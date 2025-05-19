@@ -1,0 +1,147 @@
+# Dependencies
+node_modules/
+/.pnp
+.pnp.js
+
+# Testing
+/coverage
+
+# Production
+/build
+/dist
+
+# Environment files
+.env
+.env.local
+.env.development.local
+.env.test.local
+.env.production.local
+
+# Debug logs
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# Editor directories and files
+.idea/
+.vscode/
+*.swp
+*.swo
+cursorrules
+
+# OS generated files
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db
+
+# Python virtual environments
+venv/
+.venv/
+env/
+ENV/
+.env/
+.python-version
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+
+# Logs
+logs/
+*.log
+build_*.log
+deploy_*.log 
+.databricks
+
+# SSH keys and encryption
+.backendcrew/
+**/keys/private_key.pem
+**/keys/public_key.pem
+
+# Database files
+backend/crewai-manager/backend/backendcrew/src/backendcrew/crewai.db
+.backend/crewai-manager/backend/backendcrew/src/backendcrew/crewai.db
+crewai.db
+
+# Uploads
+backend/crewai-manager/backend/backendcrew/src/uploads/knowledge
+
+# Memory files
+backend/crewai-manager/backend/backendcrew/memory/
+**/memory/
+**/length.bin
+**/*.bin
+backend/crewai-manager/backend/backendcrew/memory/*
+
+# Output files
+backend/crewai-manager/backend/backendcrew/src/output/
+**/output/
+backend/crewai-manager/backend/backendcrew/src/output/*
+
+# Database files
+backend/crewai-manager/backend/backendcrew/src/tmp/*.db
+backend/crewai-manager/backend/backendcrew/src/tmp/crewai_*.db
+
+# Python build artifacts
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+build/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+
+# Frontend build artifacts
+node_modules/
+npm-debug.log
+yarn-debug.log
+yarn-error.log
+.pnp/
+.pnp.js
+coverage/
+.DS_Store
+.env.local
+.env.development.local
+.env.test.local
+.env.production.local
+
+# Local development artifacts
+.env
+.env.*
+!.env.example
+.venv/
+venv/
+ENV/
+
+# Logs
+logs/
+*.log
+
+# IDE files
+.idea/
+.vscode/
+*.swp
+*.swo
+.vs/
+
+# Database files
+*.db
+*.sqlite
+*.sqlite3

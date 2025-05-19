@@ -1,0 +1,187 @@
+{
+  "common": {
+    "save": "Speichern",
+    "cancel": "Abbrechen",
+    "loading": "Laden...",
+    "error": "Fehler",
+    "success": "Erfolg",
+    "close": "Schließen",
+    "delete": "Löschen",
+    "view": "Ansehen",
+    "confirm": "Bestätigen"
+  },
+  "navigation": {
+    "nemo": "Nemo",
+    "runs": "Ausführungsverlauf",
+    "logs": "Protokolle",
+    "tools": "Werkzeuge",
+    "ucTools": "UC-Werkzeuge",
+    "apiKeys": "API-Schlüssel",
+    "configuration": "Konfiguration"
+  },
+  "configuration": {
+    "title": "Konfiguration",
+    "language": {
+      "title": "Spracheinstellungen",
+      "select": "Sprache auswählen",
+      "saved": "Spracheinstellungen erfolgreich gespeichert"
+    },
+    "databricks": {
+      "title": "Databricks-Einstellungen",
+      "workspaceUrl": "Databricks Workspace-URL",
+      "warehouseId": "Warehouse-ID",
+      "catalog": "Katalog",
+      "schema": "Schema",
+      "secretScope": "Secret Scope",
+      "saved": "Databricks-Konfiguration erfolgreich gespeichert",
+      "info": "Die Databricks-Konfiguration wird verwendet, um eine Verbindung zu Ihrem Databricks-Workspace herzustellen. Der Databricks-Token sollte im Bereich API-Schlüssel verwaltet werden."
+    },
+    "tools": {
+      "title": "Tools-Verwaltung",
+      "manageTools": "Tools verwalten",
+      "toolsConfig": "Konfigurieren Sie Ihre KI-Tools und Erweiterungen"
+    },
+    "logs": {
+      "title": "Protokollverwaltung",
+      "viewLogs": "Protokolle anzeigen",
+      "logsConfig": "Konfigurieren Sie Protokollierungseinstellungen und sehen Sie Systemprotokolle ein"
+    }
+  },
+  "runHistory": {
+    "title": "Ausführungsverlauf",
+    "search": "Ausführungen suchen...",
+    "filter": "Ausführungen filtern",
+    "noSearchResults": "Keine Ergebnisse für Ihre Suche",
+    "noRuns": "Keine Ausführungen verfügbar",
+    "loadError": "Fehler beim Laden des Ausführungsverlaufs",
+    "deleteError": "Fehler beim Löschen der Ausführungen",
+    "deleteConfirm": "Sind Sie sicher, dass Sie alle Ausführungen löschen möchten? Diese Aktion kann nicht rückgängig gemacht werden.",
+    "deleteAllRuns": "Alle Ausführungen löschen",
+    "columns": {
+      "jobId": "Ausführungsname",
+      "status": "Status",
+      "startTime": "Erstellungsdatum",
+      "duration": "Dauer",
+      "actions": "Aktionen"
+    },
+    "status": {
+      "pending": "Ausstehend",
+      "running": "Läuft",
+      "completed": "Abgeschlossen",
+      "failed": "Fehlgeschlagen"
+    },
+    "actions": {
+      "viewTrace": "Ausführungsverlauf anzeigen",
+      "viewResult": "Ergebnis anzeigen",
+      "viewInputs": "Eingaben anzeigen",
+      "viewLogs": "Protokolle anzeigen",
+      "downloadPdf": "PDF herunterladen",
+      "schedule": "Job planen"
+    }
+  },
+  "logs": {
+    "title": "LLM API Protokolle",
+    "filterByEndpoint": "Nach Endpunkt filtern",
+    "allEndpoints": "Alle Endpunkte",
+    "noLogs": "Keine Protokolle verfügbar",
+    "columns": {
+      "timestamp": "Zeitstempel",
+      "endpoint": "Endpunkt",
+      "model": "Modell",
+      "tokens": "Token",
+      "duration": "Dauer",
+      "status": "Status"
+    },
+    "details": {
+      "title": "Anfragedetails",
+      "prompt": "Eingabeaufforderung:",
+      "response": "Antwort:",
+      "additionalData": "Zusätzliche Daten:",
+      "error": "Fehler:"
+    },
+    "executionLogs": {
+      "title": "Ausführungsprotokolle",
+      "connecting": "Verbindung zum Protokollstream wird hergestellt...",
+      "connectionError": "Verbindung zum Protokollstream fehlgeschlagen. Bitte versuchen Sie es erneut.",
+      "autoScrollOn": "Automatisches Scrollen EIN",
+      "autoScrollOff": "Automatisches Scrollen AUS",
+      "refreshLogs": "Protokolle aktualisieren"
+    }
+  },
+  "tools": {
+    "regular": {
+      "title": "Vorhandene Werkzeuge",
+      "addTool": "Neues Werkzeug hinzufügen",
+      "editTool": "Werkzeug bearbeiten",
+      "searchPlaceholder": "Werkzeuge nach Titel oder Beschreibung suchen...",
+      "columns": {
+        "title": "Titel",
+        "description": "Beschreibung",
+        "icon": "Symbol",
+        "actions": "Aktionen"
+      },
+      "form": {
+        "title": "Titel",
+        "description": "Beschreibung",
+        "icon": "Symbol",
+        "configuration": "Konfiguration",
+        "addParameter": "Parameter hinzufügen",
+        "parameterName": "Parametername",
+        "value": "Wert"
+      },
+      "messages": {
+        "deleteConfirm": "Sind Sie sicher, dass Sie dieses Werkzeug löschen möchten?",
+        "errorLoading": "Fehler beim Laden der Werkzeuge",
+        "errorFetching": "Aktuelle Werkzeugdaten konnten nicht abgerufen werden",
+        "errorDeleting": "Fehler beim Löschen des Werkzeugs",
+        "updateSuccess": "Werkzeug erfolgreich aktualisiert!",
+        "createSuccess": "Werkzeug erfolgreich erstellt!",
+        "deleteSuccess": "Werkzeug erfolgreich gelöscht!"
+      }
+    },
+    "uc": {
+      "title": "Unity Catalog Werkzeuge",
+      "noTools": "Keine Unity Catalog Werkzeuge gefunden.",
+      "columns": {
+        "name": "Name",
+        "catalog": "Katalog",
+        "schema": "Schema",
+        "description": "Beschreibung",
+        "actions": "Aktionen"
+      },
+      "details": {
+        "title": "Funktionsdetails",
+        "noDescription": "Keine Beschreibung verfügbar"
+      }
+    }
+  },
+  "nemo": {
+    "model": {
+      "label": "Modell auswählen",
+      "provider": "Anbieter"
+    },
+    "planning": {
+      "label": "Planung",
+      "tooltip": "Wenn aktiviert, erstellt ein KI-Planer vor der Ausführung einen schrittweisen Plan für Ihr Team, der die Aufgabenkoordination und -leistung verbessert"
+    },
+    "buttons": {
+      "schedule": "Zeitplan",
+      "addAgent": "Agent hinzufügen",
+      "addTask": "Aufgabe hinzufügen",
+      "generatePlan": "Plan generieren",
+      "execute": "Ausführen",
+      "openPlan": "Plan öffnen",
+      "savePlan": "Plan speichern",
+      "deleteEdge": "Verbindung löschen",
+      "apiKeys": "API-Schlüssel verwalten",
+      "tools": "Werkzeuge verwalten",
+      "logs": "Protokolle anzeigen",
+      "configuration": "Konfiguration"
+    },
+    "errors": {
+      "agentConnection": "Ein Agent kann nicht mit einem anderen Agenten verbunden werden",
+      "missingNodes": "Bitte fügen Sie sowohl Agenten als auch Aufgaben hinzu, bevor Sie Verbindungen generieren",
+      "jobExecution": "Ausführung des Jobs fehlgeschlagen"
+    }
+  }
+} 
