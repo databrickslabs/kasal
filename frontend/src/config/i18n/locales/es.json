@@ -1,0 +1,188 @@
+{
+  "common": {
+    "save": "Guardar",
+    "cancel": "Cancelar",
+    "loading": "Cargando...",
+    "error": "Error",
+    "success": "Éxito",
+    "close": "Cerrar",
+    "delete": "Eliminar",
+    "view": "Ver",
+    "confirm": "Confirmar",
+    "enabled": "Habilitado",
+    "disabled": "Deshabilitado"
+  },
+  "navigation": {
+    "nemo": "Nemo",
+    "runs": "Historial de Ejecuciones",
+    "logs": "Registros",
+    "tools": "Herramientas",
+    "ucTools": "Herramientas UC",
+    "apiKeys": "Claves API",
+    "configuration": "Configuración"
+  },
+  "configuration": {
+    "title": "Configuración",
+    "language": {
+      "title": "Configuración de Idioma",
+      "select": "Seleccionar Idioma",
+      "saved": "Configuración de idioma guardada correctamente"
+    },
+    "databricks": {
+      "title": "Configuración de Databricks",
+      "workspaceUrl": "URL del Espacio de Trabajo de Databricks",
+      "warehouseId": "ID del Almacén",
+      "catalog": "Catálogo",
+      "schema": "Esquema",
+      "secretScope": "Ámbito Secreto",
+      "saved": "Configuración de Databricks guardada correctamente",
+      "info": "La configuración de Databricks se utiliza para conectarse a su espacio de trabajo de Databricks. El token de Databricks debe gestionarse a través de la sección de Claves API."
+    },
+    "tools": {
+      "title": "Gestión de Herramientas",
+      "manageTools": "Gestionar Herramientas",
+      "toolsConfig": "Configure sus herramientas y extensiones de IA"
+    },
+    "logs": {
+      "title": "Gestión de Registros",
+      "viewLogs": "Ver Registros",
+      "logsConfig": "Configure las preferencias de registro y vea los registros del sistema"
+    }
+  },
+  "runHistory": {
+    "title": "Historial de Ejecuciones",
+    "search": "Buscar ejecuciones...",
+    "filter": "Filtrar ejecuciones",
+    "noSearchResults": "No hay resultados que coincidan con su búsqueda",
+    "noRuns": "No hay ejecuciones disponibles",
+    "loadError": "Error al cargar el historial de ejecuciones",
+    "deleteError": "Error al eliminar las ejecuciones",
+    "deleteConfirm": "¿Está seguro de que desea eliminar todas las ejecuciones? Esta acción no se puede deshacer.",
+    "deleteAllRuns": "Eliminar Todas las Ejecuciones",
+    "columns": {
+      "jobId": "Nombre de la Ejecución",
+      "status": "Estado",
+      "startTime": "Fecha de Creación",
+      "duration": "Duración",
+      "actions": "Acciones"
+    },
+    "status": {
+      "pending": "Pendiente",
+      "running": "En Ejecución",
+      "completed": "Completado",
+      "failed": "Fallido"
+    },
+    "actions": {
+      "viewTrace": "Ver Traza de Ejecución",
+      "viewResult": "Ver Resultado",
+      "viewInputs": "Ver Entradas",
+      "viewLogs": "Ver Registros",
+      "downloadPdf": "Descargar PDF",
+      "schedule": "Programar Trabajo"
+    }
+  },
+  "logs": {
+    "title": "Registros de API LLM",
+    "filterByEndpoint": "Filtrar por Punto Final",
+    "allEndpoints": "Todos los Puntos Finales",
+    "noLogs": "No hay registros disponibles",
+    "columns": {
+      "timestamp": "Marca de Tiempo",
+      "endpoint": "Punto Final",
+      "model": "Modelo",
+      "tokens": "Tokens",
+      "duration": "Duración",
+      "status": "Estado"
+    },
+    "details": {
+      "title": "Detalles de la Solicitud",
+      "prompt": "Prompt:",
+      "response": "Respuesta:",
+      "additionalData": "Datos Adicionales:",
+      "error": "Error:"
+    },
+    "executionLogs": {
+      "title": "Registros de Ejecución",
+      "connecting": "Conectando al flujo de registros...",
+      "connectionError": "Error al conectar al flujo de registros. Por favor, inténtelo de nuevo.",
+      "autoScrollOn": "Desplazamiento automático ACTIVADO",
+      "autoScrollOff": "Desplazamiento automático DESACTIVADO",
+      "refreshLogs": "Actualizar Registros"
+    }
+  },
+  "tools": {
+    "regular": {
+      "title": "Herramientas Existentes",
+      "addTool": "Añadir Nueva Herramienta",
+      "editTool": "Editar Herramienta",
+      "columns": {
+        "title": "Título",
+        "description": "Descripción",
+        "icon": "Icono",
+        "actions": "Acciones"
+      },
+      "form": {
+        "title": "Título",
+        "description": "Descripción",
+        "icon": "Icono",
+        "configuration": "Configuración",
+        "addParameter": "Añadir Parámetro",
+        "parameterName": "Nombre del Parámetro",
+        "value": "Valor"
+      },
+      "messages": {
+        "deleteConfirm": "¿Está seguro de que desea eliminar esta herramienta?",
+        "errorLoading": "Error al cargar las herramientas",
+        "errorFetching": "No se pudieron obtener los últimos datos de la herramienta",
+        "errorDeleting": "Error al eliminar la herramienta",
+        "updateSuccess": "¡Herramienta actualizada correctamente!",
+        "createSuccess": "¡Herramienta creada correctamente!",
+        "deleteSuccess": "¡Herramienta eliminada correctamente!"
+      }
+    },
+    "uc": {
+      "title": "Herramientas Unity Catalog",
+      "noTools": "No se encontraron herramientas Unity Catalog.",
+      "columns": {
+        "name": "Nombre",
+        "catalog": "Catálogo",
+        "schema": "Esquema",
+        "description": "Descripción",
+        "actions": "Acciones"
+      },
+      "details": {
+        "title": "Detalles de la Función",
+        "noDescription": "No hay descripción disponible"
+      }
+    }
+  },
+  "nemo": {
+    "model": {
+      "label": "Elegir Modelo",
+      "provider": "Proveedor"
+    },
+    "planning": {
+      "label": "Planificación",
+      "tooltip": "Cuando está activado, un planificador de IA creará un plan paso a paso para tu equipo antes de la ejecución, mejorando la coordinación y el rendimiento de las tareas"
+    },
+    "buttons": {
+      "schedule": "Programar",
+      "addAgent": "Añadir Agente",
+      "addTask": "Añadir Tarea",
+      "generatePlan": "Generar Plan",
+      "execute": "Ejecutar",
+      "openPlan": "Abrir Plan",
+      "savePlan": "Guardar Plan",
+      "deleteEdge": "Eliminar Conexión",
+      "apiKeys": "Gestionar Claves API",
+      "tools": "Gestionar Herramientas",
+      "logs": "Ver Registros",
+      "configuration": "Configuración"
+    },
+    "errors": {
+      "agentConnection": "No se puede conectar un agente a otro agente",
+      "missingNodes": "Por favor, añade tanto agentes como tareas antes de generar conexiones",
+      "jobExecution": "Error en la ejecución del trabajo"
+    }
+  }
+} 

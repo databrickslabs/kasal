@@ -1,0 +1,70 @@
+[tool.poetry]
+name = "modern-backend"
+version = "0.1.0"
+description = "Modern Python Backend with FastAPI and SQLAlchemy"
+authors = ["Your Name <your.email@example.com>"]
+readme = "README.md"
+
+[tool.poetry.dependencies]
+python = "^3.9"
+fastapi = "^0.110.0"
+uvicorn = {extras = ["standard"], version = "^0.27.0"}
+sqlalchemy = "^2.0.27"
+pydantic = "^2.6.1"
+pydantic-settings = "^2.1.0"
+alembic = "^1.13.1"
+asyncpg = "^0.29.0"
+httpx = "^0.26.0"
+python-jose = {extras = ["cryptography"], version = "^3.3.0"}
+passlib = {extras = ["bcrypt"], version = "^1.7.4"}
+python-multipart = "^0.0.9"
+tenacity = "^8.2.3"
+greenlet = "^3.0.3"
+
+[tool.poetry.group.dev.dependencies]
+pytest = "^8.0.0"
+pytest-cov = "^4.1.0"
+pytest-asyncio = "^0.23.5"
+black = "^24.1.1"
+isort = "^5.13.2"
+mypy = "^1.8.0"
+ruff = "^0.2.1"
+httpx = "^0.26.0"
+
+[build-system]
+requires = ["poetry-core"]
+build-backend = "poetry.core.masonry.api"
+
+[tool.black]
+line-length = 88
+target-version = ["py39"]
+
+[tool.isort]
+profile = "black"
+line_length = 88
+
+[tool.mypy]
+python_version = "3.9"
+warn_return_any = true
+warn_unused_configs = true
+disallow_untyped_defs = true
+disallow_incomplete_defs = true
+
+[tool.ruff]
+line-length = 88
+target-version = "py39"
+select = ["E", "F", "I001"]
+ignore = []
+exclude = [
+    ".git",
+    ".venv",
+    "__pycache__",
+    "alembic",
+]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+python_files = "test_*.py"
+python_functions = "test_*"
+python_classes = "Test*"
+asyncio_mode = "auto"

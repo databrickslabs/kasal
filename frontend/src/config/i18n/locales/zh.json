@@ -1,0 +1,179 @@
+{
+  "common": {
+    "save": "保存",
+    "cancel": "取消",
+    "loading": "加载中...",
+    "error": "错误",
+    "success": "成功",
+    "close": "关闭",
+    "delete": "删除",
+    "view": "查看",
+    "confirm": "确认"
+  },
+  "navigation": {
+    "nemo": "尼莫",
+    "runs": "运行历史",
+    "logs": "日志",
+    "tools": "工具",
+    "ucTools": "UC工具",
+    "apiKeys": "API密钥",
+    "configuration": "配置"
+  },
+  "configuration": {
+    "title": "配置",
+    "language": {
+      "title": "语言设置",
+      "select": "选择语言",
+      "saved": "语言设置保存成功"
+    },
+    "databricks": {
+      "title": "Databricks设置",
+      "workspaceUrl": "Databricks工作区URL",
+      "warehouseId": "仓库ID",
+      "catalog": "目录",
+      "schema": "模式",
+      "secretScope": "密钥范围",
+      "saved": "Databricks配置保存成功",
+      "info": "Databricks配置用于连接到您的Databricks工作区。Databricks令牌应通过API密钥部分进行管理。"
+    },
+    "tools": {
+      "title": "工具管理",
+      "manageTools": "管理工具",
+      "toolsConfig": "配置您的AI工具和扩展"
+    },
+    "logs": {
+      "title": "日志管理",
+      "viewLogs": "查看日志",
+      "logsConfig": "配置日志首选项并查看系统日志"
+    }
+  },
+  "runHistory": {
+    "title": "运行历史",
+    "noRuns": "没有运行记录",
+    "loadError": "加载运行历史失败",
+    "deleteError": "删除运行记录失败",
+    "deleteConfirm": "确定要删除所有运行记录吗？此操作无法撤消。",
+    "deleteAllRuns": "删除所有运行记录",
+    "columns": {
+      "jobId": "运行名称",
+      "status": "状态",
+      "startTime": "创建日期",
+      "duration": "持续时间",
+      "actions": "操作"
+    },
+    "status": {
+      "pending": "等待中",
+      "running": "运行中",
+      "completed": "已完成",
+      "failed": "失败"
+    },
+    "actions": {
+      "viewTrace": "查看执行跟踪",
+      "viewResult": "查看结果",
+      "viewInputs": "查看输入",
+      "viewLogs": "查看日志",
+      "downloadPdf": "下载PDF"
+    }
+  },
+  "logs": {
+    "title": "LLM API日志",
+    "filterByEndpoint": "按端点筛选",
+    "allEndpoints": "所有端点",
+    "noLogs": "没有可用的日志",
+    "columns": {
+      "timestamp": "时间戳",
+      "endpoint": "端点",
+      "model": "模型",
+      "tokens": "令牌",
+      "duration": "持续时间",
+      "status": "状态"
+    },
+    "details": {
+      "title": "请求详情",
+      "prompt": "提示:",
+      "response": "响应:",
+      "additionalData": "附加数据:",
+      "error": "错误:"
+    },
+    "executionLogs": {
+      "title": "执行日志",
+      "connecting": "正在连接到日志流...",
+      "connectionError": "连接到日志流失败。请重试。",
+      "autoScrollOn": "自动滚动开启",
+      "autoScrollOff": "自动滚动关闭",
+      "refreshLogs": "刷新日志"
+    }
+  },
+  "tools": {
+    "regular": {
+      "title": "现有工具",
+      "addTool": "添加新工具",
+      "editTool": "编辑工具",
+      "columns": {
+        "title": "标题",
+        "description": "描述",
+        "icon": "图标",
+        "actions": "操作"
+      },
+      "form": {
+        "title": "标题",
+        "description": "描述",
+        "icon": "图标",
+        "configuration": "配置",
+        "addParameter": "添加参数",
+        "parameterName": "参数名称",
+        "value": "值"
+      },
+      "messages": {
+        "deleteConfirm": "确定要删除此工具吗？",
+        "errorLoading": "加载工具时出错",
+        "errorFetching": "无法获取最新的工具数据",
+        "errorDeleting": "删除工具时出错",
+        "updateSuccess": "工具更新成功！",
+        "createSuccess": "工具创建成功！",
+        "deleteSuccess": "工具删除成功！"
+      }
+    },
+    "uc": {
+      "title": "Unity Catalog工具",
+      "noTools": "未找到Unity Catalog工具。",
+      "columns": {
+        "name": "名称",
+        "catalog": "目录",
+        "schema": "模式",
+        "description": "描述",
+        "actions": "操作"
+      },
+      "details": {
+        "title": "函数详情",
+        "noDescription": "没有可用的描述"
+      }
+    }
+  },
+  "nemo": {
+    "model": {
+      "label": "选择模型",
+      "provider": "提供商"
+    },
+    "planning": {
+      "label": "规划",
+      "tooltip": "启用后，AI规划器将在执行前为您的团队创建一个逐步计划，改善任务协调和性能"
+    },
+    "buttons": {
+      "schedule": "调度",
+      "addAgent": "添加代理",
+      "addTask": "添加任务",
+      "generatePlan": "生成计划",
+      "execute": "执行",
+      "openPlan": "打开计划",
+      "savePlan": "保存计划",
+      "deleteEdge": "删除连接",
+      "apiKeys": "管理API密钥"
+    },
+    "errors": {
+      "agentConnection": "无法将一个代理连接到另一个代理",
+      "missingNodes": "请在生成连接之前添加代理和任务",
+      "jobExecution": "作业执行失败"
+    }
+  }
+} 

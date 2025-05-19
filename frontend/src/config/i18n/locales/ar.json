@@ -1,0 +1,179 @@
+{
+  "common": {
+    "save": "حفظ",
+    "cancel": "إلغاء",
+    "loading": "جاري التحميل...",
+    "error": "خطأ",
+    "success": "نجاح",
+    "close": "إغلاق",
+    "delete": "حذف",
+    "view": "عرض",
+    "confirm": "تأكيد"
+  },
+  "navigation": {
+    "nemo": "نيمو",
+    "runs": "سجل التشغيل",
+    "logs": "السجلات",
+    "tools": "الأدوات",
+    "ucTools": "أدوات UC",
+    "apiKeys": "مفاتيح API",
+    "configuration": "الإعدادات"
+  },
+  "configuration": {
+    "title": "الإعدادات",
+    "language": {
+      "title": "إعدادات اللغة",
+      "select": "اختر اللغة",
+      "saved": "تم حفظ إعدادات اللغة بنجاح"
+    },
+    "databricks": {
+      "title": "إعدادات Databricks",
+      "workspaceUrl": "رابط مساحة عمل Databricks",
+      "warehouseId": "معرف المستودع",
+      "catalog": "الفهرس",
+      "schema": "المخطط",
+      "secretScope": "نطاق السر",
+      "saved": "تم حفظ إعدادات Databricks بنجاح",
+      "info": "يتم استخدام إعدادات Databricks للاتصال بمساحة عمل Databricks الخاصة بك. يجب إدارة رمز Databricks من خلال قسم مفاتيح API."
+    },
+    "tools": {
+      "title": "إدارة الأدوات",
+      "manageTools": "إدارة الأدوات",
+      "toolsConfig": "تكوين أدوات وامتدادات الذكاء الاصطناعي الخاصة بك"
+    },
+    "logs": {
+      "title": "إدارة السجلات",
+      "viewLogs": "عرض السجلات",
+      "logsConfig": "تكوين تفضيلات التسجيل وعرض سجلات النظام"
+    }
+  },
+  "runHistory": {
+    "title": "سجل التشغيل",
+    "noRuns": "لا توجد عمليات تشغيل",
+    "loadError": "فشل تحميل سجل التشغيل",
+    "deleteError": "فشل حذف عمليات التشغيل",
+    "deleteConfirm": "هل أنت متأكد من حذف جميع عمليات التشغيل؟ لا يمكن التراجع عن هذا الإجراء.",
+    "deleteAllRuns": "حذف كل عمليات التشغيل",
+    "columns": {
+      "jobId": "اسم التشغيل",
+      "status": "الحالة",
+      "startTime": "تاريخ الإنشاء",
+      "duration": "المدة",
+      "actions": "الإجراءات"
+    },
+    "status": {
+      "pending": "قيد الانتظار",
+      "running": "قيد التشغيل",
+      "completed": "مكتمل",
+      "failed": "فشل"
+    },
+    "actions": {
+      "viewTrace": "عرض تتبع التنفيذ",
+      "viewResult": "عرض النتيجة",
+      "viewInputs": "عرض المدخلات",
+      "viewLogs": "عرض السجلات",
+      "downloadPdf": "تحميل PDF"
+    }
+  },
+  "logs": {
+    "title": "سجلات API LLM",
+    "filterByEndpoint": "تصفية حسب نقطة النهاية",
+    "allEndpoints": "جميع نقاط النهاية",
+    "noLogs": "لا توجد سجلات",
+    "columns": {
+      "timestamp": "الطابع الزمني",
+      "endpoint": "نقطة النهاية",
+      "model": "النموذج",
+      "tokens": "الرموز",
+      "duration": "المدة",
+      "status": "الحالة"
+    },
+    "details": {
+      "title": "تفاصيل الطلب",
+      "prompt": "الإيعاز:",
+      "response": "الاستجابة:",
+      "additionalData": "بيانات إضافية:",
+      "error": "خطأ:"
+    },
+    "executionLogs": {
+      "title": "سجلات التنفيذ",
+      "connecting": "جاري الاتصال بتدفق السجلات...",
+      "connectionError": "فشل الاتصال بتدفق السجلات. يرجى المحاولة مرة أخرى.",
+      "autoScrollOn": "التمرير التلقائي مفعل",
+      "autoScrollOff": "التمرير التلقائي معطل",
+      "refreshLogs": "تحديث السجلات"
+    }
+  },
+  "tools": {
+    "regular": {
+      "title": "الأدوات الموجودة",
+      "addTool": "إضافة أداة جديدة",
+      "editTool": "تعديل الأداة",
+      "columns": {
+        "title": "العنوان",
+        "description": "الوصف",
+        "icon": "الأيقونة",
+        "actions": "الإجراءات"
+      },
+      "form": {
+        "title": "العنوان",
+        "description": "الوصف",
+        "icon": "الأيقونة",
+        "configuration": "الإعدادات",
+        "addParameter": "إضافة معامل",
+        "parameterName": "اسم المعامل",
+        "value": "القيمة"
+      },
+      "messages": {
+        "deleteConfirm": "هل أنت متأكد من حذف هذه الأداة؟",
+        "errorLoading": "خطأ في تحميل الأدوات",
+        "errorFetching": "تعذر جلب أحدث بيانات الأداة",
+        "errorDeleting": "خطأ في حذف الأداة",
+        "updateSuccess": "تم تحديث الأداة بنجاح!",
+        "createSuccess": "تم إنشاء الأداة بنجاح!",
+        "deleteSuccess": "تم حذف الأداة بنجاح!"
+      }
+    },
+    "uc": {
+      "title": "أدوات Unity Catalog",
+      "noTools": "لم يتم العثور على أدوات Unity Catalog.",
+      "columns": {
+        "name": "الاسم",
+        "catalog": "الفهرس",
+        "schema": "المخطط",
+        "description": "الوصف",
+        "actions": "الإجراءات"
+      },
+      "details": {
+        "title": "تفاصيل الوظيفة",
+        "noDescription": "لا يوجد وصف متاح"
+      }
+    }
+  },
+  "nemo": {
+    "model": {
+      "label": "اختر النموذج",
+      "provider": "المزود"
+    },
+    "planning": {
+      "label": "التخطيط",
+      "tooltip": "عند التفعيل، سيقوم مخطط الذكاء الاصطناعي بإنشاء خطة خطوة بخطوة لفريقك قبل التنفيذ، مما يحسن تنسيق المهام والأداء"
+    },
+    "buttons": {
+      "schedule": "جدولة",
+      "addAgent": "إضافة وكيل",
+      "addTask": "إضافة مهمة",
+      "generatePlan": "إنشاء خطة",
+      "execute": "تنفيذ",
+      "openPlan": "فتح الخطة",
+      "savePlan": "حفظ الخطة",
+      "deleteEdge": "حذف الاتصال",
+      "apiKeys": "إدارة مفاتيح API"
+    },
+    "errors": {
+      "agentConnection": "لا يمكن ربط وكيل بوكيل آخر",
+      "missingNodes": "يرجى إضافة كل من الوكلاء والمهام قبل إنشاء الاتصالات",
+      "jobExecution": "فشل تنفيذ المهمة"
+    }
+  }
+} 

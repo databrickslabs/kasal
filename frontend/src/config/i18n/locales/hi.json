@@ -1,0 +1,179 @@
+{
+  "common": {
+    "save": "सहेजें",
+    "cancel": "रद्द करें",
+    "loading": "लोड हो रहा है...",
+    "error": "त्रुटि",
+    "success": "सफल",
+    "close": "बंद करें",
+    "delete": "हटाएं",
+    "view": "देखें",
+    "confirm": "पुष्टि करें"
+  },
+  "navigation": {
+    "nemo": "नीमो",
+    "runs": "रन इतिहास",
+    "logs": "लॉग्स",
+    "tools": "टूल्स",
+    "ucTools": "यूसी टूल्स",
+    "apiKeys": "एपीआई कुंजियां",
+    "configuration": "कॉन्फ़िगरेशन"
+  },
+  "configuration": {
+    "title": "कॉन्फ़िगरेशन",
+    "language": {
+      "title": "भाषा सेटिंग्स",
+      "select": "भाषा चुनें",
+      "saved": "भाषा सेटिंग्स सफलतापूर्वक सहेजी गईं"
+    },
+    "databricks": {
+      "title": "Databricks सेटिंग्स",
+      "workspaceUrl": "Databricks कार्यस्थान URL",
+      "warehouseId": "वेयरहाउस आईडी",
+      "catalog": "कैटलॉग",
+      "schema": "स्कीमा",
+      "secretScope": "सीक्रेट स्कोप",
+      "saved": "Databricks कॉन्फ़िगरेशन सफलतापूर्वक सहेजी गई",
+      "info": "Databricks कॉन्फ़िगरेशन आपके Databricks कार्यस्थान से कनेक्ट करने के लिए उपयोग की जाती है। Databricks टोकन को API कुंजियां अनुभाग के माध्यम से प्रबंधित किया जाना चाहिए।"
+    },
+    "tools": {
+      "title": "उपकरण प्रबंधन",
+      "manageTools": "उपकरण प्रबंधित करें",
+      "toolsConfig": "अपने AI उपकरण और एक्सटेंशन कॉन्फ़िगर करें"
+    },
+    "logs": {
+      "title": "लॉग प्रबंधन",
+      "viewLogs": "लॉग देखें",
+      "logsConfig": "लॉगिंग प्राथमिकताएँ कॉन्फ़िगर करें और सिस्टम लॉग देखें"
+    }
+  },
+  "runHistory": {
+    "title": "रन इतिहास",
+    "noRuns": "कोई रन नहीं मिला",
+    "loadError": "रन इतिहास लोड करने में विफल",
+    "deleteError": "रन हटाने में विफल",
+    "deleteConfirm": "क्या आप सभी रन हटाना चाहते हैं? यह क्रिया पूर्ववत नहीं की जा सकती।",
+    "deleteAllRuns": "सभी रन हटाएं",
+    "columns": {
+      "jobId": "रन नाम",
+      "status": "स्थिति",
+      "startTime": "बनाने की तिथि",
+      "duration": "अवधि",
+      "actions": "कार्रवाइयां"
+    },
+    "status": {
+      "pending": "लंबित",
+      "running": "चल रहा है",
+      "completed": "पूर्ण",
+      "failed": "विफल"
+    },
+    "actions": {
+      "viewTrace": "निष्पादन ट्रेस देखें",
+      "viewResult": "परिणाम देखें",
+      "viewInputs": "इनपुट देखें",
+      "viewLogs": "लॉग्स देखें",
+      "downloadPdf": "PDF डाउनलोड करें"
+    }
+  },
+  "logs": {
+    "title": "LLM API लॉग्स",
+    "filterByEndpoint": "एंडपॉइंट द्वारा फ़िल्टर करें",
+    "allEndpoints": "सभी एंडपॉइंट",
+    "noLogs": "कोई लॉग्स उपलब्ध नहीं",
+    "columns": {
+      "timestamp": "टाइमस्टैम्प",
+      "endpoint": "एंडपॉइंट",
+      "model": "मॉडल",
+      "tokens": "टोकन",
+      "duration": "अवधि",
+      "status": "स्थिति"
+    },
+    "details": {
+      "title": "अनुरोध विवरण",
+      "prompt": "प्रॉम्प्ट:",
+      "response": "प्रतिक्रिया:",
+      "additionalData": "अतिरिक्त डेटा:",
+      "error": "त्रुटि:"
+    },
+    "executionLogs": {
+      "title": "निष्पादन लॉग्स",
+      "connecting": "लॉग स्ट्रीम से कनेक्ट हो रहा है...",
+      "connectionError": "लॉग स्ट्रीम से कनेक्ट करने में विफल। कृपया पुनः प्रयास करें।",
+      "autoScrollOn": "स्वचालित स्क्रॉल चालू",
+      "autoScrollOff": "स्वचालित स्क्रॉल बंद",
+      "refreshLogs": "लॉग्स रीफ्रेश करें"
+    }
+  },
+  "tools": {
+    "regular": {
+      "title": "मौजूदा टूल्स",
+      "addTool": "नया टूल जोड़ें",
+      "editTool": "टूल संपादित करें",
+      "columns": {
+        "title": "शीर्षक",
+        "description": "विवरण",
+        "icon": "आइकन",
+        "actions": "कार्रवाइयां"
+      },
+      "form": {
+        "title": "शीर्षक",
+        "description": "विवरण",
+        "icon": "आइकन",
+        "configuration": "कॉन्फ़िगरेशन",
+        "addParameter": "पैरामीटर जोड़ें",
+        "parameterName": "पैरामीटर नाम",
+        "value": "मान"
+      },
+      "messages": {
+        "deleteConfirm": "क्या आप वाकई इस टूल को हटाना चाहते हैं?",
+        "errorLoading": "टूल्स लोड करने में त्रुटि",
+        "errorFetching": "नवीनतम टूल डेटा प्राप्त नहीं किया जा सका",
+        "errorDeleting": "टूल हटाने में त्रुटि",
+        "updateSuccess": "टूल सफलतापूर्वक अपडेट किया गया!",
+        "createSuccess": "टूल सफलतापूर्वक बनाया गया!",
+        "deleteSuccess": "टूल सफलतापूर्वक हटाया गया!"
+      }
+    },
+    "uc": {
+      "title": "Unity Catalog टूल्स",
+      "noTools": "कोई Unity Catalog टूल नहीं मिला।",
+      "columns": {
+        "name": "नाम",
+        "catalog": "कैटलॉग",
+        "schema": "स्कीमा",
+        "description": "विवरण",
+        "actions": "कार्रवाइयां"
+      },
+      "details": {
+        "title": "फ़ंक्शन विवरण",
+        "noDescription": "कोई विवरण उपलब्ध नहीं"
+      }
+    }
+  },
+  "nemo": {
+    "model": {
+      "label": "मॉडल चुनें",
+      "provider": "प्रदाता"
+    },
+    "planning": {
+      "label": "योजना",
+      "tooltip": "जब सक्रिय किया जाता है, एक एआई प्लानर निष्पादन से पहले आपकी टीम के लिए कार्य समन्वय और प्रदर्शन में सुधार करने वाली चरण-दर-चरण योजना बनाएगा"
+    },
+    "buttons": {
+      "schedule": "शेड्यूल",
+      "addAgent": "एजेंट जोड़ें",
+      "addTask": "कार्य जोड़ें",
+      "generatePlan": "योजना बनाएं",
+      "execute": "निष्पादित करें",
+      "openPlan": "योजना खोलें",
+      "savePlan": "योजना सहेजें",
+      "deleteEdge": "कनेक्शन हटाएं",
+      "apiKeys": "API कुंजियां प्रबंधित करें"
+    },
+    "errors": {
+      "agentConnection": "एक एजेंट को दूसरे एजेंट से नहीं जोड़ा जा सकता",
+      "missingNodes": "कृपया कनेक्शन बनाने से पहले एजेंट और कार्य दोनों जोड़ें",
+      "jobExecution": "कार्य निष्पादन विफल हुआ"
+    }
+  }
+} 
