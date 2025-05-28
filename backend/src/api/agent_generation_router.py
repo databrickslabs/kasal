@@ -27,7 +27,7 @@ router = APIRouter(
 class AgentPrompt(BaseModel):
     """Request model for agent generation."""
     prompt: str
-    model: Optional[str] = "gpt-4o-mini"
+    model: Optional[str] = "databricks-llama-4-maverick"
     tools: Optional[List[str]] = []
 
 

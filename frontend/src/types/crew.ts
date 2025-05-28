@@ -64,6 +64,8 @@ export interface AgentYaml {
   max_retry_limit?: number;
   use_system_prompt?: boolean;
   respect_context_window?: boolean;
+  reasoning?: boolean;
+  max_reasoning_attempts?: number;
   embedder_config?: any;
   knowledge_sources?: any[];
   max_context_window_size?: number;
@@ -77,6 +79,7 @@ export interface TaskYaml {
   context: string[];
   agent: string | null;
   async_execution: boolean;
+  markdown: boolean;
   output_file: string | null;
   output_json: string | null;
   output_pydantic: string | null;
@@ -123,6 +126,7 @@ export interface NodeData {
     output_pydantic: string | null;
     output_file: string | null;
     human_input: boolean;
+    markdown: boolean;
     retry_on_fail: boolean;
     max_retries: number;
     timeout: string | number | null;
@@ -181,6 +185,7 @@ export interface TaskNodeData {
     output_pydantic?: string | null;
     callback?: string | null;
     human_input?: boolean;
+    markdown?: boolean;
     condition?: string;
     guardrail?: string;
   };
@@ -212,6 +217,8 @@ export interface AgentNodeData {
   max_retry_limit?: number;
   use_system_prompt?: boolean;
   respect_context_window?: boolean;
+  reasoning?: boolean;
+  max_reasoning_attempts?: number;
   embedder_config?: Record<string, unknown>;
   knowledge_sources?: KnowledgeSource[];
   tools?: string[];

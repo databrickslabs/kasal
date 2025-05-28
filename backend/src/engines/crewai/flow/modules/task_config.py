@@ -60,12 +60,18 @@ class TaskConfig:
             description = str(task_data.description)
             expected_output = str(task_data.expected_output) if hasattr(task_data, 'expected_output') and task_data.expected_output else ""
             
+            # Add markdown instructions if enabled
+            if getattr(task_data, 'markdown', False):
+                description += "\n\nPlease format the output using Markdown syntax."
+                expected_output += "\n\nThe output should be formatted using Markdown."
+            
             # Create the task using basic parameters only
             from crewai import Task
             task = Task(
                 description=description,
                 expected_output=expected_output,
-                agent=agent
+                agent=agent,
+                markdown=getattr(task_data, 'markdown', False)
             )
             
             # If task output callback provided, configure it

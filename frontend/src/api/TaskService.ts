@@ -34,7 +34,9 @@ export class TaskService {
       
       console.log('TaskService - Initial task data received:', {
         name: task.name,
-        config: task.config
+        config: task.config,
+        markdown: task.markdown,
+        configMarkdown: task.config?.markdown
       });
       console.log('TaskService - Initial output_pydantic value:', task.config?.output_pydantic);
       
@@ -47,6 +49,7 @@ export class TaskService {
         tools: task.tools || [],
         agent_id: task.agent_id || "",
         async_execution: task.async_execution !== undefined ? Boolean(task.async_execution) : false,
+        markdown: task.markdown !== undefined ? Boolean(task.markdown) : Boolean(task.config?.markdown),
         context: task.context || [],
         config: {
           ...task.config,
@@ -63,12 +66,14 @@ export class TaskService {
           callback: task.config?.callback || null,
           human_input: Boolean(task.config?.human_input),
           condition: task.config?.condition || undefined,
-          guardrail: task.config?.guardrail || undefined
+          guardrail: task.config?.guardrail || undefined,
+          markdown: Boolean(task.config?.markdown)
         }
       };
 
       console.log('TaskService - Formatted task data:', {
         name: taskData.name,
+        markdown: taskData.markdown,
         config: JSON.stringify(taskData.config)
       });
       console.log('TaskService - Formatted output_pydantic value:', taskData.config.output_pydantic);
@@ -132,6 +137,7 @@ export class TaskService {
         tools: task.tools || [],
         agent_id: task.agent_id || "",
         async_execution: task.async_execution !== undefined ? Boolean(task.async_execution) : false,
+        markdown: task.markdown !== undefined ? Boolean(task.markdown) : Boolean(task.config?.markdown),
         context: task.context || [],
         config: {
           ...task.config,
@@ -148,7 +154,8 @@ export class TaskService {
           callback: task.config?.callback || null,
           human_input: Boolean(task.config?.human_input),
           condition: task.config?.condition || undefined,
-          guardrail: task.config?.guardrail || undefined
+          guardrail: task.config?.guardrail || undefined,
+          markdown: Boolean(task.config?.markdown)
         }
       };
 

@@ -40,6 +40,12 @@ def adapt_config(config: CrewConfig) -> Dict[str, Any]:
     else:
         logger.debug("Planning is disabled for execution")
         
+    # Log reasoning settings
+    if config.reasoning:
+        logger.info(f"Reasoning is enabled for execution")
+    else:
+        logger.debug("Reasoning is disabled for execution")
+        
     # Create engine configuration
     engine_config = {
         "agents": agents_data,
@@ -49,7 +55,8 @@ def adapt_config(config: CrewConfig) -> Dict[str, Any]:
             "process": config.inputs.get("process", "sequential"),
             "verbose": True,
             "memory": True,
-            "planning": config.planning
+            "planning": config.planning,
+            "reasoning": config.reasoning
         },
         "model": config.model or "gpt-4o",
         "max_rpm": config.inputs.get("max_rpm", 10),
@@ -61,7 +68,8 @@ def adapt_config(config: CrewConfig) -> Dict[str, Any]:
             "agents_yaml": config.agents_yaml,
             "tasks_yaml": config.tasks_yaml,
             "inputs": config.inputs,
-            "planning": config.planning
+            "planning": config.planning,
+            "reasoning": config.reasoning
         }
     }
     
@@ -73,6 +81,15 @@ def adapt_config(config: CrewConfig) -> Dict[str, Any]:
     elif config.planning:
         # Log that we're using the default model for planning
         logger.info(f"Using default model for planning: {engine_config['model']}")
+    
+    # If reasoning_llm is specified in inputs, add it to the crew config
+    if config.inputs and "reasoning_llm" in config.inputs:
+        reasoning_llm = config.inputs["reasoning_llm"]
+        engine_config["crew"]["reasoning_llm"] = reasoning_llm
+        logger.info(f"Using specific reasoning LLM: {reasoning_llm}")
+    elif config.reasoning:
+        # Log that we're using the default model for reasoning
+        logger.info(f"Using default model for reasoning: {engine_config['model']}")
     
     return engine_config
 
@@ -137,7 +154,8 @@ def normalize_flow_config(config: Dict[str, Any]) -> Dict[str, Any]:
             'expected_output': task.get('expected_output'),
             'tools': task.get('tools', []),
             'context': task.get('context', {}),
-            'async_execution': task.get('async_execution', False)
+            'async_execution': task.get('async_execution', False),
+            'markdown': task.get('markdown', False)
         }
         normalized['tasks'].append(normalized_task)
     

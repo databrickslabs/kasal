@@ -416,7 +416,7 @@ class CrewGenerationService:
                 logger.info(f"Tool name to ID mapping: {tool_name_to_id_map}")
                 
                 # Generate the crew using the LLM
-                model = request.model or os.getenv("CREW_MODEL", "gpt-4o-mini")
+                model = request.model or os.getenv("CREW_MODEL", "databricks-llama-4-maverick")
                 
                 # Get and prepare the prompt template with tool descriptions
                 system_message = await self._prepare_prompt_template(tools_with_details)

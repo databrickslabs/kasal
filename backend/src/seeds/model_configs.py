@@ -112,6 +112,13 @@ DEFAULT_MODELS = {
         "context_window": 128000,
         "max_output_tokens": 4096
     },
+    "databricks-claude-sonnet-4": {
+        "name": "databricks-claude-sonnet-4",
+        "temperature": 0.7,
+        "provider": "databricks",
+        "context_window": 200000,
+        "max_output_tokens": 4096
+    },
     "llama2:13b": {
         "name": "llama2:13b",
         "temperature": 0.7,

@@ -7,6 +7,7 @@ import subprocess
 import concurrent.futures
 import traceback
 import requests
+from src.utils.databricks_auth import get_databricks_auth_headers, get_mcp_auth_headers
 
 logger = logging.getLogger(__name__)
 
@@ -59,6 +60,36 @@ def stop_all_adapters():
     _active_mcp_adapters = {}
     logger.info("All MCP adapters stopped")
 
+async def get_databricks_workspace_host():
+    """
+    Get the Databricks workspace host from the configuration.
+    
+    Returns:
+        Tuple[Optional[str], Optional[str]]: (workspace_host, error_message)
+    """
+    try:
+        from src.services.databricks_service import DatabricksService
+        from src.core.unit_of_work import UnitOfWork
+        
+        async with UnitOfWork() as uow:
+            service = await DatabricksService.from_unit_of_work(uow)
+            config = await service.get_databricks_config()
+            
+            if config and config.workspace_url:
+                # Remove https:// prefix if present for consistency
+                workspace_host = config.workspace_url.rstrip('/')
+                if workspace_host.startswith("https://"):
+                    workspace_host = workspace_host[8:]
+                elif workspace_host.startswith("http://"):
+                    workspace_host = workspace_host[7:]
+                return workspace_host, None
+            else:
+                return None, "No workspace URL found in configuration"
+                
+    except Exception as e:
+        logger.error(f"Error getting workspace host: {e}")
+        return None, str(e)
+
 def call_databricks_api(endpoint, method="GET", data=None, params=None):
     """
     Call the Databricks API directly as a fallback when MCP fails
@@ -73,56 +104,20 @@ def call_databricks_api(endpoint, method="GET", data=None, params=None):
         The API response (parsed JSON)
     """
     try:
-        # Get credentials from environment
-        token = os.environ.get("DATABRICKS_API_KEY")
-        host = os.environ.get("DATABRICKS_HOST", "your-workspace.cloud.databricks.com")
+        # Get authentication headers (this will also get the host internally)
+        headers, error = asyncio.run(get_databricks_auth_headers())
+        if error:
+            raise ValueError(f"Authentication error: {error}")
+        if not headers:
+            raise ValueError("Failed to get authentication headers")
         
-        if not token:
-            # Try to get API key from service
-            try:
-                from src.services.api_keys_service import ApiKeysService
-                from src.utils.encryption_utils import EncryptionUtils
-                from src.core.unit_of_work import UnitOfWork
-                
-                async def get_api_key_async():
-                    async with UnitOfWork() as uow:
-                        api_keys_service = ApiKeysService(uow.session)
-                        api_key = await api_keys_service.find_by_name("DATABRICKS_API_KEY")
-                        if api_key and api_key.encrypted_value:
-                            return EncryptionUtils.decrypt_value(api_key.encrypted_value)
-                        return None
-                
-                # Use asyncio to run the async method
-                try:
-                    # Check if we're already in an event loop
-                    asyncio.get_running_loop()
-                    # We are in an event loop, use a different approach
-                    import nest_asyncio
-                    nest_asyncio.apply()
-                    token = asyncio.run(get_api_key_async())
-                except RuntimeError:
-                    # No running event loop, we can create a new one
-                    loop = asyncio.new_event_loop()
-                    try:
-                        asyncio.set_event_loop(loop)
-                        token = loop.run_until_complete(get_api_key_async())
-                    finally:
-                        loop.close()
-            except Exception as e:
-                logger.error(f"Error getting API key: {e}")
-                pass
-        
-        if not token:
-            raise ValueError("No Databricks API key available")
+        # Get the workspace host
+        workspace_host, host_error = asyncio.run(get_databricks_workspace_host())
+        if host_error:
+            raise ValueError(f"Configuration error: {host_error}")
         
         # Construct the API URL
-        url = f"https://{host}{endpoint}"
-        
-        # Set headers with authentication
-        headers = {
-            "Authorization": f"Bearer {token}",
-            "Content-Type": "application/json"
-        }
+        url = f"https://{workspace_host}{endpoint}"
         
         # Make the API call
         if method.upper() == "GET":
@@ -255,198 +250,119 @@ def run_in_separate_process(tool_name, kwargs):
     Run an MCP tool in a separate process to avoid event loop issues
     
     Args:
-        tool_name: The name of the tool to run
-        kwargs: The arguments to pass to the tool
+        tool_name: Name of the tool to run
+        kwargs: Keyword arguments for the tool
         
     Returns:
-        The result of the tool execution
+        The result of running the tool
     """
-    import subprocess
-    import json
-    import sys
-    import os
-    import concurrent.futures
-    
-    # Get tool configs
-    from src.seeds.tools import get_tool_configs
-    tool_configs = get_tool_configs()
-    mcp_config = tool_configs.get("69", {})
-    
-    # Create a script that runs the tool in a new process
-    tool_runner_script = """
-import sys, json, asyncio, traceback
-from crewai_tools import MCPServerAdapter
+    try:
+        # Get the absolute path to the backend directory
+        backend_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", "..", ".."))
+        
+        # Create a temporary script to run the tool
+        script_content = f"""
+import asyncio
+import json
+import sys
+import os
 
-# Custom JSON encoder to handle non-serializable objects
-class CustomJSONEncoder(json.JSONEncoder):
-    def default(self, obj):
-        try:
-            return super().default(obj)
-        except:
-            # Convert any non-serializable objects to strings
-            return str(obj)
+# Add the backend directory to Python path
+sys.path.insert(0, r"{backend_dir}")
 
-# Function to ensure a value is JSON serializable
-def ensure_serializable(obj):
-    if isinstance(obj, (str, int, float, bool, type(None))):
-        return obj
-    elif isinstance(obj, (list, tuple)):
-        return [ensure_serializable(item) for item in obj]
-    elif isinstance(obj, dict):
-        return {str(k): ensure_serializable(v) for k, v in obj.items()}
-    else:
-        # For any other type, convert to string
-        return str(obj)
+from src.engines.crewai.tools.mcp_handler import create_mcp_adapter
 
 async def run_tool():
-    # Parse arguments
-    tool_name = sys.argv[1]
-    args_json = sys.argv[2]
-    server_url = sys.argv[3]
-    
-    # Create event loop
-    loop = asyncio.new_event_loop()
-    asyncio.set_event_loop(loop)
-    
-    # Setup MCP adapter
-    adapter = MCPServerAdapter({"url": server_url})
-    
     try:
-        # Find matching tool
-        for tool in adapter.tools:
-            if tool.name == tool_name:
-                # Execute tool with args
-                args = json.loads(args_json)
-                print(f"Running {tool_name} with args: {args}", file=sys.stderr)
-                
-                try:
-                    result = tool._run(**args)
-                    
-                    # Make sure the result is serializable
-                    serializable_result = ensure_serializable(result)
-                    
-                    # Try to encode to JSON and print
-                    try:
-                        print(json.dumps({"success": True, "result": serializable_result}, cls=CustomJSONEncoder))
-                    except Exception as json_error:
-                        # If JSON encoding fails, return the result as a string
-                        print(json.dumps({"success": True, "result": str(serializable_result)}))
-                except Exception as e:
-                    # If tool execution fails
-                    error_msg = f"Error executing tool: {str(e)}\\n{traceback.format_exc()}"
-                    print(json.dumps({"success": False, "error": error_msg}))
-                break
-        else:
-            print(json.dumps({"success": False, "error": f"Tool {tool_name} not found"}))
+        # Create a new MCP adapter
+        adapter = await create_mcp_adapter()
+        
+        # Get the tool function
+        tool_func = getattr(adapter, tool_name)
+        
+        # Run the tool
+        result = await tool_func(**{json.dumps(kwargs)})
+        
+        # Print the result as JSON
+        print(json.dumps(result))
+        
     except Exception as e:
-        # If any other error occurs
-        error_msg = f"Unexpected error: {str(e)}\\n{traceback.format_exc()}"
-        print(json.dumps({"success": False, "error": error_msg}))
+        print(json.dumps({{"error": str(e)}}))
     finally:
-        # Cleanup
+        # Clean up
+        if 'adapter' in locals():
+            await adapter.close()
+
+# Run the async function
+asyncio.run(run_tool())
+"""
+        
+        # Write the script to a temporary file
+        script_path = f"/tmp/mcp_tool_{tool_name}.py"
+        with open(script_path, "w") as f:
+            f.write(script_content)
+        
+        # Run the script in a separate process
+        env = os.environ.copy()
+        env["PYTHONPATH"] = backend_dir
+        
+        result = subprocess.run(
+            [sys.executable, script_path],
+            capture_output=True,
+            text=True,
+            env=env,
+            check=True
+        )
+        
+        # Parse the result
         try:
-            adapter.stop()
+            return json.loads(result.stdout)
+        except json.JSONDecodeError:
+            return {"error": f"Failed to parse result: {result.stdout}"}
+            
+    except subprocess.CalledProcessError as e:
+        return {"error": f"Process error: {e.stderr}"}
+    except Exception as e:
+        return {"error": f"Error running tool: {str(e)}"}
+    finally:
+        # Clean up the temporary script
+        try:
+            os.remove(script_path)
         except:
             pass
 
-if __name__ == "__main__":
-    asyncio.run(run_tool())
-"""
+async def create_mcp_adapter():
+    """
+    Create a new MCP adapter with proper authentication.
     
-    # Write script to a temporary file
-    import tempfile
-    with tempfile.NamedTemporaryFile('w', suffix='.py', delete=False) as f:
-        f.write(tool_runner_script)
-        temp_script = f.name
-    
+    Returns:
+        MCPAdapter: A new MCP adapter instance
+    """
     try:
-        # Get server URL from config
-        server_url = mcp_config.get("server_url", "http://localhost:8000/sse")
+        # Get the MCP server URL
+        mcp_url = "https://mcpgenie-1444828305810485.aws.databricksapps.com/sse"
         
-        # Execute the script in a separate process
-        cmd = [sys.executable, temp_script, tool_name, json.dumps(kwargs), server_url]
+        # Get MCP authentication headers
+        headers, error = await get_mcp_auth_headers(mcp_url)
+        if error:
+            raise ValueError(f"Failed to get MCP auth headers: {error}")
+            
+        # Create the adapter
+        from src.engines.crewai.tools.mcp_adapter import MCPAdapter
+        adapter = MCPAdapter(mcp_url, headers)
         
-        # Log the command for debugging
-        logger.debug(f"Running MCP tool in separate process: {' '.join(cmd)}")
+        # Initialize the adapter
+        await adapter.initialize()
         
-        # Run in executor to avoid blocking
-        with concurrent.futures.ThreadPoolExecutor() as executor:
-            future = executor.submit(
-                lambda: subprocess.run(cmd, text=True, capture_output=True)
-            )
-            try:
-                process = future.result(timeout=60)  # 60 second timeout
-                
-                # Process result
-                if process.returncode == 0:
-                    stdout = process.stdout.strip()
-                    stderr = process.stderr.strip()
-                    
-                    # Log stderr for debugging if not empty
-                    if stderr:
-                        logger.debug(f"MCP tool stderr: {stderr}")
-                    
-                    # If no output, return error
-                    if not stdout:
-                        return f"Error: No output from MCP tool {tool_name}"
-                    
-                    # Try parsing as JSON first
-                    try:
-                        output = json.loads(stdout)
-                        if output.get("success"):
-                            result = output.get("result")
-                            
-                            # Try to parse the result if it's a string that looks like JSON
-                            if isinstance(result, str) and result.strip().startswith("{") and result.strip().endswith("}"):
-                                try:
-                                    # Maybe it's a nested JSON string that needs parsing
-                                    parsed_result = json.loads(result)
-                                    return parsed_result
-                                except:
-                                    # If that fails, just return the string as is
-                                    return result
-                            else:
-                                # Return as is
-                                return result
-                        else:
-                            error_msg = output.get('error', 'Unknown error')
-                            logger.error(f"Tool process error: {error_msg}")
-                            return f"Error: {error_msg}"
-                    except json.JSONDecodeError:
-                        # Failed to parse as JSON - look for patterns in the output
-                        logger.warning(f"Failed to parse JSON from stdout: {stdout[:200]}")
-                        
-                        # Check if the response contains valid JSON embedded in it
-                        import re
-                        json_pattern = r'({.*})'
-                        if re.search(json_pattern, stdout):
-                            # Try to extract JSON from the output
-                            json_match = re.search(json_pattern, stdout, re.DOTALL)
-                            if json_match:
-                                try:
-                                    json_str = json_match.group(1)
-                                    return json.loads(json_str)
-                                except:
-                                    # If that fails, return the captured text
-                                    return json_match.group(1)
-                        
-                        # If no JSON pattern, maybe it's simple text
-                        if len(stdout) < 1000:  # Reasonable size for text output
-                            return stdout
-                        
-                        # Fall back to a more user-friendly error
-                        return f"Result from {tool_name}: " + stdout[:200] + "..." 
-                else:
-                    logger.error(f"Process error: {process.stderr}")
-                    return f"Error: Process failed with code {process.returncode}: {process.stderr}"
-            except concurrent.futures.TimeoutError:
-                return "Error: Tool execution timed out"
-    finally:
-        # Clean up temp file
-        try:
-            os.unlink(temp_script)
-        except:
-            pass
+        # Register the adapter for tracking
+        adapter_id = id(adapter)
+        register_mcp_adapter(adapter_id, adapter)
+        
+        return adapter
+        
+    except Exception as e:
+        logger.error(f"Error creating MCP adapter: {e}")
+        raise
 
 def stop_mcp_adapter(adapter):
     """

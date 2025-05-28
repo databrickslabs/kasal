@@ -27,6 +27,7 @@ class TaskConfig(BaseModel):
     human_input: Optional[bool] = None
     condition: Optional[ConditionConfig] = None
     guardrail: Optional[str] = None
+    markdown: Optional[bool] = None
 
 
 # Shared properties
@@ -44,6 +45,7 @@ class TaskBase(BaseModel):
     output_pydantic: Optional[str] = None
     output_file: Optional[str] = None
     output: Optional[Dict[str, Any]] = None
+    markdown: bool = False
     callback: Optional[str] = None
     human_input: bool = False
     converter_cls: Optional[str] = None
@@ -71,6 +73,7 @@ class TaskUpdate(BaseModel):
     output_pydantic: Optional[str] = None
     output_file: Optional[str] = None
     output: Optional[Dict[str, Any]] = None
+    markdown: Optional[bool] = None
     callback: Optional[str] = None
     human_input: Optional[bool] = None
     converter_cls: Optional[str] = None

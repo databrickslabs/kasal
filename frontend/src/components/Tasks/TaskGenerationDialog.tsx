@@ -32,7 +32,7 @@ const TaskGenerationDialog: React.FC<TaskGenerationDialogProps> = ({
   const [prompt, setPrompt] = useState('');
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [dialogModel, setDialogModel] = useState<string>('gpt-4o-mini');
+  const [dialogModel, setDialogModel] = useState<string>('databricks-llama-4-maverick');
   const [models, setModels] = useState<Models>({});
   const [modelsLoading, setModelsLoading] = useState(false);
   
@@ -62,8 +62,8 @@ const TaskGenerationDialog: React.FC<TaskGenerationDialogProps> = ({
             console.log(`Auto-selecting first available model: ${firstModelKey}`);
             setDialogModel(firstModelKey);
           } else {
-            // Use selectedModel if provided, otherwise use gpt-4o-mini
-            setDialogModel(selectedModel || 'gpt-4o-mini');
+            // Use selectedModel if provided, otherwise use databricks-llama-4-maverick
+            setDialogModel(selectedModel || 'databricks-llama-4-maverick');
           }
         } catch (error) {
           console.error('Error fetching models:', error);
@@ -78,8 +78,8 @@ const TaskGenerationDialog: React.FC<TaskGenerationDialogProps> = ({
             console.log(`Auto-selecting first available fallback model: ${firstModelKey}`);
             setDialogModel(firstModelKey);
           } else {
-            // Use selectedModel if provided, otherwise use gpt-4o-mini
-            setDialogModel(selectedModel || 'gpt-4o-mini');
+            // Use selectedModel if provided, otherwise use databricks-llama-4-maverick
+            setDialogModel(selectedModel || 'databricks-llama-4-maverick');
           }
         } finally {
           setModelsLoading(false);
@@ -170,6 +170,8 @@ const TaskGenerationDialog: React.FC<TaskGenerationDialogProps> = ({
             output_pydantic: null,
             callback: null,
             human_input: false,
+            guardrail: null,
+            markdown: false
           },
           tools: response.tools || [],
         };

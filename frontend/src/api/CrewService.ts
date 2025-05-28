@@ -42,6 +42,7 @@ interface NodeData {
     output_pydantic: string | null;
     callback: null;
     human_input: boolean;
+    markdown: boolean;
   };
   [key: string]: unknown;
 }
@@ -93,7 +94,8 @@ export class CrewService {
               expected_output: String(node.data.expected_output || ''),
               agent_id: String(crewId), // Ensure agent_id is always a string
               tools: Array.isArray(node.data.tools) ? node.data.tools : [],
-              context: Array.isArray(node.data.context) ? node.data.context : []
+              context: Array.isArray(node.data.context) ? node.data.context : [],
+              markdown: (node.data.config as any)?.markdown === true || (node.data.config as any)?.markdown === 'true'
             });
           }
         });
@@ -111,7 +113,8 @@ export class CrewService {
               expected_output: String(task.data.expected_output || ''),
               agent_id: String(crewId), // Ensure agent_id is always a string
               tools: Array.isArray(task.data.tools) ? task.data.tools : [],
-              context: Array.isArray(task.data.context) ? task.data.context : []
+              context: Array.isArray(task.data.context) ? task.data.context : [],
+              markdown: (task.data.config as any)?.markdown === true || (task.data.config as any)?.markdown === 'true'
             });
           }
         });

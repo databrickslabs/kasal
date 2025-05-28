@@ -25,6 +25,9 @@ export interface PanelManagerResult {
   toggleFlowsVisibility: () => void;
   showRunHistory: boolean;
   setShowRunHistory: React.Dispatch<React.SetStateAction<boolean>>;
+  showChatPanel: boolean;
+  setShowChatPanel: React.Dispatch<React.SetStateAction<boolean>>;
+  toggleChatPanel: () => void;
 }
 
 export const usePanelManager = (): PanelManagerResult => {
@@ -34,6 +37,7 @@ export const usePanelManager = (): PanelManagerResult => {
   const [panelState, setPanelState] = useState(PANEL_STATE.SPLIT);
   const [areFlowsVisible, setAreFlowsVisible] = useState(false);
   const [showRunHistory, setShowRunHistory] = useState(true);
+  const [showChatPanel, setShowChatPanel] = useState(false);
   
   // Panel transition functions
   const handlePanelDragStart = useCallback(() => {
@@ -83,6 +87,11 @@ export const usePanelManager = (): PanelManagerResult => {
     });
   }, []);
 
+  // Handler to toggle chat panel visibility
+  const toggleChatPanel = useCallback(() => {
+    setShowChatPanel(prev => !prev);
+  }, []);
+
   // Set up event listeners for dragging outside the component
   useEffect(() => {
     if (isDraggingPanel) {
@@ -129,6 +138,9 @@ export const usePanelManager = (): PanelManagerResult => {
     toggleFlowsVisibility,
     showRunHistory,
     setShowRunHistory,
+    showChatPanel,
+    setShowChatPanel,
+    toggleChatPanel,
   };
 };
 

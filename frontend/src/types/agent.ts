@@ -75,6 +75,8 @@ export interface Agent {
   max_retry_limit?: number;
   use_system_prompt?: boolean;
   respect_context_window?: boolean;
+  reasoning?: boolean;
+  max_reasoning_attempts?: number;
   max_tokens?: number;
   max_context_window_size?: number;
   /**

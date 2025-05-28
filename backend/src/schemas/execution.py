@@ -33,6 +33,7 @@ class CrewConfig(BaseModel):
     tasks_yaml: Dict[str, Dict[str, Any]] = Field(..., description="Task configuration in YAML format")
     inputs: Dict[str, Any] = Field(..., description="Input values for the execution")
     planning: bool = Field(False, description="Whether to enable planning")
+    reasoning: bool = Field(False, description="Whether to enable reasoning")
     model: Optional[str] = Field(None, description="LLM model to use")
     llm_provider: Optional[str] = Field(None, description="LLM provider to use (openai, anthropic, etc)")
     execution_type: Optional[str] = Field("crew", description="Type of execution (crew or flow)")
@@ -133,6 +134,8 @@ class FlowConfig(BaseModel):
     output_dir: Optional[str] = Field(None, description="Directory for flow execution outputs")
     planning: Optional[bool] = Field(False, description="Whether to enable planning")
     planning_llm: Optional[str] = Field(None, description="LLM to use for planning if different from main model")
+    reasoning: Optional[bool] = Field(False, description="Whether to enable reasoning")
+    reasoning_llm: Optional[str] = Field(None, description="LLM to use for reasoning if different from main model")
 
     model_config = ConfigDict(arbitrary_types_allowed=True)
 
@@ -158,5 +161,7 @@ class FlowConfig(BaseModel):
             "max_rpm": self.max_rpm,
             "output_dir": self.output_dir,
             "planning": self.planning,
-            "planning_llm": self.planning_llm
+            "planning_llm": self.planning_llm,
+            "reasoning": self.reasoning,
+            "reasoning_llm": self.reasoning_llm
         }

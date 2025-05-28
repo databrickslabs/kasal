@@ -22,8 +22,8 @@ import { Models } from '../../types/models';
 
 // Default fallback model when API is down
 const DEFAULT_FALLBACK_MODEL = {
-  'gpt-4o-mini': {
-    name: 'gpt-4o-mini',
+  'databricks-llama-4-maverick': {
+    name: 'databricks-llama-4-maverick',
     temperature: 0.7,
     context_window: 128000,
     max_output_tokens: 4096,

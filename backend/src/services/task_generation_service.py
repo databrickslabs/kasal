@@ -22,7 +22,7 @@ from src.core.llm_manager import LLMManager
 logger = logging.getLogger(__name__)
 
 # Default model for task generation
-DEFAULT_TASK_MODEL = os.getenv("DEFAULT_TASK_MODEL", "gpt-4o-mini")
+DEFAULT_TASK_MODEL = os.getenv("DEFAULT_TASK_MODEL", "databricks-llama-4-maverick")
 
 class TaskGenerationService:
     """Service for task generation operations."""
@@ -212,6 +212,7 @@ class TaskGenerationService:
                 "output_pydantic": None,
                 "output_file": None,
                 "human_input": False,
+                "markdown": False,
                 "retry_on_fail": True,
                 "max_retries": 3,
                 "timeout": None,
@@ -222,9 +223,49 @@ class TaskGenerationService:
                 "llm": model
             }
         else:
+            # Fix common type issues in advanced_config
+            adv_config = setup["advanced_config"]
+            
+            # Fix output_json if it's a boolean instead of dict/None
+            if "output_json" in adv_config and isinstance(adv_config["output_json"], bool):
+                adv_config["output_json"] = None
+                
+            # Fix output_pydantic if it's a boolean instead of string/None
+            if "output_pydantic" in adv_config and isinstance(adv_config["output_pydantic"], bool):
+                adv_config["output_pydantic"] = None
+                
+            # Ensure context is a list
+            if "context" in adv_config and not isinstance(adv_config["context"], list):
+                adv_config["context"] = []
+                
+            # Ensure dependencies is a list
+            if "dependencies" in adv_config and not isinstance(adv_config["dependencies"], list):
+                adv_config["dependencies"] = []
+            
             # Ensure LLM field is set in advanced_config
-            setup["advanced_config"]["llm"] = model
+            adv_config["llm"] = model
+            
+            # Set defaults for missing fields
+            adv_config.setdefault("async_execution", False)
+            adv_config.setdefault("context", [])
+            adv_config.setdefault("output_json", None)
+            adv_config.setdefault("output_pydantic", None)
+            adv_config.setdefault("output_file", None)
+            adv_config.setdefault("human_input", False)
+            adv_config.setdefault("markdown", False)
+            adv_config.setdefault("retry_on_fail", True)
+            adv_config.setdefault("max_retries", 3)
+            adv_config.setdefault("timeout", None)
+            adv_config.setdefault("priority", 1)
+            adv_config.setdefault("dependencies", [])
+            adv_config.setdefault("retry_delay", 0)
+            adv_config.setdefault("allow_delegation", False)
         
+        # Add markdown instructions if enabled
+        if setup.get("advanced_config", {}).get("markdown", False):
+            setup["description"] += "\n\nPlease format the output using Markdown syntax."
+            setup["expected_output"] += "\n\nThe output should be formatted using Markdown."
+
         # Create response object
         response = TaskGenerationResponse(
             name=setup["name"],

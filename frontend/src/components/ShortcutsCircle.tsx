@@ -82,7 +82,7 @@ const ShortcutsCircle: React.FC<ShortcutsCircleProps> = ({ shortcuts }) => {
       sx={{
         position: 'fixed',
         top: 16,
-        right: 16,
+        left: 16,
         zIndex: 1000,
       }}
     >

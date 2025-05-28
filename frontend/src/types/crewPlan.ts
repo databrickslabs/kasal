@@ -37,6 +37,7 @@ export interface CrewTask {
   assigned_agent?: string;
   converter_cls?: string | null;
   async_execution?: boolean;
+  markdown?: boolean;
   output_file?: string | null;
   output_json?: string | null;
   output_pydantic?: string | null;

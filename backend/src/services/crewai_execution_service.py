@@ -83,6 +83,10 @@ class CrewAIExecutionService:
             # Prepare the engine
             engine = await self._prepare_engine(config)
             
+            # Wait for engine initialization to complete if it's still running
+            if hasattr(engine, '_init_task') and not engine._init_task.done():
+                await engine._init_task
+            
             # Update status to RUNNING
             await ExecutionStatusService.update_status(
                 job_id=execution_id,

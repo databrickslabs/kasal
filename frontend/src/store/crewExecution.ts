@@ -26,6 +26,8 @@ interface CrewExecutionState {
   selectedModel: string;
   planningEnabled: boolean;
   planningLLM: string;
+  reasoningEnabled: boolean;
+  reasoningLLM: string;
   schemaDetectionEnabled: boolean;
   isCrewPlanningOpen: boolean;
   isScheduleDialogOpen: boolean;
@@ -49,6 +51,8 @@ interface CrewExecutionState {
   setSelectedModel: (model: string) => void;
   setPlanningEnabled: (enabled: boolean) => void;
   setPlanningLLM: (model: string) => void;
+  setReasoningEnabled: (enabled: boolean) => void;
+  setReasoningLLM: (model: string) => void;
   setSchemaDetectionEnabled: (enabled: boolean) => void;
   setCrewPlanningOpen: (open: boolean) => void;
   setScheduleDialogOpen: (open: boolean) => void;
@@ -71,6 +75,7 @@ interface CrewExecutionState {
   // Execution methods
   executeCrew: (nodes: Node[], edges: Edge[]) => Promise<{ job_id: string } | null>;
   executeFlow: (nodes: Node[], edges: Edge[]) => Promise<{ job_id: string } | null>;
+  executeTab: (tabId: string, nodes: Node[], edges: Edge[], tabName?: string) => Promise<{ job_id: string } | null>;
   handleModelChange: (event: React.ChangeEvent<{ value: unknown }>) => void;
   handleRunClick: (type: 'crew' | 'flow') => Promise<void>;
   handleGenerateCrew: () => Promise<void>;
@@ -80,9 +85,11 @@ interface CrewExecutionState {
 export const useCrewExecutionStore = create<CrewExecutionState>((set, get) => ({
   // Initial state
   isExecuting: false,
-  selectedModel: 'gpt-4',
+  selectedModel: 'databricks-llama-4-maverick',
   planningEnabled: false,
   planningLLM: '',
+  reasoningEnabled: false,
+  reasoningLLM: '',
   schemaDetectionEnabled: true,
   isCrewPlanningOpen: false,
   isScheduleDialogOpen: false,
@@ -104,6 +111,8 @@ export const useCrewExecutionStore = create<CrewExecutionState>((set, get) => ({
   setSelectedModel: (model) => set({ selectedModel: model as string }),
   setPlanningEnabled: (enabled) => set({ planningEnabled: enabled }),
   setPlanningLLM: (model) => set({ planningLLM: model }),
+  setReasoningEnabled: (enabled) => set({ reasoningEnabled: enabled }),
+  setReasoningLLM: (model) => set({ reasoningLLM: model }),
   setSchemaDetectionEnabled: (enabled) => set({ schemaDetectionEnabled: enabled }),
   setCrewPlanningOpen: (open) => set({ isCrewPlanningOpen: open }),
   setScheduleDialogOpen: (open) => set({ isScheduleDialogOpen: open }),
@@ -140,7 +149,7 @@ export const useCrewExecutionStore = create<CrewExecutionState>((set, get) => ({
 
   // Execution methods
   executeCrew: async (nodes, edges) => {
-    const { selectedModel, planningEnabled, planningLLM, schemaDetectionEnabled } = get();
+    const { selectedModel, planningEnabled, planningLLM, reasoningEnabled, reasoningLLM, schemaDetectionEnabled } = get();
     set({ isExecuting: true });
 
     try {
@@ -164,10 +173,13 @@ export const useCrewExecutionStore = create<CrewExecutionState>((set, get) => ({
           }))
       );
 
-      // Prepare additionalInputs with planning_llm if planning is enabled
+      // Prepare additionalInputs with planning_llm and reasoning_llm if enabled
       const additionalInputs: Record<string, unknown> = {};
       if (planningEnabled && planningLLM) {
         additionalInputs.planning_llm = planningLLM;
+      }
+      if (reasoningEnabled && reasoningLLM) {
+        additionalInputs.reasoning_llm = reasoningLLM;
       }
 
       const response = await jobExecutionService.executeJob(
@@ -177,7 +189,8 @@ export const useCrewExecutionStore = create<CrewExecutionState>((set, get) => ({
         selectedModel,
         'crew',
         additionalInputs,
-        schemaDetectionEnabled
+        schemaDetectionEnabled,
+        reasoningEnabled
       );
 
       console.log('[CrewExecution] Job execution response:', response);
@@ -224,7 +237,7 @@ export const useCrewExecutionStore = create<CrewExecutionState>((set, get) => ({
   },
 
   executeFlow: async (nodes, edges) => {
-    const { selectedModel, planningEnabled, planningLLM, schemaDetectionEnabled } = get();
+    const { selectedModel, planningEnabled, planningLLM, reasoningEnabled, reasoningLLM, schemaDetectionEnabled } = get();
     set({ isExecuting: true });
 
     try {
@@ -262,21 +275,29 @@ export const useCrewExecutionStore = create<CrewExecutionState>((set, get) => ({
         }))
       );
 
-      // Prepare additionalInputs with planning_llm if planning is enabled
+      // Prepare additionalInputs with planning_llm and reasoning_llm if enabled
       const additionalInputs: Record<string, unknown> = {};
       if (planningEnabled && planningLLM) {
         additionalInputs.planning_llm = planningLLM;
       }
+      if (reasoningEnabled && reasoningLLM) {
+        additionalInputs.reasoning_llm = reasoningLLM;
+      }
 
       console.log('[FlowExecution] Executing flow with model:', selectedModel);
+      console.log('[FlowExecution] Planning enabled:', planningEnabled);
+      console.log('[FlowExecution] Reasoning enabled:', reasoningEnabled);
+      console.log('[FlowExecution] Schema detection enabled:', schemaDetectionEnabled);
+
       const response = await jobExecutionService.executeJob(
         nodes,
         edges,
         planningEnabled,
         selectedModel,
-        'flow', // Explicitly specify 'flow' as execution type
+        'flow',
         additionalInputs,
-        schemaDetectionEnabled
+        schemaDetectionEnabled,
+        reasoningEnabled
       );
 
       console.log('[FlowExecution] Job execution response:', response);
@@ -322,6 +343,95 @@ export const useCrewExecutionStore = create<CrewExecutionState>((set, get) => ({
     }
   },
 
+  executeTab: async (tabId, nodes, edges, tabName) => {
+    const { selectedModel, planningEnabled, planningLLM, reasoningEnabled, reasoningLLM, schemaDetectionEnabled } = get();
+    set({ isExecuting: true });
+
+    try {
+      console.log(`[TabExecution] Executing tab ${tabId} (${tabName || 'Unnamed'}) with ${nodes.length} nodes and ${edges.length} edges`);
+
+      // Determine execution type based on node types
+      const hasAgentNodes = nodes.some(node => node.type === 'agentNode');
+      const hasTaskNodes = nodes.some(node => node.type === 'taskNode');
+      const hasFlowNodes = nodes.some(node => 
+        node.type === 'flowNode' || 
+        node.type === 'crewNode' ||
+        (node.type && node.type.toLowerCase().includes('flow'))
+      );
+
+      let executionType: 'crew' | 'flow' = 'crew';
+      
+      if (hasFlowNodes) {
+        executionType = 'flow';
+      } else if (!hasAgentNodes || !hasTaskNodes) {
+        throw new Error('Tab execution requires at least one agent and one task node for crew execution, or flow nodes for flow execution');
+      }
+
+      // Prepare additionalInputs with planning_llm and reasoning_llm if enabled
+      const additionalInputs: Record<string, unknown> = {};
+      if (planningEnabled && planningLLM) {
+        additionalInputs.planning_llm = planningLLM;
+      }
+      if (reasoningEnabled && reasoningLLM) {
+        additionalInputs.reasoning_llm = reasoningLLM;
+      }
+
+      console.log(`[TabExecution] Executing tab as ${executionType} with model:`, selectedModel);
+
+      const response = await jobExecutionService.executeJob(
+        nodes,
+        edges,
+        planningEnabled,
+        selectedModel,
+        executionType,
+        additionalInputs,
+        schemaDetectionEnabled,
+        reasoningEnabled
+      );
+
+      console.log('[TabExecution] Job execution response:', response);
+
+      set({ 
+        successMessage: `Tab "${tabName || 'Unnamed'}" executed successfully`,
+        showSuccess: true,
+        jobId: response.job_id
+      });
+
+      // Dispatch custom jobCreated event to update the run history immediately
+      const jobCreatedEvent = new CustomEvent('jobCreated', { 
+        detail: { 
+          jobId: response.execution_id || response.job_id,
+          jobName: `${tabName || 'Unnamed Tab'} (${new Date().toLocaleTimeString()})`,
+          status: 'running'
+        }
+      });
+      console.log('[TabExecution] Dispatching jobCreated event:', jobCreatedEvent.detail);
+      window.dispatchEvent(jobCreatedEvent);
+
+      // Dispatch task status update event to track task statuses
+      const taskStatusUpdateEvent = new CustomEvent('taskStatusUpdate', {
+        detail: {
+          jobId: response.execution_id || response.job_id
+        }
+      });
+      console.log('[TabExecution] Dispatching taskStatusUpdate event:', taskStatusUpdateEvent.detail);
+      window.dispatchEvent(taskStatusUpdateEvent);
+
+      // Also dispatch the standard refreshRunHistory event
+      window.dispatchEvent(new CustomEvent('refreshRunHistory'));
+      return response;
+    } catch (error) {
+      console.error('[TabExecution] Error executing tab:', error);
+      set({ 
+        errorMessage: error instanceof Error ? error.message : `Failed to execute tab "${tabName || 'Unnamed'}"`,
+        showError: true 
+      });
+      return null;
+    } finally {
+      set({ isExecuting: false });
+    }
+  },
+
   handleModelChange: (event) => {
     set({ selectedModel: event.target.value as string });
   },
@@ -348,14 +458,17 @@ export const useCrewExecutionStore = create<CrewExecutionState>((set, get) => ({
 
   handleGenerateCrew: async () => {
     const { nodes, edges } = useWorkflowStore.getState();
-    const { planningEnabled, planningLLM, selectedModel, schemaDetectionEnabled } = get();
+    const { planningEnabled, planningLLM, reasoningEnabled, reasoningLLM, selectedModel, schemaDetectionEnabled } = get();
     set({ isExecuting: true });
 
     try {
-      // Prepare additionalInputs with planning_llm if planning is enabled
+      // Prepare additionalInputs with planning_llm and reasoning_llm if enabled
       const additionalInputs: Record<string, unknown> = { generate: true };
       if (planningEnabled && planningLLM) {
         additionalInputs.planning_llm = planningLLM;
+      }
+      if (reasoningEnabled && reasoningLLM) {
+        additionalInputs.reasoning_llm = reasoningLLM;
       }
 
       const response = await jobExecutionService.executeJob(
@@ -365,7 +478,8 @@ export const useCrewExecutionStore = create<CrewExecutionState>((set, get) => ({
         selectedModel,
         'crew',
         additionalInputs,
-        schemaDetectionEnabled
+        schemaDetectionEnabled,
+        reasoningEnabled
       );
 
       set({ 

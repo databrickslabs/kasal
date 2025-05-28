@@ -15,7 +15,7 @@ email-validator
 google-api-python-client
 pysendpulse
 langchain
-crewai_tools==0.40.1
+crewai_tools==0.45.0
 nixtla
 pysendpulse
 greenlet
@@ -23,14 +23,18 @@ wheel
 selenium
 python-pptx
 urllib3>=1.26.6
-mcp-crew-ai
+mcp==1.9.0
+mcpadapt
+
 # Add explicit version of bcrypt to prevent version conflicts
 bcrypt==4.0.1
 # Add compatible starlette version for fastapi 0.115.0
-starlette>=0.37.2,<0.39.0
+starlette==0.40.0
 
 # Documentation
 mkdocs>=1.6.0
 mkdocs-material>=9.4.0
 mkdocstrings[python]>=0.24.0
 mkdocs-git-revision-date-localized-plugin>=1.2.0
+
+# Add any other dependencies your project requires below

@@ -36,6 +36,7 @@ class TaskConfig(BaseModel):
     validation_function: Optional[str] = None
     callback_function: Optional[str] = None
     human_input: Optional[bool] = False
+    markdown: Optional[bool] = False
 
 
 class NodeData(BaseModel):
@@ -75,6 +76,7 @@ class NodeData(BaseModel):
     context: List[str] = Field(default_factory=list)
     async_execution: Optional[bool] = False
     knowledge_sources: Optional[List[Dict[str, Any]]] = None
+    markdown: Optional[bool] = Field(False, description="Whether to use markdown formatting")
 
 
 class Node(BaseModel):
@@ -167,7 +169,7 @@ class CrewGenerationRequest(BaseModel):
 
 class AgentConfig(BaseModel):
     """Configuration for an agent in the crew."""
-    llm: Optional[str] = Field("gpt-4o-mini", description="LLM model for the agent")
+    llm: Optional[str] = Field("databricks-llama-4-maverick", description="LLM model for the agent")
     function_calling_llm: Optional[str] = Field(None, description="LLM model for function calling")
     max_iter: Optional[int] = Field(25, description="Maximum iterations for the agent")
     max_rpm: Optional[int] = Field(None, description="Maximum requests per minute")
@@ -193,7 +195,7 @@ class Agent(BaseModel):
     goal: str = Field(..., description="Goal of the agent")
     backstory: str = Field(..., description="Backstory of the agent")
     tools: Optional[List[str]] = Field([], description="Tools available to the agent")
-    llm: Optional[str] = Field("gpt-4o-mini", description="LLM model for the agent")
+    llm: Optional[str] = Field("databricks-llama-4-maverick", description="LLM model for the agent")
     function_calling_llm: Optional[str] = Field(None, description="LLM model for function calling")
     max_iter: Optional[int] = Field(25, description="Maximum iterations")
     max_rpm: Optional[int] = Field(None, description="Maximum requests per minute")
@@ -229,6 +231,7 @@ class Task(BaseModel):
     callback: Optional[str] = Field(None, description="Callback function")
     human_input: Optional[bool] = Field(False, description="Whether to request human input")
     converter_cls: Optional[str] = Field(None, description="Converter class")
+    markdown: Optional[bool] = Field(False, description="Whether to use markdown formatting")
 
 
 class CrewGenerationResponse(BaseModel):

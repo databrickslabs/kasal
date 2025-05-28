@@ -32,7 +32,7 @@ Format your response as a JSON object with the following structure:
     "backstory": "relevant experience and expertise",
     "tools": [],
     "advanced_config": {
-        "llm": "gpt-4o-mini",
+        "llm": "databricks-llama-4-maverick",
         "function_calling_llm": null,
         "max_iter": 25,
         "max_rpm": 1,
@@ -131,7 +131,8 @@ json
     "error_handling": "default",
     "output_parser": null,
     "cache_response": true,
-    "cache_ttl": 3600
+    "cache_ttl": 3600,
+    "markdown": false
   }
 }
 Please follow these strict guidelines when generating your output:
@@ -142,7 +143,8 @@ Please follow these strict guidelines when generating your output:
 5. The tools field must be an empty array.
 6. Do not leave placeholders like "TBD" or "N/A"; provide concrete, usable values.
 7. All boolean and null values must use correct JSON syntax.
-8. Do not include any explanation or commentary—only return the JSON object."""
+8. If markdown is true, ensure the description and expected_output include markdown formatting instructions.
+9. Do not include any explanation or commentary—only return the JSON object."""
 
 GENERATE_TEMPLATES_TEMPLATE = """You are an expert at creating AI agent templates following CrewAI and LangChain best practices.
 Given an agent's role, goal, and backstory, generate three templates:
@@ -190,7 +192,42 @@ For agents include:
             "goal": "clear objective",
             "backstory": "relevant experience and expertise",
             "tools": [],
-            "llm": "gpt-4o-mini",
+            "llm": "{
+    "dispatcher": {
+        "intent": "generate_agent",
+        "confidence": 0.95,
+        "extracted_info": {
+            "agent_type": "flight finder"
+        },
+        "suggested_prompt": "Create an agent specialized in finding flights"
+    },
+    "generation_result": {
+        "name": "Flight Finder",
+        "role": "Flight Search Specialist",
+        "goal": "To find the best flights based on user's preferences",
+        "backstory": "This agent has access to comprehensive flight databases and can compare flight options based on different criteria such as price, duration, airline, and more.",
+        "tools": [],
+        "advanced_config": {
+            "llm": "databricks-llama-4-maverick",
+            "function_calling_llm": null,
+            "max_iter": 25,
+            "max_rpm": 1,
+            "verbose": false,
+            "allow_delegation": false,
+            "cache": true,
+            "allow_code_execution": false,
+            "code_execution_mode": "safe",
+            "max_retry_limit": 2,
+            "use_system_prompt": true,
+            "respect_context_window": true,
+            "max_execution_time": null,
+            "system_template": null,
+            "prompt_template": null,
+            "response_template": null
+        }
+    },
+    "service_called": "generate_agent"
+}",
             "function_calling_llm": null,
             "max_iter": 25,
             "max_rpm": 1,

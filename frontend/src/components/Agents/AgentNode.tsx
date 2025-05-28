@@ -435,7 +435,7 @@ const AgentNode: React.FC<{ data: AgentNodeData; id: string }> = ({ data, id }) 
           textOverflow: 'ellipsis',
           whiteSpace: 'nowrap',
         }}>
-          {data.llm || 'GPT-4'}
+          {data.llm || 'databricks-llama-4-maverick'}
         </Typography>
       </Box>
 

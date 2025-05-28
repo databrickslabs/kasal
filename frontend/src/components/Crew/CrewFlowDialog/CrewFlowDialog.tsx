@@ -35,6 +35,9 @@ import EditIcon from '@mui/icons-material/Edit';
 import UploadIcon from '@mui/icons-material/Upload';
 import FileUploadIcon from '@mui/icons-material/FileUpload';
 import EditFlowForm from '../../Flow/EditFlowForm';
+import { useTabManagerStore } from '../../../store/tabManager';
+import { AgentService } from '../../../api/AgentService';
+import { TaskService } from '../../../api/TaskService';
 
 interface TabPanelProps {
   children?: React.ReactNode;
@@ -135,30 +138,181 @@ const CrewFlowSelectionDialog: React.FC<CrewFlowSelectionDialogProps> = ({
   };
 
   const handleCrewSelect = async (crewId: string) => {
+    setLoading(true);
+    
+    // Dispatch event to signal crew loading is starting
+    window.dispatchEvent(new CustomEvent('crewLoadStarted'));
+    
     try {
-      setLoading(true);
-      setError(null);
-      
       const selectedCrew = await CrewService.getCrew(crewId);
-      console.log('Selected crew data:', selectedCrew);
       
-      if (!selectedCrew?.nodes || !selectedCrew?.edges) {
-        throw new Error('Invalid crew data');
+      if (!selectedCrew) {
+        throw new Error('Crew not found');
       }
+
+      console.log('Selected crew:', selectedCrew);
       
-      // Extract and validate nodes and edges
-      const validatedNodes = selectedCrew.nodes || [];
-      const validatedEdges = selectedCrew.edges || [];
+      // Create a mapping of old IDs to new IDs
+      const idMapping: { [key: string]: string } = {};
+
+      // Create agents first
+      for (const node of selectedCrew.nodes || []) {
+        if (node.type === 'agentNode') {
+          try {
+            const agentData = node.data;
+            // Format agent data following AgentForm pattern
+            const formattedAgentData = {
+              name: agentData.name || agentData.label || '',
+              role: agentData.role || '',
+              goal: agentData.goal || '',
+              backstory: agentData.backstory || '',
+              llm: agentData.llm || 'databricks-llama-4-maverick',
+              tools: agentData.tools || [],
+              function_calling_llm: agentData.function_calling_llm,
+              max_iter: agentData.max_iter || 25,
+              max_rpm: agentData.max_rpm,
+              max_execution_time: agentData.max_execution_time || 300,
+              memory: agentData.memory ?? true,
+              verbose: agentData.verbose || false,
+              allow_delegation: agentData.allow_delegation || false,
+              cache: agentData.cache ?? true,
+              system_template: agentData.system_template,
+              prompt_template: agentData.prompt_template,
+              response_template: agentData.response_template,
+              allow_code_execution: agentData.allow_code_execution || false,
+              code_execution_mode: agentData.code_execution_mode || 'safe',
+              max_retry_limit: agentData.max_retry_limit || 3,
+              use_system_prompt: agentData.use_system_prompt ?? true,
+              respect_context_window: agentData.respect_context_window ?? true,
+              embedder_config: agentData.embedder_config,
+              knowledge_sources: agentData.knowledge_sources || []
+            };
+
+            const newAgent = await AgentService.createAgent(formattedAgentData);
+            if (newAgent && newAgent.id) {
+              idMapping[node.id] = newAgent.id.toString();
+            } else {
+              throw new Error(`Failed to create agent: ${formattedAgentData.name}`);
+            }
+          } catch (err) {
+            const error = err as Error;
+            console.error('Error creating agent:', error);
+            throw new Error(`Failed to create agent: ${error.message}`);
+          }
+        }
+      }
+
+      // Create tasks
+      for (const node of selectedCrew.nodes || []) {
+        if (node.type === 'taskNode') {
+          try {
+            const taskData = node.data;
+            // Update agent_id in task data if it exists in our mapping
+            const updatedAgentId = taskData.agent_id && idMapping[taskData.agent_id] 
+              ? parseInt(idMapping[taskData.agent_id]) 
+              : 0;
+
+            // Format task data following TaskForm pattern
+            const formattedTaskData = {
+              name: String(taskData.label || ''),
+              description: String(taskData.description || ''),
+              expected_output: String(taskData.expected_output || ''),
+              tools: (taskData.tools || []).map((tool: unknown) => String(tool)),
+              agent_id: updatedAgentId ? String(updatedAgentId) : null,
+              async_execution: Boolean(taskData.async_execution),
+              context: (taskData.context || []).map((item: unknown) => String(item)),
+              config: {
+                cache_response: Boolean(taskData.config?.cache_response),
+                cache_ttl: Number(taskData.config?.cache_ttl || 3600),
+                retry_on_fail: Boolean(taskData.config?.retry_on_fail),
+                max_retries: Number(taskData.config?.max_retries || 3),
+                timeout: taskData.config?.timeout ? Number(taskData.config.timeout) : null,
+                priority: Number(taskData.config?.priority || 1),
+                error_handling: (taskData.config?.error_handling || 'default') as 'default' | 'retry' | 'ignore' | 'fail',
+                output_file: taskData.config?.output_file || null,
+                output_json: taskData.config?.output_json || null,
+                output_pydantic: taskData.config?.output_pydantic || null,
+                callback: taskData.config?.callback || null,
+                human_input: Boolean(taskData.config?.human_input),
+                condition: taskData.config?.condition === 'is_data_missing' ? 'is_data_missing' : undefined,
+                guardrail: taskData.config?.guardrail || null,
+                markdown: taskData.config?.markdown === true || taskData.config?.markdown === 'true' || taskData.markdown === true || taskData.markdown === 'true'
+              }
+            };
+
+            const newTask = await TaskService.createTask(formattedTaskData);
+            if (newTask && newTask.id) {
+              idMapping[node.id] = newTask.id.toString();
+            } else {
+              throw new Error(`Failed to create task: ${formattedTaskData.name}`);
+            }
+          } catch (err) {
+            const error = err as Error;
+            console.error('Error creating task:', error);
+            throw new Error(`Failed to create task: ${error.message}`);
+          }
+        }
+      }
+
+      // Update node IDs and references
+      const updatedNodes = (selectedCrew.nodes || []).map(node => {
+        const newId = node.type === 'agentNode' 
+          ? `agent-${idMapping[node.id] || node.id}`
+          : `task-${idMapping[node.id] || node.id}`;
+        
+        const updatedNode = {
+          ...node,
+          id: newId,
+          type: node.type, // Ensure type is preserved
+          data: {
+            ...node.data,
+            id: idMapping[node.id] || node.data.id,
+            agent_id: node.data.agent_id ? idMapping[node.data.agent_id] || node.data.agent_id : node.data.agent_id,
+            agentId: node.type === 'agentNode' ? idMapping[node.id] || node.data.agentId : node.data.agentId,
+            taskId: node.type === 'taskNode' ? idMapping[node.id] || node.data.taskId : node.data.taskId,
+            type: node.type === 'agentNode' ? 'agent' : 'task' // Set the internal type field
+          }
+        };
+        console.log('Updated node:', updatedNode);
+        return updatedNode;
+      });
+
+      // Update edge source and target IDs to match the new node IDs
+      const updatedEdges = (selectedCrew.edges || []).map(edge => {
+        const sourceNode = selectedCrew?.nodes?.find(n => n.id === edge.source);
+        const targetNode = selectedCrew?.nodes?.find(n => n.id === edge.target);
+        
+        return {
+          ...edge,
+          source: sourceNode?.type === 'agentNode' 
+            ? `agent-${idMapping[edge.source] || edge.source}`
+            : `task-${idMapping[edge.source] || edge.source}`,
+          target: targetNode?.type === 'agentNode'
+            ? `agent-${idMapping[edge.target] || edge.target}`
+            : `task-${idMapping[edge.target] || edge.target}`
+        };
+      });
       
-      console.log('Passing to onCrewSelect - Nodes:', validatedNodes);
-      console.log('Passing to onCrewSelect - Edges:', validatedEdges);
-      
-      // Make sure to pass both validatedNodes and validatedEdges to match the expected signature
-      onCrewSelect(validatedNodes, validatedEdges);
+      // Update the active tab with crew info
+      const { activeTabId, updateTabCrewInfo } = useTabManagerStore.getState();
+      if (activeTabId) {
+        updateTabCrewInfo(activeTabId, selectedCrew.id, selectedCrew.name);
+      }
+
+      onCrewSelect(updatedNodes, updatedEdges);
       onClose();
-    } catch (error) {
-      console.error('Error selecting crew:', error);
-      setError('Failed to load crew. Please try again.');
+      
+      // Dispatch event to fit view after nodes are rendered
+      setTimeout(() => {
+        if (typeof window !== 'undefined') {
+          const event = new CustomEvent('fitViewToNodes', { bubbles: true });
+          window.dispatchEvent(event);
+        }
+      }, 100);
+    } catch (err) {
+      const error = err as Error;
+      console.error('Error loading crew:', error);
+      setError(error.message || 'Failed to load crew');
     } finally {
       setLoading(false);
     }

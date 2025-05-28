@@ -488,7 +488,7 @@ const LoadCrew: React.FC<LoadCrewProps> = ({ open, onClose, onCrewLoad, inputs, 
             role: agentConfig.role || '',
             goal: agentConfig.goal || '',
             backstory: agentConfig.backstory || '',
-            llm: agentConfig.llm || 'gpt-4',
+            llm: agentConfig.llm || 'databricks-llama-4-maverick',
             tools: Array.isArray(agentConfig.tools) ? agentConfig.tools.map(t => String(t)) : [],
             function_calling_llm: agentConfig.function_calling_llm,
             max_iter: agentConfig.max_iter || 25,
@@ -573,7 +573,9 @@ const LoadCrew: React.FC<LoadCrewProps> = ({ open, onClose, onCrewLoad, inputs, 
               cache_response: Boolean(taskConfig.cache_response),
               cache_ttl: Number(taskConfig.cache_ttl || 3600),
               callback: taskConfig.callback || null,
-              condition: taskConfig.condition
+              condition: taskConfig.condition,
+              guardrail: taskConfig.guardrail || null,
+              markdown: Boolean(taskConfig.markdown)
             }
           };
 

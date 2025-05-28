@@ -32,7 +32,9 @@ class Task(BaseModel):
     description: str = Field(..., description="Description of the task")
     expected_output: Optional[str] = Field(None, description="Expected output from the task")
     tools: Optional[List[str]] = Field(None, description="Tools required for the task")
+    markdown: Optional[bool] = Field(False, description="Whether to use markdown formatting")
     context: Optional[TaskContext] = Field(None, description="Additional context for the task")
+    human_input: Optional[bool] = Field(False, description="Whether to request human input")
 
 
 class ConnectionRequest(BaseModel):

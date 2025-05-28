@@ -268,6 +268,12 @@ class CrewPreparation:
             if 'planning_llm' in crew_config:
                 crew_kwargs['planning_llm'] = crew_config['planning_llm']
             
+            if 'reasoning' in crew_config:
+                crew_kwargs['reasoning'] = crew_config['reasoning']
+                
+            if 'reasoning_llm' in crew_config:
+                crew_kwargs['reasoning_llm'] = crew_config['reasoning_llm']
+            
             # Create the crew instance
             self.crew = Crew(**crew_kwargs)
             

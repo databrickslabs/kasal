@@ -33,6 +33,7 @@ export interface TaskNodeData {
     human_input?: boolean;
     condition?: string;
     guardrail?: string;
+    markdown?: boolean;
   };
   description?: string;
   expected_output?: string;
@@ -65,6 +66,7 @@ interface TaskNodeProps {
       human_input?: boolean;
       condition?: string;
       guardrail?: string | null;
+      markdown?: boolean;
     };
   };
   id: string;
@@ -312,6 +314,7 @@ const TaskNode: React.FC<TaskNodeProps> = ({ data, id }) => {
       agent_id: '',  // This will be set by TaskForm
       async_execution: data.async_execution || false,
       context: data.context || [],
+      markdown: data.config?.markdown || false,
       config: {
         cache_response: data.config?.cache_response || false,
         cache_ttl: data.config?.cache_ttl || 3600,
@@ -329,7 +332,8 @@ const TaskNode: React.FC<TaskNodeProps> = ({ data, id }) => {
         human_input: data.config?.human_input || false,
         condition: data.config?.condition,
         // Use undefined instead of null for guardrail if it's not present
-        guardrail: data.config?.guardrail || undefined
+        guardrail: data.config?.guardrail || undefined,
+        markdown: data.config?.markdown || false
       }
     };
     
@@ -482,17 +486,29 @@ const TaskNode: React.FC<TaskNodeProps> = ({ data, id }) => {
                         tools: savedTask.tools,
                         async_execution: savedTask.async_execution,
                         context: savedTask.context,
+                        // Synchronize both markdown fields with the saved task - prioritize the saved task's top-level markdown
+                        markdown: savedTask.markdown !== undefined ? savedTask.markdown : (savedTask.config?.markdown || false),
                         // Ensure all config values are preserved
                         config: {
-                          ...savedTask.config,
+                          ...node.data.config, // Preserve existing config structure
+                          ...savedTask.config, // Override with saved task config
                           // Explicitly preserve these important fields
                           output_pydantic: savedTask.config?.output_pydantic || null,
                           output_json: savedTask.config?.output_json || null,
                           output_file: savedTask.config?.output_file || null,
                           callback: savedTask.config?.callback || null,
-                          guardrail: savedTask.config?.guardrail || undefined
+                          guardrail: savedTask.config?.guardrail || undefined,
+                          // Force markdown to be included in config - use the same value as top-level
+                          markdown: savedTask.markdown !== undefined ? savedTask.markdown : (savedTask.config?.markdown || false)
                         }
                       };
+                      
+                      console.log(`TaskNode: Updated task ${id} after save`, {
+                        savedTaskMarkdown: savedTask.markdown,
+                        savedTaskConfigMarkdown: savedTask.config?.markdown,
+                        resultTopLevelMarkdown: updatedData.markdown,
+                        resultConfigMarkdown: updatedData.config.markdown
+                      });
                       
                       return {
                         ...node,

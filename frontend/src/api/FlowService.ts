@@ -173,7 +173,8 @@ export class FlowService {
               description: task.description || '',
               expected_output: task.expected_output || '',
               tools: task.tools || [],
-              context: task.context || []
+              context: task.context || [],
+              markdown: Boolean(task.markdown || false)
             })),
             state: listener.state || {
               stateType: 'unstructured',
@@ -343,7 +344,8 @@ export class FlowService {
             description: task.description || '',
             expected_output: task.expected_output || '',
             tools: task.tools || [],
-            context: task.context || []
+            context: task.context || [],
+            markdown: Boolean(task.markdown || false)
           })),
           state: listener.state || {
             stateType: 'unstructured',

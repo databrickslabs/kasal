@@ -16,7 +16,7 @@ import ReactFlow, {
 import 'reactflow/dist/style.css';
 import { Box, Snackbar, Alert, Button } from '@mui/material';
 import { useThemeManager } from '../../hooks/workflow/useThemeManager';
-import CrewCanvasControls from './CrewCanvasControls';
+
 import useShortcuts from '../../hooks/global/useShortcuts';
 import { Agent } from '../../types/agent';
 import { ToolService } from '../../api/ToolService';
@@ -36,7 +36,8 @@ import { useCrewFlowHandlers } from '../../hooks/workflow/useCrewFlowHandlers';
 import { useToolHandlers } from '../../hooks/workflow/useToolHandlers';
 import { useCanvasHandlers } from '../../hooks/workflow/useCanvasHandlers';
 import { useDialogHandlers } from '../../hooks/workflow/useDialogHandlers';
-import ShortcutsToggle from '../../components/ShortcutsToggle';
+import LeftSidebar from './LeftSidebar';
+import RightSidebar from './RightSidebar';
 
 // Node types
 import AgentNode from '../Agents/AgentNode';
@@ -77,6 +78,26 @@ interface CrewCanvasProps {
   onSelectionChange?: (params: OnSelectionChangeParams) => void;
   onPaneContextMenu?: (event: React.MouseEvent) => void;
   onInit?: (instance: ReactFlowInstance) => void;
+  // Runtime features props
+  planningEnabled: boolean;
+  setPlanningEnabled: (enabled: boolean) => void;
+  reasoningEnabled: boolean;
+  setReasoningEnabled: (enabled: boolean) => void;
+  schemaDetectionEnabled: boolean;
+  setSchemaDetectionEnabled: (enabled: boolean) => void;
+  // Model selection props
+  selectedModel: string;
+  setSelectedModel: (model: string) => void;
+  // Dialog props
+  onOpenLogsDialog: () => void;
+  onToggleChat: () => void;
+  isChatOpen: boolean;
+  onOpenScheduleDialog: () => void;
+  setIsAgentDialogOpen: (open: boolean) => void;
+  setIsTaskDialogOpen: (open: boolean) => void;
+  setIsFlowDialogOpen: (open: boolean) => void;
+  // Execution history visibility
+  showRunHistory?: boolean;
 }
 
 // Utility function to convert crew plan to nodes and edges
@@ -134,13 +155,29 @@ const CrewCanvas: React.FC<CrewCanvasProps> = ({
   onConnect,
   onSelectionChange,
   onPaneContextMenu,
-  onInit
+  onInit,
+  planningEnabled,
+  setPlanningEnabled,
+  reasoningEnabled,
+  setReasoningEnabled,
+  schemaDetectionEnabled,
+  setSchemaDetectionEnabled,
+  selectedModel,
+  setSelectedModel,
+  onOpenLogsDialog,
+  onToggleChat,
+  isChatOpen,
+  onOpenScheduleDialog,
+  setIsAgentDialogOpen,
+  setIsTaskDialogOpen,
+  setIsFlowDialogOpen,
+  showRunHistory
 }) => {
   const [isRendering, setIsRendering] = useState(true);
   const containerRef = useRef<HTMLDivElement>(null);
   const reactFlowInstanceRef = useRef<ReactFlowInstance | null>(null);
   const { isDarkMode } = useThemeManager();
-  const [controlsVisible, setControlsVisible] = useState(false);
+
   
   // Add CSS for proper stacking order (edges behind nodes)
   useEffect(() => {
@@ -196,7 +233,7 @@ const CrewCanvas: React.FC<CrewCanvasProps> = ({
   const [isMaxRPMSelectionDialogOpen, setIsMaxRPMSelectionDialogOpen] = useState(false);
   const [isToolDialogOpen, setIsToolDialogOpen] = useState(false);
   const [isMCPConfigDialogOpen, setIsMCPConfigDialogOpen] = useState(false);
-  const [isUpdatingAgents, setIsUpdatingAgents] = useState(false);
+  const [_isUpdatingAgents, _setIsUpdatingAgents] = useState(false);
   const [_agents, setAgents] = useState<Agent[]>([]);
   const [tools, setTools] = useState<ToolType[]>([]);
 
@@ -544,21 +581,21 @@ const CrewCanvas: React.FC<CrewCanvasProps> = ({
   }, []);
   
   const fetchTools = async () => {
-    setIsUpdatingAgents(true);
+    _setIsUpdatingAgents(true);
     try {
       const toolsList = await ToolService.listTools();
       const formattedTools: ToolType[] = toolsList.map(tool => ({
         id: tool.id.toString(),
         title: tool.title,
         description: tool.description,
-        icon: tool.icon,
+        icon: tool.icon || '',
         enabled: tool.enabled
       }));
       setTools(formattedTools);
     } catch (error) {
       console.warn('Error fetching tools:', error);
     } finally {
-      setIsUpdatingAgents(false);
+      _setIsUpdatingAgents(false);
     }
   };
 
@@ -577,10 +614,22 @@ const CrewCanvas: React.FC<CrewCanvasProps> = ({
       }
     };
     
+    const openAgentGenerationDialog = () => {
+      setIsAgentGenerationDialogOpen(true);
+    };
+    
+    const openTaskGenerationDialog = () => {
+      setIsTaskGenerationDialogOpen(true);
+    };
+    
     window.addEventListener('fitViewToNodes', fitViewToNodes);
+    window.addEventListener('openAgentGenerationDialog', openAgentGenerationDialog);
+    window.addEventListener('openTaskGenerationDialog', openTaskGenerationDialog);
     
     return () => {
       window.removeEventListener('fitViewToNodes', fitViewToNodes);
+      window.removeEventListener('openAgentGenerationDialog', openAgentGenerationDialog);
+      window.removeEventListener('openTaskGenerationDialog', openTaskGenerationDialog);
     };
   }, [nodes, onNodesChange, errorStore]);
 
@@ -601,7 +650,7 @@ const CrewCanvas: React.FC<CrewCanvasProps> = ({
   }, [setSuccessMessage, setShowSuccess]);
 
   // Handler for max RPM selection
-  const handleMaxRPMSelected = useCallback(async (maxRPM: string) => {
+  const _handleMaxRPMSelected = useCallback(async (maxRPM: string) => {
     const numericMaxRPM = parseInt(maxRPM, 10);
     if (!isNaN(numericMaxRPM)) {
       await _handleUpdateAllAgentsMaxRPM(numericMaxRPM);
@@ -697,80 +746,46 @@ const CrewCanvas: React.FC<CrewCanvasProps> = ({
             variant={BackgroundVariant.Dots}
           />
 
-          <Box sx={{
-            position: 'absolute',
-            top: 10,
-            right: 10,
-            zIndex: 5
-          }}>
-            <ShortcutsToggle size="small" />
-          </Box>
-
-          <Box
-            sx={{
-              position: 'absolute',
-              top: 10,
-              left: 10,
-              width: 40,
-              height: 160,
-              zIndex: 5,
-              borderRadius: 1,
-              display: 'flex',
-              justifyContent: 'flex-start',
-              alignItems: 'flex-start',
-              transition: 'opacity 0.2s ease-in-out',
+          <LeftSidebar
+            onClearCanvas={handleClear}
+            onGenerateConnections={handleGenerateConnectionsWrapper}
+            onZoomIn={() => reactFlowInstanceRef.current?.zoomIn()}
+            onZoomOut={() => reactFlowInstanceRef.current?.zoomOut()}
+            onFitView={() => reactFlowInstanceRef.current?.fitView()}
+            onToggleInteractivity={() => {
+              if (reactFlowInstanceRef.current) {
+                const currentNodes = reactFlowInstanceRef.current.getNodes();
+                const updatedNodes = currentNodes.map(node => ({
+                  ...node,
+                  selectable: !node.selectable
+                }));
+                reactFlowInstanceRef.current.setNodes(updatedNodes);
+              }
             }}
-            onMouseEnter={() => setControlsVisible(true)}
-            onMouseLeave={() => setControlsVisible(false)}
-          >
-            {!controlsVisible && (
-              <Box
-                sx={{
-                  width: 30,
-                  height: 30,
-                  borderRadius: '50%',
-                  backgroundColor: isDarkMode ? 'rgba(255,255,255,0.1)' : 'rgba(0,0,0,0.05)',
-                  display: 'flex',
-                  justifyContent: 'center',
-                  alignItems: 'center',
-                  position: 'absolute',
-                  top: 5,
-                  left: 5,
-                  fontSize: '10px',
-                  color: isDarkMode ? 'rgba(255,255,255,0.5)' : 'rgba(0,0,0,0.4)',
-                  cursor: 'pointer',
-                  '&:hover': {
-                    backgroundColor: isDarkMode ? 'rgba(255,255,255,0.15)' : 'rgba(0,0,0,0.08)',
-                  }
-                }}
-              >
-                ctrl
-              </Box>
-            )}
-            {controlsVisible && (
-              <CrewCanvasControls
-                onClearCanvas={handleClear}
-                onGenerateConnections={handleGenerateConnectionsWrapper}
-                onZoomIn={() => reactFlowInstanceRef.current?.zoomIn()}
-                onZoomOut={() => reactFlowInstanceRef.current?.zoomOut()}
-                onFitView={() => reactFlowInstanceRef.current?.fitView()}
-                onToggleInteractivity={() => {
-                  if (reactFlowInstanceRef.current) {
-                    const currentNodes = reactFlowInstanceRef.current.getNodes();
-                    const updatedNodes = currentNodes.map(node => ({
-                      ...node,
-                      selectable: !node.selectable
-                    }));
-                    reactFlowInstanceRef.current.setNodes(updatedNodes);
-                  }
-                }}
-                isHorizontal={true}
-                isLeftToRight={true}
-                isGeneratingConnections={isGeneratingConnections}
-              />
-            )}
-          </Box>
+            isGeneratingConnections={isGeneratingConnections}
+            planningEnabled={planningEnabled}
+            setPlanningEnabled={setPlanningEnabled}
+            reasoningEnabled={reasoningEnabled}
+            setReasoningEnabled={setReasoningEnabled}
+            schemaDetectionEnabled={schemaDetectionEnabled}
+            setSchemaDetectionEnabled={setSchemaDetectionEnabled}
+            selectedModel={selectedModel}
+            setSelectedModel={setSelectedModel}
+            showRunHistory={showRunHistory}
+          />
 
+          <RightSidebar
+            onOpenLogsDialog={onOpenLogsDialog}
+            onToggleChat={onToggleChat}
+            isChatOpen={isChatOpen}
+            onOpenScheduleDialog={onOpenScheduleDialog}
+            setIsAgentDialogOpen={setIsAgentDialogOpen}
+            setIsTaskDialogOpen={setIsTaskDialogOpen}
+            setIsFlowDialogOpen={setIsFlowDialogOpen}
+            setIsAgentGenerationDialogOpen={setIsAgentGenerationDialogOpen}
+            setIsTaskGenerationDialogOpen={setIsTaskGenerationDialogOpen}
+            showRunHistory={showRunHistory}
+          />
 
         </ReactFlow>
       )}
@@ -849,7 +864,10 @@ const CrewCanvas: React.FC<CrewCanvasProps> = ({
                 tools: task.tools || [],
                 async_execution: task.async_execution !== undefined ? Boolean(task.async_execution) : false,
                 // Include context in node data if TaskNode needs it, otherwise it's just for edges
-                context: task.context || [], 
+                context: task.context || [],
+                config: {
+                  markdown: task.markdown || false
+                },
                 task: task // Pass the full task object
               }
             });
@@ -862,74 +880,30 @@ const CrewCanvas: React.FC<CrewCanvasProps> = ({
             // Create agent-to-task assignment edges
             if (task.agent_id) {
               const sourceNodeId = `agent-${task.agent_id}`;
-              // Check if source agent node exists
-              if (newNodes.some(node => node.id === sourceNodeId)) {
-                 console.log(`CrewCanvas: Creating agent-task edge: ${sourceNodeId} -> ${targetNodeId}`);
-                 newEdges.push({
-                   id: `edge-${sourceNodeId}-${targetNodeId}`,
-                   source: sourceNodeId,
-                   target: targetNodeId,
-                   animated: true
-                 });
-              } else {
-                 console.warn(`CrewCanvas: Agent node ${sourceNodeId} not found for task ${targetNodeId}`);
-              }
-            }
-
-            // Create task-to-task dependency edges from context
-            const dependencies = task.context || [];
-            if (Array.isArray(dependencies) && dependencies.length > 0) {
-              console.log(`CrewCanvas: Task ${targetNodeId} has dependencies (context):`, dependencies);
-              dependencies.forEach(prerequisiteTaskId => {
-                const sourceNodeId = `task-${prerequisiteTaskId}`;
-                // Ensure both source and target nodes exist before creating edge
-                const sourceNodeExists = newNodes.some(node => node.id === sourceNodeId);
-                const targetNodeExists = newNodes.some(node => node.id === targetNodeId);
-
-                if (sourceNodeExists && targetNodeExists) {
-                  console.log(`CrewCanvas: Creating task dependency edge from context: ${sourceNodeId} -> ${targetNodeId}`);
-                  newEdges.push({
-                    id: `edge-${sourceNodeId}-${targetNodeId}`,
-                    source: sourceNodeId,
-                    target: targetNodeId,
-                    animated: true,
-                    style: { stroke: '#ff9800' } // Style for dependency edges
-                  });
-                } else {
-                  console.warn(`CrewCanvas: Cannot create dependency edge. Source: ${sourceNodeId} (exists: ${sourceNodeExists}), Target: ${targetNodeId} (exists: ${targetNodeExists})`);
-                }
+              newEdges.push({
+                id: `edge-${task.id}`,
+                source: sourceNodeId,
+                target: targetNodeId,
+                type: 'default'
               });
-            } else {
-               console.log(`CrewCanvas: Task ${targetNodeId} has no dependencies in context.`);
             }
           });
-          
-          // Step 4: Update React Flow state
-          if (newNodes.length > 0) {
-            console.log(`CrewCanvas: Adding ${newNodes.length} nodes.`);
-            onNodesChange(newNodes.map(node => ({ type: 'add', item: node })));
-          }
-          
-          if (newEdges.length > 0) {
-             console.log(`CrewCanvas: Adding ${newEdges.length} edges.`);
-             logEdgeDetails(newEdges, "CrewCanvas: Edges generated based on context:"); // Log details of generated edges
-             onEdgesChange(newEdges.map(edge => ({ type: 'add', item: edge })));
-          } else {
-             console.log("CrewCanvas: No edges were generated.");
-          }
-          
-          // Step 5: Optional execution
+
+          // Update nodes and edges
+          onNodesChange(newNodes.map(node => ({ type: 'add', item: node })));
+          onEdgesChange(newEdges.map(edge => ({ type: 'add', item: edge })));
+
           if (shouldExecute) {
-            console.log("CrewCanvas: Triggering crew execution.");
-            setTimeout(() => {
-              handleExecuteCrew(newNodes, newEdges);
-            }, 100);
+            handleExecuteCrewButtonClick();
           }
         }}
-        selectedModel={_selectedModel}
-        tools={_planningTools}
-        selectedTools={_jobTrackerSelectedTools}
-        onToolsChange={_setJobTrackerSelectedTools}
+        selectedModel={selectedModel}
+        tools={tools.map(tool => ({
+          ...tool,
+          icon: tool.icon || ''
+        }))}
+        selectedTools={_selectedAgentGenerationTools}
+        onToolsChange={_setSelectedAgentGenerationTools}
       />
       <CrewFlowSelectionDialog
         open={isCrewFlowDialogOpen}
@@ -940,29 +914,24 @@ const CrewCanvas: React.FC<CrewCanvasProps> = ({
       <LLMSelectionDialog
         open={isLLMSelectionDialogOpen}
         onClose={() => setIsLLMSelectionDialogOpen(false)}
-        onSelectLLM={_handleUpdateAllAgentsLLM}
-        isUpdating={isUpdatingAgents}
+        onSelectLLM={handleChangeLLM}
       />
       <MaxRPMSelectionDialog
         open={isMaxRPMSelectionDialogOpen}
         onClose={() => setIsMaxRPMSelectionDialogOpen(false)}
-        onSelectMaxRPM={handleMaxRPMSelected}
-        isUpdating={isUpdatingAgents}
+        onSelectMaxRPM={_handleMaxRPMSelected}
       />
       <ToolSelectionDialog
         open={isToolDialogOpen}
         onClose={() => setIsToolDialogOpen(false)}
-        onSelectTools={_handleChangeToolsForAllAgents}
-        isUpdating={isUpdatingAgents}
+        onSelectTools={handleChangeTools}
       />
       <MCPConfigDialog
         open={isMCPConfigDialogOpen}
         onClose={() => setIsMCPConfigDialogOpen(false)}
       />
-
-      
     </Box>
   );
-}
+};
 
-export default memo(CrewCanvas); 
+export default memo(CrewCanvas);

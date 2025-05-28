@@ -4,6 +4,7 @@ import { CrewService } from '../../api/CrewService';
 import axios from 'axios';
 import { SaveCrewProps } from '../../types/crews';
 import { Edge } from 'reactflow';
+import { useTabManagerStore } from '../../store/tabManager';
 
 interface SaveCrewComponentProps extends SaveCrewProps {
   disabled?: boolean;
@@ -15,6 +16,8 @@ const SaveCrew: React.FC<SaveCrewComponentProps> = ({ nodes, edges, trigger, dis
   const [error, setError] = useState<string | null>(null);
   const nameInputRef = useRef<HTMLInputElement>(null);
   const [isSaving, setIsSaving] = useState(false);
+  
+  const { activeTabId, updateTabCrewInfo } = useTabManagerStore();
 
   // Listen for the custom event to open the save crew dialog
   useEffect(() => {
@@ -160,15 +163,54 @@ const SaveCrew: React.FC<SaveCrewComponentProps> = ({ nodes, edges, trigger, dis
 
       console.log('SaveCrew: Processed IDs', { agent_ids, task_ids });
 
-      await CrewService.saveCrew({
+      // Ensure task nodes have complete config with markdown field
+      const processedNodes = nodes.map(node => {
+        if (node.type === 'taskNode') {
+          // Ensure we have a config object, create one if it doesn't exist
+          const existingConfig = node.data?.config || {};
+          
+          // Debug logging
+          console.log(`SaveCrew: Processing task node ${node.id}`, {
+            topLevelMarkdown: node.data?.markdown,
+            configMarkdown: existingConfig.markdown,
+            hasConfig: !!node.data?.config
+          });
+          
+          const processedNode = {
+            ...node,
+            data: {
+              ...node.data,
+              config: {
+                ...existingConfig,
+                // Ensure markdown is included in config, prioritize top-level markdown
+                markdown: node.data?.markdown !== undefined ? node.data.markdown : (existingConfig.markdown || false)
+              }
+            }
+          };
+          
+          console.log(`SaveCrew: Processed task node ${node.id}`, {
+            resultMarkdown: processedNode.data.config.markdown
+          });
+          
+          return processedNode;
+        }
+        return node;
+      });
+
+      const savedCrew = await CrewService.saveCrew({
         name,
         agent_ids,
         task_ids,
-        nodes,
+        nodes: processedNodes,
         edges: uniqueEdges
       });
       
-      console.log('SaveCrew: Save successful, closing dialog');
+      console.log('SaveCrew: Save successful, closing dialog', savedCrew);
+      
+      // Update the tab's crew info
+      if (activeTabId && savedCrew.id) {
+        updateTabCrewInfo(activeTabId, savedCrew.id, name);
+      }
       
       // Close dialog and reset state
       handleClose();
@@ -178,7 +220,9 @@ const SaveCrew: React.FC<SaveCrewComponentProps> = ({ nodes, edges, trigger, dis
         console.log('SaveCrew: Dispatching saveCrewComplete event', {
           dialogOpen: document.querySelector('.MuiDialog-root') !== null
         });
-        const event = new CustomEvent('saveCrewComplete');
+        const event = new CustomEvent('saveCrewComplete', {
+          detail: { crewId: savedCrew.id, crewName: name }
+        });
         window.dispatchEvent(event);
       }, 100);
     } catch (error) {

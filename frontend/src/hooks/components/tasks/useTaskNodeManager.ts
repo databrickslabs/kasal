@@ -76,7 +76,8 @@ export const useTaskNodeManager = ({ nodes, setNodes, viewport }: TaskNodeManage
           output_json: task.config?.output_json || false,
           output_pydantic: task.config?.output_pydantic || null,
           callback: task.config?.callback || null,
-          human_input: task.config?.human_input || false
+          human_input: task.config?.human_input || false,
+          markdown: task.config?.markdown || false
         }
       }
     };

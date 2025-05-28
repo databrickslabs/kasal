@@ -158,11 +158,24 @@ class AgentTraceEventListener(BaseEventListener):
                 # Format output for storage - store complete output without truncation
                 output_content = str(event.output) if event.output is not None else "None"
                 
+                # Check if task has markdown enabled
+                is_markdown = False
+                if hasattr(event.task, 'markdown'):
+                    is_markdown = event.task.markdown
+                elif hasattr(event, 'context') and hasattr(event.context, 'task') and hasattr(event.context.task, 'markdown'):
+                    is_markdown = event.context.task.markdown
+                
+                # Add markdown flag to extra data if enabled
+                extra_data = {}
+                if is_markdown:
+                    extra_data['markdown'] = True
+                
                 self._enqueue_trace(
                     agent_name=agent_name,
                     task_name=task_name,
                     event_type="agent_execution",
-                    output_content=output_content
+                    output_content=output_content,
+                    extra_data=extra_data
                 )
             except Exception as e:
                 logger.error(f"{log_prefix} Error in on_agent_execution_completed: {e}", exc_info=True)
