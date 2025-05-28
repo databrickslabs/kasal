@@ -22,7 +22,7 @@ class Agent(Base):
     backstory = Column(String)
     
     # Core configuration
-    llm = Column(String, default="gpt-4")
+    llm = Column(String, default="databricks-llama-4-maverick")
     tools = Column(JSON, default=list, nullable=False)
     function_calling_llm = Column(String)
     

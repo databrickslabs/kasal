@@ -368,7 +368,8 @@ class CrewGeneratorRepository:
                 agent_id=agent_id,  # Set the agent_id based on the lookup or round-robin
                 async_execution=self._safe_get_attr(task_data, 'async_execution', False),
                 output=self._safe_get_attr(task_data, 'output'),
-                human_input=self._safe_get_attr(task_data, 'human_input', False)
+                human_input=self._safe_get_attr(task_data, 'human_input', False),
+                markdown=self._safe_get_attr(task_data, 'markdown', False)
             )
             
             # Store the task in the database

@@ -18,6 +18,7 @@ interface CrewConfig {
   tasks_yaml: Record<string, TaskYaml>;
   inputs: Record<string, unknown>;
   planning?: boolean;
+  reasoning?: boolean;
   model?: string;
   execution_type?: string;
   schema_detection_enabled?: boolean;
@@ -46,7 +47,8 @@ export class JobExecutionService {
     model?: string, 
     executionType: 'crew' | 'flow' = 'crew',
     additionalInputs: Record<string, unknown> = {},
-    schemaDetectionEnabled = true
+    schemaDetectionEnabled = true,
+    reasoning = false
   ): Promise<JobResponse> {
     try {
       // Generate a temporary ID to use for file path generation
@@ -62,6 +64,7 @@ export class JobExecutionService {
         tasks_yaml: {},
         inputs: additionalInputs,
         planning,
+        reasoning,
         model,
         execution_type: executionType,
         schema_detection_enabled: schemaDetectionEnabled
@@ -171,6 +174,8 @@ export class JobExecutionService {
               max_retry_limit: agentData.max_retry_limit,
               use_system_prompt: agentData.use_system_prompt,
               respect_context_window: agentData.respect_context_window,
+              reasoning: agentData.reasoning,
+              max_reasoning_attempts: agentData.max_reasoning_attempts,
               embedder_config: agentData.embedder_config,
               knowledge_sources: agentData.knowledge_sources,
             };
@@ -213,6 +218,7 @@ export class JobExecutionService {
               context: [],
               agent: null,
               async_execution: Boolean(taskData.async_execution),
+              markdown: Boolean(taskData.markdown !== undefined ? taskData.markdown : taskData.config?.markdown),
               // Use the output_file from config if available, replace placeholders, or use default
               output_file: taskData.config?.output_file 
                 ? String(taskData.config.output_file)

@@ -27,7 +27,6 @@ import {
   InputAdornment,
 } from '@mui/material';
 import ExpandMoreIcon from '@mui/icons-material/ExpandMore';
-import AutoFixHighIcon from '@mui/icons-material/AutoFixHigh';
 import OpenInFullIcon from '@mui/icons-material/OpenInFull';
 import CloseIcon from '@mui/icons-material/Close';
 import { AgentService } from '../../api/AgentService';
@@ -37,12 +36,11 @@ import { Models } from '../../types/models';
 
 import { GenerateService } from '../../api/GenerateService';
 import { KnowledgeSourcesSection } from './KnowledgeSourcesSection';
-import AgentGenerationDialog from './AgentGenerationDialog';
 
 // Default fallback model when API is down
 const DEFAULT_FALLBACK_MODEL = {
-  'gpt-4o-mini': {
-    name: 'gpt-4o-mini',
+  'databricks-llama-4-maverick': {
+    name: 'databricks-llama-4-maverick',
     temperature: 0.7,
     context_window: 128000,
     max_output_tokens: 4096,
@@ -55,7 +53,6 @@ type AgentFormData = Omit<Agent, 'id' | 'created_at'> & {
 };
 
 const AgentForm: React.FC<AgentFormProps> = ({ initialData, onCancel, onAgentSaved, tools }) => {
-  const [showGenerationDialog, setShowGenerationDialog] = useState(false);
   const [models, setModels] = useState<Models>(DEFAULT_FALLBACK_MODEL);
   const [loadingModels, setLoadingModels] = useState(true);
   const [expandedGoal, setExpandedGoal] = useState<boolean>(false);
@@ -72,7 +69,7 @@ const AgentForm: React.FC<AgentFormProps> = ({ initialData, onCancel, onAgentSav
       role: initialData?.role || '',
       goal: initialData?.goal || '',
       backstory: initialData?.backstory || '',
-      llm: initialData?.llm || 'gpt-4o-mini',
+      llm: initialData?.llm || 'databricks-llama-4-maverick',
       tools: initialData?.tools ? initialData.tools.map(id => String(id)) : [],
       function_calling_llm: initialData?.function_calling_llm || undefined,
       max_iter: initialData?.max_iter || 25,
@@ -271,55 +268,7 @@ const AgentForm: React.FC<AgentFormProps> = ({ initialData, onCancel, onAgentSav
 
   const canGenerateTemplates = Boolean(formData.role && formData.goal && formData.backstory);
 
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const handleAgentGenerated = (generatedAgent: any) => {
-    console.log('Received generated agent:', JSON.stringify(generatedAgent, null, 2));
-    
-    const { advanced_config, ...baseAgent } = generatedAgent;
-    
-    // Extract the model from advanced_config or use the first available model
-    let llmModel = advanced_config?.llm || 'gpt-4o-mini';
-    
-    // Check if the selected model exists in our available models
-    if (!models[llmModel]) {
-      // If not, pick the first available model
-      const firstModelKey = Object.keys(models)[0];
-      console.log(`Model ${llmModel} not available, using ${firstModelKey} instead`);
-      llmModel = firstModelKey;
-    }
-    
-    console.log(`Using LLM model: ${llmModel}`);
-    
-    // Process the agent data, ensuring all fields are properly formatted
-    const processedAgent = {
-      ...formData,
-      ...baseAgent,
-      // Ensure tool IDs are strings for compatibility with AgentForm
-      tools: Array.isArray(baseAgent.tools) 
-        ? baseAgent.tools.map((id: string | number) => String(id)) 
-        : [],
-      llm: llmModel, // Set the model explicitly
-      function_calling_llm: advanced_config?.function_calling_llm || undefined,
-      max_iter: advanced_config?.max_iter || 25,
-      max_rpm: advanced_config?.max_rpm || 1,
-      max_execution_time: advanced_config?.max_execution_time || undefined,
-      verbose: advanced_config?.verbose || false,
-      allow_delegation: advanced_config?.allow_delegation || false,
-      cache: advanced_config?.cache || true,
-      system_template: advanced_config?.system_template || undefined,
-      prompt_template: advanced_config?.prompt_template || undefined,
-      response_template: advanced_config?.response_template || undefined,
-      allow_code_execution: advanced_config?.allow_code_execution || false,
-      code_execution_mode: advanced_config?.code_execution_mode || 'safe',
-      max_retry_limit: advanced_config?.max_retry_limit || 2,
-      use_system_prompt: advanced_config?.use_system_prompt || true,
-      respect_context_window: advanced_config?.respect_context_window || true,
-      embedder_config: advanced_config?.embedder_config || undefined,
-    };
-    
-    setFormData(processedAgent);
-    setShowGenerationDialog(false);
-  };
+
 
   const handleOpenGoalDialog = () => {
     setExpandedGoal(true);
@@ -351,16 +300,6 @@ const AgentForm: React.FC<AgentFormProps> = ({ initialData, onCancel, onAgentSav
             <Typography variant="h6">
               {initialData?.id ? 'Edit Agent' : 'Create New Agent'}
             </Typography>
-            {!initialData?.id && (
-              <Button
-                variant="contained"
-                startIcon={<AutoFixHighIcon />}
-                onClick={() => setShowGenerationDialog(true)}
-                sx={{ ml: 2 }}
-              >
-                Generate with AI
-              </Button>
-            )}
           </Box>
           <Divider />
         </Box>
@@ -1071,12 +1010,7 @@ const AgentForm: React.FC<AgentFormProps> = ({ initialData, onCancel, onAgentSav
         </DialogActions>
       </Dialog>
 
-      <AgentGenerationDialog
-        open={showGenerationDialog}
-        onClose={() => setShowGenerationDialog(false)}
-        onAgentGenerated={handleAgentGenerated}
-        selectedModel="gpt-4o-mini"
-      />
+
     </>
   );
 };

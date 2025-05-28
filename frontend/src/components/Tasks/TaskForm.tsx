@@ -30,8 +30,6 @@ import OpenInFullIcon from '@mui/icons-material/OpenInFull';
 import CloseIcon from '@mui/icons-material/Close';
 import { TaskAdvancedConfig } from './TaskAdvancedConfig';
 import { TaskService } from '../../api/TaskService';
-import TaskGenerationDialog from './TaskGenerationDialog';
-import AutoFixHighIcon from '@mui/icons-material/AutoFixHigh';
 import useStableResize from '../../hooks/global/useStableResize';
 
 interface TaskFormProps {
@@ -53,7 +51,6 @@ interface Tool {
 }
 
 const TaskForm: React.FC<TaskFormProps> = ({ initialData, onCancel, onTaskSaved, onSubmit, isEdit, tools, hideTitle }) => {
-  const [showGenerationDialog, setShowGenerationDialog] = useState(false);
   const [expandedAccordion, setExpandedAccordion] = useState<boolean>(false);
   const [expandedDescription, setExpandedDescription] = useState<boolean>(false);
   const [expandedOutput, setExpandedOutput] = useState<boolean>(false);
@@ -67,6 +64,7 @@ const TaskForm: React.FC<TaskFormProps> = ({ initialData, onCancel, onTaskSaved,
     agent_id: initialData?.agent_id ?? null,
     async_execution: initialData?.async_execution !== undefined ? Boolean(initialData.async_execution) : false,
     context: initialData?.context ?? [],
+    markdown: initialData?.markdown === true || String(initialData?.markdown) === 'true',
     config: !initialData?.config ? {
       cache_response: false,
       cache_ttl: 3600,
@@ -80,7 +78,8 @@ const TaskForm: React.FC<TaskFormProps> = ({ initialData, onCancel, onTaskSaved,
       output_pydantic: null,
       callback: null,
       human_input: false,
-      guardrail: null
+      guardrail: null,
+      markdown: false
     } : {
       cache_response: initialData.config.cache_response ?? false,
       cache_ttl: initialData.config.cache_ttl ?? 3600,
@@ -95,7 +94,8 @@ const TaskForm: React.FC<TaskFormProps> = ({ initialData, onCancel, onTaskSaved,
       callback: initialData.config.callback ?? null,
       human_input: initialData.config.human_input ?? false,
       condition: initialData.config.condition,
-      guardrail: initialData.config.guardrail ?? null
+      guardrail: initialData.config.guardrail ?? null,
+      markdown: initialData.config.markdown ?? false
     }
   });
   const [error, setError] = useState<string | null>(null);
@@ -195,12 +195,16 @@ const TaskForm: React.FC<TaskFormProps> = ({ initialData, onCancel, onTaskSaved,
         const cleanedFormData: Task = {
           ...formData,
           context: Array.from(formData.context),
+          // Ensure top-level markdown is synchronized with config.markdown
+          markdown: formData.config.markdown ?? formData.markdown,
           config: {
             ...formData.config,
             condition: formData.config.condition === 'is_data_missing' ? 'is_data_missing' : undefined,
             callback: formData.config.callback,
             // Ensure output_pydantic is properly set in config
-            output_pydantic: formData.config.output_pydantic
+            output_pydantic: formData.config.output_pydantic,
+            // Ensure config.markdown is synchronized with top-level markdown
+            markdown: formData.config.markdown ?? formData.markdown
           }
         };
         
@@ -249,19 +253,7 @@ const TaskForm: React.FC<TaskFormProps> = ({ initialData, onCancel, onTaskSaved,
     }
   };
 
-  const handleTaskGenerated = (task: Task) => {
-    setFormData({
-      ...formData,
-      name: task.name || '',
-      description: task.description || '',
-      expected_output: task.expected_output || '',
-      tools: task.tools || [],
-      async_execution: task.async_execution !== undefined ? Boolean(task.async_execution) : false,
-      context: task.context || [],
-      config: task.config || formData.config
-    });
-    setShowGenerationDialog(false);
-  };
+
 
   // Handle accordion expansion with debouncing to prevent ResizeObserver loops
   const handleAccordionChange = (_event: React.SyntheticEvent, isExpanded: boolean) => {
@@ -309,22 +301,6 @@ const TaskForm: React.FC<TaskFormProps> = ({ initialData, onCancel, onTaskSaved,
               <Typography variant="h6">
                 {initialData?.id ? 'Edit Task' : 'Create New Task'}
               </Typography>
-            )}
-            {!initialData?.id && (
-              <Button
-                variant="contained"
-                startIcon={<AutoFixHighIcon />}
-                onClick={() => setShowGenerationDialog(true)}
-                sx={{ 
-                  backgroundColor: '#1976d2',
-                  color: 'white',
-                  '&:hover': {
-                    backgroundColor: '#1565c0'
-                  }
-                }}
-              >
-                Generate with AI
-              </Button>
             )}
           </Box>
           <Divider />
@@ -478,7 +454,8 @@ const TaskForm: React.FC<TaskFormProps> = ({ initialData, onCancel, onTaskSaved,
                     retry_on_fail: formData.config?.retry_on_fail || true,
                     timeout: formData.config?.timeout || null,
                     condition: formData.config?.condition,
-                    guardrail: formData.config?.guardrail || null
+                    guardrail: formData.config?.guardrail || null,
+                    markdown: formData.config?.markdown || false
                   }}
                   onConfigChange={handleAdvancedConfigChange}
                   availableTasks={availableTasks}
@@ -586,12 +563,7 @@ const TaskForm: React.FC<TaskFormProps> = ({ initialData, onCancel, onTaskSaved,
           </Button>
         </DialogActions>
       </Dialog>
-      <TaskGenerationDialog
-        open={showGenerationDialog}
-        onClose={() => setShowGenerationDialog(false)}
-        onTaskGenerated={handleTaskGenerated}
-        selectedModel="gpt-4o-mini"
-      />
+
     </>
   );
 };

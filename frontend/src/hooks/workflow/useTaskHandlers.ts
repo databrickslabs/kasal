@@ -62,6 +62,9 @@ export const useTaskHandlers = ({
           expected_output: task.expected_output || '',
           human_input: task.config?.human_input || false,
           tools: task.tools || [],
+          config: {
+            markdown: task.config?.markdown || false
+          },
           task: {
             ...task,
             description: task.description || task.name

@@ -107,6 +107,16 @@ class TaskRepository(BaseRepository[Task]):
                 if 'config' not in obj_in:
                     obj_in['config'] = {}
                 obj_in['config']['guardrail'] = obj_in['guardrail']
+                
+            if 'markdown' in obj_in and obj_in['markdown'] is not None:
+                if 'config' not in obj_in:
+                    obj_in['config'] = {}
+                obj_in['config']['markdown'] = obj_in['markdown']
+            
+            # Also sync markdown from config to root if present
+            if 'config' in obj_in and obj_in['config'] is not None:
+                if 'markdown' in obj_in['config'] and obj_in['config']['markdown'] is not None:
+                    obj_in['markdown'] = obj_in['config']['markdown']
             
             db_obj = self.model(**obj_in)
             self.session.add(db_obj)
@@ -181,6 +191,16 @@ class TaskRepository(BaseRepository[Task]):
                 if 'config' not in obj_in:
                     obj_in['config'] = {}
                 obj_in['config']['guardrail'] = obj_in['guardrail']
+                
+            if 'markdown' in obj_in and obj_in['markdown'] is not None:
+                if 'config' not in obj_in:
+                    obj_in['config'] = {}
+                obj_in['config']['markdown'] = obj_in['markdown']
+            
+            # Also sync markdown from config to root if present
+            if 'config' in obj_in and obj_in['config'] is not None:
+                if 'markdown' in obj_in['config'] and obj_in['config']['markdown'] is not None:
+                    obj_in['markdown'] = obj_in['config']['markdown']
             
             db_obj = await self.get(id)
             if db_obj:

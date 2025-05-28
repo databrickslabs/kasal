@@ -82,7 +82,7 @@ class AgentGenerationService:
         
         Args:
             prompt_text: Natural language description of the agent
-            model: Model to use for generation, defaults to environment variable or "gpt-4o-mini"
+            model: Model to use for generation, defaults to environment variable or "databricks-llama-4-maverick"
             tools: List of tools available to the agent
             
         Returns:
@@ -93,7 +93,7 @@ class AgentGenerationService:
             Exception: For any other errors during generation
         """
         # Default values
-        model = model or os.getenv("AGENT_MODEL", "gpt-4o-mini")
+        model = model or os.getenv("AGENT_MODEL", "databricks-llama-4-maverick")
         tools = tools or []
         
         logger.info(f"Generating agent with model: {model} and tools: {tools}")

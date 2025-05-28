@@ -70,18 +70,18 @@ const RunHistory = forwardRef<RunHistoryRef, RunHistoryProps>((props, ref) => {
     searchQuery,
     loading,
     error,
-    page,
-    totalPages,
-    totalRuns,
-    jobsPerPage,
+    page: _page,
+    totalPages: _totalPages,
+    totalRuns: _totalRuns,
+    jobsPerPage: _jobsPerPage,
     sortField,
     sortOrder,
     fetchRuns,
-    handlePageChange,
+    handlePageChange: _handlePageChange,
     handleSearchChange,
     handleDeleteAllRuns,
     handleDeleteRun,
-    getCurrentPageJobs,
+    getCurrentPageJobs: _getCurrentPageJobs,
     handleSort,
   } = useRunHistory();
 
@@ -112,6 +112,7 @@ const RunHistory = forwardRef<RunHistoryRef, RunHistoryProps>((props, ref) => {
   const [loadCrewOpen, setLoadCrewOpen] = useState(false);
   const [deleteRunDialogOpen, setDeleteRunDialogOpen] = useState(false);
   const [runToDelete, setRunToDelete] = useState<Run | null>(null);
+  const [localPage, setLocalPage] = useState(1);
 
   // Initialize static refs outside of useEffect  
   const isInitializedRef = useRef<boolean>(false);
@@ -119,11 +120,23 @@ const RunHistory = forwardRef<RunHistoryRef, RunHistoryProps>((props, ref) => {
   const previousLogsDialogRef = useRef<boolean>(false);
   const userActivityTimeoutRef = useRef<NodeJS.Timeout | null>(null);
 
+  // Calculate items for current page (4 items per page)
+  const itemsPerPage = 4;
+  const startIndex = (localPage - 1) * itemsPerPage;
+  const endIndex = startIndex + itemsPerPage;
+  const displayedRuns = runs.slice(startIndex, endIndex);
+  const totalLocalPages = Math.ceil(runs.length / itemsPerPage);
+
   // Effect for initializing ref values
   useEffect(() => {
     previousTraceOpenRef.current = showTraceOpen;
     previousLogsDialogRef.current = showLogsDialog;
   }, [showTraceOpen, showLogsDialog]);
+  
+  // Reset local page when runs change or search query changes
+  useEffect(() => {
+    setLocalPage(1);
+  }, [runs.length, searchQuery]);
   
   // Effect for periodic job status check
   useEffect(() => {
@@ -502,12 +515,12 @@ const RunHistory = forwardRef<RunHistoryRef, RunHistoryProps>((props, ref) => {
   return (
     <>
       <Card sx={{ boxShadow: 'none', height: '100%' }}>
-        <CardContent sx={{ p: 0, height: '100%', '&:last-child': { pb: 0 } }}>
-          <TableContainer sx={{ maxHeight: '130px' }}>
-            <Table size="small">
+        <CardContent sx={{ p: 0, height: '100%', '&:last-child': { pb: 0 }, display: 'flex', flexDirection: 'column' }}>
+          <TableContainer sx={{ flex: '1 1 auto', overflow: 'auto' }}>
+            <Table size="small" stickyHeader>
               <TableHead>
                 <TableRow>
-                  <TableCell sx={{ py: 0.5 }}>
+                  <TableCell sx={{ py: 0.25, fontSize: '0.8125rem', backgroundColor: theme => theme.palette.background.paper }}>
                     <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
                       {t('runHistory.columns.jobId')}
                       <Tooltip title={t('runHistory.filter')}>
@@ -515,12 +528,12 @@ const RunHistory = forwardRef<RunHistoryRef, RunHistoryProps>((props, ref) => {
                           size="small" 
                           onClick={handleFilterClick}
                           sx={{ 
-                            p: 0.5,
+                            p: 0.25,
                             color: searchQuery ? (theme: Theme) => theme.palette.primary.main : 'inherit'
                           }}
                           aria-describedby={filterId}
                         >
-                          <FilterListIcon fontSize="small" />
+                          <FilterListIcon sx={{ fontSize: '1rem' }} />
                         </IconButton>
                       </Tooltip>
                       <Popover
@@ -555,7 +568,7 @@ const RunHistory = forwardRef<RunHistoryRef, RunHistoryProps>((props, ref) => {
                     </Box>
                   </TableCell>
                   <TableCell 
-                    sx={{ py: 0.5, cursor: 'pointer' }}
+                    sx={{ py: 0.25, fontSize: '0.8125rem', cursor: 'pointer', backgroundColor: theme => theme.palette.background.paper }}
                     onClick={() => handleSort('status')}
                   >
                     <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5 }}>
@@ -564,7 +577,7 @@ const RunHistory = forwardRef<RunHistoryRef, RunHistoryProps>((props, ref) => {
                     </Box>
                   </TableCell>
                   <TableCell 
-                    sx={{ py: 0.5, cursor: 'pointer' }}
+                    sx={{ py: 0.25, fontSize: '0.8125rem', cursor: 'pointer', backgroundColor: theme => theme.palette.background.paper }}
                     onClick={() => handleSort('created_at')}
                   >
                     <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5 }}>
@@ -572,7 +585,7 @@ const RunHistory = forwardRef<RunHistoryRef, RunHistoryProps>((props, ref) => {
                       {renderSortIcon('created_at')}
                     </Box>
                   </TableCell>
-                  <TableCell sx={{ py: 0.5, width: '240px' }}>
+                  <TableCell sx={{ py: 0.25, fontSize: '0.8125rem', width: '240px', backgroundColor: theme => theme.palette.background.paper }}>
                     <Box sx={{ 
                       display: 'flex', 
                       justifyContent: 'space-between', 
@@ -592,8 +605,9 @@ const RunHistory = forwardRef<RunHistoryRef, RunHistoryProps>((props, ref) => {
                           onClick={() => setDeleteDialogOpen(true)}
                           disabled={runs.length === 0}
                           sx={{ 
-                            height: '28px', 
-                            width: '28px',
+                            height: '20px', 
+                            width: '20px',
+                            p: 0.25,
                             opacity: 0,
                             visibility: 'hidden',
                             transition: 'opacity 0.2s ease-in-out, visibility 0.2s ease-in-out',
@@ -603,7 +617,7 @@ const RunHistory = forwardRef<RunHistoryRef, RunHistoryProps>((props, ref) => {
                             }
                           }}
                         >
-                          <DeleteIcon fontSize="small" />
+                          <DeleteIcon sx={{ fontSize: '0.875rem' }} />
                         </IconButton>
                       </Tooltip>
                     </Box>
@@ -611,29 +625,30 @@ const RunHistory = forwardRef<RunHistoryRef, RunHistoryProps>((props, ref) => {
                 </TableRow>
               </TableHead>
               <TableBody>
-                {getCurrentPageJobs().length === 0 ? (
+                {displayedRuns.length === 0 ? (
                   <TableRow>
-                    <TableCell colSpan={4} align="center" sx={{ py: 0.5 }}>
+                    <TableCell colSpan={4} align="center" sx={{ py: 1, fontSize: '0.8125rem' }}>
                       {searchQuery ? t('runHistory.noSearchResults') : t('runHistory.noRuns')}
                     </TableCell>
                   </TableRow>
                 ) : (
-                  getCurrentPageJobs().map((run) => (
+                  displayedRuns.map((run) => (
                     <TableRow 
                       key={`${run.id}-${run.status}`} 
                       sx={{ 
                         transition: 'all 0.2s ease-in-out',
                         '&:hover': {
                           backgroundColor: (theme) => theme.palette.action.hover
-                        }
+                        },
+                        '& td': { py: 0.25, fontSize: '0.8125rem' }
                       }}
                     >
-                      <TableCell sx={{ py: 0.5 }}>{
+                      <TableCell>{
                         run.run_name?.startsWith('"') && run.run_name?.endsWith('"') 
                           ? run.run_name.slice(1, -1) 
                           : run.run_name
                       }</TableCell>
-                      <TableCell sx={{ py: 0.5 }}>
+                      <TableCell>
                         <Chip
                           label={t(`runHistory.status.${run.status.toLowerCase()}`)}
                           color={
@@ -657,12 +672,14 @@ const RunHistory = forwardRef<RunHistoryRef, RunHistoryProps>((props, ref) => {
                               '0%': { opacity: 1 },
                               '50%': { opacity: 0.6 },
                               '100%': { opacity: 1 }
-                            }
+                            },
+                            height: '18px',
+                            '& .MuiChip-label': { px: 0.75, fontSize: '0.7rem' }
                           }}
                         />
                       </TableCell>
-                      <TableCell sx={{ py: 0.5 }}>{new Date(run.created_at).toLocaleString()}</TableCell>
-                      <TableCell sx={{ py: 0.5 }}>
+                      <TableCell>{new Date(run.created_at).toLocaleString()}</TableCell>
+                      <TableCell>
                         <RunActions
                           run={run}
                           onViewResult={handleShowResult}
@@ -680,14 +697,22 @@ const RunHistory = forwardRef<RunHistoryRef, RunHistoryProps>((props, ref) => {
             </Table>
           </TableContainer>
 
-          {totalRuns > jobsPerPage && (
-            <Box sx={{ display: 'flex', justifyContent: 'center', py: 0.5 }}>
+          {runs.length > itemsPerPage && (
+            <Box sx={{ 
+              display: 'flex', 
+              justifyContent: 'center', 
+              py: 0.25, 
+              borderTop: 1, 
+              borderColor: 'divider',
+              flex: '0 0 auto'
+            }}>
               <Pagination
-                count={totalPages}
-                page={page}
-                onChange={handlePageChange}
+                count={totalLocalPages}
+                page={localPage}
+                onChange={(e, value) => setLocalPage(value)}
                 color="primary"
                 size="small"
+                sx={{ '& .MuiPaginationItem-root': { minWidth: '20px', height: '20px', fontSize: '0.7rem' } }}
               />
             </Box>
           )}

@@ -43,5 +43,5 @@ export interface AdvancedConfigField {
     description?: string;
     icon?: string;
   }>;
-  defaultValue: any;
+  defaultValue: string | number | boolean | string[] | Record<string, unknown>;
 } 

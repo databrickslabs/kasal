@@ -194,10 +194,58 @@ async def create_agent(
                             logger.error(f"Server URL not provided for MCP server {server_detail.name}")
                             continue
                         
-                        # Create headers with API key if available
+                        # Fix the URL for Databricks Apps - ensure it has /sse endpoint
+                        if "databricksapps.com" in server_url and not server_url.endswith("/sse"):
+                            server_url = server_url.rstrip("/") + "/sse"
+                            logger.info(f"Added /sse endpoint to Databricks Apps URL: {server_url}")
+                        
+                        # Check if this is a Databricks server and use OAuth authentication
                         headers = {}
-                        if server_detail.api_key:
-                            headers["Authorization"] = f"Bearer {server_detail.api_key}"
+                        if "databricks.com" in server_url or "databricksapps.com" in server_url:
+                            logger.info(f"Detected Databricks server, using OAuth authentication for {server_detail.name}")
+                            try:
+                                from src.utils.databricks_auth import get_mcp_auth_headers
+                                from urllib.parse import urlparse
+                                
+                                # For Databricks Apps, we need to authenticate against the workspace host
+                                if "databricksapps.com" in server_url:
+                                    # Use the new authentication system which handles workspace config internally
+                                    logger.info(f"Using Databricks Apps authentication for {server_detail.name}")
+                                    oauth_headers, error = await get_mcp_auth_headers(server_url)
+                                    
+                                    if oauth_headers:
+                                        headers = oauth_headers
+                                        logger.info(f"Successfully authenticated with Databricks Apps server {server_detail.name}")
+                                    else:
+                                        logger.error(f"Failed to authenticate with Apps server {server_detail.name}: {error}")
+                                        # Fall back to API key if available
+                                        if server_detail.api_key:
+                                            headers["Authorization"] = f"Bearer {server_detail.api_key}"
+                                            logger.warning(f"Falling back to API key authentication for {server_detail.name}")
+                                else:
+                                    # For regular Databricks servers, use the new system
+                                    oauth_headers, error = await get_mcp_auth_headers(server_url)
+                                    
+                                    if oauth_headers:
+                                        headers = oauth_headers
+                                        logger.info(f"Using MCP authentication for Databricks server {server_detail.name}")
+                                    else:
+                                        logger.error(f"Failed to get MCP headers for {server_detail.name}: {error}")
+                                        # Fall back to API key if available
+                                        if server_detail.api_key:
+                                            headers["Authorization"] = f"Bearer {server_detail.api_key}"
+                                            logger.warning(f"Falling back to API key authentication for {server_detail.name}")
+                                    
+                            except Exception as e:
+                                logger.error(f"Error getting OAuth authentication for {server_detail.name}: {e}")
+                                # Fall back to API key if available
+                                if server_detail.api_key:
+                                    headers["Authorization"] = f"Bearer {server_detail.api_key}"
+                                    logger.warning(f"Falling back to API key authentication for {server_detail.name}")
+                        else:
+                            # For non-Databricks servers, use API key if available
+                            if server_detail.api_key:
+                                headers["Authorization"] = f"Bearer {server_detail.api_key}"
                         
                         # Create server parameters
                         server_params = {"url": server_url}
@@ -403,7 +451,8 @@ async def create_agent(
     # Add additional agent configuration parameters
     additional_params = [
         'max_iter', 'max_rpm', 'memory', 'code_execution_mode', 
-        'knowledge_sources', 'max_context_window_size', 'max_tokens'
+        'knowledge_sources', 'max_context_window_size', 'max_tokens',
+        'reasoning', 'max_reasoning_attempts'
     ]
     
     for param in additional_params:

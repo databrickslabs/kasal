@@ -22,6 +22,7 @@ class TaskGenerationRequest(BaseModel):
     text: str = Field(..., description="Text prompt for task generation")
     model: Optional[str] = Field(None, description="LLM model to use for task generation")
     agent: Optional[Agent] = Field(None, description="Agent context for task generation")
+    markdown: Optional[bool] = Field(False, description="Whether the task should include markdown")
 
 
 class AdvancedConfig(BaseModel):
@@ -42,6 +43,7 @@ class AdvancedConfig(BaseModel):
     output_parser: Optional[str] = Field(None, description="Output parser function")
     cache_response: bool = Field(True, description="Whether to cache response")
     cache_ttl: int = Field(3600, description="Cache TTL in seconds")
+    markdown: bool = Field(False, description="Whether the task should include markdown")
 
 
 class TaskGenerationResponse(BaseModel):

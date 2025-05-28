@@ -21,4 +21,5 @@ export type AppDispatch = typeof store.dispatch;
 // Export all Zustand stores for centralized access
 export * from './hooks';
 export * from './nodeActions';
-export * from './shortcuts'; 
+export * from './shortcuts';
+export * from './flowConfig'; 

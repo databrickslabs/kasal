@@ -17,13 +17,17 @@ export class ConnectionService {
         name: task.name,
         description: task.description || task.name,
         expected_output: task.expected_output || '',
+        agent_id: task.agent_id,
+        async_execution: task.async_execution,
         human_input: task.human_input || false,
         tools: task.tools || [],
+        markdown: task.markdown || false,
         context: {
           type: task.context?.type || 'general',
           priority: task.context?.priority || 'medium',
           complexity: task.context?.complexity || 'medium',
-          required_skills: task.context?.required_skills || []
+          required_skills: task.context?.required_skills || [],
+          metadata: task.context?.metadata || {}
         }
       };
 

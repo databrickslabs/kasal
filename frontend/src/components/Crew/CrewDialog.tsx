@@ -33,6 +33,7 @@ import SearchIcon from '@mui/icons-material/Search';
 import InputAdornment from '@mui/material/InputAdornment';
 import TextField from '@mui/material/TextField';
 import { Node, Edge } from 'reactflow';
+import { useTabManagerStore } from '../../store/tabManager';
 
 // Update type definitions for crew ID
 interface CrewDialogProps {
@@ -85,18 +86,23 @@ const CrewDialog: React.FC<CrewDialogProps> = ({ open, onClose, onCrewSelect }):
   const handleCrewSelect = async (crewId: string) => {
     try {
       setLoading(true);
-      setError(null);
+      
+      // Dispatch event to signal crew loading is starting
+      window.dispatchEvent(new CustomEvent('crewLoadStarted'));
       
       const selectedCrew = await CrewService.getCrew(crewId);
-      if (!selectedCrew?.nodes || !selectedCrew?.edges) {
-        throw new Error('Invalid crew data');
+      
+      if (!selectedCrew) {
+        throw new Error('Crew not found');
       }
+
+      console.log('Selected crew:', selectedCrew);
 
       // Create a mapping of old IDs to new IDs
       const idMapping: { [key: string]: string } = {};
 
       // Create agents first
-      for (const node of selectedCrew.nodes) {
+      for (const node of selectedCrew.nodes || []) {
         if (node.type === 'agentNode') {
           try {
             const agentData = node.data;
@@ -106,7 +112,7 @@ const CrewDialog: React.FC<CrewDialogProps> = ({ open, onClose, onCrewSelect }):
               role: agentData.role || '',
               goal: agentData.goal || '',
               backstory: agentData.backstory || '',
-              llm: agentData.llm || 'gpt-4',
+              llm: agentData.llm || 'databricks-llama-4-maverick',
               tools: agentData.tools || [],
               function_calling_llm: agentData.function_calling_llm,
               max_iter: agentData.max_iter || 25,
@@ -143,7 +149,7 @@ const CrewDialog: React.FC<CrewDialogProps> = ({ open, onClose, onCrewSelect }):
       }
 
       // Create tasks
-      for (const node of selectedCrew.nodes) {
+      for (const node of selectedCrew.nodes || []) {
         if (node.type === 'taskNode') {
           try {
             const taskData = node.data;
@@ -174,7 +180,9 @@ const CrewDialog: React.FC<CrewDialogProps> = ({ open, onClose, onCrewSelect }):
                 output_pydantic: taskData.config?.output_pydantic || null,
                 callback: taskData.config?.callback || null,
                 human_input: Boolean(taskData.config?.human_input),
-                condition: taskData.config?.condition === 'is_data_missing' ? 'is_data_missing' : undefined
+                condition: taskData.config?.condition === 'is_data_missing' ? 'is_data_missing' : undefined,
+                guardrail: taskData.config?.guardrail || null,
+                markdown: taskData.config?.markdown === true || taskData.config?.markdown === 'true' || taskData.markdown === true || taskData.markdown === 'true'
               }
             };
 
@@ -193,7 +201,7 @@ const CrewDialog: React.FC<CrewDialogProps> = ({ open, onClose, onCrewSelect }):
       }
 
       // Update node IDs and references
-      const updatedNodes = selectedCrew.nodes.map(node => {
+      const updatedNodes = (selectedCrew.nodes || []).map(node => {
         const newId = node.type === 'agentNode' 
           ? `agent-${idMapping[node.id] || node.id}`
           : `task-${idMapping[node.id] || node.id}`;
@@ -216,7 +224,7 @@ const CrewDialog: React.FC<CrewDialogProps> = ({ open, onClose, onCrewSelect }):
       });
 
       // Update edge source and target IDs to match the new node IDs
-      const updatedEdges = selectedCrew.edges.map(edge => {
+      const updatedEdges = (selectedCrew.edges || []).map(edge => {
         const sourceNode = selectedCrew?.nodes?.find(n => n.id === edge.source);
         const targetNode = selectedCrew?.nodes?.find(n => n.id === edge.target);
         
@@ -230,6 +238,12 @@ const CrewDialog: React.FC<CrewDialogProps> = ({ open, onClose, onCrewSelect }):
             : `task-${idMapping[edge.target] || edge.target}`
         };
       });
+
+      // Update the active tab with crew info
+      const { activeTabId, updateTabCrewInfo } = useTabManagerStore.getState();
+      if (activeTabId) {
+        updateTabCrewInfo(activeTabId, selectedCrew.id, selectedCrew.name);
+      }
 
       onCrewSelect(updatedNodes, updatedEdges);
       onClose();

@@ -3,6 +3,7 @@ import { Box } from '@mui/material';
 import { Node, Edge, NodeChange, EdgeChange, Connection, OnSelectionChangeParams, ReactFlowInstance } from 'reactflow';
 import CrewCanvas from './CrewCanvas';
 import FlowCanvas from './FlowCanvas';
+import { useFlowConfigStore } from '../../store/flowConfig';
 
 interface WorkflowPanelsProps {
   areFlowsVisible: boolean;
@@ -20,6 +21,24 @@ interface WorkflowPanelsProps {
   onCrewFlowInit: (instance: ReactFlowInstance) => void;
   onFlowFlowInit: (instance: ReactFlowInstance) => void;
   onPanelDragStart: (e: React.MouseEvent) => void;
+  // Runtime features props
+  planningEnabled: boolean;
+  setPlanningEnabled: (enabled: boolean) => void;
+  reasoningEnabled: boolean;
+  setReasoningEnabled: (enabled: boolean) => void;
+  schemaDetectionEnabled: boolean;
+  setSchemaDetectionEnabled: (enabled: boolean) => void;
+  // Model selection props
+  selectedModel: string;
+  setSelectedModel: (model: string) => void;
+  // Dialog props
+  onOpenLogsDialog: () => void;
+  onToggleChat: () => void;
+  isChatOpen: boolean;
+  onOpenScheduleDialog: () => void;
+  setIsAgentDialogOpen: (open: boolean) => void;
+  setIsTaskDialogOpen: (open: boolean) => void;
+  setIsFlowDialogOpen: (open: boolean) => void;
 }
 
 const WorkflowPanels: React.FC<WorkflowPanelsProps> = ({
@@ -38,14 +57,30 @@ const WorkflowPanels: React.FC<WorkflowPanelsProps> = ({
   onCrewFlowInit,
   onFlowFlowInit,
   onPanelDragStart,
+  planningEnabled,
+  setPlanningEnabled,
+  reasoningEnabled,
+  setReasoningEnabled,
+  schemaDetectionEnabled,
+  setSchemaDetectionEnabled,
+  selectedModel,
+  setSelectedModel,
+  onOpenLogsDialog,
+  onToggleChat,
+  isChatOpen,
+  onOpenScheduleDialog,
+  setIsAgentDialogOpen,
+  setIsTaskDialogOpen,
+  setIsFlowDialogOpen
 }) => {
-  if (areFlowsVisible) {
-    return (
-      <Box sx={{ 
-        height: showRunHistory ? 'calc(100vh - 64px - 160px)' : 'calc(100vh - 64px - 40px)', 
-        position: 'relative', 
-        mt: '64px', // Toolbar height
-        mb: 0, // Remove bottom margin
+  const { crewAIFlowEnabled } = useFlowConfigStore();
+  if (areFlowsVisible && crewAIFlowEnabled) {
+      return (
+    <Box sx={{ 
+      height: showRunHistory ? 'calc(100vh - 64px - 160px)' : 'calc(100vh - 64px - 40px)', 
+      position: 'relative', 
+      mt: 0, // No margin top since TabBar is above
+      mb: 0, // Remove bottom margin
         borderBottom: '1px solid',
         borderColor: isDarkMode ? 'rgba(255,255,255,0.1)' : 'rgba(0,0,0,0.1)',
         display: 'grid',
@@ -74,6 +109,22 @@ const WorkflowPanels: React.FC<WorkflowPanelsProps> = ({
             onSelectionChange={onSelectionChange}
             onPaneContextMenu={onPaneContextMenu}
             onInit={onCrewFlowInit}
+            planningEnabled={planningEnabled}
+            setPlanningEnabled={setPlanningEnabled}
+            reasoningEnabled={reasoningEnabled}
+            setReasoningEnabled={setReasoningEnabled}
+            schemaDetectionEnabled={schemaDetectionEnabled}
+            setSchemaDetectionEnabled={setSchemaDetectionEnabled}
+            selectedModel={selectedModel}
+            setSelectedModel={setSelectedModel}
+            onOpenLogsDialog={onOpenLogsDialog}
+            onToggleChat={onToggleChat}
+            isChatOpen={isChatOpen}
+            onOpenScheduleDialog={onOpenScheduleDialog}
+            setIsAgentDialogOpen={setIsAgentDialogOpen}
+            setIsTaskDialogOpen={setIsTaskDialogOpen}
+            setIsFlowDialogOpen={setIsFlowDialogOpen}
+            showRunHistory={showRunHistory}
           />
         </Box>
         
@@ -143,7 +194,7 @@ const WorkflowPanels: React.FC<WorkflowPanelsProps> = ({
     <Box sx={{ 
       height: showRunHistory ? 'calc(100vh - 64px - 160px)' : 'calc(100vh - 64px - 40px)', 
       position: 'relative', 
-      mt: '64px', // Toolbar height
+      mt: 0, // No margin top since TabBar is above
       mb: 0, // Remove bottom margin
       borderBottom: '1px solid',
       borderColor: isDarkMode ? 'rgba(255,255,255,0.1)' : 'rgba(0,0,0,0.1)',
@@ -169,6 +220,22 @@ const WorkflowPanels: React.FC<WorkflowPanelsProps> = ({
           onSelectionChange={onSelectionChange}
           onPaneContextMenu={onPaneContextMenu}
           onInit={onCrewFlowInit}
+          planningEnabled={planningEnabled}
+          setPlanningEnabled={setPlanningEnabled}
+          reasoningEnabled={reasoningEnabled}
+          setReasoningEnabled={setReasoningEnabled}
+          schemaDetectionEnabled={schemaDetectionEnabled}
+          setSchemaDetectionEnabled={setSchemaDetectionEnabled}
+          selectedModel={selectedModel}
+          setSelectedModel={setSelectedModel}
+          onOpenLogsDialog={onOpenLogsDialog}
+          onToggleChat={onToggleChat}
+          isChatOpen={isChatOpen}
+          onOpenScheduleDialog={onOpenScheduleDialog}
+          setIsAgentDialogOpen={setIsAgentDialogOpen}
+          setIsTaskDialogOpen={setIsTaskDialogOpen}
+          setIsFlowDialogOpen={setIsFlowDialogOpen}
+          showRunHistory={showRunHistory}
         />
       </Box>
     </Box>

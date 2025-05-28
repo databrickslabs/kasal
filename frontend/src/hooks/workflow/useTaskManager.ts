@@ -79,6 +79,10 @@ export const useTaskManager = ({ nodes, setNodes }: UseTaskManagerProps) => {
         taskId: task.id,
         label: task.name,
         type: 'task',
+        config: {
+          ...task.config,
+          markdown: task.config?.markdown || false
+        }
       }
     };
 

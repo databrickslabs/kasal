@@ -31,6 +31,7 @@ class Task(Base):
     output_pydantic = Column(String)
     output_file = Column(String)
     output = Column(JSON)
+    markdown = Column(Boolean, default=False)
     
     # Advanced configuration
     callback = Column(String)
@@ -74,6 +75,12 @@ class Task(Base):
             self.callback = self.config['callback']
         elif self.callback and (not self.config.get('callback')):
             self.config['callback'] = self.callback
+            
+        # Synchronize markdown field
+        if self.config and 'markdown' in self.config and self.config['markdown'] is not None:
+            self.markdown = self.config['markdown']
+        elif self.markdown is not None and (self.config.get('markdown') is None):
+            self.config['markdown'] = self.markdown
             
         # Ensure condition is properly structured in config if present
         if 'condition' in kwargs:

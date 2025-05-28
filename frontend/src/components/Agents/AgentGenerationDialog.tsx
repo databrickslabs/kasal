@@ -40,7 +40,7 @@ const AgentGenerationDialog: React.FC<AgentGenerationDialogProps> = ({
   const [prompt, setPrompt] = useState('');
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [dialogModel, setDialogModel] = useState<string>('gpt-4o-mini');
+  const [dialogModel, setDialogModel] = useState<string>('databricks-llama-4-maverick');
   const [models, setModels] = useState<Models>({});
   const [modelsLoading, setModelsLoading] = useState(false);
   const [localTools, setLocalTools] = useState<typeof tools>([]);
@@ -101,8 +101,8 @@ const AgentGenerationDialog: React.FC<AgentGenerationDialogProps> = ({
             const firstModelKey = Object.keys(fetchedModels)[0];
             setDialogModel(firstModelKey);
           } else {
-            // Use selectedModel if provided, otherwise use gpt-4o-mini
-            setDialogModel(selectedModel || 'gpt-4o-mini');
+            // Use selectedModel if provided, otherwise use databricks-llama-4-maverick
+            setDialogModel(selectedModel || 'databricks-llama-4-maverick');
           }
         } catch (error) {
           console.error('Error fetching models:', error);
@@ -116,8 +116,8 @@ const AgentGenerationDialog: React.FC<AgentGenerationDialogProps> = ({
             const firstModelKey = Object.keys(fallbackModels)[0];
             setDialogModel(firstModelKey);
           } else {
-            // Use selectedModel if provided, otherwise use gpt-4o-mini
-            setDialogModel(selectedModel || 'gpt-4o-mini');
+            // Use selectedModel if provided, otherwise use databricks-llama-4-maverick
+            setDialogModel(selectedModel || 'databricks-llama-4-maverick');
           }
         } finally {
           setModelsLoading(false);

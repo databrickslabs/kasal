@@ -13,7 +13,7 @@ class AgentBase(BaseModel):
     backstory: str
     
     # Core configuration
-    llm: str = Field(default="gpt-4")
+    llm: str = Field(default="databricks-llama-4-maverick")
     tools: List[Any] = Field(default_factory=list)
     function_calling_llm: Optional[str] = None
     

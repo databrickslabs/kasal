@@ -1,18 +1,38 @@
 export interface ConnectionTask {
   name: string;
-  description?: string;
-  expected_output?: string;
-  human_input?: boolean;
-  tools?: string[];
+  description: string;
+  expected_output: string;
+  agent_id: string;
+  tools: string[];
   type?: string;
   priority?: string;
   complexity?: string;
   required_skills?: string[];
-  context?: {
-    type?: string;
-    priority?: string;
+  context: {
+    type: string;
+    priority: string;
     complexity?: string;
     required_skills?: string[];
+    metadata: Record<string, any>;
+  };
+  async_execution: boolean;
+  human_input: boolean;
+  markdown: boolean;
+  config?: {
+    cache_response: boolean;
+    cache_ttl: number;
+    retry_on_fail: boolean;
+    max_retries: number;
+    timeout: number | null;
+    priority: number;
+    error_handling: 'default' | 'ignore' | 'retry' | 'fail';
+    output_file: string | null;
+    output_json: string | null;
+    output_pydantic: string | null;
+    callback: string | null;
+    human_input: boolean;
+    guardrail: string | null;
+    markdown: boolean;
   };
 }
 

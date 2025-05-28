@@ -10,6 +10,7 @@ export const convertToServiceTask = (task: InterfaceTask): ServiceTask => ({
   agent_id: task.agent_id ?? null,
   async_execution: false,
   context: [],
+  markdown: false,
   config: {
     cache_response: false,
     cache_ttl: 3600,
@@ -23,6 +24,8 @@ export const convertToServiceTask = (task: InterfaceTask): ServiceTask => ({
     output_pydantic: null,
     callback: null,
     human_input: false,
+    guardrail: null,
+    markdown: false
   }
 });
 
@@ -35,6 +38,7 @@ export const convertToInterfaceTask = (task: ServiceTask): InterfaceTask => ({
   agent_id: task.agent_id,
   async_execution: Boolean(task.async_execution),
   context: (task.context || []).map(String),
+  markdown: Boolean(task.markdown),
   config: {
     cache_response: Boolean(task.config?.cache_response),
     cache_ttl: Number(task.config?.cache_ttl || 3600),
@@ -47,6 +51,8 @@ export const convertToInterfaceTask = (task: ServiceTask): InterfaceTask => ({
     output_json: task.config?.output_json ? String(task.config.output_json) : null,
     output_pydantic: task.config?.output_pydantic ? String(task.config.output_pydantic) : null,
     callback: task.config?.callback ? String(task.config.callback) : null,
-    human_input: Boolean(task.config?.human_input)
+    human_input: Boolean(task.config?.human_input),
+    guardrail: task.config?.guardrail ? String(task.config.guardrail) : null,
+    markdown: Boolean(task.config?.markdown)
   }
 }); 

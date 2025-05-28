@@ -6,6 +6,7 @@ export interface Task {
   tools: string[];
   agent_id: string | null;
   async_execution: boolean;
+  markdown: boolean;
   context: string[];
   config: {
     cache_response: boolean;
@@ -20,6 +21,7 @@ export interface Task {
     output_pydantic: string | null;
     callback: string | null;
     human_input: boolean;
+    markdown: boolean;
     condition?: string;
     guardrail?: string | null;
   };
@@ -32,6 +34,7 @@ export interface Task {
 
 export interface TaskFormData extends Omit<Task, 'config' | 'context'> {
   async_execution: boolean;
+  markdown: boolean;
   output_json?: string;
   output_pydantic?: string;
   output_file?: string;
@@ -82,6 +85,7 @@ export interface AdvancedConfig {
   dependencies: string[];
   error_handling: string;
   human_input: boolean;
+  markdown: boolean;
   max_retries: number;
   output_file: string | null;
   output_json: string | null;

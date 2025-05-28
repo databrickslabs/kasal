@@ -8,6 +8,7 @@ engine service instances.
 import logging
 from typing import Dict, Type, Optional, Any
 from sqlalchemy.ext.asyncio import AsyncSession
+import asyncio
 
 from src.engines.base.base_engine_service import BaseEngineService
 from src.engines.crewai.crewai_engine_service import CrewAIEngineService
@@ -41,7 +42,10 @@ class EngineFactory:
                 from src.engines.crewai.crewai_engine_service import CrewAIEngineService
                 engine = CrewAIEngineService()
                 if initialize:
-                    await engine.initialize(llm_provider=llm_provider, model=model)
+                    # Create initialization task but don't await it
+                    init_task = asyncio.create_task(engine.initialize(llm_provider=llm_provider, model=model))
+                    # Store the task on the engine instance for later reference
+                    engine._init_task = init_task
                 return engine
             else:
                 raise ValueError(f"Unknown engine type: {engine_type}")

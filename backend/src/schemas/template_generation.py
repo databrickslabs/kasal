@@ -14,7 +14,7 @@ class TemplateGenerationRequest(BaseModel):
     role: str = Field(..., description="Role of the agent")
     goal: str = Field(..., description="Goal of the agent")
     backstory: str = Field(..., description="Backstory of the agent")
-    model: str = Field("gpt-4-turbo", description="LLM model to use for template generation")
+    model: str = Field("databricks-llama-4-maverick", description="LLM model to use for template generation")
 
 
 class TemplateGenerationResponse(BaseModel):

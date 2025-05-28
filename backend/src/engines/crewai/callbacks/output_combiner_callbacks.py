@@ -81,57 +81,25 @@ class OutputCombinerCallback(CrewAICallback):
             return output
             
         try:
-            # Get task tracking service with repository access
-            from src.repositories.task_tracking_repository import TaskTrackingRepository
-            task_tracking_repository = TaskTrackingRepository(self.repository.db)
-            task_tracking_service = TaskTrackingService.for_crew_with_repo(task_tracking_repository)
+            # Get all task statuses
+            all_tasks = await self.repository.get_all_task_statuses()
             
-            # Always get all tasks for this job - needed regardless of execution path
-            all_tasks = task_tracking_service.get_all_task_statuses(self.job_id)
+            # Check if all tasks are complete
+            all_complete = all(task.status == 'completed' for task in all_tasks)
             
-            # Check if we're being called at job completion (from job_runner.py)
-            if self.task_key == "job_completion":
-                logger.info(f"=== Running OutputCombinerCallback at job completion for job {self.job_id} ===")
-                # Skip the task completion check since we know the job has completed
-                force_combine = True
-            else:
-                # Normal execution from task callback - check if all tasks are complete
-                # Count completed and total tasks
-                total_tasks = len(all_tasks)
-                completed_tasks = sum(1 for task in all_tasks if task.status == TaskStatusEnum.COMPLETED)
-                
-                # If not all tasks are complete, log and return original output
-                force_combine = completed_tasks >= total_tasks
-                if not force_combine:
-                    logger.info(f"Skipping output combination: {completed_tasks}/{total_tasks} tasks completed for job {self.job_id}")
-                    return output
-                logger.info(f"=== Starting OutputCombinerCallback for job {self.job_id}: All {total_tasks} tasks have completed ===")
-                
-            logger.info(f"Using output directory: {self.output_dir}")
-            
-            # Get run information from repository
-            db_run = self.repository.get_run_by_job_id(self.job_id)
-            if not db_run:
-                logger.error(f"No run record found for job_id: {self.job_id}")
+            if not all_complete:
+                logger.info("Not all tasks are complete yet, skipping output combination")
                 return output
-                
-            # Create a timestamp for the combined output file
-            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-            combined_output_path = os.path.join(self.output_dir, f"combined_{self.job_id}_{timestamp}.md")
             
-            # Prepare header for the combined output
-            header = f"""# Combined Output for Job: {self.job_id}
-Generated: {datetime.now().strftime("%Y-%m-%d %H:%M:%S")}
-Run Name: {db_run.run_name or 'Unnamed Run'}
-Status: {db_run.status}
-
----
-
-"""
-            # Create the combined output file
-            with open(combined_output_path, 'w') as combined_file:
+            # Create output directory if it doesn't exist
+            os.makedirs(self.output_dir, exist_ok=True)
+            
+            # Create combined output file
+            combined_file_path = os.path.join(self.output_dir, f"combined_output_{datetime.now().strftime('%Y%m%d_%H%M%S')}.md")
+            
+            with open(combined_file_path, 'w') as combined_file:
                 # Write header
-                combined_file.write(header)
+                combined_file.write("# Combined Task Outputs\n\n")
                 
                 # Process each task in order (they're already ordered by dependency due to get_all_task_statuses)
                 for task_status in all_tasks:
@@ -139,7 +107,7 @@ Status: {db_run.status}
                     task_name = task_id  # Default to task ID if name not available
                     
                     # Try to get more information about the task
-                    task_info = db_run.inputs.get('tasks_yaml', {}).get(task_id, {})
+                    task_info = self.repository.get_run_by_job_id(self.job_id).inputs.get('tasks_yaml', {}).get(task_id, {})
                     if task_info:
                         task_name = task_info.get('name', task_id)
                     
@@ -171,61 +139,32 @@ Status: {db_run.status}
                     # Find all files that match the task pattern
                     # Format: job_TIMESTAMP_task-NUMBER.md
                     all_task_files = glob.glob(os.path.join(self.output_dir, f"job_*_task-{task_short_id}.md"))
-                    logger.info(f"Found {len(all_task_files)} files matching pattern 'job_*_task-{task_short_id}.md'")
                     
-                    # If we didn't find files and task_short_id might have additional text, try to extract just the number
-                    if not all_task_files and task_short_id:
-                        # Try to extract just the numeric part if there's non-numeric content
-                        import re
-                        numeric_match = re.search(r'\d+', task_short_id)
-                        if numeric_match:
-                            numeric_id = numeric_match.group(0)
-                            all_task_files = glob.glob(os.path.join(self.output_dir, f"job_*_task-{numeric_id}.md"))
-                            logger.info(f"Trying numeric-only ID: Found {len(all_task_files)} files matching pattern 'job_*_task-{numeric_id}.md'")
-                    
-                    # Show all MD files in directory for debugging
-                    all_md_files = glob.glob(os.path.join(self.output_dir, "*.md"))
-                    logger.info(f"All MD files in directory ({len(all_md_files)} total):")
-                    for f in all_md_files:
-                        logger.info(f"  - {os.path.basename(f)}")
-                    
-                    # Sort the files by modification time (most recent first) to get the latest output
-                    task_output_files = sorted(
-                        all_task_files,
-                        key=lambda x: os.path.getmtime(x),
-                        reverse=True
-                    )
-                    
-                    # Process each output file for this task
-                    for output_file in task_output_files:
-                        try:
-                            logger.info(f"Processing output file: {output_file}")
-                            combined_file.write(f"### Output from {os.path.basename(output_file)}\n\n")
+                    if all_task_files:
+                        # Sort files by timestamp (newest first)
+                        all_task_files.sort(reverse=True)
+                        
+                        # Read the most recent file
+                        with open(all_task_files[0], 'r') as task_file:
+                            content = task_file.read()
                             
-                            # Read and include the file content
-                            with open(output_file, 'r') as task_file:
-                                content = task_file.read()
+                            # Check if the task has markdown enabled
+                            task_config = task_info.get('config', {})
+                            if task_config.get('markdown', False):
+                                # Content is already in markdown format
                                 combined_file.write(content)
-                                combined_file.write("\n\n")
-                                
-                        except Exception as e:
-                            error_msg = f"Error processing output file {output_file}: {str(e)}"
-                            logger.error(error_msg)
-                            combined_file.write(f"**Error processing file: {str(e)}**\n\n")
+                            else:
+                                # Convert content to markdown format
+                                combined_file.write(f"```\n{content}\n```\n")
+                    else:
+                        combined_file.write("No output file found for this task.\n")
                     
-                    # If no output files were found for this task
-                    if not task_output_files:
-                        combined_file.write(f"*No output files found for task {task_id}*\n\n")
+                    combined_file.write("\n---\n")  # Add separator between tasks
+                
+                logger.info(f"Combined output written to {combined_file_path}")
             
-            logger.info(f"Combined output saved to: {combined_output_path}")
-            
-            # Store the combined output path in metadata
-            self.metadata["combined_output_path"] = combined_output_path
-            
-            # Return the original output
             return output
             
         except Exception as e:
-            logger.error(f"Error in OutputCombinerCallback: {str(e)}", exc_info=True)
-            # Even if we fail, return the original output
+            logger.error(f"Error combining task outputs: {str(e)}", exc_info=True)
             return output 

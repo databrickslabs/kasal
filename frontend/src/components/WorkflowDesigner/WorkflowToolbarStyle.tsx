@@ -45,7 +45,7 @@ export const BottomPanelToggle: React.FC<PanelToggleProps> = ({
     <ToggleButtonContainer
       sx={{
         position: 'fixed',
-        bottom: isVisible ? '159px' : '0px',
+        bottom: isVisible ? '200px' : '0px',
         left: '50%',
         transform: 'translateX(-50%)',
         transition: 'bottom 0.3s ease',
@@ -79,6 +79,32 @@ export const RightPanelToggle: React.FC<PanelToggleProps> = ({
         left: isVisible ? 'calc(100% - 24px)' : 'auto',
         transform: 'translateY(-50%)',
         transition: 'left 0.3s ease, right 0.3s ease',
+      }}
+    >
+      <Tooltip title={tooltip}>
+        <ToggleIconButton onClick={togglePanel} size="small">
+          {isVisible ? <ChevronRightIcon fontSize="small" /> : <ChevronLeftIcon fontSize="small" />}
+        </ToggleIconButton>
+      </Tooltip>
+    </ToggleButtonContainer>
+  );
+};
+
+// Component for toggling chat panel (AI Assistant)
+export const ChatPanelToggle: React.FC<PanelToggleProps> = ({ 
+  isVisible, 
+  togglePanel,
+  tooltip
+}) => {
+  return (
+    <ToggleButtonContainer
+      sx={{
+        position: 'fixed',
+        top: '50%',
+        right: isVisible ? '350px' : 0,
+        transform: 'translateY(-50%)',
+        transition: 'right 0.3s ease',
+        zIndex: 1000,
       }}
     >
       <Tooltip title={tooltip}>

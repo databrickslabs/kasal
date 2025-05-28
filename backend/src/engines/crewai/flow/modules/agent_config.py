@@ -173,20 +173,20 @@ class AgentConfig:
                         llm = await LLMManager.get_llm(agent_llm)
                     elif isinstance(agent_llm, dict):
                         # Dictionary with LLM configuration
-                        model_name = agent_llm.get('model', 'gpt-4o')
+                        model_name = agent_llm.get('model', 'databricks-llama-4-maverick')
                         llm = await LLMManager.get_llm(model_name)
                     logger.info(f"Configured custom LLM for agent: {agent_data.name}")
                 except ImportError:
                     logger.warning("Could not import LLMManager, using default model string")
-                    llm = agent_llm if isinstance(agent_llm, str) else agent_llm.get('model', 'gpt-4o')
+                    llm = agent_llm if isinstance(agent_llm, str) else agent_llm.get('model', 'databricks-llama-4-maverick')
                     logger.info(f"Using model name '{llm}' for agent: {agent_data.name}")
             else:
                 # Use default LLM
                 try:
                     from src.core.llm_manager import LLMManager
-                    model_name = getattr(agent_data, 'model', 'gpt-4o')
+                    model_name = getattr(agent_data, 'model', 'databricks-llama-4-maverick')
                     if not isinstance(model_name, str):
-                        model_name = 'gpt-4o'
+                        model_name = 'databricks-llama-4-maverick'
                     llm = await LLMManager.get_llm(model_name)
                     logger.info(f"Using default LLM from LLMManager for agent: {agent_data.name}")
                 except ImportError:

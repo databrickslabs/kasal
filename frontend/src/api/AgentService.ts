@@ -26,7 +26,7 @@ export class AgentService {
   static async createAgent(agent: Omit<Agent, 'id' | 'created_at'>): Promise<Agent | null> {
     try {
       const defaultValues: Partial<Agent> = {
-        llm: 'gpt-4o-mini',
+        llm: 'databricks-llama-4-maverick',
         tools: [],
         max_iter: 25,
         verbose: false,

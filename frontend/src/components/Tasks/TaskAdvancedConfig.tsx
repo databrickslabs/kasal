@@ -253,6 +253,15 @@ const TaskAdvancedConfigComponent: React.FC<TaskAdvancedConfigProps> = ({
         onChange={(e) => onConfigChange('output_file', e.target.value || null)}
         fullWidth
       />
+      <FormControlLabel
+        control={
+          <Switch
+            checked={advancedConfig.markdown}
+            onChange={(e) => onConfigChange('markdown', e.target.checked)}
+          />
+        }
+        label="Enable Markdown Output"
+      />
 
       <Divider sx={{ my: 2 }} />
       <Typography variant="subtitle2" color="text.secondary">Error Handling</Typography>

@@ -31,6 +31,8 @@ from src.api.execution_history_router import router as execution_history_router
 from src.api.execution_trace_router import router as execution_trace_router
 from src.api.flow_execution_router import router as flow_execution_router
 from src.api.mcp_router import router as mcp_router
+from src.api.dispatcher_router import router as dispatcher_router
+from src.api.engine_config_router import router as engine_config_router
 # User management routers
 from src.api.auth_router import router as auth_router
 from src.api.users_router import router as users_router
@@ -72,6 +74,8 @@ api_router.include_router(execution_trace_router)
 api_router.include_router(flow_execution_router)
 api_router.include_router(runs_router)
 api_router.include_router(mcp_router)
+api_router.include_router(dispatcher_router)
+api_router.include_router(engine_config_router)
 # Include user management routers
 api_router.include_router(auth_router)
 api_router.include_router(users_router)
@@ -110,6 +114,8 @@ __all__ = [
     "execution_trace_router",
     "flow_execution_router",
     "mcp_router",
+    "dispatcher_router",
+    "engine_config_router",
     # Add user management routers to __all__
     "auth_router",
     "users_router",
