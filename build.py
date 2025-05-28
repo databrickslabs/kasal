@@ -458,6 +458,36 @@ if __name__ == "__main__":
         finally:
             os.chdir(self.root_dir)
     
+    def copy_deployment_files(self):
+        """Copy requirements.txt and app.yaml to the dist directory"""
+        logger.info("Copying deployment files")
+        try:
+            # Copy requirements.txt from root
+            requirements_src = self.root_dir / "requirements.txt"
+            if requirements_src.exists():
+                shutil.copy(requirements_src, self.dist_dir / "requirements.txt")
+                logger.info("Copied requirements.txt to dist directory")
+            else:
+                logger.warning("requirements.txt not found in root directory")
+            
+            # Copy app.yaml from dist (if it exists) or create it
+            app_yaml_content = """command: ['python', '-m', 'kasal']
+environment_vars:
+  PYTHONPATH: '.:${PYTHONPATH}'
+  PYTHONUNBUFFERED: '1'
+apt_packages:
+  - libpq-dev
+"""
+            app_yaml_dest = self.dist_dir / "app.yaml"
+            with open(app_yaml_dest, "w") as f:
+                f.write(app_yaml_content)
+            logger.info("Created app.yaml in dist directory")
+            
+            return True
+        except Exception as e:
+            logger.error(f"Error copying deployment files: {e}")
+            return False
+    
     def run(self):
         """Run the full build process"""
         start_time = time.time()
@@ -487,6 +517,10 @@ if __name__ == "__main__":
         
         if not self.build_wheel():
             logger.error("Wheel build failed, stopping build process")
+            return False
+        
+        if not self.copy_deployment_files():
+            logger.error("Copying deployment files failed, stopping build process")
             return False
         
         elapsed_time = time.time() - start_time
