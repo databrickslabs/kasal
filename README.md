@@ -1,10 +1,10 @@
 # Kasal
 
-A modern, full-stack application platform for building and managing AI agent-based workflows using CrewAI.
+A modern, full-stack application platform for building and managing AI agent-based workflows.
 
 ## Overview
 
-Kasal combines a Python FastAPI backend with a React frontend to create a powerful environment for designing, orchestrating, and monitoring autonomous AI agents. It provides a sophisticated infrastructure for developing agent-based workflows using the CrewAI framework.
+Kasal combines a Python FastAPI backend with a React frontend to create a powerful environment for designing, orchestrating, and monitoring autonomous AI agents. It provides a sophisticated infrastructure for developing agent-based workflows using the Agentic AI frameworks.
 
 ### Core Capabilities
 
@@ -13,17 +13,6 @@ Kasal combines a Python FastAPI backend with a React frontend to create a powerf
 - **Monitor Executions**: Track agent activities with comprehensive logging and tracing
 - **Integrate External Tools**: Connect agents to APIs, data sources, and services
 - **Manage Resources**: Control resource allocation and execution constraints
-
-## Features
-
-- ✅ FastAPI with async support and clean architecture
-- ✅ SQLAlchemy 2.0 with advanced ORM features
-- ✅ Complete CrewAI integration for agent-based workflows
-- ✅ Modern React frontend with Zustand state management
-- ✅ Repository pattern for consistent data access
-- ✅ Environment-based configuration system
-- ✅ Built-in documentation with MkDocs
-- ✅ Packaged as a Python wheel for easy deployment
 
 ## Documentation
 
