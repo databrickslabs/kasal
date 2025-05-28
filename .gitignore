@@ -72,11 +72,9 @@ crewai.db
 backend/crewai-manager/backend/backendcrew/src/uploads/knowledge
 
 # Memory files
-backend/crewai-manager/backend/backendcrew/memory/
-**/memory/
-**/length.bin
-**/*.bin
 backend/crewai-manager/backend/backendcrew/memory/*
+**/memory/
+**/*.bin
 
 # Output files
 backend/crewai-manager/backend/backendcrew/src/output/
@@ -145,3 +143,6 @@ logs/
 *.db
 *.sqlite
 *.sqlite3
+
+# Exception: Include frontend Memory configuration
+!frontend/src/components/Configuration/Memory/

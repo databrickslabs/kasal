@@ -1,0 +1,692 @@
+import React, { useState, useEffect, useCallback } from 'react';
+import {
+  Box,
+  Typography,
+  Paper,
+  Tabs,
+  Tab,
+  Table,
+  TableBody,
+  TableCell,
+  TableContainer,
+  TableHead,
+  TableRow,
+  Button,
+  TextField,
+  Dialog,
+  DialogActions,
+  DialogContent,
+  DialogContentText,
+  DialogTitle,
+  Chip,
+  CircularProgress,
+  Alert,
+  Grid,
+} from '@mui/material';
+import {
+  Delete as DeleteIcon,
+  Search as SearchIcon,
+  Refresh as RefreshIcon,
+  Storage as StorageIcon,
+  MemoryRounded as MemoryIcon,
+  BarChart as StatsIcon,
+  CleaningServices as CleanupIcon,
+} from '@mui/icons-material';
+import { useTranslation } from 'react-i18next';
+import { MemoryService } from '../../../services/MemoryService';
+
+interface TabPanelProps {
+  children?: React.ReactNode;
+  index: number;
+  value: number;
+}
+
+interface MemoryDetails {
+  memory_path: string;
+  size_bytes: number;
+  creation_date: string;
+  last_modified: string;
+  long_term_memory?: {
+    path: string;
+    size_bytes: number;
+    tables?: string[];
+    records?: Array<{
+      timestamp: string;
+      content: string;
+    }>;
+  };
+  short_term_memory?: {
+    messages?: Array<{
+      role: string;
+      content: string;
+    }>;
+  };
+}
+
+interface MemoryStats {
+  total_crews: number;
+  total_size: number;
+  avg_size: number;
+  oldest_memory: string;
+  newest_memory?: string;
+  crew_details?: Record<string, CrewDetail>;
+}
+
+interface CrewDetail {
+  size: number;
+  last_modified: string;
+  messages_count?: number;
+}
+
+interface SearchResult {
+  crew_name: string;
+  snippet: string;
+}
+
+function TabPanel(props: TabPanelProps) {
+  const { children, value, index, ...other } = props;
+
+  return (
+    <div
+      role="tabpanel"
+      hidden={value !== index}
+      id={`memory-tabpanel-${index}`}
+      aria-labelledby={`memory-tab-${index}`}
+      {...other}
+    >
+      {value === index && <Box sx={{ p: 3 }}>{children}</Box>}
+    </div>
+  );
+}
+
+function a11yProps(index: number) {
+  return {
+    id: `memory-tab-${index}`,
+    'aria-controls': `memory-tabpanel-${index}`,
+  };
+}
+
+const MemoryManagement: React.FC = () => {
+  const { t } = useTranslation();
+  const [tabValue, setTabValue] = useState(0);
+  const [memories, setMemories] = useState<string[]>([]);
+  const [selectedMemory, setSelectedMemory] = useState<string | null>(null);
+  const [memoryDetails, setMemoryDetails] = useState<MemoryDetails | null>(null);
+  const [memoryStats, setMemoryStats] = useState<MemoryStats | null>(null);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [confirmDialogOpen, setConfirmDialogOpen] = useState(false);
+  const [confirmAction, setConfirmAction] = useState<'reset' | 'resetAll' | null>(null);
+  const [searchQuery, setSearchQuery] = useState('');
+  const [searchResults, setSearchResults] = useState<SearchResult[]>([]);
+  const [cleanupDays, setCleanupDays] = useState(30);
+
+  const memoryService = MemoryService.getInstance();
+
+  const fetchMemories = useCallback(async () => {
+    setLoading(true);
+    setError(null);
+    try {
+      const data = await memoryService.listMemories();
+      setMemories(data);
+      if (data.length > 0) {
+        setSelectedMemory(prevSelected => prevSelected || data[0]);
+      }
+    } catch (err) {
+      setError('Failed to fetch memories');
+      console.error(err);
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
+  const fetchMemoryDetails = useCallback(async (crewName: string) => {
+    setLoading(true);
+    setError(null);
+    try {
+      const data = await memoryService.getMemoryDetails(crewName);
+      setMemoryDetails(data);
+    } catch (err) {
+      setError(`Failed to fetch details for memory "${crewName}"`);
+      console.error(err);
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
+  const fetchMemoryStats = useCallback(async () => {
+    setLoading(true);
+    setError(null);
+    try {
+      const data = await memoryService.getMemoryStats(true);
+      setMemoryStats(data);
+    } catch (err) {
+      setError('Failed to fetch memory statistics');
+      console.error(err);
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
+  // Load memories when component mounts
+  useEffect(() => {
+    fetchMemories();
+  }, [fetchMemories]);
+
+  // Fetch memory data when tab changes or selection changes
+  useEffect(() => {
+    if (tabValue === 1 && selectedMemory) {
+      fetchMemoryDetails(selectedMemory);
+    } else if (tabValue === 2) {
+      fetchMemoryStats();
+    }
+  }, [tabValue, selectedMemory, fetchMemoryDetails, fetchMemoryStats]);
+
+  const handleTabChange = (_event: React.SyntheticEvent, newValue: number) => {
+    setTabValue(newValue);
+  };
+
+  const handleMemorySelect = (crewName: string) => {
+    setSelectedMemory(crewName);
+  };
+
+  const handleResetMemory = async () => {
+    if (!selectedMemory) return;
+
+    setLoading(true);
+    setError(null);
+    try {
+      await memoryService.resetMemory(selectedMemory);
+      setConfirmDialogOpen(false);
+      fetchMemories();
+    } catch (err) {
+      setError(`Failed to reset memory "${selectedMemory}"`);
+      console.error(err);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleResetAllMemories = async () => {
+    setLoading(true);
+    setError(null);
+    try {
+      await memoryService.resetAllMemories();
+      setConfirmDialogOpen(false);
+      fetchMemories();
+    } catch (err) {
+      setError('Failed to reset all memories');
+      console.error(err);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const openConfirmDialog = (action: 'reset' | 'resetAll') => {
+    setConfirmAction(action);
+    setConfirmDialogOpen(true);
+  };
+
+  const handleCleanupMemories = async () => {
+    setLoading(true);
+    setError(null);
+    try {
+      await memoryService.cleanupOldMemories(cleanupDays);
+      fetchMemories();
+      fetchMemoryStats();
+    } catch (err) {
+      setError('Failed to cleanup memories');
+      console.error(err);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleSearch = async () => {
+    if (!searchQuery.trim()) return;
+
+    setLoading(true);
+    setError(null);
+    try {
+      const results = await memoryService.searchMemories(searchQuery);
+      setSearchResults(results);
+    } catch (err) {
+      setError(`Failed to search memories for "${searchQuery}"`);
+      console.error(err);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const formatDate = (dateString: string) => {
+    return new Date(dateString).toLocaleString();
+  };
+
+  const formatSize = (bytes: number) => {
+    if (bytes < 1024) return `${bytes} B`;
+    if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(2)} KB`;
+    return `${(bytes / (1024 * 1024)).toFixed(2)} MB`;
+  };
+
+  return (
+    <Box>
+      <Box sx={{ display: 'flex', alignItems: 'center', mb: 3 }}>
+        <MemoryIcon sx={{ mr: 1, color: 'primary.main' }} />
+        <Typography variant="h6">{t('memory.title')}</Typography>
+      </Box>
+
+      {error && (
+        <Alert severity="error" sx={{ mb: 2 }}>
+          {error}
+        </Alert>
+      )}
+
+      <Paper sx={{ mb: 3 }}>
+        <Tabs
+          value={tabValue}
+          onChange={handleTabChange}
+          indicatorColor="primary"
+          textColor="primary"
+          variant="fullWidth"
+        >
+          <Tab
+            label={t('memory.overview')}
+            icon={<StorageIcon />}
+            iconPosition="start"
+            {...a11yProps(0)}
+          />
+          <Tab
+            label={t('memory.details')}
+            icon={<MemoryIcon />}
+            iconPosition="start"
+            {...a11yProps(1)}
+          />
+          <Tab
+            label={t('memory.stats')}
+            icon={<StatsIcon />}
+            iconPosition="start"
+            {...a11yProps(2)}
+          />
+        </Tabs>
+      </Paper>
+
+      {loading && (
+        <Box sx={{ display: 'flex', justifyContent: 'center', my: 4 }}>
+          <CircularProgress />
+        </Box>
+      )}
+
+      <TabPanel value={tabValue} index={0}>
+        <Box sx={{ mb: 3 }}>
+          <Typography variant="subtitle1" fontWeight="medium" gutterBottom>
+            {t('memory.availableMemories')}
+          </Typography>
+          
+          <Box sx={{ display: 'flex', gap: 2, mb: 2 }}>
+            <Button 
+              variant="outlined" 
+              color="primary" 
+              startIcon={<RefreshIcon />}
+              onClick={fetchMemories}
+            >
+              {t('memory.refresh')}
+            </Button>
+            <Button 
+              variant="outlined" 
+              color="error" 
+              startIcon={<DeleteIcon />}
+              onClick={() => openConfirmDialog('resetAll')}
+              disabled={memories.length === 0}
+            >
+              {t('memory.resetAll')}
+            </Button>
+          </Box>
+
+          {memories.length === 0 ? (
+            <Typography color="textSecondary">
+              {t('memory.noMemories')}
+            </Typography>
+          ) : (
+            <TableContainer component={Paper}>
+              <Table>
+                <TableHead>
+                  <TableRow>
+                    <TableCell>{t('memory.crewName')}</TableCell>
+                    <TableCell align="right">{t('memory.actions')}</TableCell>
+                  </TableRow>
+                </TableHead>
+                <TableBody>
+                  {memories.map((memory) => (
+                    <TableRow 
+                      key={memory}
+                      selected={selectedMemory === memory}
+                      hover
+                      onClick={() => handleMemorySelect(memory)}
+                      sx={{ cursor: 'pointer' }}
+                    >
+                      <TableCell>{memory}</TableCell>
+                      <TableCell align="right">
+                        <Button
+                          size="small"
+                          color="error"
+                          startIcon={<DeleteIcon />}
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            setSelectedMemory(memory);
+                            openConfirmDialog('reset');
+                          }}
+                        >
+                          {t('memory.reset')}
+                        </Button>
+                      </TableCell>
+                    </TableRow>
+                  ))}
+                </TableBody>
+              </Table>
+            </TableContainer>
+          )}
+        </Box>
+
+        <Box sx={{ mt: 4 }}>
+          <Typography variant="subtitle1" fontWeight="medium" gutterBottom>
+            {t('memory.search.title')}
+          </Typography>
+          
+          <Box sx={{ display: 'flex', gap: 2, mb: 2 }}>
+            <TextField 
+              label={t('memory.search.query')}
+              variant="outlined"
+              fullWidth
+              value={searchQuery}
+              onChange={(e) => setSearchQuery(e.target.value)}
+              size="small"
+            />
+            <Button 
+              variant="contained" 
+              startIcon={<SearchIcon />}
+              onClick={handleSearch}
+              disabled={!searchQuery.trim()}
+            >
+              {t('memory.search.button')}
+            </Button>
+          </Box>
+
+          {searchResults.length > 0 && (
+            <TableContainer component={Paper} sx={{ mt: 2 }}>
+              <Table>
+                <TableHead>
+                  <TableRow>
+                    <TableCell>{t('memory.search.crew')}</TableCell>
+                    <TableCell>{t('memory.search.snippet')}</TableCell>
+                  </TableRow>
+                </TableHead>
+                <TableBody>
+                  {searchResults.map((result, idx) => (
+                    <TableRow key={idx}>
+                      <TableCell>{result.crew_name}</TableCell>
+                      <TableCell>{result.snippet}</TableCell>
+                    </TableRow>
+                  ))}
+                </TableBody>
+              </Table>
+            </TableContainer>
+          )}
+        </Box>
+
+        <Box sx={{ mt: 4 }}>
+          <Typography variant="subtitle1" fontWeight="medium" gutterBottom>
+            {t('memory.cleanup.title')}
+          </Typography>
+          
+          <Box sx={{ display: 'flex', gap: 2, alignItems: 'center' }}>
+            <TextField 
+              label={t('memory.cleanup.days')}
+              type="number"
+              variant="outlined"
+              value={cleanupDays}
+              onChange={(e) => setCleanupDays(parseInt(e.target.value) || 30)}
+              size="small"
+              sx={{ width: 100 }}
+            />
+            <Typography variant="body2">
+              {t('memory.cleanup.description')}
+            </Typography>
+            <Button 
+              variant="contained" 
+              color="warning"
+              startIcon={<CleanupIcon />}
+              onClick={handleCleanupMemories}
+            >
+              {t('memory.cleanup.button')}
+            </Button>
+          </Box>
+        </Box>
+      </TabPanel>
+
+      <TabPanel value={tabValue} index={1}>
+        {!selectedMemory ? (
+          <Typography color="textSecondary">
+            {t('memory.selectMemory')}
+          </Typography>
+        ) : !memoryDetails ? (
+          <Typography color="textSecondary">
+            {t('memory.noDetails')}
+          </Typography>
+        ) : (
+          <Box>
+            <Typography variant="h6" gutterBottom>
+              {t('memory.detailsFor', { name: selectedMemory })}
+            </Typography>
+            
+            <Paper sx={{ p: 2, mb: 3 }}>
+              <Grid container spacing={2}>
+                <Grid item xs={6}>
+                  <Typography variant="subtitle2">{t('memory.details.path')}:</Typography>
+                  <Typography variant="body2">{memoryDetails.memory_path}</Typography>
+                </Grid>
+                <Grid item xs={6}>
+                  <Typography variant="subtitle2">{t('memory.details.size')}:</Typography>
+                  <Typography variant="body2">{formatSize(memoryDetails.size_bytes)}</Typography>
+                </Grid>
+                <Grid item xs={6}>
+                  <Typography variant="subtitle2">{t('memory.details.created')}:</Typography>
+                  <Typography variant="body2">{formatDate(memoryDetails.creation_date)}</Typography>
+                </Grid>
+                <Grid item xs={6}>
+                  <Typography variant="subtitle2">{t('memory.details.modified')}:</Typography>
+                  <Typography variant="body2">{formatDate(memoryDetails.last_modified)}</Typography>
+                </Grid>
+              </Grid>
+            </Paper>
+
+            {/* Long-Term Memory Section */}
+            {memoryDetails.long_term_memory && (
+              <Box sx={{ mb: 3 }}>
+                <Typography variant="subtitle1" gutterBottom>
+                  {t('memory.longTerm.title')}
+                </Typography>
+                <Paper sx={{ p: 2 }}>
+                  <Grid container spacing={2}>
+                    <Grid item xs={6}>
+                      <Typography variant="subtitle2">{t('memory.details.path')}:</Typography>
+                      <Typography variant="body2">{memoryDetails.long_term_memory.path}</Typography>
+                    </Grid>
+                    <Grid item xs={6}>
+                      <Typography variant="subtitle2">{t('memory.details.size')}:</Typography>
+                      <Typography variant="body2">{formatSize(memoryDetails.long_term_memory.size_bytes)}</Typography>
+                    </Grid>
+                  </Grid>
+
+                  {memoryDetails.long_term_memory.tables && (
+                    <Box sx={{ mt: 2 }}>
+                      <Typography variant="subtitle2" gutterBottom>{t('memory.details.tables')}:</Typography>
+                      <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 1 }}>
+                        {memoryDetails.long_term_memory.tables.map((table: string) => (
+                          <Chip key={table} label={table} size="small" />
+                        ))}
+                      </Box>
+                    </Box>
+                  )}
+
+                  {memoryDetails.long_term_memory.records && (
+                    <Box sx={{ mt: 2 }}>
+                      <Typography variant="subtitle2" gutterBottom>{t('memory.details.records')}:</Typography>
+                      <TableContainer sx={{ maxHeight: 300 }}>
+                        <Table size="small" stickyHeader>
+                          <TableHead>
+                            <TableRow>
+                              <TableCell>{t('memory.details.timestamp')}</TableCell>
+                              <TableCell>{t('memory.details.content')}</TableCell>
+                            </TableRow>
+                          </TableHead>
+                          <TableBody>
+                            {memoryDetails.long_term_memory.records.map((record: any, idx: number) => (
+                              <TableRow key={idx}>
+                                <TableCell>{formatDate(record.timestamp)}</TableCell>
+                                <TableCell>{record.content}</TableCell>
+                              </TableRow>
+                            ))}
+                          </TableBody>
+                        </Table>
+                      </TableContainer>
+                    </Box>
+                  )}
+                </Paper>
+              </Box>
+            )}
+
+            {/* Short-Term Memory Section */}
+            {memoryDetails.short_term_memory && (
+              <Box sx={{ mb: 3 }}>
+                <Typography variant="subtitle1" gutterBottom>
+                  {t('memory.shortTerm.title')}
+                </Typography>
+                <Paper sx={{ p: 2 }}>
+                  {memoryDetails.short_term_memory.messages && (
+                    <TableContainer sx={{ maxHeight: 300 }}>
+                      <Table size="small" stickyHeader>
+                        <TableHead>
+                          <TableRow>
+                            <TableCell>{t('memory.details.role')}</TableCell>
+                            <TableCell>{t('memory.details.content')}</TableCell>
+                          </TableRow>
+                        </TableHead>
+                        <TableBody>
+                          {memoryDetails.short_term_memory.messages.map((msg: any, idx: number) => (
+                            <TableRow key={idx}>
+                              <TableCell>{msg.role}</TableCell>
+                              <TableCell>{msg.content}</TableCell>
+                            </TableRow>
+                          ))}
+                        </TableBody>
+                      </Table>
+                    </TableContainer>
+                  )}
+                </Paper>
+              </Box>
+            )}
+          </Box>
+        )}
+      </TabPanel>
+
+      <TabPanel value={tabValue} index={2}>
+        {!memoryStats ? (
+          <Typography color="textSecondary">
+            {t('memory.noStats')}
+          </Typography>
+        ) : (
+          <Box>
+            <Typography variant="h6" gutterBottom>
+              {t('memory.stats.title')}
+            </Typography>
+            
+            <Paper sx={{ p: 2, mb: 3 }}>
+              <Grid container spacing={2}>
+                <Grid item xs={6} md={3}>
+                  <Typography variant="subtitle2">{t('memory.stats.totalCrews')}:</Typography>
+                  <Typography variant="h6">{memoryStats.total_crews}</Typography>
+                </Grid>
+                <Grid item xs={6} md={3}>
+                  <Typography variant="subtitle2">{t('memory.stats.totalSize')}:</Typography>
+                  <Typography variant="h6">{memoryStats.total_size} KB</Typography>
+                </Grid>
+                <Grid item xs={6} md={3}>
+                  <Typography variant="subtitle2">{t('memory.stats.avgSize')}:</Typography>
+                  <Typography variant="h6">{memoryStats.avg_size} KB</Typography>
+                </Grid>
+                <Grid item xs={6} md={3}>
+                  <Typography variant="subtitle2">{t('memory.stats.oldestMemory')}:</Typography>
+                  <Typography variant="body2">{memoryStats.oldest_memory}</Typography>
+                </Grid>
+              </Grid>
+            </Paper>
+
+            {memoryStats.crew_details && (
+              <Box>
+                <Typography variant="subtitle1" gutterBottom>
+                  {t('memory.stats.detailedStats')}
+                </Typography>
+                
+                <TableContainer component={Paper}>
+                  <Table>
+                    <TableHead>
+                      <TableRow>
+                        <TableCell>{t('memory.stats.crew')}</TableCell>
+                        <TableCell align="right">{t('memory.stats.size')}</TableCell>
+                        <TableCell>{t('memory.stats.lastModified')}</TableCell>
+                        <TableCell align="right">{t('memory.stats.messagesCount')}</TableCell>
+                      </TableRow>
+                    </TableHead>
+                    <TableBody>
+                      {Object.entries(memoryStats.crew_details).map(([crew, details]: [string, any]) => (
+                        <TableRow key={crew} hover>
+                          <TableCell>{crew}</TableCell>
+                          <TableCell align="right">{details.size}</TableCell>
+                          <TableCell>{details.last_modified}</TableCell>
+                          <TableCell align="right">{details.messages_count || 'N/A'}</TableCell>
+                        </TableRow>
+                      ))}
+                    </TableBody>
+                  </Table>
+                </TableContainer>
+              </Box>
+            )}
+          </Box>
+        )}
+      </TabPanel>
+
+      {/* Confirmation Dialog */}
+      <Dialog
+        open={confirmDialogOpen}
+        onClose={() => setConfirmDialogOpen(false)}
+      >
+        <DialogTitle>
+          {confirmAction === 'reset' 
+            ? t('memory.confirmReset.title')
+            : t('memory.confirmResetAll.title')}
+        </DialogTitle>
+        <DialogContent>
+          <DialogContentText>
+            {confirmAction === 'reset' 
+              ? t('memory.confirmReset.message', { name: selectedMemory })
+              : t('memory.confirmResetAll.message')}
+          </DialogContentText>
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={() => setConfirmDialogOpen(false)}>
+            {t('common.cancel')}
+          </Button>
+          <Button 
+            onClick={confirmAction === 'reset' ? handleResetMemory : handleResetAllMemories} 
+            color="error"
+            autoFocus
+          >
+            {t('common.confirm')}
+          </Button>
+        </DialogActions>
+      </Dialog>
+    </Box>
+  );
+};
+
+export default MemoryManagement; 
