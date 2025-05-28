@@ -73,7 +73,7 @@ def deploy_wheel_to_databricks(
         f.write("  PYTHONPATH: '.:${PYTHONPATH}'\n")
         f.write("  PYTHONUNBUFFERED: '1'\n")  # Ensures logs appear immediately
         f.write("apt_packages:\n")
-        f.write("  - libpq-dev\n")  # PostgreSQL development headers for psycopg2
+        f.write("  - libpq-dev\n")  # PostgreSQL development headers for asyncpg
     
     try:
         # Check if app exists, create if not

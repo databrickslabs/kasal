@@ -2,7 +2,6 @@ litellm
 asyncpg
 aiosqlite 
 pydantic-settings
-psycopg2-binary
 cryptography
 python-multipart
 databricks

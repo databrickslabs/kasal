@@ -244,8 +244,7 @@
       "python-dotenv"
     ],
     "database": [
-      "asyncpg",
-      "psycopg2-binary"
+      "asyncpg"
     ],
     "testing": [
       "pytest",
