@@ -161,8 +161,6 @@ const WorkflowChat: React.FC<WorkflowChatProps> = ({
       const savedAgent = await AgentService.createAgent(agentToCreate);
       
       if (savedAgent) {
-        let createdNode: Node;
-        
         setNodes((nodes) => {
           // Find existing agent nodes to determine positioning
           const agentNodes = nodes.filter(n => n.type === 'agentNode');
@@ -197,18 +195,19 @@ const WorkflowChat: React.FC<WorkflowChatProps> = ({
             },
           };
 
-          createdNode = newNode;
           const updated = [...nodes, newNode];
           setTimeout(() => {
             window.dispatchEvent(new Event('fitViewToNodesInternal'));
           }, 100);
+          
+          // Call onNodesGenerated with the created node
+          if (onNodesGenerated) {
+            onNodesGenerated([newNode], []);
+          }
+          
           return updated;
         });
         
-        if (onNodesGenerated) {
-          onNodesGenerated([createdNode!], []);
-        }
-
         toast.success(`Agent "${savedAgent.name}" created and saved successfully!`);
       } else {
         throw new Error('Failed to save agent');
