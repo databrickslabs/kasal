@@ -462,13 +462,12 @@ if __name__ == "__main__":
         """Copy requirements.txt and app.yaml to the dist directory"""
         logger.info("Copying deployment files")
         try:
-            # Copy requirements.txt from root
-            requirements_src = self.root_dir / "requirements.txt"
-            if requirements_src.exists():
-                shutil.copy(requirements_src, self.dist_dir / "requirements.txt")
-                logger.info("Copied requirements.txt to dist directory")
-            else:
-                logger.warning("requirements.txt not found in root directory")
+            # Create requirements.txt with wheel reference for dist
+            requirements_content = f"./{self.package_name}-{self.version}-py3-none-any.whl"
+            requirements_dest = self.dist_dir / "requirements.txt"
+            with open(requirements_dest, "w") as f:
+                f.write(requirements_content)
+            logger.info("Created requirements.txt with wheel reference in dist directory")
             
             # Copy app.yaml from dist (if it exists) or create it
             app_yaml_content = """command: ['python', '-m', 'kasal']
