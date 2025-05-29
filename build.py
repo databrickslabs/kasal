@@ -9,13 +9,6 @@ import argparse
 from pathlib import Path
 from datetime import datetime
 
-# Parse command-line arguments
-parser = argparse.ArgumentParser(description="Build the Kasal application")
-parser.add_argument("--api-url", 
-                    help="API URL to use in the frontend build (e.g. https://kasal-xxx.aws.databricksapps.com/api/v1)", 
-                    required=True)
-args = parser.parse_args()
-
 # Configure logging
 log_dir = Path("build/logs")
 log_dir.mkdir(parents=True, exist_ok=True)
@@ -34,7 +27,7 @@ logging.basicConfig(
 logger = logging.getLogger("build")
 
 class Builder:
-    def __init__(self, api_url):
+    def __init__(self):
         self.root_dir = Path(os.path.dirname(os.path.abspath(__file__)))
         self.dist_dir = self.root_dir / "dist"
         self.build_dir = self.root_dir / "build"
@@ -45,7 +38,6 @@ class Builder:
         self.docs_dir = self.root_dir / "docs"
         self.package_name = "kasal"
         self.version = "0.1.0"  # Could be dynamically determined
-        self.api_url = api_url
         
         # Create build directories
         for d in [self.dist_dir, self.build_dir, self.temp_dir, self.package_dir]:
@@ -66,13 +58,9 @@ class Builder:
             os.chdir(self.frontend_dir)
             subprocess.run(["npm", "install"], check=True)
             
-            # Set the API URL environment variable for the build
-            env = os.environ.copy()
-            env["REACT_APP_API_URL"] = self.api_url
-            logger.info(f"Setting REACT_APP_API_URL={self.api_url}")
-            
-            # Run the build with the environment variable
-            subprocess.run(["npm", "run", "build"], check=True, env=env)
+            # Run the build without setting REACT_APP_API_URL
+            # The frontend will use DATABRICKS_APP_URL environment variable at runtime
+            subprocess.run(["npm", "run", "build"], check=True)
             
             # Create the frontend destination directory
             frontend_dest = self.package_dir / self.package_name / "frontend" / "static"
@@ -462,12 +450,18 @@ if __name__ == "__main__":
         """Copy requirements.txt and app.yaml to the dist directory"""
         logger.info("Copying deployment files")
         try:
-            # Create requirements.txt with wheel reference for dist
-            requirements_content = f"./{self.package_name}-{self.version}-py3-none-any.whl"
+            # Read the original requirements.txt
+            requirements_src = self.root_dir / "requirements.txt"
+            if not requirements_src.exists():
+                logger.error("requirements.txt not found in root directory")
+                return False
+
+            # Create requirements.txt in dist with original contents
             requirements_dest = self.dist_dir / "requirements.txt"
-            with open(requirements_dest, "w") as f:
-                f.write(requirements_content)
-            logger.info("Created requirements.txt with wheel reference in dist directory")
+            with open(requirements_src, "r") as src, open(requirements_dest, "w") as dest:
+                # Copy all original requirements
+                dest.write(src.read())
+            logger.info("Created requirements.txt with original dependencies in dist directory")
             
             # Copy app.yaml from dist (if it exists) or create it
             app_yaml_content = """command: ['python', '-m', 'kasal']
@@ -528,6 +522,6 @@ apt_packages:
         return True
 
 if __name__ == "__main__":
-    builder = Builder(args.api_url)
+    builder = Builder()
     success = builder.run()
     sys.exit(0 if success else 1) 

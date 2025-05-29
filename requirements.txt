@@ -1,3 +1,4 @@
+./kasal-0.1.0-py3-none-any.whl
 litellm
 asyncpg
 aiosqlite 
@@ -24,6 +25,7 @@ python-pptx
 urllib3>=1.26.6
 mcp==1.9.0
 mcpadapt
+psycopg2-binary
 
 # Add explicit version of bcrypt to prevent version conflicts
 bcrypt==4.0.1
@@ -35,5 +37,3 @@ mkdocs>=1.6.0
 mkdocs-material>=9.4.0
 mkdocstrings[python]>=0.24.0
 mkdocs-git-revision-date-localized-plugin>=1.2.0
-
-# Add any other dependencies your project requires below
