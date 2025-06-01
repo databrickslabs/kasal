@@ -7,7 +7,7 @@ from fastapi import APIRouter, Depends, HTTPException, Path, Query, status
 from pydantic import ValidationError
 
 from src.core.dependencies import SessionDep
-from src.schemas.crew import CrewCreate, CrewResponse
+from src.schemas.crew import CrewCreate, CrewUpdate, CrewResponse
 from src.services.crew_service import CrewService
 
 router = APIRouter(
@@ -183,6 +183,53 @@ async def debug_crew_data(
             "status": "error",
             "message": f"Unexpected error: {str(e)}"
         }
+
+
+@router.put("/{crew_id}", response_model=CrewResponse)
+async def update_crew(
+    crew_id: Annotated[UUID, Path(title="The ID of the crew to update")],
+    crew_update: CrewUpdate,
+    service: Annotated[CrewService, Depends(get_crew_service)],
+):
+    """
+    Update a crew.
+    
+    Args:
+        crew_id: ID of the crew to update
+        crew_update: Crew data for update (only provided fields will be updated)
+        service: Crew service injected by dependency
+        
+    Returns:
+        Updated crew
+        
+    Raises:
+        HTTPException: If crew not found
+    """
+    try:
+        updated_crew = await service.update_with_partial_data(crew_id, crew_update)
+        if not updated_crew:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="Crew not found",
+            )
+        return CrewResponse(
+            id=updated_crew.id,
+            name=updated_crew.name,
+            agent_ids=updated_crew.agent_ids,
+            task_ids=updated_crew.task_ids,
+            nodes=updated_crew.nodes or [],
+            edges=updated_crew.edges or [],
+            created_at=updated_crew.created_at.isoformat(),
+            updated_at=updated_crew.updated_at.isoformat()
+        )
+    except HTTPException as he:
+        raise he
+    except ValidationError as e:
+        logger.error(f"Validation error: {e.json()}")
+        raise HTTPException(status_code=422, detail=json.loads(e.json()))
+    except Exception as e:
+        logger.error(f"Error updating crew: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
 
 
 @router.delete("/{crew_id}", status_code=status.HTTP_204_NO_CONTENT)

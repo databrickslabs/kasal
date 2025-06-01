@@ -35,7 +35,6 @@ import EditIcon from '@mui/icons-material/Edit';
 import UploadIcon from '@mui/icons-material/Upload';
 import FileUploadIcon from '@mui/icons-material/FileUpload';
 import EditFlowForm from '../../Flow/EditFlowForm';
-import { useTabManagerStore } from '../../../store/tabManager';
 import { AgentService } from '../../../api/AgentService';
 import { TaskService } from '../../../api/TaskService';
 
@@ -293,13 +292,8 @@ const CrewFlowSelectionDialog: React.FC<CrewFlowSelectionDialogProps> = ({
         };
       });
       
-      // Update the active tab with crew info
-      const { activeTabId, updateTabCrewInfo } = useTabManagerStore.getState();
-      if (activeTabId) {
-        updateTabCrewInfo(activeTabId, selectedCrew.id, selectedCrew.name);
-      }
-
-      onCrewSelect(updatedNodes, updatedEdges);
+      // Pass the crew data to the callback - the tab creation will be handled there
+      onCrewSelect(updatedNodes, updatedEdges, selectedCrew.name, selectedCrew.id.toString());
       onClose();
       
       // Dispatch event to fit view after nodes are rendered

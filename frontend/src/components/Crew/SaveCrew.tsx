@@ -27,10 +27,152 @@ const SaveCrew: React.FC<SaveCrewComponentProps> = ({ nodes, edges, trigger, dis
       }
     };
     
+    const handleUpdateExistingCrew = async (event: Event) => {
+      if (disabled) return;
+      
+      const customEvent = event as CustomEvent;
+      const { tabId, crewId } = customEvent.detail;
+      
+      // Perform the update directly without showing the dialog
+      try {
+        console.log('SaveCrew: Updating existing crew', { tabId, crewId });
+        
+        const tab = useTabManagerStore.getState().getTab(tabId);
+        if (!tab) {
+          console.error('SaveCrew: Tab not found for update', tabId);
+          return;
+        }
+        
+        setIsSaving(true);
+        
+        // Remove duplicate edges before saving - use tab edges not component edges
+        const uniqueEdges = tab.edges.reduce((acc: Edge[], edge) => {
+          const edgeKey = `${edge.source}-${edge.target}`;
+          if (!acc.some(e => `${e.source}-${e.target}` === edgeKey)) {
+            acc.push(edge);
+          }
+          return acc;
+        }, []);
+
+        console.log('SaveCrew: About to update crew with data:', {
+          crewId,
+          name: tab.savedCrewName || tab.name,
+          nodes: tab.nodes.length,
+          edges: uniqueEdges.length
+        });
+
+        // Use the current tab's nodes and edges for update
+        const updatedCrew = await CrewService.updateCrew(crewId, {
+          name: tab.savedCrewName || tab.name,
+          agent_ids: [], // Will be calculated in the service
+          task_ids: [], // Will be calculated in the service
+          nodes: tab.nodes,
+          edges: uniqueEdges
+        });
+        
+        console.log('SaveCrew: Update successful', updatedCrew);
+        
+        // Update the tab's crew info and mark as clean
+        const { updateTabCrewInfo, markTabClean } = useTabManagerStore.getState();
+        updateTabCrewInfo(tabId, updatedCrew.id, updatedCrew.name);
+        markTabClean(tabId);
+        
+        // Dispatch completion event
+        setTimeout(() => {
+          const completeEvent = new CustomEvent('updateCrewComplete', {
+            detail: { crewId: updatedCrew.id, crewName: updatedCrew.name }
+          });
+          window.dispatchEvent(completeEvent);
+        }, 100);
+        
+      } catch (error) {
+        console.error('SaveCrew: Update failed', error);
+        // Could show an error notification here
+      } finally {
+        setIsSaving(false);
+      }
+    };
+
+    const handleUpdateExistingCrewByName = async (event: Event) => {
+      if (disabled) return;
+      
+      const customEvent = event as CustomEvent;
+      const { tabId, crewName } = customEvent.detail;
+      
+      try {
+        console.log('SaveCrew: Updating crew by name:', { tabId, crewName });
+        
+        const tab = useTabManagerStore.getState().getTab(tabId);
+        if (!tab) {
+          console.error('SaveCrew: Tab not found for update by name', tabId);
+          return;
+        }
+        
+        setIsSaving(true);
+        
+        // First, get all crews to find the one with matching name
+        const allCrews = await CrewService.getCrews();
+        const matchingCrew = allCrews.find(crew => crew.name === crewName);
+        
+        if (!matchingCrew) {
+          console.error('SaveCrew: No crew found with name:', crewName);
+          // Fallback to showing save dialog if crew not found
+          setOpen(true);
+          return;
+        }
+        
+        console.log('SaveCrew: Found matching crew:', matchingCrew.id, 'for name:', crewName);
+        
+        // Remove duplicate edges before saving
+        const uniqueEdges = tab.edges.reduce((acc: Edge[], edge) => {
+          const edgeKey = `${edge.source}-${edge.target}`;
+          if (!acc.some(e => `${e.source}-${e.target}` === edgeKey)) {
+            acc.push(edge);
+          }
+          return acc;
+        }, []);
+
+        // Use the found crew ID to update
+        const updatedCrew = await CrewService.updateCrew(matchingCrew.id.toString(), {
+          name: crewName,
+          agent_ids: [], // Will be calculated in the service
+          task_ids: [], // Will be calculated in the service
+          nodes: tab.nodes,
+          edges: uniqueEdges
+        });
+        
+        console.log('SaveCrew: Update by name successful', updatedCrew);
+        
+        // Update the tab's crew info and mark as clean
+        const { updateTabCrewInfo, markTabClean } = useTabManagerStore.getState();
+        updateTabCrewInfo(tabId, updatedCrew.id, updatedCrew.name);
+        markTabClean(tabId);
+        
+        // Dispatch completion event
+        setTimeout(() => {
+          const completeEvent = new CustomEvent('updateCrewComplete', {
+            detail: { crewId: updatedCrew.id, crewName: updatedCrew.name }
+          });
+          window.dispatchEvent(completeEvent);
+        }, 100);
+        
+      } catch (error) {
+        console.error('SaveCrew: Update by name failed', error);
+        // Fallback to showing save dialog on error
+        setOpen(true);
+      } finally {
+        setIsSaving(false);
+      }
+    };
+    
     window.addEventListener('openSaveCrewDialog', handleOpenSaveCrewDialog);
+    window.addEventListener('updateExistingCrew', handleUpdateExistingCrew);
+    window.addEventListener('updateExistingCrewByName', handleUpdateExistingCrewByName);
     
     return () => {
       window.removeEventListener('openSaveCrewDialog', handleOpenSaveCrewDialog);
+      window.removeEventListener('updateExistingCrew', handleUpdateExistingCrew);
+      window.removeEventListener('updateExistingCrewByName', handleUpdateExistingCrewByName);
     };
   }, [disabled]);
 

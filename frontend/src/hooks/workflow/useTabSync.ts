@@ -230,11 +230,16 @@ export const useTabSync = ({ nodes, edges, setNodes, setEdges }: UseTabSyncProps
 
   // Listen for crew save complete events
   useEffect(() => {
-    const handleSaveCrewComplete = (event: CustomEvent<{ crewId: string; crewName: string }>) => {
-      if (activeTabId && event.detail) {
-        const { crewId, crewName } = event.detail;
-        if (crewId && crewName) {
-          updateTabCrewInfo(activeTabId, crewId, crewName);
+    const handleSaveCrewComplete = (event: CustomEvent<{ crewId: string; crewName: string; tabId?: string }>) => {
+      if (event.detail) {
+        const { crewId, crewName, tabId } = event.detail;
+        const targetTabId = tabId || activeTabId; // Use specified tab ID or current active tab
+        
+        if (targetTabId && crewId && crewName && !isLoadingCrewRef.current) {
+          console.log('Updating crew info for tab:', targetTabId, 'with name:', crewName);
+          updateTabCrewInfo(targetTabId, crewId, crewName);
+        } else if (isLoadingCrewRef.current) {
+          console.log('Skipping crew info update during crew load');
         }
       }
     };

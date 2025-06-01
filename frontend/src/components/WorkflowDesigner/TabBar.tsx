@@ -131,17 +131,89 @@ const TabBar: React.FC<TabBarProps> = ({
   };
 
   const handleConfirmClose = (action: 'save' | 'discard' | 'cancel') => {
+    console.log('TabBar: handleConfirmClose called with action:', action, 'tabId:', closeConfirmDialog.tabId);
+    
     if (action === 'save') {
-      // Trigger save crew dialog
-      const event = new CustomEvent('openSaveCrewDialog');
-      window.dispatchEvent(event);
+      const tab = tabs.find(t => t.id === closeConfirmDialog.tabId);
+      console.log('TabBar: Found tab for close:', tab ? { id: tab.id, name: tab.name, savedCrewId: tab.savedCrewId, isDirty: tab.isDirty } : 'NOT FOUND');
       
-      // Listen for save completion
-      const handleSaveComplete = () => {
-        closeTab(closeConfirmDialog.tabId);
-        window.removeEventListener('saveCrewComplete', handleSaveComplete);
-      };
-      window.addEventListener('saveCrewComplete', handleSaveComplete);
+      if (tab && tab.savedCrewId) {
+        // Check if this is a legacy tab with 'loaded' placeholder
+        if (tab.savedCrewId === 'loaded') {
+          console.log('TabBar: Found legacy tab with "loaded" savedCrewId, attempting to find actual crew ID');
+          
+          // Look for agent nodes with agentId
+          const agentNode = tab.nodes.find(node => node.type === 'agentNode' && node.data?.agentId);
+          if (agentNode?.data?.agentId) {
+            console.log('TabBar: Found agent ID in tab:', agentNode.data.agentId);
+          }
+          
+          // Look for task nodes with taskId  
+          const taskNode = tab.nodes.find(node => node.type === 'taskNode' && node.data?.taskId);
+          if (taskNode?.data?.taskId) {
+            console.log('TabBar: Found task ID in tab:', taskNode.data.taskId);
+          }
+          
+          // If we have a tab name that matches a crew name, we can try to update by name
+          if (tab.name && (agentNode || taskNode)) {
+            console.log('TabBar: Attempting to update crew by name for legacy tab:', tab.name);
+            // Trigger update with special flag indicating this is a legacy tab update
+            const event = new CustomEvent('updateExistingCrewByName', {
+              detail: { tabId: closeConfirmDialog.tabId, crewName: tab.name }
+            });
+            window.dispatchEvent(event);
+            
+            // Listen for update completion
+            const handleUpdateComplete = () => {
+              console.log('TabBar: Legacy update complete, closing tab:', closeConfirmDialog.tabId);
+              closeTab(closeConfirmDialog.tabId);
+              window.removeEventListener('updateCrewComplete', handleUpdateComplete);
+            };
+            window.addEventListener('updateCrewComplete', handleUpdateComplete);
+          } else {
+            // Fallback to save dialog if we can't determine the crew
+            console.log('TabBar: Cannot determine crew ID, falling back to save dialog');
+            const event = new CustomEvent('openSaveCrewDialog');
+            window.dispatchEvent(event);
+            
+            // Listen for save completion
+            const handleSaveComplete = () => {
+              console.log('TabBar: Save complete, closing tab:', closeConfirmDialog.tabId);
+              closeTab(closeConfirmDialog.tabId);
+              window.removeEventListener('saveCrewComplete', handleSaveComplete);
+            };
+            window.addEventListener('saveCrewComplete', handleSaveComplete);
+          }
+        } else {
+          // This is an existing crew with valid ID - trigger update
+          console.log('TabBar: Triggering update for existing crew:', tab.savedCrewId);
+          const event = new CustomEvent('updateExistingCrew', {
+            detail: { tabId: closeConfirmDialog.tabId, crewId: tab.savedCrewId }
+          });
+          window.dispatchEvent(event);
+          
+          // Listen for update completion
+          const handleUpdateComplete = () => {
+            console.log('TabBar: Update complete, closing tab:', closeConfirmDialog.tabId);
+            closeTab(closeConfirmDialog.tabId);
+            window.removeEventListener('updateCrewComplete', handleUpdateComplete);
+          };
+          window.addEventListener('updateCrewComplete', handleUpdateComplete);
+        }
+      } else {
+        // This is a new crew - trigger save crew dialog
+        console.log('TabBar: Triggering save dialog for new crew');
+        const event = new CustomEvent('openSaveCrewDialog');
+        window.dispatchEvent(event);
+        
+        // Listen for save completion
+        const handleSaveComplete = () => {
+          console.log('TabBar: Save complete, closing tab:', closeConfirmDialog.tabId);
+          closeTab(closeConfirmDialog.tabId);
+          window.removeEventListener('saveCrewComplete', handleSaveComplete);
+        };
+        window.addEventListener('saveCrewComplete', handleSaveComplete);
+      }
     } else if (action === 'discard') {
       closeTab(closeConfirmDialog.tabId);
     }

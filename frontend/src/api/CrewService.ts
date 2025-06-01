@@ -356,6 +356,181 @@ export class CrewService {
     }
   }
 
+  static async updateCrew(id: string, crew: CrewSaveData): Promise<Crew> {
+    try {
+      // Helper function to convert boolean values to strings recursively
+      const convertBooleansToStrings = (obj: NodeData | Record<string, unknown>): unknown => {
+        if (typeof obj !== 'object' || obj === null) {
+          return typeof obj === 'boolean' ? String(obj) : obj;
+        }
+        
+        if (Array.isArray(obj)) {
+          return obj.map(item => convertBooleansToStrings(item as Record<string, unknown>));
+        }
+        
+        const result: Record<string, unknown> = {};
+        for (const [key, value] of Object.entries(obj)) {
+          // Special handling for knowledge_sources to preserve fileInfo
+          if (key === 'knowledge_sources' && Array.isArray(value)) {
+            console.log(`Processing knowledge_sources for node, found ${value.length} sources:`, value);
+            result[key] = value.map(source => {
+              if (source && typeof source === 'object') {
+                // Make sure fileInfo is preserved
+                const processed = convertBooleansToStrings(source as Record<string, unknown>);
+                return processed;
+              }
+              return source;
+            });
+            console.log('Processed knowledge_sources:', result[key]);
+          }
+          // Convert IDs to strings
+          else if ((key === 'taskId' || key === 'agentId') && value !== null) {
+            result[key] = String(value);
+          } else if (typeof value === 'object' && value !== null) {
+            result[key] = convertBooleansToStrings(value as Record<string, unknown>);
+          } else {
+            result[key] = typeof value === 'boolean' ? String(value) : value;
+          }
+        }
+        return result;
+      };
+
+      const agentNodes = crew.nodes.filter(node => node.type === 'agentNode');
+      const taskNodes = crew.nodes.filter(node => node.type === 'taskNode');
+      
+      // Validate agent IDs
+      const agent_ids = agentNodes.map(node => {
+        // Check for agentId field first
+        if (node.data?.agentId) {
+          return String(node.data.agentId);
+        }
+        
+        // If no agentId but node has an ID, use that
+        if (node.id) {
+          // If ID starts with "agent-", extract the uuid part
+          if (node.id.startsWith('agent-')) {
+            const parts = node.id.split('agent-');
+            if (parts.length > 1) {
+              return parts[1];
+            }
+          }
+          return node.id;
+        }
+        
+        console.warn(`Cannot extract valid ID from agent node ${node.id}`, node);
+        return null;
+      }).filter(Boolean) as string[];
+
+      // Validate task IDs
+      const task_ids = taskNodes.map(node => {
+        // Check for taskId field first
+        if (node.data?.taskId) {
+          return String(node.data.taskId);
+        }
+        
+        // If no taskId but node has an ID, use that
+        if (node.id) {
+          // If ID starts with "task-", extract the uuid part
+          if (node.id.startsWith('task-')) {
+            const parts = node.id.split('task-');
+            if (parts.length > 1) {
+              return parts[1];
+            }
+          }
+          return node.id;
+        }
+        
+        console.warn(`Cannot extract valid ID from task node ${node.id}`, node);
+        return null;
+      }).filter(Boolean) as string[];
+
+      // Clean up node data
+      const cleanedNodes = crew.nodes.map(node => {
+        if (!node.data) {
+          node.data = { label: node.id };
+        }
+
+        if (!node.data.label || typeof node.data.label !== 'string') {
+          node.data.label = node.id; // Use node id as fallback label
+        }
+
+        // Ensure tools is always an array
+        if (!node.data.tools || !Array.isArray(node.data.tools)) {
+          node.data.tools = [];
+        }
+
+        // Ensure context is always an array
+        if (!node.data.context || !Array.isArray(node.data.context)) {
+          node.data.context = [];
+        }
+
+        // Set async_execution to a string of boolean if not already set
+        if (node.data.async_execution === undefined) {
+          node.data.async_execution = "false";
+        } else {
+          node.data.async_execution = String(node.data.async_execution);
+        }
+
+        // Create a minimal node structure with original data
+        const cleanedNode = {
+          id: node.id,
+          type: node.type,
+          position: {
+            x: node.position.x,
+            y: node.position.y
+          },
+          data: convertBooleansToStrings(node.data as NodeData) as Record<string, unknown>
+        };
+
+        return cleanedNode;
+      });
+
+      // Clean up edges to bare minimum
+      const cleanedEdges = crew.edges.map(edge => ({
+        id: edge.id,
+        source: edge.source,
+        target: edge.target
+      }));
+
+      // Create the update data - only include changed fields
+      const updateData = {
+        name: crew.name,
+        agent_ids: agent_ids,
+        task_ids: task_ids,
+        nodes: cleanedNodes,
+        edges: cleanedEdges
+      };
+
+      console.log('Updating crew with data:', JSON.stringify(updateData, null, 2));
+
+      const response = await API.put(`/crews/${id}`, updateData);
+      const updatedCrew: CrewResponse = response.data;
+      
+      return {
+        id: updatedCrew.id.toString(),
+        name: updatedCrew.name,
+        agent_ids: updatedCrew.agent_ids,
+        task_ids: updatedCrew.task_ids,
+        nodes: updatedCrew.nodes || cleanedNodes,
+        edges: updatedCrew.edges || cleanedEdges,
+        created_at: updatedCrew.created_at,
+        updated_at: updatedCrew.updated_at,
+      };
+    } catch (error) {
+      console.error('Error updating crew:', error);
+      if (axios.isAxiosError(error) && error.response) {
+        const errorData = error.response.data;
+        console.error('Server validation error details:', {
+          status: error.response.status,
+          data: errorData,
+          detail: errorData.detail,
+          fullDetail: JSON.stringify(errorData.detail, null, 2)
+        });
+      }
+      throw error;
+    }
+  }
+
   static async deleteCrew(id: string): Promise<boolean> {
     try {
       await API.delete(`/crews/${id}`);

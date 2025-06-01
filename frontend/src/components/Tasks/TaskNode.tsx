@@ -10,6 +10,7 @@ import { Task } from '../../api/TaskService';
 import { ToolService, Tool } from '../../api/ToolService';
 import TaskForm from './TaskForm';
 import { Theme } from '@mui/material/styles';
+import { useTabDirtyState } from '../../hooks/workflow/useTabDirtyState';
 
 export interface TaskNodeData {
   label?: string;
@@ -81,6 +82,9 @@ const TaskNode: React.FC<TaskNodeProps> = ({ data, id }) => {
   
   // Local selection state
   const [isSelected, setIsSelected] = useState(false);
+
+  // Tab dirty state management
+  const { markCurrentTabDirty } = useTabDirtyState();
   
   // Add debugging logs on component mount
   useEffect(() => {
@@ -474,6 +478,9 @@ const TaskNode: React.FC<TaskNodeProps> = ({ data, id }) => {
               initialData={handlePrepareTaskData()}
               onCancel={() => setIsEditing(false)}
               onTaskSaved={(savedTask) => {
+                // Mark tab as dirty since task was modified
+                markCurrentTabDirty();
+                
                 // Update the node with the saved task data
                 setNodes(nodes => 
                   nodes.map(node => {

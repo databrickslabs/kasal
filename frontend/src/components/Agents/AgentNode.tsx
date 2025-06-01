@@ -12,6 +12,7 @@ import AgentForm from './AgentForm';
 import { ToolService } from '../../api/ToolService';
 import { Tool, KnowledgeSource } from '../../types/agent';
 import { Theme } from '@mui/material/styles';
+import { useTabDirtyState } from '../../hooks/workflow/useTabDirtyState';
 
 interface AgentNodeData {
   agentId: string;
@@ -57,6 +58,9 @@ const AgentNode: React.FC<{ data: AgentNodeData; id: string }> = ({ data, id }) 
 
   // Local selection state
   const [isSelected, setIsSelected] = useState(false);
+
+  // Tab dirty state management
+  const { markCurrentTabDirty } = useTabDirtyState();
 
   useEffect(() => {
     loadTools();
@@ -546,6 +550,8 @@ const AgentNode: React.FC<{ data: AgentNodeData; id: string }> = ({ data, id }) 
               onAgentSaved={(updatedAgent) => {
                 setIsEditing(false);
                 if (updatedAgent) {
+                  // Mark tab as dirty since agent was modified
+                  markCurrentTabDirty();
                   // Direct update with the received agent data
                   handleUpdateNode(updatedAgent);
                 }

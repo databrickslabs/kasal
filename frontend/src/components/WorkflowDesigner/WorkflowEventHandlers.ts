@@ -493,26 +493,44 @@ export const useEventBindings = (
     }
   }, [handleRunClick]);
 
-  const handleCrewSelectWrapper = useCallback((nodes: Node[], edges: Edge[], crewName?: string) => {
-    console.log('WorkflowDesigner - Handling crew select:', { nodes, edges, crewName });
+  const handleCrewSelectWrapper = useCallback((nodes: Node[], edges: Edge[], crewName?: string, crewId?: string) => {
+    console.log('WorkflowDesigner - Handling crew select:', { nodes, edges, crewName, crewId });
     
     // Notify that crew loading has started
     window.dispatchEvent(new CustomEvent('crewLoadStarted'));
     
     // Get the tab manager store
-    const { createTab, updateTabNodes, updateTabEdges, setActiveTab } = 
+    const { createTab, updateTabNodes, updateTabEdges, setActiveTab, getActiveTab, updateTabCrewInfo } = 
       useTabManagerStore.getState();
     
-    // Create a new tab for the loaded crew
-    const newTabId = createTab(crewName || 'Loaded Crew');
+    // Save the current active tab ID before creating new one
+    const previousActiveTabId = getActiveTab()?.id;
+    console.log('Previous active tab ID:', previousActiveTabId);
     
-    // Set the new tab as active
+    // Create a new tab for the loaded crew with the crew name
+    const actualCrewName = crewName || 'Loaded Crew';
+    const newTabId = createTab(actualCrewName);
+    console.log('Created new tab with ID:', newTabId, 'and name:', actualCrewName);
+    
+    // Set the new tab as active immediately
     setActiveTab(newTabId);
+    console.log('Set new tab as active:', newTabId);
     
     // Update the new tab with the loaded nodes and edges
     setTimeout(() => {
+      // Double-check that we're updating the correct tab
+      const currentActiveTab = getActiveTab();
+      console.log('Current active tab when updating:', currentActiveTab?.id, currentActiveTab?.name);
+      
       updateTabNodes(newTabId, nodes);
       updateTabEdges(newTabId, edges);
+      
+      // If we have a crew name and ID, mark this tab as having loaded crew content
+      if (crewName && crewId) {
+        console.log('Marking tab as loaded crew with name:', crewName, 'and ID:', crewId);
+        // Set the actual crew ID instead of placeholder
+        updateTabCrewInfo(newTabId, crewId, crewName);
+      }
       
       // Also update the current state to trigger re-render
       setNodes(nodes);
