@@ -474,20 +474,29 @@ const WorkflowDesigner: React.FC<WorkflowDesignerProps> = (): JSX.Element => {
 
             {/* Chat Panel positioned to the left of the RightSidebar */}
             {showChatPanel && (
-              <Box sx={{ 
-                position: 'absolute',
-                top: 0,
-                right: 48, // Position to the left of RightSidebar (48px width)
-                width: '350px',
-                height: '100%',
-                display: 'flex',
-                flexDirection: 'column',
-                overflow: 'hidden',
-                borderLeft: 1,
-                borderColor: 'divider',
-                backgroundColor: 'background.paper',
-                zIndex: 6 // Higher than RightSidebar (5)
-              }}>
+              <Box 
+                onMouseEnter={() => {
+                  // Notify RightSidebar that mouse is over chat
+                  window.postMessage({ type: 'chat-hover-state', isHovering: true }, '*');
+                }}
+                onMouseLeave={() => {
+                  // Notify RightSidebar that mouse left chat
+                  window.postMessage({ type: 'chat-hover-state', isHovering: false }, '*');
+                }}
+                sx={{ 
+                  position: 'absolute',
+                  top: 0,
+                  right: 48, // Position to the left of RightSidebar (48px width)
+                  width: '350px',
+                  height: '100%',
+                  display: 'flex',
+                  flexDirection: 'column',
+                  overflow: 'hidden',
+                  borderLeft: 1,
+                  borderColor: 'divider',
+                  backgroundColor: 'background.paper',
+                  zIndex: 6 // Higher than RightSidebar (5)
+                }}>
                 <ChatPanel onNodesGenerated={(newNodes, newEdges) => {
                   setNodes(currentNodes => [...currentNodes, ...newNodes]);
                   setEdges(currentEdges => [...currentEdges, ...newEdges]);

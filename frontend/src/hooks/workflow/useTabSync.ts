@@ -97,8 +97,15 @@ export const useTabSync = ({ nodes, edges, setNodes, setEdges }: UseTabSyncProps
   // Sync tab data to flow manager when active tab changes
   useEffect(() => {
     if (activeTabId !== lastActiveTabIdRef.current) {
+      // Don't interfere if we're currently loading a crew
+      if (isLoadingCrewRef.current) {
+        console.log('Skipping tab sync during crew load');
+        lastActiveTabIdRef.current = activeTabId;
+        return;
+      }
+
       // Save current state to the previous tab before switching
-      if (lastActiveTabIdRef.current) {
+      if (lastActiveTabIdRef.current && !isLoadingCrewRef.current) {
         saveStateForTab(lastActiveTabIdRef.current, lastNodesRef.current, lastEdgesRef.current);
       }
 
@@ -121,38 +128,41 @@ export const useTabSync = ({ nodes, edges, setNodes, setEdges }: UseTabSyncProps
           data: edge.data ? { ...edge.data } : undefined
         }));
         
-        // Set the nodes and edges with proper state restoration
-        setNodes(restoredNodes);
-        setEdges(restoredEdges);
-        
-        // Update refs immediately
-        lastNodesRef.current = restoredNodes;
-        lastEdgesRef.current = restoredEdges;
-        
-        // For new empty tabs, ensure the canvas is cleared
-        if (restoredNodes.length === 0 && restoredEdges.length === 0) {
-          // Force clear the canvas for empty tabs
-          setTimeout(() => {
-            setNodes([]);
-            setEdges([]);
-            lastNodesRef.current = [];
-            lastEdgesRef.current = [];
-          }, 50);
-        }
-        
-        // Trigger fitView after nodes are restored to ensure proper viewport
-        setTimeout(() => {
-          if (restoredNodes.length > 0) {
-            window.dispatchEvent(new CustomEvent('fitViewToNodes', { bubbles: true }));
+        // Only restore if we're not loading a crew
+        if (!isLoadingCrewRef.current) {
+          // Set the nodes and edges with proper state restoration
+          setNodes(restoredNodes);
+          setEdges(restoredEdges);
+          
+          // Update refs immediately
+          lastNodesRef.current = restoredNodes;
+          lastEdgesRef.current = restoredEdges;
+          
+          // For new empty tabs, ensure the canvas is cleared
+          if (restoredNodes.length === 0 && restoredEdges.length === 0) {
+            // Force clear the canvas for empty tabs
+            setTimeout(() => {
+              setNodes([]);
+              setEdges([]);
+              lastNodesRef.current = [];
+              lastEdgesRef.current = [];
+            }, 50);
           }
-        }, 300);
-        
-        // Also trigger a ReactFlow instance update to ensure proper synchronization
-        setTimeout(() => {
-          window.dispatchEvent(new CustomEvent('updateReactFlowInstance', { 
-            detail: { nodes: restoredNodes, edges: restoredEdges }
-          }));
-        }, 100);
+          
+          // Trigger fitView after nodes are restored to ensure proper viewport
+          setTimeout(() => {
+            if (restoredNodes.length > 0) {
+              window.dispatchEvent(new CustomEvent('fitViewToNodes', { bubbles: true }));
+            }
+          }, 300);
+          
+          // Also trigger a ReactFlow instance update to ensure proper synchronization
+          setTimeout(() => {
+            window.dispatchEvent(new CustomEvent('updateReactFlowInstance', { 
+              detail: { nodes: restoredNodes, edges: restoredEdges }
+            }));
+          }, 100);
+        }
         
         // Reset the switching flag after a delay to allow ReactFlow to process
         setTimeout(() => {
@@ -238,17 +248,24 @@ export const useTabSync = ({ nodes, edges, setNodes, setEdges }: UseTabSyncProps
 
   // Listen for crew load events to prevent marking as dirty during load
   useEffect(() => {
-    const handleCrewLoad = () => {
+    const handleCrewLoadStart = () => {
+      console.log('Crew load started - disabling sync');
       isLoadingCrewRef.current = true;
-      setTimeout(() => {
-        isLoadingCrewRef.current = false;
-      }, 1000); // Give more time for crew loading to complete
     };
 
-    window.addEventListener('crewLoadStarted', handleCrewLoad);
+    const handleCrewLoadComplete = () => {
+      console.log('Crew load completed - re-enabling sync');
+      setTimeout(() => {
+        isLoadingCrewRef.current = false;
+      }, 200); // Small delay to ensure all updates are processed
+    };
+
+    window.addEventListener('crewLoadStarted', handleCrewLoadStart);
+    window.addEventListener('crewLoadCompleted', handleCrewLoadComplete);
     
     return () => {
-      window.removeEventListener('crewLoadStarted', handleCrewLoad);
+      window.removeEventListener('crewLoadStarted', handleCrewLoadStart);
+      window.removeEventListener('crewLoadCompleted', handleCrewLoadComplete);
     };
   }, []);
 

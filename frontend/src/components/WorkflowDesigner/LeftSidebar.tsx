@@ -563,6 +563,7 @@ const LeftSidebar: React.FC<LeftSidebarProps> = ({
         display: 'flex',
         flexDirection: 'row'
       }}
+      onMouseLeave={() => setActiveSection(null)}
     >
           {/* Activity Bar (like VS Code) */}
           <Paper

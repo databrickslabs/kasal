@@ -6,6 +6,7 @@ import { createEdge } from '../../utils/edgeUtils';
 import { FlowService } from '../../api/FlowService';
 import { createUniqueEdges } from './WorkflowUtils';
 import { _generateCrewPositions, validateNodePositions } from '../../utils/flowWizardUtils';
+import { useTabManagerStore } from '../../store/tabManager';
 
 // Context menu handlers
 export const useContextMenuHandlers = () => {
@@ -492,10 +493,41 @@ export const useEventBindings = (
     }
   }, [handleRunClick]);
 
-  const handleCrewSelectWrapper = useCallback((nodes: Node[], edges: Edge[]) => {
-    console.log('WorkflowDesigner - Handling crew select:', { nodes, edges });
-    setNodes(nodes);
-    setEdges(edges);
+  const handleCrewSelectWrapper = useCallback((nodes: Node[], edges: Edge[], crewName?: string) => {
+    console.log('WorkflowDesigner - Handling crew select:', { nodes, edges, crewName });
+    
+    // Notify that crew loading has started
+    window.dispatchEvent(new CustomEvent('crewLoadStarted'));
+    
+    // Get the tab manager store
+    const { createTab, updateTabNodes, updateTabEdges, setActiveTab } = 
+      useTabManagerStore.getState();
+    
+    // Create a new tab for the loaded crew
+    const newTabId = createTab(crewName || 'Loaded Crew');
+    
+    // Set the new tab as active
+    setActiveTab(newTabId);
+    
+    // Update the new tab with the loaded nodes and edges
+    setTimeout(() => {
+      updateTabNodes(newTabId, nodes);
+      updateTabEdges(newTabId, edges);
+      
+      // Also update the current state to trigger re-render
+      setNodes(nodes);
+      setEdges(edges);
+      
+      // Fit view to the loaded nodes
+      setTimeout(() => {
+        window.dispatchEvent(new CustomEvent('fitViewToNodes'));
+      }, 200);
+      
+      // Notify that crew loading has completed
+      setTimeout(() => {
+        window.dispatchEvent(new CustomEvent('crewLoadCompleted'));
+      }, 500);
+    }, 100);
   }, [setNodes, setEdges]);
 
   // Update event listeners to use the wrapper

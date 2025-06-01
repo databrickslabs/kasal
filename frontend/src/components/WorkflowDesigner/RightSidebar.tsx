@@ -65,6 +65,8 @@ const RightSidebar: React.FC<RightSidebarProps> = ({
   const theme = useTheme();
   const [activeSection, setActiveSection] = useState<string | null>(null);
   const [animateAIAssistant, setAnimateAIAssistant] = useState(true);
+  const [shouldKeepChatOpen, setShouldKeepChatOpen] = useState(false);
+  const [chatOpenedByClick, setChatOpenedByClick] = useState(false);
   const { crewAIFlowEnabled } = useFlowConfigStore();
 
   useEffect(() => {
@@ -74,6 +76,25 @@ const RightSidebar: React.FC<RightSidebarProps> = ({
       return () => clearTimeout(timeout);
     }
   }, [animateAIAssistant]);
+
+  // Listen for messages from the chat panel about mouse hover state
+  useEffect(() => {
+    const handleMessage = (event: MessageEvent) => {
+      if (event.data?.type === 'chat-hover-state') {
+        setShouldKeepChatOpen(event.data.isHovering);
+      }
+    };
+
+    window.addEventListener('message', handleMessage);
+    return () => window.removeEventListener('message', handleMessage);
+  }, []);
+
+  // Reset chatOpenedByClick when chat is closed
+  useEffect(() => {
+    if (!isChatOpen) {
+      setChatOpenedByClick(false);
+    }
+  }, [isChatOpen]);
 
   const handleSectionClick = (sectionId: string) => {
     setActiveSection(activeSection === sectionId ? null : sectionId);
@@ -241,9 +262,13 @@ const RightSidebar: React.FC<RightSidebarProps> = ({
       )
     },
     {
-      id: 'chat',
-      icon: <SmartToyIcon />,
-      tooltip: 'AI Assistant',
+      id: 'separator1',
+      isSeparator: true
+    },
+    {
+      id: 'workflow',
+      icon: <WorkflowIcon />,
+      tooltip: 'Workflow Actions',
       content: (
         <Box
           sx={{
@@ -260,8 +285,22 @@ const RightSidebar: React.FC<RightSidebarProps> = ({
             boxSizing: 'border-box',
             px: 1
           }}>
+            <Typography 
+              variant="subtitle2" 
+              sx={{ 
+                color: theme.palette.primary.main, 
+                mb: 1,
+                fontWeight: 600,
+                textTransform: 'uppercase',
+                letterSpacing: '0.5px',
+                fontSize: '0.7rem'
+              }}
+            >
+              Save & Load
+            </Typography>
+            
             <Box
-              onClick={onToggleChat}
+              onClick={onSaveCrewClick}
               sx={{
                 display: 'flex',
                 alignItems: 'center',
@@ -270,8 +309,8 @@ const RightSidebar: React.FC<RightSidebarProps> = ({
                 px: 1,
                 borderRadius: 1,
                 cursor: 'pointer',
-                border: `1px solid ${isChatOpen ? theme.palette.primary.main : theme.palette.divider}`,
-                backgroundColor: isChatOpen ? 'action.selected' : 'background.paper',
+                border: `1px solid ${theme.palette.divider}`,
+                backgroundColor: 'background.paper',
                 transition: 'all 0.2s ease-in-out',
                 width: '220px',
                 boxSizing: 'border-box',
@@ -282,9 +321,10 @@ const RightSidebar: React.FC<RightSidebarProps> = ({
                   transform: 'translateY(-1px)',
                   boxShadow: theme.shadows[2],
                 },
+                mb: 1
               }}
             >
-              <SmartToyIcon 
+              <SaveIcon 
                 sx={{ 
                   fontSize: '1.2rem', 
                   color: theme.palette.primary.main 
@@ -298,7 +338,7 @@ const RightSidebar: React.FC<RightSidebarProps> = ({
                     color: 'text.primary'
                   }}
                 >
-                  {isChatOpen ? 'Hide AI Assistant' : 'Show AI Assistant'}
+                  Save Crew
                 </Typography>
                 <Typography 
                   variant="caption" 
@@ -307,7 +347,59 @@ const RightSidebar: React.FC<RightSidebarProps> = ({
                     fontSize: '0.7rem'
                   }}
                 >
-                  Get help with workflow design and automation
+                  Save current workflow
+                </Typography>
+              </Box>
+            </Box>
+
+            <Box
+              onClick={() => setIsCrewDialogOpen?.(true)}
+              sx={{
+                display: 'flex',
+                alignItems: 'center',
+                gap: 1,
+                py: 1,
+                px: 1,
+                borderRadius: 1,
+                cursor: 'pointer',
+                border: `1px solid ${theme.palette.divider}`,
+                backgroundColor: 'background.paper',
+                transition: 'all 0.2s ease-in-out',
+                width: '220px',
+                boxSizing: 'border-box',
+                ml: 2,
+                '&:hover': {
+                  backgroundColor: 'action.hover',
+                  borderColor: theme.palette.primary.main,
+                  transform: 'translateY(-1px)',
+                  boxShadow: theme.shadows[2],
+                }
+              }}
+            >
+              <MenuBookIcon 
+                sx={{ 
+                  fontSize: '1.2rem', 
+                  color: theme.palette.primary.main 
+                }} 
+              />
+              <Box>
+                <Typography 
+                  variant="body2" 
+                  sx={{ 
+                    fontWeight: 500,
+                    color: 'text.primary'
+                  }}
+                >
+                  Open Workflow
+                </Typography>
+                <Typography 
+                  variant="caption" 
+                  sx={{ 
+                    color: 'text.secondary',
+                    fontSize: '0.7rem'
+                  }}
+                >
+                  Load saved crew or flow
                 </Typography>
               </Box>
             </Box>
@@ -687,9 +779,13 @@ const RightSidebar: React.FC<RightSidebarProps> = ({
       )
     },
     {
-      id: 'workflow',
-      icon: <WorkflowIcon />,
-      tooltip: 'Workflow Actions',
+      id: 'separator2',
+      isSeparator: true
+    },
+    {
+      id: 'chat',
+      icon: <SmartToyIcon />,
+      tooltip: 'AI Assistant',
       content: (
         <Box
           sx={{
@@ -706,22 +802,8 @@ const RightSidebar: React.FC<RightSidebarProps> = ({
             boxSizing: 'border-box',
             px: 1
           }}>
-            <Typography 
-              variant="subtitle2" 
-              sx={{ 
-                color: theme.palette.primary.main, 
-                mb: 1,
-                fontWeight: 600,
-                textTransform: 'uppercase',
-                letterSpacing: '0.5px',
-                fontSize: '0.7rem'
-              }}
-            >
-              Save & Load
-            </Typography>
-            
             <Box
-              onClick={onSaveCrewClick}
+              onClick={onToggleChat}
               sx={{
                 display: 'flex',
                 alignItems: 'center',
@@ -730,8 +812,8 @@ const RightSidebar: React.FC<RightSidebarProps> = ({
                 px: 1,
                 borderRadius: 1,
                 cursor: 'pointer',
-                border: `1px solid ${theme.palette.divider}`,
-                backgroundColor: 'background.paper',
+                border: `1px solid ${isChatOpen ? theme.palette.primary.main : theme.palette.divider}`,
+                backgroundColor: isChatOpen ? 'action.selected' : 'background.paper',
                 transition: 'all 0.2s ease-in-out',
                 width: '220px',
                 boxSizing: 'border-box',
@@ -742,10 +824,9 @@ const RightSidebar: React.FC<RightSidebarProps> = ({
                   transform: 'translateY(-1px)',
                   boxShadow: theme.shadows[2],
                 },
-                mb: 1
               }}
             >
-              <SaveIcon 
+              <SmartToyIcon 
                 sx={{ 
                   fontSize: '1.2rem', 
                   color: theme.palette.primary.main 
@@ -759,7 +840,7 @@ const RightSidebar: React.FC<RightSidebarProps> = ({
                     color: 'text.primary'
                   }}
                 >
-                  Save Crew
+                  {isChatOpen ? 'Hide AI Assistant' : 'Show AI Assistant'}
                 </Typography>
                 <Typography 
                   variant="caption" 
@@ -768,65 +849,17 @@ const RightSidebar: React.FC<RightSidebarProps> = ({
                     fontSize: '0.7rem'
                   }}
                 >
-                  Save current workflow
-                </Typography>
-              </Box>
-            </Box>
-
-            <Box
-              onClick={() => setIsCrewDialogOpen?.(true)}
-              sx={{
-                display: 'flex',
-                alignItems: 'center',
-                gap: 1,
-                py: 1,
-                px: 1,
-                borderRadius: 1,
-                cursor: 'pointer',
-                border: `1px solid ${theme.palette.divider}`,
-                backgroundColor: 'background.paper',
-                transition: 'all 0.2s ease-in-out',
-                width: '220px',
-                boxSizing: 'border-box',
-                ml: 2,
-                '&:hover': {
-                  backgroundColor: 'action.hover',
-                  borderColor: theme.palette.primary.main,
-                  transform: 'translateY(-1px)',
-                  boxShadow: theme.shadows[2],
-                }
-              }}
-            >
-              <MenuBookIcon 
-                sx={{ 
-                  fontSize: '1.2rem', 
-                  color: theme.palette.primary.main 
-                }} 
-              />
-              <Box>
-                <Typography 
-                  variant="body2" 
-                  sx={{ 
-                    fontWeight: 500,
-                    color: 'text.primary'
-                  }}
-                >
-                  Open Workflow
-                </Typography>
-                <Typography 
-                  variant="caption" 
-                  sx={{ 
-                    color: 'text.secondary',
-                    fontSize: '0.7rem'
-                  }}
-                >
-                  Load saved crew or flow
+                  Get help with workflow design and automation
                 </Typography>
               </Box>
             </Box>
           </Box>
         </Box>
       )
+    },
+    {
+      id: 'separator3',
+      isSeparator: true
     },
     {
       id: 'schedule',
@@ -1030,6 +1063,13 @@ const RightSidebar: React.FC<RightSidebarProps> = ({
           display: 'flex',
           flexDirection: 'row'
         }}
+        onMouseLeave={() => {
+          setActiveSection(null);
+          // Only close chat if it was opened by hover (not click) and mouse is not over the chat panel
+          if (isChatOpen && !shouldKeepChatOpen && !chatOpenedByClick) {
+            onToggleChat();
+          }
+        }}
       >
         {/* Side Panel Content */}
         {activeSection && (
@@ -1071,63 +1111,89 @@ const RightSidebar: React.FC<RightSidebarProps> = ({
             borderRadius: 0
           }}
         >
-          {sidebarItems.map((item, idx) => (
+          {sidebarItems.map((item) => (
             <React.Fragment key={item.id}>
-              <Tooltip title={item.tooltip} placement="left">
-                <IconButton
-                  onClick={() => {
-                    if (item.id === 'chat') {
-                      onToggleChat();
-                    } else if (item.id === 'logs') {
-                      // Close chat if it's open when opening logs
-                      if (isChatOpen) {
+              {item.isSeparator ? (
+                <Divider sx={{ width: '80%', my: 0.5 }} />
+              ) : (
+                <Tooltip title={item.tooltip} placement="left">
+                  <IconButton
+                    onMouseEnter={() => {
+                      // Special handling for chat - open it directly only if not opened by click
+                      if (item.id === 'chat' && !isChatOpen) {
+                        // Don't set chatOpenedByClick when opening via hover
                         onToggleChat();
                       }
-                      onOpenLogsDialog();
-                    } else if (item.id === 'schedule') {
-                      // Close chat if it's open when opening schedule
-                      if (isChatOpen) {
-                        onToggleChat();
+                      // For other icons, close chat if it's open (unless opened by click) and set active section
+                      else if (item.id !== 'chat') {
+                        if (isChatOpen && !shouldKeepChatOpen && !chatOpenedByClick) {
+                          onToggleChat();
+                        }
+                        // Don't set active section for logs and schedule since they open dialogs
+                        if (item.id !== 'logs' && item.id !== 'schedule') {
+                          setActiveSection(item.id);
+                        }
                       }
-                      onOpenScheduleDialog();
-                    } else {
-                      // Close chat if it's open when switching to other sections
-                      if (isChatOpen) {
+                    }}
+                    onClick={() => {
+                      if (item.id === 'chat') {
+                        // Toggle the click state when clicking chat
+                        setChatOpenedByClick(!isChatOpen);
                         onToggleChat();
+                      } else if (item.id === 'logs') {
+                        // Close chat if it's open when opening logs
+                        if (isChatOpen) {
+                          setChatOpenedByClick(false);
+                          onToggleChat();
+                        }
+                        onOpenLogsDialog();
+                      } else if (item.id === 'schedule') {
+                        // Close chat if it's open when opening schedule
+                        if (isChatOpen) {
+                          setChatOpenedByClick(false);
+                          onToggleChat();
+                        }
+                        onOpenScheduleDialog();
+                      } else {
+                        // Close chat if it's open when switching to other sections
+                        if (isChatOpen) {
+                          setChatOpenedByClick(false);
+                          onToggleChat();
+                        }
+                        handleSectionClick(item.id);
                       }
-                      handleSectionClick(item.id);
-                    }
-                  }}
-                  sx={{
-                    width: 40,
-                    height: 40,
-                    mb: 1,
-                    color: item.id === 'chat' ? theme.palette.primary.main : 'text.secondary',
-                    backgroundColor: (item.id === 'chat' && isChatOpen) || activeSection === item.id 
-                      ? 'action.selected'
-                      : 'transparent',
-                    borderRight: (item.id === 'chat' && isChatOpen) || activeSection === item.id 
-                      ? `2px solid ${theme.palette.primary.main}`
-                      : '2px solid transparent',
-                    borderRadius: '50%',
-                    display: 'flex',
-                    alignItems: 'center',
-                    justifyContent: 'center',
-                    transition: 'all 0.2s cubic-bezier(.4,2,.6,1)',
-                    '&:hover': {
-                      backgroundColor: 'action.hover',
-                      color: item.id === 'chat' ? theme.palette.primary.main : 'text.primary',
-                    },
-                    animation: item.id === 'chat' && animateAIAssistant ? 'ai-bounce 1.2s' : 'none',
-                  }}
-                >
-                  {item.id === 'chat' ? (
-                    <SmartToyIcon sx={{ fontSize: '2rem', color: theme.palette.primary.main }} />
-                  ) : (
-                    item.icon
-                  )}
-                </IconButton>
-              </Tooltip>
+                    }}
+                    sx={{
+                      width: 40,
+                      height: 40,
+                      mb: 1,
+                      color: item.id === 'chat' ? theme.palette.primary.main : 'text.secondary',
+                      backgroundColor: (item.id === 'chat' && isChatOpen) || activeSection === item.id 
+                        ? 'action.selected'
+                        : 'transparent',
+                      borderRight: (item.id === 'chat' && isChatOpen) || activeSection === item.id 
+                        ? `2px solid ${theme.palette.primary.main}`
+                        : '2px solid transparent',
+                      borderRadius: '50%',
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                      transition: 'all 0.2s cubic-bezier(.4,2,.6,1)',
+                      '&:hover': {
+                        backgroundColor: 'action.hover',
+                        color: item.id === 'chat' ? theme.palette.primary.main : 'text.primary',
+                      },
+                      animation: item.id === 'chat' && animateAIAssistant ? 'ai-bounce 1.2s' : 'none',
+                    }}
+                  >
+                    {item.id === 'chat' ? (
+                      <SmartToyIcon sx={{ fontSize: '2rem', color: theme.palette.primary.main }} />
+                    ) : (
+                      item.icon
+                    )}
+                  </IconButton>
+                </Tooltip>
+              )}
             </React.Fragment>
           ))}
         </Paper>
@@ -1136,4 +1202,4 @@ const RightSidebar: React.FC<RightSidebarProps> = ({
   );
 };
 
-export default RightSidebar; 
+export default RightSidebar;
