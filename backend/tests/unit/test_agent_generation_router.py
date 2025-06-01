@@ -45,7 +45,7 @@ async def test_generate_agent_success(client, mock_agent_generation_service):
         "name": "Research Agent",
         "role": "Research Assistant",
         "goal": "Find relevant information from the web",
-        "backstory": "I am an AI assistant specialized in research",
+        "backstory": "I am Kasal specialized in research",
         "tools": ["web_search", "document_analyzer"],
         "advanced_config": {
             "llm": "gpt-4o-mini",

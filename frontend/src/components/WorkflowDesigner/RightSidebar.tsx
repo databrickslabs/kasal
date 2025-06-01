@@ -785,7 +785,7 @@ const RightSidebar: React.FC<RightSidebarProps> = ({
     {
       id: 'chat',
       icon: <SmartToyIcon />,
-      tooltip: 'AI Assistant',
+      tooltip: 'Kasal',
       content: (
         <Box
           sx={{
@@ -840,7 +840,7 @@ const RightSidebar: React.FC<RightSidebarProps> = ({
                     color: 'text.primary'
                   }}
                 >
-                  {isChatOpen ? 'Hide AI Assistant' : 'Show AI Assistant'}
+                  {isChatOpen ? 'Hide Kasal' : 'Show Kasal'}
                 </Typography>
                 <Typography 
                   variant="caption" 

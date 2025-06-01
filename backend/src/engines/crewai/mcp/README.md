@@ -51,7 +51,7 @@ Example agent configuration:
 {
     "role": "Assistant",
     "goal": "Help the user with their request",
-    "backstory": "You are an intelligent AI assistant.",
+    "backstory": "You are Kasal, an intelligent assistant.",
     "tools": ["mcp"]  // This will include all enabled MCP servers
 }
 ```

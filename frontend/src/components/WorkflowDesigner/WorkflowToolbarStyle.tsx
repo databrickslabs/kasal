@@ -90,7 +90,7 @@ export const RightPanelToggle: React.FC<PanelToggleProps> = ({
   );
 };
 
-// Component for toggling chat panel (AI Assistant)
+// Component for toggling chat panel (Kasal)
 export const ChatPanelToggle: React.FC<PanelToggleProps> = ({ 
   isVisible, 
   togglePanel,

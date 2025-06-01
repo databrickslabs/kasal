@@ -914,7 +914,7 @@ const CrewCanvas: React.FC<CrewCanvasProps> = ({
       <LLMSelectionDialog
         open={isLLMSelectionDialogOpen}
         onClose={() => setIsLLMSelectionDialogOpen(false)}
-        onSelectLLM={handleChangeLLM}
+        onSelectLLM={_handleUpdateAllAgentsLLM}
       />
       <MaxRPMSelectionDialog
         open={isMaxRPMSelectionDialogOpen}
@@ -924,7 +924,7 @@ const CrewCanvas: React.FC<CrewCanvasProps> = ({
       <ToolSelectionDialog
         open={isToolDialogOpen}
         onClose={() => setIsToolDialogOpen(false)}
-        onSelectTools={handleChangeTools}
+        onSelectTools={_handleChangeToolsForAllAgents}
       />
       <MCPConfigDialog
         open={isMCPConfigDialogOpen}

@@ -525,7 +525,7 @@ const WorkflowDesigner: React.FC<WorkflowDesignerProps> = (): JSX.Element => {
         
 
 
-        {/* Jobs Panel with Run History and AI Assistant */}
+        {/* Jobs Panel with Run History and Kasal */}
         {showRunHistory && (
           <Box sx={{ 
             height: '200px', // Adjusted to fit 4 rows, header, and pagination

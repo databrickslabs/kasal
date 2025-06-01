@@ -42,7 +42,7 @@ const ChatPanel: React.FC<ChatPanelProps> = ({ onNodesGenerated }) => {
           }}
         >
           <SmartToyIcon fontSize="small" />
-          AI Assistantt
+          Kasal
         </Typography>
       </Box>
       <Box sx={{ flex: 1, overflow: 'hidden' }}>

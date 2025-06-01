@@ -47,6 +47,11 @@ interface NodeData {
   [key: string]: unknown;
 }
 
+interface NodeConfig {
+  markdown?: boolean | string;
+  [key: string]: unknown;
+}
+
 export class CrewService {
   static async getCrews(): Promise<CrewResponse[]> {
     try {
@@ -95,7 +100,7 @@ export class CrewService {
               agent_id: String(crewId), // Ensure agent_id is always a string
               tools: Array.isArray(node.data.tools) ? node.data.tools : [],
               context: Array.isArray(node.data.context) ? node.data.context : [],
-              markdown: (node.data.config as any)?.markdown === true || (node.data.config as any)?.markdown === 'true'
+              markdown: (node.data.config as NodeConfig)?.markdown === true || (node.data.config as NodeConfig)?.markdown === 'true'
             });
           }
         });
@@ -114,7 +119,7 @@ export class CrewService {
               agent_id: String(crewId), // Ensure agent_id is always a string
               tools: Array.isArray(task.data.tools) ? task.data.tools : [],
               context: Array.isArray(task.data.context) ? task.data.context : [],
-              markdown: (task.data.config as any)?.markdown === true || (task.data.config as any)?.markdown === 'true'
+              markdown: (task.data.config as NodeConfig)?.markdown === true || (task.data.config as NodeConfig)?.markdown === 'true'
             });
           }
         });
