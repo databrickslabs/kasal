@@ -168,7 +168,7 @@ def get_tool_configs():
                     "temperature": 0.0
                 },
                 "embedder": {
-                    "model": "text-embedding-ada-002"
+                    "model": "databricks-gte-large-en"
                 }
             },
             "result_as_answer": False
@@ -200,7 +200,7 @@ def get_tool_configs():
                     "temperature": 0.0
                 },
                 "embedder": {
-                    "model": "text-embedding-ada-002"
+                    "model": "databricks-gte-large-en"
                 }
             },
             "result_as_answer": False
@@ -228,7 +228,7 @@ def get_tool_configs():
                     "temperature": 0.0
                 },
                 "embedder": {
-                    "model": "text-embedding-ada-002"
+                    "model": "databricks-gte-large-en"
                 }
             },
             "result_as_answer": False
@@ -240,7 +240,7 @@ def get_tool_configs():
                     "temperature": 0.0
                 },
                 "embedder": {
-                    "model": "text-embedding-ada-002"
+                    "model": "databricks-gte-large-en"
                 }
             },
             "result_as_answer": False
@@ -252,7 +252,7 @@ def get_tool_configs():
                     "temperature": 0.0
                 },
                 "embedder": {
-                    "model": "text-embedding-ada-002"
+                    "model": "databricks-gte-large-en"
                 }
             },
             "result_as_answer": False

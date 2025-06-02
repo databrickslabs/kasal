@@ -13,7 +13,7 @@ from datetime import datetime
 parser = argparse.ArgumentParser(description="Build the Kasal application")
 parser.add_argument("--api-url", 
                     help="API URL to use in the frontend build (e.g. https://kasal-xxx.aws.databricksapps.com/api/v1)", 
-                    required=True)
+                    required=False)
 args = parser.parse_args()
 
 # Configure logging
@@ -34,7 +34,7 @@ logging.basicConfig(
 logger = logging.getLogger("build")
 
 class Builder:
-    def __init__(self, api_url):
+    def __init__(self, api_url=None):
         self.root_dir = Path(os.path.dirname(os.path.abspath(__file__)))
         self.dist_dir = self.root_dir / "dist"
         self.build_dir = self.root_dir / "build"
@@ -66,10 +66,13 @@ class Builder:
             os.chdir(self.frontend_dir)
             subprocess.run(["npm", "install"], check=True)
             
-            # Set the API URL environment variable for the build
+            # Set environment variables for the build if api_url is provided
             env = os.environ.copy()
-            env["REACT_APP_API_URL"] = self.api_url
-            logger.info(f"Setting REACT_APP_API_URL={self.api_url}")
+            if self.api_url:
+                env["REACT_APP_API_URL"] = self.api_url
+                logger.info(f"Setting REACT_APP_API_URL={self.api_url}")
+            else:
+                logger.info("No API URL provided, using environment or default configuration")
             
             # Run the build with the environment variable
             subprocess.run(["npm", "run", "build"], check=True, env=env)
@@ -462,12 +465,52 @@ if __name__ == "__main__":
         """Copy requirements.txt and app.yaml to the dist directory"""
         logger.info("Copying deployment files")
         try:
-            # Create requirements.txt with wheel reference for dist
-            requirements_content = f"./{self.package_name}-{self.version}-py3-none-any.whl"
+            # Create requirements.txt with wheel reference and all dependencies for dist
+            requirements_content = f"""./{self.package_name}-{self.version}-py3-none-any.whl
+litellm
+asyncpg
+aiosqlite 
+pydantic-settings
+cryptography
+python-multipart
+databricks
+databricks-sdk
+croniter
+crewai
+pydantic[email]
+passlib
+email-validator
+google-api-python-client
+pysendpulse
+langchain
+crewai_tools==0.45.0
+nixtla
+pysendpulse
+greenlet
+wheel
+selenium
+python-pptx
+urllib3>=1.26.6
+mcp==1.9.0
+mcpadapt
+
+# Add explicit version of bcrypt to prevent version conflicts
+bcrypt==4.0.1
+# Add compatible starlette version for fastapi 0.115.0
+starlette==0.40.0
+
+# Documentation
+mkdocs>=1.6.0
+mkdocs-material>=9.4.0
+mkdocstrings[python]>=0.24.0
+mkdocs-git-revision-date-localized-plugin>=1.2.0
+
+# Add any other dependencies your project requires below
+"""
             requirements_dest = self.dist_dir / "requirements.txt"
             with open(requirements_dest, "w") as f:
                 f.write(requirements_content)
-            logger.info("Created requirements.txt with wheel reference in dist directory")
+            logger.info("Created requirements.txt with wheel reference and full dependencies in dist directory")
             
             # Copy app.yaml from dist (if it exists) or create it
             app_yaml_content = """command: ['python', '-m', 'kasal']

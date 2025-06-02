@@ -38,7 +38,7 @@ DOCS_URLS = [
 ]
 
 # Embedding model configuration
-EMBEDDING_MODEL = "text-embedding-ada-002"
+EMBEDDING_MODEL = "databricks-gte-large-en"
 
 async def fetch_url(url: str) -> str:
     """Fetch content from a URL."""
@@ -220,11 +220,16 @@ async def seed_documentation_embeddings(session: AsyncSession) -> None:
             # Create embedding for each chunk and store in database
             for chunk in chunks:
                 try:
-                    # Create embedding using LLMManager
+                    # Create embedding using LLMManager with Databricks configuration
                     try:
+                        embedder_config = {
+                            'provider': 'databricks',
+                            'config': {'model': EMBEDDING_MODEL}
+                        }
                         embedding = await LLMManager.get_embedding(
                             text=chunk["content"],
-                            model=EMBEDDING_MODEL
+                            model=EMBEDDING_MODEL,
+                            embedder_config=embedder_config
                         )
                     except Exception as e:
                         logger.warning(f"Error with LLMManager.get_embedding: {str(e)}. Using mock embeddings instead.")

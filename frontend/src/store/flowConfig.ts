@@ -16,7 +16,7 @@ export const useFlowConfigStore = create<FlowConfigState>()(
   persist(
     (set, get) => ({
       // Default state
-      crewAIFlowEnabled: true, // Default to enabled
+      crewAIFlowEnabled: false, // Default to disabled
       
       // Actions
       setCrewAIFlowEnabled: (enabled: boolean) => {

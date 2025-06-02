@@ -855,7 +855,7 @@ class ToolFactory:
                 
                 # If db_uri is not provided or empty, use the complete default URI
                 if not db_uri:
-                    db_uri = "postgresql://postgres@localhost:5432/app"
+                    db_uri = "postgresql+asyncpg://postgres@localhost:5432/app"
                     logger.info(f"No db_uri provided, using default URI: {db_uri}")
                 # If db_uri is provided but needs parsing for defaults
                 elif '://' in db_uri:

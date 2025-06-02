@@ -347,9 +347,14 @@ class CrewGenerationService:
             # Initialize the LLM manager
             llm_manager = LLMManager()
             
-            # Get the embedding for the user prompt
-            # Using OpenAI's embedding service for consistency with documentation embeddings
-            embedding_response = await llm_manager.get_embedding(user_prompt)
+            # Configure embedder (default to Databricks for consistency with crew configuration)
+            embedder_config = {
+                'provider': 'databricks',
+                'config': {'model': 'databricks-gte-large-en'}
+            }
+            
+            # Get the embedding for the user prompt with proper configuration
+            embedding_response = await llm_manager.get_embedding(user_prompt, embedder_config=embedder_config)
             if not embedding_response:
                 logger.warning("Failed to create embedding for user prompt")
                 return ""

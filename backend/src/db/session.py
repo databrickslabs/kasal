@@ -72,11 +72,24 @@ engine = create_async_engine(
 )
 
 # Create sync engine for backwards compatibility if needed
-sync_engine = create_engine(
-    str(settings.SYNC_DATABASE_URI),
-    echo=False,
-    future=True,
-)
+# Since asyncpg is async-only and cannot be used for sync operations,
+# we'll use SQLite for sync operations when using PostgreSQL+asyncpg for async
+if str(settings.SYNC_DATABASE_URI).startswith("postgresql+asyncpg://"):
+    # asyncpg cannot be used for sync operations, use SQLite instead
+    logger.info("Using SQLite for sync operations since asyncpg is async-only")
+    sync_sqlite_uri = f"sqlite:///{settings.SQLITE_DB_PATH}"
+    sync_engine = create_engine(
+        sync_sqlite_uri,
+        echo=False,
+        future=True,
+    )
+else:
+    # For other database configurations, use the configured sync URI
+    sync_engine = create_engine(
+        str(settings.SYNC_DATABASE_URI),
+        echo=False,
+        future=True,
+    )
 
 # Create async session factory
 async_session_factory = async_sessionmaker(

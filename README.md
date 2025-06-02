@@ -69,13 +69,32 @@ Comprehensive documentation is available in the `/docs` directory and served at 
 
 To build and deploy the application to Databricks Apps:
 
-1. Build the wheel package:
+### Option 1: Using Environment Variables (Recommended)
+
+1. Set the `DATABRICKS_APP_URL` environment variable:
+   ```bash
+   export DATABRICKS_APP_URL="https://your-app-name.cloud.databricks.com/api/v1"
    ```
+
+2. Build the wheel package:
+   ```bash
+   python build.py
+   ```
+
+3. Deploy the built package:
+   ```bash
+   python deploy.py --app-name kasal --user-name your.email@databricks.com
+   ```
+
+### Option 2: Using Command Line Arguments
+
+1. Build the wheel package with explicit API URL:
+   ```bash
    python build.py --api-url="https://your-custom-api-url.com/api/v1"
    ```
 
 2. Deploy the built package:
-   ```
+   ```bash
    python deploy.py --app-name kasal --user-name your.email@databricks.com
    ```
 
@@ -83,16 +102,21 @@ The wheel package will be created in the `dist` directory and then deployed to y
 
 ### API Configuration
 
-Before deploying, make sure to configure the API URL in `frontend/src/config/api/ApiConfig.ts`:
+The frontend automatically picks up the API URL in the following priority order:
+
+1. `DATABRICKS_APP_URL` environment variable (highest priority)
+2. `REACT_APP_API_URL` environment variable  
+3. `http://localhost:8000/api/v1` (default for local development)
+
+This is configured in `frontend/src/config/api/ApiConfig.ts`:
 
 ```typescript
 export const config = {
-  apiUrl: 'http://localhost:8000/api/v1',  // For local development
-  // apiUrl: 'https://your-app-name.cloud.databricks.com/api/v1',  // For production
+  apiUrl: process.env.DATABRICKS_APP_URL || process.env.REACT_APP_API_URL || 'http://localhost:8000/api/v1',
 };
 ```
 
-Update this URL to match your deployment environment. The app will use this URL to communicate with the backend API.
+For Databricks Apps deployment, set the `DATABRICKS_APP_URL` environment variable to your app's URL, and the frontend will automatically use it without requiring code changes.
 
 ## Architecture
 

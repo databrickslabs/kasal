@@ -54,7 +54,7 @@ def create_parser():
     )
     parser.add_argument(
         "--db-url",
-        help="Database URL (for postgres: postgresql://user@host:port/dbname)"
+        help="Database URL (for postgres: postgresql+asyncpg://user@host:port/dbname)"
     )
     parser.add_argument(
         "--port",
@@ -278,7 +278,7 @@ def run_app():
             db_url = args.db_url
         else:
             logger.warning("No database URL provided for PostgreSQL. Using default.")
-            db_url = "postgresql://postgres@localhost:5432/kasal"
+            db_url = "postgresql+asyncpg://postgres@localhost:5432/kasal"
         
         os.environ["DATABASE_URL"] = db_url
         os.environ["DATABASE_URI"] = db_url  # Set both variables

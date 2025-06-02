@@ -842,7 +842,7 @@ const AgentForm: React.FC<AgentFormProps> = ({ initialData, onCancel, onAgentSav
                             ...currentConfig,
                             provider: newProvider,
                             config: {
-                              ...((currentConfig as any).config || {}),
+                              ...((currentConfig as { config?: Record<string, unknown> }).config || {}),
                               model: defaultModel
                             }
                           });

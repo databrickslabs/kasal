@@ -128,7 +128,11 @@ class AgentTraceEventListener(BaseEventListener):
                     logger.warning(f"[AgentTraceEventListener][{self.job_id}] Could not find any matching task in database for: {task_name[:50]}")
                     
         except Exception as e:
-            logger.error(f"[AgentTraceEventListener][{self.job_id}] Error looking up task ID in database: {e}", exc_info=True)
+            # Check if it's a missing table error and handle gracefully
+            if "no such table" in str(e):
+                logger.warning(f"[AgentTraceEventListener][{self.job_id}] Database tables not available, skipping task lookup")
+            else:
+                logger.error(f"[AgentTraceEventListener][{self.job_id}] Error looking up task ID in database: {e}", exc_info=True)
         
         # If all else fails, create a new UUID
         task_id = str(uuid.uuid4())
@@ -321,7 +325,11 @@ class AgentTraceEventListener(BaseEventListener):
                     
                     logger.info(f"{log_prefix} Updated task status for {task_id} to COMPLETED")
                 except Exception as e:
-                    logger.error(f"{log_prefix} Error updating task status: {e}", exc_info=True)
+                    # Check if it's a missing table error and handle gracefully
+                    if "no such table" in str(e):
+                        logger.warning(f"{log_prefix} Task status tables not available, skipping task status update")
+                    else:
+                        logger.error(f"{log_prefix} Error updating task status: {e}", exc_info=True)
                     
             except Exception as e:
                 logger.error(f"{log_prefix} Error in on_task_completed: {e}", exc_info=True)
@@ -426,7 +434,11 @@ class AgentTraceEventListener(BaseEventListener):
                     uow.commit()
                     
                 except Exception as e:
-                    logger.error(f"{log_prefix} Error creating task status: {e}", exc_info=True)
+                    # Check if it's a missing table error and handle gracefully
+                    if "no such table" in str(e):
+                        logger.warning(f"{log_prefix} Task status tables not available, skipping task status creation")
+                    else:
+                        logger.error(f"{log_prefix} Error creating task status: {e}", exc_info=True)
                     
             except Exception as e:
                 logger.error(f"{log_prefix} Error in on_task_started: {e}", exc_info=True)

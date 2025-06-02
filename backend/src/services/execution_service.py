@@ -357,10 +357,14 @@ class ExecutionService:
             from src.db.session import async_session_factory
             from src.repositories.execution_repository import ExecutionRepository
             
+            logger.info("Attempting to connect to database for listing executions")
+            
             async with async_session_factory() as db:
                 repo = ExecutionRepository(db)
                 # Get all executions using the correct repository method
                 db_executions = await repo.list()
+                
+                logger.info(f"Successfully retrieved {len(db_executions)} executions from database")
                 
                 # Convert to list of dicts
                 db_executions = [
@@ -390,15 +394,27 @@ class ExecutionService:
                     execution_data["execution_id"] = execution_id
                 results.append(execution_data)
             
+            logger.info(f"Returning {len(results)} total executions ({len(db_executions)} from DB, {len(memory_executions)} from memory)")
             return results
                 
         except Exception as e:
-            logger.error(f"Error listing executions: {str(e)}")
+            logger.error(f"Database connection failed while listing executions: {str(e)}")
+            logger.error(f"Error type: {type(e).__name__}")
+            import traceback
+            logger.error(f"Full traceback: {traceback.format_exc()}")
+            
+            # Check database configuration
+            from src.config.settings import settings
+            logger.error(f"Database URI: {settings.DATABASE_URI}")
+            logger.error(f"Database type: {settings.DATABASE_TYPE}")
+            
             # If database access fails, just return in-memory executions
-            return [
+            memory_only_results = [
                 {**data, "execution_id": execution_id} 
                 for execution_id, data in ExecutionService.executions.items()
             ]
+            logger.info(f"Falling back to {len(memory_only_results)} in-memory executions")
+            return memory_only_results
     
     @staticmethod
     def _execute_crew(

@@ -66,8 +66,8 @@ class Settings(BaseSettings):
             sqlite_path = info.data.get("SQLITE_DB_PATH", "./app.db")
             return f"sqlite:///{sqlite_path}"
         else:
-            # Default to PostgreSQL - return string instead of PostgresDsn to avoid validation issues
-            return f"postgresql://{info.data.get('POSTGRES_USER')}:{info.data.get('POSTGRES_PASSWORD')}@{info.data.get('POSTGRES_SERVER')}:{info.data.get('POSTGRES_PORT', 5432)}/{info.data.get('POSTGRES_DB') or ''}"
+            # Use asyncpg for sync operations too - avoid psycopg2 dependency
+            return f"postgresql+asyncpg://{info.data.get('POSTGRES_USER')}:{info.data.get('POSTGRES_PASSWORD')}@{info.data.get('POSTGRES_SERVER')}:{info.data.get('POSTGRES_PORT', 5432)}/{info.data.get('POSTGRES_DB') or ''}"
 
     # Security settings
     SECRET_KEY: str = "development_secret_key"
