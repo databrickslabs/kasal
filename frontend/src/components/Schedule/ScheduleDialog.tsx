@@ -35,6 +35,7 @@ import { toast } from 'react-hot-toast';
 import InfoIcon from '@mui/icons-material/Info';
 import { Schedule, ScheduleDialogProps, ConfigViewerDialogProps } from '../../types/schedule';
 import { AgentYaml, TaskYaml } from '../../types/crew';
+import CloseIcon from '@mui/icons-material/Close';
 
 type CronMode = 'manual' | 'visual';
 
@@ -531,7 +532,28 @@ const ScheduleDialog: React.FC<ScheduleDialogProps> = ({
   return (
     <>
       <Dialog open={open} onClose={onClose} maxWidth="md" fullWidth>
-        <DialogTitle>Schedule Manager</DialogTitle>
+        <DialogTitle sx={{ 
+          display: 'flex', 
+          alignItems: 'center', 
+          justifyContent: 'space-between',
+          pb: 1.5,
+          borderBottom: '1px solid',
+          borderColor: 'divider'
+        }}>
+          <Typography variant="h6">Schedule Manager</Typography>
+          <IconButton 
+            onClick={onClose}
+            size="small"
+            sx={{ 
+              color: 'text.secondary',
+              '&:hover': {
+                color: 'text.primary',
+              }
+            }}
+          >
+            <CloseIcon />
+          </IconButton>
+        </DialogTitle>
         <DialogContent>
           <Box sx={{ mb: 4 }}>
             <Typography variant="h6" gutterBottom>

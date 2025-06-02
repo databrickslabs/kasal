@@ -468,6 +468,9 @@ async def create_agent(
     if 'response_template' in agent_config and agent_config['response_template']:
         agent_kwargs['format_prompt'] = agent_config['response_template']
     
+    # Note: Embedder configuration is handled at the Crew level, not Agent level
+    # The embedder_config from agents will be used by CrewPreparation to configure the crew
+    
     # Create and return the agent
     agent = Agent(**agent_kwargs)
     

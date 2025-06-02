@@ -129,6 +129,14 @@ async def get_execution_status(execution_id: str, db: AsyncSession = Depends(get
             # If not valid JSON, wrap in a dict to satisfy the schema
             execution_data["result"] = {"value": execution_data["result"]}
     
+    # If result is a list, convert it to a dictionary to match the schema
+    if execution_data.get("result") and isinstance(execution_data["result"], list):
+        execution_data["result"] = {"items": execution_data["result"]}
+    
+    # If result is a boolean, convert it to a dictionary to match the schema
+    if execution_data.get("result") and isinstance(execution_data["result"], bool):
+        execution_data["result"] = {"success": execution_data["result"]}
+    
     # Return the execution data
     return ExecutionResponse(**execution_data)
 
@@ -160,6 +168,10 @@ async def list_executions():
         # If result is a list, convert it to a dictionary to match the schema
         if execution_data.get("result") and isinstance(execution_data["result"], list):
             execution_data["result"] = {"items": execution_data["result"]}
+        
+        # If result is a boolean, convert it to a dictionary to match the schema
+        if execution_data.get("result") and isinstance(execution_data["result"], bool):
+            execution_data["result"] = {"success": execution_data["result"]}
         
         processed_executions.append(execution_data)
     

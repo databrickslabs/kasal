@@ -8,7 +8,7 @@ import {
   Connection as _Connection,
 } from 'reactflow';
 import 'reactflow/dist/style.css';
-import { Box, Snackbar, Alert, Dialog, DialogContent, Menu, Button } from '@mui/material';
+import { Box, Snackbar, Alert, Dialog, DialogContent, Menu, Button, DialogTitle, IconButton, Typography } from '@mui/material';
 import { useWorkflowStore } from '../../store/workflow';
 import { useThemeManager } from '../../hooks/workflow/useThemeManager';
 import { useErrorManager } from '../../hooks/workflow/useErrorManager';
@@ -22,6 +22,7 @@ import { FlowService as _FlowService } from '../../api/FlowService';
 import { useAPIKeysStore as _useAPIKeysStore } from '../../store/apiKeys';
 import { FlowFormData as _FlowFormData, FlowConfiguration as _FlowConfiguration } from '../../types/flow';
 import { createEdge as _createEdge } from '../../utils/edgeUtils';
+import CloseIcon from '@mui/icons-material/Close';
 
 // Component Imports
 import { BottomPanelToggle, RightPanelToggle } from './WorkflowToolbarStyle';
@@ -625,6 +626,28 @@ const WorkflowDesigner: React.FC<WorkflowDesignerProps> = (): JSX.Element => {
           maxWidth="lg"
           fullWidth
         >
+          <DialogTitle sx={{ 
+            display: 'flex', 
+            alignItems: 'center', 
+            justifyContent: 'space-between',
+            pb: 1.5,
+            borderBottom: '1px solid',
+            borderColor: 'divider'
+          }}>
+            <Typography variant="h6">LLM Logs</Typography>
+            <IconButton 
+              onClick={() => dialogManager.setIsLogsDialogOpen(false)}
+              size="small"
+              sx={{ 
+                color: 'text.secondary',
+                '&:hover': {
+                  color: 'text.primary',
+                }
+              }}
+            >
+              <CloseIcon />
+            </IconButton>
+          </DialogTitle>
           <DialogContent>
             <Logs />
           </DialogContent>

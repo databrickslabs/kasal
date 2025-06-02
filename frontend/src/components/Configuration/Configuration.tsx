@@ -14,6 +14,7 @@ import {
   ListItemText,
   Paper,
   ListItemButton,
+  IconButton,
 } from '@mui/material';
 import SettingsIcon from '@mui/icons-material/Settings';
 import TranslateIcon from '@mui/icons-material/Translate';
@@ -27,6 +28,7 @@ import StorageIcon from '@mui/icons-material/Storage';
 import MemoryIcon from '@mui/icons-material/MemoryRounded';
 import CloudIcon from '@mui/icons-material/Cloud';
 import EngineeringIcon from '@mui/icons-material/Engineering';
+import CloseIcon from '@mui/icons-material/Close';
 import { useTranslation } from 'react-i18next';
 import { LanguageService } from '../../api/LanguageService';
 import { ThemeConfig as _ThemeConfig } from '../../api/ThemeService';
@@ -214,13 +216,30 @@ function Configuration({ onClose }: ConfigurationProps): JSX.Element {
       <Box sx={{ 
         display: 'flex', 
         alignItems: 'center', 
+        justifyContent: 'space-between',
         mb: 3,
         pb: 1.5,
         borderBottom: '1px solid',
         borderColor: 'divider'
       }}>
-        <SettingsIcon sx={{ mr: 1.5, color: 'primary.main', fontSize: '1.4rem' }} />
-        <Typography variant="h5">{t('configuration.title')}</Typography>
+        <Box sx={{ display: 'flex', alignItems: 'center' }}>
+          <SettingsIcon sx={{ mr: 1.5, color: 'primary.main', fontSize: '1.4rem' }} />
+          <Typography variant="h5">{t('configuration.title')}</Typography>
+        </Box>
+        {onClose && (
+          <IconButton 
+            onClick={onClose}
+            size="small"
+            sx={{ 
+              color: 'text.secondary',
+              '&:hover': {
+                color: 'text.primary',
+              }
+            }}
+          >
+            <CloseIcon />
+          </IconButton>
+        )}
       </Box>
 
       <Box sx={{ 

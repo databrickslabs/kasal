@@ -257,6 +257,9 @@ litellm.failure_callback = [litellm_file_logger]
 # Configure logging
 logger.info(f"Configured LiteLLM to write logs to: {log_file_path}")
 
+# Export functions for external use
+__all__ = ['LLMManager']
+
 class LLMManager:
     """Manager for LLM configurations and interactions."""
     
@@ -467,38 +470,107 @@ class LLMManager:
         return llm
 
     @staticmethod
-    async def get_embedding(text: str, model: str = "text-embedding-ada-002") -> Optional[List[float]]:
+    async def get_embedding(text: str, model: str = "text-embedding-ada-002", embedder_config: Optional[Dict[str, Any]] = None) -> Optional[List[float]]:
         """
-        Get an embedding vector for the given text.
+        Get an embedding vector for the given text using configurable embedder.
         
         Args:
             text: The text to create an embedding for
-            model: The embedding model to use
+            model: The embedding model to use (can be overridden by embedder_config)
+            embedder_config: Optional embedder configuration with provider and model settings
             
         Returns:
             List[float]: The embedding vector or None if creation fails
         """
         try:
-            logger.info(f"Creating embedding using model: {model}")
+            # Determine provider and model from embedder_config or defaults
+            if embedder_config:
+                provider = embedder_config.get('provider', 'openai')
+                config = embedder_config.get('config', {})
+                embedding_model = config.get('model', model)
+            else:
+                provider = 'openai'
+                embedding_model = model
             
-            # Get API key for OpenAI (which provides embedding models)
-            api_key = await ApiKeysService.get_provider_api_key(ModelProvider.OPENAI)
+            logger.info(f"Creating embedding using provider: {provider}, model: {embedding_model}")
             
-            if not api_key:
-                logger.warning("No OpenAI API key found for creating embeddings")
-                return None
+            # Handle different embedding providers
+            if provider == 'databricks' or 'databricks' in embedding_model:
+                # Use Databricks for embeddings
+                api_key = await ApiKeysService.get_provider_api_key("DATABRICKS")
+                api_base = os.getenv("DATABRICKS_ENDPOINT", "")
                 
-            # Create the embedding using litellm
-            response = await litellm.aembedding(
-                model=model,
-                input=text,
-                api_key=api_key
-            )
+                if not api_key:
+                    logger.warning("No Databricks API key found for creating embeddings")
+                    return None
+                
+                # Ensure model has databricks prefix for litellm
+                if not embedding_model.startswith('databricks/'):
+                    if embedding_model == 'databricks-gte-large-en' or 'databricks' in embedding_model:
+                        # Keep the model name as is for Databricks models
+                        pass
+                    else:
+                        embedding_model = f"databricks/{embedding_model}"
+                
+                # Create the embedding using litellm with Databricks
+                response = await litellm.aembedding(
+                    model=embedding_model,
+                    input=text,
+                    api_key=api_key,
+                    api_base=api_base
+                )
+                
+            elif provider == 'ollama':
+                # Use Ollama for embeddings
+                api_base = os.getenv("OLLAMA_API_BASE", "http://localhost:11434")
+                
+                # Ensure model has ollama prefix
+                if not embedding_model.startswith('ollama/'):
+                    embedding_model = f"ollama/{embedding_model}"
+                
+                response = await litellm.aembedding(
+                    model=embedding_model,
+                    input=text,
+                    api_base=api_base
+                )
+                
+            elif provider == 'google':
+                # Use Google AI for embeddings
+                api_key = await ApiKeysService.get_provider_api_key(ModelProvider.GEMINI)
+                
+                if not api_key:
+                    logger.warning("No Google API key found for creating embeddings")
+                    return None
+                
+                # Ensure model has gemini prefix for embeddings
+                if not embedding_model.startswith('gemini/'):
+                    embedding_model = f"gemini/{embedding_model}"
+                
+                response = await litellm.aembedding(
+                    model=embedding_model,
+                    input=text,
+                    api_key=api_key
+                )
+                
+            else:
+                # Default to OpenAI for embeddings
+                api_key = await ApiKeysService.get_provider_api_key(ModelProvider.OPENAI)
+                
+                if not api_key:
+                    logger.warning("No OpenAI API key found for creating embeddings")
+                    return None
+                    
+                # Create the embedding using litellm
+                response = await litellm.aembedding(
+                    model=embedding_model,
+                    input=text,
+                    api_key=api_key
+                )
             
             # Extract the embedding vector
             if response and "data" in response and len(response["data"]) > 0:
                 embedding = response["data"][0]["embedding"]
-                logger.info(f"Successfully created embedding with {len(embedding)} dimensions")
+                logger.info(f"Successfully created embedding with {len(embedding)} dimensions using {provider}")
                 return embedding
             else:
                 logger.warning("Failed to get embedding from response")

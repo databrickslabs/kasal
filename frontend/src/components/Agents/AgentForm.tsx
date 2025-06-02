@@ -823,16 +823,33 @@ const AgentForm: React.FC<AgentFormProps> = ({ initialData, onCancel, onAgentSav
                     <FormControl fullWidth disabled={!formData.memory}>
                       <InputLabel>Embedding Provider</InputLabel>
                       <Select
-                        value={formData.embedder_config?.provider || 'openai'}
+                        value={formData.embedder_config?.provider || 'databricks'}
                         onChange={(e) => {
                           const currentConfig = formData.embedder_config || {};
+                          const newProvider = e.target.value;
+                          
+                          // Set default model based on provider
+                          let defaultModel = 'text-embedding-3-small';
+                          if (newProvider === 'databricks') {
+                            defaultModel = 'databricks-gte-large-en';
+                          } else if (newProvider === 'ollama') {
+                            defaultModel = 'nomic-embed-text';
+                          } else if (newProvider === 'google') {
+                            defaultModel = 'text-embedding-004';
+                          }
+                          
                           handleInputChange('embedder_config', {
                             ...currentConfig,
-                            provider: e.target.value
+                            provider: newProvider,
+                            config: {
+                              ...((currentConfig as any).config || {}),
+                              model: defaultModel
+                            }
                           });
                         }}
                         label="Embedding Provider"
                       >
+                        <MenuItem value="databricks">Databricks (Default)</MenuItem>
                         <MenuItem value="openai">OpenAI</MenuItem>
                         <MenuItem value="ollama">Ollama</MenuItem>
                         <MenuItem value="google">Google AI</MenuItem>
@@ -852,9 +869,9 @@ const AgentForm: React.FC<AgentFormProps> = ({ initialData, onCancel, onAgentSav
                     <TextField
                       fullWidth
                       label="Embedding Model"
-                      value={(formData.embedder_config?.config as Record<string, unknown>)?.model || 'text-embedding-3-small'}
+                      value={(formData.embedder_config?.config as Record<string, unknown>)?.model || 'databricks-gte-large-en'}
                       onChange={(e) => {
-                        const currentConfig = formData.embedder_config || { provider: 'openai', config: { model: 'text-embedding-3-small' } };
+                        const currentConfig = formData.embedder_config || { provider: 'databricks', config: { model: 'databricks-gte-large-en' } };
                         const currentInnerConfig = currentConfig.config || {};
                         handleInputChange('embedder_config', {
                           ...currentConfig,
@@ -865,7 +882,7 @@ const AgentForm: React.FC<AgentFormProps> = ({ initialData, onCancel, onAgentSav
                         });
                       }}
                       disabled={!formData.memory}
-                      helperText="Model to use for text embeddings (e.g., text-embedding-3-small for OpenAI)"
+                      helperText="Model to use for text embeddings (e.g., databricks-gte-large-en for Databricks, text-embedding-3-small for OpenAI)"
                     />
                   </Grid>
 

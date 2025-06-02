@@ -258,6 +258,146 @@ class CrewPreparation:
                 'memory': True
             }
             
+            # Configure embedder for memory using CrewAI's native configuration
+            embedder_config = None
+            for agent_config in self.config.get('agents', []):
+                if 'embedder_config' in agent_config and agent_config['embedder_config']:
+                    embedder_config = agent_config['embedder_config']
+                    logger.info(f"Found embedder configuration: {embedder_config}")
+                    break
+            
+            # Set default to Databricks if no embedder config found
+            if not embedder_config:
+                embedder_config = {
+                    'provider': 'databricks',
+                    'config': {'model': 'databricks-gte-large-en'}
+                }
+                logger.info("No embedder config found, using default Databricks configuration")
+            
+            # Use CrewAI's native embedder configuration
+            if embedder_config:
+                provider = embedder_config.get('provider', 'openai')
+                config = embedder_config.get('config', {})
+                
+                if provider == 'databricks':
+                    # For Databricks, create a custom embedding function using LiteLLM
+                    try:
+                        from src.services.api_keys_service import ApiKeysService
+                        
+                        # Get Databricks credentials directly with async/await
+                        databricks_key = await ApiKeysService.get_provider_api_key("DATABRICKS")
+                        
+                        if databricks_key:
+                            import os
+                            from chromadb import EmbeddingFunction, Documents, Embeddings
+                            import litellm
+                            from typing import cast
+                            
+                            # Get Databricks endpoint
+                            databricks_endpoint = os.getenv('DATABRICKS_ENDPOINT', '')
+                            model_name = config.get('model', 'databricks-gte-large-en')
+                            
+                            # Create custom embedding function for Databricks
+                            class DatabricksEmbeddingFunction(EmbeddingFunction):
+                                def __init__(self, api_key: str, api_base: str, model: str):
+                                    self.api_key = api_key
+                                    self.api_base = api_base 
+                                    self.model = model if model.startswith('databricks/') else f"databricks/{model}"
+                                
+                                def __call__(self, input: Documents) -> Embeddings:
+                                    try:
+                                        # Use LiteLLM for Databricks embeddings
+                                        response = litellm.embedding(
+                                            model=self.model,
+                                            input=input,
+                                            api_key=self.api_key,
+                                            api_base=self.api_base
+                                        )
+                                        
+                                        # Extract embeddings from response
+                                        embeddings = [item['embedding'] for item in response['data']]
+                                        return cast(Embeddings, embeddings)
+                                    except Exception as e:
+                                        logger.error(f"Error in Databricks embedding function: {e}")
+                                        raise e
+                            
+                            # Create the custom embedding function instance
+                            databricks_embedder = DatabricksEmbeddingFunction(
+                                api_key=databricks_key,
+                                api_base=databricks_endpoint,
+                                model=model_name
+                            )
+                            
+                            crew_kwargs['embedder'] = {
+                                'provider': 'custom',
+                                'config': {
+                                    'embedder': databricks_embedder
+                                }
+                            }
+                            logger.info(f"Configured CrewAI custom embedder for Databricks with model: {model_name}")
+                        else:
+                            logger.warning("No Databricks API key found, falling back to default embedder")
+                            
+                    except Exception as e:
+                        logger.error(f"Error configuring Databricks embedder: {e}")
+                        
+                elif provider == 'openai':
+                    # Standard OpenAI configuration
+                    try:
+                        from src.services.api_keys_service import ApiKeysService
+                        
+                        # Get OpenAI credentials directly with async/await
+                        openai_key = await ApiKeysService.get_provider_api_key("OPENAI")
+                            
+                        if openai_key:
+                            crew_kwargs['embedder'] = {
+                                'provider': 'openai',
+                                'config': {
+                                    'api_key': openai_key,
+                                    'model': config.get('model', 'text-embedding-3-small')
+                                }
+                            }
+                            logger.info(f"Configured CrewAI embedder for OpenAI: {crew_kwargs['embedder']}")
+                    except Exception as e:
+                        logger.error(f"Error configuring OpenAI embedder: {e}")
+                        
+                elif provider == 'ollama':
+                    # Local Ollama configuration
+                    crew_kwargs['embedder'] = {
+                        'provider': 'ollama',
+                        'config': {
+                            'model': config.get('model', 'nomic-embed-text')
+                        }
+                    }
+                    logger.info(f"Configured CrewAI embedder for Ollama: {crew_kwargs['embedder']}")
+                    
+                elif provider == 'google':
+                    # Google AI configuration
+                    try:
+                        from src.services.api_keys_service import ApiKeysService
+                        from src.schemas.model_provider import ModelProvider
+                        
+                        # Get Google credentials directly with async/await
+                        google_key = await ApiKeysService.get_provider_api_key(ModelProvider.GEMINI)
+                            
+                        if google_key:
+                            crew_kwargs['embedder'] = {
+                                'provider': 'google',
+                                'config': {
+                                    'api_key': google_key,
+                                    'model': config.get('model', 'text-embedding-004')
+                                }
+                            }
+                            logger.info(f"Configured CrewAI embedder for Google: {crew_kwargs['embedder']}")
+                    except Exception as e:
+                        logger.error(f"Error configuring Google embedder: {e}")
+                else:
+                    # Other providers - pass through config as-is
+                    crew_kwargs['embedder'] = embedder_config
+                    logger.info(f"Configured CrewAI embedder for {provider}: {crew_kwargs['embedder']}")
+                    
+            logger.info(f"Final embedder configuration: {crew_kwargs.get('embedder', 'None (default)')}")
+            
             # Add optional parameters if they exist in config
             if 'max_rpm' in self.config:
                 crew_kwargs['max_rpm'] = self.config['max_rpm']
