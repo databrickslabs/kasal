@@ -18,5 +18,6 @@ class DatabricksConfig(Base):
     is_active = Column(Boolean, default=True)  # To track the currently active configuration
     is_enabled = Column(Boolean, default=True)  # To enable/disable Databricks integration
     apps_enabled = Column(Boolean, default=False)  # To enable/disable Databricks apps
+    encrypted_personal_access_token = Column(String, nullable=True)  # Encrypted personal access token for apps
     created_at = Column(DateTime(timezone=True), default=datetime.now(timezone.utc))
     updated_at = Column(DateTime(timezone=True), default=datetime.now(timezone.utc), onupdate=datetime.now(timezone.utc)) 

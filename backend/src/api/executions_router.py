@@ -164,15 +164,15 @@ async def list_executions():
             except json.JSONDecodeError:
                 # If not valid JSON, wrap in a dict to satisfy the schema
                 execution_data["result"] = {"value": execution_data["result"]}
-        
         # If result is a list, convert it to a dictionary to match the schema
         if execution_data.get("result") and isinstance(execution_data["result"], list):
             execution_data["result"] = {"items": execution_data["result"]}
-        
         # If result is a boolean, convert it to a dictionary to match the schema
         if execution_data.get("result") and isinstance(execution_data["result"], bool):
             execution_data["result"] = {"success": execution_data["result"]}
-        
+        # If result is not a dict at this point, set it to an empty dict
+        if execution_data.get("result") is not None and not isinstance(execution_data["result"], dict):
+            execution_data["result"] = {}
         processed_executions.append(execution_data)
     
     # Convert to response models
