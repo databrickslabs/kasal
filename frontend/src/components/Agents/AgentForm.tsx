@@ -35,7 +35,8 @@ import { ModelService } from '../../api/ModelService';
 import { Models } from '../../types/models';
 
 import { GenerateService } from '../../api/GenerateService';
-import { KnowledgeSourcesSection } from './KnowledgeSourcesSection';
+// TODO: Re-enable when knowledge sources are restored
+// import { KnowledgeSourcesSection } from './KnowledgeSourcesSection';
 
 // Default fallback model when API is down
 const DEFAULT_FALLBACK_MODEL = {
@@ -460,7 +461,8 @@ const AgentForm: React.FC<AgentFormProps> = ({ initialData, onCancel, onAgentSav
               </Select>
             </FormControl>
 
-            <Accordion>
+            {/* TODO: Re-enable knowledge sources in the future */}
+            {/* <Accordion>
               <AccordionSummary expandIcon={<ExpandMoreIcon />}>
                 <Typography>Knowledge Sources</Typography>
               </AccordionSummary>
@@ -470,7 +472,7 @@ const AgentForm: React.FC<AgentFormProps> = ({ initialData, onCancel, onAgentSav
                   onChange={(sources) => handleInputChange('knowledge_sources', sources)}
                 />
               </AccordionDetails>
-            </Accordion>
+            </Accordion> */}
 
             {/* LLM Configuration */}
             <Accordion>
@@ -720,7 +722,8 @@ const AgentForm: React.FC<AgentFormProps> = ({ initialData, onCancel, onAgentSav
                       }}
                     />
                   </Grid>
-                  <Grid item xs={12} md={6}>
+                  {/* TODO: Re-enable code execution in the future */}
+                  {/* <Grid item xs={12} md={6}>
                     <FormControlLabel
                       control={
                         <Switch
@@ -746,7 +749,7 @@ const AgentForm: React.FC<AgentFormProps> = ({ initialData, onCancel, onAgentSav
                         e.stopPropagation();
                       }}
                     />
-                  </Grid>
+                  </Grid> */}
                   <Grid item xs={12} md={6}>
                     <FormControlLabel
                       control={
@@ -904,8 +907,9 @@ const AgentForm: React.FC<AgentFormProps> = ({ initialData, onCancel, onAgentSav
               </AccordionDetails>
             </Accordion>
 
+            {/* TODO: Re-enable code execution mode in the future */}
             {/* Code Execution Mode */}
-            <Accordion>
+            {/* <Accordion>
               <AccordionSummary expandIcon={<ExpandMoreIcon />}>
                 <Typography>Code Execution Mode</Typography>
               </AccordionSummary>
@@ -927,7 +931,7 @@ const AgentForm: React.FC<AgentFormProps> = ({ initialData, onCancel, onAgentSav
                   </Grid>
                 </Grid>
               </AccordionDetails>
-            </Accordion>
+            </Accordion> */}
           </Box>
         </Box>
 
