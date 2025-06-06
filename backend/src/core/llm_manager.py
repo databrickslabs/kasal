@@ -317,13 +317,41 @@ class LLMManager:
             prefixed_model = f"ollama/{normalized_model_name}"
             model_params["model"] = prefixed_model
         elif provider == ModelProvider.DATABRICKS:
-            # For Databricks, we need to get a token, not an API key
-            token = await ApiKeysService.get_provider_api_key("DATABRICKS")
+            # For Databricks, get token from database and set environment variables
+            # to prevent LiteLLM from reading .databrickscfg file
+            token = await ApiKeysService.get_api_key_value(key_name="DATABRICKS_TOKEN")
+            if not token:
+                token = await ApiKeysService.get_api_key_value(key_name="DATABRICKS_API_KEY")
+            
             if token:
                 model_params["api_key"] = token
+                # Set environment variables to prevent reading from .databrickscfg
+                os.environ["DATABRICKS_TOKEN"] = token
+                
+            # Get workspace URL from database configuration
             model_params["api_base"] = os.getenv("DATABRICKS_ENDPOINT", "")
-            if "databricks/" not in model_params["model"]:
+            if not model_params["api_base"]:
+                from src.services.databricks_service import DatabricksService
+                try:
+                    async with UnitOfWork() as uow:
+                        databricks_service = await DatabricksService.from_unit_of_work(uow)
+                        config = await databricks_service.get_databricks_config()
+                        if config and config.workspace_url:
+                            workspace_url = config.workspace_url.rstrip('/')
+                            if not workspace_url.startswith('https://'):
+                                workspace_url = f"https://{workspace_url}"
+                            model_params["api_base"] = f"{workspace_url}/serving-endpoints"
+                            # Set environment variable to prevent file reading
+                            os.environ["DATABRICKS_HOST"] = workspace_url
+                except Exception as e:
+                    logger.error(f"Error getting Databricks workspace URL: {e}")
+            
+            # For Databricks with LiteLLM, we need the databricks/ prefix for provider identification
+            if not model_params["model"].startswith("databricks/"):
                 model_params["model"] = f"databricks/{model_params['model']}"
+            
+            # Debug logging
+            logger.info(f"Databricks model params: model={model_params.get('model')}, api_base={model_params.get('api_base')}, has_api_key={bool(model_params.get('api_key'))}")
         elif provider == ModelProvider.GEMINI:
             # For Gemini, get the API key
             api_key = await ApiKeysService.get_provider_api_key(provider)
