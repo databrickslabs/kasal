@@ -27,12 +27,13 @@ import {
   Tab,
 } from '@mui/material';
 import EditIcon from '@mui/icons-material/Edit';
-import VisibilityIcon from '@mui/icons-material/Visibility';
-import VisibilityOffIcon from '@mui/icons-material/VisibilityOff';
 import KeyIcon from '@mui/icons-material/Key';
 import AddIcon from '@mui/icons-material/Add';
 import DeleteIcon from '@mui/icons-material/Delete';
 import StorageIcon from '@mui/icons-material/Storage';
+import CheckCircleIcon from '@mui/icons-material/CheckCircle';
+import ErrorIcon from '@mui/icons-material/Error';
+import VisibilityOffIcon from '@mui/icons-material/VisibilityOff';
 import { 
   APIKeysService, 
   ApiKey, 
@@ -42,6 +43,15 @@ import {
   DatabricksSecretCreate,
   DatabricksSecretUpdate 
 } from '../../../api';
+
+// Extended interfaces for editing with masked values
+interface ApiKeyWithMasked extends ApiKey {
+  maskedValue?: string;
+}
+
+interface DatabricksSecretWithMasked extends DatabricksSecret {
+  maskedValue?: string;
+}
 import { useAPIKeys } from '../../../hooks/global/useAPIKeys';
 import { useAPIKeysStore } from '../../../store/apiKeys';
 import { NotificationState } from '../../../types/common';
@@ -50,14 +60,13 @@ function APIKeys(): JSX.Element {
   const { secrets: apiKeys, loading, error, updateSecrets: updateApiKeys } = useAPIKeys();
   const { editDialogOpen, providerToEdit, closeApiKeyEditor } = useAPIKeysStore();
   const [editDialog, setEditDialog] = useState<boolean>(false);
-  const [editingApiKey, setEditingApiKey] = useState<ApiKey | null>(null);
-  const [editingDatabricksSecret, setEditingDatabricksSecret] = useState<DatabricksSecret | null>(null);
+  const [editingApiKey, setEditingApiKey] = useState<ApiKeyWithMasked | null>(null);
+  const [editingDatabricksSecret, setEditingDatabricksSecret] = useState<DatabricksSecretWithMasked | null>(null);
   const [notification, setNotification] = useState<NotificationState>({ 
     open: false, 
     message: '', 
     severity: 'success' 
   });
-  const [visibleSecrets, setVisibleSecrets] = useState<Record<string, boolean>>({});
   const [createDialog, setCreateDialog] = useState<boolean>(false);
   const [newApiKey, setNewApiKey] = useState<ApiKeyCreate>({ 
     name: '', 
@@ -205,13 +214,25 @@ function APIKeys(): JSX.Element {
   }
 
   const handleEditApiKey = (apiKey: ApiKey) => {
-    setEditingApiKey(apiKey);
+    // Create a copy for editing - show key status as placeholder
+    const editingCopy = {
+      ...apiKey,
+      value: '', // Start with empty value for user input
+      maskedValue: apiKey.value === 'Set' ? '•••••••••••••••• (hidden for security)' : 'Not configured' // Show status based on API response
+    };
+    setEditingApiKey(editingCopy);
     setEditingDatabricksSecret(null);
     setEditDialog(true);
   };
 
   const handleEditDatabricksSecret = (secret: DatabricksSecret) => {
-    setEditingDatabricksSecret(secret);
+    // Create a copy for editing - show key status as placeholder
+    const editingCopy = {
+      ...secret,
+      value: '', // Start with empty value for user input
+      maskedValue: secret.value === 'Set' ? '•••••••••••••••• (hidden for security)' : 'Not configured' // Show status based on API response
+    };
+    setEditingDatabricksSecret(editingCopy);
     setEditingApiKey(null);
     setEditDialog(true);
   };
@@ -256,18 +277,45 @@ function APIKeys(): JSX.Element {
     }
   };
 
-  const toggleVisibility = (id: number) => {
-    setVisibleSecrets(prev => ({
-      ...prev,
-      [id]: !prev[id]
-    }));
-  };
 
-  const formatSecretValue = (value: string, visible: boolean) => {
-    if (!visible) {
-      return '••••••••••••••••';
+  const formatSecretValue = (value: string) => {
+    const isSet = value === "Set";
+    const isNotSet = value === "Not set" || !value || value.trim() === '';
+    
+    if (isSet) {
+      return (
+        <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+          <CheckCircleIcon sx={{ color: 'success.main', fontSize: 20 }} />
+          <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5 }}>
+            <VisibilityOffIcon sx={{ color: 'text.secondary', fontSize: 16 }} />
+            <Typography variant="body2" sx={{ color: 'text.secondary', fontStyle: 'italic' }}>
+              Hidden
+            </Typography>
+          </Box>
+        </Box>
+      );
     }
-    return value;
+    
+    if (isNotSet) {
+      return (
+        <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+          <ErrorIcon sx={{ color: 'warning.main', fontSize: 20 }} />
+          <Typography variant="body2" sx={{ color: 'text.secondary' }}>
+            Not configured
+          </Typography>
+        </Box>
+      );
+    }
+    
+    // Fallback for any other values
+    return (
+      <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+        <CheckCircleIcon sx={{ color: 'success.main', fontSize: 20 }} />
+        <Typography variant="body2" sx={{ color: 'text.secondary' }}>
+          Configured
+        </Typography>
+      </Box>
+    );
   };
 
   const handleCreate = async () => {
@@ -369,15 +417,7 @@ function APIKeys(): JSX.Element {
                 <TableRow key={apiKey.id}>
                   <TableCell>{apiKey.name}</TableCell>
                   <TableCell>
-                    <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
-                      {formatSecretValue(apiKey.value, visibleSecrets[apiKey.id])}
-                      <IconButton
-                        size="small"
-                        onClick={() => toggleVisibility(apiKey.id)}
-                      >
-                        {visibleSecrets[apiKey.id] ? <VisibilityOffIcon /> : <VisibilityIcon />}
-                      </IconButton>
-                    </Box>
+                    {formatSecretValue(apiKey.value)}
                   </TableCell>
                   <TableCell>{apiKey.description}</TableCell>
                   <TableCell>
@@ -435,15 +475,7 @@ function APIKeys(): JSX.Element {
                   <TableRow key={secret.id}>
                     <TableCell>{secret.name}</TableCell>
                     <TableCell>
-                      <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
-                        {formatSecretValue(secret.value, visibleSecrets[secret.id])}
-                        <IconButton
-                          size="small"
-                          onClick={() => toggleVisibility(secret.id)}
-                        >
-                          {visibleSecrets[secret.id] ? <VisibilityOffIcon /> : <VisibilityIcon />}
-                        </IconButton>
-                      </Box>
+                      {formatSecretValue(secret.value)}
                     </TableCell>
                     <TableCell>{secret.description}</TableCell>
                     <TableCell>{secret.scope}</TableCell>
@@ -508,21 +540,16 @@ function APIKeys(): JSX.Element {
                       <TableRow key={keyName}>
                         <TableCell>{keyName}</TableCell>
                         <TableCell>
-                          <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
-                            {apiKey ? (
-                              <>
-                                {formatSecretValue(apiKey.value, visibleSecrets[apiKey.id])}
-                                <IconButton
-                                  size="small"
-                                  onClick={() => apiKey && toggleVisibility(apiKey.id)}
-                                >
-                                  {visibleSecrets[apiKey.id] ? <VisibilityOffIcon /> : <VisibilityIcon />}
-                                </IconButton>
-                              </>
-                            ) : (
-                              'Not set'
-                            )}
-                          </Box>
+                          {apiKey ? (
+                            formatSecretValue(apiKey.value)
+                          ) : (
+                            <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+                              <ErrorIcon sx={{ color: 'warning.main', fontSize: 20 }} />
+                              <Typography variant="body2" sx={{ color: 'text.secondary' }}>
+                                Not configured
+                              </Typography>
+                            </Box>
+                          )}
                         </TableCell>
                         <TableCell>{apiKey?.description || ''}</TableCell>
                         <TableCell>
@@ -655,6 +682,11 @@ function APIKeys(): JSX.Element {
               />
               <TextField
                 label="Value"
+                placeholder={
+                  (editingApiKey?.maskedValue || editingDatabricksSecret?.maskedValue) 
+                    ? `Current: ${editingApiKey?.maskedValue || editingDatabricksSecret?.maskedValue}` 
+                    : "Enter new value"
+                }
                 value={(editingApiKey || editingDatabricksSecret)?.value || ''}
                 onChange={(e) => {
                   if (editingApiKey) {
@@ -665,6 +697,7 @@ function APIKeys(): JSX.Element {
                 }}
                 fullWidth
                 required
+                helperText="Current value is masked for security. Enter a new value to update."
               />
               <TextField
                 label="Description"

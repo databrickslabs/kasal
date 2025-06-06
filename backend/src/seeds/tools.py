@@ -430,20 +430,21 @@ async def seed_async():
         try:
             async with async_session_factory() as session:
                 if tool_id not in existing_ids:
-                    # Add new tool
+                    # Add new tool - only GenieTool (ID 35) is enabled by default
                     tool = Tool(
                         id=tool_id,
                         title=title,
                         description=description,
                         icon=icon,
                         config=get_tool_configs().get(str(tool_id), {}),
+                        enabled=(tool_id == 35),  # Only enable GenieTool
                         created_at=datetime.now().replace(tzinfo=None),
                         updated_at=datetime.now().replace(tzinfo=None)
                     )
                     session.add(tool)
                     tools_added += 1
                 else:
-                    # Update existing tool
+                    # Update existing tool - only GenieTool (ID 35) is enabled by default
                     result = await session.execute(
                         select(Tool).filter(Tool.id == tool_id)
                     )
@@ -453,6 +454,7 @@ async def seed_async():
                         existing_tool.description = description
                         existing_tool.icon = icon
                         existing_tool.config = get_tool_configs().get(str(tool_id), {})
+                        existing_tool.enabled = (tool_id == 35)  # Only enable GenieTool
                         existing_tool.updated_at = datetime.now().replace(tzinfo=None)
                         tools_updated += 1
                 
@@ -486,20 +488,21 @@ def seed_sync():
         try:
             with SessionLocal() as session:
                 if tool_id not in existing_ids:
-                    # Add new tool
+                    # Add new tool - only GenieTool (ID 35) is enabled by default
                     tool = Tool(
                         id=tool_id,
                         title=title,
                         description=description,
                         icon=icon,
                         config=get_tool_configs().get(str(tool_id), {}),
+                        enabled=(tool_id == 35),  # Only enable GenieTool
                         created_at=datetime.now().replace(tzinfo=None),
                         updated_at=datetime.now().replace(tzinfo=None)
                     )
                     session.add(tool)
                     tools_added += 1
                 else:
-                    # Update existing tool
+                    # Update existing tool - only GenieTool (ID 35) is enabled by default
                     result = session.execute(
                         select(Tool).filter(Tool.id == tool_id)
                     )
@@ -509,6 +512,7 @@ def seed_sync():
                         existing_tool.description = description
                         existing_tool.icon = icon
                         existing_tool.config = get_tool_configs().get(str(tool_id), {})
+                        existing_tool.enabled = (tool_id == 35)  # Only enable GenieTool
                         existing_tool.updated_at = datetime.now().replace(tzinfo=None)
                         tools_updated += 1
                 

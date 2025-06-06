@@ -280,11 +280,12 @@ async def seed_async():
                         existing_model.context_window = model_data["context_window"]
                         existing_model.max_output_tokens = model_data["max_output_tokens"]
                         existing_model.extended_thinking = model_data.get("extended_thinking", False)
+                        existing_model.enabled = (model_data["provider"] == "databricks")  # Only enable Databricks models
                         existing_model.updated_at = datetime.now().replace(tzinfo=None)
                         logger.debug(f"Updating existing model: {model_key}")
                         models_updated += 1
                     else:
-                        # Add new model config
+                        # Add new model config - only Databricks models are enabled by default
                         model_config = ModelConfig(
                             key=model_key,
                             name=model_data["name"],
@@ -293,7 +294,7 @@ async def seed_async():
                             context_window=model_data["context_window"],
                             max_output_tokens=model_data["max_output_tokens"],
                             extended_thinking=model_data.get("extended_thinking", False),
-                            enabled=True,
+                            enabled=(model_data["provider"] == "databricks"),  # Only enable Databricks models
                             created_at=datetime.now().replace(tzinfo=None),
                             updated_at=datetime.now().replace(tzinfo=None)
                         )
@@ -301,7 +302,7 @@ async def seed_async():
                         logger.debug(f"Adding new model: {model_key}")
                         models_added += 1
                 else:
-                    # Update existing model config
+                    # Update existing model config - only Databricks models are enabled by default
                     result = await session.execute(
                         select(ModelConfig).filter(ModelConfig.key == model_key)
                     )
@@ -314,6 +315,7 @@ async def seed_async():
                         existing_model.context_window = model_data["context_window"]
                         existing_model.max_output_tokens = model_data["max_output_tokens"]
                         existing_model.extended_thinking = model_data.get("extended_thinking", False)
+                        existing_model.enabled = (model_data["provider"] == "databricks")  # Only enable Databricks models
                         existing_model.updated_at = datetime.now().replace(tzinfo=None)
                         logger.debug(f"Updating existing model: {model_key}")
                         models_updated += 1
@@ -400,7 +402,7 @@ def seed_sync():
                         logger.debug(f"Updating existing model: {model_key}")
                         models_updated += 1
                     else:
-                        # Add new model config
+                        # Add new model config - only Databricks models are enabled by default
                         model_config = ModelConfig(
                             key=model_key,
                             name=model_data["name"],
@@ -409,7 +411,7 @@ def seed_sync():
                             context_window=model_data["context_window"],
                             max_output_tokens=model_data["max_output_tokens"],
                             extended_thinking=model_data.get("extended_thinking", False),
-                            enabled=True,
+                            enabled=(model_data["provider"] == "databricks"),  # Only enable Databricks models
                             created_at=datetime.now().replace(tzinfo=None),
                             updated_at=datetime.now().replace(tzinfo=None)
                         )
@@ -417,7 +419,7 @@ def seed_sync():
                         logger.debug(f"Adding new model: {model_key}")
                         models_added += 1
                 else:
-                    # Update existing model config
+                    # Update existing model config - only Databricks models are enabled by default
                     result = session.execute(
                         select(ModelConfig).filter(ModelConfig.key == model_key)
                     )
@@ -430,6 +432,7 @@ def seed_sync():
                         existing_model.context_window = model_data["context_window"]
                         existing_model.max_output_tokens = model_data["max_output_tokens"]
                         existing_model.extended_thinking = model_data.get("extended_thinking", False)
+                        existing_model.enabled = (model_data["provider"] == "databricks")  # Only enable Databricks models
                         existing_model.updated_at = datetime.now().replace(tzinfo=None)
                         logger.debug(f"Updating existing model: {model_key}")
                         models_updated += 1

@@ -31,11 +31,15 @@ const TOOL_SECURITY_INFO: Record<string, {
   risks: string[];
   mitigations: string[];
   description: string;
+  singleTenantRiskLevel?: 'CRITICAL' | 'HIGH' | 'MEDIUM' | 'LOW';
+  singleTenantRisks?: string[];
+  singleTenantMitigations?: string[];
+  deploymentContext?: string;
 }> = {
   // CRITICAL RISK TOOLS
   'FileReadTool': {
     riskLevel: 'CRITICAL',
-    description: 'Can read ANY file on the system without restrictions',
+    description: 'Can read files within the container filesystem',
     risks: [
       'Path traversal attacks (../../../etc/passwd)',
       'Access to other users\' sensitive files',
@@ -48,7 +52,20 @@ const TOOL_SECURITY_INFO: Record<string, {
       'Implement path validation and sanitization',
       'Use sandboxed file access',
       'Add audit logging for all file reads'
-    ]
+    ],
+    singleTenantRiskLevel: 'LOW',
+    singleTenantRisks: [
+      'Can read files within user\'s dedicated container',
+      'Access to user\'s workspace files and configurations',
+      'Reading of temporary files and logs within container'
+    ],
+    singleTenantMitigations: [
+      'Container runs with non-root user privileges',
+      'Filesystem isolated to user\'s container only',
+      'API keys managed through secure backend service',
+      'No access to other users or system files'
+    ],
+    deploymentContext: 'Single-tenant containerized deployment on Databricks'
   },
   'FileWriterTool': {
     riskLevel: 'CRITICAL',
@@ -114,7 +131,50 @@ const TOOL_SECURITY_INFO: Record<string, {
       'Implement tenant-based data filtering',
       'Add query approval workflows',
       'Set query timeouts and resource limits'
-    ]
+    ],
+    singleTenantRiskLevel: 'MEDIUM',
+    singleTenantRisks: [
+      'SQL injection if queries not properly sanitized',
+      'Access to all data user has permissions for',
+      'Potential for expensive queries impacting performance',
+      'Data modification within user\'s scope'
+    ],
+    singleTenantMitigations: [
+      'Databricks On-Behalf-Of (OBO) scopes access to user permissions',
+      'User can only access data they\'re already authorized for',
+      'Query execution limits enforced by Databricks',
+      'SQL operations logged and auditable'
+    ],
+    deploymentContext: 'Single-tenant with Databricks OBO security model'
+  },
+  'GenieTool': {
+    riskLevel: 'HIGH',
+    description: 'Natural language interface to Databricks Genie AI assistant',
+    risks: [
+      'Unrestricted natural language queries to database',
+      'Potential for complex data aggregations',
+      'Access to sensitive data through conversational interface',
+      'Query interpretation may expose unexpected data'
+    ],
+    mitigations: [
+      'Implement query complexity limits',
+      'Add data access monitoring',
+      'Review query translations before execution',
+      'Use read-only database connections where possible'
+    ],
+    singleTenantRiskLevel: 'LOW',
+    singleTenantRisks: [
+      'Natural language queries within user\'s data scope',
+      'Potential for unintended data exposure through AI interpretation',
+      'Performance impact from complex generated queries'
+    ],
+    singleTenantMitigations: [
+      'Databricks OBO ensures queries run with user\'s permissions only',
+      'Genie AI respects existing data access controls',
+      'Query execution limited to user\'s authorized datasets',
+      'All interactions logged and auditable'
+    ],
+    deploymentContext: 'Single-tenant with Databricks OBO and Genie AI security'
   },
   'NL2SQLTool': {
     riskLevel: 'CRITICAL',
@@ -403,12 +463,21 @@ const SecurityDisclaimer: React.FC<SecurityDisclaimerProps> = ({
       <DialogTitle sx={{ display: 'flex', alignItems: 'center', gap: 1, pb: 1 }}>
         <SecurityIcon color="error" />
         <Typography variant="h6">Security Warning</Typography>
-        <Chip 
-          label={`${securityInfo.riskLevel} RISK`}
-          color={getRiskColor(securityInfo.riskLevel)}
-          size="small"
-          sx={{ ml: 'auto' }}
-        />
+        <Box sx={{ ml: 'auto', display: 'flex', gap: 1 }}>
+          <Chip 
+            label={`MULTI-TENANT: ${securityInfo.riskLevel}`}
+            color={getRiskColor(securityInfo.riskLevel)}
+            size="small"
+          />
+          {securityInfo.singleTenantRiskLevel && (
+            <Chip 
+              label={`SINGLE-TENANT: ${securityInfo.singleTenantRiskLevel}`}
+              color={getRiskColor(securityInfo.singleTenantRiskLevel)}
+              size="small"
+              variant="outlined"
+            />
+          )}
+        </Box>
       </DialogTitle>
       
       <DialogContent>
@@ -419,11 +488,17 @@ const SecurityDisclaimer: React.FC<SecurityDisclaimerProps> = ({
           <Typography variant="body2">
             {securityInfo.description}
           </Typography>
+          {securityInfo.deploymentContext && (
+            <Typography variant="body2" sx={{ mt: 1, fontStyle: 'italic' }}>
+              Deployment: {securityInfo.deploymentContext}
+            </Typography>
+          )}
         </Alert>
 
+        {/* Multi-tenant risks (general case) */}
         <Box sx={{ mb: 3 }}>
           <Typography variant="h6" color="error" gutterBottom sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
-            <WarningIcon /> Security Risks
+            <WarningIcon /> Multi-Tenant Security Risks
           </Typography>
           <List dense>
             {securityInfo.risks.map((risk, index) => (
@@ -437,11 +512,31 @@ const SecurityDisclaimer: React.FC<SecurityDisclaimerProps> = ({
           </List>
         </Box>
 
+        {/* Single-tenant risks (current deployment) */}
+        {securityInfo.singleTenantRisks && (
+          <Box sx={{ mb: 3 }}>
+            <Typography variant="h6" color="info.main" gutterBottom sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+              📦 Single-Tenant Containerized Risks
+            </Typography>
+            <List dense>
+              {securityInfo.singleTenantRisks.map((risk, index) => (
+                <ListItem key={index} sx={{ py: 0.5 }}>
+                  <ListItemText 
+                    primary={`• ${risk}`}
+                    sx={{ color: 'info.main' }}
+                  />
+                </ListItem>
+              ))}
+            </List>
+          </Box>
+        )}
+
         <Divider sx={{ my: 2 }} />
 
-        <Box>
+        {/* Multi-tenant mitigations */}
+        <Box sx={{ mb: 2 }}>
           <Typography variant="h6" color="success.main" gutterBottom>
-            🛡️ Recommended Security Mitigations
+            🛡️ General Security Mitigations
           </Typography>
           <List dense>
             {securityInfo.mitigations.map((mitigation, index) => (
@@ -454,6 +549,25 @@ const SecurityDisclaimer: React.FC<SecurityDisclaimerProps> = ({
             ))}
           </List>
         </Box>
+
+        {/* Single-tenant mitigations */}
+        {securityInfo.singleTenantMitigations && (
+          <Box sx={{ mb: 2 }}>
+            <Typography variant="h6" color="success.main" gutterBottom>
+              ✅ Container Security Mitigations
+            </Typography>
+            <List dense>
+              {securityInfo.singleTenantMitigations.map((mitigation, index) => (
+                <ListItem key={index} sx={{ py: 0.5 }}>
+                  <ListItemText 
+                    primary={`• ${mitigation}`}
+                    sx={{ color: 'success.main' }}
+                  />
+                </ListItem>
+              ))}
+            </List>
+          </Box>
+        )}
 
         <Alert severity="error" sx={{ mt: 3 }}>
           <Typography variant="body2">

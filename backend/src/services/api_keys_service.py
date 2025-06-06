@@ -177,6 +177,26 @@ class ApiKeysService(BaseService):
         
         return api_keys
     
+    async def get_api_keys_metadata(self) -> List[ApiKey]:
+        """
+        Get all API keys metadata without values for frontend display.
+        
+        Returns only metadata (names, descriptions, IDs) with status indicator.
+        Safe for HTTP API exposure.
+        
+        Returns:
+            List of API keys with metadata and set/not set status
+        """
+        api_keys = await self.repository.find_all()
+        
+        # Set status indicator instead of actual values for security
+        for key in api_keys:
+            # Check if key has an encrypted value
+            has_value = bool(key.encrypted_value and key.encrypted_value.strip())
+            key.value = "Set" if has_value else "Not set"  # Status indicator instead of actual value
+        
+        return api_keys
+    
     @classmethod
     async def get_api_key_value(cls, db: AsyncSession = None, key_name: str = None):
         """

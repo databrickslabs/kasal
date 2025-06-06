@@ -1,4 +1,4 @@
-from typing import Annotated, List, Optional
+from typing import Annotated, List
 
 from fastapi import APIRouter, Depends, HTTPException, status
 import logging
@@ -22,23 +22,25 @@ def get_api_key_service(session: SessionDep) -> ApiKeysService:
 
 
 @router.get("", response_model=List[ApiKeyResponse])
-async def get_api_keys(
+async def get_api_keys_metadata(
     service: Annotated[ApiKeysService, Depends(get_api_key_service)],
 ):
     """
-    Get all API keys stored in the local database.
+    Get API keys metadata (names, descriptions) without actual values.
+    
+    Returns only safe metadata - no actual key values are returned.
     
     Args:
         service: API key service injected by dependency
         
     Returns:
-        List of API keys
+        List of API keys with empty values (metadata only)
     """
     try:
-        api_keys = await service.get_all_api_keys()
+        api_keys = await service.get_api_keys_metadata()
         return api_keys
     except Exception as e:
-        logger.error(f"Error getting API keys: {str(e)}")
+        logger.error(f"Error getting API keys metadata: {str(e)}")
         raise HTTPException(status_code=500, detail=str(e))
 
 
