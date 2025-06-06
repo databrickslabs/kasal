@@ -152,39 +152,8 @@ async def toggle_tool_enabled(
         logger.warning(f"Tool toggle failed: {str(e)}")
         raise
 
-@router.patch("/enable-all", response_model=List[ToolResponse])
-async def enable_all_tools(
-    db: AsyncSession = Depends(get_db)
-) -> List[ToolResponse]:
-    """
-    Enable all tools.
-    """
-    logger.info("Enabling all tools")
-    try:
-        service = ToolService(db)
-        tools = await service.enable_all_tools()
-        logger.info(f"Enabled {len(tools)} tools")
-        return tools
-    except HTTPException as e:
-        logger.warning(f"Enable all tools failed: {str(e)}")
-        raise
-
-@router.patch("/disable-all", response_model=List[ToolResponse])
-async def disable_all_tools(
-    db: AsyncSession = Depends(get_db)
-) -> List[ToolResponse]:
-    """
-    Disable all tools.
-    """
-    logger.info("Disabling all tools")
-    try:
-        service = ToolService(db)
-        tools = await service.disable_all_tools()
-        logger.info(f"Disabled {len(tools)} tools")
-        return tools
-    except HTTPException as e:
-        logger.warning(f"Disable all tools failed: {str(e)}")
-        raise
+# Removed enable-all and disable-all endpoints for security reasons
+# Individual tool enabling now requires security disclaimer confirmation
 
 @router.get("/configurations/all", response_model=Dict[str, Dict[str, Any]])
 async def get_all_tool_configurations(

@@ -28,19 +28,17 @@ import {
   DialogActions,
   Tabs,
   Tab,
-  Switch,
-  ButtonGroup
+  Switch
 } from '@mui/material';
 import DeleteIcon from '@mui/icons-material/Delete';
 import EditIcon from '@mui/icons-material/Edit';
 import AddIcon from '@mui/icons-material/Add';
-import PowerSettingsNewIcon from '@mui/icons-material/PowerSettingsNew';
-import PowerOffIcon from '@mui/icons-material/PowerOff';
 import { Tool, ToolIcon } from '../../types/tool';
 import { Tool as ServiceTool, ToolService } from '../../api/ToolService';
 import { UCToolsService, UCTool } from '../../api/UCToolsService';
 import { DatabricksService } from '../../api/DatabricksService';
 import { useTranslation } from 'react-i18next';
+import SecurityDisclaimer from './SecurityDisclaimer';
 
 const toolIcons: ToolIcon[] = [
   { value: 'screwdriver-wrench', label: 'Screwdriver Wrench' },
@@ -101,6 +99,8 @@ const ToolForm: React.FC = () => {
   const [isEditing, setIsEditing] = useState(false);
   const [activeTab, setActiveTab] = useState<number>(0);
   const [databricksEnabled, setDatabricksEnabled] = useState(false);
+  const [securityDisclaimerOpen, setSecurityDisclaimerOpen] = useState(false);
+  const [pendingToggleTool, setPendingToggleTool] = useState<Tool | null>(null);
   const [notification, setNotification] = useState<{
     open: boolean;
     message: string;
@@ -292,6 +292,21 @@ const ToolForm: React.FC = () => {
   };
 
   const handleToggleEnabled = async (id: string) => {
+    const tool = tools.find(t => t.id === id);
+    if (!tool) return;
+
+    // If tool is currently disabled and user wants to enable it, show security disclaimer
+    if (!tool.enabled) {
+      setPendingToggleTool(tool);
+      setSecurityDisclaimerOpen(true);
+      return;
+    }
+
+    // If tool is currently enabled and user wants to disable it, proceed directly
+    await performToggleEnabled(id);
+  };
+
+  const performToggleEnabled = async (id: string) => {
     try {
       const { enabled } = await ToolService.toggleToolEnabled(Number(id));
       
@@ -335,6 +350,19 @@ const ToolForm: React.FC = () => {
     }
   };
 
+  const handleSecurityDisclaimerConfirm = async () => {
+    if (pendingToggleTool?.id) {
+      await performToggleEnabled(pendingToggleTool.id);
+    }
+    setSecurityDisclaimerOpen(false);
+    setPendingToggleTool(null);
+  };
+
+  const handleSecurityDisclaimerClose = () => {
+    setSecurityDisclaimerOpen(false);
+    setPendingToggleTool(null);
+  };
+
   const handleCloseNotification = () => {
     setNotification(prev => ({ ...prev, open: false }));
   };
@@ -347,63 +375,6 @@ const ToolForm: React.FC = () => {
     setSearchQuery(e.target.value);
   };
 
-  const handleEnableAllTools = async () => {
-    try {
-      const updatedTools = await ToolService.enableAllTools();
-      setTools(updatedTools.map(convertServiceToolToTool));
-      setNotification({
-        open: true,
-        message: t('tools.regular.messages.enableAllSuccess'),
-        severity: 'success',
-      });
-
-      // Dispatch custom event with the fresh tool data
-      const toolUpdateEvent = new CustomEvent<{toolId?: string; enabled?: boolean; tools: Tool[]}>('toolStateChanged', { 
-        detail: { 
-          toolId: 'all', 
-          enabled: true,
-          tools: updatedTools.map(convertServiceToolToTool)
-        } 
-      });
-      window.dispatchEvent(toolUpdateEvent);
-    } catch (error) {
-      console.error('Error enabling all tools:', error);
-      setNotification({
-        open: true,
-        message: error instanceof Error ? error.message : 'Error enabling all tools',
-        severity: 'error',
-      });
-    }
-  };
-
-  const handleDisableAllTools = async () => {
-    try {
-      const updatedTools = await ToolService.disableAllTools();
-      setTools(updatedTools.map(convertServiceToolToTool));
-      setNotification({
-        open: true,
-        message: t('tools.regular.messages.disableAllSuccess'),
-        severity: 'success',
-      });
-
-      // Dispatch custom event with the fresh tool data
-      const toolUpdateEvent = new CustomEvent<{toolId?: string; enabled?: boolean; tools: Tool[]}>('toolStateChanged', { 
-        detail: { 
-          toolId: 'all', 
-          enabled: false,
-          tools: updatedTools.map(convertServiceToolToTool)
-        } 
-      });
-      window.dispatchEvent(toolUpdateEvent);
-    } catch (error) {
-      console.error('Error disabling all tools:', error);
-      setNotification({
-        open: true,
-        message: error instanceof Error ? error.message : 'Error disabling all tools',
-        severity: 'error',
-      });
-    }
-  };
 
   // Filter tools by the current category
   const prebuiltTools = filteredTools.filter(tool => tool.category === 'PreBuilt' || !tool.category);
@@ -439,22 +410,6 @@ const ToolForm: React.FC = () => {
                 {t('tools.regular.existingTools')}
               </Typography>
               <Box>
-                <ButtonGroup variant="outlined" size="small" sx={{ mr: 2 }}>
-                  <Button 
-                    startIcon={<PowerSettingsNewIcon />}
-                    onClick={handleEnableAllTools}
-                    color="success"
-                  >
-                    {t('tools.regular.enableAll')}
-                  </Button>
-                  <Button 
-                    startIcon={<PowerOffIcon />}
-                    onClick={handleDisableAllTools}
-                    color="error"
-                  >
-                    {t('tools.regular.disableAll')}
-                  </Button>
-                </ButtonGroup>
                 <IconButton
                   color="primary"
                   onClick={() => {
@@ -793,6 +748,13 @@ const ToolForm: React.FC = () => {
             {notification.message}
           </Alert>
         </Snackbar>
+
+        <SecurityDisclaimer
+          open={securityDisclaimerOpen}
+          onClose={handleSecurityDisclaimerClose}
+          onConfirm={handleSecurityDisclaimerConfirm}
+          tool={pendingToggleTool}
+        />
       </Stack>
     </Box>
   );

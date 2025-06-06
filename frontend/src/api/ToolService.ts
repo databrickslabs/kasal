@@ -108,27 +108,6 @@ export class ToolService {
     }
   }
 
-  static async enableAllTools(): Promise<Tool[]> {
-    try {
-      const response = await apiClient.patch<Tool[]>('/tools/enable-all');
-      console.log('Enabled all tools:', response.data);
-      return response.data;
-    } catch (error) {
-      console.error('Error enabling all tools:', error);
-      const axiosError = error as AxiosError<ErrorResponse>;
-      throw new Error(axiosError.response?.data?.detail || 'Error enabling all tools');
-    }
-  }
-
-  static async disableAllTools(): Promise<Tool[]> {
-    try {
-      const response = await apiClient.patch<Tool[]>('/tools/disable-all');
-      console.log('Disabled all tools:', response.data);
-      return response.data;
-    } catch (error) {
-      console.error('Error disabling all tools:', error);
-      const axiosError = error as AxiosError<ErrorResponse>;
-      throw new Error(axiosError.response?.data?.detail || 'Error disabling all tools');
-    }
-  }
+  // Removed enableAllTools and disableAllTools methods for security reasons
+  // Individual tool enabling now requires security disclaimer confirmation
 } 

@@ -219,51 +219,8 @@ class ToolService:
                 detail=f"Failed to toggle tool: {str(e)}"
             )
 
-    async def enable_all_tools(self) -> List[ToolResponse]:
-        """
-        Enable all tools.
-        
-        Returns:
-            List of all tools with their updated enabled status
-            
-        Raises:
-            HTTPException: If operation fails
-        """
-        try:
-            # Enable all tools using repository
-            tools = await self.repository.enable_all()
-            
-            # Return updated tools
-            return [ToolResponse.model_validate(tool) for tool in tools]
-        except Exception as e:
-            logger.error(f"Failed to enable all tools: {str(e)}")
-            raise HTTPException(
-                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-                detail=f"Failed to enable all tools: {str(e)}"
-            )
-
-    async def disable_all_tools(self) -> List[ToolResponse]:
-        """
-        Disable all tools.
-        
-        Returns:
-            List of all tools with their updated enabled status
-            
-        Raises:
-            HTTPException: If operation fails
-        """
-        try:
-            # Disable all tools using repository
-            tools = await self.repository.disable_all()
-            
-            # Return updated tools
-            return [ToolResponse.model_validate(tool) for tool in tools]
-        except Exception as e:
-            logger.error(f"Failed to disable all tools: {str(e)}")
-            raise HTTPException(
-                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-                detail=f"Failed to disable all tools: {str(e)}"
-            )
+    # Removed enable_all_tools and disable_all_tools methods for security reasons
+    # Individual tool enabling now requires security disclaimer confirmation
 
     async def get_tool_config_by_name(self, tool_name: str) -> Optional[Dict[str, Any]]:
         """
