@@ -13,7 +13,7 @@ def generate_uuid():
 class Task(Base):
     """
     Task model representing a task in the system.
-    Enhanced with tenant isolation for multi-tenant deployments.
+    Enhanced with group isolation for multi-group deployments.
     """
     __tablename__ = "tasks"
     
@@ -27,8 +27,9 @@ class Task(Base):
     context = Column(JSON, default=list)
     config = Column(JSON, default=dict)
     
-    # Multi-tenant fields
-    tenant_id = Column(String(100), index=True, nullable=True)  # Tenant isolation
+    # Multi-group fields
+    group_id = Column(String(100), index=True, nullable=True)  # Group isolation
+    tenant_id = Column(String(100), index=True, nullable=True)  # Legacy compatibility (will be removed)
     created_by_email = Column(String(255), nullable=True)  # Creator email for audit
     
     # Output configuration

@@ -11,7 +11,24 @@ class UserStatus(str, Enum):
     INACTIVE = "inactive"
     SUSPENDED = "suspended"
 
-# Simple tenant enums for Phase 1
+# Group enums (formerly tenant enums)
+class GroupStatus(str, Enum):
+    ACTIVE = "active"
+    SUSPENDED = "suspended"
+    ARCHIVED = "archived"
+
+class GroupUserRole(str, Enum):
+    ADMIN = "admin"           # Full control within group
+    MANAGER = "manager"       # Can manage users and workflows
+    USER = "user"            # Can execute workflows
+    VIEWER = "viewer"        # Read-only access
+
+class GroupUserStatus(str, Enum):
+    ACTIVE = "active"
+    INACTIVE = "inactive"
+    SUSPENDED = "suspended"
+
+# Legacy tenant enums for backward compatibility during migration
 class TenantStatus(str, Enum):
     ACTIVE = "active"
     SUSPENDED = "suspended"

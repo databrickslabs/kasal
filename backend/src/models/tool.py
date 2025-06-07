@@ -7,7 +7,7 @@ from src.db.base import Base
 class Tool(Base):
     """
     SQLAlchemy model for tools.
-    Enhanced with tenant isolation for multi-tenant deployments.
+    Enhanced with group isolation for multi-group deployments.
     """
     
     __tablename__ = "tools"
@@ -19,8 +19,9 @@ class Tool(Base):
     config = Column(JSON, default=dict)
     enabled = Column(Boolean, default=True)
     
-    # Multi-tenant fields
-    tenant_id = Column(String(100), index=True, nullable=True)  # Tenant isolation
+    # Multi-group fields
+    group_id = Column(String(100), index=True, nullable=True)  # Group isolation
+    tenant_id = Column(String(100), index=True, nullable=True)  # Legacy compatibility (will be removed)
     created_by_email = Column(String(255), nullable=True)  # Creator email for audit
     
     # Metadata

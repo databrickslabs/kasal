@@ -12,7 +12,7 @@ def generate_uuid():
 class Agent(Base):
     """
     Agent model representing an AI agent in the system.
-    Enhanced with tenant isolation for multi-tenant deployments.
+    Enhanced with group isolation for multi-group deployments.
     """
     __tablename__ = "agents"
     
@@ -22,8 +22,9 @@ class Agent(Base):
     goal = Column(String, nullable=False)
     backstory = Column(String)
     
-    # Multi-tenant fields
-    tenant_id = Column(String(100), index=True, nullable=True)  # Tenant isolation
+    # Multi-group fields
+    group_id = Column(String(100), index=True, nullable=True)  # Group isolation
+    tenant_id = Column(String(100), index=True, nullable=True)  # Legacy compatibility (will be removed)
     created_by_email = Column(String(255), nullable=True)  # Creator email for audit
     
     # Core configuration

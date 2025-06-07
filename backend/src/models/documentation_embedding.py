@@ -40,7 +40,7 @@ class DocumentationEmbedding(Base):
     source = Column(String, index=True, nullable=False)
     title = Column(String, index=True, nullable=False)
     content = Column(Text, nullable=False)
-    embedding = Column(Vector(1536), nullable=False)
+    embedding = Column(Vector(1024), nullable=False)
     doc_metadata = Column(JSON, nullable=True)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())

@@ -1,7 +1,8 @@
 from datetime import datetime, timezone
-from sqlalchemy import Column, String, DateTime, Enum, Boolean, ForeignKey
+from sqlalchemy import Column, String, DateTime, Enum, Boolean, ForeignKey, UniqueConstraint
 from sqlalchemy.orm import relationship
 from sqlalchemy import Enum as SQLAlchemyEnum
+import sqlalchemy as sa
 from src.db.base import Base
 from uuid import uuid4
 from src.models.enums import UserRole, UserStatus, IdentityProviderType
@@ -26,6 +27,7 @@ class User(Base):
     profile = relationship("UserProfile", back_populates="user", uselist=False, cascade="all, delete-orphan")
     refresh_tokens = relationship("RefreshToken", back_populates="user", cascade="all, delete-orphan")
     external_identities = relationship("ExternalIdentity", back_populates="user", cascade="all, delete-orphan")
+    user_roles = relationship("UserRole", back_populates="user", cascade="all, delete-orphan")
 
 
 class UserProfile(Base):
@@ -72,7 +74,7 @@ class ExternalIdentity(Base):
     
     __table_args__ = (
         # Unique constraint to prevent duplicate provider identity
-        {'unique_constraint': ['provider', 'provider_user_id']}
+        sa.UniqueConstraint('provider', 'provider_user_id', name='uq_external_identity_provider_user'),
     )
 
 
@@ -87,6 +89,7 @@ class Role(Base):
     
     # Relationships
     role_privileges = relationship("RolePrivilege", back_populates="role", cascade="all, delete-orphan")
+    user_roles = relationship("UserRole", back_populates="role", cascade="all, delete-orphan")
 
 
 class Privilege(Base):
@@ -114,7 +117,26 @@ class RolePrivilege(Base):
     
     __table_args__ = (
         # Unique constraint to prevent duplicate role-privilege pairs
-        {'unique_constraint': ['role_id', 'privilege_id']}
+        UniqueConstraint('role_id', 'privilege_id', name='uq_role_privilege'),
+    )
+
+
+class UserRole(Base):
+    __tablename__ = "user_roles"
+
+    id = Column(String, primary_key=True, default=generate_uuid)
+    user_id = Column(String, ForeignKey("users.id", ondelete="CASCADE"))
+    role_id = Column(String, ForeignKey("roles.id", ondelete="CASCADE"))
+    assigned_at = Column(DateTime(timezone=True), default=datetime.now(timezone.utc))
+    assigned_by = Column(String, nullable=True)  # Email of admin who assigned the role
+    
+    # Relationships
+    user = relationship("User", back_populates="user_roles")
+    role = relationship("Role", back_populates="user_roles")
+    
+    __table_args__ = (
+        # Unique constraint to prevent duplicate user-role pairs
+        UniqueConstraint('user_id', 'role_id', name='uq_user_role'),
     )
 
 

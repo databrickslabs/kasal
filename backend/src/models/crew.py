@@ -9,7 +9,7 @@ from src.db.base import Base
 class Crew(Base):
     """
     SQLAlchemy model for crews.
-    Enhanced with tenant isolation for multi-tenant deployments.
+    Enhanced with group isolation for multi-group deployments.
     """
     __tablename__ = "crews"
     
@@ -20,8 +20,9 @@ class Crew(Base):
     nodes = Column(JSON, nullable=True)
     edges = Column(JSON, nullable=True)
     
-    # Multi-tenant fields
-    tenant_id = Column(String(100), index=True, nullable=True)  # Tenant isolation
+    # Multi-group fields
+    group_id = Column(String(100), index=True, nullable=True)  # Group isolation
+    tenant_id = Column(String(100), index=True, nullable=True)  # Legacy compatibility (will be removed)
     created_by_email = Column(String(255), nullable=True)  # Creator email for audit
     
     # Metadata

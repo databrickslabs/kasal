@@ -7,7 +7,7 @@ from src.db.base import Base
 class PromptTemplate(Base):
     """
     PromptTemplate model for storing reusable prompt templates.
-    Enhanced with tenant isolation for multi-tenant deployments.
+    Enhanced with group isolation for multi-group deployments.
     """
     
     id = Column(Integer, primary_key=True)
@@ -16,8 +16,9 @@ class PromptTemplate(Base):
     template = Column(Text, nullable=False)  # The actual prompt template text
     is_active = Column(Boolean, default=True)
     
-    # Multi-tenant fields
-    tenant_id = Column(String(100), index=True, nullable=True)  # Tenant isolation
+    # Multi-group fields
+    group_id = Column(String(100), index=True, nullable=True)  # Group isolation
+    tenant_id = Column(String(100), index=True, nullable=True)  # Legacy compatibility (will be removed)
     created_by_email = Column(String(255), nullable=True)  # Creator email for audit
     
     # Metadata

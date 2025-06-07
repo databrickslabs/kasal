@@ -19,7 +19,7 @@ def generate_job_id():
 class ExecutionHistory(Base):
     """
     Run model representing an execution of a job/workflow.
-    Enhanced with tenant isolation for multi-tenant deployments.
+    Enhanced with group isolation for multi-group deployments.
     """
     
     __tablename__ = "executionhistory"
@@ -36,9 +36,11 @@ class ExecutionHistory(Base):
     run_name = Column(String)
     completed_at = Column(DateTime)
     
-    # Multi-tenant fields
-    tenant_id = Column(String(100), index=True, nullable=True)  # Tenant isolation
-    tenant_email = Column(String(255), index=True, nullable=True)  # User email for audit
+    # Multi-group fields
+    group_id = Column(String(100), index=True, nullable=True)  # Group isolation
+    tenant_id = Column(String(100), index=True, nullable=True)  # Legacy compatibility (will be removed)
+    group_email = Column(String(255), index=True, nullable=True)  # User email for audit
+    tenant_email = Column(String(255), index=True, nullable=True)  # Legacy compatibility (will be removed)
     
     # Relationships
     task_statuses = relationship("TaskStatus", back_populates="execution_history", 
