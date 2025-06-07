@@ -37,7 +37,7 @@ export const usePanelManager = (): PanelManagerResult => {
   const [panelState, setPanelState] = useState(PANEL_STATE.SPLIT);
   const [areFlowsVisible, setAreFlowsVisible] = useState(false);
   const [showRunHistory, setShowRunHistory] = useState(true);
-  const [showChatPanel, setShowChatPanel] = useState(false);
+  const [showChatPanel, setShowChatPanel] = useState(true);
   
   // Panel transition functions
   const handlePanelDragStart = useCallback(() => {

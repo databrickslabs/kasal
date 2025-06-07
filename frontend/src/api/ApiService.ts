@@ -14,13 +14,22 @@ const axiosInstance = axios.create({
   },
 });
 
-// Add a request interceptor to include authentication tokens
+// Add a request interceptor to include authentication tokens and tenant headers
 axiosInstance.interceptors.request.use(
   (config) => {
     const token = localStorage.getItem('token');
     if (token) {
       config.headers.Authorization = `Bearer ${token}`;
     }
+    
+    // For local development: add mock tenant headers
+    const mockUserEmail = localStorage.getItem('mockUserEmail');
+    if (mockUserEmail && process.env.NODE_ENV === 'development') {
+      config.headers['X-Forwarded-Email'] = mockUserEmail;
+      config.headers['X-Forwarded-Access-Token'] = 'mock-token-for-dev';
+      console.log(`[DEV] Using mock user: ${mockUserEmail}`);
+    }
+    
     return config;
   },
   (error) => {
@@ -81,6 +90,25 @@ export const ApiService = {
   patch: async (url: string, data = {}) => {
     console.log('PATCH Request to:', url, 'with data:', data);
     return axiosInstance.patch(url, data);
+  }
+};
+
+// Development utilities for mock user management
+export const DevUtils = {
+  getCurrentMockUser: () => {
+    return localStorage.getItem('mockUserEmail') || null;
+  },
+  
+  setMockUser: (email: string) => {
+    localStorage.setItem('mockUserEmail', email);
+  },
+  
+  clearMockUser: () => {
+    localStorage.removeItem('mockUserEmail');
+  },
+  
+  isDevelopment: () => {
+    return process.env.NODE_ENV === 'development';
   }
 };
 
