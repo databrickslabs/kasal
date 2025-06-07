@@ -42,6 +42,7 @@ class ConnectionRequest(BaseModel):
     agents: List[Agent] = Field(..., description="List of agents available for task assignment")
     tasks: List[Task] = Field(..., description="List of tasks to be assigned to agents")
     model: str = Field("gpt-4-turbo", description="LLM model to use for generating connections")
+    instructions: Optional[str] = Field(None, description="Additional instructions for connection generation")
 
 
 class TaskAssignment(BaseModel):

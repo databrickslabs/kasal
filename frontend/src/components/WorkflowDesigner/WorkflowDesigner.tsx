@@ -173,6 +173,9 @@ const WorkflowDesigner: React.FC<WorkflowDesignerProps> = (): JSX.Element => {
   // Use the dialog manager
   const dialogManager = useDialogManager(hasSeenTutorial, setHasSeenTutorial);
 
+  // Connection generation state
+  const [isGeneratingConnections, setIsGeneratingConnections] = React.useState(false);
+
   // Use crew execution store
   const {
     isExecuting,
@@ -748,9 +751,148 @@ const WorkflowDesigner: React.FC<WorkflowDesignerProps> = (): JSX.Element => {
             setNodes([]);
             setEdges([]);
           }}
+          isGeneratingConnections={isGeneratingConnections}
           onGenerateConnections={async () => {
-            // Implementation for generating connections
-            console.log('Generating connections...');
+            // Implementation for generating connections using ConnectionService
+            setIsGeneratingConnections(true);
+            try {
+              // Import required services
+              const { ConnectionService } = await import('../../api/ConnectionService');
+              
+              // Debug: Log all nodes to see their structure
+              console.log('All nodes:', nodes);
+              console.log('Node types found:', nodes.map(node => ({ id: node.id, type: node.type, data: node.data })));
+              
+              // Extract agent nodes from the current nodes
+              const agentNodes = nodes.filter(node => node.type === 'agentNode');
+              const taskNodes = nodes.filter(node => node.type === 'taskNode');
+              
+              console.log('Filtered agent nodes:', agentNodes);
+              console.log('Filtered task nodes:', taskNodes);
+              
+              if (agentNodes.length === 0) {
+                showErrorMessage('No agents found. Please add at least one agent to generate connections.');
+                return;
+              }
+              
+              if (taskNodes.length === 0) {
+                showErrorMessage('No tasks found. Please add at least one task to generate connections.');
+                return;
+              }
+              
+              // Convert agent nodes to ConnectionAgent format
+              const agents: any[] = agentNodes.map(node => ({
+                name: node.data.label || node.data.name || `Agent ${node.id}`,
+                role: node.data.role || 'Assistant',
+                goal: node.data.goal || 'Complete assigned tasks effectively',
+                backstory: node.data.backstory || 'A dedicated AI agent designed to help with various tasks',
+                tools: node.data.tools || []
+              }));
+              
+              // Convert task nodes to ConnectionTask format  
+              const tasks: any[] = taskNodes.map(node => ({
+                name: node.data.label || node.data.name || `Task ${node.id}`,
+                description: node.data.description || node.data.label || `Task ${node.id}`,
+                expected_output: node.data.expected_output || 'Complete the task successfully',
+                agent_id: node.data.agent_id || '',
+                tools: node.data.tools || [],
+                async_execution: node.data.async_execution || false,
+                human_input: node.data.config?.human_input || false,
+                markdown: node.data.config?.markdown || false,
+                context: {
+                  type: 'general',
+                  priority: node.data.config?.priority === 1 ? 'high' : 
+                           node.data.config?.priority === 2 ? 'medium' : 'low',
+                  complexity: 'medium',
+                  required_skills: [],
+                  metadata: {}
+                }
+              }));
+              
+              // Use a default model (this should be configurable in the future)
+              const model = 'gpt-4o-mini';
+              
+              console.log('Generating connections with:', { agents, tasks, model });
+              
+              // Call the ConnectionService to generate intelligent connections
+              const response = await ConnectionService.generateConnections(agents, tasks, model);
+              
+              console.log('Connection generation response:', response);
+              
+              // Create edges based on the AI-generated assignments
+              const newEdges: any[] = [];
+              
+              response.assignments.forEach(assignment => {
+                const agentNode = agentNodes.find(node => 
+                  (node.data.label || node.data.name) === assignment.agent_name
+                );
+                
+                if (agentNode) {
+                  assignment.tasks.forEach(taskAssignment => {
+                    const taskNode = taskNodes.find(node => 
+                      (node.data.label || node.data.name) === taskAssignment.task_name
+                    );
+                    
+                    if (taskNode) {
+                      const edgeId = `${agentNode.id}-${taskNode.id}`;
+                      newEdges.push({
+                        id: edgeId,
+                        source: agentNode.id,
+                        target: taskNode.id,
+                        type: 'default',
+                        data: {
+                          reasoning: taskAssignment.reasoning
+                        }
+                      });
+                    }
+                  });
+                }
+              });
+              
+              // Add dependency edges based on AI-generated dependencies
+              response.dependencies?.forEach(dependency => {
+                const dependentTask = taskNodes.find(node => 
+                  (node.data.label || node.data.name) === dependency.task_name
+                );
+                
+                if (dependentTask && dependency.required_before) {
+                  dependency.required_before.forEach(requiredTaskName => {
+                    const requiredTask = taskNodes.find(node => 
+                      (node.data.label || node.data.name) === requiredTaskName
+                    );
+                    
+                    if (requiredTask) {
+                      const edgeId = `dep-${requiredTask.id}-${dependentTask.id}`;
+                      newEdges.push({
+                        id: edgeId,
+                        source: requiredTask.id,
+                        target: dependentTask.id,
+                        type: 'default',
+                        style: { stroke: '#ff6b6b', strokeDasharray: '5,5' },
+                        data: {
+                          reasoning: dependency.reasoning,
+                          isDependency: true
+                        }
+                      });
+                    }
+                  });
+                }
+              });
+              
+              // Update the edges in the flow
+              if (newEdges.length > 0) {
+                setEdges(newEdges);
+                console.log(`Generated ${newEdges.length} connections based on CrewAI best practices`);
+              } else {
+                showErrorMessage('No connections could be generated. Please check that agent and task names are properly set.');
+              }
+              
+            } catch (error) {
+              console.error('Error generating connections:', error);
+              showErrorMessage(`Failed to generate connections: ${error instanceof Error ? error.message : 'Unknown error'}`);
+            } finally {
+              setIsGeneratingConnections(false);
+            }
           }}
           onZoomIn={() => {
             const reactFlowInstance = crewFlowInstanceRef.current || flowFlowInstanceRef.current;
@@ -774,7 +916,6 @@ const WorkflowDesigner: React.FC<WorkflowDesignerProps> = (): JSX.Element => {
             // Toggle interactivity if needed
             console.log('Toggle interactivity');
           }}
-          isGeneratingConnections={false}
           planningEnabled={planningEnabled}
           setPlanningEnabled={setPlanningEnabled}
           reasoningEnabled={reasoningEnabled}

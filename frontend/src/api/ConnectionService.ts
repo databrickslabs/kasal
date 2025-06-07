@@ -139,7 +139,7 @@ export class ConnectionService {
       console.log('Full Request Data:', JSON.stringify(requestData, null, 2));
 
       const response = await apiClient.post<ConnectionResponse>(
-        `/generate/generate-connections`,
+        `/connections/generate-connections`,
         requestData,
         {
           headers: {
