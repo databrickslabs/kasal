@@ -18,7 +18,6 @@ from src.api.upload_router import router as upload_router
 from src.api.uc_tools_router import router as uc_tools_router
 from src.api.task_tracking_router import router as task_tracking_router
 from src.api.scheduler_router import router as scheduler_router
-from src.api.memory_router import router as memory_router
 from src.api.uc_functions_router import router as uc_functions_router
 from src.api.agent_generation_router import router as agent_generation_router
 from src.api.connections_router import router as connections_router
@@ -65,7 +64,6 @@ api_router.include_router(upload_router)
 api_router.include_router(uc_tools_router)
 api_router.include_router(task_tracking_router)
 api_router.include_router(scheduler_router)
-api_router.include_router(memory_router)
 api_router.include_router(uc_functions_router)
 api_router.include_router(agent_generation_router)
 api_router.include_router(connections_router)
@@ -111,7 +109,6 @@ __all__ = [
     "uc_tools_router",
     "task_tracking_router",
     "scheduler_router",
-    "memory_router",
     "uc_functions_router",
     "agent_generation_router",
     "connections_router",

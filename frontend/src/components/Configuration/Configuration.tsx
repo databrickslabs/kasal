@@ -25,7 +25,6 @@ import BuildIcon from '@mui/icons-material/Build';
 import CodeIcon from '@mui/icons-material/Code';
 import TextFormatIcon from '@mui/icons-material/TextFormat';
 import StorageIcon from '@mui/icons-material/Storage';
-import MemoryIcon from '@mui/icons-material/MemoryRounded';
 import CloudIcon from '@mui/icons-material/Cloud';
 import EngineeringIcon from '@mui/icons-material/Engineering';
 import CloseIcon from '@mui/icons-material/Close';
@@ -41,7 +40,6 @@ import ToolForm from '../Tools/ToolForm';
 import PromptConfiguration from './PromptConfiguration';
 import DatabricksConfiguration from './DatabricksConfiguration';
 import DatabaseConfiguration from './Database';
-import MemoryManagement from './Memory/MemoryManagement';
 import MCPConfiguration from './MCP/MCPConfiguration';
 import EnginesConfiguration from './Engines';
 import SecurityManagement from './SecurityManagement';
@@ -152,11 +150,6 @@ function Configuration({ onClose }: ConfigurationProps): JSX.Element {
       icon: <StorageIcon fontSize="small" />,
       index: 10
     },
-    {
-      label: t('configuration.memory.tab', { defaultValue: 'Memory' }),
-      icon: <MemoryIcon fontSize="small" />,
-      index: 11
-    }
   ];
 
   useEffect(() => {
@@ -402,9 +395,6 @@ function Configuration({ onClose }: ConfigurationProps): JSX.Element {
             <DatabaseConfiguration />
           </ContentPanel>
 
-          <ContentPanel value={activeSection} index={11}>
-            <MemoryManagement />
-          </ContentPanel>
         </Box>
       </Box>
 
