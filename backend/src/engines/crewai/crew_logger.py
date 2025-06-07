@@ -7,12 +7,21 @@ including console output, event bus messages, and standard logging.
 
 import logging
 import traceback
+import warnings
 from typing import Optional, Any, Dict
 import sys
 import io
 import threading
 from contextlib import contextmanager
 from datetime import datetime
+
+# Suppress known deprecation warnings from third-party libraries
+warnings.filterwarnings("ignore", category=DeprecationWarning, module="httpx")
+warnings.filterwarnings("ignore", category=DeprecationWarning, module="chromadb")
+warnings.filterwarnings("ignore", category=DeprecationWarning, module="websockets")
+warnings.filterwarnings("ignore", message=".*Use 'content=.*' to upload raw bytes/text content.*")
+warnings.filterwarnings("ignore", message=".*Accessing the 'model_fields' attribute on the instance is deprecated.*")
+warnings.filterwarnings("ignore", message=".*remove second argument of ws_handler.*")
 
 # Import CrewAI's event system
 from crewai.utilities.events import (
@@ -55,8 +64,8 @@ from src.core.logger import LoggerManager
 # Import queue services
 from src.services.execution_logs_queue import enqueue_log
 
-# Import tenant context
-from src.utils.user_context import TenantContext
+# Import group context
+from src.utils.user_context import GroupContext
 
 # Configure logger
 logger = logging.getLogger(__name__)
@@ -150,20 +159,20 @@ class CrewLogger:
         except Exception as e:
             logger.error(f"Error setting up CrewAI logging redirection: {str(e)}")
     
-    def setup_for_job(self, job_id: str, tenant_context: TenantContext = None) -> None:
+    def setup_for_job(self, job_id: str, group_context: GroupContext = None) -> None:
         """
         Set up comprehensive logging for a specific job.
         
         Args:
             job_id: The execution/job ID
-            tenant_context: Tenant context for logging isolation
+            group_context: Group context for logging isolation
         """
         if job_id in self._active_jobs:
             logger.warning(f"CrewLogger already set up for job {job_id}")
             return
             
         # Create a handler for this job
-        handler = CrewLoggerHandler(job_id=job_id, tenant_context=tenant_context)
+        handler = CrewLoggerHandler(job_id=job_id, group_context=group_context)
         handler.setFormatter(logging.Formatter('[CREW] %(asctime)s - %(levelname)s - %(message)s'))
         
         # Store job info
@@ -251,15 +260,15 @@ class CrewLogger:
                 self._crew_logger.info(log_message)
                 
                 # Also directly enqueue to ensure it reaches the execution logs table
-                tenant_context = None
+                group_context = None
                 if job_id in self._active_jobs:
                     job_handler = self._active_jobs[job_id]["handler"]
-                    tenant_context = getattr(job_handler, 'tenant_context', None)
+                    group_context = getattr(job_handler, 'group_context', None)
                 
                 enqueue_log(
                     execution_id=job_id, 
                     content=f"[CREW] {datetime.now().strftime('%Y-%m-%d %H:%M:%S')} - INFO - {log_message}", 
-                    tenant_context=tenant_context
+                    group_context=group_context
                 )
             except Exception as e:
                 self._crew_logger.error(f"Error in crew kickoff started handler: {e}")
@@ -274,15 +283,15 @@ class CrewLogger:
                 self._crew_logger.info(log_message)
                 
                 # Also directly enqueue to ensure it reaches the execution logs table
-                tenant_context = None
+                group_context = None
                 if job_id in self._active_jobs:
                     job_handler = self._active_jobs[job_id]["handler"]
-                    tenant_context = getattr(job_handler, 'tenant_context', None)
+                    group_context = getattr(job_handler, 'group_context', None)
                 
                 enqueue_log(
                     execution_id=job_id, 
                     content=f"[CREW] {datetime.now().strftime('%Y-%m-%d %H:%M:%S')} - INFO - {log_message}", 
-                    tenant_context=tenant_context
+                    group_context=group_context
                 )
             except Exception as e:
                 self._crew_logger.error(f"Error in crew kickoff completed handler: {e}")
@@ -309,15 +318,15 @@ class CrewLogger:
                 self._crew_logger.info(log_message)
                 
                 # Also directly enqueue to ensure it reaches the execution logs table
-                tenant_context = None
+                group_context = None
                 if job_id in self._active_jobs:
                     job_handler = self._active_jobs[job_id]["handler"]
-                    tenant_context = getattr(job_handler, 'tenant_context', None)
+                    group_context = getattr(job_handler, 'group_context', None)
                 
                 enqueue_log(
                     execution_id=job_id, 
                     content=f"[CREW] {datetime.now().strftime('%Y-%m-%d %H:%M:%S')} - INFO - {log_message}", 
-                    tenant_context=tenant_context
+                    group_context=group_context
                 )
             except Exception as e:
                 self._crew_logger.error(f"Error in agent execution started handler: {e}")
@@ -347,15 +356,15 @@ class CrewLogger:
                 self._crew_logger.info(log_message)
                 
                 # Also directly enqueue to ensure it reaches the execution logs table
-                tenant_context = None
+                group_context = None
                 if job_id in self._active_jobs:
                     job_handler = self._active_jobs[job_id]["handler"]
-                    tenant_context = getattr(job_handler, 'tenant_context', None)
+                    group_context = getattr(job_handler, 'group_context', None)
                 
                 enqueue_log(
                     execution_id=job_id, 
                     content=f"[CREW] {datetime.now().strftime('%Y-%m-%d %H:%M:%S')} - INFO - {log_message}", 
-                    tenant_context=tenant_context
+                    group_context=group_context
                 )
             except Exception as e:
                 self._crew_logger.error(f"Error in task started handler: {e}")
@@ -490,11 +499,11 @@ class CrewLogger:
             def custom_print(self, content: str, color: Optional[str] = None):
                 # Filter out noise and debug messages
                 if content.strip() and not _should_filter_content(content):
-                    # Get tenant context for this job if available
-                    tenant_context = None
+                    # Get group context for this job if available
+                    group_context = None
                     if job_id in active_jobs:
                         job_handler = active_jobs[job_id]["handler"]
-                        tenant_context = getattr(job_handler, 'tenant_context', None)
+                        group_context = getattr(job_handler, 'group_context', None)
                     
                     # Log with simple formatting
                     log_message = f"CREW: {content.strip()}"
@@ -503,7 +512,7 @@ class CrewLogger:
                     enqueue_log(
                         execution_id=job_id, 
                         content=f"[CREW] {datetime.now().strftime('%Y-%m-%d %H:%M:%S')} - INFO - {log_message}", 
-                        tenant_context=tenant_context
+                        group_context=group_context
                     )
                 # Call the original method to maintain normal behavior
                 original_print_method(self, content, color)
@@ -553,11 +562,11 @@ class CrewLogger:
             if stdout_content:
                 for line in stdout_content.splitlines():
                     if line.strip():
-                        # Get tenant context for this job if available
-                        tenant_context = None
+                        # Get group context for this job if available
+                        group_context = None
                         if job_id in self._active_jobs:
                             job_handler = self._active_jobs[job_id]["handler"]
-                            tenant_context = getattr(job_handler, 'tenant_context', None)
+                            group_context = getattr(job_handler, 'group_context', None)
                         
                         # Log both to crew logger AND directly enqueue for database
                         log_message = f"STDOUT: {line.strip()}"
@@ -566,17 +575,17 @@ class CrewLogger:
                         enqueue_log(
                             execution_id=job_id, 
                             content=f"[CREW] {datetime.now().strftime('%Y-%m-%d %H:%M:%S')} - INFO - {log_message}", 
-                            tenant_context=tenant_context
+                            group_context=group_context
                         )
             
             if stderr_content:
                 for line in stderr_content.splitlines():
                     if line.strip():
-                        # Get tenant context for this job if available
-                        tenant_context = None
+                        # Get group context for this job if available
+                        group_context = None
                         if job_id in self._active_jobs:
                             job_handler = self._active_jobs[job_id]["handler"]
-                            tenant_context = getattr(job_handler, 'tenant_context', None)
+                            group_context = getattr(job_handler, 'group_context', None)
                         
                         # Log both to crew logger AND directly enqueue for database
                         log_message = f"STDERR: {line.strip()}"
@@ -585,7 +594,7 @@ class CrewLogger:
                         enqueue_log(
                             execution_id=job_id, 
                             content=f"[CREW] {datetime.now().strftime('%Y-%m-%d %H:%M:%S')} - ERROR - {log_message}", 
-                            tenant_context=tenant_context
+                            group_context=group_context
                         )
             
             # Clean up
@@ -599,17 +608,17 @@ class CrewLoggerHandler(logging.Handler):
     and redirects them to the job_output_queue.
     """
     
-    def __init__(self, job_id: str, tenant_context: TenantContext = None):
+    def __init__(self, job_id: str, group_context: GroupContext = None):
         """
         Initialize the handler with a job ID.
         
         Args:
             job_id: The execution/job ID to associate logs with
-            tenant_context: Tenant context for logging isolation
+            group_context: Group context for logging isolation
         """
         super().__init__()
         self.job_id = job_id
-        self.tenant_context = tenant_context
+        self.group_context = group_context
         
     def emit(self, record: logging.LogRecord):
         """
@@ -622,8 +631,8 @@ class CrewLoggerHandler(logging.Handler):
             # Format the log message
             log_message = self.format(record)
             
-            # Enqueue the log message with the job ID and tenant context
-            enqueue_log(execution_id=self.job_id, content=log_message, tenant_context=self.tenant_context)
+            # Enqueue the log message with the job ID and group context
+            enqueue_log(execution_id=self.job_id, content=log_message, group_context=self.group_context)
             
         except Exception as e:
             # Don't use logging here to avoid potential infinite recursion

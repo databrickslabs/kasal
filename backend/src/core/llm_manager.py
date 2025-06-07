@@ -524,29 +524,69 @@ class LLMManager:
             
             # Handle different embedding providers
             if provider == 'databricks' or 'databricks' in embedding_model:
-                # Use Databricks for embeddings
+                # Use Databricks for embeddings - avoid config files by using direct HTTP calls
                 api_key = await ApiKeysService.get_provider_api_key("DATABRICKS")
-                api_base = os.getenv("DATABRICKS_ENDPOINT", "")
                 
-                if not api_key:
-                    logger.warning("No Databricks API key found for creating embeddings")
+                # Get workspace URL from database configuration
+                api_base = None
+                from src.services.databricks_service import DatabricksService
+                try:
+                    async with UnitOfWork() as uow:
+                        databricks_service = await DatabricksService.from_unit_of_work(uow)
+                        config = await databricks_service.get_databricks_config()
+                        if config and config.workspace_url:
+                            workspace_url = config.workspace_url.rstrip('/')
+                            if not workspace_url.startswith('https://'):
+                                workspace_url = f"https://{workspace_url}"
+                            api_base = f"{workspace_url}/serving-endpoints"
+                except Exception as e:
+                    logger.error(f"Error getting Databricks workspace URL: {e}")
+                
+                if not api_key or not api_base:
+                    logger.warning(f"Missing Databricks credentials - API key: {bool(api_key)}, API base: {bool(api_base)}")
                     return None
                 
                 # Ensure model has databricks prefix for litellm
                 if not embedding_model.startswith('databricks/'):
-                    if embedding_model == 'databricks-gte-large-en' or 'databricks' in embedding_model:
-                        # Keep the model name as is for Databricks models
-                        pass
-                    else:
-                        embedding_model = f"databricks/{embedding_model}"
+                    embedding_model = f"databricks/{embedding_model}"
                 
-                # Create the embedding using litellm with Databricks
-                response = await litellm.aembedding(
-                    model=embedding_model,
-                    input=text,
-                    api_key=api_key,
-                    api_base=api_base
-                )
+                # Use direct HTTP request to avoid config file issues
+                import aiohttp
+                import json
+                
+                try:
+                    # Construct the direct API endpoint
+                    endpoint_url = f"{api_base}/{embedding_model.replace('databricks/', '')}/invocations"
+                    
+                    headers = {
+                        "Authorization": f"Bearer {api_key}",
+                        "Content-Type": "application/json"
+                    }
+                    
+                    payload = {
+                        "input": [text] if isinstance(text, str) else text
+                    }
+                    
+                    async with aiohttp.ClientSession() as session:
+                        async with session.post(endpoint_url, headers=headers, json=payload) as response:
+                            if response.status == 200:
+                                result = await response.json()
+                                # Databricks embedding API returns embeddings in 'data' field
+                                if 'data' in result and len(result['data']) > 0:
+                                    embedding = result['data'][0].get('embedding', result['data'][0])
+                                    logger.info(f"Successfully created embedding with {len(embedding)} dimensions using direct Databricks API")
+                                    return embedding
+                                else:
+                                    logger.warning("No embedding data found in Databricks response")
+                                    return None
+                            else:
+                                error_text = await response.text()
+                                logger.error(f"Databricks embedding API error {response.status}: {error_text}")
+                                return None
+                                
+                except Exception as e:
+                    logger.error(f"Error calling Databricks embedding API directly: {str(e)}")
+                    return None
                 
             elif provider == 'ollama':
                 # Use Ollama for embeddings

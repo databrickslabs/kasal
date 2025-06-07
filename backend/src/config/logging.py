@@ -8,9 +8,18 @@ import logging
 import logging.config
 import os
 import sys
+import warnings
 from datetime import datetime
 from pathlib import Path
 from typing import Dict, Any
+
+# Suppress known deprecation warnings from third-party libraries
+warnings.filterwarnings("ignore", category=DeprecationWarning, module="httpx")
+warnings.filterwarnings("ignore", category=DeprecationWarning, module="chromadb")
+warnings.filterwarnings("ignore", category=DeprecationWarning, module="websockets")
+warnings.filterwarnings("ignore", message=".*Use 'content=.*' to upload raw bytes/text content.*")
+warnings.filterwarnings("ignore", message=".*Accessing the 'model_fields' attribute on the instance is deprecated.*")
+warnings.filterwarnings("ignore", message=".*remove second argument of ws_handler.*")
 
 # Import LoggerManager to use its log directory
 from src.core.logger import LoggerManager

@@ -33,7 +33,7 @@ from crewai.flow import Flow
 from src.core.logger import LoggerManager
 
 from src.schemas.execution import CrewConfig, FlowConfig
-from src.utils.user_context import TenantContext
+from src.utils.user_context import GroupContext
 
 logger = LoggerManager.get_instance().crew
 
@@ -90,13 +90,14 @@ class CrewAIEngineService(BaseEngineService):
             logger.error(f"Failed to initialize CrewAI engine: {str(e)}")
             return False
     
-    async def run_execution(self, execution_id: str, execution_config: Dict[str, Any], tenant_context: TenantContext = None) -> str:
+    async def run_execution(self, execution_id: str, execution_config: Dict[str, Any], group_context: GroupContext = None) -> str:
         """
         Run a CrewAI execution with the given configuration.
         
         Args:
             execution_id: Unique ID for this execution
             execution_config: Configuration for the execution
+            group_context: Group context for logging isolation
             
         Returns:
             Execution ID
@@ -204,7 +205,7 @@ class CrewAIEngineService(BaseEngineService):
                 execution_id=execution_id, 
                 crew=crew,
                 running_jobs=self._running_jobs,
-                tenant_context=tenant_context
+                group_context=group_context
             ))
             
             # Store job info

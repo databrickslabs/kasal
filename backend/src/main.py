@@ -2,10 +2,19 @@ import os
 import sys
 import logging
 import asyncio
+import warnings
 from datetime import datetime
 from contextlib import asynccontextmanager
 from pathlib import Path
 from sqlalchemy import text
+
+# Suppress known deprecation warnings from third-party libraries
+warnings.filterwarnings("ignore", category=DeprecationWarning, module="httpx")
+warnings.filterwarnings("ignore", category=DeprecationWarning, module="chromadb")
+warnings.filterwarnings("ignore", category=DeprecationWarning, module="websockets")
+warnings.filterwarnings("ignore", message=".*Use 'content=.*' to upload raw bytes/text content.*")
+warnings.filterwarnings("ignore", message=".*Accessing the 'model_fields' attribute on the instance is deprecated.*")
+warnings.filterwarnings("ignore", message=".*remove second argument of ws_handler.*")
 
 from fastapi import FastAPI, HTTPException, Request, Depends
 from fastapi.middleware.cors import CORSMiddleware
