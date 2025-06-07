@@ -2,13 +2,13 @@ from typing import List, Optional
 from fastapi import APIRouter, Depends, HTTPException, status, Query
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from src.db.session import get_db
+from src.core.dependencies import SessionDep
+from src.dependencies.admin_auth import AdminUserDep, AuthenticatedUserDep
 from src.schemas.user import (
     UserInDB, UserUpdate, UserProfileUpdate, UserWithProfile, 
     UserRoleAssign, UserComplete, ExternalIdentityInDB
 )
 from src.models.user import User
-from src.dependencies.auth import get_current_user, get_current_active_user, check_user_role
 from src.services.user_service import UserService
 
 router = APIRouter(
@@ -19,8 +19,8 @@ router = APIRouter(
 
 @router.get("/me", response_model=UserWithProfile)
 async def read_users_me(
-    current_user: User = Depends(get_current_active_user),
-    session: AsyncSession = Depends(get_db),
+    current_user: AuthenticatedUserDep,
+    session: SessionDep,
 ):
     """Get current user's information"""
     user_service = UserService(session)
@@ -29,8 +29,8 @@ async def read_users_me(
 @router.put("/me", response_model=UserWithProfile)
 async def update_users_me(
     user_update: UserUpdate,
-    current_user: User = Depends(get_current_active_user),
-    session: AsyncSession = Depends(get_db),
+    current_user: AuthenticatedUserDep,
+    session: SessionDep,
 ):
     """Update current user's information"""
     user_service = UserService(session)
@@ -39,8 +39,8 @@ async def update_users_me(
 @router.put("/me/profile", response_model=UserWithProfile)
 async def update_users_profile(
     profile_update: UserProfileUpdate,
-    current_user: User = Depends(get_current_active_user),
-    session: AsyncSession = Depends(get_db),
+    current_user: AuthenticatedUserDep,
+    session: SessionDep,
 ):
     """Update current user's profile"""
     user_service = UserService(session)
@@ -48,8 +48,8 @@ async def update_users_profile(
 
 @router.get("/me/external-identities", response_model=List[ExternalIdentityInDB])
 async def read_users_external_identities(
-    current_user: User = Depends(get_current_active_user),
-    session: AsyncSession = Depends(get_db),
+    current_user: AuthenticatedUserDep,
+    session: SessionDep,
 ):
     """Get current user's external identities"""
     user_service = UserService(session)
@@ -58,8 +58,8 @@ async def read_users_external_identities(
 @router.delete("/me/external-identities/{provider}", status_code=status.HTTP_204_NO_CONTENT)
 async def delete_external_identity(
     provider: str,
-    current_user: User = Depends(get_current_active_user),
-    session: AsyncSession = Depends(get_db),
+    current_user: AuthenticatedUserDep,
+    session: SessionDep,
 ):
     """Remove an external identity from current user"""
     user_service = UserService(session)
@@ -72,14 +72,15 @@ async def delete_external_identity(
         )
 
 # Admin endpoints
-@router.get("", response_model=List[UserInDB], dependencies=[Depends(check_user_role(["admin"]))])
+@router.get("", response_model=List[UserInDB])
 async def read_users(
+    session: SessionDep,
+    admin_user: AdminUserDep,
     skip: int = 0,
     limit: int = 100,
     role: Optional[str] = None,
     status: Optional[str] = None,
     search: Optional[str] = None,
-    session: AsyncSession = Depends(get_db),
 ):
     """Get list of users (admin only)"""
     user_service = UserService(session)
@@ -93,10 +94,11 @@ async def read_users(
     users = await user_service.get_users(skip=skip, limit=limit, filters=filters, search=search)
     return users
 
-@router.get("/{user_id}", response_model=UserComplete, dependencies=[Depends(check_user_role(["admin"]))])
+@router.get("/{user_id}", response_model=UserComplete)
 async def read_user(
     user_id: str,
-    session: AsyncSession = Depends(get_db),
+    session: SessionDep,
+    admin_user: AdminUserDep,
 ):
     """Get user by ID (admin only)"""
     user_service = UserService(session)
@@ -110,11 +112,12 @@ async def read_user(
     
     return user
 
-@router.put("/{user_id}", response_model=UserInDB, dependencies=[Depends(check_user_role(["admin"]))])
+@router.put("/{user_id}", response_model=UserInDB)
 async def update_user(
     user_id: str,
     user_update: UserUpdate,
-    session: AsyncSession = Depends(get_db),
+    session: SessionDep,
+    admin_user: AdminUserDep,
 ):
     """Update user information (admin only)"""
     user_service = UserService(session)
@@ -128,11 +131,12 @@ async def update_user(
     
     return user
 
-@router.put("/{user_id}/role", response_model=UserInDB, dependencies=[Depends(check_user_role(["admin"]))])
+@router.put("/{user_id}/role", response_model=UserInDB)
 async def assign_user_role(
     user_id: str,
     role_assign: UserRoleAssign,
-    session: AsyncSession = Depends(get_db),
+    session: SessionDep,
+    admin_user: AdminUserDep,
 ):
     """Assign a role to a user (admin only)"""
     user_service = UserService(session)
@@ -146,10 +150,11 @@ async def assign_user_role(
     
     return user
 
-@router.delete("/{user_id}", status_code=status.HTTP_204_NO_CONTENT, dependencies=[Depends(check_user_role(["admin"]))])
+@router.delete("/{user_id}", status_code=status.HTTP_204_NO_CONTENT)
 async def delete_user(
     user_id: str,
-    session: AsyncSession = Depends(get_db),
+    session: SessionDep,
+    admin_user: AdminUserDep,
 ):
     """Delete a user (admin only)"""
     user_service = UserService(session)

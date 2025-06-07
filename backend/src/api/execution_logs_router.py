@@ -11,7 +11,7 @@ from fastapi import APIRouter, WebSocket, WebSocketDisconnect, HTTPException, Qu
 from src.core.logger import LoggerManager
 from src.services.execution_logs_service import execution_logs_service
 from src.schemas.execution_logs import ExecutionLogResponse, ExecutionLogsResponse
-from src.core.dependencies import TenantContextDep
+from src.core.dependencies import GroupContextDep
 
 # Get logger from the centralized logging system
 logger = LoggerManager.get_instance().system
@@ -38,18 +38,18 @@ async def websocket_execution_logs(websocket: WebSocket, execution_id: str):
     the tenant context should be passed as a query parameter.
     """
     try:
-        # Extract tenant information from query parameters for WebSocket
+        # Extract group information from query parameters for WebSocket
         query_params = websocket.query_params
-        tenant_email = query_params.get('tenant_email')
+        tenant_email = query_params.get('tenant_email')  # Keep for backward compatibility
         
-        # Create a basic tenant context from query params
-        # Note: WebSocket doesn't use standard headers, so we get tenant info from query params
-        from src.utils.user_context import TenantContext
-        tenant_context = await TenantContext.from_email(tenant_email) if tenant_email else TenantContext()
+        # Create a basic group context from query params
+        # Note: WebSocket doesn't use standard headers, so we get group info from query params
+        from src.utils.user_context import GroupContext
+        group_context = await GroupContext.from_email(tenant_email) if tenant_email else GroupContext()
         
-        # Connect to the WebSocket with tenant context
-        await execution_logs_service.connect_with_tenant(websocket, execution_id, tenant_context)
-        logger.info(f"WebSocket connection established for execution {execution_id} (tenant: {tenant_context.primary_tenant_id})")
+        # Connect to the WebSocket with group context
+        await execution_logs_service.connect_with_group(websocket, execution_id, group_context)
+        logger.info(f"WebSocket connection established for execution {execution_id} (group: {group_context.primary_group_id})")
         
         # Keep the connection alive until disconnect
         while True:
@@ -68,7 +68,7 @@ async def websocket_execution_logs(websocket: WebSocket, execution_id: str):
 @logs_router.get("/executions/{execution_id}", response_model=List[ExecutionLogResponse])
 async def get_execution_logs(
     execution_id: str,
-    tenant_context: TenantContextDep,
+    group_context: GroupContextDep,
     limit: int = Query(1000, ge=1, le=10000),
     offset: int = Query(0, ge=0),
 ):
@@ -80,7 +80,7 @@ async def get_execution_logs(
     
     Args:
         execution_id: ID of the execution to get logs for
-        tenant_context: Tenant context from headers
+        group_context: Group context from headers
         limit: Maximum number of logs to return
         offset: Number of logs to skip
         
@@ -88,7 +88,7 @@ async def get_execution_logs(
         List of execution logs with their timestamps
     """
     try:
-        logs = await execution_logs_service.get_execution_logs_by_tenant(execution_id, tenant_context, limit, offset)
+        logs = await execution_logs_service.get_execution_logs_by_group(execution_id, group_context, limit, offset)
         return logs
     except Exception as e:
         logger.error(f"Error fetching execution logs: {e}")
@@ -97,7 +97,7 @@ async def get_execution_logs(
 @runs_router.get("/{run_id}/outputs", response_model=ExecutionLogsResponse)
 async def get_run_logs(
     run_id: str,
-    tenant_context: TenantContextDep,
+    group_context: GroupContextDep,
     limit: int = Query(1000, ge=1, le=10000),
     offset: int = Query(0, ge=0),
 ):
@@ -109,7 +109,7 @@ async def get_run_logs(
     
     Args:
         run_id: ID of the run to get logs for
-        tenant_context: Tenant context from headers
+        group_context: Group context from headers
         limit: Maximum number of logs to return
         offset: Number of logs to skip
         
@@ -117,7 +117,7 @@ async def get_run_logs(
         Dictionary with a list of run logs with their timestamps
     """
     try:
-        logs = await execution_logs_service.get_execution_logs_by_tenant(run_id, tenant_context, limit, offset)
+        logs = await execution_logs_service.get_execution_logs_by_group(run_id, group_context, limit, offset)
         return ExecutionLogsResponse(logs=logs)
     except Exception as e:
         logger.error(f"Error fetching run logs: {e}")

@@ -2,28 +2,28 @@ from typing import List, Optional
 from fastapi import APIRouter, Depends, HTTPException, status, Query
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from src.db.session import get_db
+from src.core.dependencies import SessionDep
+from src.dependencies.admin_auth import AdminUserDep
 from src.schemas.user import (
     RoleCreate, RoleUpdate, RoleInDB, RoleWithPrivileges,
     PrivilegeInDB, PrivilegeCreate, PrivilegeUpdate
 )
-from src.dependencies.auth import check_user_role
 from src.services.role_service import RoleService
 from src.services.privilege_service import PrivilegeService
 
 router = APIRouter(
     prefix="/roles",
     tags=["roles"],
-    dependencies=[Depends(check_user_role(["admin"]))],  # Only admins can access these endpoints
     responses={401: {"description": "Unauthorized"}, 403: {"description": "Forbidden"}},
 )
 
 # Roles endpoints
 @router.get("", response_model=List[RoleInDB])
 async def read_roles(
+    session: SessionDep,
+    admin_user: AdminUserDep,
     skip: int = 0,
     limit: int = 100,
-    session: AsyncSession = Depends(get_db),
 ):
     """Get list of roles"""
     role_service = RoleService(session)
@@ -32,7 +32,8 @@ async def read_roles(
 @router.post("", response_model=RoleWithPrivileges, status_code=status.HTTP_201_CREATED)
 async def create_role(
     role_data: RoleCreate,
-    session: AsyncSession = Depends(get_db),
+    session: SessionDep,
+    admin_user: AdminUserDep,
 ):
     """Create a new role"""
     role_service = RoleService(session)
@@ -48,7 +49,8 @@ async def create_role(
 @router.get("/{role_id}", response_model=RoleWithPrivileges)
 async def read_role(
     role_id: str,
-    session: AsyncSession = Depends(get_db),
+    session: SessionDep,
+    admin_user: AdminUserDep,
 ):
     """Get a role by ID"""
     role_service = RoleService(session)
@@ -66,7 +68,8 @@ async def read_role(
 async def update_role(
     role_id: str,
     role_data: RoleUpdate,
-    session: AsyncSession = Depends(get_db),
+    session: SessionDep,
+    admin_user: AdminUserDep,
 ):
     """Update a role"""
     role_service = RoleService(session)
@@ -88,7 +91,8 @@ async def update_role(
 @router.delete("/{role_id}", status_code=status.HTTP_204_NO_CONTENT)
 async def delete_role(
     role_id: str,
-    session: AsyncSession = Depends(get_db),
+    session: SessionDep,
+    admin_user: AdminUserDep,
 ):
     """Delete a role"""
     role_service = RoleService(session)
@@ -107,19 +111,74 @@ async def delete_role(
             detail="Role not found"
         )
 
+# Role-Privilege management endpoints
+@router.get("/{role_id}/privileges", response_model=List[PrivilegeInDB])
+async def get_role_privileges(
+    role_id: str,
+    session: SessionDep,
+    admin_user: AdminUserDep,
+):
+    """Get privileges for a specific role"""
+    role_service = RoleService(session)
+    privileges = await role_service.get_role_privileges(role_id)
+    return privileges
+
+@router.post("/{role_id}/privileges", status_code=status.HTTP_201_CREATED)
+async def assign_privilege_to_role(
+    role_id: str,
+    privilege_data: dict,
+    session: SessionDep,
+    admin_user: AdminUserDep,
+):
+    """Assign a privilege to a role"""
+    role_service = RoleService(session)
+    
+    privilege_id = privilege_data.get("privilege_id")
+    if not privilege_id:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="privilege_id is required"
+        )
+    
+    success = await role_service.assign_privilege_to_role(role_id, privilege_id)
+    if not success:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Role or privilege not found"
+        )
+    
+    return {"message": "Privilege assigned successfully"}
+
+@router.delete("/{role_id}/privileges/{privilege_id}", status_code=status.HTTP_204_NO_CONTENT)
+async def remove_privilege_from_role(
+    role_id: str,
+    privilege_id: str,
+    session: SessionDep,
+    admin_user: AdminUserDep,
+):
+    """Remove a privilege from a role"""
+    role_service = RoleService(session)
+    
+    success = await role_service.remove_privilege_from_role(role_id, privilege_id)
+    if not success:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Role or privilege not found"
+        )
+
 # Privileges router - could also be separated into its own file
 privilege_router = APIRouter(
     prefix="/privileges",
     tags=["privileges"],
-    dependencies=[Depends(check_user_role(["admin"]))],  # Only admins can access these endpoints
     responses={401: {"description": "Unauthorized"}, 403: {"description": "Forbidden"}},
 )
 
 @privilege_router.get("", response_model=List[PrivilegeInDB])
 async def read_privileges(
+    session: SessionDep,
+    admin_user: AdminUserDep,
     skip: int = 0,
     limit: int = 100,
-    session: AsyncSession = Depends(get_db),
 ):
     """Get list of privileges"""
     privilege_service = PrivilegeService(session)
@@ -128,7 +187,8 @@ async def read_privileges(
 @privilege_router.post("", response_model=PrivilegeInDB, status_code=status.HTTP_201_CREATED)
 async def create_privilege(
     privilege_data: PrivilegeCreate,
-    session: AsyncSession = Depends(get_db),
+    session: SessionDep,
+    admin_user: AdminUserDep,
 ):
     """Create a new privilege"""
     privilege_service = PrivilegeService(session)
@@ -144,7 +204,8 @@ async def create_privilege(
 @privilege_router.get("/{privilege_id}", response_model=PrivilegeInDB)
 async def read_privilege(
     privilege_id: str,
-    session: AsyncSession = Depends(get_db),
+    session: SessionDep,
+    admin_user: AdminUserDep,
 ):
     """Get a privilege by ID"""
     privilege_service = PrivilegeService(session)
@@ -162,7 +223,8 @@ async def read_privilege(
 async def update_privilege(
     privilege_id: str,
     privilege_data: PrivilegeUpdate,
-    session: AsyncSession = Depends(get_db),
+    session: SessionDep,
+    admin_user: AdminUserDep,
 ):
     """Update a privilege"""
     privilege_service = PrivilegeService(session)
@@ -179,7 +241,8 @@ async def update_privilege(
 @privilege_router.delete("/{privilege_id}", status_code=status.HTTP_204_NO_CONTENT)
 async def delete_privilege(
     privilege_id: str,
-    session: AsyncSession = Depends(get_db),
+    session: SessionDep,
+    admin_user: AdminUserDep,
 ):
     """Delete a privilege"""
     privilege_service = PrivilegeService(session)

@@ -4,11 +4,11 @@ import logging
 from fastapi import APIRouter, Depends, HTTPException, BackgroundTasks, status, Path
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from src.schemas.schedule import ScheduleCreate, ScheduleUpdate, ScheduleResponse, ScheduleListResponse, ToggleResponse
+from src.schemas.schedule import ScheduleCreate, ScheduleCreateFromExecution, ScheduleUpdate, ScheduleResponse, ScheduleListResponse, ToggleResponse
 from src.db.session import get_db
 from src.services.scheduler_service import SchedulerService
-from src.utils.user_context import TenantContext
-from src.core.dependencies import TenantContextDep
+from src.utils.user_context import GroupContext
+from src.core.dependencies import GroupContextDep
 from src.schemas.scheduler import (
     SchedulerJobSchema,
     SchedulerJobCreate,
@@ -35,7 +35,7 @@ async def get_scheduler_service(db: AsyncSession = Depends(get_db)) -> Scheduler
 async def create_schedule(
     schedule: ScheduleCreate,
     service: Annotated[SchedulerService, Depends(get_scheduler_service)],
-    tenant_context: TenantContextDep
+    group_context: GroupContextDep
 ) -> ScheduleResponse:
     """
     Create a new schedule.
@@ -50,7 +50,7 @@ async def create_schedule(
     """
     logger.info(f"Creating schedule: {schedule.name} with cron expression: {schedule.cron_expression}")
     try:
-        response = await service.create_schedule(schedule, tenant_context)
+        response = await service.create_schedule(schedule, group_context)
         logger.info(f"Created schedule with ID {response.id}")
         return response
     except HTTPException as e:
@@ -58,10 +58,38 @@ async def create_schedule(
         raise
 
 
+@router.post("/from-execution", response_model=ScheduleResponse, status_code=status.HTTP_201_CREATED)
+async def create_schedule_from_execution(
+    schedule: ScheduleCreateFromExecution,
+    service: Annotated[SchedulerService, Depends(get_scheduler_service)],
+    group_context: GroupContextDep
+) -> ScheduleResponse:
+    """
+    Create a new schedule based on an existing execution.
+    
+    This endpoint creates a new schedule using the agents and tasks configuration
+    from a previously executed job.
+    
+    Args:
+        schedule: Schedule data including execution_id to use as template
+        
+    Returns:
+        Created schedule information
+    """
+    logger.info(f"Creating schedule from execution {schedule.execution_id}: {schedule.name}")
+    try:
+        response = await service.create_schedule_from_execution(schedule, group_context)
+        logger.info(f"Created schedule with ID {response.id} from execution {schedule.execution_id}")
+        return response
+    except HTTPException as e:
+        logger.warning(f"Schedule creation from execution failed: {str(e)}")
+        raise
+
+
 @router.get("", response_model=List[ScheduleResponse])
 async def list_schedules(
     service: Annotated[SchedulerService, Depends(get_scheduler_service)],
-    tenant_context: TenantContext = TenantContextDep
+    group_context: GroupContext = GroupContextDep
 ) -> List[ScheduleResponse]:
     """
     List all schedules.
@@ -70,7 +98,7 @@ async def list_schedules(
         List of all schedules
     """
     logger.info("Listing all schedules")
-    response = await service.get_all_schedules(tenant_context)
+    response = await service.get_all_schedules(group_context)
     logger.info(f"Found {response.count} schedules")
     return response.schedules
 

@@ -4,7 +4,7 @@ from fastapi import APIRouter, Depends, HTTPException, Path, status
 import logging
 from sqlalchemy.exc import IntegrityError
 
-from src.core.dependencies import SessionDep, TenantContextDep, get_service
+from src.core.dependencies import SessionDep, GroupContextDep, get_service
 from src.models.agent import Agent
 from src.repositories.agent_repository import AgentRepository
 from src.schemas.agent import Agent as AgentSchema
@@ -28,21 +28,24 @@ get_agent_service = get_service(AgentService, AgentRepository, Agent)
 async def create_agent(
     agent_in: AgentCreate,
     service: Annotated[AgentService, Depends(get_agent_service)],
-    tenant_context: TenantContextDep,
+    group_context: GroupContextDep,
 ):
     """
-    Create a new agent with tenant isolation.
+    Create a new agent with group isolation.
     
     Args:
         agent_in: Agent data for creation
         service: Agent service injected by dependency
-        tenant_context: Tenant context from headers
+        group_context: Group context from headers
         
     Returns:
         Created agent
     """
     try:
-        return await service.create_with_tenant(agent_in, tenant_context)
+        if group_context and group_context.is_valid():
+            return await service.create_with_group(agent_in, group_context)
+        else:
+            raise HTTPException(status_code=400, detail="No valid group context provided")
     except Exception as e:
         logger.error(f"Error creating agent: {e}")
         raise HTTPException(status_code=500, detail=str(e))
@@ -51,20 +54,24 @@ async def create_agent(
 @router.get("", response_model=List[AgentSchema])
 async def list_agents(
     service: Annotated[AgentService, Depends(get_agent_service)],
-    tenant_context: TenantContextDep,
+    group_context: GroupContextDep,
 ):
     """
-    Retrieve all agents for the current tenant.
+    Retrieve all agents for the current group.
     
     Args:
         service: Agent service injected by dependency
-        tenant_context: Tenant context from headers
+        group_context: Group context from headers
         
     Returns:
-        List of agents for the current tenant
+        List of agents for the current group
     """
     try:
-        return await service.find_by_tenant(tenant_context)
+        if group_context and group_context.is_valid():
+            return await service.find_by_group(group_context)
+        else:
+            # If no context available, return empty list for security
+            return []
     except Exception as e:
         logger.error(f"Error listing agents: {e}")
         raise HTTPException(status_code=500, detail=str(e))

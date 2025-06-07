@@ -3,7 +3,7 @@ from typing import Annotated, List, Dict, Any
 from fastapi import APIRouter, Depends, HTTPException, Path, Query, status
 import logging
 
-from src.core.dependencies import SessionDep, TenantContextDep, get_service
+from src.core.dependencies import SessionDep, GroupContextDep, get_service
 from src.models.task import Task
 from src.repositories.task_repository import TaskRepository
 from src.schemas.task import Task as TaskSchema
@@ -27,21 +27,21 @@ get_task_service = get_service(TaskService, TaskRepository, Task)
 async def create_task(
     task_in: TaskCreate,
     service: Annotated[TaskService, Depends(get_task_service)],
-    tenant_context: TenantContextDep,
+    group_context: GroupContextDep,
 ):
     """
-    Create a new task with tenant isolation.
+    Create a new task with group isolation.
     
     Args:
         task_in: Task data for creation
         service: Task service injected by dependency
-        tenant_context: Tenant context from headers
+        group_context: Group context from headers
         
     Returns:
         Created task
     """
     try:
-        return await service.create_with_tenant(task_in, tenant_context)
+        return await service.create_with_group(task_in, group_context)
     except Exception as e:
         logger.error(f"Error creating task: {e}")
         raise HTTPException(status_code=500, detail=str(e))
@@ -50,20 +50,20 @@ async def create_task(
 @router.get("", response_model=List[TaskSchema])
 async def list_tasks(
     service: Annotated[TaskService, Depends(get_task_service)],
-    tenant_context: TenantContextDep,
+    group_context: GroupContextDep,
 ):
     """
-    Retrieve all tasks for the current tenant.
+    Retrieve all tasks for the current group.
     
     Args:
         service: Task service injected by dependency
-        tenant_context: Tenant context from headers
+        group_context: Group context from headers
         
     Returns:
-        List of tasks for the current tenant
+        List of tasks for the current group
     """
     try:
-        return await service.find_by_tenant(tenant_context)
+        return await service.find_by_group(group_context)
     except Exception as e:
         logger.error(f"Error listing tasks: {e}")
         raise HTTPException(status_code=500, detail=str(e))

@@ -25,7 +25,7 @@ from src.api.connections_router import router as connections_router
 from src.api.crew_generation_router import router as crew_generation_router
 from src.api.task_generation_router import router as task_generation_router
 from src.api.template_generation_router import router as template_generation_router
-from src.api.execution_logs_router import runs_router
+from src.api.execution_logs_router import runs_router, logs_router as execution_logs_router
 from src.api.executions_router import router as executions_router
 from src.api.execution_history_router import router as execution_history_router
 from src.api.execution_trace_router import router as execution_trace_router
@@ -33,12 +33,15 @@ from src.api.flow_execution_router import router as flow_execution_router
 from src.api.mcp_router import router as mcp_router
 from src.api.dispatcher_router import router as dispatcher_router
 from src.api.engine_config_router import router as engine_config_router
+from src.api.databricks_role_router import router as databricks_role_router
 # User management routers
 from src.api.auth_router import router as auth_router
 from src.api.users_router import router as users_router
 from src.api.roles_router import router as roles_router
+from src.api.privileges_router import router as privileges_router
+from src.api.user_roles_router import router as user_roles_router
 from src.api.identity_providers_router import router as identity_providers_router
-from src.api.tenant_router import router as tenant_router
+from src.api.group_router import router as group_router
 
 # Create the main API router
 api_router = APIRouter()
@@ -74,15 +77,19 @@ api_router.include_router(execution_history_router)
 api_router.include_router(execution_trace_router)
 api_router.include_router(flow_execution_router)
 api_router.include_router(runs_router)
+api_router.include_router(execution_logs_router)
 api_router.include_router(mcp_router)
 api_router.include_router(dispatcher_router)
 api_router.include_router(engine_config_router)
+api_router.include_router(databricks_role_router)
 # Include user management routers
 api_router.include_router(auth_router)
 api_router.include_router(users_router)
 api_router.include_router(roles_router)
+api_router.include_router(privileges_router)
+api_router.include_router(user_roles_router)
 api_router.include_router(identity_providers_router)
-api_router.include_router(tenant_router)
+api_router.include_router(group_router)
 
 __all__ = [
     "api_router",
@@ -123,6 +130,8 @@ __all__ = [
     "users_router",
     "runs_router",
     "roles_router",
+    "privileges_router",
+    "user_roles_router",
     "identity_providers_router",
-    "tenant_router"
+    "group_router"
 ]

@@ -16,7 +16,7 @@ from sqlalchemy import select
 from sqlalchemy import desc
 
 from src.core.logger import LoggerManager
-from src.core.dependencies import TenantContextDep
+from src.core.dependencies import GroupContextDep
 from src.db.session import get_db
 from src.models.execution_history import ExecutionHistory
 from src.schemas.execution import (
@@ -43,7 +43,7 @@ router = APIRouter(
 async def create_execution(
     config: CrewConfig,
     background_tasks: BackgroundTasks,
-    tenant_context: TenantContextDep,
+    group_context: GroupContextDep,
     db: AsyncSession = Depends(get_db)
 ):
     """
@@ -90,7 +90,7 @@ async def create_execution(
         result = await execution_service.create_execution(
             config=config,
             background_tasks=background_tasks,
-            tenant_context=tenant_context
+            group_context=group_context
         )
         
         # Return the result as an API response
@@ -109,21 +109,21 @@ async def create_execution(
 @router.get("/{execution_id}", response_model=ExecutionResponse)
 async def get_execution_status(
     execution_id: str, 
-    tenant_context: TenantContextDep,
+    group_context: GroupContextDep,
     db: AsyncSession = Depends(get_db)
 ):
     """
-    Get the status of a specific execution with tenant filtering.
+    Get the status of a specific execution with group filtering.
     
     Args:
         execution_id: ID of the execution to get status for
-        tenant_context: Tenant context for filtering
+        group_context: Group context for filtering
         
     Returns:
         ExecutionResponse with execution details
     """
-    # Use the service method to get execution data with tenant filtering
-    execution_data = await ExecutionService.get_execution_status(execution_id, tenant_ids=tenant_context.tenant_ids)
+    # Use the service method to get execution data with group filtering
+    execution_data = await ExecutionService.get_execution_status(execution_id, group_ids=group_context.group_ids)
     
     if not execution_data:
         raise HTTPException(status_code=404, detail="Execution not found")
@@ -151,18 +151,18 @@ async def get_execution_status(
 
 
 @router.get("", response_model=list[ExecutionResponse])
-async def list_executions(tenant_context: TenantContextDep):
+async def list_executions(group_context: GroupContextDep):
     """
-    List executions with tenant filtering.
+    List executions with group filtering.
     
     Args:
-        tenant_context: Tenant context for filtering
+        group_context: Group context for filtering
     
     Returns:
         List of ExecutionResponse objects
     """
-    # Use the service's list_executions method with tenant filtering
-    executions_list = await ExecutionService.list_executions(tenant_ids=tenant_context.tenant_ids)
+    # Use the service's list_executions method with group filtering
+    executions_list = await ExecutionService.list_executions(group_ids=group_context.group_ids)
     
     # Process results before converting to response models
     processed_executions = []

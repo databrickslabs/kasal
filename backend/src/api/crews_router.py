@@ -6,7 +6,7 @@ from uuid import UUID
 from fastapi import APIRouter, Depends, HTTPException, Path, Query, status
 from pydantic import ValidationError
 
-from src.core.dependencies import SessionDep, TenantContextDep
+from src.core.dependencies import SessionDep, GroupContextDep
 from src.schemas.crew import CrewCreate, CrewUpdate, CrewResponse
 from src.services.crew_service import CrewService
 
@@ -27,20 +27,20 @@ def get_crew_service(session: SessionDep) -> CrewService:
 @router.get("", response_model=List[CrewResponse])
 async def list_crews(
     service: Annotated[CrewService, Depends(get_crew_service)],
-    tenant_context: TenantContextDep,
+    group_context: GroupContextDep,
 ):
     """
-    Retrieve all crews for the current tenant.
+    Retrieve all crews for the current group.
     
     Args:
         service: Crew service injected by dependency
-        tenant_context: Tenant context from headers
+        group_context: Group context from headers
         
     Returns:
-        List of crews for current tenant
+        List of crews for current group
     """
     try:
-        crews = await service.find_by_tenant(tenant_context)
+        crews = await service.find_by_group(group_context)
         return [
             CrewResponse(
                 id=crew.id,
@@ -63,24 +63,24 @@ async def list_crews(
 async def get_crew(
     crew_id: Annotated[UUID, Path(title="The ID of the crew to get")],
     service: Annotated[CrewService, Depends(get_crew_service)],
-    tenant_context: TenantContextDep,
+    group_context: GroupContextDep,
 ):
     """
-    Get a specific crew by ID for the current tenant.
+    Get a specific crew by ID for the current group.
     
     Args:
         crew_id: ID of the crew to get
         service: Crew service injected by dependency
-        tenant_context: Tenant context from headers
+        group_context: Group context from headers
         
     Returns:
-        Crew if found and belongs to tenant
+        Crew if found and belongs to group
         
     Raises:
-        HTTPException: If crew not found or doesn't belong to tenant
+        HTTPException: If crew not found or doesn't belong to group
     """
     try:
-        crew = await service.get_by_tenant(crew_id, tenant_context)
+        crew = await service.get_by_group(crew_id, group_context)
         if not crew:
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND,
@@ -107,22 +107,22 @@ async def get_crew(
 async def create_crew(
     crew_in: CrewCreate,
     service: Annotated[CrewService, Depends(get_crew_service)],
-    tenant_context: TenantContextDep,
+    group_context: GroupContextDep,
 ):
     """
-    Create a new crew for the current tenant.
+    Create a new crew for the current group.
     
     Args:
         crew_in: Crew data for creation
         service: Crew service injected by dependency
-        tenant_context: Tenant context from headers
+        group_context: Group context from headers
         
     Returns:
         Created crew
     """
     try:
-        # Use the tenant-aware create method
-        crew = await service.create_with_tenant(crew_in, tenant_context)
+        # Use the group-aware create method
+        crew = await service.create_with_group(crew_in, group_context)
         
         # Format the response
         return CrewResponse(
@@ -196,25 +196,25 @@ async def update_crew(
     crew_id: Annotated[UUID, Path(title="The ID of the crew to update")],
     crew_update: CrewUpdate,
     service: Annotated[CrewService, Depends(get_crew_service)],
-    tenant_context: TenantContextDep,
+    group_context: GroupContextDep,
 ):
     """
-    Update a crew for the current tenant.
+    Update a crew for the current group.
     
     Args:
         crew_id: ID of the crew to update
         crew_update: Crew data for update (only provided fields will be updated)
         service: Crew service injected by dependency
-        tenant_context: Tenant context from headers
+        group_context: Group context from headers
         
     Returns:
         Updated crew
         
     Raises:
-        HTTPException: If crew not found or doesn't belong to tenant
+        HTTPException: If crew not found or doesn't belong to group
     """
     try:
-        updated_crew = await service.update_with_partial_data_by_tenant(crew_id, crew_update, tenant_context)
+        updated_crew = await service.update_with_partial_data_by_group(crew_id, crew_update, group_context)
         if not updated_crew:
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND,
@@ -244,21 +244,21 @@ async def update_crew(
 async def delete_crew(
     crew_id: Annotated[UUID, Path(title="The ID of the crew to delete")],
     service: Annotated[CrewService, Depends(get_crew_service)],
-    tenant_context: TenantContextDep,
+    group_context: GroupContextDep,
 ):
     """
-    Delete a crew for the current tenant.
+    Delete a crew for the current group.
     
     Args:
         crew_id: ID of the crew to delete
         service: Crew service injected by dependency
-        tenant_context: Tenant context from headers
+        group_context: Group context from headers
         
     Raises:
-        HTTPException: If crew not found or doesn't belong to tenant
+        HTTPException: If crew not found or doesn't belong to group
     """
     try:
-        deleted = await service.delete_by_tenant(crew_id, tenant_context)
+        deleted = await service.delete_by_group(crew_id, group_context)
         if not deleted:
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND,
@@ -272,17 +272,17 @@ async def delete_crew(
 @router.delete("", status_code=status.HTTP_204_NO_CONTENT)
 async def delete_all_crews(
     service: Annotated[CrewService, Depends(get_crew_service)],
-    tenant_context: TenantContextDep,
+    group_context: GroupContextDep,
 ):
     """
-    Delete all crews for the current tenant.
+    Delete all crews for the current group.
     
     Args:
         service: Crew service injected by dependency
-        tenant_context: Tenant context from headers
+        group_context: Group context from headers
     """
     try:
-        await service.delete_all_by_tenant(tenant_context)
+        await service.delete_all_by_group(group_context)
     except Exception as e:
         logger.error(f"Error deleting all crews: {e}")
         raise HTTPException(status_code=500, detail=str(e)) 
