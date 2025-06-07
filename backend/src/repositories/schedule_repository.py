@@ -85,6 +85,20 @@ class ScheduleRepository:
         result = await self.session.execute(query)
         return list(result.scalars().all())
     
+    async def find_by_group(self, group_id: str) -> List[Schedule]:
+        """
+        Find all schedules belonging to a specific group.
+        
+        Args:
+            group_id: ID of the group to filter schedules by
+            
+        Returns:
+            List of Schedule objects belonging to the group
+        """
+        query = select(Schedule).where(Schedule.group_id == group_id)
+        result = await self.session.execute(query)
+        return list(result.scalars().all())
+    
     async def find_due_schedules(self, current_time) -> List[Schedule]:
         """
         Find all schedules that are due to run.

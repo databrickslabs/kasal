@@ -2,7 +2,7 @@ from datetime import datetime
 from typing import List, Optional, Dict, Any, Union
 from sqlalchemy import select, update, delete, and_, or_
 from sqlalchemy.ext.asyncio import AsyncSession
-from src.models.user import User, UserProfile, RefreshToken, ExternalIdentity, Role, Privilege, RolePrivilege, IdentityProvider
+from src.models.user import User, UserProfile, RefreshToken, ExternalIdentity, Role, Privilege, RolePrivilege, UserRole, IdentityProvider
 from src.core.base_repository import BaseRepository
 
 
@@ -36,6 +36,20 @@ class UserRepository(BaseRepository[User]):
         """Update user's last login timestamp"""
         query = update(self.model).where(self.model.id == user_id).values(last_login=datetime.utcnow())
         await self.session.execute(query)
+    
+    async def list_with_filters(self, skip: int = 0, limit: int = 100, filters: dict = None) -> List[User]:
+        """Get users with optional filters"""
+        query = select(self.model)
+        
+        if filters:
+            if 'role' in filters:
+                query = query.where(self.model.role == filters['role'])
+            if 'status' in filters:
+                query = query.where(self.model.status == filters['status'])
+        
+        query = query.offset(skip).limit(limit)
+        result = await self.session.execute(query)
+        return list(result.scalars().all())
 
 
 class UserProfileRepository(BaseRepository[UserProfile]):
@@ -183,6 +197,80 @@ class RolePrivilegeRepository(BaseRepository[RolePrivilege]):
         """Delete all role-privilege mappings for a role"""
         query = delete(self.model).where(self.model.role_id == role_id)
         await self.session.execute(query)
+
+
+class UserRoleRepository(BaseRepository[UserRole]):
+    """Repository for UserRole model"""
+    
+    async def get_user_roles(self, user_id: str) -> List[Role]:
+        """Get all roles assigned to a user"""
+        query = select(Role).join(UserRole, UserRole.role_id == Role.id).where(UserRole.user_id == user_id)
+        result = await self.session.execute(query)
+        return list(result.scalars().all())
+    
+    async def has_role(self, user_id: str, role_name: str) -> bool:
+        """Check if user has a specific role"""
+        query = select(UserRole).join(Role, UserRole.role_id == Role.id).where(
+            and_(UserRole.user_id == user_id, Role.name == role_name)
+        )
+        result = await self.session.execute(query)
+        return result.scalars().first() is not None
+    
+    async def assign_role(self, user_id: str, role_id: str, assigned_by: str = None) -> UserRole:
+        """Assign a role to a user"""
+        # Check if assignment already exists
+        existing = await self.session.execute(
+            select(UserRole).where(and_(UserRole.user_id == user_id, UserRole.role_id == role_id))
+        )
+        if existing.scalars().first():
+            return existing.scalars().first()
+        
+        # Create new assignment
+        user_role = UserRole(
+            user_id=user_id,
+            role_id=role_id,
+            assigned_by=assigned_by
+        )
+        self.session.add(user_role)
+        await self.session.flush()
+        return user_role
+    
+    async def remove_role(self, user_id: str, role_id: str) -> None:
+        """Remove a role from a user"""
+        query = delete(UserRole).where(and_(UserRole.user_id == user_id, UserRole.role_id == role_id))
+        await self.session.execute(query)
+    
+    async def get_users_with_role(self, role_name: str) -> List[User]:
+        """Get all users who have a specific role"""
+        query = select(User).join(UserRole, UserRole.user_id == User.id).join(
+            Role, UserRole.role_id == Role.id
+        ).where(Role.name == role_name)
+        result = await self.session.execute(query)
+        return list(result.scalars().all())
+    
+    async def get_user_privileges(self, user_id: str) -> List[Privilege]:
+        """Get all privileges for a user based on their roles"""
+        query = select(Privilege).join(
+            RolePrivilege, RolePrivilege.privilege_id == Privilege.id
+        ).join(
+            Role, RolePrivilege.role_id == Role.id
+        ).join(
+            UserRole, UserRole.role_id == Role.id
+        ).where(UserRole.user_id == user_id)
+        result = await self.session.execute(query)
+        return list(result.scalars().all())
+    
+    async def has_privilege(self, user_id: str, privilege_name: str) -> bool:
+        """Check if user has a specific privilege"""
+        query = select(Privilege).join(
+            RolePrivilege, RolePrivilege.privilege_id == Privilege.id
+        ).join(
+            Role, RolePrivilege.role_id == Role.id
+        ).join(
+            UserRole, UserRole.role_id == Role.id
+        ).where(and_(UserRole.user_id == user_id, Privilege.name == privilege_name))
+        result = await self.session.execute(query)
+        return result.scalars().first() is not None
 
 
 class IdentityProviderRepository(BaseRepository[IdentityProvider]):

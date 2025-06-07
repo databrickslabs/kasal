@@ -17,27 +17,31 @@ from src.db.session import async_session_factory
 class ExecutionHistoryRepository:
     """Repository for execution history data access operations."""
     
+    def __init__(self, session: AsyncSession = None):
+        """Initialize with optional session."""
+        self.session = session
+    
     async def get_execution_history(
         self, 
         limit: int = 50, 
         offset: int = 0,
-        tenant_ids: List[str] = None
+        group_ids: List[str] = None
     ) -> tuple[List[ExecutionHistory], int]:
         """
-        Get paginated execution history with group-based tenant filtering.
+        Get paginated execution history with group filtering.
         
         Args:
             limit: Maximum number of items to return
             offset: Number of items to skip
-            tenant_ids: List of tenant IDs for group-based filtering
+            group_ids: List of group IDs for filtering
             
         Returns:
             Tuple of (list of Run objects, total count)
         """
         async with async_session_factory() as session:
-            # Build base query with group-based tenant filtering
-            if tenant_ids and len(tenant_ids) > 0:
-                base_filter = ExecutionHistory.tenant_id.in_(tenant_ids)
+            # Build base query with group filtering
+            if group_ids and len(group_ids) > 0:
+                base_filter = ExecutionHistory.group_id.in_(group_ids)
             else:
                 # No filtering (fallback for admin/system access)
                 base_filter = True
@@ -58,13 +62,13 @@ class ExecutionHistoryRepository:
             
             return runs, total_count
     
-    async def get_execution_by_id(self, execution_id: int, tenant_ids: List[str] = None) -> Optional[ExecutionHistory]:
+    async def get_execution_by_id(self, execution_id: int, group_ids: List[str] = None) -> Optional[ExecutionHistory]:
         """
-        Get a specific execution by ID with group-based tenant filtering.
+        Get a specific execution by ID with group filtering.
         
         Args:
             execution_id: ID of the execution
-            tenant_ids: List of tenant IDs for group-based filtering
+            group_ids: List of group IDs for filtering
             
         Returns:
             Run object if found, None otherwise
@@ -72,21 +76,21 @@ class ExecutionHistoryRepository:
         async with async_session_factory() as session:
             filters = [ExecutionHistory.id == execution_id]
             
-            # Add tenant filtering
-            if tenant_ids and len(tenant_ids) > 0:
-                filters.append(ExecutionHistory.tenant_id.in_(tenant_ids))
+            # Add group filtering
+            if group_ids and len(group_ids) > 0:
+                filters.append(ExecutionHistory.group_id.in_(group_ids))
             
             stmt = select(ExecutionHistory).where(*filters)
             result = await session.execute(stmt)
             return result.scalars().first()
     
-    async def get_execution_by_job_id(self, job_id: str, tenant_ids: List[str] = None) -> Optional[ExecutionHistory]:
+    async def get_execution_by_job_id(self, job_id: str, group_ids: List[str] = None) -> Optional[ExecutionHistory]:
         """
-        Get a specific execution by job_id with group-based tenant filtering.
+        Get a specific execution by job_id with group filtering.
         
         Args:
             job_id: Job ID of the execution
-            tenant_ids: List of tenant IDs for group-based filtering
+            group_ids: List of group IDs for filtering
             
         Returns:
             Run object if found, None otherwise
@@ -94,13 +98,31 @@ class ExecutionHistoryRepository:
         async with async_session_factory() as session:
             filters = [ExecutionHistory.job_id == job_id]
             
-            # Add tenant filtering
-            if tenant_ids and len(tenant_ids) > 0:
-                filters.append(ExecutionHistory.tenant_id.in_(tenant_ids))
+            # Add group filtering
+            if group_ids and len(group_ids) > 0:
+                filters.append(ExecutionHistory.group_id.in_(group_ids))
             
             stmt = select(ExecutionHistory).where(*filters)
             result = await session.execute(stmt)
             return result.scalars().first()
+    
+    async def find_by_id(self, execution_id: int) -> Optional[ExecutionHistory]:
+        """
+        Find execution by ID.
+        
+        Args:
+            execution_id: ID of the execution
+            
+        Returns:
+            ExecutionHistory object if found, None otherwise
+        """
+        if self.session:
+            # Use existing session
+            return await self._get_execution_by_id_internal(self.session, execution_id)
+        else:
+            # Create new session
+            async with async_session_factory() as session:
+                return await self._get_execution_by_id_internal(session, execution_id)
     
     async def check_execution_exists(self, execution_id: int) -> bool:
         """

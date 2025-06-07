@@ -14,7 +14,7 @@ from datetime import datetime, timezone
 from src.models.execution_logs import ExecutionLog
 from src.db.session import async_session_factory
 from src.core.logger import LoggerManager
-from src.utils.user_context import TenantContext
+from src.utils.user_context import GroupContext
 
 # Get logger from the centralized logging system
 logger = LoggerManager.get_instance().system
@@ -274,41 +274,41 @@ class ExecutionLogsRepository:
                 newest_first=newest_first
             )
     
-    async def get_by_execution_id_and_tenant_with_managed_session(
+    async def get_by_execution_id_and_group_with_managed_session(
         self, 
         execution_id: str,
-        tenant_id: str,
+        group_id: str,
         limit: int = 1000, 
         offset: int = 0,
         newest_first: bool = False,
-        include_null_tenant: bool = False
+        include_null_group: bool = False
     ) -> List[ExecutionLog]:
         """
-        Retrieve logs for a specific execution and tenant with internal session management.
+        Retrieve logs for a specific execution and group with internal session management.
         
         Args:
             execution_id: ID of the execution to fetch logs for
-            tenant_id: ID of the tenant to filter by
+            group_id: ID of the group to filter by
             limit: Maximum number of logs to return
             offset: Number of logs to skip
             newest_first: If True, return newest logs first
-            include_null_tenant: If True, also include logs with NULL tenant_id (for backward compatibility)
+            include_null_group: If True, also include logs with NULL group_id (for backward compatibility)
             
         Returns:
-            List of ExecutionLog objects filtered by tenant
+            List of ExecutionLog objects filtered by group
         """
         async with async_session_factory() as session:
-            if include_null_tenant:
-                # Include logs that belong to the tenant OR have NULL tenant_id (legacy logs)
+            if include_null_group:
+                # Include logs that belong to the group OR have NULL group_id (legacy logs)
                 query = select(ExecutionLog).where(
                     ExecutionLog.execution_id == execution_id,
-                    (ExecutionLog.tenant_id == tenant_id) | (ExecutionLog.tenant_id == None)
+                    (ExecutionLog.group_id == group_id) | (ExecutionLog.group_id == None)
                 )
             else:
-                # Only include logs that belong to the specific tenant
+                # Only include logs that belong to the specific group
                 query = select(ExecutionLog).where(
                     ExecutionLog.execution_id == execution_id,
-                    ExecutionLog.tenant_id == tenant_id
+                    ExecutionLog.group_id == group_id
                 )
             
             if newest_first:
@@ -357,15 +357,15 @@ class ExecutionLogsRepository:
         async with async_session_factory() as session:
             return await self.delete_all(session)
     
-    async def create_with_tenant_managed_session(self, execution_id: str, content: str, timestamp=None, tenant_context: TenantContext = None) -> ExecutionLog:
+    async def create_with_group_managed_session(self, execution_id: str, content: str, timestamp=None, group_context: GroupContext = None) -> ExecutionLog:
         """
-        Create a new execution log entry with tenant information and internal session management.
+        Create a new execution log entry with group information and internal session management.
         
         Args:
             execution_id: ID of the execution
             content: Log content text
             timestamp: Optional timestamp, will use current time if not provided
-            tenant_context: Optional tenant context for multi-tenant isolation
+            group_context: Optional group context for multi-group isolation
             
         Returns:
             Created ExecutionLog object
@@ -376,13 +376,13 @@ class ExecutionLogsRepository:
                 # Normalize the timestamp to timezone-naive UTC
                 normalized_timestamp = self._normalize_timestamp(timestamp)
                 
-                # Create the log object with tenant information
+                # Create the log object with group information
                 log = ExecutionLog(
                     execution_id=execution_id,
                     content=content,
                     timestamp=normalized_timestamp,  # If None, the model default will be used
-                    tenant_id=tenant_context.primary_tenant_id if tenant_context else None,
-                    tenant_email=tenant_context.tenant_email if tenant_context else None
+                    group_id=group_context.primary_group_id if group_context else None,
+                    group_email=group_context.group_email if group_context else None
                 )
                 
                 # Add it to the session
@@ -396,7 +396,7 @@ class ExecutionLogsRepository:
                 
                 return log
         except Exception as e:
-            logger.error(f"[ExecutionLogsRepository.create_with_tenant_managed_session] Error creating log: {e}", exc_info=True)
+            logger.error(f"[ExecutionLogsRepository.create_with_group_managed_session] Error creating log: {e}", exc_info=True)
             raise
 
 

@@ -32,23 +32,23 @@ class ExecutionRepository(BaseRepository[ExecutionHistory]):
         self, 
         limit: int = 50, 
         offset: int = 0,
-        tenant_ids: List[str] = None
+        group_ids: List[str] = None
     ) -> Tuple[List[ExecutionHistory], int]:
         """
-        Get paginated execution history with tenant filtering.
+        Get paginated execution history with group filtering.
         
         Args:
             limit: Maximum number of items to return
             offset: Number of items to skip
-            tenant_ids: List of tenant IDs for filtering
+            group_ids: List of group IDs for filtering
             
         Returns:
             Tuple of (list of executions, total count)
         """
-        # Build base filter with tenant filtering
+        # Build base filter with group filtering
         base_filter = True
-        if tenant_ids and len(tenant_ids) > 0:
-            base_filter = ExecutionHistory.tenant_id.in_(tenant_ids)
+        if group_ids and len(group_ids) > 0:
+            base_filter = ExecutionHistory.group_id.in_(group_ids)
         
         # Get total count
         count_stmt = select(func.count()).select_from(ExecutionHistory).where(base_filter)
@@ -66,17 +66,23 @@ class ExecutionRepository(BaseRepository[ExecutionHistory]):
         
         return executions, total_count
     
-    async def get_execution_by_job_id(self, job_id: str) -> Optional[ExecutionHistory]:
+    async def get_execution_by_job_id(self, job_id: str, group_ids: List[str] = None) -> Optional[ExecutionHistory]:
         """
-        Get a specific execution by job_id.
+        Get a specific execution by job_id with group filtering.
         
         Args:
             job_id: Job ID of the execution
+            group_ids: List of group IDs for filtering
             
         Returns:
             Execution object if found, None otherwise
         """
-        stmt = select(ExecutionHistory).where(ExecutionHistory.job_id == job_id)
+        # Build base filter
+        base_filter = ExecutionHistory.job_id == job_id
+        if group_ids and len(group_ids) > 0:
+            base_filter = base_filter & ExecutionHistory.group_id.in_(group_ids)
+        
+        stmt = select(ExecutionHistory).where(base_filter)
         result = await self.session.execute(stmt)
         return result.scalars().first()
     

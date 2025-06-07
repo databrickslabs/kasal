@@ -100,6 +100,42 @@ class BaseRepository(Generic[ModelType]):
             await self.session.rollback()
             raise
 
+    async def add(self, obj: ModelType) -> ModelType:
+        """
+        Add an existing model object to the database.
+        
+        Args:
+            obj: Model instance to add to database
+            
+        Returns:
+            The added model instance with database-generated values
+        """
+        import logging
+        logger = logging.getLogger(__name__)
+        
+        try:
+            logger.debug(f"Adding {self.model.__name__} object to database")
+            self.session.add(obj)
+            
+            # Flush changes to get generated ID and other DB-generated values
+            await self.session.flush()
+            
+            # Explicitly commit changes to ensure they're persisted to the database
+            await self.session.commit()
+            
+            # Refresh the object to ensure we have all the DB-generated data
+            await self.session.refresh(obj)
+            
+            logger.debug(f"Added {self.model.__name__} with ID: {obj.id}")
+            return obj
+        except Exception as e:
+            logger.error(f"Error adding {self.model.__name__}: {str(e)}")
+            import traceback
+            logger.error(traceback.format_exc())
+            # Rollback on error
+            await self.session.rollback()
+            raise
+
     async def update(self, id: IdType, obj_in: dict) -> Optional[ModelType]:
         """
         Update an existing record.
