@@ -27,6 +27,7 @@ from src.models.agent import Agent
 from src.models.task import Task
 from src.repositories.crew_generator_repository import CrewGeneratorRepository
 from src.core.unit_of_work import UnitOfWork
+from src.utils.user_context import TenantContext
 
 # Configure logging
 logger = logging.getLogger(__name__)
@@ -62,7 +63,8 @@ class CrewGenerationService:
         return cls(log_service=log_service)
     
     async def _log_llm_interaction(self, endpoint: str, prompt: str, response: str, model: str, 
-                                  status: str = 'success', error_message: str = None) -> None:
+                                  status: str = 'success', error_message: str = None, 
+                                  tenant_context: Optional[TenantContext] = None) -> None:
         """
         Log LLM interaction using the log service.
         
@@ -81,7 +83,8 @@ class CrewGenerationService:
                 response=response,
                 model=model,
                 status=status,
-                error_message=error_message
+                error_message=error_message,
+                tenant_context=tenant_context
             )
             logger.info(f"Logged {endpoint} interaction to database")
         except Exception as e:
@@ -396,7 +399,7 @@ class CrewGenerationService:
             logger.error(traceback.format_exc())
             return ""
 
-    async def create_crew_complete(self, request: CrewGenerationRequest) -> Dict[str, Any]:
+    async def create_crew_complete(self, request: CrewGenerationRequest, tenant_context: Optional[TenantContext] = None) -> Dict[str, Any]:
         """
         Create a crew with agents and tasks.
         
@@ -469,7 +472,8 @@ class CrewGenerationService:
                         endpoint='generate-crew',
                         prompt=f"System: {system_message}\nDocumentation: {documentation_context}\nUser: {request.prompt}",
                         response=content,
-                        model=model
+                        model=model,
+                        tenant_context=tenant_context
                     )
                     
                     # Parse JSON setup

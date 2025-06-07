@@ -20,6 +20,7 @@ from src.utils.prompt_utils import robust_json_parser
 from src.services.template_service import TemplateService
 from src.services.log_service import LLMLogService
 from src.core.llm_manager import LLMManager
+from src.utils.user_context import TenantContext
 
 # Configure logging
 logger = logging.getLogger(__name__)
@@ -50,7 +51,8 @@ class AgentGenerationService:
         log_service = LLMLogService.create()
         return cls(log_service=log_service)
     
-    async def _log_llm_interaction(self, endpoint: str, prompt: str, response: str, model: str) -> None:
+    async def _log_llm_interaction(self, endpoint: str, prompt: str, response: str, model: str, 
+                                  tenant_context: Optional[TenantContext] = None) -> None:
         """
         Log LLM interaction using the log service.
         
@@ -59,6 +61,7 @@ class AgentGenerationService:
             prompt: Input prompt text
             response: Response from the LLM
             model: Model used for generation
+            tenant_context: Optional tenant context for multi-tenant isolation
         """
         try:
             await self.log_service.create_log(
@@ -66,14 +69,16 @@ class AgentGenerationService:
                 prompt=prompt,
                 response=response,
                 model=model,
-                status='success'
+                status='success',
+                tenant_context=tenant_context
             )
             logger.info(f"Logged {endpoint} interaction to database")
         except Exception as e:
             logger.error(f"Failed to log LLM interaction: {str(e)}")
             logger.error(f"Traceback: {traceback.format_exc()}")
     
-    async def generate_agent(self, prompt_text: str, model: str = None, tools: List[str] = None) -> Dict[str, Any]:
+    async def generate_agent(self, prompt_text: str, model: str = None, tools: List[str] = None, 
+                            tenant_context: Optional[TenantContext] = None) -> Dict[str, Any]:
         """
         Generate agent configuration from natural language description.
         
@@ -84,6 +89,7 @@ class AgentGenerationService:
             prompt_text: Natural language description of the agent
             model: Model to use for generation, defaults to environment variable or "databricks-llama-4-maverick"
             tools: List of tools available to the agent
+            tenant_context: Optional tenant context for multi-tenant isolation
             
         Returns:
             Dict[str, Any]: Agent configuration in JSON format
@@ -111,7 +117,8 @@ class AgentGenerationService:
                     endpoint='generate-agent',
                     prompt=f"System: {system_message}\nUser: {prompt_text}",
                     response=json.dumps(agent_config),
-                    model=model
+                    model=model,
+                    tenant_context=tenant_context
                 )
             except Exception as e:
                 # Just log the error, don't fail the request

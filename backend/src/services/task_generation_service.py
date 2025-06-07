@@ -9,6 +9,7 @@ import logging
 import os
 from typing import Optional
 import re
+import json
 import litellm
 
 from src.schemas.model_provider import ModelProvider
@@ -17,10 +18,8 @@ from src.services.template_service import TemplateService
 from src.utils.prompt_utils import robust_json_parser
 from src.services.log_service import LLMLogService
 from src.core.llm_manager import LLMManager
-from src.services.task_service import TaskService
 from src.schemas.task import TaskCreate
 from src.utils.user_context import TenantContext
-from src.core.dependencies import get_db
 
 # Configure logging
 logger = logging.getLogger(__name__)
@@ -55,7 +54,8 @@ class TaskGenerationService:
         return cls(log_service=log_service)
     
     async def _log_llm_interaction(self, endpoint: str, prompt: str, response: str, model: str, 
-                                  status: str = 'success', error_message: Optional[str] = None):
+                                  status: str = 'success', error_message: Optional[str] = None,
+                                  tenant_context: Optional[TenantContext] = None):
         """
         Log LLM interaction using the log service.
         
@@ -66,6 +66,7 @@ class TaskGenerationService:
             model: LLM model used
             status: Status of the interaction (success/error)
             error_message: Optional error message
+            tenant_context: Optional tenant context for multi-tenant isolation
         """
         try:
             await self.log_service.create_log(
@@ -74,13 +75,14 @@ class TaskGenerationService:
                 response=response,
                 model=model,
                 status=status,
-                error_message=error_message
+                error_message=error_message,
+                tenant_context=tenant_context
             )
             logger.info(f"Logged {endpoint} interaction to database")
         except Exception as e:
             logger.error(f"Failed to log LLM interaction: {str(e)}")
     
-    async def generate_task(self, request: TaskGenerationRequest) -> TaskGenerationResponse:
+    async def generate_task(self, request: TaskGenerationRequest, tenant_context: Optional[TenantContext] = None) -> TaskGenerationResponse:
         """
         Generate a task based on the provided prompt and context.
         
@@ -164,7 +166,8 @@ class TaskGenerationService:
                 endpoint='generate-task',
                 prompt=f"System: {base_message}\nUser: {request.text}",
                 response=content,
-                model=model
+                model=model,
+                tenant_context=tenant_context
             )
             
         except Exception as e:
@@ -176,7 +179,8 @@ class TaskGenerationService:
                 response=str(e),
                 model=model,
                 status='error',
-                error_message=error_msg
+                error_message=error_msg,
+                tenant_context=tenant_context
             )
             raise ValueError(error_msg)
         
@@ -193,7 +197,8 @@ class TaskGenerationService:
                 response=content,
                 model=model,
                 status='error',
-                error_message=error_msg
+                error_message=error_msg,
+                tenant_context=tenant_context
             )
             raise ValueError(f"Could not parse response as JSON: {str(e)}")
         
@@ -283,51 +288,88 @@ class TaskGenerationService:
     
     async def generate_and_save_task(self, request: TaskGenerationRequest, tenant_context: TenantContext) -> dict:
         """
-        Generate a task and save it to the database with tenant isolation.
+        Generate a task using LLM.
+        
+        This method follows the exact same pattern as AgentGenerationService.generate_agent()
+        - Only handles generation, no database saving
+        - Database persistence should be handled by the calling layer (frontend)
         
         Args:
             request: Task generation request
-            tenant_context: Tenant context for multi-tenant isolation
+            tenant_context: Tenant context (for compatibility, not used in generation)
             
         Returns:
-            Dictionary containing both the generation response and saved task
+            Dictionary containing the generation response (same format as agent generation)
         """
-        # Generate the task first
-        generation_response = await self.generate_task(request)
+        # Generate the task using LLM (same as AgentGenerationService pattern)
+        generation_response = await self.generate_task(request, tenant_context)
         
-        # Convert the generation response to a TaskCreate schema for persistence
-        task_create = TaskCreate(
+        # Log the interaction (same as AgentGenerationService pattern)
+        try:
+            await self._log_llm_interaction(
+                endpoint='generate-task',
+                prompt=f"User: {request.text}",
+                response=json.dumps(generation_response.model_dump()),
+                model=request.model or "databricks-llama-4-maverick",
+                tenant_context=tenant_context
+            )
+        except Exception as e:
+            # Just log the error, don't fail the request (same as AgentGenerationService)
+            logger.error(f"Failed to log interaction: {str(e)}")
+        
+        # Return the task config (same as AgentGenerationService pattern)
+        return generation_response.model_dump()
+    
+    def convert_to_task_create(self, generation_response: TaskGenerationResponse) -> TaskCreate:
+        """
+        Convert a TaskGenerationResponse to a TaskCreate schema.
+        
+        This is a utility method that can be used by other services to convert
+        generated task data into the format needed for database persistence.
+        
+        Args:
+            generation_response: Generated task data from LLM
+            
+        Returns:
+            TaskCreate schema ready for database persistence
+        """
+        import json
+        from src.schemas.task import TaskConfig
+        
+        # Convert output_json from dict to string if it exists
+        output_json_str = None
+        if generation_response.advanced_config.output_json:
+            output_json_str = json.dumps(generation_response.advanced_config.output_json)
+        
+        # Create TaskConfig object from AdvancedConfig
+        task_config = TaskConfig(
+            output_json=output_json_str,
+            output_pydantic=generation_response.advanced_config.output_pydantic,
+            output_file=generation_response.advanced_config.output_file,
+            callback=generation_response.advanced_config.callback,
+            human_input=generation_response.advanced_config.human_input,
+            markdown=generation_response.advanced_config.markdown,
+            retry_on_fail=generation_response.advanced_config.retry_on_fail,
+            max_retries=generation_response.advanced_config.max_retries,
+            timeout=generation_response.advanced_config.timeout,
+            priority=generation_response.advanced_config.priority,
+            error_handling=generation_response.advanced_config.error_handling,
+            cache_response=generation_response.advanced_config.cache_response,
+            cache_ttl=generation_response.advanced_config.cache_ttl
+        )
+        
+        return TaskCreate(
             name=generation_response.name,
             description=generation_response.description,
             expected_output=generation_response.expected_output,
             tools=generation_response.tools,
-            async_execution=generation_response.advanced_config.get('async_execution', False),
-            context=generation_response.advanced_config.get('context', []),
-            config=generation_response.advanced_config,
-            output_json=generation_response.advanced_config.get('output_json'),
-            output_pydantic=generation_response.advanced_config.get('output_pydantic'),
-            output_file=generation_response.advanced_config.get('output_file'),
-            markdown=generation_response.advanced_config.get('markdown', False),
-            human_input=generation_response.advanced_config.get('human_input', False),
-            callback=generation_response.advanced_config.get('callback')
-        )
-        
-        # Create database session and task service
-        async for session in get_db():
-            task_service = TaskService(session)
-            
-            # Save the task with tenant context
-            saved_task = await task_service.create_with_tenant(task_create, tenant_context)
-            
-            return {
-                "generation_response": generation_response.model_dump(),
-                "saved_task": {
-                    "id": saved_task.id,
-                    "name": saved_task.name,
-                    "description": saved_task.description,
-                    "expected_output": saved_task.expected_output,
-                    "tenant_id": saved_task.tenant_id,
-                    "created_by_email": saved_task.created_by_email,
-                    "created_at": saved_task.created_at.isoformat() if saved_task.created_at else None
-                }
-            } 
+            async_execution=generation_response.advanced_config.async_execution,
+            context=generation_response.advanced_config.context,
+            config=task_config,
+            output_json=output_json_str,
+            output_pydantic=generation_response.advanced_config.output_pydantic,
+            output_file=generation_response.advanced_config.output_file,
+            markdown=generation_response.advanced_config.markdown,
+            human_input=generation_response.advanced_config.human_input,
+            callback=generation_response.advanced_config.callback
+        ) 
