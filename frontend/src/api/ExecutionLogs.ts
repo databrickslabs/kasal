@@ -79,7 +79,11 @@ class ExecutionLogService {
     }
 
     try {
-      const ws = new WebSocket(`${this.wsUrl}/ws/logs/executions/${jobId}/stream`);
+      // Get tenant email from localStorage for development mode
+      const mockUserEmail = localStorage.getItem('mockUserEmail');
+      const tenantParam = mockUserEmail ? `?tenant_email=${encodeURIComponent(mockUserEmail)}` : '';
+      
+      const ws = new WebSocket(`${this.wsUrl}/logs/executions/${jobId}/stream${tenantParam}`);
       let reconnectAttempts = 0;
       const maxReconnectAttempts = 5;
 
