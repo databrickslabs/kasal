@@ -1,10 +1,12 @@
 from typing import List, Optional, Dict, Any, Type
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy import select
 
 from src.core.base_service import BaseService
 from src.models.task import Task
 from src.repositories.task_repository import TaskRepository
 from src.schemas.task import TaskCreate, TaskUpdate
+from src.utils.user_context import TenantContext
 
 
 class TaskService(BaseService[Task, TaskCreate]):
@@ -165,4 +167,45 @@ class TaskService(BaseService[Task, TaskCreate]):
         Returns:
             None
         """
-        await self.repository.delete_all() 
+        await self.repository.delete_all()
+    
+    async def create_with_tenant(self, obj_in: TaskCreate, tenant_context: TenantContext) -> Task:
+        """
+        Create a new task with tenant isolation.
+        
+        Args:
+            obj_in: Task data for creation
+            tenant_context: Tenant context from headers
+            
+        Returns:
+            Created task with tenant information
+        """
+        # Convert schema to dict and add tenant fields
+        task_data = obj_in.model_dump()
+        task_data['tenant_id'] = tenant_context.tenant_id
+        task_data['created_by_email'] = tenant_context.tenant_email
+        
+        # Convert empty agent_id to None for PostgreSQL compatibility
+        if "agent_id" in task_data and task_data["agent_id"] == "":
+            task_data["agent_id"] = None
+        
+        # Create task using repository (pass dict, not object)
+        return await self.repository.create(task_data)
+    
+    async def find_by_tenant(self, tenant_context: TenantContext) -> List[Task]:
+        """
+        Find all tasks for a specific tenant.
+        
+        Args:
+            tenant_context: Tenant context from headers
+            
+        Returns:
+            List of tasks for the specified tenant
+        """
+        if not tenant_context.tenant_id:
+            # If no tenant context, return empty list for security
+            return []
+        
+        stmt = select(Task).where(Task.tenant_id == tenant_context.tenant_id)
+        result = await self.session.execute(stmt)
+        return result.scalars().all() 

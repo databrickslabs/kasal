@@ -17,6 +17,10 @@ from src.services.template_service import TemplateService
 from src.utils.prompt_utils import robust_json_parser
 from src.services.log_service import LLMLogService
 from src.core.llm_manager import LLMManager
+from src.services.task_service import TaskService
+from src.schemas.task import TaskCreate
+from src.utils.user_context import TenantContext
+from src.core.dependencies import get_db
 
 # Configure logging
 logger = logging.getLogger(__name__)
@@ -275,4 +279,55 @@ class TaskGenerationService:
             advanced_config=setup.get("advanced_config", {})
         )
         
-        return response 
+        return response
+    
+    async def generate_and_save_task(self, request: TaskGenerationRequest, tenant_context: TenantContext) -> dict:
+        """
+        Generate a task and save it to the database with tenant isolation.
+        
+        Args:
+            request: Task generation request
+            tenant_context: Tenant context for multi-tenant isolation
+            
+        Returns:
+            Dictionary containing both the generation response and saved task
+        """
+        # Generate the task first
+        generation_response = await self.generate_task(request)
+        
+        # Convert the generation response to a TaskCreate schema for persistence
+        task_create = TaskCreate(
+            name=generation_response.name,
+            description=generation_response.description,
+            expected_output=generation_response.expected_output,
+            tools=generation_response.tools,
+            async_execution=generation_response.advanced_config.get('async_execution', False),
+            context=generation_response.advanced_config.get('context', []),
+            config=generation_response.advanced_config,
+            output_json=generation_response.advanced_config.get('output_json'),
+            output_pydantic=generation_response.advanced_config.get('output_pydantic'),
+            output_file=generation_response.advanced_config.get('output_file'),
+            markdown=generation_response.advanced_config.get('markdown', False),
+            human_input=generation_response.advanced_config.get('human_input', False),
+            callback=generation_response.advanced_config.get('callback')
+        )
+        
+        # Create database session and task service
+        async for session in get_db():
+            task_service = TaskService(session)
+            
+            # Save the task with tenant context
+            saved_task = await task_service.create_with_tenant(task_create, tenant_context)
+            
+            return {
+                "generation_response": generation_response.model_dump(),
+                "saved_task": {
+                    "id": saved_task.id,
+                    "name": saved_task.name,
+                    "description": saved_task.description,
+                    "expected_output": saved_task.expected_output,
+                    "tenant_id": saved_task.tenant_id,
+                    "created_by_email": saved_task.created_by_email,
+                    "created_at": saved_task.created_at.isoformat() if saved_task.created_at else None
+                }
+            } 

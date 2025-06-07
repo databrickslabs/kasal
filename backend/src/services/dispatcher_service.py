@@ -20,6 +20,7 @@ from src.services.template_service import TemplateService
 from src.services.log_service import LLMLogService
 from src.core.llm_manager import LLMManager
 from src.utils.prompt_utils import robust_json_parser
+from src.utils.user_context import TenantContext
 
 # Configure logging
 logger = logging.getLogger(__name__)
@@ -163,12 +164,13 @@ Examples:
                 "suggested_prompt": message
             }
     
-    async def dispatch(self, request: DispatcherRequest) -> Dict[str, Any]:
+    async def dispatch(self, request: DispatcherRequest, tenant_context: TenantContext = None) -> Dict[str, Any]:
         """
         Dispatch the user's request to the appropriate generation service.
         
         Args:
             request: Dispatcher request with user message and options
+            tenant_context: Tenant context from headers for multi-tenant isolation
             
         Returns:
             Dictionary containing the intent detection result and generation response
@@ -212,7 +214,7 @@ Examples:
                     text=dispatcher_response.suggested_prompt or request.message,
                     model=request.model
                 )
-                generation_result = await self.task_service.generate_task(task_request)
+                generation_result = await self.task_service.generate_and_save_task(task_request, tenant_context)
                 
             elif dispatcher_response.intent == IntentType.GENERATE_CREW:
                 # Call crew generation service

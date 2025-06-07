@@ -1,10 +1,12 @@
 from typing import List, Optional, Type
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy import select
 
 from src.core.base_service import BaseService
 from src.models.agent import Agent
 from src.repositories.agent_repository import AgentRepository
 from src.schemas.agent import AgentCreate, AgentUpdate, AgentLimitedUpdate
+from src.utils.user_context import TenantContext
 
 
 class AgentService(BaseService[Agent, AgentCreate]):
@@ -146,4 +148,41 @@ class AgentService(BaseService[Agent, AgentCreate]):
         Returns:
             None
         """
-        await self.repository.delete_all() 
+        await self.repository.delete_all()
+    
+    async def create_with_tenant(self, obj_in: AgentCreate, tenant_context: TenantContext) -> Agent:
+        """
+        Create a new agent with tenant isolation.
+        
+        Args:
+            obj_in: Agent data for creation
+            tenant_context: Tenant context from headers
+            
+        Returns:
+            Created agent with tenant information
+        """
+        # Convert schema to dict and add tenant fields
+        agent_data = obj_in.model_dump()
+        agent_data['tenant_id'] = tenant_context.tenant_id
+        agent_data['created_by_email'] = tenant_context.tenant_email
+        
+        # Create agent using repository (pass dict, not object)
+        return await self.repository.create(agent_data)
+    
+    async def find_by_tenant(self, tenant_context: TenantContext) -> List[Agent]:
+        """
+        Find all agents for a specific tenant.
+        
+        Args:
+            tenant_context: Tenant context from headers
+            
+        Returns:
+            List of agents for the specified tenant
+        """
+        if not tenant_context.tenant_id:
+            # If no tenant context, return empty list for security
+            return []
+        
+        stmt = select(Agent).where(Agent.tenant_id == tenant_context.tenant_id)
+        result = await self.session.execute(stmt)
+        return result.scalars().all() 
