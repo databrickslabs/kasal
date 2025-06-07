@@ -1,7 +1,7 @@
 import queue
 from datetime import datetime
 from typing import Optional
-from src.utils.user_context import TenantContext
+from src.utils.user_context import GroupContext
 
 class JobOutputQueue:
     """Singleton holder for the job output queue."""
@@ -22,7 +22,7 @@ class JobOutputQueue:
 def get_job_output_queue() -> queue.Queue:
     return JobOutputQueue().get_queue()
 
-def enqueue_log(execution_id: str, content: str, timestamp: Optional[datetime] = None, tenant_context: TenantContext = None) -> bool:
+def enqueue_log(execution_id: str, content: str, timestamp: Optional[datetime] = None, group_context: GroupContext = None) -> bool:
     """
     Enqueue a log message to be processed by the logs writer.
     
@@ -30,7 +30,7 @@ def enqueue_log(execution_id: str, content: str, timestamp: Optional[datetime] =
         execution_id: ID of the execution (job_id)
         content: Content of the log message
         timestamp: Optional timestamp, defaults to current time
-        tenant_context: Optional tenant context for logging isolation
+        group_context: Optional group context for logging isolation
         
     Returns:
         bool: True if enqueued successfully, False otherwise
@@ -46,10 +46,10 @@ def enqueue_log(execution_id: str, content: str, timestamp: Optional[datetime] =
             "timestamp": timestamp or datetime.now()
         }
         
-        # Add tenant context information if available
-        if tenant_context:
-            log_data["tenant_id"] = tenant_context.primary_tenant_id
-            log_data["tenant_email"] = tenant_context.tenant_email
+        # Add group context information if available
+        if group_context:
+            log_data["group_id"] = group_context.primary_group_id
+            log_data["group_email"] = group_context.group_email
         
         # Add to queue
         job_queue.put_nowait(log_data)

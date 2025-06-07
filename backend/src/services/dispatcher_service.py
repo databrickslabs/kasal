@@ -20,7 +20,7 @@ from src.services.template_service import TemplateService
 from src.services.log_service import LLMLogService
 from src.core.llm_manager import LLMManager
 from src.utils.prompt_utils import robust_json_parser
-from src.utils.user_context import TenantContext
+from src.utils.user_context import GroupContext
 
 # Configure logging
 logger = logging.getLogger(__name__)
@@ -57,7 +57,7 @@ class DispatcherService:
     
     async def _log_llm_interaction(self, endpoint: str, prompt: str, response: str, model: str, 
                                   status: str = 'success', error_message: Optional[str] = None,
-                                  tenant_context: Optional[TenantContext] = None):
+                                  group_context: Optional[GroupContext] = None):
         """
         Log LLM interaction using the log service.
         
@@ -68,7 +68,7 @@ class DispatcherService:
             model: LLM model used
             status: Status of the interaction (success/error)
             error_message: Optional error message
-            tenant_context: Optional tenant context for multi-tenant isolation
+            group_context: Optional group context for multi-group isolation
         """
         try:
             await self.log_service.create_log(
@@ -78,7 +78,7 @@ class DispatcherService:
                 model=model,
                 status=status,
                 error_message=error_message,
-                tenant_context=tenant_context
+                group_context=group_context
             )
             logger.info(f"Logged {endpoint} interaction to database")
         except Exception as e:
@@ -167,13 +167,13 @@ Examples:
                 "suggested_prompt": message
             }
     
-    async def dispatch(self, request: DispatcherRequest, tenant_context: TenantContext = None) -> Dict[str, Any]:
+    async def dispatch(self, request: DispatcherRequest, group_context: GroupContext = None) -> Dict[str, Any]:
         """
         Dispatch the user's request to the appropriate generation service.
         
         Args:
             request: Dispatcher request with user message and options
-            tenant_context: Tenant context from headers for multi-tenant isolation
+            group_context: Group context from headers for multi-group isolation
             
         Returns:
             Dictionary containing the intent detection result and generation response
@@ -189,7 +189,7 @@ Examples:
             prompt=request.message,
             response=str(intent_result),
             model=model,
-            tenant_context=tenant_context
+            group_context=group_context
         )
         
         # Create dispatcher response
@@ -210,7 +210,7 @@ Examples:
                     prompt_text=dispatcher_response.suggested_prompt or request.message,
                     model=request.model,
                     tools=request.tools,
-                    tenant_context=tenant_context
+                    group_context=group_context
                 )
                 
             elif dispatcher_response.intent == IntentType.GENERATE_TASK:
@@ -219,7 +219,7 @@ Examples:
                     text=dispatcher_response.suggested_prompt or request.message,
                     model=request.model
                 )
-                generation_result = await self.task_service.generate_and_save_task(task_request, tenant_context)
+                generation_result = await self.task_service.generate_and_save_task(task_request, group_context)
                 
             elif dispatcher_response.intent == IntentType.GENERATE_CREW:
                 # Call crew generation service
@@ -228,7 +228,7 @@ Examples:
                     model=request.model,
                     tools=request.tools
                 )
-                generation_result = await self.crew_service.create_crew_complete(crew_request, tenant_context)
+                generation_result = await self.crew_service.create_crew_complete(crew_request, group_context)
                 
             else:
                 # Unknown intent
@@ -243,7 +243,7 @@ Examples:
                 model=model,
                 status='error',
                 error_message=str(e),
-                tenant_context=tenant_context
+                group_context=group_context
             )
             raise
         

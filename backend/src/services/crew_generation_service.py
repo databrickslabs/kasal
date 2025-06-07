@@ -27,7 +27,7 @@ from src.models.agent import Agent
 from src.models.task import Task
 from src.repositories.crew_generator_repository import CrewGeneratorRepository
 from src.core.unit_of_work import UnitOfWork
-from src.utils.user_context import TenantContext
+from src.utils.user_context import GroupContext
 
 # Configure logging
 logger = logging.getLogger(__name__)
@@ -64,7 +64,7 @@ class CrewGenerationService:
     
     async def _log_llm_interaction(self, endpoint: str, prompt: str, response: str, model: str, 
                                   status: str = 'success', error_message: str = None, 
-                                  tenant_context: Optional[TenantContext] = None) -> None:
+                                  group_context: Optional[GroupContext] = None) -> None:
         """
         Log LLM interaction using the log service.
         
@@ -84,7 +84,7 @@ class CrewGenerationService:
                 model=model,
                 status=status,
                 error_message=error_message,
-                tenant_context=tenant_context
+                group_context=group_context
             )
             logger.info(f"Logged {endpoint} interaction to database")
         except Exception as e:
@@ -399,7 +399,7 @@ class CrewGenerationService:
             logger.error(traceback.format_exc())
             return ""
 
-    async def create_crew_complete(self, request: CrewGenerationRequest, tenant_context: Optional[TenantContext] = None) -> Dict[str, Any]:
+    async def create_crew_complete(self, request: CrewGenerationRequest, group_context: Optional[GroupContext] = None) -> Dict[str, Any]:
         """
         Create a crew with agents and tasks.
         
@@ -473,7 +473,7 @@ class CrewGenerationService:
                         prompt=f"System: {system_message}\nDocumentation: {documentation_context}\nUser: {request.prompt}",
                         response=content,
                         model=model,
-                        tenant_context=tenant_context
+                        group_context=group_context
                     )
                     
                     # Parse JSON setup

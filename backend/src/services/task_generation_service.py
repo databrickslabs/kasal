@@ -19,7 +19,7 @@ from src.utils.prompt_utils import robust_json_parser
 from src.services.log_service import LLMLogService
 from src.core.llm_manager import LLMManager
 from src.schemas.task import TaskCreate
-from src.utils.user_context import TenantContext
+from src.utils.user_context import GroupContext
 
 # Configure logging
 logger = logging.getLogger(__name__)
@@ -55,7 +55,7 @@ class TaskGenerationService:
     
     async def _log_llm_interaction(self, endpoint: str, prompt: str, response: str, model: str, 
                                   status: str = 'success', error_message: Optional[str] = None,
-                                  tenant_context: Optional[TenantContext] = None):
+                                  group_context: Optional[GroupContext] = None):
         """
         Log LLM interaction using the log service.
         
@@ -66,7 +66,7 @@ class TaskGenerationService:
             model: LLM model used
             status: Status of the interaction (success/error)
             error_message: Optional error message
-            tenant_context: Optional tenant context for multi-tenant isolation
+            group_context: Optional group context for multi-group isolation
         """
         try:
             await self.log_service.create_log(
@@ -76,13 +76,13 @@ class TaskGenerationService:
                 model=model,
                 status=status,
                 error_message=error_message,
-                tenant_context=tenant_context
+                group_context=group_context
             )
             logger.info(f"Logged {endpoint} interaction to database")
         except Exception as e:
             logger.error(f"Failed to log LLM interaction: {str(e)}")
     
-    async def generate_task(self, request: TaskGenerationRequest, tenant_context: Optional[TenantContext] = None) -> TaskGenerationResponse:
+    async def generate_task(self, request: TaskGenerationRequest, group_context: Optional[GroupContext] = None) -> TaskGenerationResponse:
         """
         Generate a task based on the provided prompt and context.
         
@@ -167,7 +167,7 @@ class TaskGenerationService:
                 prompt=f"System: {base_message}\nUser: {request.text}",
                 response=content,
                 model=model,
-                tenant_context=tenant_context
+                group_context=group_context
             )
             
         except Exception as e:
@@ -180,7 +180,7 @@ class TaskGenerationService:
                 model=model,
                 status='error',
                 error_message=error_msg,
-                tenant_context=tenant_context
+                group_context=group_context
             )
             raise ValueError(error_msg)
         
@@ -198,7 +198,7 @@ class TaskGenerationService:
                 model=model,
                 status='error',
                 error_message=error_msg,
-                tenant_context=tenant_context
+                group_context=group_context
             )
             raise ValueError(f"Could not parse response as JSON: {str(e)}")
         
@@ -286,7 +286,7 @@ class TaskGenerationService:
         
         return response
     
-    async def generate_and_save_task(self, request: TaskGenerationRequest, tenant_context: TenantContext) -> dict:
+    async def generate_and_save_task(self, request: TaskGenerationRequest, group_context: GroupContext) -> dict:
         """
         Generate a task using LLM.
         
@@ -296,13 +296,13 @@ class TaskGenerationService:
         
         Args:
             request: Task generation request
-            tenant_context: Tenant context (for compatibility, not used in generation)
+            group_context: Group context (for compatibility, not used in generation)
             
         Returns:
             Dictionary containing the generation response (same format as agent generation)
         """
         # Generate the task using LLM (same as AgentGenerationService pattern)
-        generation_response = await self.generate_task(request, tenant_context)
+        generation_response = await self.generate_task(request, group_context)
         
         # Log the interaction (same as AgentGenerationService pattern)
         try:
@@ -311,7 +311,7 @@ class TaskGenerationService:
                 prompt=f"User: {request.text}",
                 response=json.dumps(generation_response.model_dump()),
                 model=request.model or "databricks-llama-4-maverick",
-                tenant_context=tenant_context
+                group_context=group_context
             )
         except Exception as e:
             # Just log the error, don't fail the request (same as AgentGenerationService)
