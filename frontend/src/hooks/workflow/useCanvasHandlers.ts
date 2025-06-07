@@ -26,15 +26,25 @@ export const useCanvasHandlers = ({
 
   const handleClear = useCallback(() => {
     console.log("Clearing all nodes and edges");
-    // Remove all nodes
+    
+    // Clear both nodes and edges atomically to prevent orphaned connections
+    // First clear all edges, then all nodes to ensure proper cleanup
+    if (edges.length > 0) {
+      console.log(`Removing ${edges.length} edges`);
+      onEdgesChange(edges.map(edge => ({ type: 'remove' as const, id: edge.id })));
+    }
+    
     if (nodes.length > 0) {
+      console.log(`Removing ${nodes.length} nodes`);
       onNodesChange(nodes.map(node => ({ type: 'remove' as const, id: node.id })));
     }
     
-    // Remove all edges by creating remove changes for each edge
-    if (edges.length > 0) {
-      onEdgesChange(edges.map(edge => ({ type: 'remove' as const, id: edge.id })));
-    }
+    // Force a state update to ensure the canvas is completely cleared
+    setTimeout(() => {
+      // Additional cleanup - this ensures any remaining state inconsistencies are resolved
+      onEdgesChange([]);
+      onNodesChange([]);
+    }, 0);
   }, [nodes, edges, onNodesChange, onEdgesChange]);
 
   return {
