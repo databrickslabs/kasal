@@ -35,13 +35,21 @@ async def get_tenant_context(
     Returns:
         TenantContext: Extracted tenant context with tenant_id, email, etc.
     """
+    import logging
+    logger = logging.getLogger(__name__)
+    
+    print(f"DEBUG: get_tenant_context called with email: {x_forwarded_email}")
+    
     if x_forwarded_email:
-        return TenantContext.from_email(
+        tenant_context = await TenantContext.from_email(
             email=x_forwarded_email,
             access_token=x_forwarded_access_token
         )
+        print(f"DEBUG: Created tenant context: primary_tenant_id={tenant_context.primary_tenant_id}, tenant_ids={tenant_context.tenant_ids}, email={tenant_context.tenant_email}")
+        return tenant_context
     
     # Fallback: No tenant context available (single-tenant mode)
+    print("DEBUG: No email header found, returning empty tenant context")
     return TenantContext()
 
 

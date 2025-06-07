@@ -8,7 +8,7 @@ Unity Catalog integration.
 from datetime import datetime
 from typing import Optional
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select
+from sqlalchemy import select, delete
 
 from src.models.tenant import Tenant, TenantUser
 from src.models.enums import TenantStatus, TenantUserRole, TenantUserStatus, UserRole, UserStatus
@@ -39,22 +39,22 @@ class TenantService:
         Returns:
             Tenant: The existing or newly created tenant
         """
-        if not tenant_context.tenant_id or not tenant_context.email_domain:
-            logger.warning("Cannot create tenant: missing tenant_id or email_domain")
+        if not tenant_context.primary_tenant_id or not tenant_context.email_domain:
+            logger.warning("Cannot create tenant: missing primary_tenant_id or email_domain")
             return None
         
         # Check if tenant already exists
-        stmt = select(Tenant).where(Tenant.id == tenant_context.tenant_id)
+        stmt = select(Tenant).where(Tenant.id == tenant_context.primary_tenant_id)
         result = await self.session.execute(stmt)
         tenant = result.scalar_one_or_none()
         
         if tenant:
-            logger.debug(f"Tenant {tenant_context.tenant_id} already exists")
+            logger.debug(f"Tenant {tenant_context.primary_tenant_id} already exists")
             return tenant
         
         # Auto-create tenant
         tenant = Tenant(
-            id=tenant_context.tenant_id,
+            id=tenant_context.primary_tenant_id,
             name=self._generate_tenant_name(tenant_context.email_domain),
             email_domain=tenant_context.email_domain,
             status=TenantStatus.ACTIVE,
@@ -68,7 +68,7 @@ class TenantService:
         self.session.add(tenant)
         await self.session.commit()
         
-        logger.info(f"Auto-created tenant {tenant_context.tenant_id} for domain {tenant_context.email_domain}")
+        logger.info(f"Auto-created tenant {tenant_context.primary_tenant_id} for domain {tenant_context.email_domain}")
         return tenant
     
     async def ensure_tenant_user_exists(
@@ -86,12 +86,12 @@ class TenantService:
         Returns:
             TenantUser: The existing or newly created tenant user association
         """
-        if not tenant_context.tenant_id:
+        if not tenant_context.primary_tenant_id:
             return None
         
         # Check if tenant user already exists
         stmt = select(TenantUser).where(
-            TenantUser.tenant_id == tenant_context.tenant_id,
+            TenantUser.tenant_id == tenant_context.primary_tenant_id,
             TenantUser.user_id == user_id
         )
         result = await self.session.execute(stmt)
@@ -102,8 +102,8 @@ class TenantService:
         
         # Auto-create tenant user association
         tenant_user = TenantUser(
-            id=f"{tenant_context.tenant_id}_{user_id}",
-            tenant_id=tenant_context.tenant_id,
+            id=f"{tenant_context.primary_tenant_id}_{user_id}",
+            tenant_id=tenant_context.primary_tenant_id,
             user_id=user_id,
             role=TenantUserRole.USER,  # Default role
             status=TenantUserStatus.ACTIVE,
@@ -116,7 +116,7 @@ class TenantService:
         self.session.add(tenant_user)
         await self.session.commit()
         
-        logger.info(f"Auto-created tenant user association for {user_id} in tenant {tenant_context.tenant_id}")
+        logger.info(f"Auto-created tenant user association for {user_id} in tenant {tenant_context.primary_tenant_id}")
         return tenant_user
     
     async def get_tenant_by_email_domain(self, email_domain: str) -> Optional[Tenant]:
@@ -148,6 +148,29 @@ class TenantService:
             .join(TenantUser, Tenant.id == TenantUser.tenant_id)
             .where(
                 TenantUser.user_id == user_id,
+                TenantUser.status == TenantUserStatus.ACTIVE,
+                Tenant.status == TenantStatus.ACTIVE
+            )
+        )
+        result = await self.session.execute(stmt)
+        return result.scalars().all()
+    
+    async def get_user_tenant_memberships(self, email: str) -> list[Tenant]:
+        """
+        Get all tenants a user belongs to by email address.
+        
+        Args:
+            email: User email address to look up
+            
+        Returns:
+            list[Tenant]: List of tenants the user belongs to
+        """
+        stmt = (
+            select(Tenant)
+            .join(TenantUser, Tenant.id == TenantUser.tenant_id)
+            .join(User, TenantUser.user_id == User.id)
+            .where(
+                User.email == email,
                 TenantUser.status == TenantUserStatus.ACTIVE,
                 Tenant.status == TenantStatus.ACTIVE
             )
@@ -468,6 +491,43 @@ class TenantService:
         await self.session.commit()
         
         logger.info(f"Removed user {user_id} from tenant {tenant_id}")
+
+    async def delete_tenant(self, tenant_id: str) -> None:
+        """
+        Delete a tenant and all associated data.
+        
+        This will remove:
+        - The tenant record
+        - All tenant user associations
+        - All related execution history and data
+        
+        Args:
+            tenant_id: ID of the tenant to delete
+            
+        Raises:
+            ValueError: If tenant not found or cannot be deleted
+        """
+        # Check if tenant exists
+        tenant = await self.get_tenant_by_id(tenant_id)
+        if not tenant:
+            raise ValueError(f"Tenant {tenant_id} not found")
+        
+        try:
+            # Delete all tenant users first (foreign key constraints)
+            # Delete tenant user associations
+            delete_users_stmt = delete(TenantUser).where(TenantUser.tenant_id == tenant_id)
+            await self.session.execute(delete_users_stmt)
+            
+            # Delete the tenant itself
+            await self.session.delete(tenant)
+            await self.session.commit()
+            
+            logger.info(f"Deleted tenant {tenant_id} and all associated data")
+            
+        except Exception as e:
+            await self.session.rollback()
+            logger.error(f"Error deleting tenant {tenant_id}: {e}")
+            raise ValueError(f"Failed to delete tenant: {str(e)}")
 
     def _generate_tenant_name(self, email_domain: str) -> str:
         """

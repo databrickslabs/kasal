@@ -24,33 +24,71 @@ _tenant_context: ContextVar[Optional['TenantContext']] = ContextVar('tenant_cont
 @dataclass
 class TenantContext:
     """
-    Simple tenant context extracted from user information.
+    Hybrid tenant context for multi-tenant data isolation.
     
-    This provides basic tenant isolation without complex Unity Catalog integration.
-    Can be enhanced later with Unity Catalog mapping.
+    Supports two modes:
+    1. Individual mode: Users not in any groups get their own private tenant
+    2. Group mode: Users in groups see data from all their assigned groups
+    
+    This provides both individual privacy and team collaboration.
     """
-    tenant_id: Optional[str] = None        # e.g., "acme_corp"
+    tenant_ids: Optional[list] = None      # All tenant IDs user belongs to
     tenant_email: Optional[str] = None     # e.g., "alice@acme-corp.com"
     email_domain: Optional[str] = None     # e.g., "acme-corp.com"
     user_id: Optional[str] = None          # User ID if available
     access_token: Optional[str] = None     # Databricks access token
     
+    @property
+    def primary_tenant_id(self) -> Optional[str]:
+        """
+        Get the primary (first) tenant ID for creating new data.
+        
+        This will be either:
+        - The user's individual tenant ID (if not in any groups)
+        - The first group tenant ID (if in groups)
+        """
+        return self.tenant_ids[0] if self.tenant_ids and len(self.tenant_ids) > 0 else None
+    
     @classmethod
-    def from_email(cls, email: str, access_token: str = None, user_id: str = None) -> 'TenantContext':
-        """Create TenantContext from user email."""
+    async def from_email(cls, email: str, access_token: str = None, user_id: str = None) -> 'TenantContext':
+        """Create TenantContext from user email with hybrid individual/group-based tenancy."""
         if not email or "@" not in email:
             return cls()
         
         email_domain = email.split("@")[1]
-        tenant_id = cls.generate_tenant_id(email_domain)
         
-        return cls(
-            tenant_id=tenant_id,
-            tenant_email=email,
-            email_domain=email_domain,
-            user_id=user_id,
-            access_token=access_token
-        )
+        # Get user's group memberships from tenant management system
+        try:
+            user_tenant_ids = await cls._get_user_tenant_memberships(email)
+            
+            if not user_tenant_ids or len(user_tenant_ids) == 0:
+                # User is NOT in any groups - use individual tenancy
+                # Create a unique tenant ID based on the user's email (sanitized)
+                individual_tenant_id = cls.generate_individual_tenant_id(email)
+                logger.info(f"User {email} not in any groups, using individual tenant: {individual_tenant_id}")
+                user_tenant_ids = [individual_tenant_id]
+            else:
+                # User IS in groups - use group-based tenancy
+                logger.info(f"User {email} belongs to groups: {user_tenant_ids}")
+            
+            return cls(
+                tenant_ids=user_tenant_ids,
+                tenant_email=email,
+                email_domain=email_domain,
+                user_id=user_id,
+                access_token=access_token
+            )
+        except Exception as e:
+            # Fallback to individual tenancy if group lookup fails
+            logger.warning(f"Failed to lookup user groups for {email}, falling back to individual tenancy: {e}")
+            individual_tenant_id = cls.generate_individual_tenant_id(email)
+            return cls(
+                tenant_ids=[individual_tenant_id],
+                tenant_email=email,
+                email_domain=email_domain,
+                user_id=user_id,
+                access_token=access_token
+            )
     
     @staticmethod
     def generate_tenant_id(email_domain: str) -> str:
@@ -63,9 +101,47 @@ class TenantContext:
         """
         return email_domain.replace(".", "_").replace("-", "_").lower()
     
+    @staticmethod
+    def generate_individual_tenant_id(email: str) -> str:
+        """
+        Generate individual tenant ID from user email for isolated access.
+        
+        Examples:
+        - alice@company.com -> user_alice_company_com
+        - bob.smith@startup.io -> user_bob_smith_startup_io
+        """
+        # Sanitize the full email for use as tenant ID
+        sanitized = email.replace("@", "_").replace(".", "_").replace("-", "_").replace("+", "_")
+        return f"user_{sanitized}".lower()
+    
     def is_valid(self) -> bool:
         """Check if tenant context is valid."""
-        return bool(self.tenant_id and self.email_domain)
+        return bool(self.tenant_ids and len(self.tenant_ids) > 0 and self.email_domain)
+    
+    @staticmethod
+    async def _get_user_tenant_memberships(email: str) -> list:
+        """
+        Get list of tenant IDs that the user belongs to.
+        
+        Args:
+            email: User email address
+            
+        Returns:
+            List of tenant IDs the user is a member of
+        """
+        try:
+            # Import here to avoid circular imports
+            from src.services.tenant_service import TenantService
+            from src.db.session import async_session_factory
+            
+            async with async_session_factory() as session:
+                tenant_service = TenantService(session)
+                user_tenants = await tenant_service.get_user_tenant_memberships(email)
+                return [tenant.id for tenant in user_tenants]
+                
+        except Exception as e:
+            logger.error(f"Error getting user tenant memberships for {email}: {e}")
+            return []
 
 
 class UserContext:
@@ -124,7 +200,7 @@ class UserContext:
             tenant_context: TenantContext object
         """
         _tenant_context.set(tenant_context)
-        logger.debug(f"Tenant context set: {tenant_context.tenant_id}")
+        logger.debug(f"Tenant context set: {tenant_context.primary_tenant_id}")
     
     @staticmethod
     def get_tenant_context() -> Optional[TenantContext]:
@@ -180,7 +256,7 @@ def extract_user_token_from_request(request: Request) -> Optional[str]:
         return None
 
 
-def extract_tenant_context_from_request(request: Request) -> Optional[TenantContext]:
+async def extract_tenant_context_from_request(request: Request) -> Optional[TenantContext]:
     """
     Extract tenant context from HTTP request headers.
     
@@ -203,10 +279,10 @@ def extract_tenant_context_from_request(request: Request) -> Optional[TenantCont
         access_token = extract_user_token_from_request(request)
         
         # Create tenant context from email
-        tenant_context = TenantContext.from_email(email, access_token)
+        tenant_context = await TenantContext.from_email(email, access_token)
         
         if tenant_context.is_valid():
-            logger.debug(f"Extracted tenant context: {tenant_context.tenant_id}")
+            logger.debug(f"Extracted tenant context: {tenant_context.primary_tenant_id}, groups: {tenant_context.tenant_ids}")
             return tenant_context
         else:
             logger.debug(f"Invalid tenant context extracted from email: {email}")
@@ -287,10 +363,10 @@ async def user_context_middleware(request: Request, call_next):
         apps_enabled = await _is_databricks_apps_enabled()
         
         # Always try to extract tenant context from X-Forwarded-Email if present
-        tenant_context = extract_tenant_context_from_request(request)
+        tenant_context = await extract_tenant_context_from_request(request)
         if tenant_context:
             UserContext.set_tenant_context(tenant_context)
-            logger.debug(f"Tenant context middleware: Set tenant {tenant_context.tenant_id}")
+            logger.debug(f"Tenant context middleware: Set tenant groups {tenant_context.tenant_ids}")
         
         if apps_enabled:
             # Extract user context from request

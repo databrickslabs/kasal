@@ -163,7 +163,7 @@ class AgentService(BaseService[Agent, AgentCreate]):
         """
         # Convert schema to dict and add tenant fields
         agent_data = obj_in.model_dump()
-        agent_data['tenant_id'] = tenant_context.tenant_id
+        agent_data['tenant_id'] = tenant_context.primary_tenant_id
         agent_data['created_by_email'] = tenant_context.tenant_email
         
         # Create agent using repository (pass dict, not object)
@@ -179,10 +179,10 @@ class AgentService(BaseService[Agent, AgentCreate]):
         Returns:
             List of agents for the specified tenant
         """
-        if not tenant_context.tenant_id:
+        if not tenant_context.tenant_ids:
             # If no tenant context, return empty list for security
             return []
         
-        stmt = select(Agent).where(Agent.tenant_id == tenant_context.tenant_id)
+        stmt = select(Agent).where(Agent.tenant_id.in_(tenant_context.tenant_ids))
         result = await self.session.execute(stmt)
         return result.scalars().all() 

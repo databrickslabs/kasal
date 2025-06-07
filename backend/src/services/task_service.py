@@ -182,7 +182,7 @@ class TaskService(BaseService[Task, TaskCreate]):
         """
         # Convert schema to dict and add tenant fields
         task_data = obj_in.model_dump()
-        task_data['tenant_id'] = tenant_context.tenant_id
+        task_data['tenant_id'] = tenant_context.primary_tenant_id
         task_data['created_by_email'] = tenant_context.tenant_email
         
         # Convert empty agent_id to None for PostgreSQL compatibility
@@ -202,10 +202,10 @@ class TaskService(BaseService[Task, TaskCreate]):
         Returns:
             List of tasks for the specified tenant
         """
-        if not tenant_context.tenant_id:
+        if not tenant_context.tenant_ids:
             # If no tenant context, return empty list for security
             return []
         
-        stmt = select(Task).where(Task.tenant_id == tenant_context.tenant_id)
+        stmt = select(Task).where(Task.tenant_id.in_(tenant_context.tenant_ids))
         result = await self.session.execute(stmt)
         return result.scalars().all() 
