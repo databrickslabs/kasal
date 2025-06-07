@@ -20,58 +20,85 @@ class ExecutionHistoryRepository:
     async def get_execution_history(
         self, 
         limit: int = 50, 
-        offset: int = 0
+        offset: int = 0,
+        tenant_ids: List[str] = None
     ) -> tuple[List[ExecutionHistory], int]:
         """
-        Get paginated execution history.
+        Get paginated execution history with group-based tenant filtering.
         
         Args:
             limit: Maximum number of items to return
             offset: Number of items to skip
+            tenant_ids: List of tenant IDs for group-based filtering
             
         Returns:
             Tuple of (list of Run objects, total count)
         """
         async with async_session_factory() as session:
+            # Build base query with group-based tenant filtering
+            if tenant_ids and len(tenant_ids) > 0:
+                base_filter = ExecutionHistory.tenant_id.in_(tenant_ids)
+            else:
+                # No filtering (fallback for admin/system access)
+                base_filter = True
+            
             # Get total count
-            count_stmt = select(func.count()).select_from(ExecutionHistory)
+            count_stmt = select(func.count()).select_from(ExecutionHistory).where(base_filter)
             total_count_result = await session.execute(count_stmt)
             total_count = total_count_result.scalar() or 0
             
             # Get paginated runs
-            stmt = select(ExecutionHistory).order_by(ExecutionHistory.created_at.desc()).offset(offset).limit(limit)
+            stmt = (select(ExecutionHistory)
+                   .where(base_filter)
+                   .order_by(ExecutionHistory.created_at.desc())
+                   .offset(offset)
+                   .limit(limit))
             result = await session.execute(stmt)
             runs = result.scalars().all()
             
             return runs, total_count
     
-    async def get_execution_by_id(self, execution_id: int) -> Optional[ExecutionHistory]:
+    async def get_execution_by_id(self, execution_id: int, tenant_ids: List[str] = None) -> Optional[ExecutionHistory]:
         """
-        Get a specific execution by ID.
+        Get a specific execution by ID with group-based tenant filtering.
         
         Args:
             execution_id: ID of the execution
+            tenant_ids: List of tenant IDs for group-based filtering
             
         Returns:
             Run object if found, None otherwise
         """
         async with async_session_factory() as session:
-            stmt = select(ExecutionHistory).where(ExecutionHistory.id == execution_id)
+            filters = [ExecutionHistory.id == execution_id]
+            
+            # Add tenant filtering
+            if tenant_ids and len(tenant_ids) > 0:
+                filters.append(ExecutionHistory.tenant_id.in_(tenant_ids))
+            
+            stmt = select(ExecutionHistory).where(*filters)
             result = await session.execute(stmt)
             return result.scalars().first()
     
-    async def get_execution_by_job_id(self, job_id: str) -> Optional[ExecutionHistory]:
+    async def get_execution_by_job_id(self, job_id: str, tenant_ids: List[str] = None) -> Optional[ExecutionHistory]:
         """
-        Get a specific execution by job_id.
+        Get a specific execution by job_id with group-based tenant filtering.
         
         Args:
             job_id: Job ID of the execution
+            tenant_ids: List of tenant IDs for group-based filtering
             
         Returns:
             Run object if found, None otherwise
         """
         async with async_session_factory() as session:
-            stmt = select(ExecutionHistory).where(ExecutionHistory.job_id == job_id)
+            filters = [ExecutionHistory.job_id == job_id]
+            
+            # Add tenant filtering
+            if tenant_ids and len(tenant_ids) > 0:
+                filters.append(ExecutionHistory.tenant_id.in_(tenant_ids))
+            
+            stmt = select(ExecutionHistory).where(*filters)
             result = await session.execute(stmt)
             return result.scalars().first()
     

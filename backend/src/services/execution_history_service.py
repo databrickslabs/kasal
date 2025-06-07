@@ -5,7 +5,7 @@ This module provides functions for retrieving and managing execution history
 from the database.
 """
 
-from typing import Optional
+from typing import Optional, List
 import logging
 from sqlalchemy.exc import SQLAlchemyError
 
@@ -45,13 +45,14 @@ class ExecutionHistoryService:
         self.logs_repo = execution_logs_repository
         self.trace_repo = execution_trace_repository
     
-    async def get_execution_history(self, limit: int = 50, offset: int = 0) -> ExecutionHistoryList:
+    async def get_execution_history(self, limit: int = 50, offset: int = 0, tenant_ids: List[str] = None) -> ExecutionHistoryList:
         """
-        Get paginated execution history.
+        Get paginated execution history with group-based tenant filtering.
         
         Args:
             limit: Maximum number of items to return
             offset: Number of items to skip
+            tenant_ids: List of tenant IDs for group-based filtering
             
         Returns:
             ExecutionHistoryList with paginated execution history items and metadata
@@ -60,7 +61,8 @@ class ExecutionHistoryService:
             # Use the repository to get the paginated data and total count
             runs, total_count = await self.history_repo.get_execution_history(
                 limit=limit,
-                offset=offset
+                offset=offset,
+                tenant_ids=tenant_ids
             )
                 
             # Convert each run to a pydantic model, handling string results properly
@@ -89,19 +91,20 @@ class ExecutionHistoryService:
             logger.error(f"Error retrieving execution history: {str(e)}", exc_info=True)
             raise
     
-    async def get_execution_by_id(self, execution_id: int) -> Optional[ExecutionHistoryItem]:
+    async def get_execution_by_id(self, execution_id: int, tenant_ids: List[str] = None) -> Optional[ExecutionHistoryItem]:
         """
-        Get a specific execution by ID.
+        Get a specific execution by ID with group-based tenant filtering.
         
         Args:
             execution_id: ID of the execution to retrieve
+            tenant_ids: List of tenant IDs for group-based filtering
             
         Returns:
             ExecutionHistoryItem or None if not found
         """
         try:
             # Use the repository to get the data
-            run = await self.history_repo.get_execution_by_id(execution_id)
+            run = await self.history_repo.get_execution_by_id(execution_id, tenant_ids=tenant_ids)
                 
             if not run:
                 return None
@@ -150,22 +153,37 @@ class ExecutionHistoryService:
         self, 
         execution_id: str, 
         limit: int = 1000, 
-        offset: int = 0
+        offset: int = 0,
+        tenant_ids: List[str] = None
     ) -> ExecutionOutputList:
         """
-        Get outputs for an execution.
+        Get outputs for an execution with tenant filtering.
         
         Args:
             execution_id: String ID of the execution (job_id in database)
             limit: Maximum number of items to return
             offset: Number of items to skip
+            tenant_ids: List of tenant IDs for security filtering
             
         Returns:
             ExecutionOutputList with paginated execution outputs
         """
         try:
+            # First verify the execution belongs to the user's tenant
+            if tenant_ids:
+                execution = await self.history_repo.get_execution_by_job_id(execution_id, tenant_ids=tenant_ids)
+                if not execution:
+                    # Execution doesn't exist or doesn't belong to user's tenants
+                    return ExecutionOutputList(
+                        execution_id=execution_id,
+                        outputs=[],
+                        limit=limit,
+                        offset=offset,
+                        total=0
+                    )
+            
             # Get logs from our repository
-            logs = await self.logs_repo.get_by_execution_id(
+            logs = await self.logs_repo.get_by_execution_id_with_managed_session(
                 execution_id=execution_id,
                 limit=limit,
                 offset=offset,
@@ -173,7 +191,7 @@ class ExecutionHistoryService:
             )
                 
             # Get total count
-            total_count = await self.logs_repo.count_by_execution_id(
+            total_count = await self.logs_repo.count_by_execution_id_with_managed_session(
                 execution_id=execution_id
             )
             
@@ -202,25 +220,26 @@ class ExecutionHistoryService:
             logger.error(f"Error retrieving outputs for execution {execution_id}: {str(e)}")
             raise
     
-    async def get_debug_outputs(self, execution_id: str) -> ExecutionOutputDebugList:
+    async def get_debug_outputs(self, execution_id: str, tenant_ids: List[str] = None) -> ExecutionOutputDebugList:
         """
-        Get debug information about outputs for an execution.
+        Get debug information about outputs for an execution with tenant filtering.
         
         Args:
             execution_id: String ID of the execution (job_id in database)
+            tenant_ids: List of tenant IDs for security filtering
             
         Returns:
             ExecutionOutputDebugList with debug information
         """
         try:
-            # Check if the run exists
-            run = await self.history_repo.get_execution_by_job_id(execution_id)
+            # Check if the run exists and belongs to user's tenant
+            run = await self.history_repo.get_execution_by_job_id(execution_id, tenant_ids=tenant_ids)
                 
             if not run:
                 return None
             
             # Get logs from our repository
-            logs = await self.logs_repo.get_by_execution_id(
+            logs = await self.logs_repo.get_by_execution_id_with_managed_session(
                 execution_id=execution_id
             )
             

@@ -9,6 +9,7 @@ execution history records and related data.
 from fastapi import APIRouter, Depends, HTTPException, Query, status, Response
 
 from src.core.logger import LoggerManager
+from src.core.dependencies import TenantContextDep
 from src.services.execution_history_service import ExecutionHistoryService, get_execution_history_service
 from src.schemas.execution_history import (
     ExecutionHistoryList,
@@ -28,23 +29,25 @@ router = APIRouter(
 
 @router.get("/history", response_model=ExecutionHistoryList)
 async def get_execution_history(
+    tenant_context: TenantContextDep,
     limit: int = Query(50, ge=1, le=100),
     offset: int = Query(0, ge=0),
     service: ExecutionHistoryService = Depends(get_execution_history_service)
 ):
     """
-    Get a paginated list of execution history.
+    Get a paginated list of execution history with tenant filtering.
     
     Args:
         limit: Maximum number of executions to return (1-100)
         offset: Pagination offset
+        tenant_context: Tenant context for filtering
         service: ExecutionHistoryService instance
     
     Returns:
         ExecutionHistoryList with paginated execution history
     """
     try:
-        return await service.get_execution_history(limit, offset)
+        return await service.get_execution_history(limit, offset, tenant_ids=tenant_context.tenant_ids)
     except Exception as e:
         logger.error(f"Error getting execution history: {str(e)}")
         raise HTTPException(
@@ -54,7 +57,8 @@ async def get_execution_history(
 
 @router.head("/history/{execution_id}")
 async def check_execution_exists(
-    execution_id: int, 
+    execution_id: int,
+    tenant_context: TenantContextDep,
     service: ExecutionHistoryService = Depends(get_execution_history_service), 
     response: Response = None
 ):
@@ -90,21 +94,23 @@ async def check_execution_exists(
 
 @router.get("/history/{execution_id}", response_model=ExecutionHistoryItem)
 async def get_execution_by_id(
-    execution_id: int, 
+    execution_id: int,
+    tenant_context: TenantContextDep,
     service: ExecutionHistoryService = Depends(get_execution_history_service)
 ):
     """
-    Get execution details by ID.
+    Get execution details by ID with tenant filtering.
     
     Args:
         execution_id: Database ID of the execution
+        tenant_context: Tenant context for filtering
         service: ExecutionHistoryService instance
     
     Returns:
         ExecutionHistoryItem with execution details
     """
     try:
-        execution = await service.get_execution_by_id(execution_id)
+        execution = await service.get_execution_by_id(execution_id, tenant_ids=tenant_context.tenant_ids)
         if not execution:
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND,
@@ -123,6 +129,7 @@ async def get_execution_by_id(
 @router.get("/{execution_id}/outputs", response_model=ExecutionOutputList)
 async def get_execution_outputs(
     execution_id: str,
+    tenant_context: TenantContextDep,
     limit: int = Query(1000, ge=1, le=5000),
     offset: int = Query(0, ge=0),
     service: ExecutionHistoryService = Depends(get_execution_history_service)
@@ -140,7 +147,7 @@ async def get_execution_outputs(
         ExecutionOutputList with paginated execution outputs
     """
     try:
-        return await service.get_execution_outputs(execution_id, limit, offset)
+        return await service.get_execution_outputs(execution_id, limit, offset, tenant_ids=tenant_context.tenant_ids)
     except Exception as e:
         logger.error(f"Error getting outputs for execution {execution_id}: {str(e)}")
         raise HTTPException(
@@ -150,7 +157,8 @@ async def get_execution_outputs(
 
 @router.get("/{execution_id}/outputs/debug", response_model=ExecutionOutputDebugList)
 async def get_execution_debug_outputs(
-    execution_id: str, 
+    execution_id: str,
+    tenant_context: TenantContextDep,
     service: ExecutionHistoryService = Depends(get_execution_history_service)
 ):
     """
@@ -164,7 +172,7 @@ async def get_execution_debug_outputs(
         ExecutionOutputDebugList with debug information
     """
     try:
-        debug_info = await service.get_debug_outputs(execution_id)
+        debug_info = await service.get_debug_outputs(execution_id, tenant_ids=tenant_context.tenant_ids)
         if not debug_info:
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND,
@@ -182,6 +190,7 @@ async def get_execution_debug_outputs(
 
 @router.delete("/history", response_model=DeleteResponse)
 async def delete_all_executions(
+    tenant_context: TenantContextDep,
     service: ExecutionHistoryService = Depends(get_execution_history_service)
 ):
     """
@@ -201,7 +210,8 @@ async def delete_all_executions(
 
 @router.delete("/history/{execution_id}", response_model=DeleteResponse)
 async def delete_execution(
-    execution_id: int, 
+    execution_id: int,
+    tenant_context: TenantContextDep,
     service: ExecutionHistoryService = Depends(get_execution_history_service)
 ):
     """
@@ -233,7 +243,8 @@ async def delete_execution(
 
 @router.delete("/{job_id}", response_model=DeleteResponse)
 async def delete_execution_by_job_id(
-    job_id: str, 
+    job_id: str,
+    tenant_context: TenantContextDep,
     service: ExecutionHistoryService = Depends(get_execution_history_service)
 ):
     """
