@@ -86,7 +86,7 @@ Access Scope: Data from both teams
 
 ### Database-Level Isolation
 
-All major data entities include tenant isolation:
+All major data entities include tenant isolation with automatic filtering at every data access point:
 
 ```sql
 -- Example: Execution History Table
@@ -102,14 +102,33 @@ CREATE TABLE execution_history (
 );
 ```
 
-**Isolated Entities:**
-- `execution_history` - Workflow execution records
-- `agents` - AI agent definitions
-- `tasks` - Task configurations
-- `crews` - Team configurations
-- `flows` - Workflow definitions
-- `templates` - Reusable templates
-- `tools` - Custom tool definitions
+**Comprehensive Isolated Entities:**
+
+#### Core Workflow Components
+- `execution_history` - All workflow execution records with tenant isolation
+- `execution_logs` - Detailed execution logs filtered by tenant
+- `flow_executions` - Flow execution instances with tenant boundaries
+- `agents` - AI agent definitions scoped to tenant
+- `tasks` - Task configurations with tenant access control
+- `crews` - Team configurations isolated by tenant
+- `flows` - Workflow definitions with tenant ownership
+- `schedules` - Scheduled job executions with tenant filtering
+
+#### Configuration & Templates
+- `templates` - Reusable prompt templates scoped to tenant
+- `tools` - Custom tool definitions with tenant access
+- `model_configs` - LLM model configurations per tenant
+- `engine_configs` - Execution engine settings by tenant
+
+#### Logging & Monitoring
+- `llmlog` - **NEW**: LLM API interaction logs with tenant isolation
+- `execution_trace` - Detailed execution traces filtered by tenant
+- `api_logs` - API access logs with tenant context
+
+#### User Management
+- `tenants` - Tenant definitions and metadata
+- `tenant_users` - User-to-tenant assignments with roles
+- `users` - User profiles with tenant associations
 
 ### Query-Level Filtering
 
@@ -123,9 +142,12 @@ WHERE tenant_id = 'user_alice_company_com'
 WHERE tenant_id IN ('dev_team', 'qa_team')
 ```
 
-### Tenant Context Propagation
+### Multi-Layer Isolation Architecture
 
-Every request includes tenant context:
+The system implements isolation at multiple levels to ensure comprehensive data protection:
+
+#### 1. **Request-Level Isolation**
+Every HTTP request includes tenant context extraction:
 
 ```python
 @dataclass
@@ -135,6 +157,392 @@ class TenantContext:
     email_domain: str               # Email domain
     user_id: Optional[str]          # User identifier
     access_token: Optional[str]     # Authentication token
+
+    @property
+    def primary_tenant_id(self) -> str:
+        """Primary tenant for creating new data."""
+        return self.tenant_ids[0] if self.tenant_ids else None
+```
+
+#### 2. **API Endpoint Isolation**
+All API endpoints automatically enforce tenant boundaries:
+
+```python
+# Every endpoint that accesses data includes tenant dependency
+@router.get("/executions/")
+async def get_executions(
+    tenant_context: TenantContextDep,  # Automatic tenant injection
+    page: int = 1,
+    limit: int = 20
+):
+    # Service automatically filters by tenant_context.tenant_ids
+    return await execution_service.get_executions_paginated(
+        tenant_context=tenant_context,
+        page=page, 
+        limit=limit
+    )
+```
+
+#### 3. **Service-Level Isolation**
+All business logic services respect tenant boundaries:
+
+```python
+class ExecutionHistoryService:
+    async def get_executions_paginated(
+        self, 
+        tenant_context: TenantContext,
+        page: int = 1, 
+        limit: int = 20
+    ) -> Dict[str, Any]:
+        """Get executions with automatic tenant filtering."""
+        # Automatic tenant ID filtering
+        return await self.repository.get_paginated_by_tenant(
+            tenant_ids=tenant_context.tenant_ids,
+            page=page,
+            limit=limit
+        )
+```
+
+#### 4. **Repository-Level Isolation**
+Data access layer enforces tenant filtering at query level:
+
+```python
+class ExecutionHistoryRepository:
+    async def get_paginated_by_tenant(
+        self, 
+        tenant_ids: List[str], 
+        page: int, 
+        limit: int
+    ) -> Dict[str, Any]:
+        """Repository ensures tenant filtering in all queries."""
+        
+        # Base query with tenant filtering
+        base_query = select(ExecutionHistory).where(
+            ExecutionHistory.tenant_id.in_(tenant_ids)
+        )
+        
+        # Count query with same tenant filtering
+        count_query = select(func.count(ExecutionHistory.id)).where(
+            ExecutionHistory.tenant_id.in_(tenant_ids)
+        )
+        
+        # Both queries automatically respect tenant boundaries
+        # No possibility of cross-tenant data access
+```
+
+#### 5. **Database-Level Isolation**
+Every table includes tenant columns with indexed access:
+
+```sql
+-- All tables follow this pattern
+ALTER TABLE execution_history 
+ADD COLUMN tenant_id VARCHAR(100) NOT NULL,
+ADD COLUMN tenant_email VARCHAR(255),
+ADD INDEX idx_tenant_id (tenant_id),
+ADD INDEX idx_tenant_email (tenant_email);
+
+-- Queries are always tenant-scoped
+SELECT * FROM execution_history 
+WHERE tenant_id IN ('user_alice_company_com', 'dev_team') 
+ORDER BY created_at DESC;
+```
+
+## Comprehensive Isolation Mechanisms
+
+### AI Generation Services Isolation
+
+All AI-powered generation services (agents, tasks, crews) include tenant context for complete isolation:
+
+#### LLM Interaction Logging
+```python
+class AgentGenerationService:
+    async def generate_agent(
+        self, 
+        prompt_text: str, 
+        model: str = None, 
+        tools: List[str] = None,
+        tenant_context: Optional[TenantContext] = None
+    ) -> Dict[str, Any]:
+        """Generate agent with tenant-aware logging."""
+        
+        # Generate agent configuration
+        agent_config = await self._generate_agent_config(prompt_text, model)
+        
+        # Log interaction with tenant context
+        await self._log_llm_interaction(
+            endpoint='generate-agent',
+            prompt=prompt_text,
+            response=json.dumps(agent_config),
+            model=model,
+            tenant_context=tenant_context  # Tenant isolation for logs
+        )
+        
+        return agent_config
+```
+
+#### LLM Log Isolation
+Every AI interaction is logged with tenant boundaries:
+
+```python
+class LLMLogService:
+    async def create_log(
+        self,
+        endpoint: str,
+        prompt: str, 
+        response: str,
+        model: str,
+        tenant_context: Optional[TenantContext] = None
+    ) -> LLMLog:
+        """Create LLM log with automatic tenant isolation."""
+        
+        log_data = {
+            "endpoint": endpoint,
+            "prompt": prompt,
+            "response": response, 
+            "model": model,
+            "status": "success"
+        }
+        
+        # Add tenant fields if context provided
+        if tenant_context and tenant_context.primary_tenant_id:
+            log_data["tenant_id"] = tenant_context.primary_tenant_id
+            log_data["tenant_email"] = tenant_context.tenant_email
+            
+        # Log is automatically scoped to tenant
+        return await self.repository.create(log_data)
+```
+
+### Execution Workflow Isolation
+
+#### Execution History Isolation
+```python
+class ExecutionHistoryService:
+    async def get_executions_with_tenant_filter(
+        self, 
+        tenant_context: TenantContext,
+        status: Optional[str] = None,
+        flow_id: Optional[str] = None
+    ) -> List[ExecutionHistory]:
+        """Get executions with comprehensive tenant filtering."""
+        
+        # Multiple filter criteria, all tenant-scoped
+        return await self.repository.get_filtered_by_tenant(
+            tenant_ids=tenant_context.tenant_ids,
+            status=status,
+            flow_id=flow_id,
+            # Additional filters automatically respect tenant boundaries
+        )
+```
+
+#### Execution Logs Isolation  
+```python
+class ExecutionLogsService:
+    async def get_logs_for_execution(
+        self,
+        execution_id: str,
+        tenant_context: TenantContext
+    ) -> List[ExecutionLog]:
+        """Get execution logs with tenant validation."""
+        
+        # First verify execution belongs to user's tenants
+        execution = await self.execution_repository.get_by_id_and_tenant(
+            execution_id=execution_id,
+            tenant_ids=tenant_context.tenant_ids
+        )
+        
+        if not execution:
+            raise PermissionError("Execution not found or not accessible")
+            
+        # Get logs only if execution is accessible
+        return await self.logs_repository.get_by_execution_and_tenant(
+            execution_id=execution_id,
+            tenant_ids=tenant_context.tenant_ids
+        )
+```
+
+### Scheduler Isolation
+
+#### Scheduled Job Isolation
+```python
+class SchedulerService:
+    async def create_schedule(
+        self,
+        schedule_data: ScheduleCreate,
+        tenant_context: TenantContext
+    ) -> Schedule:
+        """Create schedule with tenant ownership."""
+        
+        # Automatically assign tenant ownership
+        schedule_dict = schedule_data.model_dump()
+        schedule_dict['tenant_id'] = tenant_context.primary_tenant_id
+        schedule_dict['created_by_email'] = tenant_context.tenant_email
+        
+        return await self.repository.create_with_tenant(schedule_dict)
+        
+    async def get_user_schedules(
+        self,
+        tenant_context: TenantContext
+    ) -> List[Schedule]:
+        """Get schedules visible to user's tenants."""
+        
+        return await self.repository.get_by_tenant_ids(
+            tenant_ids=tenant_context.tenant_ids
+        )
+```
+
+### Crew Management Isolation
+
+#### Crew Access Control
+```python
+class CrewService:
+    async def get_user_crews(
+        self,
+        tenant_context: TenantContext,
+        include_shared: bool = True
+    ) -> List[Crew]:
+        """Get crews accessible to user with tenant filtering."""
+        
+        if include_shared:
+            # User sees crews from all their assigned tenants
+            return await self.repository.get_by_tenant_ids(
+                tenant_ids=tenant_context.tenant_ids
+            )
+        else:
+            # User sees only crews they created
+            return await self.repository.get_by_creator_and_tenant(
+                created_by_email=tenant_context.tenant_email,
+                tenant_ids=tenant_context.tenant_ids
+            )
+```
+
+### Frontend Isolation Mechanisms
+
+#### API Service Layer Isolation
+```typescript
+// Frontend services automatically include tenant headers
+class ExecutionHistoryService {
+    static async getExecutions(
+        page: number = 1, 
+        limit: number = 20
+    ): Promise<PaginatedResponse<ExecutionRun>> {
+        // Tenant context automatically extracted from headers
+        // Backend filters results by user's accessible tenants
+        const response = await ApiService.get('/execution-history/', {
+            params: { page, limit }
+        });
+        
+        // Response contains only tenant-accessible data
+        return response.data;
+    }
+}
+```
+
+#### Component-Level Data Isolation
+```typescript
+// Frontend components work with pre-filtered data
+const ExecutionHistory: React.FC = () => {
+    const [executions, setExecutions] = useState<ExecutionRun[]>([]);
+    
+    useEffect(() => {
+        const loadExecutions = async () => {
+            // Service returns only tenant-accessible executions
+            const response = await ExecutionHistoryService.getExecutions();
+            setExecutions(response.data);
+        };
+        
+        loadExecutions();
+    }, []);
+    
+    // Component automatically displays tenant-filtered data
+    // No additional filtering needed in UI layer
+    return (
+        <div>
+            {executions.map(execution => (
+                <ExecutionCard key={execution.id} execution={execution} />
+            ))}
+        </div>
+    );
+};
+```
+
+### Data Creation Isolation
+
+#### Automatic Tenant Assignment
+```python
+class TaskService:
+    async def create_with_tenant(
+        self,
+        task_data: TaskCreate,
+        tenant_context: TenantContext
+    ) -> Task:
+        """Create task with automatic tenant assignment."""
+        
+        # Convert Pydantic model to dict for manipulation
+        task_dict = task_data.model_dump()
+        
+        # Automatically assign tenant ownership
+        task_dict['tenant_id'] = tenant_context.primary_tenant_id
+        task_dict['created_by_email'] = tenant_context.tenant_email
+        
+        # Create task with tenant isolation
+        return await self.repository.create(task_dict)
+```
+
+#### Tenant Validation on Updates
+```python
+class AgentService:
+    async def update_agent(
+        self,
+        agent_id: str,
+        agent_update: AgentUpdate,
+        tenant_context: TenantContext
+    ) -> Agent:
+        """Update agent with tenant ownership validation."""
+        
+        # First verify agent belongs to user's tenants
+        existing_agent = await self.repository.get_by_id_and_tenant(
+            agent_id=agent_id,
+            tenant_ids=tenant_context.tenant_ids
+        )
+        
+        if not existing_agent:
+            raise PermissionError("Agent not found or not accessible")
+            
+        # Update only if tenant validation passes
+        return await self.repository.update(agent_id, agent_update.model_dump())
+```
+
+### Cross-Service Isolation
+
+#### Service-to-Service Tenant Propagation
+```python
+class DispatcherService:
+    async def dispatch(
+        self, 
+        request: DispatcherRequest, 
+        tenant_context: TenantContext
+    ) -> Dict[str, Any]:
+        """Dispatch with tenant context propagation."""
+        
+        if dispatcher_response.intent == IntentType.GENERATE_AGENT:
+            # Pass tenant context to agent generation
+            generation_result = await self.agent_service.generate_agent(
+                prompt_text=request.message,
+                model=request.model,
+                tools=request.tools,
+                tenant_context=tenant_context  # Tenant context propagated
+            )
+            
+        elif dispatcher_response.intent == IntentType.GENERATE_TASK:
+            # Pass tenant context to task generation
+            task_request = TaskGenerationRequest(
+                text=request.message,
+                model=request.model
+            )
+            generation_result = await self.task_service.generate_and_save_task(
+                task_request, 
+                tenant_context  # Tenant context propagated
+            )
 ```
 
 ## Access Control
