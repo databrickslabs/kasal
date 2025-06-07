@@ -107,18 +107,23 @@ async def create_execution(
 
 
 @router.get("/{execution_id}", response_model=ExecutionResponse)
-async def get_execution_status(execution_id: str, db: AsyncSession = Depends(get_db)):
+async def get_execution_status(
+    execution_id: str, 
+    tenant_context: TenantContextDep,
+    db: AsyncSession = Depends(get_db)
+):
     """
-    Get the status of a specific execution.
+    Get the status of a specific execution with tenant filtering.
     
     Args:
         execution_id: ID of the execution to get status for
+        tenant_context: Tenant context for filtering
         
     Returns:
         ExecutionResponse with execution details
     """
-    # Use the service method to get execution data
-    execution_data = await ExecutionService.get_execution_status(execution_id)
+    # Use the service method to get execution data with tenant filtering
+    execution_data = await ExecutionService.get_execution_status(execution_id, tenant_ids=tenant_context.tenant_ids)
     
     if not execution_data:
         raise HTTPException(status_code=404, detail="Execution not found")
@@ -146,15 +151,18 @@ async def get_execution_status(execution_id: str, db: AsyncSession = Depends(get
 
 
 @router.get("", response_model=list[ExecutionResponse])
-async def list_executions():
+async def list_executions(tenant_context: TenantContextDep):
     """
-    List all executions.
+    List executions with tenant filtering.
+    
+    Args:
+        tenant_context: Tenant context for filtering
     
     Returns:
         List of ExecutionResponse objects
     """
-    # Use the service's list_executions method
-    executions_list = await ExecutionService.list_executions()
+    # Use the service's list_executions method with tenant filtering
+    executions_list = await ExecutionService.list_executions(tenant_ids=tenant_context.tenant_ids)
     
     # Process results before converting to response models
     processed_executions = []

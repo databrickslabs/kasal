@@ -154,12 +154,13 @@ class ExecutionStatusService:
             return None
 
     @staticmethod
-    async def create_execution(execution_data: Dict[str, Any]) -> bool:
+    async def create_execution(execution_data: Dict[str, Any], tenant_context=None) -> bool:
         """
-        Create a new execution record in the database.
+        Create a new execution record in the database with tenant context.
         
         Args:
             execution_data: Dictionary with execution data
+            tenant_context: Tenant context for multi-tenant data isolation
             
         Returns:
             True if successful, False otherwise
@@ -174,6 +175,12 @@ class ExecutionStatusService:
             return False
             
         try:
+            # Add tenant information to execution data if tenant context is provided
+            if tenant_context:
+                execution_data["tenant_id"] = tenant_context.primary_tenant_id
+                execution_data["tenant_email"] = tenant_context.tenant_email
+                logger.info(f"[ExecutionStatusService] Adding tenant context to execution: tenant_id={tenant_context.primary_tenant_id}, groups={tenant_context.tenant_ids}, email={tenant_context.tenant_email}")
+            
             # Create database session internally
             async with async_session_factory() as session:
                 # Create repository instance

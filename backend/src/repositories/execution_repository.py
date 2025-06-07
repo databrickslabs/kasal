@@ -31,25 +31,36 @@ class ExecutionRepository(BaseRepository[ExecutionHistory]):
     async def get_execution_history(
         self, 
         limit: int = 50, 
-        offset: int = 0
+        offset: int = 0,
+        tenant_ids: List[str] = None
     ) -> Tuple[List[ExecutionHistory], int]:
         """
-        Get paginated execution history.
+        Get paginated execution history with tenant filtering.
         
         Args:
             limit: Maximum number of items to return
             offset: Number of items to skip
+            tenant_ids: List of tenant IDs for filtering
             
         Returns:
             Tuple of (list of executions, total count)
         """
+        # Build base filter with tenant filtering
+        base_filter = True
+        if tenant_ids and len(tenant_ids) > 0:
+            base_filter = ExecutionHistory.tenant_id.in_(tenant_ids)
+        
         # Get total count
-        count_stmt = select(func.count()).select_from(ExecutionHistory)
+        count_stmt = select(func.count()).select_from(ExecutionHistory).where(base_filter)
         total_count_result = await self.session.execute(count_stmt)
         total_count = total_count_result.scalar() or 0
         
         # Get paginated executions
-        stmt = select(ExecutionHistory).order_by(ExecutionHistory.created_at.desc()).offset(offset).limit(limit)
+        stmt = (select(ExecutionHistory)
+               .where(base_filter)
+               .order_by(ExecutionHistory.created_at.desc())
+               .offset(offset)
+               .limit(limit))
         result = await self.session.execute(stmt)
         executions = result.scalars().all()
         

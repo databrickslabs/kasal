@@ -348,9 +348,12 @@ class ExecutionService:
             raise # Re-raise the original exception
     
     @staticmethod
-    async def list_executions() -> List[Dict[str, Any]]:
+    async def list_executions(tenant_ids: List[str] = None) -> List[Dict[str, Any]]:
         """
-        List all executions from both database and in-memory storage.
+        List executions from both database and in-memory storage with tenant filtering.
+        
+        Args:
+            tenant_ids: List of tenant IDs for filtering
         
         Returns:
             List of execution data dictionaries
@@ -364,10 +367,14 @@ class ExecutionService:
             
             async with async_session_factory() as db:
                 repo = ExecutionRepository(db)
-                # Get all executions using the correct repository method
-                db_executions = await repo.list()
+                # Get executions with tenant filtering using the correct repository method
+                db_executions_list, _ = await repo.get_execution_history(
+                    limit=1000,  # Get more records for compatibility with the old behavior
+                    offset=0,
+                    tenant_ids=tenant_ids
+                )
                 
-                logger.info(f"Successfully retrieved {len(db_executions)} executions from database")
+                logger.info(f"Successfully retrieved {len(db_executions_list)} executions from database")
                 
                 # Convert to list of dicts
                 db_executions = [
@@ -379,7 +386,7 @@ class ExecutionService:
                         "result": e.result,
                         "error": e.error
                     }
-                    for e in db_executions
+                    for e in db_executions_list
                 ]
             
             # Get in-memory executions that might not be in the database yet
@@ -522,20 +529,21 @@ class ExecutionService:
             exec_logger.error(f"Error updating execution status: {str(e)}")
     
     @staticmethod
-    async def get_execution_status(execution_id: str) -> Dict[str, Any]:
+    async def get_execution_status(execution_id: str, tenant_ids: List[str] = None) -> Dict[str, Any]:
         """
-        Get the current status of an execution from the database.
+        Get the current status of an execution from the database with tenant filtering.
         
         Args:
             execution_id: String ID of the execution
+            tenant_ids: List of tenant IDs for filtering
             
         Returns:
             Dictionary with execution status information or None if not found
         """
         try:
-            # Use ExecutionStatusService to get status
-            from src.services.execution_status_service import ExecutionStatusService
-            execution = await ExecutionStatusService.get_status(execution_id)
+            # Use ExecutionHistoryRepository to get execution with tenant filtering
+            from src.repositories.execution_history_repository import execution_history_repository
+            execution = await execution_history_repository.get_execution_by_job_id(execution_id, tenant_ids=tenant_ids)
             
             if not execution:
                 # Check in-memory for very early states if needed
@@ -692,7 +700,7 @@ class ExecutionService:
             
             # Use ExecutionStatusService to create the execution
             from src.services.execution_status_service import ExecutionStatusService
-            success = await ExecutionStatusService.create_execution(execution_data)
+            success = await ExecutionStatusService.create_execution(execution_data, tenant_context=tenant_context)
             
             if not success:
                 raise ValueError(f"Failed to create execution record for {execution_id}")
