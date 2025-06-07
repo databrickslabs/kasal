@@ -70,6 +70,7 @@ nav:
   - Architecture:
     - Overview: ARCHITECTURE.md
     - Authorization: AUTHORIZATION.md
+    - Security Model: SECURITY_MODEL.md
     - Repository Pattern: REPOSITORY_PATTERN.md
     - Database:
       - Migrations: DATABASE_MIGRATIONS.md
