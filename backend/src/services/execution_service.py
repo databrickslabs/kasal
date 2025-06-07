@@ -25,6 +25,7 @@ from src.utils.asyncio_utils import run_in_thread_with_loop, create_and_run_loop
 from src.services.crewai_execution_service import CrewAIExecutionService
 from src.services.execution_status_service import ExecutionStatusService
 from src.services.execution_name_service import ExecutionNameService
+from src.utils.user_context import TenantContext
 
 
 # Configure logging
@@ -225,7 +226,8 @@ class ExecutionService:
     async def run_crew_execution(
         execution_id: str,
         config: CrewConfig,
-        execution_type: str = "crew"
+        execution_type: str = "crew",
+        tenant_context: TenantContext = None
     ) -> Dict[str, Any]:
         """
         Run a crew execution with the provided configuration.
@@ -308,7 +310,8 @@ class ExecutionService:
                 # This call should handle PREPARING/RUNNING updates internally
                 result = await crew_execution_service.run_crew_execution(
                     execution_id=execution_id,
-                    config=config
+                    config=config,
+                    tenant_context=tenant_context
                 )
                 exec_logger.info(f"[run_crew_execution] Successfully initiated crew execution via CrewAIExecutionService for job_id: {execution_id}. Result: {result}")
                 return result # Return result from run_crew_execution
@@ -554,7 +557,8 @@ class ExecutionService:
     async def create_execution(
         self,
         config: CrewConfig, 
-        background_tasks = None
+        background_tasks = None,
+        tenant_context: TenantContext = None
     ) -> Dict[str, Any]:
         """
         Create a new execution and start it in the background.
@@ -717,7 +721,8 @@ class ExecutionService:
                         await ExecutionService.run_crew_execution(
                             execution_id=execution_id, 
                             config=config, 
-                            execution_type=execution_type
+                            execution_type=execution_type,
+                            tenant_context=tenant_context
                         )
                         task_logger.info(f"[run_execution_task] ExecutionService.run_crew_execution completed for execution_id: {execution_id}")
                     except Exception as task_error:
@@ -744,7 +749,8 @@ class ExecutionService:
                 asyncio.create_task(ExecutionService._run_in_background(
                     execution_id=execution_id,
                     config=config,
-                    execution_type=execution_type
+                    execution_type=execution_type,
+                    tenant_context=tenant_context
                 ))
                 crew_logger.info(f"[ExecutionService.create_execution] Launched _run_in_background task via asyncio for execution_id: {execution_id}")
 
@@ -767,7 +773,7 @@ class ExecutionService:
             )
     
     @staticmethod
-    async def _run_in_background(execution_id: str, config: CrewConfig, execution_type: str = "crew"):
+    async def _run_in_background(execution_id: str, config: CrewConfig, execution_type: str = "crew", tenant_context: TenantContext = None):
         """
         Run an execution in the background using a new database session.
         This is used when FastAPI's background_tasks is not available.
@@ -785,7 +791,8 @@ class ExecutionService:
             await ExecutionService.run_crew_execution(
                 execution_id=execution_id, 
                 config=config, 
-                execution_type=execution_type
+                execution_type=execution_type,
+                tenant_context=tenant_context
             )
             task_logger.info(f"[_run_in_background] ExecutionService.run_crew_execution completed for execution_id: {execution_id}")
         except Exception as e:

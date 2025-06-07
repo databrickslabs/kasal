@@ -14,6 +14,7 @@ from datetime import datetime, timezone
 from src.models.execution_logs import ExecutionLog
 from src.db.session import async_session_factory
 from src.core.logger import LoggerManager
+from src.utils.user_context import TenantContext
 
 # Get logger from the centralized logging system
 logger = LoggerManager.get_instance().system
@@ -273,6 +274,43 @@ class ExecutionLogsRepository:
                 newest_first=newest_first
             )
     
+    async def get_by_execution_id_and_tenant_with_managed_session(
+        self, 
+        execution_id: str,
+        tenant_id: str,
+        limit: int = 1000, 
+        offset: int = 0,
+        newest_first: bool = False
+    ) -> List[ExecutionLog]:
+        """
+        Retrieve logs for a specific execution and tenant with internal session management.
+        
+        Args:
+            execution_id: ID of the execution to fetch logs for
+            tenant_id: ID of the tenant to filter by
+            limit: Maximum number of logs to return
+            offset: Number of logs to skip
+            newest_first: If True, return newest logs first
+            
+        Returns:
+            List of ExecutionLog objects filtered by tenant
+        """
+        async with async_session_factory() as session:
+            query = select(ExecutionLog).where(
+                ExecutionLog.execution_id == execution_id,
+                ExecutionLog.tenant_id == tenant_id
+            )
+            
+            if newest_first:
+                query = query.order_by(desc(ExecutionLog.timestamp))
+            else:
+                query = query.order_by(ExecutionLog.timestamp)
+                
+            query = query.offset(offset).limit(limit)
+            
+            result = await session.execute(query)
+            return result.scalars().all()
+    
     async def count_by_execution_id_with_managed_session(self, execution_id: str) -> int:
         """
         Count logs for a specific execution with internal session management.
@@ -308,6 +346,48 @@ class ExecutionLogsRepository:
         """
         async with async_session_factory() as session:
             return await self.delete_all(session)
+    
+    async def create_with_tenant_managed_session(self, execution_id: str, content: str, timestamp=None, tenant_context: TenantContext = None) -> ExecutionLog:
+        """
+        Create a new execution log entry with tenant information and internal session management.
+        
+        Args:
+            execution_id: ID of the execution
+            content: Log content text
+            timestamp: Optional timestamp, will use current time if not provided
+            tenant_context: Optional tenant context for multi-tenant isolation
+            
+        Returns:
+            Created ExecutionLog object
+        """
+        # Create a new session
+        try:
+            async with async_session_factory() as session:
+                # Normalize the timestamp to timezone-naive UTC
+                normalized_timestamp = self._normalize_timestamp(timestamp)
+                
+                # Create the log object with tenant information
+                log = ExecutionLog(
+                    execution_id=execution_id,
+                    content=content,
+                    timestamp=normalized_timestamp,  # If None, the model default will be used
+                    tenant_id=tenant_context.tenant_id if tenant_context else None,
+                    tenant_email=tenant_context.email if tenant_context else None
+                )
+                
+                # Add it to the session
+                session.add(log)
+                
+                # Commit the transaction
+                await session.commit()
+                
+                # Refresh to get the ID
+                await session.refresh(log)
+                
+                return log
+        except Exception as e:
+            logger.error(f"[ExecutionLogsRepository.create_with_tenant_managed_session] Error creating log: {e}", exc_info=True)
+            raise
 
 
 # Create a singleton instance

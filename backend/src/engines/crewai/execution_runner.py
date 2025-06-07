@@ -14,10 +14,11 @@ import os
 from crewai import Crew, LLM
 from src.models.execution_status import ExecutionStatus
 from src.core.llm_manager import LLMManager
+from src.utils.user_context import TenantContext
 
 logger = logging.getLogger(__name__)
 
-async def run_crew(execution_id: str, crew: Crew, running_jobs: Dict) -> None:
+async def run_crew(execution_id: str, crew: Crew, running_jobs: Dict, tenant_context: TenantContext = None) -> None:
     """
     Run the crew in a separate task, ensuring final status update
     occurs within its own database session scope.
@@ -26,6 +27,7 @@ async def run_crew(execution_id: str, crew: Crew, running_jobs: Dict) -> None:
         execution_id: Execution ID
         crew: The CrewAI crew to run
         running_jobs: Dictionary tracking running jobs
+        tenant_context: Tenant context for logging isolation
     """
     # First, ensure status is set to RUNNING
     from src.services.execution_status_service import ExecutionStatusService
@@ -70,7 +72,7 @@ async def run_crew(execution_id: str, crew: Crew, running_jobs: Dict) -> None:
     logger.info(f"Using max_retry_limit={max_retry_limit} for execution {execution_id}")
     
     # Initialize logging for this job
-    crew_logger.setup_for_job(execution_id)
+    crew_logger.setup_for_job(execution_id, tenant_context)
     
     # Initialize event streaming with configuration
     event_streaming = EventStreamingCallback(job_id=execution_id, config=config)

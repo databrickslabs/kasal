@@ -23,6 +23,7 @@ from src.engines.factory import EngineFactory
 from src.engines.crewai.crewai_engine_service import CrewAIEngineService
 from src.services.execution_status_service import ExecutionStatusService
 from src.engines.crewai.crewai_flow_service import CrewAIFlowService
+from src.utils.user_context import TenantContext
 
 
 # Initialize logger
@@ -60,7 +61,8 @@ class CrewAIExecutionService:
     async def prepare_and_run_crew(
         self,
         execution_id: str,
-        config: CrewConfig
+        config: CrewConfig,
+        tenant_context: TenantContext = None
     ) -> Dict[str, Any]:
         """
         Prepare and run a crew execution.
@@ -96,7 +98,7 @@ class CrewAIExecutionService:
             
             # Run the crew via the engine - this starts the execution but doesn't wait for it to complete
             # The engine will update the status to COMPLETED or FAILED when done
-            result = await engine.run_execution(execution_id, config)
+            result = await engine.run_execution(execution_id, config, tenant_context)
             
             # Return the execution ID - do NOT update status to COMPLETED here
             # as the execution is running asynchronously and will be updated by the engine
@@ -133,7 +135,7 @@ class CrewAIExecutionService:
             
         return engine
     
-    async def run_crew_execution(self, execution_id: str, config: CrewConfig) -> Dict[str, Any]:
+    async def run_crew_execution(self, execution_id: str, config: CrewConfig, tenant_context: TenantContext = None) -> Dict[str, Any]:
         """
         Run a crew execution with the provided configuration.
         
@@ -149,7 +151,8 @@ class CrewAIExecutionService:
         # Create an asyncio task for executing the crew
         task = asyncio.create_task(self.prepare_and_run_crew(
             execution_id=execution_id,
-            config=config
+            config=config,
+            tenant_context=tenant_context
         ))
         
         # Store task reference to prevent garbage collection

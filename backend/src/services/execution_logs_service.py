@@ -19,6 +19,7 @@ from src.models.execution_logs import ExecutionLog
 from src.schemas.execution_logs import LogMessage, ExecutionLogResponse
 from src.repositories.execution_logs_repository import execution_logs_repository
 from src.services.execution_logs_queue import enqueue_log, get_job_output_queue
+from src.utils.user_context import TenantContext
 
 # Get logger from the centralized logging system
 logger = LoggerManager.get_instance().system
@@ -70,6 +71,44 @@ class ExecutionLogsService:
             logger.error(f"Error sending historical logs: {e}")
         
         logger.debug(f"Client connected to execution {execution_id}. Total connections: {len(self.active_connections[execution_id])}")
+    
+    async def connect_with_tenant(self, websocket: WebSocket, execution_id: str, tenant_context: TenantContext):
+        """
+        Connect a client to an execution's WebSocket stream with tenant filtering.
+        
+        Args:
+            websocket: WebSocket connection to register
+            execution_id: ID of the execution to connect to
+            tenant_context: Tenant context for filtering logs
+        """
+        await websocket.accept()
+        async with self._lock:
+            if execution_id not in self.active_connections:
+                self.active_connections[execution_id] = set()
+            self.active_connections[execution_id].add(websocket)
+        
+        # Send tenant-filtered historical logs when client connects
+        try:
+            if tenant_context.tenant_id:
+                historical_logs = await execution_logs_repository.get_by_execution_id_and_tenant_with_managed_session(
+                    execution_id=execution_id,
+                    tenant_id=tenant_context.tenant_id
+                )
+            else:
+                # If no tenant context, don't send any historical logs for security
+                historical_logs = []
+            
+            for log in historical_logs:
+                await websocket.send_text(json.dumps({
+                    "execution_id": execution_id,
+                    "content": log.content,
+                    "timestamp": log.timestamp.isoformat(),
+                    "type": "historical"
+                }))
+        except Exception as e:
+            logger.error(f"Error sending historical logs: {e}")
+        
+        logger.debug(f"Client connected to execution {execution_id} with tenant {tenant_context.tenant_id}. Total connections: {len(self.active_connections[execution_id])}")
 
     async def disconnect(self, websocket: WebSocket, execution_id: str):
         """
@@ -86,7 +125,7 @@ class ExecutionLogsService:
                     del self.active_connections[execution_id]
         logger.debug(f"Client disconnected from execution {execution_id}")
 
-    async def create_execution_log(self, execution_id: str, content: str, timestamp: datetime = None) -> bool:
+    async def create_execution_log(self, execution_id: str, content: str, timestamp: datetime = None, tenant_context: TenantContext = None) -> bool:
         """
         Create a new execution log entry via the repository layer.
         
@@ -94,6 +133,7 @@ class ExecutionLogsService:
             execution_id: ID of the execution to log for
             content: The log message content
             timestamp: Optional timestamp for the log entry (defaults to current time)
+            tenant_context: Optional tenant context for multi-tenant isolation
             
         Returns:
             bool: True if log was created successfully, False otherwise
@@ -102,10 +142,11 @@ class ExecutionLogsService:
             logger.debug(f"[create_execution_log] Creating log for execution {execution_id}")
             
             # Use the repository to create the log with a managed session
-            await execution_logs_repository.create_with_managed_session(
+            await execution_logs_repository.create_with_tenant_managed_session(
                 execution_id=execution_id,
                 content=content,
-                timestamp=timestamp or datetime.now()
+                timestamp=timestamp or datetime.now(),
+                tenant_context=tenant_context
             )
             
             logger.debug(f"[create_execution_log] Successfully created log for execution {execution_id}")
@@ -173,6 +214,38 @@ class ExecutionLogsService:
         """
         logs = await execution_logs_repository.get_by_execution_id_with_managed_session(
             execution_id=execution_id,
+            limit=limit,
+            offset=offset
+        )
+        
+        return [
+            ExecutionLogResponse(
+                content=log.content,
+                timestamp=log.timestamp.isoformat()
+            )
+            for log in logs
+        ]
+    
+    async def get_execution_logs_by_tenant(self, execution_id: str, tenant_context: TenantContext, limit: int = 1000, offset: int = 0) -> List[ExecutionLogResponse]:
+        """
+        Fetch historical execution logs from the database filtered by tenant.
+        
+        Args:
+            execution_id: ID of the execution to fetch logs for
+            tenant_context: Tenant context for filtering
+            limit: Maximum number of logs to fetch
+            offset: Number of logs to skip
+            
+        Returns:
+            List of execution log responses for the tenant
+        """
+        if not tenant_context.tenant_id:
+            # If no tenant context, return empty list for security
+            return []
+        
+        logs = await execution_logs_repository.get_by_execution_id_and_tenant_with_managed_session(
+            execution_id=execution_id,
+            tenant_id=tenant_context.tenant_id,
             limit=limit,
             offset=offset
         )
@@ -280,11 +353,20 @@ async def logs_writer_loop(shutdown_event: asyncio.Event):
                             timestamp = log_data.get("timestamp", datetime.now())
                             log_info = f"[{job_id}:{idx+1}/{len(batch)}]"
                             
+                            # Extract tenant information if available
+                            tenant_context = None
+                            if log_data.get("tenant_id") or log_data.get("tenant_email"):
+                                tenant_context = TenantContext(
+                                    tenant_id=log_data.get("tenant_id"),
+                                    email=log_data.get("tenant_email")
+                                )
+                            
                             # Create log with execution_logs_service
                             success = await execution_logs_service.create_execution_log(
                                 execution_id=job_id,
                                 content=content,
-                                timestamp=timestamp
+                                timestamp=timestamp,
+                                tenant_context=tenant_context
                             )
                             
                             if not success:

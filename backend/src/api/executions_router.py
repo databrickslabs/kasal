@@ -7,6 +7,7 @@ of crews and flows, as well as utility operations like name generation.
 
 import logging
 import asyncio
+from typing import Annotated
 from fastapi import APIRouter, HTTPException, Depends, BackgroundTasks
 import uuid
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -15,6 +16,7 @@ from sqlalchemy import select
 from sqlalchemy import desc
 
 from src.core.logger import LoggerManager
+from src.core.dependencies import TenantContextDep
 from src.db.session import get_db
 from src.models.execution_history import ExecutionHistory
 from src.schemas.execution import (
@@ -40,7 +42,8 @@ router = APIRouter(
 @router.post("", response_model=ExecutionCreateResponse)
 async def create_execution(
     config: CrewConfig,
-    background_tasks: BackgroundTasks, 
+    background_tasks: BackgroundTasks,
+    tenant_context: TenantContextDep,
     db: AsyncSession = Depends(get_db)
 ):
     """
@@ -86,7 +89,8 @@ async def create_execution(
         # Delegate all business logic to the service
         result = await execution_service.create_execution(
             config=config,
-            background_tasks=background_tasks
+            background_tasks=background_tasks,
+            tenant_context=tenant_context
         )
         
         # Return the result as an API response

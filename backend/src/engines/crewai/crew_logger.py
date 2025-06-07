@@ -36,6 +36,9 @@ from src.core.logger import LoggerManager
 # Import queue services
 from src.services.execution_logs_queue import enqueue_log
 
+# Import tenant context
+from src.utils.user_context import TenantContext
+
 # Configure logger
 logger = logging.getLogger(__name__)
 
@@ -124,19 +127,20 @@ class CrewLogger:
         except Exception as e:
             logger.error(f"Error setting up CrewAI logging redirection: {str(e)}")
     
-    def setup_for_job(self, job_id: str) -> None:
+    def setup_for_job(self, job_id: str, tenant_context: TenantContext = None) -> None:
         """
         Set up comprehensive logging for a specific job.
         
         Args:
             job_id: The execution/job ID
+            tenant_context: Tenant context for logging isolation
         """
         if job_id in self._active_jobs:
             logger.warning(f"CrewLogger already set up for job {job_id}")
             return
             
         # Create a handler for this job
-        handler = CrewLoggerHandler(job_id=job_id)
+        handler = CrewLoggerHandler(job_id=job_id, tenant_context=tenant_context)
         handler.setFormatter(logging.Formatter('[CREW] %(asctime)s - %(levelname)s - %(message)s'))
         
         # Store job info
@@ -346,15 +350,17 @@ class CrewLoggerHandler(logging.Handler):
     and redirects them to the job_output_queue.
     """
     
-    def __init__(self, job_id: str):
+    def __init__(self, job_id: str, tenant_context: TenantContext = None):
         """
         Initialize the handler with a job ID.
         
         Args:
             job_id: The execution/job ID to associate logs with
+            tenant_context: Tenant context for logging isolation
         """
         super().__init__()
         self.job_id = job_id
+        self.tenant_context = tenant_context
         
     def emit(self, record: logging.LogRecord):
         """
@@ -367,8 +373,8 @@ class CrewLoggerHandler(logging.Handler):
             # Format the log message
             log_message = self.format(record)
             
-            # Enqueue the log message with the job ID
-            enqueue_log(execution_id=self.job_id, content=log_message)
+            # Enqueue the log message with the job ID and tenant context
+            enqueue_log(execution_id=self.job_id, content=log_message, tenant_context=self.tenant_context)
         except Exception as e:
             # Don't use logging here to avoid potential infinite recursion
             print(f"Error in CrewLoggerHandler.emit: {e}", file=sys.stderr)

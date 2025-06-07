@@ -1,6 +1,7 @@
 import queue
 from datetime import datetime
 from typing import Optional
+from src.utils.user_context import TenantContext
 
 class JobOutputQueue:
     """Singleton holder for the job output queue."""
@@ -21,7 +22,7 @@ class JobOutputQueue:
 def get_job_output_queue() -> queue.Queue:
     return JobOutputQueue().get_queue()
 
-def enqueue_log(execution_id: str, content: str, timestamp: Optional[datetime] = None) -> bool:
+def enqueue_log(execution_id: str, content: str, timestamp: Optional[datetime] = None, tenant_context: TenantContext = None) -> bool:
     """
     Enqueue a log message to be processed by the logs writer.
     
@@ -29,6 +30,7 @@ def enqueue_log(execution_id: str, content: str, timestamp: Optional[datetime] =
         execution_id: ID of the execution (job_id)
         content: Content of the log message
         timestamp: Optional timestamp, defaults to current time
+        tenant_context: Optional tenant context for logging isolation
         
     Returns:
         bool: True if enqueued successfully, False otherwise
@@ -43,6 +45,11 @@ def enqueue_log(execution_id: str, content: str, timestamp: Optional[datetime] =
             "content": content,
             "timestamp": timestamp or datetime.now()
         }
+        
+        # Add tenant context information if available
+        if tenant_context:
+            log_data["tenant_id"] = tenant_context.tenant_id
+            log_data["tenant_email"] = tenant_context.email
         
         # Add to queue
         job_queue.put_nowait(log_data)
