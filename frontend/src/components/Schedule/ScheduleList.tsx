@@ -13,18 +13,13 @@ import {
   useTheme,
 } from '@mui/material';
 import {
-  Edit as EditIcon,
   Delete as DeleteIcon,
 } from '@mui/icons-material';
 import { ScheduleService } from '../../api/ScheduleService';
 import { toast } from 'react-hot-toast';
 import { Schedule } from '../../types/schedule';
 
-interface ScheduleListProps {
-  onEditSchedule?: (schedule: Schedule) => void;
-}
-
-const ScheduleList: React.FC<ScheduleListProps> = ({ onEditSchedule }) => {
+const ScheduleList: React.FC = () => {
   const theme = useTheme();
   const [schedules, setSchedules] = useState<Schedule[]>([]);
   const [loading, setLoading] = useState(false);
@@ -72,11 +67,6 @@ const ScheduleList: React.FC<ScheduleListProps> = ({ onEditSchedule }) => {
     }
   };
 
-  const handleEditSchedule = (schedule: Schedule) => {
-    if (onEditSchedule) {
-      onEditSchedule(schedule);
-    }
-  };
 
   if (loading && schedules.length === 0) {
     return (
@@ -154,9 +144,9 @@ const ScheduleList: React.FC<ScheduleListProps> = ({ onEditSchedule }) => {
                     {schedule.cron_expression}
                   </Typography>
                 }
-                sx={{ mr: 1 }}
+                sx={{ mr: 10 }} // Much larger margin to make room for buttons
               />
-              <ListItemSecondaryAction>
+              <ListItemSecondaryAction sx={{ right: 60 }}>
                 <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5 }}>
                   <Tooltip title={schedule.is_active ? 'Disable' : 'Enable'}>
                     <Switch
@@ -177,20 +167,6 @@ const ScheduleList: React.FC<ScheduleListProps> = ({ onEditSchedule }) => {
                         }
                       }}
                     />
-                  </Tooltip>
-                  <Tooltip title="Edit">
-                    <IconButton
-                      size="small"
-                      onClick={() => handleEditSchedule(schedule)}
-                      sx={{ 
-                        p: 0.5,
-                        '&:hover': {
-                          color: theme.palette.primary.main,
-                        }
-                      }}
-                    >
-                      <EditIcon sx={{ fontSize: '1rem' }} />
-                    </IconButton>
                   </Tooltip>
                   <Tooltip title="Delete">
                     <IconButton

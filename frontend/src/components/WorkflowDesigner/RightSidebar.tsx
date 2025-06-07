@@ -41,7 +41,6 @@ interface RightSidebarProps {
   isExecuting?: boolean;
   onSaveCrewClick?: () => void;
   showRunHistory?: boolean;
-  onEditSchedule?: (schedule: unknown) => void;
 }
 
 const RightSidebar: React.FC<RightSidebarProps> = ({
@@ -60,7 +59,6 @@ const RightSidebar: React.FC<RightSidebarProps> = ({
   isExecuting = false,
   onSaveCrewClick,
   showRunHistory = false,
-  onEditSchedule,
 }) => {
   const theme = useTheme();
   const [activeSection, setActiveSection] = useState<string | null>(null);
@@ -875,7 +873,7 @@ const RightSidebar: React.FC<RightSidebarProps> = ({
             boxSizing: 'border-box'
           }}
         >
-          <ScheduleList onEditSchedule={onEditSchedule} />
+          <ScheduleList />
         </Box>
       )
     },
