@@ -424,7 +424,6 @@ const WorkflowDesigner: React.FC<WorkflowDesignerProps> = (): JSX.Element => {
               onOpenLogsDialog={() => dialogManager.setIsLogsDialogOpen(true)}
               onToggleChat={toggleChatPanel}
               isChatOpen={showChatPanel}
-              onOpenScheduleDialog={() => dialogManager.setScheduleDialogOpen(true)}
               setIsAgentDialogOpen={setIsAgentDialogOpen}
               setIsTaskDialogOpen={setIsTaskDialogOpen}
               setIsFlowDialogOpen={dialogManager.setIsFlowDialogOpen}
@@ -720,7 +719,6 @@ const WorkflowDesigner: React.FC<WorkflowDesignerProps> = (): JSX.Element => {
           onOpenLogsDialog={() => dialogManager.setIsLogsDialogOpen(true)}
           onToggleChat={() => _setShowChatPanel(!showChatPanel)}
           isChatOpen={showChatPanel}
-          onOpenScheduleDialog={() => dialogManager.setScheduleDialogOpen(true)}
           setIsAgentDialogOpen={setIsAgentDialogOpen}
           setIsTaskDialogOpen={setIsTaskDialogOpen}
           setIsFlowDialogOpen={dialogManager.setIsFlowDialogOpen}

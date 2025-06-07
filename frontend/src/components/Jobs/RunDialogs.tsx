@@ -6,9 +6,9 @@ import {
   DialogContentText,
   DialogActions,
   Button,
-  TextField,
 } from '@mui/material';
 import { useTranslation } from 'react-i18next';
+import EnhancedScheduleDialog from './EnhancedScheduleDialog';
 
 interface RunDialogsProps {
   deleteDialogOpen: boolean;
@@ -69,38 +69,16 @@ const RunDialogs: React.FC<RunDialogsProps> = ({
         </DialogActions>
       </Dialog>
 
-      <Dialog
+      <EnhancedScheduleDialog
         open={scheduleDialogOpen}
         onClose={onCloseScheduleDialog}
-        maxWidth="sm"
-        fullWidth
-      >
-        <DialogTitle>Schedule Job</DialogTitle>
-        <DialogContent>
-          <TextField
-            fullWidth
-            label="Schedule Name"
-            value={scheduleName}
-            onChange={onScheduleNameChange}
-            margin="normal"
-            inputRef={scheduleNameInputRef}
-          />
-          <TextField
-            fullWidth
-            label="Cron Expression"
-            value={cronExpression}
-            onChange={onCronExpressionChange}
-            margin="normal"
-            helperText="Example: '0 0 * * *' for daily at midnight"
-          />
-        </DialogContent>
-        <DialogActions>
-          <Button onClick={onCloseScheduleDialog}>Cancel</Button>
-          <Button onClick={onScheduleJob} variant="contained" color="primary">
-            Schedule
-          </Button>
-        </DialogActions>
-      </Dialog>
+        scheduleName={scheduleName}
+        cronExpression={cronExpression}
+        scheduleNameInputRef={scheduleNameInputRef}
+        onScheduleNameChange={onScheduleNameChange}
+        onCronExpressionChange={onCronExpressionChange}
+        onScheduleJob={onScheduleJob}
+      />
 
       <Dialog
         open={deleteRunDialogOpen}

@@ -93,7 +93,6 @@ interface CrewCanvasProps {
   onOpenLogsDialog: () => void;
   onToggleChat: () => void;
   isChatOpen: boolean;
-  onOpenScheduleDialog: () => void;
   setIsAgentDialogOpen: (open: boolean) => void;
   setIsTaskDialogOpen: (open: boolean) => void;
   setIsFlowDialogOpen: (open: boolean) => void;
@@ -168,7 +167,6 @@ const CrewCanvas: React.FC<CrewCanvasProps> = ({
   onOpenLogsDialog,
   onToggleChat,
   isChatOpen,
-  onOpenScheduleDialog,
   setIsAgentDialogOpen,
   setIsTaskDialogOpen,
   setIsFlowDialogOpen,
@@ -791,7 +789,6 @@ const CrewCanvas: React.FC<CrewCanvasProps> = ({
             onOpenLogsDialog={onOpenLogsDialog}
             onToggleChat={onToggleChat}
             isChatOpen={isChatOpen}
-            onOpenScheduleDialog={onOpenScheduleDialog}
             setIsAgentDialogOpen={setIsAgentDialogOpen}
             setIsTaskDialogOpen={setIsTaskDialogOpen}
             setIsFlowDialogOpen={setIsFlowDialogOpen}

@@ -23,13 +23,13 @@ import {
   AutoFixHigh as AutoFixHighIcon,
   FolderOpen as WorkflowIcon,
 } from '@mui/icons-material';
+import ScheduleList from '../Schedule/ScheduleList';
 import { useFlowConfigStore } from '../../store/flowConfig';
 
 interface RightSidebarProps {
   onOpenLogsDialog: () => void;
   onToggleChat: () => void;
   isChatOpen: boolean;
-  onOpenScheduleDialog: () => void;
   setIsAgentDialogOpen: (open: boolean) => void;
   setIsTaskDialogOpen: (open: boolean) => void;
   setIsFlowDialogOpen: (open: boolean) => void;
@@ -42,13 +42,13 @@ interface RightSidebarProps {
   isExecuting?: boolean;
   onSaveCrewClick?: () => void;
   showRunHistory?: boolean;
+  onEditSchedule?: (schedule: unknown) => void;
 }
 
 const RightSidebar: React.FC<RightSidebarProps> = ({
   onOpenLogsDialog,
   onToggleChat,
   isChatOpen,
-  onOpenScheduleDialog,
   setIsAgentDialogOpen,
   setIsTaskDialogOpen,
   setIsFlowDialogOpen,
@@ -61,6 +61,7 @@ const RightSidebar: React.FC<RightSidebarProps> = ({
   isExecuting = false,
   onSaveCrewClick,
   showRunHistory = false,
+  onEditSchedule,
 }) => {
   const theme = useTheme();
   const [activeSection, setActiveSection] = useState<string | null>(null);
@@ -864,7 +865,7 @@ const RightSidebar: React.FC<RightSidebarProps> = ({
     {
       id: 'schedule',
       icon: <ScheduleIcon />,
-      tooltip: 'Schedule Workflow',
+      tooltip: 'Schedules',
       content: (
         <Box
           sx={{
@@ -875,78 +876,7 @@ const RightSidebar: React.FC<RightSidebarProps> = ({
             boxSizing: 'border-box'
           }}
         >
-          <Box sx={{ 
-            mb: 2,
-            width: '100%',
-            boxSizing: 'border-box',
-            px: 1
-          }}>
-            <Typography 
-              variant="subtitle2" 
-              sx={{ 
-                color: theme.palette.primary.main, 
-                mb: 1,
-                fontWeight: 600,
-                textTransform: 'uppercase',
-                letterSpacing: '0.5px',
-                fontSize: '0.7rem'
-              }}
-            >
-              Workflow Scheduling
-            </Typography>
-            
-            <Box
-              onClick={onOpenScheduleDialog}
-              sx={{
-                display: 'flex',
-                alignItems: 'center',
-                gap: 1,
-                py: 1,
-                px: 1,
-                borderRadius: 1,
-                cursor: 'pointer',
-                border: `1px solid ${theme.palette.divider}`,
-                backgroundColor: 'background.paper',
-                transition: 'all 0.2s ease-in-out',
-                width: '220px',
-                boxSizing: 'border-box',
-                ml: 2,
-                '&:hover': {
-                  backgroundColor: 'action.hover',
-                  borderColor: theme.palette.primary.main,
-                  transform: 'translateY(-1px)',
-                  boxShadow: theme.shadows[2],
-                },
-              }}
-            >
-              <ScheduleIcon 
-                sx={{ 
-                  fontSize: '1.2rem', 
-                  color: theme.palette.primary.main 
-                }} 
-              />
-              <Box>
-                <Typography 
-                  variant="body2" 
-                  sx={{ 
-                    fontWeight: 500,
-                    color: 'text.primary'
-                  }}
-                >
-                  Schedule Execution
-                </Typography>
-                <Typography 
-                  variant="caption" 
-                  sx={{ 
-                    color: 'text.secondary',
-                    fontSize: '0.7rem'
-                  }}
-                >
-                  Set up automated workflow execution
-                </Typography>
-              </Box>
-            </Box>
-          </Box>
+          <ScheduleList onEditSchedule={onEditSchedule} />
         </Box>
       )
     },
@@ -1129,8 +1059,8 @@ const RightSidebar: React.FC<RightSidebarProps> = ({
                         if (isChatOpen && !shouldKeepChatOpen && !chatOpenedByClick) {
                           onToggleChat();
                         }
-                        // Don't set active section for logs and schedule since they open dialogs
-                        if (item.id !== 'logs' && item.id !== 'schedule') {
+                        // Don't set active section for logs since it opens a dialog
+                        if (item.id !== 'logs') {
                           setActiveSection(item.id);
                         }
                       }
@@ -1148,12 +1078,12 @@ const RightSidebar: React.FC<RightSidebarProps> = ({
                         }
                         onOpenLogsDialog();
                       } else if (item.id === 'schedule') {
-                        // Close chat if it's open when opening schedule
+                        // Close chat if it's open when switching to schedule section
                         if (isChatOpen) {
                           setChatOpenedByClick(false);
                           onToggleChat();
                         }
-                        onOpenScheduleDialog();
+                        handleSectionClick(item.id);
                       } else {
                         // Close chat if it's open when switching to other sections
                         if (isChatOpen) {
