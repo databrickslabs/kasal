@@ -107,4 +107,96 @@ class LLMLogRepository(BaseRepository[LLMLog]):
             session.add(db_obj)
             await session.commit()
             await session.refresh(db_obj)
-            return db_obj 
+            return db_obj
+    
+    # Tenant-aware methods
+    async def get_logs_paginated_by_tenant(
+        self, 
+        page: int = 0, 
+        per_page: int = 10, 
+        endpoint: Optional[str] = None,
+        tenant_ids: List[str] = None
+    ) -> List[LLMLog]:
+        """
+        Get paginated logs with optional endpoint filtering for specific tenants.
+        
+        Args:
+            page: Page number (0-indexed)
+            per_page: Items per page
+            endpoint: Optional endpoint to filter by
+            tenant_ids: List of tenant IDs to filter by
+            
+        Returns:
+            List of LLM logs for the specified page and tenants
+        """
+        if not tenant_ids:
+            return []
+        
+        async with async_session_factory() as session:
+            # Start with a base query filtered by tenant
+            query = select(self.model).where(
+                self.model.tenant_id.in_(tenant_ids)
+            ).order_by(desc(self.model.created_at))
+            
+            # Apply endpoint filter if provided
+            if endpoint and endpoint != 'all':
+                query = query.where(self.model.endpoint == endpoint)
+            
+            # Apply pagination
+            query = query.offset(page * per_page).limit(per_page)
+            
+            # Execute query
+            result = await session.execute(query)
+            return list(result.scalars().all())
+
+    async def count_logs_by_tenant(
+        self, 
+        endpoint: Optional[str] = None, 
+        tenant_ids: List[str] = None
+    ) -> int:
+        """
+        Count logs with optional endpoint filtering for specific tenants.
+        
+        Args:
+            endpoint: Optional endpoint to filter by
+            tenant_ids: List of tenant IDs to filter by
+            
+        Returns:
+            Total count of matching logs for tenants
+        """
+        if not tenant_ids:
+            return 0
+        
+        async with async_session_factory() as session:
+            # Start with a base query filtered by tenant
+            query = select(self.model).where(
+                self.model.tenant_id.in_(tenant_ids)
+            )
+            
+            # Apply endpoint filter if provided
+            if endpoint and endpoint != 'all':
+                query = query.where(self.model.endpoint == endpoint)
+            
+            # Execute query
+            result = await session.execute(query)
+            return len(list(result.scalars().all()))
+
+    async def get_unique_endpoints_by_tenant(self, tenant_ids: List[str] = None) -> List[str]:
+        """
+        Get list of unique endpoints in the logs for specific tenants.
+        
+        Args:
+            tenant_ids: List of tenant IDs to filter by
+        
+        Returns:
+            List of unique endpoint strings for tenants
+        """
+        if not tenant_ids:
+            return []
+        
+        async with async_session_factory() as session:
+            query = select(self.model.endpoint).where(
+                self.model.tenant_id.in_(tenant_ids)
+            ).distinct()
+            result = await session.execute(query)
+            return [endpoint for (endpoint,) in result.all()] 
