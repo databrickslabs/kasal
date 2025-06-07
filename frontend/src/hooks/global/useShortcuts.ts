@@ -13,8 +13,7 @@ export const DEFAULT_SHORTCUTS: ShortcutConfig[] = [
   // Canvas Operations
   { action: 'deleteSelected', keys: ['Delete'], description: 'Delete selected nodes or edges' },
   { action: 'deleteSelected', keys: ['Backspace'], description: 'Delete selected nodes or edges' },
-  { action: 'clearCanvas', keys: ['d', 'd'], description: 'Clear entire canvas (vim-style)' },
-  { action: 'clearCanvas', keys: ['Alt', 'c'], description: 'Clear entire canvas' },
+  { action: 'clearCanvas', keys: ['d', 'd'], description: 'Clear entire canvas' },
   { action: 'fitView', keys: ['v', 'f'], description: 'Fit view to all nodes (vim-style)' },
   { action: 'fitView', keys: ['Control', '0'], description: 'Fit view to all nodes' },
   { action: 'zoomIn', keys: ['Control', '='], description: 'Zoom in' },
@@ -362,7 +361,41 @@ const useShortcuts = ({
         return;
       }
 
-      // Rest of key handling logic
+      // Build current key combination including modifiers
+      const currentCombination: string[] = [];
+      if (event.ctrlKey || event.metaKey) currentCombination.push('Control');
+      if (event.shiftKey) currentCombination.push('Shift');
+      if (event.altKey) currentCombination.push('Alt');
+      
+      // Add the main key (but not if it's a modifier key itself)
+      if (!['Control', 'Shift', 'Alt', 'Meta'].includes(event.key)) {
+        currentCombination.push(event.key);
+      }
+
+      // First check for modifier key combinations (like Ctrl+=, Ctrl+-)
+      const modifierShortcut = currentShortcuts.find(shortcut => {
+        if (shortcut.keys.length === currentCombination.length) {
+          return shortcut.keys.every(key => 
+            currentCombination.some(combo => 
+              key.toLowerCase() === combo.toLowerCase()
+            )
+          );
+        }
+        return false;
+      });
+
+      if (modifierShortcut) {
+        // console.log('useShortcuts - Matched modifier shortcut:', modifierShortcut);
+        const handler = handlerRef.current ? handlerRef.current[modifierShortcut.action] : null;
+        if (handler) {
+          // console.log('useShortcuts - Executing modifier handler for:', modifierShortcut.action);
+          handler();
+          event.preventDefault();
+          return;
+        }
+      }
+
+      // If no modifier combination matched, handle sequential shortcuts
       const isShortcutKey = currentShortcuts.some(shortcut => 
         shortcut.keys.some(key => key.toLowerCase() === event.key.toLowerCase())
       );

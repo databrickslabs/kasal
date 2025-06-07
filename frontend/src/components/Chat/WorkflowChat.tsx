@@ -28,6 +28,7 @@ import { Node, Edge } from 'reactflow';
 import { Agent } from '../../types/agent';
 import { Task } from '../../types/task';
 import { AgentService } from '../../api/AgentService';
+import { TaskService } from '../../api/TaskService';
 
 interface GeneratedAgent {
   name: string;
@@ -263,56 +264,162 @@ const WorkflowChat: React.FC<WorkflowChatProps> = ({
     }
   };
 
-  const handleTaskGenerated = (taskData: GeneratedTask) => {
-    setNodes((nodes) => {
-      // Find existing task nodes to determine positioning
-      const taskNodes = nodes.filter(n => n.type === 'taskNode');
-      const agentNodes = nodes.filter(n => n.type === 'agentNode');
-      
-      let position = { x: 300, y: 100 };
-      
-      if (taskNodes.length > 0) {
-        // If there are existing task nodes, position the new task below the lowest one
-        const lowestTask = taskNodes.reduce((lowest, current) => 
-          current.position.y > lowest.position.y ? current : lowest
-        );
-        position = {
-          x: lowestTask.position.x, // Same x position as the lowest task
-          y: lowestTask.position.y + 180 // 180px below for clear separation
-        };
-      } else if (agentNodes.length > 0) {
-        // If no task nodes but there are agent nodes, position to the right of the rightmost agent
-        const rightmostAgent = agentNodes.reduce((rightmost, current) => 
-          current.position.x > rightmost.position.x ? current : rightmost
-        );
-        position = {
-          x: rightmostAgent.position.x + 260, // 260px to the right for a clear gap
-          y: rightmostAgent.position.y
-        };
-      }
-      
-      const newNode: Node = {
-        id: `task-${Date.now()}`,
-        type: 'taskNode',
-        position,
-        data: {
-          label: taskData.name,
-          description: taskData.description,
-          expected_output: taskData.expected_output,
-          tools: taskData.tools || [],
-          human_input: taskData.advanced_config?.human_input || false,
-          async_execution: taskData.advanced_config?.async_execution || false,
-          task: taskData,
-        },
+  const handleTaskGenerated = async (taskData: GeneratedTask) => {
+    try {
+      // First, persist the task via TaskService (same pattern as handleAgentGenerated)
+      const taskToCreate = {
+        name: taskData.name,
+        description: taskData.description,
+        expected_output: taskData.expected_output,
+        tools: taskData.tools || [],
+        agent_id: "",
+        async_execution: Boolean(taskData.advanced_config?.async_execution) || false,
+        markdown: Boolean(taskData.advanced_config?.markdown) || false,
+        context: [],
+        config: {
+          cache_response: false,
+          cache_ttl: 3600,
+          retry_on_fail: true,
+          max_retries: 3,
+          timeout: null,
+          priority: 1,
+          error_handling: 'default' as const,
+          output_file: (taskData.advanced_config?.output_file as string) || null,
+          output_json: taskData.advanced_config?.output_json 
+            ? (typeof taskData.advanced_config.output_json === 'string' 
+                ? taskData.advanced_config.output_json 
+                : JSON.stringify(taskData.advanced_config.output_json)) 
+            : null,
+          output_pydantic: (taskData.advanced_config?.output_pydantic as string) || null,
+          callback: (taskData.advanced_config?.callback as string) || null,
+          human_input: Boolean(taskData.advanced_config?.human_input) || false,
+          markdown: Boolean(taskData.advanced_config?.markdown) || false
+        }
       };
-      if (onNodesGenerated) onNodesGenerated([newNode], []);
-      toast.success(`Task "${taskData.name}" created successfully!`);
-      // Trigger fitView after node is added
-      setTimeout(() => {
-        window.dispatchEvent(new Event('fitViewToNodesInternal'));
-      }, 100);
-      return [...nodes, newNode];
-    });
+
+      const savedTask = await TaskService.createTask(taskToCreate);
+      
+      if (savedTask) {
+        setNodes((nodes) => {
+          // Find existing task nodes to determine positioning
+          const taskNodes = nodes.filter(n => n.type === 'taskNode');
+          const agentNodes = nodes.filter(n => n.type === 'agentNode');
+          
+          let position = { x: 300, y: 100 };
+          
+          if (taskNodes.length > 0) {
+            // If there are existing task nodes, position the new task below the lowest one
+            const lowestTask = taskNodes.reduce((lowest, current) => 
+              current.position.y > lowest.position.y ? current : lowest
+            );
+            position = {
+              x: lowestTask.position.x, // Same x position as the lowest task
+              y: lowestTask.position.y + 180 // 180px below for clear separation
+            };
+          } else if (agentNodes.length > 0) {
+            // If no task nodes but there are agent nodes, position to the right of the rightmost agent
+            const rightmostAgent = agentNodes.reduce((rightmost, current) => 
+              current.position.x > rightmost.position.x ? current : rightmost
+            );
+            position = {
+              x: rightmostAgent.position.x + 260, // 260px to the right for a clear gap
+              y: rightmostAgent.position.y
+            };
+          }
+
+          // Create the node with the persisted task data
+          const newNode: Node = {
+            id: `task-${savedTask.id}`,
+            type: 'taskNode',
+            position,
+            data: {
+              label: savedTask.name,
+              taskId: savedTask.id,
+              description: savedTask.description,
+              expected_output: savedTask.expected_output,
+              tools: savedTask.tools || [],
+              human_input: savedTask.config?.human_input || false,
+              async_execution: savedTask.async_execution || false,
+              task: savedTask,
+            },
+          };
+
+          const updated = [...nodes, newNode];
+          setTimeout(() => {
+            window.dispatchEvent(new Event('fitViewToNodesInternal'));
+          }, 100);
+          
+          // Call onNodesGenerated with the created node
+          if (onNodesGenerated) {
+            onNodesGenerated([newNode], []);
+          }
+          
+          return updated;
+        });
+        
+        toast.success(`Task "${savedTask.name}" created and saved successfully!`);
+      } else {
+        throw new Error('Failed to save task');
+      }
+    } catch (error) {
+      console.error('Error saving task:', error);
+      toast.error(`Failed to save task "${taskData.name}". Please try again.`);
+      
+      // Still create the node even if saving failed, but with a warning
+      setNodes((nodes) => {
+        // Find existing task nodes to determine positioning
+        const taskNodes = nodes.filter(n => n.type === 'taskNode');
+        const agentNodes = nodes.filter(n => n.type === 'agentNode');
+        
+        let position = { x: 300, y: 100 };
+        
+        if (taskNodes.length > 0) {
+          // If there are existing task nodes, position the new task below the lowest one
+          const lowestTask = taskNodes.reduce((lowest, current) => 
+            current.position.y > lowest.position.y ? current : lowest
+          );
+          position = {
+            x: lowestTask.position.x, // Same x position as the lowest task
+            y: lowestTask.position.y + 180 // 180px below for clear separation
+          };
+        } else if (agentNodes.length > 0) {
+          // If no task nodes but there are agent nodes, position to the right of the rightmost agent
+          const rightmostAgent = agentNodes.reduce((rightmost, current) => 
+            current.position.x > rightmost.position.x ? current : rightmost
+          );
+          position = {
+            x: rightmostAgent.position.x + 260, // 260px to the right for a clear gap
+            y: rightmostAgent.position.y
+          };
+        }
+
+        const newNode: Node = {
+          id: `task-${Date.now()}`,
+          type: 'taskNode',
+          position,
+          data: {
+            label: taskData.name,
+            description: taskData.description,
+            expected_output: taskData.expected_output,
+            tools: taskData.tools || [],
+            human_input: taskData.advanced_config?.human_input || false,
+            async_execution: taskData.advanced_config?.async_execution || false,
+            task: taskData,
+          },
+        };
+
+        const updated = [...nodes, newNode];
+        setTimeout(() => {
+          window.dispatchEvent(new Event('fitViewToNodesInternal'));
+        }, 100);
+        
+        if (onNodesGenerated) {
+          onNodesGenerated([newNode], []);
+        }
+        
+        return updated;
+      });
+    }
   };
 
   const handleCrewGenerated = (crewData: GeneratedCrew) => {
@@ -452,7 +559,7 @@ const WorkflowChat: React.FC<WorkflowChatProps> = ({
             await handleAgentGenerated(result.generation_result as GeneratedAgent);
             break;
           case 'generate_task':
-            handleTaskGenerated(result.generation_result as GeneratedTask);
+            await handleTaskGenerated(result.generation_result as GeneratedTask);
             break;
           case 'generate_crew':
             handleCrewGenerated(result.generation_result as GeneratedCrew);

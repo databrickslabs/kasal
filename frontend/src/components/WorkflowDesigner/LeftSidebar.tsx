@@ -28,8 +28,8 @@ import {
   Settings as SettingsIcon,
 } from '@mui/icons-material';
 
-import { DEFAULT_SHORTCUTS } from '../../hooks/global/useShortcuts';
 import { ShortcutConfig } from '../../types/shortcuts';
+import { useShortcutsStore } from '../../store/shortcuts';
 import { Models } from '../../types/models';
 import { ModelService } from '../../api/ModelService';
 import { useCrewExecutionStore } from '../../store/crewExecution';
@@ -100,6 +100,9 @@ const LeftSidebar: React.FC<LeftSidebarProps> = ({
     setReasoningLLM,
   } = useCrewExecutionStore();
 
+  // Get active shortcuts from store
+  const { shortcuts } = useShortcutsStore();
+
   // Fetch models on component mount
   useEffect(() => {
     const fetchModels = async () => {
@@ -148,8 +151,18 @@ const LeftSidebar: React.FC<LeftSidebarProps> = ({
     setSelectedModel(event.target.value);
   }, [setSelectedModel]);
 
-  // Group shortcuts by category
+  // Group shortcuts by category, filtering out non-functional shortcuts
   const groupedShortcuts = useMemo(() => {
+    // List of shortcuts that are defined but don't have working implementations
+    const nonFunctionalActions = new Set([
+      'undo',
+      'redo', 
+      'selectAll',
+      'copy',
+      'paste',
+      'toggleFullscreen'
+    ]);
+
     const result: Record<string, ShortcutConfig[]> = {
       'Canvas': [],
       'Creation': [],
@@ -157,12 +170,16 @@ const LeftSidebar: React.FC<LeftSidebarProps> = ({
       'Management': []
     };
 
-    DEFAULT_SHORTCUTS.forEach(shortcut => {
+    shortcuts.forEach(shortcut => {
       const action = shortcut.action;
       
+      // Skip shortcuts that don't have working implementations
+      if (nonFunctionalActions.has(action)) {
+        return;
+      }
+      
       if (action.includes('zoom') || action.includes('fit') || action.includes('clear') || 
-          action.includes('delete') || action.includes('select') || action === 'undo' || 
-          action === 'redo' || action === 'copy' || action === 'paste') {
+          action.includes('delete')) {
         result['Canvas'].push(shortcut);
       } else if (action.includes('open') || action.includes('generate')) {
         result['Creation'].push(shortcut);
@@ -174,7 +191,7 @@ const LeftSidebar: React.FC<LeftSidebarProps> = ({
     });
 
     return result;
-  }, []);
+  }, [shortcuts]);
 
   const sidebarItems = [
     {

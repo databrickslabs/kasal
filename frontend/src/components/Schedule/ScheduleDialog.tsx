@@ -613,7 +613,12 @@ const ScheduleDialog: React.FC<ScheduleDialogProps> = ({
             )}
           </Box>
 
-          <Typography variant="h6" gutterBottom>Existing Schedules</Typography>
+          <Typography variant="h6" gutterBottom>Existing Schedules ({schedules.length})</Typography>
+          {schedules.length === 0 && (
+            <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
+              No schedules found.
+            </Typography>
+          )}
           <List>
             {schedules.map((schedule) => (
               <ListItem key={schedule.id}>
