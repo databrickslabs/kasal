@@ -784,6 +784,7 @@ const WorkflowDesigner: React.FC<WorkflowDesignerProps> = (): JSX.Element => {
           selectedModel={selectedModel}
           setSelectedModel={setSelectedModel}
           setIsConfigurationDialogOpen={dialogManager.setIsConfigurationDialogOpen}
+          onOpenLogsDialog={() => dialogManager.setIsLogsDialogOpen(true)}
           showRunHistory={showRunHistory}
         />
       </Box>

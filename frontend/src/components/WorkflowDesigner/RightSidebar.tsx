@@ -11,7 +11,6 @@ import {
   GlobalStyles,
 } from '@mui/material';
 import {
-  Assessment as LogsIcon,
   SmartToy as SmartToyIcon,
   Schedule as ScheduleIcon,
   PersonAdd as PersonAddIcon,
@@ -880,95 +879,6 @@ const RightSidebar: React.FC<RightSidebarProps> = ({
         </Box>
       )
     },
-    {
-      id: 'logs',
-      icon: <LogsIcon />,
-      tooltip: 'View Logs',
-      content: (
-        <Box
-          sx={{
-            maxHeight: contentHeight,
-            overflowY: 'auto',
-            p: 1,
-            width: '100%',
-            boxSizing: 'border-box'
-          }}
-        >
-          <Box sx={{ 
-            mb: 2,
-            width: '100%',
-            boxSizing: 'border-box',
-            px: 1
-          }}>
-            <Typography 
-              variant="subtitle2" 
-              sx={{ 
-                color: theme.palette.primary.main, 
-                mb: 1,
-                fontWeight: 600,
-                textTransform: 'uppercase',
-                letterSpacing: '0.5px',
-                fontSize: '0.7rem'
-              }}
-            >
-              System Logs
-            </Typography>
-            
-            <Box
-              onClick={onOpenLogsDialog}
-              sx={{
-                display: 'flex',
-                alignItems: 'center',
-                gap: 1,
-                py: 1,
-                px: 1,
-                borderRadius: 1,
-                cursor: 'pointer',
-                border: `1px solid ${theme.palette.divider}`,
-                backgroundColor: 'background.paper',
-                transition: 'all 0.2s ease-in-out',
-                width: '220px',
-                boxSizing: 'border-box',
-                ml: 2,
-                '&:hover': {
-                  backgroundColor: 'action.hover',
-                  borderColor: theme.palette.primary.main,
-                  transform: 'translateY(-1px)',
-                  boxShadow: theme.shadows[2],
-                },
-              }}
-            >
-              <LogsIcon 
-                sx={{ 
-                  fontSize: '1.2rem', 
-                  color: theme.palette.primary.main 
-                }} 
-              />
-              <Box>
-                <Typography 
-                  variant="body2" 
-                  sx={{ 
-                    fontWeight: 500,
-                    color: 'text.primary'
-                  }}
-                >
-                  View System Logs
-                </Typography>
-                <Typography 
-                  variant="caption" 
-                  sx={{ 
-                    color: 'text.secondary',
-                    fontSize: '0.7rem'
-                  }}
-                >
-                  Monitor execution logs and debug information
-                </Typography>
-              </Box>
-            </Box>
-          </Box>
-        </Box>
-      )
-    },
   ];
 
   return (
@@ -1059,10 +969,7 @@ const RightSidebar: React.FC<RightSidebarProps> = ({
                         if (isChatOpen && !shouldKeepChatOpen && !chatOpenedByClick) {
                           onToggleChat();
                         }
-                        // Don't set active section for logs since it opens a dialog
-                        if (item.id !== 'logs') {
-                          setActiveSection(item.id);
-                        }
+                        setActiveSection(item.id);
                       }
                     }}
                     onClick={() => {
@@ -1070,13 +977,6 @@ const RightSidebar: React.FC<RightSidebarProps> = ({
                         // Toggle the click state when clicking chat
                         setChatOpenedByClick(!isChatOpen);
                         onToggleChat();
-                      } else if (item.id === 'logs') {
-                        // Close chat if it's open when opening logs
-                        if (isChatOpen) {
-                          setChatOpenedByClick(false);
-                          onToggleChat();
-                        }
-                        onOpenLogsDialog();
                       } else if (item.id === 'schedule') {
                         // Close chat if it's open when switching to schedule section
                         if (isChatOpen) {

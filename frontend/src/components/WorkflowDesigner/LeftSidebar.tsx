@@ -26,6 +26,7 @@ import {
   Tune as TuneIcon,
   Memory as ModelIcon,
   Settings as SettingsIcon,
+  Assessment as LogsIcon,
 } from '@mui/icons-material';
 
 import { ShortcutConfig } from '../../types/shortcuts';
@@ -65,6 +66,8 @@ interface LeftSidebarProps {
   setSelectedModel: (model: string) => void;
   // New prop for configuration
   setIsConfigurationDialogOpen?: (open: boolean) => void;
+  // Logs dialog prop
+  onOpenLogsDialog?: () => void;
   // Execution history visibility
   showRunHistory?: boolean;
 }
@@ -86,6 +89,7 @@ const LeftSidebar: React.FC<LeftSidebarProps> = ({
   selectedModel,
   setSelectedModel,
   setIsConfigurationDialogOpen,
+  onOpenLogsDialog,
   showRunHistory
 }) => {
   const theme = useTheme();
@@ -764,6 +768,41 @@ const LeftSidebar: React.FC<LeftSidebarProps> = ({
                         alignSelf: 'center'
                       }}
                     />
+                  </>
+                )}
+                {/* Add View Logs button after Keyboard Shortcuts with separator */}
+                {item.id === 'shortcuts' && onOpenLogsDialog && (
+                  <>
+                    {/* Separator */}
+                    <Box
+                      sx={{
+                        width: '80%',
+                        height: '1px',
+                        backgroundColor: 'divider',
+                        mb: 1,
+                        alignSelf: 'center'
+                      }}
+                    />
+                    
+                    <Tooltip title="View System Logs" placement="right">
+                      <IconButton
+                        onClick={onOpenLogsDialog}
+                        sx={{
+                          width: 40,
+                          height: 40,
+                          mb: 1,
+                          color: 'text.secondary',
+                          borderRadius: 0,
+                          transition: 'all 0.2s ease-in-out',
+                          '&:hover': {
+                            backgroundColor: 'action.hover',
+                            color: 'text.primary'
+                          }
+                        }}
+                      >
+                        <LogsIcon fontSize="small" />
+                      </IconButton>
+                    </Tooltip>
                   </>
                 )}
               </React.Fragment>
