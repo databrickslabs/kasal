@@ -1,6 +1,6 @@
-from typing import Annotated, AsyncGenerator, Callable, Type
+from typing import Annotated, AsyncGenerator, Callable, Type, Optional
 
-from fastapi import Depends
+from fastapi import Depends, Request, Header
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.core.base_repository import BaseRepository
@@ -9,9 +9,44 @@ from src.db.base import Base
 from src.db.session import get_db
 from src.services.log_service import LLMLogService
 from src.repositories.log_repository import LLMLogRepository
+from src.utils.user_context import TenantContext
 
 # Type definitions for dependencies
 SessionDep = Annotated[AsyncSession, Depends(get_db)]
+
+
+async def get_tenant_context(
+    request: Request,
+    x_forwarded_email: Optional[str] = Header(None, alias="X-Forwarded-Email"),
+    x_forwarded_access_token: Optional[str] = Header(None, alias="X-Forwarded-Access-Token")
+) -> TenantContext:
+    """
+    Extract tenant context from Databricks Apps headers.
+    
+    For Databricks Apps deployment, this extracts tenant information from:
+    - X-Forwarded-Email: The user's email for tenant identification
+    - X-Forwarded-Access-Token: Access token for verification
+    
+    Args:
+        request: FastAPI request object
+        x_forwarded_email: User email from Databricks Apps
+        x_forwarded_access_token: Access token from Databricks Apps
+        
+    Returns:
+        TenantContext: Extracted tenant context with tenant_id, email, etc.
+    """
+    if x_forwarded_email:
+        return TenantContext.from_email(
+            email=x_forwarded_email,
+            access_token=x_forwarded_access_token
+        )
+    
+    # Fallback: No tenant context available (single-tenant mode)
+    return TenantContext()
+
+
+# Type definitions for tenant-aware dependencies
+TenantContextDep = Annotated[TenantContext, Depends(get_tenant_context)]
 
 
 def get_repository(

@@ -1,14 +1,16 @@
 """
-User context utility for handling user tokens from HTTP headers.
+User and tenant context utility for handling user tokens and tenant identification.
 
 This module provides utilities to extract and manage user access tokens
 from HTTP headers, particularly for Databricks Apps where user tokens
-are forwarded via the X-Forwarded-Access-Token header.
+are forwarded via the X-Forwarded-Access-Token header. It also handles
+automatic tenant extraction from user email domains.
 """
 
 import logging
 from contextvars import ContextVar
 from typing import Optional, Dict, Any
+from dataclasses import dataclass
 from fastapi import Request
 
 logger = logging.getLogger(__name__)
@@ -16,6 +18,54 @@ logger = logging.getLogger(__name__)
 # Context variable to store the current user's access token
 _user_access_token: ContextVar[Optional[str]] = ContextVar('user_access_token', default=None)
 _user_context: ContextVar[Optional[Dict[str, Any]]] = ContextVar('user_context', default=None)
+_tenant_context: ContextVar[Optional['TenantContext']] = ContextVar('tenant_context', default=None)
+
+
+@dataclass
+class TenantContext:
+    """
+    Simple tenant context extracted from user information.
+    
+    This provides basic tenant isolation without complex Unity Catalog integration.
+    Can be enhanced later with Unity Catalog mapping.
+    """
+    tenant_id: Optional[str] = None        # e.g., "acme_corp"
+    tenant_email: Optional[str] = None     # e.g., "alice@acme-corp.com"
+    email_domain: Optional[str] = None     # e.g., "acme-corp.com"
+    user_id: Optional[str] = None          # User ID if available
+    access_token: Optional[str] = None     # Databricks access token
+    
+    @classmethod
+    def from_email(cls, email: str, access_token: str = None, user_id: str = None) -> 'TenantContext':
+        """Create TenantContext from user email."""
+        if not email or "@" not in email:
+            return cls()
+        
+        email_domain = email.split("@")[1]
+        tenant_id = cls.generate_tenant_id(email_domain)
+        
+        return cls(
+            tenant_id=tenant_id,
+            tenant_email=email,
+            email_domain=email_domain,
+            user_id=user_id,
+            access_token=access_token
+        )
+    
+    @staticmethod
+    def generate_tenant_id(email_domain: str) -> str:
+        """
+        Generate tenant ID from email domain.
+        
+        Examples:
+        - acme-corp.com -> acme_corp
+        - tech.startup.io -> tech_startup_io
+        """
+        return email_domain.replace(".", "_").replace("-", "_").lower()
+    
+    def is_valid(self) -> bool:
+        """Check if tenant context is valid."""
+        return bool(self.tenant_id and self.email_domain)
 
 
 class UserContext:
@@ -66,10 +116,32 @@ class UserContext:
         return _user_context.get()
     
     @staticmethod
+    def set_tenant_context(tenant_context: TenantContext) -> None:
+        """
+        Set the current tenant context.
+        
+        Args:
+            tenant_context: TenantContext object
+        """
+        _tenant_context.set(tenant_context)
+        logger.debug(f"Tenant context set: {tenant_context.tenant_id}")
+    
+    @staticmethod
+    def get_tenant_context() -> Optional[TenantContext]:
+        """
+        Get the current tenant context.
+        
+        Returns:
+            TenantContext object if available, None otherwise
+        """
+        return _tenant_context.get()
+    
+    @staticmethod
     def clear_context() -> None:
         """Clear all user context information."""
         _user_access_token.set(None)
         _user_context.set(None)
+        _tenant_context.set(None)
         logger.debug("User context cleared")
 
 
@@ -108,6 +180,43 @@ def extract_user_token_from_request(request: Request) -> Optional[str]:
         return None
 
 
+def extract_tenant_context_from_request(request: Request) -> Optional[TenantContext]:
+    """
+    Extract tenant context from HTTP request headers.
+    
+    Uses X-Forwarded-Email header from Databricks Apps to determine tenant.
+    
+    Args:
+        request: FastAPI Request object
+        
+    Returns:
+        TenantContext object if tenant can be determined, None otherwise
+    """
+    try:
+        # Extract email from Databricks Apps header
+        email = request.headers.get('X-Forwarded-Email')
+        if not email:
+            logger.debug("No X-Forwarded-Email header found")
+            return None
+        
+        # Extract access token
+        access_token = extract_user_token_from_request(request)
+        
+        # Create tenant context from email
+        tenant_context = TenantContext.from_email(email, access_token)
+        
+        if tenant_context.is_valid():
+            logger.debug(f"Extracted tenant context: {tenant_context.tenant_id}")
+            return tenant_context
+        else:
+            logger.debug(f"Invalid tenant context extracted from email: {email}")
+            return None
+            
+    except Exception as e:
+        logger.error(f"Error extracting tenant context from request: {e}")
+        return None
+
+
 def extract_user_context_from_request(request: Request) -> Dict[str, Any]:
     """
     Extract user context information from HTTP request headers.
@@ -126,6 +235,11 @@ def extract_user_context_from_request(request: Request) -> Dict[str, Any]:
         if user_token:
             context['access_token'] = user_token
         
+        # Extract Databricks Apps email
+        email = request.headers.get('X-Forwarded-Email')
+        if email:
+            context['email'] = email
+        
         # Extract other relevant headers
         user_agent = request.headers.get('User-Agent')
         if user_agent:
@@ -134,7 +248,7 @@ def extract_user_context_from_request(request: Request) -> Dict[str, Any]:
         # Extract Databricks-specific headers if present
         databricks_headers = {}
         for header_name, header_value in request.headers.items():
-            if header_name.lower().startswith('x-databricks-'):
+            if header_name.lower().startswith('x-databricks-') or header_name.lower().startswith('x-forwarded-'):
                 databricks_headers[header_name] = header_value
         
         if databricks_headers:
@@ -155,10 +269,10 @@ def extract_user_context_from_request(request: Request) -> Dict[str, Any]:
 
 async def user_context_middleware(request: Request, call_next):
     """
-    Middleware to extract and set user context from HTTP headers.
+    Middleware to extract and set user and tenant context from HTTP headers.
     
-    This middleware is only active when Databricks Apps is enabled.
-    It extracts user context from incoming requests when apps_enabled is true.
+    This middleware extracts both user context and tenant context from Databricks Apps headers.
+    It works whether or not Databricks Apps is enabled, but provides richer context when it is.
     
     Args:
         request: FastAPI Request object
@@ -171,6 +285,12 @@ async def user_context_middleware(request: Request, call_next):
     try:
         # Check if Databricks Apps is enabled before processing user context
         apps_enabled = await _is_databricks_apps_enabled()
+        
+        # Always try to extract tenant context from X-Forwarded-Email if present
+        tenant_context = extract_tenant_context_from_request(request)
+        if tenant_context:
+            UserContext.set_tenant_context(tenant_context)
+            logger.debug(f"Tenant context middleware: Set tenant {tenant_context.tenant_id}")
         
         if apps_enabled:
             # Extract user context from request
@@ -197,9 +317,8 @@ async def user_context_middleware(request: Request, call_next):
         return await call_next(request)
     
     finally:
-        # Clear context after request processing if it was set
-        if apps_enabled:
-            UserContext.clear_context()
+        # Clear context after request processing
+        UserContext.clear_context()
 
 
 async def _is_databricks_apps_enabled() -> bool:
