@@ -37,7 +37,7 @@ def debug_log(message):
 try:
     debug_log("Importing seeders...")
     # Import all needed modules
-    from src.seeds import tools, schemas, prompt_templates, model_configs, documentation
+    from src.seeds import tools, schemas, prompt_templates, model_configs, documentation, roles
     from src.db.session import async_session_factory
     debug_log("Successfully imported all seeder modules")
 except ImportError as e:
@@ -78,6 +78,12 @@ try:
     debug_log("Added documentation.seed to SEEDERS")
 except (NameError, AttributeError) as e:
     logger.error(f"Error adding documentation seeder: {e}")
+
+try:
+    SEEDERS["roles"] = roles.seed
+    debug_log("Added roles.seed to SEEDERS")
+except (NameError, AttributeError) as e:
+    logger.error(f"Error adding roles seeder: {e}")
 
 # Log available seeders
 logger.info(f"Available seeders: {list(SEEDERS.keys())}")

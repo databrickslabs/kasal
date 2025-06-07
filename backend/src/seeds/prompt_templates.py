@@ -192,42 +192,7 @@ For agents include:
             "goal": "clear objective",
             "backstory": "relevant experience and expertise",
             "tools": [],
-            "llm": "{
-    "dispatcher": {
-        "intent": "generate_agent",
-        "confidence": 0.95,
-        "extracted_info": {
-            "agent_type": "flight finder"
-        },
-        "suggested_prompt": "Create an agent specialized in finding flights"
-    },
-    "generation_result": {
-        "name": "Flight Finder",
-        "role": "Flight Search Specialist",
-        "goal": "To find the best flights based on user's preferences",
-        "backstory": "This agent has access to comprehensive flight databases and can compare flight options based on different criteria such as price, duration, airline, and more.",
-        "tools": [],
-        "advanced_config": {
             "llm": "databricks-llama-4-maverick",
-            "function_calling_llm": null,
-            "max_iter": 25,
-            "max_rpm": 1,
-            "verbose": false,
-            "allow_delegation": false,
-            "cache": true,
-            "allow_code_execution": false,
-            "code_execution_mode": "safe",
-            "max_retry_limit": 2,
-            "use_system_prompt": true,
-            "respect_context_window": true,
-            "max_execution_time": null,
-            "system_template": null,
-            "prompt_template": null,
-            "response_template": null
-        }
-    },
-    "service_called": "generate_agent"
-}",
             "function_calling_llm": null,
             "max_iter": 25,
             "max_rpm": 1,

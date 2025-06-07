@@ -19,6 +19,14 @@ class ScheduleCreate(ScheduleBase):
     pass
 
 
+class ScheduleCreateFromExecution(BaseModel):
+    """Schema for creating a schedule from an existing execution"""
+    name: str = Field(..., description="Name of the scheduled job")
+    cron_expression: str = Field(..., description="Cron expression for schedule timing")
+    execution_id: int = Field(..., description="ID of the execution to use as template")
+    is_active: bool = Field(default=True, description="Whether the schedule is active")
+
+
 class ScheduleUpdate(ScheduleBase):
     """Schema for updating an existing schedule"""
     pass

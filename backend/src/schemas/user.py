@@ -4,16 +4,8 @@ from typing import Optional, List, Dict, Any, Union
 from pydantic import BaseModel, EmailStr, Field, field_validator, root_validator
 import re
 
-# Enums
-class UserRole(str, Enum):
-    ADMIN = "admin"
-    TECHNICAL = "technical"
-    REGULAR = "regular"
-
-class UserStatus(str, Enum):
-    ACTIVE = "active"
-    INACTIVE = "inactive"
-    SUSPENDED = "suspended"
+# Import enums from models to ensure consistency
+from src.models.enums import UserRole, UserStatus
 
 class IdentityProviderType(str, Enum):
     LOCAL = "local"
@@ -25,7 +17,7 @@ class IdentityProviderType(str, Enum):
 # Base schemas
 class UserBase(BaseModel):
     username: str
-    email: EmailStr
+    email: str  # Changed from EmailStr to str to allow localhost domains in development
 
     @field_validator('username', mode='before')
     def username_validator(cls, v):
@@ -33,6 +25,16 @@ class UserBase(BaseModel):
             raise ValueError('Username can only contain letters, numbers, underscores, and hyphens')
         if len(v) < 3 or len(v) > 50:
             raise ValueError('Username must be between 3 and 50 characters')
+        return v
+    
+    @field_validator('email', mode='before')
+    def email_validator(cls, v):
+        # Allow localhost domains for development
+        if '@localhost' in v:
+            return v
+        # For other domains, use basic email regex validation
+        if not re.match(r'^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$', v):
+            raise ValueError('Invalid email format')
         return v
 
 # User registration and creation
@@ -272,7 +274,8 @@ class UserInDB(UserBase):
     last_login: Optional[datetime] = None
     
     model_config = {
-        "from_attributes": True
+        "from_attributes": True,
+        "use_enum_values": True
     }
 
 class UserWithProfile(UserInDB):

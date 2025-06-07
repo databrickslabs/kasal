@@ -87,8 +87,8 @@ async def mock_create_embedding(text: str) -> List[float]:
     # Set the random seed for reproducibility
     random.seed(seed)
     
-    # Generate a 1536-dimensional vector (same as OpenAI embeddings)
-    mock_embedding = [random.uniform(-0.1, 0.1) for _ in range(1536)]
+    # Generate a 1024-dimensional vector (same as Databricks GTE large embeddings)
+    mock_embedding = [random.uniform(-0.1, 0.1) for _ in range(1024)]
     
     # Normalize the vector to unit length
     magnitude = sum(x**2 for x in mock_embedding) ** 0.5
