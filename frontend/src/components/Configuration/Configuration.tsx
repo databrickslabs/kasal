@@ -104,7 +104,7 @@ function Configuration({ onClose }: ConfigurationProps): JSX.Element {
       index: 0
     },
     {
-      label: t('configuration.tenants.tab', { defaultValue: 'Tenants' }),
+      label: t('configuration.groups.tab', { defaultValue: 'Groups' }),
       icon: <GroupIcon fontSize="small" />,
       index: 1
     },
