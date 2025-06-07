@@ -29,7 +29,7 @@ import MemoryIcon from '@mui/icons-material/MemoryRounded';
 import CloudIcon from '@mui/icons-material/Cloud';
 import EngineeringIcon from '@mui/icons-material/Engineering';
 import CloseIcon from '@mui/icons-material/Close';
-import GroupIcon from '@mui/icons-material/Group';
+import SecurityIcon from '@mui/icons-material/Security';
 import { useTranslation } from 'react-i18next';
 import { LanguageService } from '../../api/LanguageService';
 import { ThemeConfig as _ThemeConfig } from '../../api/ThemeService';
@@ -44,8 +44,7 @@ import DatabaseConfiguration from './Database';
 import MemoryManagement from './Memory/MemoryManagement';
 import MCPConfiguration from './MCP/MCPConfiguration';
 import EnginesConfiguration from './Engines';
-import TenantManagement from './TenantManagement';
-import DeveloperMode from './DeveloperMode';
+import SecurityManagement from './SecurityManagement';
 import { LANGUAGES } from '../../config/i18n/config';
 
 interface ConfigurationProps {
@@ -104,8 +103,8 @@ function Configuration({ onClose }: ConfigurationProps): JSX.Element {
       index: 0
     },
     {
-      label: t('configuration.groups.tab', { defaultValue: 'Groups' }),
-      icon: <GroupIcon fontSize="small" />,
+      label: t('configuration.security.tab', { defaultValue: 'Security' }),
+      icon: <SecurityIcon fontSize="small" />,
       index: 1
     },
     {
@@ -364,8 +363,7 @@ function Configuration({ onClose }: ConfigurationProps): JSX.Element {
           </ContentPanel>
 
           <ContentPanel value={activeSection} index={1}>
-            <DeveloperMode />
-            <TenantManagement />
+            <SecurityManagement />
           </ContentPanel>
 
           <ContentPanel value={activeSection} index={2}>

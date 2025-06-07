@@ -21,7 +21,7 @@ import {
 interface MockUser {
   email: string;
   name: string;
-  tenant: string;
+  group: string;
   color: 'primary' | 'secondary' | 'success' | 'warning' | 'error';
 }
 
@@ -29,25 +29,25 @@ const MOCK_USERS: MockUser[] = [
   {
     email: 'alice@acme-corp.com',
     name: 'Alice (Acme Corp)',
-    tenant: 'acme_corp_com',
+    group: 'acme_corp_com',
     color: 'primary'
   },
   {
     email: 'bob@tech-startup.io',
     name: 'Bob (Tech Startup)',
-    tenant: 'tech_startup_io',
+    group: 'tech_startup_io',
     color: 'secondary'
   },
   {
     email: 'charlie@big-enterprise.com',
     name: 'Charlie (Big Enterprise)',
-    tenant: 'big_enterprise_com',
+    group: 'big_enterprise_com',
     color: 'success'
   },
   {
     email: 'diana@small-business.net',
     name: 'Diana (Small Business)',
-    tenant: 'small_business_net',
+    group: 'small_business_net',
     color: 'warning'
   },
 ];
@@ -91,7 +91,7 @@ const DeveloperMode: React.FC = () => {
 
   const getCurrentUserInfo = () => {
     const user = MOCK_USERS.find(u => u.email === currentUser);
-    return user || { email: currentUser, name: 'Custom User', tenant: 'unknown', color: 'default' as const };
+    return user || { email: currentUser, name: 'Custom User', group: 'unknown', color: 'default' as const };
   };
 
   // Only show in development mode

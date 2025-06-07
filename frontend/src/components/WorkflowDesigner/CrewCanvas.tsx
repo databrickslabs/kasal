@@ -421,8 +421,8 @@ const CrewCanvas: React.FC<CrewCanvasProps> = ({
     });
 
     return crewNodes.map(node => {
-      const defaultWidth = node.type === 'agentNode' ? 180 : 280;
-      const defaultHeight = node.type === 'agentNode' ? 180 : 140;
+      const defaultWidth = node.type === 'agentNode' ? 170 : 270;
+      const defaultHeight = node.type === 'agentNode' ? 170 : 135;
       
       if (!node.style || (!node.style.width && !node.style.height)) {
         return {
@@ -845,7 +845,7 @@ const CrewCanvas: React.FC<CrewCanvasProps> = ({
             newNodes.push({
               id: nodeId,
               type: 'agentNode',
-              position: { x: 100, y: 100 + (index * 150) },
+              position: { x: 80, y: 100 + (index * 150) },
               data: {
                 label: agent.name,
                 agentId: agent.id,
@@ -867,7 +867,7 @@ const CrewCanvas: React.FC<CrewCanvasProps> = ({
               id: nodeId,
               type: 'taskNode',
               // Position tasks to the right of agents
-              position: { x: 400, y: 100 + (index * 150) }, 
+              position: { x: 360, y: 100 + (index * 150) }, 
               data: {
                 label: task.name,
                 taskId: task.id,
