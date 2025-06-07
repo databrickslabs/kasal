@@ -25,11 +25,16 @@ from src.models.schema import Schema
 from src.models.execution_logs import ExecutionLog
 from src.models.mcp_server import MCPServer
 from src.models.mcp_settings import MCPSettings
-# Multi-tenant models
-from src.models.tenant import Tenant, TenantUser
+# Multi-group models (formerly multi-tenant)
+from src.models.group import Group, GroupUser
+
+# User and RBAC models
+from src.models.user import User, UserProfile, RefreshToken, ExternalIdentity, Role, Privilege, RolePrivilege, UserRole, IdentityProvider
+
+# Billing models
+from src.models.billing import LLMUsageBilling, BillingPeriod, BillingAlert
 
 # Add additional models here as your application grows
-# from src.models.user import User
 # from src.models.order import Order
 
 # This ensures all models are registered with SQLAlchemy metadata
@@ -58,7 +63,21 @@ __all__ = [
     "ExecutionLog",
     "MCPServer",
     "MCPSettings",
-    # Multi-tenant models
-    "Tenant",
-    "TenantUser"
+    # Multi-group models
+    "Group",
+    "GroupUser",
+    # User and RBAC models
+    "User",
+    "UserProfile", 
+    "RefreshToken",
+    "ExternalIdentity",
+    "Role",
+    "Privilege",
+    "RolePrivilege",
+    "UserRole",
+    "IdentityProvider",
+    # Billing models
+    "LLMUsageBilling",
+    "BillingPeriod", 
+    "BillingAlert"
 ] 
