@@ -24,7 +24,6 @@ import KeyIcon from '@mui/icons-material/Key';
 import BuildIcon from '@mui/icons-material/Build';
 import CodeIcon from '@mui/icons-material/Code';
 import TextFormatIcon from '@mui/icons-material/TextFormat';
-import StorageIcon from '@mui/icons-material/Storage';
 import CloudIcon from '@mui/icons-material/Cloud';
 import EngineeringIcon from '@mui/icons-material/Engineering';
 import CloseIcon from '@mui/icons-material/Close';
@@ -39,7 +38,6 @@ import ObjectManagement from './ObjectManagement';
 import ToolForm from '../Tools/ToolForm';
 import PromptConfiguration from './PromptConfiguration';
 import DatabricksConfiguration from './DatabricksConfiguration';
-import DatabaseConfiguration from './Database';
 import MCPConfiguration from './MCP/MCPConfiguration';
 import EnginesConfiguration from './Engines';
 import SecurityManagement from './SecurityManagement';
@@ -144,11 +142,6 @@ function Configuration({ onClose }: ConfigurationProps): JSX.Element {
       label: t('configuration.prompts.tab', { defaultValue: 'Prompts' }),
       icon: <TextFormatIcon fontSize="small" />,
       index: 9
-    },
-    {
-      label: t('configuration.database.tab', { defaultValue: 'Database' }),
-      icon: <StorageIcon fontSize="small" />,
-      index: 10
     },
   ];
 
@@ -391,9 +384,6 @@ function Configuration({ onClose }: ConfigurationProps): JSX.Element {
             <PromptConfiguration />
           </ContentPanel>
 
-          <ContentPanel value={activeSection} index={10}>
-            <DatabaseConfiguration />
-          </ContentPanel>
 
         </Box>
       </Box>
