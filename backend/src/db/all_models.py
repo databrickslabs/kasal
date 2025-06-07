@@ -25,6 +25,8 @@ from src.models.schema import Schema
 from src.models.execution_logs import ExecutionLog
 from src.models.mcp_server import MCPServer
 from src.models.mcp_settings import MCPSettings
+# Multi-tenant models
+from src.models.tenant import Tenant, TenantUser
 
 # Add additional models here as your application grows
 # from src.models.user import User
@@ -55,5 +57,8 @@ __all__ = [
     "Schema",
     "ExecutionLog",
     "MCPServer",
-    "MCPSettings"
+    "MCPSettings",
+    # Multi-tenant models
+    "Tenant",
+    "TenantUser"
 ] 

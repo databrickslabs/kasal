@@ -13,6 +13,7 @@ def generate_uuid():
 class Task(Base):
     """
     Task model representing a task in the system.
+    Enhanced with tenant isolation for multi-tenant deployments.
     """
     __tablename__ = "tasks"
     
@@ -25,6 +26,10 @@ class Task(Base):
     async_execution = Column(Boolean, default=False)
     context = Column(JSON, default=list)
     config = Column(JSON, default=dict)
+    
+    # Multi-tenant fields
+    tenant_id = Column(String(100), index=True, nullable=True)  # Tenant isolation
+    created_by_email = Column(String(255), nullable=True)  # Creator email for audit
     
     # Output configuration
     output_json = Column(String)

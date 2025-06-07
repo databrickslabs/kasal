@@ -8,6 +8,7 @@ from src.db.base import Base
 class ExecutionTrace(Base):
     """
     ExecutionTrace model for tracking agent/task execution.
+    Enhanced with tenant isolation for multi-tenant deployments.
     """
     
     __tablename__ = "execution_trace"
@@ -21,6 +22,10 @@ class ExecutionTrace(Base):
     output = Column(JSON)
     trace_metadata = Column(JSON, nullable=True)
     created_at = Column(DateTime, default=datetime.utcnow)
+    
+    # Multi-tenant fields
+    tenant_id = Column(String(100), index=True, nullable=True)  # Tenant isolation
+    tenant_email = Column(String(255), index=True, nullable=True)  # User email for audit
     
     # Relationship with ExecutionHistory - Use specific foreign keys to resolve ambiguity
     run = relationship("ExecutionHistory", back_populates="execution_traces", foreign_keys=[run_id])

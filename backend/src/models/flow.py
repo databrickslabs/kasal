@@ -9,6 +9,7 @@ from src.db.base import Base
 class Flow(Base):
     """
     Flow model representing a workflow definition with nodes and edges.
+    Enhanced with tenant isolation for multi-tenant deployments.
     """
     __tablename__ = "flows"
     
@@ -18,6 +19,10 @@ class Flow(Base):
     nodes = Column(JSON, default=list)
     edges = Column(JSON, default=list)
     flow_config = Column(JSON, default=dict)
+    
+    # Multi-tenant fields
+    tenant_id = Column(String(100), index=True, nullable=True)  # Tenant isolation
+    created_by_email = Column(String(255), nullable=True)  # Creator email for audit
     
     # Metadata
     created_at = Column(DateTime, default=datetime.utcnow)

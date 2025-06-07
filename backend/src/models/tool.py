@@ -7,6 +7,7 @@ from src.db.base import Base
 class Tool(Base):
     """
     SQLAlchemy model for tools.
+    Enhanced with tenant isolation for multi-tenant deployments.
     """
     
     __tablename__ = "tools"
@@ -17,6 +18,12 @@ class Tool(Base):
     icon = Column(String, nullable=False)
     config = Column(JSON, default=dict)
     enabled = Column(Boolean, default=True)
+    
+    # Multi-tenant fields
+    tenant_id = Column(String(100), index=True, nullable=True)  # Tenant isolation
+    created_by_email = Column(String(255), nullable=True)  # Creator email for audit
+    
+    # Metadata
     created_at = Column(DateTime, default=datetime.utcnow)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
     

@@ -12,6 +12,7 @@ def generate_uuid():
 class Agent(Base):
     """
     Agent model representing an AI agent in the system.
+    Enhanced with tenant isolation for multi-tenant deployments.
     """
     __tablename__ = "agents"
     
@@ -20,6 +21,10 @@ class Agent(Base):
     role = Column(String, nullable=False)
     goal = Column(String, nullable=False)
     backstory = Column(String)
+    
+    # Multi-tenant fields
+    tenant_id = Column(String(100), index=True, nullable=True)  # Tenant isolation
+    created_by_email = Column(String(255), nullable=True)  # Creator email for audit
     
     # Core configuration
     llm = Column(String, default="databricks-llama-4-maverick")
