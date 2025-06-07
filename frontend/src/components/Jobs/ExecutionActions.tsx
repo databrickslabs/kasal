@@ -2,7 +2,6 @@ import React from 'react';
 import { Box, IconButton, Tooltip } from '@mui/material';
 import DeleteIcon from '@mui/icons-material/Delete';
 import VisibilityIcon from '@mui/icons-material/Visibility';
-import InputIcon from '@mui/icons-material/Input';
 import PictureAsPdfIcon from '@mui/icons-material/PictureAsPdf';
 import PreviewIcon from '@mui/icons-material/Preview';
 import TerminalIcon from '@mui/icons-material/Terminal';
@@ -14,7 +13,6 @@ import { useTranslation } from 'react-i18next';
 interface RunActionsProps {
   run: Run;
   onViewResult: (run: Run) => void;
-  onLoadCrew: (run: Run) => void;
   onShowTrace: (runId: string) => void;
   onShowLogs: (jobId: string) => void;
   onSchedule: (run: Run) => void;
@@ -24,7 +22,6 @@ interface RunActionsProps {
 const RunActions: React.FC<RunActionsProps> = ({
   run,
   onViewResult,
-  onLoadCrew,
   onShowTrace,
   onShowLogs,
   onSchedule,
@@ -50,15 +47,6 @@ const RunActions: React.FC<RunActionsProps> = ({
           color="primary"
         >
           <PictureAsPdfIcon fontSize="small" />
-        </IconButton>
-      </Tooltip>
-      <Tooltip title={t('runHistory.actions.viewInputs')}>
-        <IconButton
-          size="small"
-          onClick={() => onLoadCrew(run)}
-          color="primary"
-        >
-          <InputIcon fontSize="small" />
         </IconButton>
       </Tooltip>
       <Tooltip title={t('runHistory.actions.viewTrace')}>

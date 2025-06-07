@@ -25,7 +25,7 @@ import SearchIcon from '@mui/icons-material/Search';
 import FilterListIcon from '@mui/icons-material/FilterList';
 import ArrowUpwardIcon from '@mui/icons-material/ArrowUpward';
 import ArrowDownwardIcon from '@mui/icons-material/ArrowDownward';
-import { Run, RunService } from '../../api/ExecutionHistoryService';
+import { Run } from '../../api/ExecutionHistoryService';
 import { ScheduleService } from '../../api/ScheduleService';
 import ShowTrace from './ShowTrace';
 import ShowResult from './ShowResult';
@@ -35,8 +35,6 @@ import { executionLogService } from '../../api/ExecutionLogs';
 import type { LogMessage, LogEntry } from '../../api/ExecutionLogs';
 import { useTranslation } from 'react-i18next';
 import { toast } from 'react-hot-toast';
-import LoadCrew from '../Crew/LoadCrew';
-import { Node, Edge } from 'reactflow';
 import { useRunResult } from '../../hooks/global/useExecutionResult';
 import { useRunHistory } from '../../hooks/global/useExecutionHistory';
 import { useRunStatusStore } from '../../store/runStatus';
@@ -46,10 +44,6 @@ import { AgentYaml, TaskYaml } from '../../types/crew';
 
 export interface RunHistoryRef {
   refreshRuns: () => Promise<void>;
-}
-
-interface RunHistoryProps {
-  onCrewLoad?: (nodes: Node[], edges: Edge[]) => void;
 }
 
 interface ScheduleCreateData {
@@ -62,7 +56,7 @@ interface ScheduleCreateData {
   planning: boolean;
 }
 
-const RunHistory = forwardRef<RunHistoryRef, RunHistoryProps>((props, ref) => {
+const RunHistory = forwardRef<RunHistoryRef>((_, ref) => {
   const { t } = useTranslation();
   const { showRunResult, selectedRun, isOpen, closeRunResult } = useRunResult();
   const {
@@ -108,8 +102,6 @@ const RunHistory = forwardRef<RunHistoryRef, RunHistoryProps>((props, ref) => {
   const [anchorEl, setAnchorEl] = useState<HTMLButtonElement | null>(null);
   const searchInputRef = useRef<HTMLInputElement>(null);
   const scheduleNameInputRef = useRef<HTMLInputElement>(null);
-  const [selectedRunForLoad, setSelectedRunForLoad] = useState<Run | null>(null);
-  const [loadCrewOpen, setLoadCrewOpen] = useState(false);
   const [deleteRunDialogOpen, setDeleteRunDialogOpen] = useState(false);
   const [runToDelete, setRunToDelete] = useState<Run | null>(null);
   const [localPage, setLocalPage] = useState(1);
@@ -255,52 +247,6 @@ const RunHistory = forwardRef<RunHistoryRef, RunHistoryProps>((props, ref) => {
     showRunResult(run);
   };
 
-  const handleLoadCrew = (run: Run) => {
-    console.log('Loading crew from run:', run);
-    console.log('Run inputs:', run.inputs);
-    
-    // Check if we have valid YAML data
-    const hasAgentsYaml = !!(run.agents_yaml && run.agents_yaml.trim());
-    const hasTasksYaml = !!(run.tasks_yaml && run.tasks_yaml.trim());
-    
-    console.log('YAML data check:', {
-      agents_yaml_present: hasAgentsYaml,
-      tasks_yaml_present: hasTasksYaml,
-      agents_yaml_length: run.agents_yaml?.length || 0,
-      tasks_yaml_length: run.tasks_yaml?.length || 0
-    });
-    
-    // If we don't have YAML data, try to refresh the run data
-    if (!hasAgentsYaml || !hasTasksYaml) {
-      console.log('Missing YAML data, attempting to refresh run data');
-      
-      // Fetch the run data again to make sure we have the latest
-      RunService.getInstance().getRunById(run.id)
-        .then(refreshedRun => {
-          if (refreshedRun) {
-            console.log('Refreshed run data:', {
-              agents_yaml_present: !!refreshedRun.agents_yaml,
-              tasks_yaml_present: !!refreshedRun.tasks_yaml
-            });
-            
-            // Now we can use the refreshed data
-            setSelectedRunForLoad(refreshedRun);
-            setLoadCrewOpen(true);
-          } else {
-            console.error('Failed to refresh run data');
-            toast.error('Failed to load crew configuration');
-          }
-        })
-        .catch(err => {
-          console.error('Error refreshing run data:', err);
-          toast.error('Failed to load crew configuration');
-        });
-    } else {
-      // We already have the YAML data, proceed normally
-      setSelectedRunForLoad(run);
-      setLoadCrewOpen(true);
-    }
-  };
 
   const handleDeleteAllRunsClick = async () => {
     try {
@@ -474,13 +420,6 @@ const RunHistory = forwardRef<RunHistoryRef, RunHistoryProps>((props, ref) => {
   const open = Boolean(anchorEl);
   const filterId = open ? 'filter-popover' : undefined;
 
-  const handleCrewLoaded = (nodes: Node[], edges: Edge[]) => {
-    if (props.onCrewLoad) {
-      props.onCrewLoad(nodes, edges);
-    }
-    setLoadCrewOpen(false);
-    setSelectedRunForLoad(null);
-  };
 
   const renderSortIcon = (field: 'status' | 'created_at') => {
     if (sortField !== field) return null;
@@ -683,7 +622,6 @@ const RunHistory = forwardRef<RunHistoryRef, RunHistoryProps>((props, ref) => {
                         <RunActions
                           run={run}
                           onViewResult={handleShowResult}
-                          onLoadCrew={handleLoadCrew}
                           onShowTrace={handleShowTrace}
                           onShowLogs={handleShowLogs}
                           onSchedule={handleOpenScheduleDialog}
@@ -709,7 +647,7 @@ const RunHistory = forwardRef<RunHistoryRef, RunHistoryProps>((props, ref) => {
               <Pagination
                 count={totalLocalPages}
                 page={localPage}
-                onChange={(e, value) => setLocalPage(value)}
+                onChange={(_, value) => setLocalPage(value)}
                 color="primary"
                 size="small"
                 sx={{ '& .MuiPaginationItem-root': { minWidth: '20px', height: '20px', fontSize: '0.7rem' } }}
@@ -725,36 +663,6 @@ const RunHistory = forwardRef<RunHistoryRef, RunHistoryProps>((props, ref) => {
             />
           )}
 
-          {selectedRunForLoad && selectedRunForLoad.inputs && (() => {
-            console.log('About to render LoadCrew with selectedRunForLoad:', selectedRunForLoad);
-            console.log('YAML inputs present:', {
-              agents_yaml: !!selectedRunForLoad.inputs.agents_yaml,
-              tasks_yaml: !!selectedRunForLoad.inputs.tasks_yaml,
-            });
-            return (
-              <LoadCrew
-                open={loadCrewOpen}
-                onClose={() => {
-                  setLoadCrewOpen(false);
-                  setSelectedRunForLoad(null);
-                }}
-                onCrewLoad={handleCrewLoaded}
-                inputs={{
-                  agents_yaml: typeof selectedRunForLoad.inputs.agents_yaml === 'string'
-                    ? selectedRunForLoad.inputs.agents_yaml
-                    : JSON.stringify(selectedRunForLoad.inputs.agents_yaml, null, 2),
-                  tasks_yaml: typeof selectedRunForLoad.inputs.tasks_yaml === 'string'
-                    ? selectedRunForLoad.inputs.tasks_yaml
-                    : JSON.stringify(selectedRunForLoad.inputs.tasks_yaml, null, 2)
-                }}
-                runName={
-                  selectedRunForLoad.run_name?.startsWith('"') && selectedRunForLoad.run_name?.endsWith('"') 
-                    ? selectedRunForLoad.run_name.slice(1, -1) 
-                    : selectedRunForLoad.run_name
-                }
-              />
-            );
-          })()}
 
           {showLogsDialog && selectedJobId && (
             <ShowLogs

@@ -536,10 +536,7 @@ const WorkflowDesigner: React.FC<WorkflowDesignerProps> = (): JSX.Element => {
             borderTop: 1,
             borderColor: 'divider'
           }}>
-            <JobsPanel onCrewLoad={(newNodes, newEdges) => {
-              setNodes(currentNodes => [...currentNodes, ...newNodes]);
-              setEdges(currentEdges => [...currentEdges, ...newEdges]);
-            }} />
+            <JobsPanel />
           </Box>
         )}
 

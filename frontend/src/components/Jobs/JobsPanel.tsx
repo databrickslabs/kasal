@@ -1,13 +1,8 @@
 import React, { useRef } from 'react';
 import { Box, Paper } from '@mui/material';
 import ExecutionHistory, { RunHistoryRef } from './ExecutionHistory';
-import { Node, Edge } from 'reactflow';
 
-interface JobsPanelProps {
-  onCrewLoad?: (nodes: Node[], edges: Edge[]) => void;
-}
-
-const JobsPanel: React.FC<JobsPanelProps> = ({ onCrewLoad }) => {
+const JobsPanel: React.FC = () => {
   const runHistoryRef = useRef<RunHistoryRef>(null);
 
   return (
@@ -15,7 +10,6 @@ const JobsPanel: React.FC<JobsPanelProps> = ({ onCrewLoad }) => {
       <Box sx={{ flex: 1, overflow: 'hidden' }}>
         <ExecutionHistory 
           ref={runHistoryRef}
-          onCrewLoad={onCrewLoad} 
         />
       </Box>
     </Paper>
