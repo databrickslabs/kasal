@@ -5,12 +5,13 @@ This module provides endpoints for analyzing user messages and determining
 whether they want to generate an agent, task, or crew, then calling the appropriate service.
 """
 
-from fastapi import APIRouter, HTTPException
-from typing import Dict, Any
+from fastapi import APIRouter, HTTPException, Depends
+from typing import Dict, Any, Annotated
 
 from src.schemas.dispatcher import DispatcherRequest, DispatcherResponse
 from src.services.dispatcher_service import DispatcherService
 from src.services.log_service import LLMLogService
+from src.core.dependencies import TenantContextDep
 
 router = APIRouter(
     prefix="/dispatcher",
@@ -18,12 +19,16 @@ router = APIRouter(
 )
 
 @router.post("/dispatch", response_model=Dict[str, Any])
-async def dispatch_request(request: DispatcherRequest) -> Dict[str, Any]:
+async def dispatch_request(
+    request: DispatcherRequest,
+    tenant_context: TenantContextDep
+) -> Dict[str, Any]:
     """
     Dispatch a natural language request to the appropriate generation service.
     
     Args:
         request: Dispatcher request with user message and options
+        tenant_context: Tenant context from headers
         
     Returns:
         Dictionary containing the intent detection result and generation response
@@ -32,8 +37,8 @@ async def dispatch_request(request: DispatcherRequest) -> Dict[str, Any]:
         # Create service instance
         dispatcher_service = DispatcherService.create()
         
-        # Process request
-        result = await dispatcher_service.dispatch(request)
+        # Process request with tenant context
+        result = await dispatcher_service.dispatch(request, tenant_context)
         
         return result
         

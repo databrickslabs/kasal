@@ -38,6 +38,7 @@ from src.api.auth_router import router as auth_router
 from src.api.users_router import router as users_router
 from src.api.roles_router import router as roles_router
 from src.api.identity_providers_router import router as identity_providers_router
+from src.api.tenant_router import router as tenant_router
 
 # Create the main API router
 api_router = APIRouter()
@@ -81,6 +82,7 @@ api_router.include_router(auth_router)
 api_router.include_router(users_router)
 api_router.include_router(roles_router)
 api_router.include_router(identity_providers_router)
+api_router.include_router(tenant_router)
 
 __all__ = [
     "api_router",
@@ -121,5 +123,6 @@ __all__ = [
     "users_router",
     "runs_router",
     "roles_router",
-    "identity_providers_router"
+    "identity_providers_router",
+    "tenant_router"
 ]

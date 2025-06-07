@@ -4,7 +4,7 @@ from fastapi import APIRouter, Depends, HTTPException, Path, status
 import logging
 from sqlalchemy.exc import IntegrityError
 
-from src.core.dependencies import SessionDep, get_service
+from src.core.dependencies import SessionDep, TenantContextDep, get_service
 from src.models.agent import Agent
 from src.repositories.agent_repository import AgentRepository
 from src.schemas.agent import Agent as AgentSchema
@@ -28,19 +28,21 @@ get_agent_service = get_service(AgentService, AgentRepository, Agent)
 async def create_agent(
     agent_in: AgentCreate,
     service: Annotated[AgentService, Depends(get_agent_service)],
+    tenant_context: TenantContextDep,
 ):
     """
-    Create a new agent.
+    Create a new agent with tenant isolation.
     
     Args:
         agent_in: Agent data for creation
         service: Agent service injected by dependency
+        tenant_context: Tenant context from headers
         
     Returns:
         Created agent
     """
     try:
-        return await service.create(agent_in)
+        return await service.create_with_tenant(agent_in, tenant_context)
     except Exception as e:
         logger.error(f"Error creating agent: {e}")
         raise HTTPException(status_code=500, detail=str(e))
@@ -49,18 +51,20 @@ async def create_agent(
 @router.get("", response_model=List[AgentSchema])
 async def list_agents(
     service: Annotated[AgentService, Depends(get_agent_service)],
+    tenant_context: TenantContextDep,
 ):
     """
-    Retrieve all agents.
+    Retrieve all agents for the current tenant.
     
     Args:
         service: Agent service injected by dependency
+        tenant_context: Tenant context from headers
         
     Returns:
-        List of agents
+        List of agents for the current tenant
     """
     try:
-        return await service.find_all()
+        return await service.find_by_tenant(tenant_context)
     except Exception as e:
         logger.error(f"Error listing agents: {e}")
         raise HTTPException(status_code=500, detail=str(e))

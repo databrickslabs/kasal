@@ -5,12 +5,13 @@ This module provides endpoints for real-time execution log streaming
 and retrieving historical execution logs.
 """
 
-from typing import List, Dict
-from fastapi import APIRouter, WebSocket, WebSocketDisconnect, HTTPException, Query
+from typing import List, Dict, Annotated
+from fastapi import APIRouter, WebSocket, WebSocketDisconnect, HTTPException, Query, Depends
 
 from src.core.logger import LoggerManager
 from src.services.execution_logs_service import execution_logs_service
 from src.schemas.execution_logs import ExecutionLogResponse, ExecutionLogsResponse
+from src.core.dependencies import TenantContextDep
 
 # Get logger from the centralized logging system
 logger = LoggerManager.get_instance().system
@@ -33,12 +34,22 @@ async def websocket_execution_logs(websocket: WebSocket, execution_id: str):
     WebSocket endpoint for streaming execution logs.
     
     This endpoint allows clients to connect via WebSocket and receive
-    real-time updates about execution progress.
+    real-time updates about execution progress. For tenant isolation,
+    the tenant context should be passed as a query parameter.
     """
     try:
-        # Connect to the WebSocket
-        await execution_logs_service.connect(websocket, execution_id)
-        logger.info(f"WebSocket connection established for execution {execution_id}")
+        # Extract tenant information from query parameters for WebSocket
+        query_params = websocket.query_params
+        tenant_email = query_params.get('tenant_email')
+        
+        # Create a basic tenant context from query params
+        # Note: WebSocket doesn't use standard headers, so we get tenant info from query params
+        from src.utils.user_context import TenantContext
+        tenant_context = TenantContext.from_email(tenant_email) if tenant_email else TenantContext()
+        
+        # Connect to the WebSocket with tenant context
+        await execution_logs_service.connect_with_tenant(websocket, execution_id, tenant_context)
+        logger.info(f"WebSocket connection established for execution {execution_id} (tenant: {tenant_context.tenant_id})")
         
         # Keep the connection alive until disconnect
         while True:
@@ -57,16 +68,19 @@ async def websocket_execution_logs(websocket: WebSocket, execution_id: str):
 @logs_router.get("/executions/{execution_id}", response_model=List[ExecutionLogResponse])
 async def get_execution_logs(
     execution_id: str,
+    tenant_context: TenantContextDep,
     limit: int = Query(1000, ge=1, le=10000),
     offset: int = Query(0, ge=0),
 ):
     """
-    Get historical execution logs.
+    Get historical execution logs for the current tenant.
     
-    This endpoint allows retrieval of past logs for a specific execution.
+    This endpoint allows retrieval of past logs for a specific execution
+    belonging to the current tenant.
     
     Args:
         execution_id: ID of the execution to get logs for
+        tenant_context: Tenant context from headers
         limit: Maximum number of logs to return
         offset: Number of logs to skip
         
@@ -74,7 +88,7 @@ async def get_execution_logs(
         List of execution logs with their timestamps
     """
     try:
-        logs = await execution_logs_service.get_execution_logs(execution_id, limit, offset)
+        logs = await execution_logs_service.get_execution_logs_by_tenant(execution_id, tenant_context, limit, offset)
         return logs
     except Exception as e:
         logger.error(f"Error fetching execution logs: {e}")
@@ -83,17 +97,19 @@ async def get_execution_logs(
 @runs_router.get("/{run_id}/outputs", response_model=ExecutionLogsResponse)
 async def get_run_logs(
     run_id: str,
+    tenant_context: TenantContextDep,
     limit: int = Query(1000, ge=1, le=10000),
     offset: int = Query(0, ge=0),
 ):
     """
-    Get historical logs for a specific run.
+    Get historical logs for a specific run within the current tenant.
     
     This endpoint matches the frontend expectation for the URL pattern.
-    It simply delegates to the execution logs service.
+    It delegates to the execution logs service with tenant filtering.
     
     Args:
         run_id: ID of the run to get logs for
+        tenant_context: Tenant context from headers
         limit: Maximum number of logs to return
         offset: Number of logs to skip
         
@@ -101,7 +117,7 @@ async def get_run_logs(
         Dictionary with a list of run logs with their timestamps
     """
     try:
-        logs = await execution_logs_service.get_execution_logs(run_id, limit, offset)
+        logs = await execution_logs_service.get_execution_logs_by_tenant(run_id, tenant_context, limit, offset)
         return ExecutionLogsResponse(logs=logs)
     except Exception as e:
         logger.error(f"Error fetching run logs: {e}")
