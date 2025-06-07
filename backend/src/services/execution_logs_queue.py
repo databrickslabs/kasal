@@ -48,7 +48,7 @@ def enqueue_log(execution_id: str, content: str, timestamp: Optional[datetime] =
         
         # Add tenant context information if available
         if tenant_context:
-            log_data["tenant_id"] = tenant_context.tenant_id
+            log_data["tenant_id"] = tenant_context.primary_tenant_id
             log_data["tenant_email"] = tenant_context.email
         
         # Add to queue

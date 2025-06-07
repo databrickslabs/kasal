@@ -49,7 +49,7 @@ async def websocket_execution_logs(websocket: WebSocket, execution_id: str):
         
         # Connect to the WebSocket with tenant context
         await execution_logs_service.connect_with_tenant(websocket, execution_id, tenant_context)
-        logger.info(f"WebSocket connection established for execution {execution_id} (tenant: {tenant_context.tenant_id})")
+        logger.info(f"WebSocket connection established for execution {execution_id} (tenant: {tenant_context.primary_tenant_id})")
         
         # Keep the connection alive until disconnect
         while True:

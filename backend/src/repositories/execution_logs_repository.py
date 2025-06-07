@@ -371,7 +371,7 @@ class ExecutionLogsRepository:
                     execution_id=execution_id,
                     content=content,
                     timestamp=normalized_timestamp,  # If None, the model default will be used
-                    tenant_id=tenant_context.tenant_id if tenant_context else None,
+                    tenant_id=tenant_context.primary_tenant_id if tenant_context else None,
                     tenant_email=tenant_context.email if tenant_context else None
                 )
                 

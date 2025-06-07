@@ -89,10 +89,10 @@ class ExecutionLogsService:
         
         # Send tenant-filtered historical logs when client connects
         try:
-            if tenant_context.tenant_id:
+            if tenant_context.primary_tenant_id:
                 historical_logs = await execution_logs_repository.get_by_execution_id_and_tenant_with_managed_session(
                     execution_id=execution_id,
-                    tenant_id=tenant_context.tenant_id
+                    tenant_id=tenant_context.primary_tenant_id
                 )
             else:
                 # If no tenant context, don't send any historical logs for security
@@ -108,7 +108,7 @@ class ExecutionLogsService:
         except Exception as e:
             logger.error(f"Error sending historical logs: {e}")
         
-        logger.debug(f"Client connected to execution {execution_id} with tenant {tenant_context.tenant_id}. Total connections: {len(self.active_connections[execution_id])}")
+        logger.debug(f"Client connected to execution {execution_id} with tenant {tenant_context.primary_tenant_id}. Total connections: {len(self.active_connections[execution_id])}")
 
     async def disconnect(self, websocket: WebSocket, execution_id: str):
         """
@@ -239,13 +239,13 @@ class ExecutionLogsService:
         Returns:
             List of execution log responses for the tenant
         """
-        if not tenant_context.tenant_id:
+        if not tenant_context.primary_tenant_id:
             # If no tenant context, return empty list for security
             return []
         
         logs = await execution_logs_repository.get_by_execution_id_and_tenant_with_managed_session(
             execution_id=execution_id,
-            tenant_id=tenant_context.tenant_id,
+            tenant_id=tenant_context.primary_tenant_id,
             limit=limit,
             offset=offset
         )
