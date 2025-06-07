@@ -652,7 +652,7 @@ class TestToolUsagePatterns:
             icon="memory",
             config={
                 "embedding_model": "text-embedding-ada-002",
-                "vector_dimension": 1536,
+                "vector_dimension": 1024,
                 "similarity_threshold": 0.8,
                 "max_memories": 1000
             }
@@ -666,7 +666,7 @@ class TestToolUsagePatterns:
         assert search_tool.config["safe_search"] is True
         
         assert "Memory" in memory_tool.title
-        assert memory_tool.config["vector_dimension"] == 1536
+        assert memory_tool.config["vector_dimension"] == 1024
     
     def test_tool_group_isolation(self):
         """Test tool group isolation pattern."""

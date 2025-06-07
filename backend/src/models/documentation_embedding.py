@@ -9,7 +9,7 @@ from src.db.base import Base
 
 # Define a custom type for pgvector
 class Vector(UserDefinedType):
-    def __init__(self, dim=1536):
+    def __init__(self, dim=1024):
         self.dim = dim
 
     def get_col_spec(self, **kw):

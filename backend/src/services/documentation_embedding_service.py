@@ -89,10 +89,12 @@ class DocumentationEmbeddingService:
                 logger.info("Using AsyncSession for similarity search")
                 
                 try:
-                    # First approach: Use a more compatible approach with SQLAlchemy ORM
+                    # First approach: Use SQLAlchemy ORM with properly formatted vector
+                    # Format the embedding as a vector string for PostgreSQL
+                    embedding_str = f"[{','.join(str(x) for x in query_embedding)}]"
                     base_query = select(DocumentationEmbedding)
                     query = base_query.order_by(text("embedding <=> :embedding")).limit(limit)
-                    result = await db.execute(query, {"embedding": query_embedding})
+                    result = await db.execute(query, {"embedding": embedding_str})
                     similar_docs = result.scalars().all()
                     
                     logger.info(f"Found {len(similar_docs)} similar documents with SQLAlchemy ORM approach")
@@ -104,8 +106,8 @@ class DocumentationEmbeddingService:
                     
                     # Fallback: Use completely raw SQL
                     try:
-                        # Properly format the embedding array for PostgreSQL
-                        embedding_str = str(query_embedding).replace('[', '{').replace(']', '}')
+                        # Properly format the embedding array for PostgreSQL vector type
+                        embedding_str = f"[{','.join(str(x) for x in query_embedding)}]"
                         
                         # Raw SQL query with direct embedding array notation
                         raw_query = text(f"""
