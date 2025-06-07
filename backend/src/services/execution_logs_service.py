@@ -240,15 +240,24 @@ class ExecutionLogsService:
             List of execution log responses for the tenant
         """
         if not tenant_context.primary_tenant_id:
-            # If no tenant context, return empty list for security
-            return []
-        
-        logs = await execution_logs_repository.get_by_execution_id_and_tenant_with_managed_session(
-            execution_id=execution_id,
-            tenant_id=tenant_context.primary_tenant_id,
-            limit=limit,
-            offset=offset
-        )
+            # If no tenant context, fall back to non-tenant filtering for compatibility
+            # This allows logs to be visible in development environments or when tenant headers are missing
+            logger.warning(f"No tenant context provided for execution {execution_id}, falling back to non-tenant logs")
+            logs = await execution_logs_repository.get_by_execution_id_with_managed_session(
+                execution_id=execution_id,
+                limit=limit,
+                offset=offset
+            )
+        else:
+            # Use tenant-aware filtering when tenant context is available
+            # Also include logs with NULL tenant_id for backward compatibility
+            logs = await execution_logs_repository.get_by_execution_id_and_tenant_with_managed_session(
+                execution_id=execution_id,
+                tenant_id=tenant_context.primary_tenant_id,
+                limit=limit,
+                offset=offset,
+                include_null_tenant=True
+            )
         
         return [
             ExecutionLogResponse(
@@ -357,8 +366,8 @@ async def logs_writer_loop(shutdown_event: asyncio.Event):
                             tenant_context = None
                             if log_data.get("tenant_id") or log_data.get("tenant_email"):
                                 tenant_context = TenantContext(
-                                    tenant_id=log_data.get("tenant_id"),
-                                    email=log_data.get("tenant_email")
+                                    tenant_ids=[log_data.get("tenant_id")] if log_data.get("tenant_id") else None,
+                                    tenant_email=log_data.get("tenant_email")
                                 )
                             
                             # Create log with execution_logs_service

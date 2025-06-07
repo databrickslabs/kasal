@@ -280,7 +280,8 @@ class ExecutionLogsRepository:
         tenant_id: str,
         limit: int = 1000, 
         offset: int = 0,
-        newest_first: bool = False
+        newest_first: bool = False,
+        include_null_tenant: bool = False
     ) -> List[ExecutionLog]:
         """
         Retrieve logs for a specific execution and tenant with internal session management.
@@ -291,15 +292,24 @@ class ExecutionLogsRepository:
             limit: Maximum number of logs to return
             offset: Number of logs to skip
             newest_first: If True, return newest logs first
+            include_null_tenant: If True, also include logs with NULL tenant_id (for backward compatibility)
             
         Returns:
             List of ExecutionLog objects filtered by tenant
         """
         async with async_session_factory() as session:
-            query = select(ExecutionLog).where(
-                ExecutionLog.execution_id == execution_id,
-                ExecutionLog.tenant_id == tenant_id
-            )
+            if include_null_tenant:
+                # Include logs that belong to the tenant OR have NULL tenant_id (legacy logs)
+                query = select(ExecutionLog).where(
+                    ExecutionLog.execution_id == execution_id,
+                    (ExecutionLog.tenant_id == tenant_id) | (ExecutionLog.tenant_id == None)
+                )
+            else:
+                # Only include logs that belong to the specific tenant
+                query = select(ExecutionLog).where(
+                    ExecutionLog.execution_id == execution_id,
+                    ExecutionLog.tenant_id == tenant_id
+                )
             
             if newest_first:
                 query = query.order_by(desc(ExecutionLog.timestamp))
@@ -372,7 +382,7 @@ class ExecutionLogsRepository:
                     content=content,
                     timestamp=normalized_timestamp,  # If None, the model default will be used
                     tenant_id=tenant_context.primary_tenant_id if tenant_context else None,
-                    tenant_email=tenant_context.email if tenant_context else None
+                    tenant_email=tenant_context.tenant_email if tenant_context else None
                 )
                 
                 # Add it to the session

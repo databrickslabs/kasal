@@ -45,7 +45,7 @@ async def websocket_execution_logs(websocket: WebSocket, execution_id: str):
         # Create a basic tenant context from query params
         # Note: WebSocket doesn't use standard headers, so we get tenant info from query params
         from src.utils.user_context import TenantContext
-        tenant_context = TenantContext.from_email(tenant_email) if tenant_email else TenantContext()
+        tenant_context = await TenantContext.from_email(tenant_email) if tenant_email else TenantContext()
         
         # Connect to the WebSocket with tenant context
         await execution_logs_service.connect_with_tenant(websocket, execution_id, tenant_context)

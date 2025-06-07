@@ -49,7 +49,7 @@ def enqueue_log(execution_id: str, content: str, timestamp: Optional[datetime] =
         # Add tenant context information if available
         if tenant_context:
             log_data["tenant_id"] = tenant_context.primary_tenant_id
-            log_data["tenant_email"] = tenant_context.email
+            log_data["tenant_email"] = tenant_context.tenant_email
         
         # Add to queue
         job_queue.put_nowait(log_data)
