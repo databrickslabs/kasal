@@ -11,6 +11,7 @@ from fastapi import APIRouter, HTTPException
 
 from src.schemas.task_generation import TaskGenerationRequest, TaskGenerationResponse
 from src.services.task_generation_service import TaskGenerationService
+from src.core.dependencies import TenantContextDep
 
 # Configure logging
 logger = logging.getLogger(__name__)
@@ -24,7 +25,8 @@ router = APIRouter(
 
 @router.post("/generate-task", response_model=TaskGenerationResponse)
 async def generate_task(
-    request: TaskGenerationRequest
+    request: TaskGenerationRequest,
+    tenant_context: TenantContextDep
 ):
     """
     Generate a task based on the provided prompt and context.
@@ -38,7 +40,7 @@ async def generate_task(
         
         # Generate task
         logger.info(f"Generating task from prompt: {request.text[:50]}...")
-        task_response = await task_generation_service.generate_task(request)
+        task_response = await task_generation_service.generate_task(request, tenant_context)
         
         logger.info(f"Generated task: {task_response.name}")
         return task_response

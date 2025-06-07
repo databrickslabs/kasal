@@ -56,7 +56,8 @@ class DispatcherService:
         return cls(log_service=log_service)
     
     async def _log_llm_interaction(self, endpoint: str, prompt: str, response: str, model: str, 
-                                  status: str = 'success', error_message: Optional[str] = None):
+                                  status: str = 'success', error_message: Optional[str] = None,
+                                  tenant_context: Optional[TenantContext] = None):
         """
         Log LLM interaction using the log service.
         
@@ -67,6 +68,7 @@ class DispatcherService:
             model: LLM model used
             status: Status of the interaction (success/error)
             error_message: Optional error message
+            tenant_context: Optional tenant context for multi-tenant isolation
         """
         try:
             await self.log_service.create_log(
@@ -75,7 +77,8 @@ class DispatcherService:
                 response=response,
                 model=model,
                 status=status,
-                error_message=error_message
+                error_message=error_message,
+                tenant_context=tenant_context
             )
             logger.info(f"Logged {endpoint} interaction to database")
         except Exception as e:
@@ -185,7 +188,8 @@ Examples:
             endpoint='detect-intent',
             prompt=request.message,
             response=str(intent_result),
-            model=model
+            model=model,
+            tenant_context=tenant_context
         )
         
         # Create dispatcher response
@@ -201,15 +205,16 @@ Examples:
         
         try:
             if dispatcher_response.intent == IntentType.GENERATE_AGENT:
-                # Call agent generation service directly
+                # Call agent generation service with tenant context
                 generation_result = await self.agent_service.generate_agent(
                     prompt_text=dispatcher_response.suggested_prompt or request.message,
                     model=request.model,
-                    tools=request.tools
+                    tools=request.tools,
+                    tenant_context=tenant_context
                 )
                 
             elif dispatcher_response.intent == IntentType.GENERATE_TASK:
-                # Call task generation service
+                # Call task generation service (which handles both generation and saving)
                 task_request = TaskGenerationRequest(
                     text=dispatcher_response.suggested_prompt or request.message,
                     model=request.model
@@ -223,7 +228,7 @@ Examples:
                     model=request.model,
                     tools=request.tools
                 )
-                generation_result = await self.crew_service.create_crew_complete(crew_request)
+                generation_result = await self.crew_service.create_crew_complete(crew_request, tenant_context)
                 
             else:
                 # Unknown intent
@@ -237,7 +242,8 @@ Examples:
                 response=str(e),
                 model=model,
                 status='error',
-                error_message=str(e)
+                error_message=str(e),
+                tenant_context=tenant_context
             )
             raise
         
