@@ -361,17 +361,83 @@ const RunHistory = forwardRef<RunHistoryRef>((_, ref) => {
       return;
     }
 
-    if (!selectedRunForSchedule.inputs?.agents_yaml || !selectedRunForSchedule.inputs?.tasks_yaml) {
-      toast.error('Invalid job configuration');
-      return;
+    // Extract complete YAML configuration data from execution inputs
+    let agents_yaml = null;
+    let tasks_yaml = null;
+    
+    // First try to get from the inputs object (this is where the complete config is stored)
+    if (selectedRunForSchedule.inputs?.agents_yaml) {
+      agents_yaml = selectedRunForSchedule.inputs.agents_yaml;
+    }
+    if (selectedRunForSchedule.inputs?.tasks_yaml) {
+      tasks_yaml = selectedRunForSchedule.inputs.tasks_yaml;
+    }
+    
+    // Fallback to direct properties (though these are usually strings or empty)
+    if (!agents_yaml && selectedRunForSchedule.agents_yaml) {
+      try {
+        agents_yaml = typeof selectedRunForSchedule.agents_yaml === 'string' 
+          ? JSON.parse(selectedRunForSchedule.agents_yaml) 
+          : selectedRunForSchedule.agents_yaml;
+      } catch (e) {
+        console.warn('Failed to parse agents_yaml string:', e);
+      }
+    }
+    if (!tasks_yaml && selectedRunForSchedule.tasks_yaml) {
+      try {
+        tasks_yaml = typeof selectedRunForSchedule.tasks_yaml === 'string' 
+          ? JSON.parse(selectedRunForSchedule.tasks_yaml) 
+          : selectedRunForSchedule.tasks_yaml;
+      } catch (e) {
+        console.warn('Failed to parse tasks_yaml string:', e);
+      }
+    }
+
+    let finalAgentsYaml = '';
+    let finalTasksYaml = '';
+    
+    if (agents_yaml && tasks_yaml && Object.keys(agents_yaml).length > 0 && Object.keys(tasks_yaml).length > 0) {
+      // We have complete configuration from the execution
+      finalAgentsYaml = JSON.stringify(agents_yaml);
+      finalTasksYaml = JSON.stringify(tasks_yaml);
+      toast.success('Using complete agent and task configuration from execution');
+    } else {
+      // Create a minimal dummy configuration as fallback
+      const executionName = selectedRunForSchedule.run_name || 'Scheduled Task';
+      
+      finalAgentsYaml = JSON.stringify({
+        "research_agent": {
+          "role": "Research Specialist",
+          "goal": `Execute ${executionName}`,
+          "backstory": `You are a specialist responsible for executing the scheduled task: ${executionName}`,
+          "tools": [],
+          "llm": "gpt-4o-mini"
+        }
+      });
+      
+      finalTasksYaml = JSON.stringify({
+        "main_task": {
+          "description": `Execute the scheduled task: ${executionName}`,
+          "agent": "research_agent",
+          "expected_output": "Task execution completed successfully"
+        }
+      });
+      
+      toast('⚠️ Using dummy configuration. The selected execution does not contain complete agent/task configuration.', {
+        duration: 5000,
+        style: {
+          background: '#f59e0b',
+          color: 'white',
+        },
+      });
     }
 
     try {
       const scheduleData: ScheduleCreateData = {
         name: scheduleName,
         cron_expression: cronExpression,
-        agents_yaml: JSON.parse(selectedRunForSchedule.inputs?.agents_yaml || '{}'),
-        tasks_yaml: JSON.parse(selectedRunForSchedule.inputs?.tasks_yaml || '{}'),
+        agents_yaml: JSON.parse(finalAgentsYaml || '{}'),
+        tasks_yaml: JSON.parse(finalTasksYaml || '{}'),
         inputs: {},
         is_active: true,
         planning: false,

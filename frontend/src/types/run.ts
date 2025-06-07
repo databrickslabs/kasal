@@ -19,8 +19,14 @@ export interface Run {
   agents_yaml: string;
   tasks_yaml: string;
   inputs?: {
-    agents_yaml: string;
-    tasks_yaml: string;
+    agents_yaml: Record<string, any>;
+    tasks_yaml: Record<string, any>;
+    inputs?: Record<string, any>;
+    planning?: boolean;
+    model?: string;
+    execution_type?: string;
+    schema_detection_enabled?: boolean;
+    [key: string]: any;
   };
   result?: RunResult;
   error?: string;

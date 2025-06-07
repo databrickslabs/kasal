@@ -229,6 +229,48 @@ export class RunService {
     const agents_yaml = stringifyYamlData(agentsYamlData);
     const tasks_yaml = stringifyYamlData(tasksYamlData);
     
+    // Prepare object versions for inputs (preserve original structure if it's an object)
+    const agents_yaml_object = (typeof agentsYamlData === 'object' && agentsYamlData !== null) 
+      ? agentsYamlData as Record<string, unknown>
+      : {};
+    const tasks_yaml_object = (typeof tasksYamlData === 'object' && tasksYamlData !== null) 
+      ? tasksYamlData as Record<string, unknown>
+      : {};
+    
+    // Build inputs object if we have input data
+    let inputs: {
+      agents_yaml: Record<string, unknown>;
+      tasks_yaml: Record<string, unknown>;
+      inputs?: Record<string, unknown>;
+      planning?: boolean;
+      model?: string;
+      execution_type?: string;
+      schema_detection_enabled?: boolean;
+      [key: string]: unknown;
+    } | undefined = undefined;
+    if (executionItem.inputs && typeof executionItem.inputs === 'object') {
+      // Parse inputs if it's a string, otherwise use directly
+      let parsedInputs = executionItem.inputs;
+      if (typeof executionItem.inputs === 'string') {
+        try {
+          parsedInputs = JSON.parse(executionItem.inputs as string);
+        } catch (e) {
+          parsedInputs = {};
+        }
+      }
+      
+      inputs = {
+        ...parsedInputs,
+        agents_yaml: agents_yaml_object,
+        tasks_yaml: tasks_yaml_object
+      };
+    } else if (Object.keys(agents_yaml_object).length > 0 || Object.keys(tasks_yaml_object).length > 0) {
+      inputs = {
+        agents_yaml: agents_yaml_object,
+        tasks_yaml: tasks_yaml_object
+      };
+    }
+    
     // Return the run object with all extracted data
     return {
       id: (executionItem.id as number | undefined)?.toString() || jobId,
@@ -240,10 +282,7 @@ export class RunService {
       run_name: name || `Run ${jobId}`,
       agents_yaml,
       tasks_yaml,
-      inputs: {
-        agents_yaml,
-        tasks_yaml
-      },
+      inputs,
       result: executionItem.result as Record<string, OutputDataType> | undefined,
       error: executionItem.error as string | undefined,
     };
