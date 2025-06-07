@@ -105,6 +105,85 @@ const RightSidebar: React.FC<RightSidebarProps> = ({
 
   const sidebarItems = [
     {
+      id: 'chat',
+      icon: <SmartToyIcon />,
+      tooltip: 'Kasal',
+      content: (
+        <Box
+          sx={{
+            maxHeight: contentHeight,
+            overflowY: 'auto',
+            p: 1,
+            width: '100%',
+            boxSizing: 'border-box'
+          }}
+        >
+          <Box sx={{ 
+            mb: 2,
+            width: '100%',
+            boxSizing: 'border-box',
+            px: 1
+          }}>
+            <Box
+              onClick={onToggleChat}
+              sx={{
+                display: 'flex',
+                alignItems: 'center',
+                gap: 1,
+                py: 1,
+                px: 1,
+                borderRadius: 1,
+                cursor: 'pointer',
+                border: `1px solid ${isChatOpen ? theme.palette.primary.main : theme.palette.divider}`,
+                backgroundColor: isChatOpen ? 'action.selected' : 'background.paper',
+                transition: 'all 0.2s ease-in-out',
+                width: '220px',
+                boxSizing: 'border-box',
+                ml: 2,
+                '&:hover': {
+                  backgroundColor: 'action.hover',
+                  borderColor: theme.palette.primary.main,
+                  transform: 'translateY(-1px)',
+                  boxShadow: theme.shadows[2],
+                },
+              }}
+            >
+              <SmartToyIcon 
+                sx={{ 
+                  fontSize: '1.2rem', 
+                  color: theme.palette.primary.main 
+                }} 
+              />
+              <Box>
+                <Typography 
+                  variant="body2" 
+                  sx={{ 
+                    fontWeight: 500,
+                    color: 'text.primary'
+                  }}
+                >
+                  {isChatOpen ? 'Hide Kasal' : 'Show Kasal'}
+                </Typography>
+                <Typography 
+                  variant="caption" 
+                  sx={{ 
+                    color: 'text.secondary',
+                    fontSize: '0.7rem'
+                  }}
+                >
+                  Get help with workflow design and automation
+                </Typography>
+              </Box>
+            </Box>
+          </Box>
+        </Box>
+      )
+    },
+    {
+      id: 'separator1',
+      isSeparator: true
+    },
+    {
       id: 'execute',
       icon: <PlayArrowIcon />,
       tooltip: 'Execute Workflow',
@@ -775,89 +854,6 @@ const RightSidebar: React.FC<RightSidebarProps> = ({
           </Box>
         </Box>
       )
-    },
-    {
-      id: 'separator2',
-      isSeparator: true
-    },
-    {
-      id: 'chat',
-      icon: <SmartToyIcon />,
-      tooltip: 'Kasal',
-      content: (
-        <Box
-          sx={{
-            maxHeight: contentHeight,
-            overflowY: 'auto',
-            p: 1,
-            width: '100%',
-            boxSizing: 'border-box'
-          }}
-        >
-          <Box sx={{ 
-            mb: 2,
-            width: '100%',
-            boxSizing: 'border-box',
-            px: 1
-          }}>
-            <Box
-              onClick={onToggleChat}
-              sx={{
-                display: 'flex',
-                alignItems: 'center',
-                gap: 1,
-                py: 1,
-                px: 1,
-                borderRadius: 1,
-                cursor: 'pointer',
-                border: `1px solid ${isChatOpen ? theme.palette.primary.main : theme.palette.divider}`,
-                backgroundColor: isChatOpen ? 'action.selected' : 'background.paper',
-                transition: 'all 0.2s ease-in-out',
-                width: '220px',
-                boxSizing: 'border-box',
-                ml: 2,
-                '&:hover': {
-                  backgroundColor: 'action.hover',
-                  borderColor: theme.palette.primary.main,
-                  transform: 'translateY(-1px)',
-                  boxShadow: theme.shadows[2],
-                },
-              }}
-            >
-              <SmartToyIcon 
-                sx={{ 
-                  fontSize: '1.2rem', 
-                  color: theme.palette.primary.main 
-                }} 
-              />
-              <Box>
-                <Typography 
-                  variant="body2" 
-                  sx={{ 
-                    fontWeight: 500,
-                    color: 'text.primary'
-                  }}
-                >
-                  {isChatOpen ? 'Hide Kasal' : 'Show Kasal'}
-                </Typography>
-                <Typography 
-                  variant="caption" 
-                  sx={{ 
-                    color: 'text.secondary',
-                    fontSize: '0.7rem'
-                  }}
-                >
-                  Get help with workflow design and automation
-                </Typography>
-              </Box>
-            </Box>
-          </Box>
-        </Box>
-      )
-    },
-    {
-      id: 'separator3',
-      isSeparator: true
     },
     {
       id: 'schedule',
