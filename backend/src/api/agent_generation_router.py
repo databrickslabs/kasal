@@ -13,7 +13,7 @@ from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
 
 from src.services.agent_generation_service import AgentGenerationService
-from src.core.dependencies import TenantContextDep
+from src.core.dependencies import GroupContextDep
 
 # Configure logging
 logger = logging.getLogger(__name__)
@@ -35,7 +35,7 @@ class AgentPrompt(BaseModel):
 @router.post("/generate", response_model=Dict[str, Any])
 async def generate_agent(
     prompt: AgentPrompt,
-    tenant_context: TenantContextDep
+    group_context: GroupContextDep
 ):
     """
     Generate agent configuration from natural language description.
@@ -58,7 +58,7 @@ async def generate_agent(
             prompt_text=prompt.prompt,
             model=prompt.model,
             tools=prompt.tools,
-            tenant_context=tenant_context
+            group_context=group_context
         )
             
     except ValueError as e:

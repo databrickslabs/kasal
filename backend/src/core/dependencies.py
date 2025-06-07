@@ -9,52 +9,69 @@ from src.db.base import Base
 from src.db.session import get_db
 from src.services.log_service import LLMLogService
 from src.repositories.log_repository import LLMLogRepository
-from src.utils.user_context import TenantContext
+from src.utils.user_context import GroupContext
 
 # Type definitions for dependencies
 SessionDep = Annotated[AsyncSession, Depends(get_db)]
 
 
-async def get_tenant_context(
+
+
+async def get_group_context(
     request: Request,
     x_forwarded_email: Optional[str] = Header(None, alias="X-Forwarded-Email"),
-    x_forwarded_access_token: Optional[str] = Header(None, alias="X-Forwarded-Access-Token")
-) -> TenantContext:
+    x_forwarded_access_token: Optional[str] = Header(None, alias="X-Forwarded-Access-Token"),
+    x_auth_request_email: Optional[str] = Header(None, alias="X-Auth-Request-Email"),
+    x_auth_request_user: Optional[str] = Header(None, alias="X-Auth-Request-User"),
+    x_auth_request_access_token: Optional[str] = Header(None, alias="X-Auth-Request-Access-Token")
+) -> GroupContext:
     """
-    Extract tenant context from Databricks Apps headers.
+    Extract group context from Databricks Apps or OAuth2-Proxy headers.
     
-    For Databricks Apps deployment, this extracts tenant information from:
-    - X-Forwarded-Email: The user's email for tenant identification
-    - X-Forwarded-Access-Token: Access token for verification
+    For Databricks Apps deployment with OAuth2-Proxy, this extracts group information from:
+    - X-Auth-Request-Email: User email from OAuth2-Proxy (preferred)
+    - X-Forwarded-Email: User email from Databricks Apps (fallback)
+    - X-Auth-Request-Access-Token: Access token from OAuth2-Proxy (preferred)
+    - X-Forwarded-Access-Token: Access token from Databricks Apps (fallback)
     
     Args:
         request: FastAPI request object
         x_forwarded_email: User email from Databricks Apps
         x_forwarded_access_token: Access token from Databricks Apps
+        x_auth_request_email: User email from OAuth2-Proxy
+        x_auth_request_user: Username from OAuth2-Proxy
+        x_auth_request_access_token: Access token from OAuth2-Proxy
         
     Returns:
-        TenantContext: Extracted tenant context with tenant_id, email, etc.
+        GroupContext: Extracted group context with group_id, email, etc.
     """
     import logging
     logger = logging.getLogger(__name__)
     
-    print(f"DEBUG: get_tenant_context called with email: {x_forwarded_email}")
+    # Prefer OAuth2-Proxy headers over direct headers
+    user_email = x_auth_request_email or x_forwarded_email
+    access_token = x_auth_request_access_token or x_forwarded_access_token
     
-    if x_forwarded_email:
-        tenant_context = await TenantContext.from_email(
-            email=x_forwarded_email,
-            access_token=x_forwarded_access_token
+    print(f"DEBUG: get_group_context called with:")
+    print(f"  X-Auth-Request-Email: {x_auth_request_email}")
+    print(f"  X-Forwarded-Email: {x_forwarded_email}")
+    print(f"  Final email: {user_email}")
+    
+    if user_email:
+        group_context = await GroupContext.from_email(
+            email=user_email,
+            access_token=access_token
         )
-        print(f"DEBUG: Created tenant context: primary_tenant_id={tenant_context.primary_tenant_id}, tenant_ids={tenant_context.tenant_ids}, email={tenant_context.tenant_email}")
-        return tenant_context
+        print(f"DEBUG: Created group context: primary_group_id={group_context.primary_group_id}, group_ids={group_context.group_ids}, email={group_context.group_email}")
+        return group_context
     
-    # Fallback: No tenant context available (single-tenant mode)
-    print("DEBUG: No email header found, returning empty tenant context")
-    return TenantContext()
+    # Fallback: No group context available (single-group mode)
+    print("DEBUG: No email header found, returning empty group context")
+    return GroupContext()
 
 
-# Type definitions for tenant-aware dependencies
-TenantContextDep = Annotated[TenantContext, Depends(get_tenant_context)]
+# Type definitions for group-aware dependencies
+GroupContextDep = Annotated[GroupContext, Depends(get_group_context)]
 
 
 def get_repository(

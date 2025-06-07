@@ -11,7 +11,7 @@ from fastapi import APIRouter, HTTPException
 
 from src.schemas.crew import CrewGenerationRequest, CrewGenerationResponse, CrewCreationResponse
 from src.services.crew_generation_service import CrewGenerationService
-from src.core.dependencies import TenantContextDep
+from src.core.dependencies import GroupContextDep
 
 # Configure logging
 logger = logging.getLogger(__name__)
@@ -26,7 +26,7 @@ router = APIRouter(
 @router.post("/create-crew", response_model=CrewCreationResponse)
 async def create_crew(
     request: CrewGenerationRequest,
-    tenant_context: TenantContextDep
+    group_context: GroupContextDep
 ):
     """
     Generate and create a crew setup with agents and tasks in the database.
@@ -39,7 +39,7 @@ async def create_crew(
         
         # Generate and create the crew - all DB handling is inside the service
         logger.info(f"Creating crew from prompt: {request.prompt[:50]}...")
-        result = await crew_service.create_crew_complete(request, tenant_context)
+        result = await crew_service.create_crew_complete(request, group_context)
         
         # Log success
         created_agents = result.get('agents', [])
