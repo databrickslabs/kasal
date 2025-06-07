@@ -199,4 +199,96 @@ class LLMLogRepository(BaseRepository[LLMLog]):
                 self.model.tenant_id.in_(tenant_ids)
             ).distinct()
             result = await session.execute(query)
+            return [endpoint for (endpoint,) in result.all()]
+    
+    # Group-aware methods
+    async def get_logs_paginated_by_group(
+        self, 
+        page: int = 0, 
+        per_page: int = 10, 
+        endpoint: Optional[str] = None,
+        group_ids: List[str] = None
+    ) -> List[LLMLog]:
+        """
+        Get paginated logs with optional endpoint filtering for specific groups.
+        
+        Args:
+            page: Page number (0-indexed)
+            per_page: Items per page
+            endpoint: Optional endpoint to filter by
+            group_ids: List of group IDs to filter by
+            
+        Returns:
+            List of LLM logs for the specified page and groups
+        """
+        if not group_ids:
+            return []
+        
+        async with async_session_factory() as session:
+            # Start with a base query filtered by group
+            query = select(self.model).where(
+                self.model.group_id.in_(group_ids)
+            ).order_by(desc(self.model.created_at))
+            
+            # Apply endpoint filter if provided
+            if endpoint and endpoint != 'all':
+                query = query.where(self.model.endpoint == endpoint)
+            
+            # Apply pagination
+            query = query.offset(page * per_page).limit(per_page)
+            
+            # Execute query
+            result = await session.execute(query)
+            return list(result.scalars().all())
+
+    async def count_logs_by_group(
+        self, 
+        endpoint: Optional[str] = None, 
+        group_ids: List[str] = None
+    ) -> int:
+        """
+        Count logs with optional endpoint filtering for specific groups.
+        
+        Args:
+            endpoint: Optional endpoint to filter by
+            group_ids: List of group IDs to filter by
+            
+        Returns:
+            Total count of matching logs for groups
+        """
+        if not group_ids:
+            return 0
+        
+        async with async_session_factory() as session:
+            # Start with a base query filtered by group
+            query = select(self.model).where(
+                self.model.group_id.in_(group_ids)
+            )
+            
+            # Apply endpoint filter if provided
+            if endpoint and endpoint != 'all':
+                query = query.where(self.model.endpoint == endpoint)
+            
+            # Execute query
+            result = await session.execute(query)
+            return len(list(result.scalars().all()))
+
+    async def get_unique_endpoints_by_group(self, group_ids: List[str] = None) -> List[str]:
+        """
+        Get list of unique endpoints in the logs for specific groups.
+        
+        Args:
+            group_ids: List of group IDs to filter by
+        
+        Returns:
+            List of unique endpoint strings for groups
+        """
+        if not group_ids:
+            return []
+        
+        async with async_session_factory() as session:
+            query = select(self.model.endpoint).where(
+                self.model.group_id.in_(group_ids)
+            ).distinct()
+            result = await session.execute(query)
             return [endpoint for (endpoint,) in result.all()] 

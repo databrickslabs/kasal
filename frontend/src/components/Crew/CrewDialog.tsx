@@ -200,7 +200,7 @@ const CrewDialog: React.FC<CrewDialogProps> = ({ open, onClose, onCrewSelect }):
         }
       }
 
-      // Update node IDs and references
+      // Update node IDs and references with position adjustments
       const updatedNodes = (selectedCrew.nodes || []).map(node => {
         const newId = node.type === 'agentNode' 
           ? `agent-${idMapping[node.id] || node.id}`
@@ -210,6 +210,17 @@ const CrewDialog: React.FC<CrewDialogProps> = ({ open, onClose, onCrewSelect }):
           ...node,
           id: newId,
           type: node.type, // Ensure type is preserved
+          // Adjust position: shift left and make smaller
+          position: {
+            x: (node.position?.x || 0) - 150, // Shift 150px to the left
+            y: node.position?.y || 0
+          },
+          // Make nodes smaller
+          style: {
+            ...node.style,
+            width: node.style?.width ? Math.max(180, (node.style.width * 0.8)) : 180, // 20% smaller, minimum 180px
+            height: node.style?.height ? Math.max(120, (node.style.height * 0.8)) : 120 // 20% smaller, minimum 120px
+          },
           data: {
             ...node.data,
             id: idMapping[node.id] || node.data.id,

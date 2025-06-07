@@ -89,7 +89,7 @@ async def create_schedule_from_execution(
 @router.get("", response_model=List[ScheduleResponse])
 async def list_schedules(
     service: Annotated[SchedulerService, Depends(get_scheduler_service)],
-    group_context: GroupContext = GroupContextDep
+    group_context: GroupContextDep
 ) -> List[ScheduleResponse]:
     """
     List all schedules.
