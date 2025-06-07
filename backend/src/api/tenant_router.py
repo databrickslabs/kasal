@@ -187,6 +187,41 @@ async def update_tenant(
         )
 
 
+@router.delete("/{tenant_id}", status_code=status.HTTP_204_NO_CONTENT)
+async def delete_tenant(
+    tenant_id: str,
+    session: SessionDep,
+    tenant_context: TenantContextDep
+):
+    """
+    Delete a tenant and all associated data.
+    
+    Warning: This permanently removes the tenant and all associated:
+    - User assignments
+    - Execution history
+    - All related data
+    
+    This action cannot be undone.
+    """
+    tenant_service = TenantService(session)
+    
+    try:
+        await tenant_service.delete_tenant(tenant_id)
+        logger.info(f"Deleted tenant {tenant_id} by {tenant_context.tenant_email}")
+        
+    except ValueError as e:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=str(e)
+        )
+    except Exception as e:
+        logger.error(f"Error deleting tenant {tenant_id}: {e}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Failed to delete tenant"
+        )
+
+
 @router.get("/{tenant_id}/users", response_model=List[TenantUserResponse])
 async def list_tenant_users(
     tenant_id: str,
@@ -360,7 +395,7 @@ async def get_tenant_context_debug(
     by showing what tenant context is extracted from the request headers.
     """
     return TenantContextResponse(
-        tenant_id=tenant_context.tenant_id,
+        tenant_id=tenant_context.primary_tenant_id,
         tenant_email=tenant_context.tenant_email,
         email_domain=tenant_context.email_domain,
         user_id=tenant_context.user_id,

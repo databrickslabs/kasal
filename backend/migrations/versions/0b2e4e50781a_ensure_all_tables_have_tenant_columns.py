@@ -30,7 +30,8 @@ def upgrade() -> None:
         'tools',
         'executionhistory',
         'execution_trace',
-        'flow_executions'
+        'flow_executions',
+        'schedule'
     ]
     
     conn = op.get_bind()
@@ -96,7 +97,8 @@ def downgrade() -> None:
         'tools',
         'executionhistory',
         'execution_trace',
-        'flow_executions'
+        'flow_executions',
+        'schedule'
     ]
     
     for table_name in tables_to_update:

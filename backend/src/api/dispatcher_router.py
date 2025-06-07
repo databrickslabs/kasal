@@ -5,12 +5,11 @@ This module provides endpoints for analyzing user messages and determining
 whether they want to generate an agent, task, or crew, then calling the appropriate service.
 """
 
-from fastapi import APIRouter, HTTPException, Depends
-from typing import Dict, Any, Annotated
+from fastapi import APIRouter, HTTPException
+from typing import Dict, Any
 
 from src.schemas.dispatcher import DispatcherRequest, DispatcherResponse
 from src.services.dispatcher_service import DispatcherService
-from src.services.log_service import LLMLogService
 from src.core.dependencies import TenantContextDep
 
 router = APIRouter(
