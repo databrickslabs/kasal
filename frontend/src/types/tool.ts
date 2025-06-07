@@ -1,6 +1,4 @@
 // Define possible config value types
-import { UCTool } from '../api/UCToolsService';
-
 export type ConfigValue = string | number | boolean | null | ConfigValue[] | { [key: string]: ConfigValue };
 
 export interface Tool {
@@ -9,7 +7,7 @@ export interface Tool {
   description: string;
   icon: string;
   config?: Record<string, ConfigValue>;
-  category?: 'PreBuilt' | 'Custom' | 'UnityCatalog';
+  category?: 'PreBuilt' | 'Custom';
   enabled?: boolean;
 }
 
@@ -20,10 +18,4 @@ export interface SavedToolsProps {
 export interface ToolIcon {
   value: string;
   label: string;
-}
-
-export interface UCToolsProps {
-  tools: UCTool[];
-  loading: boolean;
-  error: string | null;
 } 

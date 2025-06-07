@@ -27,8 +27,6 @@ import EditIcon from '@mui/icons-material/Edit';
 import DeleteIcon from '@mui/icons-material/Delete';
 import { SavedToolsProps, ToolIcon } from '../../types/tool';
 import { Tool, ToolService } from '../../api/ToolService';
-import { DatabricksService } from '../../api/DatabricksService';
-import { UCToolsService, UCTool } from '../../api/UCToolsService';
 
 const toolIcons: ToolIcon[] = [
   { value: 'screwdriver-wrench', label: 'Screwdriver Wrench' },
@@ -43,36 +41,14 @@ const toolIcons: ToolIcon[] = [
 
 function SavedTools({ refreshTrigger }: SavedToolsProps): JSX.Element {
   const [tools, setTools] = useState<Tool[]>([]);
-  const [ucTools, setUCTools] = useState<UCTool[]>([]);
   const [editDialog, setEditDialog] = useState<boolean>(false);
   const [editedTool, setEditedTool] = useState<Tool>({} as Tool);
-  const [activeTab, setActiveTab] = useState(0);
-  const [databricksEnabled, setDatabricksEnabled] = useState(false);
 
-  useEffect(() => {
-    const checkDatabricksEnabled = async () => {
-      try {
-        const databricksService = DatabricksService.getInstance();
-        const config = await databricksService.getDatabricksConfig();
-        setDatabricksEnabled(config?.enabled ?? false);
-      } catch (error) {
-        console.error('Error checking Databricks enabled state:', error);
-        setDatabricksEnabled(false);
-      }
-    };
-
-    checkDatabricksEnabled();
-  }, []);
 
   useEffect(() => {
     loadTools();
   }, [refreshTrigger]);
 
-  useEffect(() => {
-    if (databricksEnabled && activeTab === 2) {
-      loadUCTools();
-    }
-  }, [databricksEnabled, activeTab]);
 
   const loadTools = async () => {
     try {
@@ -83,19 +59,7 @@ function SavedTools({ refreshTrigger }: SavedToolsProps): JSX.Element {
     }
   };
 
-  const loadUCTools = async () => {
-    try {
-      const ucToolsService = UCToolsService.getInstance();
-      const ucToolsList = await ucToolsService.getUCTools();
-      setUCTools(ucToolsList);
-    } catch (error) {
-      console.error('Error loading UC tools:', error);
-    }
-  };
 
-  const handleTabChange = (_event: React.SyntheticEvent, newValue: number) => {
-    setActiveTab(newValue);
-  };
 
   const handleEdit = (tool: Tool) => {
     setEditedTool(tool);
@@ -135,132 +99,57 @@ function SavedTools({ refreshTrigger }: SavedToolsProps): JSX.Element {
 
   return (
     <>
-      {databricksEnabled && (
-        <Tabs value={activeTab} onChange={handleTabChange} sx={{ mb: 2 }}>
-          <Tab label="PreBuilt Tools" />
-          <Tab label="Custom Tools" />
-          <Tab label="Unity Catalog Tools" />
-        </Tabs>
-      )}
+      <Tabs value={0} sx={{ mb: 2 }}>
+        <Tab label="Tools" />
+      </Tabs>
 
-      {(!databricksEnabled || activeTab === 0) && (
-        <TableContainer component={Paper}>
-          <Table>
-            <TableHead>
-              <TableRow>
-                <TableCell>Title</TableCell>
-                <TableCell>Description</TableCell>
-                <TableCell>Icon</TableCell>
-                <TableCell>Actions</TableCell>
+      <TableContainer component={Paper}>
+        <Table>
+          <TableHead>
+            <TableRow>
+              <TableCell>Title</TableCell>
+              <TableCell>Description</TableCell>
+              <TableCell>Icon</TableCell>
+              <TableCell>Category</TableCell>
+              <TableCell>Actions</TableCell>
+            </TableRow>
+          </TableHead>
+          <TableBody>
+            {tools.map((tool) => (
+              <TableRow key={tool.id}>
+                <TableCell>{tool.title}</TableCell>
+                <TableCell>
+                  {tool.description.length > 100 
+                    ? `${tool.description.substring(0, 100)}...` 
+                    : tool.description}
+                </TableCell>
+                <TableCell>{tool.icon}</TableCell>
+                <TableCell>{tool.category || 'PreBuilt'}</TableCell>
+                <TableCell>
+                  <Stack direction="row" spacing={1}>
+                    <IconButton 
+                      size="small" 
+                      onClick={() => handleEdit(tool)}
+                      color="primary"
+                    >
+                      <EditIcon />
+                    </IconButton>
+                    <IconButton 
+                      size="small" 
+                      onClick={() => tool.id ? handleDelete(tool.id) : undefined}
+                      color="error"
+                    >
+                      <DeleteIcon />
+                    </IconButton>
+                  </Stack>
+                </TableCell>
               </TableRow>
-            </TableHead>
-            <TableBody>
-              {tools.filter(tool => tool.category === 'PreBuilt' || !tool.category).map((tool) => (
-                <TableRow key={tool.id}>
-                  <TableCell>{tool.title}</TableCell>
-                  <TableCell>
-                    {tool.description.length > 100 
-                      ? `${tool.description.substring(0, 100)}...` 
-                      : tool.description}
-                  </TableCell>
-                  <TableCell>{tool.icon}</TableCell>
-                  <TableCell>
-                    <Stack direction="row" spacing={1}>
-                      <IconButton 
-                        size="small" 
-                        onClick={() => handleEdit(tool)}
-                        color="primary"
-                      >
-                        <EditIcon />
-                      </IconButton>
-                      <IconButton 
-                        size="small" 
-                        onClick={() => tool.id ? handleDelete(tool.id) : undefined}
-                        color="error"
-                      >
-                        <DeleteIcon />
-                      </IconButton>
-                    </Stack>
-                  </TableCell>
-                </TableRow>
-              ))}
-            </TableBody>
-          </Table>
-        </TableContainer>
-      )}
+            ))}
+          </TableBody>
+        </Table>
+      </TableContainer>
 
-      {databricksEnabled && activeTab === 1 && (
-        <TableContainer component={Paper}>
-          <Table>
-            <TableHead>
-              <TableRow>
-                <TableCell>Title</TableCell>
-                <TableCell>Description</TableCell>
-                <TableCell>Icon</TableCell>
-                <TableCell>Actions</TableCell>
-              </TableRow>
-            </TableHead>
-            <TableBody>
-              {tools.filter(tool => tool.category === 'Custom').map((tool) => (
-                <TableRow key={tool.id}>
-                  <TableCell>{tool.title}</TableCell>
-                  <TableCell>
-                    {tool.description.length > 100 
-                      ? `${tool.description.substring(0, 100)}...` 
-                      : tool.description}
-                  </TableCell>
-                  <TableCell>{tool.icon}</TableCell>
-                  <TableCell>
-                    <Stack direction="row" spacing={1}>
-                      <IconButton 
-                        size="small" 
-                        onClick={() => handleEdit(tool)}
-                        color="primary"
-                      >
-                        <EditIcon />
-                      </IconButton>
-                      <IconButton 
-                        size="small" 
-                        onClick={() => tool.id ? handleDelete(tool.id) : undefined}
-                        color="error"
-                      >
-                        <DeleteIcon />
-                      </IconButton>
-                    </Stack>
-                  </TableCell>
-                </TableRow>
-              ))}
-            </TableBody>
-          </Table>
-        </TableContainer>
-      )}
 
-      {databricksEnabled && activeTab === 2 && (
-        <TableContainer component={Paper}>
-          <Table>
-            <TableHead>
-              <TableRow>
-                <TableCell>Name</TableCell>
-                <TableCell>Full Name</TableCell>
-                <TableCell>Catalog</TableCell>
-                <TableCell>Schema</TableCell>
-                <TableCell>Return Type</TableCell>
-              </TableRow>
-            </TableHead>
-            <TableBody>
-              {ucTools.map((tool) => (
-                <TableRow key={`${tool.catalog}.${tool.schema}.${tool.name}`}>
-                  <TableCell>{tool.name}</TableCell>
-                  <TableCell>{tool.full_name}</TableCell>
-                  <TableCell>{tool.catalog}</TableCell>
-                  <TableCell>{tool.schema}</TableCell>
-                  <TableCell>{tool.return_type}</TableCell>
-                </TableRow>
-              ))}
-            </TableBody>
-          </Table>
-        </TableContainer>
-      )}
 
       <Dialog open={editDialog} onClose={() => setEditDialog(false)} maxWidth="md" fullWidth>
         <DialogTitle>Edit Tool</DialogTitle>

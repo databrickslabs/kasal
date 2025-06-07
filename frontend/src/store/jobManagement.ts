@@ -7,7 +7,7 @@ interface SimplifiedTool {
   title: string;
   description: string;
   icon: string;
-  category?: 'PreBuilt' | 'Custom' | 'UnityCatalog';
+  category?: 'PreBuilt' | 'Custom';
   enabled?: boolean;
 }
 

@@ -147,11 +147,14 @@ const CrewPlanningDialog: React.FC<CrewPlanningDialogProps> = ({
         try {
           const toolService = ToolService;
           const refreshedTools = await toolService.listTools();
-          const formattedTools = refreshedTools.map(tool => ({
-            ...tool,
-            id: tool.id.toString(),
-            enabled: tool.enabled !== undefined ? tool.enabled : true
-          }));
+          const formattedTools = refreshedTools
+            .filter(tool => tool.category !== 'UnityCatalog') // Filter out UnityCatalog tools
+            .map(tool => ({
+              ...tool,
+              id: tool.id.toString(),
+              enabled: tool.enabled !== undefined ? tool.enabled : true,
+              category: (tool.category === 'UnityCatalog' ? 'Custom' : tool.category) as 'PreBuilt' | 'Custom' | undefined
+            }));
           setLocalTools(formattedTools);
         } catch (error) {
           console.error("Failed to refresh tools in CrewPlanningDialog:", error);

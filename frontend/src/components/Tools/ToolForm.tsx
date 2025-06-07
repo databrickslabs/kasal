@@ -35,8 +35,6 @@ import EditIcon from '@mui/icons-material/Edit';
 import AddIcon from '@mui/icons-material/Add';
 import { Tool, ToolIcon } from '../../types/tool';
 import { Tool as ServiceTool, ToolService } from '../../api/ToolService';
-import { UCToolsService, UCTool } from '../../api/UCToolsService';
-import { DatabricksService } from '../../api/DatabricksService';
 import { useTranslation } from 'react-i18next';
 import SecurityDisclaimer from './SecurityDisclaimer';
 
@@ -64,7 +62,7 @@ const customTools = [
 
 const convertServiceToolToTool = (serviceTool: ServiceTool): Tool => {
   // Determine the category based on the tool title
-  let category: 'PreBuilt' | 'Custom' | 'UnityCatalog' = 'PreBuilt';
+  let category: 'PreBuilt' | 'Custom' = 'PreBuilt';
   
   if (customTools.includes(serviceTool.title)) {
     category = 'Custom';
@@ -94,11 +92,9 @@ const ToolForm: React.FC = () => {
   const [tools, setTools] = useState<Tool[]>([]);
   const [filteredTools, setFilteredTools] = useState<Tool[]>([]);
   const [searchQuery, setSearchQuery] = useState('');
-  const [ucTools, setUCTools] = useState<UCTool[]>([]);
   const [isFormOpen, setIsFormOpen] = useState(false);
   const [isEditing, setIsEditing] = useState(false);
   const [activeTab, setActiveTab] = useState<number>(0);
-  const [databricksEnabled, setDatabricksEnabled] = useState(false);
   const [securityDisclaimerOpen, setSecurityDisclaimerOpen] = useState(false);
   const [pendingToggleTool, setPendingToggleTool] = useState<Tool | null>(null);
   const [notification, setNotification] = useState<{
@@ -111,30 +107,11 @@ const ToolForm: React.FC = () => {
     severity: 'success',
   });
 
-  useEffect(() => {
-    const checkDatabricksEnabled = async () => {
-      try {
-        const databricksService = DatabricksService.getInstance();
-        const config = await databricksService.getDatabricksConfig();
-        setDatabricksEnabled(config?.enabled ?? false);
-      } catch (error) {
-        console.error('Error checking Databricks enabled state:', error);
-        setDatabricksEnabled(false);
-      }
-    };
-
-    checkDatabricksEnabled();
-  }, []);
 
   useEffect(() => {
     loadTools();
   }, []);
 
-  useEffect(() => {
-    if (databricksEnabled && activeTab === 2) {
-      loadUCTools();
-    }
-  }, [databricksEnabled, activeTab]);
 
   useEffect(() => {
     const filtered = tools.filter(tool => 
@@ -158,20 +135,6 @@ const ToolForm: React.FC = () => {
     }
   };
 
-  const loadUCTools = async () => {
-    try {
-      const ucToolsService = UCToolsService.getInstance();
-      const ucToolsList = await ucToolsService.getUCTools();
-      setUCTools(ucToolsList);
-    } catch (error) {
-      console.error('Error loading UC tools:', error);
-      setNotification({
-        open: true,
-        message: 'Error loading Unity Catalog tools',
-        severity: 'error',
-      });
-    }
-  };
 
   const handleChange = (
     e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement> | SelectChangeEvent<string>
@@ -414,7 +377,7 @@ const ToolForm: React.FC = () => {
                   color="primary"
                   onClick={() => {
                     setIsEditing(false);
-                    setFormData(prev => ({ ...prev, category: activeTab === 0 ? 'PreBuilt' : activeTab === 1 ? 'Custom' : 'UnityCatalog' }));
+                    setFormData(prev => ({ ...prev, category: activeTab === 0 ? 'PreBuilt' : 'Custom' }));
                     setIsFormOpen(true);
                   }}
                   size="small"
@@ -431,7 +394,6 @@ const ToolForm: React.FC = () => {
             >
               <Tab label={t('tools.regular.tabs.prebuilt')} />
               <Tab label={t('tools.regular.tabs.custom')} />
-              {databricksEnabled && <Tab label={t('tools.regular.tabs.unityCatalog')} />}
             </Tabs>
 
             {activeTab === 0 && (
@@ -552,40 +514,6 @@ const ToolForm: React.FC = () => {
               </TableContainer>
             )}
 
-            {databricksEnabled && activeTab === 2 && (
-              <TableContainer component={Paper} sx={{ mt: 0 }}>
-                <Table>
-                  <TableHead>
-                    <TableRow>
-                      <TableCell>{t('tools.unityCatalog.fields.name')}</TableCell>
-                      <TableCell>{t('tools.unityCatalog.fields.fullName')}</TableCell>
-                      <TableCell>{t('tools.unityCatalog.fields.catalog')}</TableCell>
-                      <TableCell>{t('tools.unityCatalog.fields.schema')}</TableCell>
-                      <TableCell>{t('tools.unityCatalog.fields.returnType')}</TableCell>
-                    </TableRow>
-                  </TableHead>
-                  <TableBody>
-                    {ucTools.length === 0 ? (
-                      <TableRow>
-                        <TableCell colSpan={5} align="center">
-                          {t('tools.unityCatalog.noToolsFound')}
-                        </TableCell>
-                      </TableRow>
-                    ) : (
-                      ucTools.map((tool) => (
-                        <TableRow key={`${tool.catalog}.${tool.schema}.${tool.name}`}>
-                          <TableCell>{tool.name}</TableCell>
-                          <TableCell>{tool.full_name}</TableCell>
-                          <TableCell>{tool.catalog}</TableCell>
-                          <TableCell>{tool.schema}</TableCell>
-                          <TableCell>{tool.return_type}</TableCell>
-                        </TableRow>
-                      ))
-                    )}
-                  </TableBody>
-                </Table>
-              </TableContainer>
-            )}
           </CardContent>
         </Card>
 
@@ -645,7 +573,6 @@ const ToolForm: React.FC = () => {
                   >
                     <MenuItem value="PreBuilt">{t('tools.regular.categories.prebuilt')}</MenuItem>
                     <MenuItem value="Custom">{t('tools.regular.categories.custom')}</MenuItem>
-                    <MenuItem value="UnityCatalog">{t('tools.regular.categories.unityCatalog')}</MenuItem>
                   </Select>
                 </FormControl>
                 
