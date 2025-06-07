@@ -10,6 +10,7 @@ import ReactFlow, {
   ReactFlowInstance,
   ConnectionMode,
   BackgroundVariant,
+  getConnectedEdges
 } from 'reactflow';
 import 'reactflow/dist/style.css';
 import { Box, Snackbar, Alert } from '@mui/material';
@@ -147,6 +148,7 @@ const FlowCanvas: React.FC<FlowCanvasProps> = ({
 
   // Handle shortcut actions
   const handleDeleteSelected = useCallback((selectedNodes: Node[], selectedEdges: Edge[]) => {
+    // First, remove the selected nodes
     if (selectedNodes.length > 0) {
       const nodesToRemove = selectedNodes.map(node => ({
         id: node.id,
@@ -156,9 +158,19 @@ const FlowCanvas: React.FC<FlowCanvasProps> = ({
       onNodesChange(nodesToRemove);
     }
     
-    if (selectedEdges.length > 0) {
-      const edgesToRemove = selectedEdges.map(edge => ({
-        id: edge.id,
+    // Find all edges connected to the nodes being deleted (including orphaned edges)
+    const connectedEdges = selectedNodes.length > 0 ? getConnectedEdges(selectedNodes, edges) : [];
+    
+    // Combine explicitly selected edges with edges connected to deleted nodes
+    const allEdgesToDelete = new Set([
+      ...selectedEdges.map(edge => edge.id),
+      ...connectedEdges.map(edge => edge.id)
+    ]);
+    
+    // Remove all edges that need to be deleted
+    if (allEdgesToDelete.size > 0) {
+      const edgesToRemove = Array.from(allEdgesToDelete).map(edgeId => ({
+        id: edgeId,
         type: 'remove' as const,
       }));
       
@@ -166,10 +178,10 @@ const FlowCanvas: React.FC<FlowCanvasProps> = ({
     }
     
     // Show success notification if something was deleted
-    if (selectedNodes.length > 0 || selectedEdges.length > 0) {
-      showTemporaryNotification(`Deleted ${selectedNodes.length} nodes and ${selectedEdges.length} edges`);
+    if (selectedNodes.length > 0 || allEdgesToDelete.size > 0) {
+      showTemporaryNotification(`Deleted ${selectedNodes.length} nodes and ${allEdgesToDelete.size} edges`);
     }
-  }, [onNodesChange, onEdgesChange, showTemporaryNotification]);
+  }, [onNodesChange, onEdgesChange, showTemporaryNotification, edges]);
 
   // Initialize shortcuts - prefix with _ to indicate it's intentionally unused in the JSX
   const { shortcuts: _shortcuts } = useShortcuts({

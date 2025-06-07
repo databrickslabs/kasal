@@ -11,7 +11,8 @@ import ReactFlow, {
   ConnectionMode,
   NodeTypes,
   EdgeTypes,
-  BackgroundVariant
+  BackgroundVariant,
+  getConnectedEdges
 } from 'reactflow';
 import 'reactflow/dist/style.css';
 import { Box, Snackbar, Alert, Button } from '@mui/material';
@@ -517,9 +518,21 @@ const CrewCanvas: React.FC<CrewCanvasProps> = ({
   }, [edges, nodes, runStatusStore.hasRunningJobs]); // Add hasRunningJobs to dependencies
 
   const _handleDeleteSelected = useCallback((selectedNodes: Node[], selectedEdges: Edge[]) => {
+    // First, remove the selected nodes
     onNodesChange(selectedNodes.map(node => ({ type: 'remove', id: node.id })));
-    onEdgesChange(selectedEdges.map(edge => ({ type: 'remove', id: edge.id })));
-  }, [onNodesChange, onEdgesChange]);
+    
+    // Find all edges connected to the nodes being deleted (including orphaned edges)
+    const connectedEdges = getConnectedEdges(selectedNodes, edges);
+    
+    // Combine explicitly selected edges with edges connected to deleted nodes
+    const allEdgesToDelete = new Set([
+      ...selectedEdges.map(edge => edge.id),
+      ...connectedEdges.map(edge => edge.id)
+    ]);
+    
+    // Remove all edges that need to be deleted
+    onEdgesChange(Array.from(allEdgesToDelete).map(edgeId => ({ type: 'remove', id: edgeId })));
+  }, [onNodesChange, onEdgesChange, edges]);
 
   const { shortcuts } = useShortcuts({
     flowInstance: reactFlowInstanceRef.current,
