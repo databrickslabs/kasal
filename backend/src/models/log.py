@@ -7,6 +7,7 @@ from src.db.base import Base
 class LLMLog(Base):
     """
     LLMLog model for tracking LLM interactions and usage.
+    Enhanced with tenant isolation for multi-tenant deployments.
     """
     
     id = Column(Integer, primary_key=True)
@@ -19,4 +20,8 @@ class LLMLog(Base):
     status = Column(String, nullable=False)    # 'success' or 'error'
     error_message = Column(String)             # Error message if any
     created_at = Column(DateTime, default=datetime.utcnow)  # Use timezone-naive UTC time
-    extra_data = Column(JSON)                  # Any additional metadata 
+    extra_data = Column(JSON)                  # Any additional metadata
+    
+    # Multi-tenant fields
+    tenant_id = Column(String(100), index=True, nullable=True)  # Tenant isolation
+    tenant_email = Column(String(255), nullable=True)  # Creator email for audit 
