@@ -6,7 +6,7 @@ from src.core.base_service import BaseService
 from src.models.task import Task
 from src.repositories.task_repository import TaskRepository
 from src.schemas.task import TaskCreate, TaskUpdate
-from src.utils.user_context import TenantContext
+from src.utils.user_context import GroupContext
 
 
 class TaskService(BaseService[Task, TaskCreate]):
@@ -169,21 +169,21 @@ class TaskService(BaseService[Task, TaskCreate]):
         """
         await self.repository.delete_all()
     
-    async def create_with_tenant(self, obj_in: TaskCreate, tenant_context: TenantContext) -> Task:
+    async def create_with_group(self, obj_in: TaskCreate, group_context: GroupContext) -> Task:
         """
-        Create a new task with tenant isolation.
+        Create a new task with group isolation.
         
         Args:
             obj_in: Task data for creation
-            tenant_context: Tenant context from headers
+            group_context: Group context from headers
             
         Returns:
-            Created task with tenant information
+            Created task with group information
         """
-        # Convert schema to dict and add tenant fields
+        # Convert schema to dict and add group fields
         task_data = obj_in.model_dump()
-        task_data['tenant_id'] = tenant_context.primary_tenant_id
-        task_data['created_by_email'] = tenant_context.tenant_email
+        task_data['group_id'] = group_context.primary_group_id
+        task_data['created_by_email'] = group_context.group_email
         
         # Convert empty agent_id to None for PostgreSQL compatibility
         if "agent_id" in task_data and task_data["agent_id"] == "":
@@ -192,20 +192,20 @@ class TaskService(BaseService[Task, TaskCreate]):
         # Create task using repository (pass dict, not object)
         return await self.repository.create(task_data)
     
-    async def find_by_tenant(self, tenant_context: TenantContext) -> List[Task]:
+    async def find_by_group(self, group_context: GroupContext) -> List[Task]:
         """
-        Find all tasks for a specific tenant.
+        Find all tasks for a specific group.
         
         Args:
-            tenant_context: Tenant context from headers
+            group_context: Group context from headers
             
         Returns:
-            List of tasks for the specified tenant
+            List of tasks for the specified group
         """
-        if not tenant_context.tenant_ids:
-            # If no tenant context, return empty list for security
+        if not group_context.group_ids:
+            # If no group context, return empty list for security
             return []
         
-        stmt = select(Task).where(Task.tenant_id.in_(tenant_context.tenant_ids))
+        stmt = select(Task).where(Task.group_id.in_(group_context.group_ids))
         result = await self.session.execute(stmt)
         return result.scalars().all() 

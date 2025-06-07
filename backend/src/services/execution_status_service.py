@@ -154,13 +154,13 @@ class ExecutionStatusService:
             return None
 
     @staticmethod
-    async def create_execution(execution_data: Dict[str, Any], tenant_context=None) -> bool:
+    async def create_execution(execution_data: Dict[str, Any], group_context=None) -> bool:
         """
-        Create a new execution record in the database with tenant context.
+        Create a new execution record in the database with group context.
         
         Args:
             execution_data: Dictionary with execution data
-            tenant_context: Tenant context for multi-tenant data isolation
+            group_context: Group context for multi-group data isolation
             
         Returns:
             True if successful, False otherwise
@@ -175,19 +175,20 @@ class ExecutionStatusService:
             return False
             
         try:
-            # Add tenant information to execution data if tenant context is provided
-            if tenant_context:
-                execution_data["tenant_id"] = tenant_context.primary_tenant_id
-                execution_data["tenant_email"] = tenant_context.tenant_email
-                logger.info(f"[ExecutionStatusService] Adding tenant context to execution: tenant_id={tenant_context.primary_tenant_id}, groups={tenant_context.tenant_ids}, email={tenant_context.tenant_email}")
+            # Add group information to execution data if group context is provided
+            if group_context:
+                execution_data["group_id"] = group_context.primary_group_id
+                execution_data["group_email"] = group_context.group_email
+                logger.info(f"[ExecutionStatusService] Adding group context to execution: group_id={group_context.primary_group_id}, groups={group_context.group_ids}, email={group_context.group_email}")
             
             # Create database session internally
             async with async_session_factory() as session:
                 # Create repository instance
                 repo = ExecutionRepository(session)
                 
-                # Check if record already exists
-                existing = await repo.get_execution_by_job_id(job_id=job_id)
+                # Check if record already exists (with group filtering if available)
+                group_ids = group_context.group_ids if group_context else None
+                existing = await repo.get_execution_by_job_id(job_id=job_id, group_ids=group_ids)
                 if existing:
                     logger.info(f"[ExecutionStatusService] Execution record with job_id: {job_id} already exists, skipping creation")
                     return True

@@ -40,7 +40,7 @@ class RoleService:
     
     async def get_roles(self, skip: int = 0, limit: int = 100) -> List[Role]:
         """Get a list of roles"""
-        return await self.role_repo.get_all(skip=skip, limit=limit)
+        return await self.role_repo.list(skip=skip, limit=limit)
     
     async def create_role(self, role_data: RoleCreate) -> Dict[str, Any]:
         """Create a new role with privileges"""
@@ -155,4 +155,50 @@ class RoleService:
         
         # Check if privilege is in role's privileges
         privileges = getattr(role, "privileges", [])
-        return any(p.id == privilege.id for p in privileges) 
+        return any(p.id == privilege.id for p in privileges)
+    
+    async def get_role_privileges(self, role_id: str) -> List[Privilege]:
+        """Get privileges for a specific role"""
+        role = await self.role_repo.get_with_privileges(role_id)
+        if not role:
+            return []
+        
+        return getattr(role, "privileges", [])
+    
+    async def assign_privilege_to_role(self, role_id: str, privilege_id: str) -> bool:
+        """Assign a privilege to a role"""
+        # Check if role exists
+        role = await self.role_repo.get(role_id)
+        if not role:
+            return False
+        
+        # Check if privilege exists
+        privilege = await self.privilege_repo.get(privilege_id)
+        if not privilege:
+            return False
+        
+        # Check if mapping already exists
+        existing_mapping = await self.role_privilege_repo.get_by_role_and_privilege(role_id, privilege_id)
+        if existing_mapping:
+            return True  # Already assigned
+        
+        # Create role-privilege mapping
+        role_privilege_data = {
+            "role_id": role_id,
+            "privilege_id": privilege_id
+        }
+        await self.role_privilege_repo.create(role_privilege_data)
+        
+        return True
+    
+    async def remove_privilege_from_role(self, role_id: str, privilege_id: str) -> bool:
+        """Remove a privilege from a role"""
+        # Get mapping
+        mapping = await self.role_privilege_repo.get_by_role_and_privilege(role_id, privilege_id)
+        if not mapping:
+            return True  # Already removed
+        
+        # Delete mapping
+        await self.role_privilege_repo.delete(mapping.id)
+        
+        return True 

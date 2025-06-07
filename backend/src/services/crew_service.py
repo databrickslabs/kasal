@@ -7,7 +7,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from src.models.crew import Crew
 from src.repositories.crew_repository import CrewRepository
 from src.schemas.crew import CrewCreate, CrewUpdate
-from src.utils.user_context import TenantContext
+from src.utils.user_context import GroupContext
 
 logger = logging.getLogger(__name__)
 
@@ -153,30 +153,30 @@ class CrewService:
         """
         await self.repository.delete_all()
     
-    # Tenant-aware methods
-    async def create_with_tenant(self, obj_in: CrewCreate, tenant_context: TenantContext) -> Crew:
+    # Group-aware methods
+    async def create_with_group(self, obj_in: CrewCreate, group_context: GroupContext) -> Crew:
         """
-        Create a new crew with tenant context.
+        Create a new crew with group context.
         
         Args:
             obj_in: Crew data for creation
-            tenant_context: Tenant context from headers
+            group_context: Group context from headers
             
         Returns:
             Created crew
         """
         try:
             # Log details for debugging
-            logger.info(f"Creating crew with name: {obj_in.name} for tenant: {tenant_context.primary_tenant_id}")
+            logger.info(f"Creating crew with name: {obj_in.name} for group: {group_context.primary_group_id}")
             logger.info(f"Agent IDs: {obj_in.agent_ids}")
             logger.info(f"Task IDs: {obj_in.task_ids}")
             logger.info(f"Number of nodes: {len(obj_in.nodes)}")
             logger.info(f"Number of edges: {len(obj_in.edges)}")
             
-            # Convert schema to dict and add tenant fields
+            # Convert schema to dict and add group fields
             crew_data = obj_in.model_dump()
-            crew_data['tenant_id'] = tenant_context.primary_tenant_id
-            crew_data['created_by_email'] = tenant_context.tenant_email
+            crew_data['group_id'] = group_context.primary_group_id
+            crew_data['created_by_email'] = group_context.group_email
             
             # Ensure all lists are properly initialized
             if crew_data.get('agent_ids') is None:
@@ -195,58 +195,58 @@ class CrewService:
             # Create the model using the serialized data
             return await self.repository.create(crew_data)
         except Exception as e:
-            logger.error(f"Error creating crew with tenant: {str(e)}")
+            logger.error(f"Error creating crew with group: {str(e)}")
             raise
 
-    async def find_by_tenant(self, tenant_context: TenantContext) -> List[Crew]:
+    async def find_by_group(self, group_context: GroupContext) -> List[Crew]:
         """
-        Find all crews for the given tenant.
+        Find all crews for the given group.
         
         Args:
-            tenant_context: Tenant context from headers
+            group_context: Group context from headers
             
         Returns:
-            List of crews for the tenant
+            List of crews for the group
         """
-        if not tenant_context.tenant_ids:
-            # If no tenant context, return empty list for security
+        if not group_context.group_ids:
+            # If no group context, return empty list for security
             return []
         
-        return await self.repository.find_by_tenant(tenant_context.tenant_ids)
+        return await self.repository.find_by_group(group_context.group_ids)
 
-    async def get_by_tenant(self, id: UUID, tenant_context: TenantContext) -> Optional[Crew]:
+    async def get_by_group(self, id: UUID, group_context: GroupContext) -> Optional[Crew]:
         """
-        Get a crew by ID, ensuring it belongs to the tenant.
+        Get a crew by ID, ensuring it belongs to the group.
         
         Args:
             id: ID of the crew to get
-            tenant_context: Tenant context from headers
+            group_context: Group context from headers
             
         Returns:
-            Crew if found and belongs to tenant, else None
+            Crew if found and belongs to group, else None
         """
-        if not tenant_context.tenant_ids:
+        if not group_context.group_ids:
             return None
         
-        return await self.repository.get_by_tenant(id, tenant_context.tenant_ids)
+        return await self.repository.get_by_group(id, group_context.group_ids)
 
-    async def update_with_partial_data_by_tenant(self, id: UUID, obj_in: CrewUpdate, tenant_context: TenantContext) -> Optional[Crew]:
+    async def update_with_partial_data_by_group(self, id: UUID, obj_in: CrewUpdate, group_context: GroupContext) -> Optional[Crew]:
         """
-        Update a crew with partial data, ensuring it belongs to the tenant.
+        Update a crew with partial data, ensuring it belongs to the group.
         
         Args:
             id: ID of the crew to update
             obj_in: Schema with fields to update
-            tenant_context: Tenant context from headers
+            group_context: Group context from headers
             
         Returns:
-            Updated crew if found and belongs to tenant, else None
+            Updated crew if found and belongs to group, else None
         """
-        if not tenant_context.tenant_ids:
+        if not group_context.group_ids:
             return None
         
-        # First verify the crew exists and belongs to the tenant
-        existing_crew = await self.repository.get_by_tenant(id, tenant_context.tenant_ids)
+        # First verify the crew exists and belongs to the group
+        existing_crew = await self.repository.get_by_group(id, group_context.group_ids)
         if not existing_crew:
             return None
         
@@ -258,30 +258,30 @@ class CrewService:
         
         return await self.repository.update(id, update_data)
 
-    async def delete_by_tenant(self, id: UUID, tenant_context: TenantContext) -> bool:
+    async def delete_by_group(self, id: UUID, group_context: GroupContext) -> bool:
         """
-        Delete a crew by ID, ensuring it belongs to the tenant.
+        Delete a crew by ID, ensuring it belongs to the group.
         
         Args:
             id: ID of the crew to delete
-            tenant_context: Tenant context from headers
+            group_context: Group context from headers
             
         Returns:
-            True if crew was deleted, False if not found or doesn't belong to tenant
+            True if crew was deleted, False if not found or doesn't belong to group
         """
-        if not tenant_context.tenant_ids:
+        if not group_context.group_ids:
             return False
         
-        return await self.repository.delete_by_tenant(id, tenant_context.tenant_ids)
+        return await self.repository.delete_by_group(id, group_context.group_ids)
 
-    async def delete_all_by_tenant(self, tenant_context: TenantContext) -> None:
+    async def delete_all_by_group(self, group_context: GroupContext) -> None:
         """
-        Delete all crews for the given tenant.
+        Delete all crews for the given group.
         
         Args:
-            tenant_context: Tenant context from headers
+            group_context: Group context from headers
         """
-        if not tenant_context.tenant_ids:
+        if not group_context.group_ids:
             return
         
-        await self.repository.delete_all_by_tenant(tenant_context.tenant_ids) 
+        await self.repository.delete_all_by_group(group_context.group_ids) 

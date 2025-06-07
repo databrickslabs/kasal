@@ -4,7 +4,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.models.log import LLMLog
 from src.repositories.log_repository import LLMLogRepository
-from src.utils.user_context import TenantContext
+from src.utils.user_context import GroupContext
 
 
 class LLMLogService:
@@ -87,7 +87,7 @@ class LLMLogService:
         duration_ms: Optional[int] = None,
         error_message: Optional[str] = None,
         extra_data: Optional[Dict[str, Any]] = None,
-        tenant_context: Optional[TenantContext] = None
+        group_context: Optional[GroupContext] = None
     ) -> LLMLog:
         """
         Create a new LLM log entry with optional tenant context.
@@ -102,7 +102,7 @@ class LLMLogService:
             duration_ms: Duration in milliseconds
             error_message: Error message if any
             extra_data: Any additional data to store
-            tenant_context: Optional tenant context for multi-tenant isolation
+            group_context: Optional group context for multi-group isolation
             
         Returns:
             The created LLM log
@@ -120,10 +120,10 @@ class LLMLogService:
             "created_at": datetime.now(timezone.utc)
         }
         
-        # Add tenant fields if tenant context is provided and has valid values
-        if tenant_context and tenant_context.primary_tenant_id:
-            log_data["tenant_id"] = tenant_context.primary_tenant_id
-            log_data["tenant_email"] = tenant_context.tenant_email
+        # Add group fields if group context is provided and has valid values
+        if group_context and group_context.primary_group_id:
+            log_data["group_id"] = group_context.primary_group_id
+            log_data["group_email"] = group_context.group_email
         
         return await self.repository.create(log_data)
     
@@ -154,85 +154,85 @@ class LLMLogService:
             "days_included": days
         }
     
-    # Tenant-aware methods
-    async def get_logs_paginated_by_tenant(
+    # Group-aware methods
+    async def get_logs_paginated_by_group(
         self, 
         page: int = 0, 
         per_page: int = 10, 
         endpoint: Optional[str] = None,
-        tenant_context: TenantContext = None
+        group_context: GroupContext = None
     ) -> List[LLMLog]:
         """
-        Get paginated logs with optional endpoint filtering for a specific tenant.
+        Get paginated logs with optional endpoint filtering for a specific group.
         
         Args:
             page: Page number (0-indexed)
             per_page: Items per page
             endpoint: Optional endpoint to filter by
-            tenant_context: Tenant context for filtering
+            group_context: Group context for filtering
             
         Returns:
-            List of LLM logs for the specified page and tenant
+            List of LLM logs for the specified page and group
         """
-        if not tenant_context or not tenant_context.tenant_ids:
-            # If no tenant context, return empty list for security
+        if not group_context or not group_context.group_ids:
+            # If no group context, return empty list for security
             return []
         
-        return await self.repository.get_logs_paginated_by_tenant(
-            page, per_page, endpoint, tenant_context.tenant_ids
+        return await self.repository.get_logs_paginated_by_group(
+            page, per_page, endpoint, group_context.group_ids
         )
 
-    async def count_logs_by_tenant(
+    async def count_logs_by_group(
         self, 
         endpoint: Optional[str] = None, 
-        tenant_context: TenantContext = None
+        group_context: GroupContext = None
     ) -> int:
         """
-        Count logs with optional endpoint filtering for a specific tenant.
+        Count logs with optional endpoint filtering for a specific group.
         
         Args:
             endpoint: Optional endpoint to filter by
-            tenant_context: Tenant context for filtering
+            group_context: Group context for filtering
             
         Returns:
-            Total count of matching logs for tenant
+            Total count of matching logs for group
         """
-        if not tenant_context or not tenant_context.tenant_ids:
+        if not group_context or not group_context.group_ids:
             return 0
         
-        return await self.repository.count_logs_by_tenant(endpoint, tenant_context.tenant_ids)
+        return await self.repository.count_logs_by_group(endpoint, group_context.group_ids)
 
-    async def get_unique_endpoints_by_tenant(self, tenant_context: TenantContext = None) -> List[str]:
+    async def get_unique_endpoints_by_group(self, group_context: GroupContext = None) -> List[str]:
         """
-        Get list of unique endpoints in the logs for a specific tenant.
+        Get list of unique endpoints in the logs for a specific group.
         
         Args:
-            tenant_context: Tenant context for filtering
+            group_context: Group context for filtering
         
         Returns:
-            List of unique endpoint strings for tenant
+            List of unique endpoint strings for group
         """
-        if not tenant_context or not tenant_context.tenant_ids:
+        if not group_context or not group_context.group_ids:
             return []
         
-        return await self.repository.get_unique_endpoints_by_tenant(tenant_context.tenant_ids)
+        return await self.repository.get_unique_endpoints_by_group(group_context.group_ids)
 
-    async def get_log_stats_by_tenant(
+    async def get_log_stats_by_group(
         self, 
         days: int = 30, 
-        tenant_context: TenantContext = None
+        group_context: GroupContext = None
     ) -> Dict[str, Any]:
         """
-        Get statistics about LLM usage for a specific tenant.
+        Get statistics about LLM usage for a specific group.
         
         Args:
             days: Number of days to include in stats
-            tenant_context: Tenant context for filtering
+            group_context: Group context for filtering
             
         Returns:
-            Dictionary with usage statistics for tenant
+            Dictionary with usage statistics for group
         """
-        if not tenant_context or not tenant_context.tenant_ids:
+        if not group_context or not group_context.group_ids:
             return {
                 "total_logs": 0,
                 "endpoints": [],
@@ -240,13 +240,13 @@ class LLMLogService:
                 "days_included": days
             }
         
-        total_count = await self.count_logs_by_tenant(None, tenant_context)
-        endpoints = await self.get_unique_endpoints_by_tenant(tenant_context)
+        total_count = await self.count_logs_by_group(None, group_context)
+        endpoints = await self.get_unique_endpoints_by_group(group_context)
         
         # Count by endpoint
         endpoint_counts = {}
         for endpoint in endpoints:
-            endpoint_counts[endpoint] = await self.count_logs_by_tenant(endpoint, tenant_context)
+            endpoint_counts[endpoint] = await self.count_logs_by_group(endpoint, group_context)
             
         return {
             "total_logs": total_count,

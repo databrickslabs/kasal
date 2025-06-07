@@ -31,7 +31,7 @@ class UserService:
             users = []
             
             # Search by username (exact or partial match)
-            username_matches = await self.user_repo.get_all(
+            username_matches = await self.user_repo.list(
                 filters={"username": {"$like": f"%{search}%"}},
                 skip=skip,
                 limit=limit
@@ -39,7 +39,7 @@ class UserService:
             users.extend(username_matches)
             
             # Search by email (exact or partial match)
-            email_matches = await self.user_repo.get_all(
+            email_matches = await self.user_repo.list(
                 filters={"email": {"$like": f"%{search}%"}},
                 skip=skip,
                 limit=limit
@@ -57,7 +57,7 @@ class UserService:
             return unique_users[:limit]
         
         # Regular filtering
-        return await self.user_repo.get_all(filters=filters, skip=skip, limit=limit)
+        return await self.user_repo.list_with_filters(skip=skip, limit=limit, filters=filters)
     
     async def get_user_with_profile(self, user_id: str) -> Optional[Dict[str, Any]]:
         """Get a user with their profile"""

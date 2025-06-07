@@ -10,7 +10,8 @@ from sqlalchemy.orm import sessionmaker
 from sqlalchemy import create_engine
 
 from src.repositories.schedule_repository import ScheduleRepository
-from src.schemas.schedule import ScheduleCreate, ScheduleUpdate, ScheduleResponse, ScheduleListResponse, ToggleResponse, CrewConfig
+from src.repositories.execution_history_repository import ExecutionHistoryRepository
+from src.schemas.schedule import ScheduleCreate, ScheduleCreateFromExecution, ScheduleUpdate, ScheduleResponse, ScheduleListResponse, ToggleResponse, CrewConfig
 from src.schemas.scheduler import SchedulerJobCreate, SchedulerJobUpdate, SchedulerJobResponse
 from src.utils.cron_utils import ensure_utc, calculate_next_run_from_last
 from src.services.crewai_execution_service import CrewAIExecutionService, JobStatus
@@ -21,7 +22,7 @@ from src.engines.crewai.callbacks import JobOutputCallback
 from src.core.logger import LoggerManager
 from src.services.execution_service import ExecutionService
 from src.schemas.execution import ExecutionNameGenerationRequest
-from src.utils.user_context import TenantContext
+from src.utils.user_context import GroupContext
 
 logger = logging.getLogger(__name__)
 logger_manager = LoggerManager.get_instance()
@@ -43,10 +44,11 @@ class SchedulerService:
             session: SQLAlchemy async session
         """
         self.repository = ScheduleRepository(session)
+        self.execution_history_repository = ExecutionHistoryRepository(session)
         self.session = session
         self._running_tasks: Set[asyncio.Task] = set()
     
-    async def create_schedule(self, schedule_data: ScheduleCreate, tenant_context: TenantContext = None) -> ScheduleResponse:
+    async def create_schedule(self, schedule_data: ScheduleCreate, group_context: GroupContext = None) -> ScheduleResponse:
         """
         Create a new schedule.
         
@@ -67,10 +69,10 @@ class SchedulerService:
             schedule_dict = schedule_data.model_dump()
             schedule_dict["next_run_at"] = next_run
             
-            # Add tenant context if provided
-            if tenant_context:
-                schedule_dict["tenant_id"] = tenant_context.primary_tenant_id
-                schedule_dict["created_by_email"] = tenant_context.tenant_email
+            # Add group context if provided
+            if group_context:
+                schedule_dict["group_id"] = group_context.primary_group_id
+                schedule_dict["created_by_email"] = group_context.group_email
             
             schedule = await self.repository.create(schedule_dict)
             
@@ -88,19 +90,95 @@ class SchedulerService:
                 detail=f"Failed to create schedule: {str(e)}"
             )
     
-    async def get_all_schedules(self, tenant_context: TenantContext = None) -> ScheduleListResponse:
+    async def create_schedule_from_execution(self, schedule_data: ScheduleCreateFromExecution, group_context: GroupContext = None) -> ScheduleResponse:
+        """
+        Create a new schedule based on an existing execution.
+        
+        Args:
+            schedule_data: Schedule data for creation including execution_id
+            group_context: Group context for group isolation
+            
+        Returns:
+            ScheduleResponse of created schedule
+            
+        Raises:
+            HTTPException: If execution not found or schedule creation fails
+        """
+        try:
+            # Get the execution history to extract the real YAML
+            execution = await self.execution_history_repository.find_by_id(schedule_data.execution_id)
+            if not execution:
+                raise HTTPException(
+                    status_code=status.HTTP_404_NOT_FOUND,
+                    detail=f"Execution with ID {schedule_data.execution_id} not found"
+                )
+            
+            # Parse the inputs from execution to extract agents_yaml and tasks_yaml
+            inputs = execution.inputs if execution.inputs else {}
+            agents_yaml = inputs.get("agents_yaml", {})
+            tasks_yaml = inputs.get("tasks_yaml", {})
+            execution_inputs = inputs.get("inputs", {})
+            planning = inputs.get("planning", False)
+            model = inputs.get("model", "gpt-4o-mini")
+            
+            if not agents_yaml or not tasks_yaml:
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail=f"Execution {schedule_data.execution_id} does not contain valid agents_yaml or tasks_yaml configuration"
+                )
+            
+            # Calculate next run time
+            next_run = calculate_next_run_from_last(schedule_data.cron_expression)
+            
+            # Create schedule dictionary
+            schedule_dict = {
+                "name": schedule_data.name,
+                "cron_expression": schedule_data.cron_expression,
+                "agents_yaml": agents_yaml,
+                "tasks_yaml": tasks_yaml,
+                "inputs": execution_inputs,
+                "is_active": schedule_data.is_active,
+                "planning": planning,
+                "model": model,
+                "next_run_at": next_run
+            }
+            
+            # Add group context if provided
+            if group_context:
+                schedule_dict["group_id"] = group_context.primary_group_id
+                schedule_dict["created_by_email"] = group_context.group_email
+            
+            schedule = await self.repository.create(schedule_dict)
+            
+            return ScheduleResponse.model_validate(schedule)
+        except HTTPException:
+            raise
+        except ValueError as e:
+            logger.error(f"Invalid cron expression: {str(e)}")
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"Invalid cron expression: {str(e)}"
+            )
+        except Exception as e:
+            logger.error(f"Failed to create schedule from execution: {str(e)}")
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail=f"Failed to create schedule from execution: {str(e)}"
+            )
+    
+    async def get_all_schedules(self, group_context: GroupContext = None) -> ScheduleListResponse:
         """
         Get all schedules.
         
         Returns:
             ScheduleListResponse with list of schedules
         """
-        logger.error(f"DEBUG: get_all_schedules called with tenant_context: {tenant_context}")
-        if tenant_context and tenant_context.primary_tenant_id:
-            logger.error(f"DEBUG: Filtering by tenant_id: {tenant_context.primary_tenant_id}")
-            schedules = await self.repository.find_by_tenant(tenant_context.primary_tenant_id)
+        logger.error(f"DEBUG: get_all_schedules called with group_context: {group_context}")
+        if group_context and group_context.primary_group_id:
+            logger.error(f"DEBUG: Filtering by group_id: {group_context.primary_group_id}")
+            schedules = await self.repository.find_by_group(group_context.primary_group_id)
         else:
-            logger.error(f"DEBUG: No valid tenant context (context={tenant_context}, tenant_id={getattr(tenant_context, 'tenant_id', None)}), getting all schedules")
+            logger.error(f"DEBUG: No valid group context (context={group_context}, group_id={getattr(group_context, 'primary_group_id', None)}), getting all schedules")
             schedules = await self.repository.find_all()
         
         logger.error(f"DEBUG: Found {len(schedules)} schedules")

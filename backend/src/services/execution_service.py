@@ -25,7 +25,7 @@ from src.utils.asyncio_utils import run_in_thread_with_loop, create_and_run_loop
 from src.services.crewai_execution_service import CrewAIExecutionService
 from src.services.execution_status_service import ExecutionStatusService
 from src.services.execution_name_service import ExecutionNameService
-from src.utils.user_context import TenantContext
+from src.utils.user_context import GroupContext
 
 
 # Configure logging
@@ -227,7 +227,7 @@ class ExecutionService:
         execution_id: str,
         config: CrewConfig,
         execution_type: str = "crew",
-        tenant_context: TenantContext = None
+        group_context: GroupContext = None
     ) -> Dict[str, Any]:
         """
         Run a crew execution with the provided configuration.
@@ -311,7 +311,7 @@ class ExecutionService:
                 result = await crew_execution_service.run_crew_execution(
                     execution_id=execution_id,
                     config=config,
-                    tenant_context=tenant_context
+                    group_context=group_context
                 )
                 exec_logger.info(f"[run_crew_execution] Successfully initiated crew execution via CrewAIExecutionService for job_id: {execution_id}. Result: {result}")
                 return result # Return result from run_crew_execution
@@ -348,12 +348,12 @@ class ExecutionService:
             raise # Re-raise the original exception
     
     @staticmethod
-    async def list_executions(tenant_ids: List[str] = None) -> List[Dict[str, Any]]:
+    async def list_executions(group_ids: List[str] = None) -> List[Dict[str, Any]]:
         """
-        List executions from both database and in-memory storage with tenant filtering.
+        List executions from both database and in-memory storage with group filtering.
         
         Args:
-            tenant_ids: List of tenant IDs for filtering
+            group_ids: List of group IDs for filtering
         
         Returns:
             List of execution data dictionaries
@@ -367,11 +367,11 @@ class ExecutionService:
             
             async with async_session_factory() as db:
                 repo = ExecutionRepository(db)
-                # Get executions with tenant filtering using the correct repository method
+                # Get executions with group filtering using the correct repository method
                 db_executions_list, _ = await repo.get_execution_history(
                     limit=1000,  # Get more records for compatibility with the old behavior
                     offset=0,
-                    tenant_ids=tenant_ids
+                    group_ids=group_ids
                 )
                 
                 logger.info(f"Successfully retrieved {len(db_executions_list)} executions from database")
@@ -529,21 +529,21 @@ class ExecutionService:
             exec_logger.error(f"Error updating execution status: {str(e)}")
     
     @staticmethod
-    async def get_execution_status(execution_id: str, tenant_ids: List[str] = None) -> Dict[str, Any]:
+    async def get_execution_status(execution_id: str, group_ids: List[str] = None) -> Dict[str, Any]:
         """
-        Get the current status of an execution from the database with tenant filtering.
+        Get the current status of an execution from the database with group filtering.
         
         Args:
             execution_id: String ID of the execution
-            tenant_ids: List of tenant IDs for filtering
+            group_ids: List of group IDs for filtering
             
         Returns:
             Dictionary with execution status information or None if not found
         """
         try:
-            # Use ExecutionHistoryRepository to get execution with tenant filtering
+            # Use ExecutionHistoryRepository to get execution with group filtering
             from src.repositories.execution_history_repository import execution_history_repository
-            execution = await execution_history_repository.get_execution_by_job_id(execution_id, tenant_ids=tenant_ids)
+            execution = await execution_history_repository.get_execution_by_job_id(execution_id, group_ids=group_ids)
             
             if not execution:
                 # Check in-memory for very early states if needed
@@ -566,7 +566,7 @@ class ExecutionService:
         self,
         config: CrewConfig, 
         background_tasks = None,
-        tenant_context: TenantContext = None
+        group_context: GroupContext = None
     ) -> Dict[str, Any]:
         """
         Create a new execution and start it in the background.
@@ -700,7 +700,7 @@ class ExecutionService:
             
             # Use ExecutionStatusService to create the execution
             from src.services.execution_status_service import ExecutionStatusService
-            success = await ExecutionStatusService.create_execution(execution_data, tenant_context=tenant_context)
+            success = await ExecutionStatusService.create_execution(execution_data, group_context=group_context)
             
             if not success:
                 raise ValueError(f"Failed to create execution record for {execution_id}")
@@ -730,7 +730,7 @@ class ExecutionService:
                             execution_id=execution_id, 
                             config=config, 
                             execution_type=execution_type,
-                            tenant_context=tenant_context
+                            group_context=group_context
                         )
                         task_logger.info(f"[run_execution_task] ExecutionService.run_crew_execution completed for execution_id: {execution_id}")
                     except Exception as task_error:
@@ -758,7 +758,7 @@ class ExecutionService:
                     execution_id=execution_id,
                     config=config,
                     execution_type=execution_type,
-                    tenant_context=tenant_context
+                    group_context=group_context
                 ))
                 crew_logger.info(f"[ExecutionService.create_execution] Launched _run_in_background task via asyncio for execution_id: {execution_id}")
 
@@ -781,7 +781,7 @@ class ExecutionService:
             )
     
     @staticmethod
-    async def _run_in_background(execution_id: str, config: CrewConfig, execution_type: str = "crew", tenant_context: TenantContext = None):
+    async def _run_in_background(execution_id: str, config: CrewConfig, execution_type: str = "crew", group_context: GroupContext = None):
         """
         Run an execution in the background using a new database session.
         This is used when FastAPI's background_tasks is not available.
@@ -800,7 +800,7 @@ class ExecutionService:
                 execution_id=execution_id, 
                 config=config, 
                 execution_type=execution_type,
-                tenant_context=tenant_context
+                group_context=group_context
             )
             task_logger.info(f"[_run_in_background] ExecutionService.run_crew_execution completed for execution_id: {execution_id}")
         except Exception as e:

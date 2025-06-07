@@ -19,7 +19,7 @@ from src.models.execution_logs import ExecutionLog
 from src.schemas.execution_logs import LogMessage, ExecutionLogResponse
 from src.repositories.execution_logs_repository import execution_logs_repository
 from src.services.execution_logs_queue import enqueue_log, get_job_output_queue
-from src.utils.user_context import TenantContext
+from src.utils.user_context import GroupContext
 
 # Get logger from the centralized logging system
 logger = LoggerManager.get_instance().system
@@ -72,14 +72,14 @@ class ExecutionLogsService:
         
         logger.debug(f"Client connected to execution {execution_id}. Total connections: {len(self.active_connections[execution_id])}")
     
-    async def connect_with_tenant(self, websocket: WebSocket, execution_id: str, tenant_context: TenantContext):
+    async def connect_with_group(self, websocket: WebSocket, execution_id: str, group_context: GroupContext):
         """
-        Connect a client to an execution's WebSocket stream with tenant filtering.
+        Connect a client to an execution's WebSocket stream with group filtering.
         
         Args:
             websocket: WebSocket connection to register
             execution_id: ID of the execution to connect to
-            tenant_context: Tenant context for filtering logs
+            group_context: Group context for filtering logs
         """
         await websocket.accept()
         async with self._lock:
@@ -87,15 +87,15 @@ class ExecutionLogsService:
                 self.active_connections[execution_id] = set()
             self.active_connections[execution_id].add(websocket)
         
-        # Send tenant-filtered historical logs when client connects
+        # Send group-filtered historical logs when client connects
         try:
-            if tenant_context.primary_tenant_id:
-                historical_logs = await execution_logs_repository.get_by_execution_id_and_tenant_with_managed_session(
+            if group_context.primary_group_id:
+                historical_logs = await execution_logs_repository.get_by_execution_id_and_group_with_managed_session(
                     execution_id=execution_id,
-                    tenant_id=tenant_context.primary_tenant_id
+                    group_id=group_context.primary_group_id
                 )
             else:
-                # If no tenant context, don't send any historical logs for security
+                # If no group context, don't send any historical logs for security
                 historical_logs = []
             
             for log in historical_logs:
@@ -108,7 +108,7 @@ class ExecutionLogsService:
         except Exception as e:
             logger.error(f"Error sending historical logs: {e}")
         
-        logger.debug(f"Client connected to execution {execution_id} with tenant {tenant_context.primary_tenant_id}. Total connections: {len(self.active_connections[execution_id])}")
+        logger.debug(f"Client connected to execution {execution_id} with group {group_context.primary_group_id}. Total connections: {len(self.active_connections[execution_id])}")
 
     async def disconnect(self, websocket: WebSocket, execution_id: str):
         """
@@ -125,7 +125,7 @@ class ExecutionLogsService:
                     del self.active_connections[execution_id]
         logger.debug(f"Client disconnected from execution {execution_id}")
 
-    async def create_execution_log(self, execution_id: str, content: str, timestamp: datetime = None, tenant_context: TenantContext = None) -> bool:
+    async def create_execution_log(self, execution_id: str, content: str, timestamp: datetime = None, group_context: GroupContext = None) -> bool:
         """
         Create a new execution log entry via the repository layer.
         
@@ -133,7 +133,7 @@ class ExecutionLogsService:
             execution_id: ID of the execution to log for
             content: The log message content
             timestamp: Optional timestamp for the log entry (defaults to current time)
-            tenant_context: Optional tenant context for multi-tenant isolation
+            group_context: Optional group context for multi-group isolation
             
         Returns:
             bool: True if log was created successfully, False otherwise
@@ -142,11 +142,11 @@ class ExecutionLogsService:
             logger.debug(f"[create_execution_log] Creating log for execution {execution_id}")
             
             # Use the repository to create the log with a managed session
-            await execution_logs_repository.create_with_tenant_managed_session(
+            await execution_logs_repository.create_with_group_managed_session(
                 execution_id=execution_id,
                 content=content,
                 timestamp=timestamp or datetime.now(),
-                tenant_context=tenant_context
+                group_context=group_context
             )
             
             logger.debug(f"[create_execution_log] Successfully created log for execution {execution_id}")
@@ -226,37 +226,37 @@ class ExecutionLogsService:
             for log in logs
         ]
     
-    async def get_execution_logs_by_tenant(self, execution_id: str, tenant_context: TenantContext, limit: int = 1000, offset: int = 0) -> List[ExecutionLogResponse]:
+    async def get_execution_logs_by_group(self, execution_id: str, group_context: GroupContext, limit: int = 1000, offset: int = 0) -> List[ExecutionLogResponse]:
         """
-        Fetch historical execution logs from the database filtered by tenant.
+        Fetch historical execution logs from the database filtered by group.
         
         Args:
             execution_id: ID of the execution to fetch logs for
-            tenant_context: Tenant context for filtering
+            group_context: Group context for filtering
             limit: Maximum number of logs to fetch
             offset: Number of logs to skip
             
         Returns:
-            List of execution log responses for the tenant
+            List of execution log responses for the group
         """
-        if not tenant_context.primary_tenant_id:
-            # If no tenant context, fall back to non-tenant filtering for compatibility
-            # This allows logs to be visible in development environments or when tenant headers are missing
-            logger.warning(f"No tenant context provided for execution {execution_id}, falling back to non-tenant logs")
+        if not group_context.primary_group_id:
+            # If no group context, fall back to non-group filtering for compatibility
+            # This allows logs to be visible in development environments or when group headers are missing
+            logger.warning(f"No group context provided for execution {execution_id}, falling back to non-group logs")
             logs = await execution_logs_repository.get_by_execution_id_with_managed_session(
                 execution_id=execution_id,
                 limit=limit,
                 offset=offset
             )
         else:
-            # Use tenant-aware filtering when tenant context is available
-            # Also include logs with NULL tenant_id for backward compatibility
-            logs = await execution_logs_repository.get_by_execution_id_and_tenant_with_managed_session(
+            # Use group-aware filtering when group context is available
+            # Also include logs with NULL group_id for backward compatibility
+            logs = await execution_logs_repository.get_by_execution_id_and_group_with_managed_session(
                 execution_id=execution_id,
-                tenant_id=tenant_context.primary_tenant_id,
+                group_id=group_context.primary_group_id,
                 limit=limit,
                 offset=offset,
-                include_null_tenant=True
+                include_null_group=True
             )
         
         return [
@@ -362,12 +362,12 @@ async def logs_writer_loop(shutdown_event: asyncio.Event):
                             timestamp = log_data.get("timestamp", datetime.now())
                             log_info = f"[{job_id}:{idx+1}/{len(batch)}]"
                             
-                            # Extract tenant information if available
-                            tenant_context = None
-                            if log_data.get("tenant_id") or log_data.get("tenant_email"):
-                                tenant_context = TenantContext(
-                                    tenant_ids=[log_data.get("tenant_id")] if log_data.get("tenant_id") else None,
-                                    tenant_email=log_data.get("tenant_email")
+                            # Extract group information if available
+                            group_context = None
+                            if log_data.get("group_id") or log_data.get("group_email"):
+                                group_context = GroupContext(
+                                    group_ids=[log_data.get("group_id")] if log_data.get("group_id") else None,
+                                    group_email=log_data.get("group_email")
                                 )
                             
                             # Create log with execution_logs_service
@@ -375,7 +375,7 @@ async def logs_writer_loop(shutdown_event: asyncio.Event):
                                 execution_id=job_id,
                                 content=content,
                                 timestamp=timestamp,
-                                tenant_context=tenant_context
+                                group_context=group_context
                             )
                             
                             if not success:

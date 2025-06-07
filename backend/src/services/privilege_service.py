@@ -22,7 +22,7 @@ class PrivilegeService:
     
     async def get_privileges(self, skip: int = 0, limit: int = 100) -> List[Privilege]:
         """Get a list of privileges"""
-        return await self.privilege_repo.get_all(skip=skip, limit=limit)
+        return await self.privilege_repo.list(skip=skip, limit=limit)
     
     async def create_privilege(self, privilege_data: PrivilegeCreate) -> Privilege:
         """Create a new privilege"""
