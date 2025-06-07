@@ -21,6 +21,7 @@ import { v4 as _uuidv4 } from 'uuid';
 import { FlowService as _FlowService } from '../../api/FlowService';
 import { useAPIKeysStore as _useAPIKeysStore } from '../../store/apiKeys';
 import { FlowFormData as _FlowFormData, FlowConfiguration as _FlowConfiguration } from '../../types/flow';
+import { ConnectionAgent, ConnectionTask } from '../../types/connection';
 import { createEdge as _createEdge } from '../../utils/edgeUtils';
 import CloseIcon from '@mui/icons-material/Close';
 
@@ -781,7 +782,7 @@ const WorkflowDesigner: React.FC<WorkflowDesignerProps> = (): JSX.Element => {
               }
               
               // Convert agent nodes to ConnectionAgent format
-              const agents: any[] = agentNodes.map(node => ({
+              const agents: ConnectionAgent[] = agentNodes.map(node => ({
                 name: node.data.label || node.data.name || `Agent ${node.id}`,
                 role: node.data.role || 'Assistant',
                 goal: node.data.goal || 'Complete assigned tasks effectively',
@@ -790,7 +791,7 @@ const WorkflowDesigner: React.FC<WorkflowDesignerProps> = (): JSX.Element => {
               }));
               
               // Convert task nodes to ConnectionTask format  
-              const tasks: any[] = taskNodes.map(node => ({
+              const tasks: ConnectionTask[] = taskNodes.map(node => ({
                 name: node.data.label || node.data.name || `Task ${node.id}`,
                 description: node.data.description || node.data.label || `Task ${node.id}`,
                 expected_output: node.data.expected_output || 'Complete the task successfully',
@@ -809,8 +810,8 @@ const WorkflowDesigner: React.FC<WorkflowDesignerProps> = (): JSX.Element => {
                 }
               }));
               
-              // Use a default model (this should be configurable in the future)
-              const model = 'gpt-4o-mini';
+              // Use Databricks Llama 70b model (try simpler format)
+              const model = 'llama-3.1-70b-instruct';
               
               console.log('Generating connections with:', { agents, tasks, model });
               
@@ -820,7 +821,7 @@ const WorkflowDesigner: React.FC<WorkflowDesignerProps> = (): JSX.Element => {
               console.log('Connection generation response:', response);
               
               // Create edges based on the AI-generated assignments
-              const newEdges: any[] = [];
+              const newEdges: _Edge[] = [];
               
               response.assignments.forEach(assignment => {
                 const agentNode = agentNodes.find(node => 
@@ -855,8 +856,8 @@ const WorkflowDesigner: React.FC<WorkflowDesignerProps> = (): JSX.Element => {
                   (node.data.label || node.data.name) === dependency.task_name
                 );
                 
-                if (dependentTask && dependency.required_before) {
-                  dependency.required_before.forEach(requiredTaskName => {
+                if (dependentTask && dependency.depends_on) {
+                  dependency.depends_on.forEach(requiredTaskName => {
                     const requiredTask = taskNodes.find(node => 
                       (node.data.label || node.data.name) === requiredTaskName
                     );

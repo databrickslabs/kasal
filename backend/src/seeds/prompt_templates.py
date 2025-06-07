@@ -89,7 +89,7 @@ Expected JSON structure:
     "dependencies": [
         {
             "task_name": "task name",
-            "required_before": ["task names that must be completed first"],
+            "depends_on": ["task names that must be completed first"],
             "reasoning": "explain why these tasks must be completed first and how their output is used"
         }
     ]

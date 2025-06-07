@@ -13,7 +13,7 @@ export interface ConnectionTask {
     priority: string;
     complexity?: string;
     required_skills?: string[];
-    metadata: Record<string, any>;
+    metadata: Record<string, unknown>;
   };
   async_execution: boolean;
   human_input: boolean;
@@ -56,7 +56,7 @@ export interface AgentAssignment {
 
 export interface TaskDependency {
   task_name: string;
-  required_before: string[];
+  depends_on: string[];
   reasoning: string;
 }
 
@@ -76,7 +76,7 @@ export interface ConnectionAssignment {
 
 export interface ConnectionDependency {
   task_name: string;
-  required_before: string[];
+  depends_on: string[];
   reasoning: string;
 }
 
