@@ -266,10 +266,24 @@ class ExecutionHistoryService:
             # Delete all executions and associated data last (after dependent records are gone)
             result = await self.history_repo.delete_all_executions()
             
+            # Clear in-memory executions from ExecutionService and CrewAIExecutionService
+            from src.services.execution_service import ExecutionService
+            from src.services.crewai_execution_service import executions as crewai_executions
+            
+            execution_count_before = len(ExecutionService.executions)
+            crewai_execution_count_before = len(crewai_executions)
+            
+            ExecutionService.executions.clear()
+            crewai_executions.clear()
+            
+            logger.info(f"Cleared {execution_count_before} in-memory executions from ExecutionService")
+            logger.info(f"Cleared {crewai_execution_count_before} in-memory executions from CrewAIExecutionService")
+            
             return DeleteResponse(
                 success=True,
                 message=f"Deleted {result['run_count']} executions, {result['task_status_count']} task statuses, "
-                        f"{result['error_trace_count']} error traces, {log_count} logs, and {trace_count} traces."
+                        f"{result['error_trace_count']} error traces, {log_count} logs, {trace_count} traces, "
+                        f"and {execution_count_before + crewai_execution_count_before} in-memory executions."
             )
             
         except SQLAlchemyError as e:
