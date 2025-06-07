@@ -282,6 +282,7 @@ export class RunService {
       run_name: name || `Run ${jobId}`,
       agents_yaml,
       tasks_yaml,
+      group_email: executionItem.group_email as string | undefined,
       inputs,
       result: executionItem.result as Record<string, OutputDataType> | undefined,
       error: executionItem.error as string | undefined,

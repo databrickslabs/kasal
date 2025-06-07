@@ -45,14 +45,14 @@ class ExecutionHistoryService:
         self.logs_repo = execution_logs_repository
         self.trace_repo = execution_trace_repository
     
-    async def get_execution_history(self, limit: int = 50, offset: int = 0, tenant_ids: List[str] = None) -> ExecutionHistoryList:
+    async def get_execution_history(self, limit: int = 50, offset: int = 0, group_ids: List[str] = None) -> ExecutionHistoryList:
         """
-        Get paginated execution history with group-based tenant filtering.
+        Get paginated execution history with group-based filtering.
         
         Args:
             limit: Maximum number of items to return
             offset: Number of items to skip
-            tenant_ids: List of tenant IDs for group-based filtering
+            group_ids: List of group IDs for group-based filtering
             
         Returns:
             ExecutionHistoryList with paginated execution history items and metadata
@@ -62,7 +62,7 @@ class ExecutionHistoryService:
             runs, total_count = await self.history_repo.get_execution_history(
                 limit=limit,
                 offset=offset,
-                tenant_ids=tenant_ids
+                group_ids=group_ids
             )
                 
             # Convert each run to a pydantic model, handling string results properly

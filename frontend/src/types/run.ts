@@ -18,6 +18,7 @@ export interface Run {
   run_name: string;
   agents_yaml: string;
   tasks_yaml: string;
+  group_email?: string;
   inputs?: {
     agents_yaml: Record<string, any>;
     tasks_yaml: Record<string, any>;

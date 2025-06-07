@@ -105,6 +105,7 @@ class ExecutionResponse(BaseModel):
     execution_inputs: Optional[Dict[str, Any]] = Field(None, description="Input data for the execution")
     execution_outputs: Optional[Dict[str, Any]] = Field(None, description="Output data from the execution")
     execution_config: Optional[Dict[str, Any]] = Field(None, description="Configuration used for the execution")
+    group_email: Optional[str] = Field(None, description="Email of the user who submitted the execution")
 
     model_config = ConfigDict(from_attributes=True)
 

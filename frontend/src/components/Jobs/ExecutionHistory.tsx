@@ -581,6 +581,9 @@ const RunHistory = forwardRef<RunHistoryRef>((_, ref) => {
                       {renderSortIcon('status')}
                     </Box>
                   </TableCell>
+                  <TableCell sx={{ py: 0.25, fontSize: '0.8125rem', backgroundColor: theme => theme.palette.background.paper }}>
+                    Submitter
+                  </TableCell>
                   <TableCell 
                     sx={{ py: 0.25, fontSize: '0.8125rem', cursor: 'pointer', backgroundColor: theme => theme.palette.background.paper }}
                     onClick={() => handleSort('created_at')}
@@ -632,7 +635,7 @@ const RunHistory = forwardRef<RunHistoryRef>((_, ref) => {
               <TableBody>
                 {displayedRuns.length === 0 ? (
                   <TableRow>
-                    <TableCell colSpan={4} align="center" sx={{ py: 1, fontSize: '0.8125rem' }}>
+                    <TableCell colSpan={5} align="center" sx={{ py: 1, fontSize: '0.8125rem' }}>
                       {searchQuery ? t('runHistory.noSearchResults') : t('runHistory.noRuns')}
                     </TableCell>
                   </TableRow>
@@ -683,6 +686,7 @@ const RunHistory = forwardRef<RunHistoryRef>((_, ref) => {
                           }}
                         />
                       </TableCell>
+                      <TableCell>{run.group_email || '-'}</TableCell>
                       <TableCell>{new Date(run.created_at).toLocaleString()}</TableCell>
                       <TableCell>
                         <RunActions

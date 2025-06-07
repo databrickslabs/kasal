@@ -218,8 +218,8 @@ const CrewDialog: React.FC<CrewDialogProps> = ({ open, onClose, onCrewSelect }):
           // Make nodes smaller
           style: {
             ...node.style,
-            width: node.style?.width ? Math.max(180, (node.style.width * 0.8)) : 180, // 20% smaller, minimum 180px
-            height: node.style?.height ? Math.max(120, (node.style.height * 0.8)) : 120 // 20% smaller, minimum 120px
+            width: node.style?.width ? Math.max(180, (Number(node.style.width) * 0.8)) : 180, // 20% smaller, minimum 180px
+            height: node.style?.height ? Math.max(120, (Number(node.style.height) * 0.8)) : 120 // 20% smaller, minimum 120px
           },
           data: {
             ...node.data,

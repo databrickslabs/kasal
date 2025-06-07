@@ -384,7 +384,8 @@ class ExecutionService:
                         "created_at": e.created_at,
                         "run_name": e.run_name,
                         "result": e.result,
-                        "error": e.error
+                        "error": e.error,
+                        "group_email": e.group_email
                     }
                     for e in db_executions_list
                 ]
