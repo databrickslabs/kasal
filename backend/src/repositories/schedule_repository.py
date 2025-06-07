@@ -71,6 +71,20 @@ class ScheduleRepository:
         result = await self.session.execute(query)
         return result.scalar_one_or_none()
     
+    async def find_by_tenant(self, tenant_id: str) -> List[Schedule]:
+        """
+        Find all schedules belonging to a specific tenant.
+        
+        Args:
+            tenant_id: ID of the tenant to filter schedules by
+            
+        Returns:
+            List of Schedule objects belonging to the tenant
+        """
+        query = select(Schedule).where(Schedule.tenant_id == tenant_id)
+        result = await self.session.execute(query)
+        return list(result.scalars().all())
+    
     async def find_due_schedules(self, current_time) -> List[Schedule]:
         """
         Find all schedules that are due to run.

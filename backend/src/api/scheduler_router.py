@@ -7,6 +7,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from src.schemas.schedule import ScheduleCreate, ScheduleUpdate, ScheduleResponse, ScheduleListResponse, ToggleResponse
 from src.db.session import get_db
 from src.services.scheduler_service import SchedulerService
+from src.utils.user_context import TenantContext
+from src.core.dependencies import TenantContextDep
 from src.schemas.scheduler import (
     SchedulerJobSchema,
     SchedulerJobCreate,
@@ -32,7 +34,8 @@ async def get_scheduler_service(db: AsyncSession = Depends(get_db)) -> Scheduler
 @router.post("", response_model=ScheduleResponse, status_code=status.HTTP_201_CREATED)
 async def create_schedule(
     schedule: ScheduleCreate,
-    service: Annotated[SchedulerService, Depends(get_scheduler_service)]
+    service: Annotated[SchedulerService, Depends(get_scheduler_service)],
+    tenant_context: TenantContextDep
 ) -> ScheduleResponse:
     """
     Create a new schedule.
@@ -47,7 +50,7 @@ async def create_schedule(
     """
     logger.info(f"Creating schedule: {schedule.name} with cron expression: {schedule.cron_expression}")
     try:
-        response = await service.create_schedule(schedule)
+        response = await service.create_schedule(schedule, tenant_context)
         logger.info(f"Created schedule with ID {response.id}")
         return response
     except HTTPException as e:
@@ -57,7 +60,8 @@ async def create_schedule(
 
 @router.get("", response_model=List[ScheduleResponse])
 async def list_schedules(
-    service: Annotated[SchedulerService, Depends(get_scheduler_service)]
+    service: Annotated[SchedulerService, Depends(get_scheduler_service)],
+    tenant_context: TenantContext = TenantContextDep
 ) -> List[ScheduleResponse]:
     """
     List all schedules.
@@ -66,7 +70,7 @@ async def list_schedules(
         List of all schedules
     """
     logger.info("Listing all schedules")
-    response = await service.get_all_schedules()
+    response = await service.get_all_schedules(tenant_context)
     logger.info(f"Found {response.count} schedules")
     return response.schedules
 

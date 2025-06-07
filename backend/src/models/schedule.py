@@ -1,5 +1,5 @@
 from datetime import datetime, timezone
-from sqlalchemy import Column, Integer, String, JSON, Boolean, DateTime
+from sqlalchemy import Column, Integer, String, JSON, Boolean, DateTime, Index
 
 from src.db.base import Base
 
@@ -21,4 +21,13 @@ class Schedule(Base):
     last_run_at = Column(DateTime, nullable=True)  # Last time the schedule was executed
     next_run_at = Column(DateTime, nullable=True)  # Next scheduled run time
     created_at = Column(DateTime, default=datetime.utcnow)  # Use timezone-naive UTC time
-    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)  # Use timezone-naive UTC time 
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)  # Use timezone-naive UTC time
+    
+    # Tenant isolation fields
+    tenant_id = Column(String(100), nullable=True, index=True)
+    created_by_email = Column(String(255), nullable=True, index=True)
+
+    __table_args__ = (
+        Index('ix_schedule_tenant_id', 'tenant_id'),
+        Index('ix_schedule_created_by_email', 'created_by_email'),
+    ) 

@@ -32,7 +32,7 @@ def calculate_next_run(cron_expression: str, base_time: Optional[datetime] = Non
         base_time: Base time to calculate from, defaults to now
         
     Returns:
-        Next run time as timezone-aware datetime in UTC
+        Next run time as timezone-naive datetime for database storage
         
     Raises:
         ValueError: If cron expression is invalid
@@ -49,7 +49,8 @@ def calculate_next_run(cron_expression: str, base_time: Optional[datetime] = Non
         next_run_local = next_run.replace(tzinfo=local_tz)
         next_run_utc = next_run_local.astimezone(timezone.utc)
         logger.info(f"Calculated next run time: {next_run} (naive) -> {next_run_local} (local) -> {next_run_utc} (UTC)")
-        return next_run_utc
+        # Return timezone-naive datetime for database storage
+        return next_run_utc.replace(tzinfo=None)
     except Exception as e:
         logger.error(f"Error in calculate_next_run: {e}")
         raise ValueError(f"Invalid cron expression: {str(e)}")
@@ -69,7 +70,7 @@ def calculate_next_run_from_last(cron_expression: str, last_run: Optional[dateti
         last_run: Last run time, if available
         
     Returns:
-        Next run time as timezone-aware datetime in UTC
+        Next run time as timezone-naive datetime for database storage
         
     Raises:
         ValueError: If cron expression is invalid
@@ -95,13 +96,20 @@ def calculate_next_run_from_last(cron_expression: str, last_run: Optional[dateti
             
             if next_run.date() == now.date() and next_run > now:
                 logger.info(f"Found next run time today: {next_run} (naive) -> {next_run_local} (local) -> {next_run_utc} (UTC)")
-                return next_run_utc
+                # Return timezone-naive datetime for database storage
+                return next_run_utc.replace(tzinfo=None)
                 
             logger.info(f"No more runs today, calculating from now: {now}")
-            return calculate_next_run(cron_expression, now)
+            next_run_calculated = calculate_next_run(cron_expression, now)
+            # Return timezone-naive datetime for database storage
+            return next_run_calculated.replace(tzinfo=None)
             
         except Exception as e:
             logger.error(f"Error calculating next run time: {e}")
-            return calculate_next_run(cron_expression, now)
+            next_run_calculated = calculate_next_run(cron_expression, now)
+            # Return timezone-naive datetime for database storage
+            return next_run_calculated.replace(tzinfo=None)
     
-    return calculate_next_run(cron_expression, last_run) 
+    next_run_calculated = calculate_next_run(cron_expression, last_run)
+    # Return timezone-naive datetime for database storage
+    return next_run_calculated.replace(tzinfo=None) 

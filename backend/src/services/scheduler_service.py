@@ -21,6 +21,7 @@ from src.engines.crewai.callbacks import JobOutputCallback
 from src.core.logger import LoggerManager
 from src.services.execution_service import ExecutionService
 from src.schemas.execution import ExecutionNameGenerationRequest
+from src.utils.user_context import TenantContext
 
 logger = logging.getLogger(__name__)
 logger_manager = LoggerManager.get_instance()
@@ -45,7 +46,7 @@ class SchedulerService:
         self.session = session
         self._running_tasks: Set[asyncio.Task] = set()
     
-    async def create_schedule(self, schedule_data: ScheduleCreate) -> ScheduleResponse:
+    async def create_schedule(self, schedule_data: ScheduleCreate, tenant_context: TenantContext = None) -> ScheduleResponse:
         """
         Create a new schedule.
         
@@ -62,11 +63,16 @@ class SchedulerService:
             # Calculate next run time
             next_run = calculate_next_run_from_last(schedule_data.cron_expression)
             
-            # Create schedule
-            schedule = await self.repository.create({
-                **schedule_data.model_dump(),
-                "next_run_at": next_run
-            })
+            # Create schedule with tenant context
+            schedule_dict = schedule_data.model_dump()
+            schedule_dict["next_run_at"] = next_run
+            
+            # Add tenant context if provided
+            if tenant_context:
+                schedule_dict["tenant_id"] = tenant_context.primary_tenant_id
+                schedule_dict["created_by_email"] = tenant_context.tenant_email
+            
+            schedule = await self.repository.create(schedule_dict)
             
             return ScheduleResponse.model_validate(schedule)
         except ValueError as e:
@@ -82,14 +88,25 @@ class SchedulerService:
                 detail=f"Failed to create schedule: {str(e)}"
             )
     
-    async def get_all_schedules(self) -> ScheduleListResponse:
+    async def get_all_schedules(self, tenant_context: TenantContext = None) -> ScheduleListResponse:
         """
         Get all schedules.
         
         Returns:
             ScheduleListResponse with list of schedules
         """
-        schedules = await self.repository.find_all()
+        logger.error(f"DEBUG: get_all_schedules called with tenant_context: {tenant_context}")
+        if tenant_context and tenant_context.primary_tenant_id:
+            logger.error(f"DEBUG: Filtering by tenant_id: {tenant_context.primary_tenant_id}")
+            schedules = await self.repository.find_by_tenant(tenant_context.primary_tenant_id)
+        else:
+            logger.error(f"DEBUG: No valid tenant context (context={tenant_context}, tenant_id={getattr(tenant_context, 'tenant_id', None)}), getting all schedules")
+            schedules = await self.repository.find_all()
+        
+        logger.error(f"DEBUG: Found {len(schedules)} schedules")
+        for schedule in schedules:
+            logger.error(f"DEBUG:   Schedule ID: {schedule.id}, Name: {schedule.name}, Tenant: {schedule.tenant_id}")
+        
         return ScheduleListResponse(
             schedules=[ScheduleResponse.model_validate(schedule) for schedule in schedules],
             count=len(schedules)
@@ -322,14 +339,24 @@ class SchedulerService:
                 # Find due schedules
                 async with async_session_factory() as session:
                     repo = ScheduleRepository(session)
-                    due_schedules = await repo.find_due_schedules(now_utc)
+                    # Convert timezone-aware now_utc to timezone-naive for database comparison
+                    due_schedules = await repo.find_due_schedules(now_utc.replace(tzinfo=None))
                     all_schedules = await repo.find_all()
                     
                     # Log status of all schedules
                     logger_manager.scheduler.info("Current schedules status:")
                     for schedule in all_schedules:
-                        next_run = ensure_utc(schedule.next_run_at)
-                        last_run = ensure_utc(schedule.last_run_at)
+                        # Handle timezone-naive datetimes from database
+                        if schedule.next_run_at and schedule.next_run_at.tzinfo is None:
+                            next_run = schedule.next_run_at.replace(tzinfo=timezone.utc)
+                        else:
+                            next_run = ensure_utc(schedule.next_run_at)
+                            
+                        if schedule.last_run_at and schedule.last_run_at.tzinfo is None:
+                            last_run = schedule.last_run_at.replace(tzinfo=timezone.utc)
+                        else:
+                            last_run = ensure_utc(schedule.last_run_at)
+                            
                         is_due = schedule.is_active and next_run is not None and next_run <= now_utc
                         
                         next_run_local = next_run.astimezone() if next_run else None
@@ -370,9 +397,10 @@ class SchedulerService:
                         self._running_tasks.add(task)
                         
                         # Update next run time immediately
+                        # Convert timezone-aware now_utc to timezone-naive for consistency
                         schedule.next_run_at = calculate_next_run_from_last(
                             schedule.cron_expression,
-                            now_utc
+                            now_utc.replace(tzinfo=None)
                         )
                         await session.commit()
                 
