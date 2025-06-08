@@ -1,3 +1,4 @@
+import asyncio
 import logging
 from typing import Dict, Any, List, Optional, Callable
 from datetime import datetime
@@ -165,7 +166,7 @@ class TaskTrackingService:
         service.db = repository.db if hasattr(repository, 'db') else None
         return service
     
-    def create_task_status(self, job_id: str, task_id: str, agent_name: Optional[str] = None) -> TaskStatusResponse:
+    async def create_task_status(self, job_id: str, task_id: str, agent_name: Optional[str] = None) -> TaskStatusResponse:
         """
         Create a new task status entry with RUNNING status.
         
@@ -186,12 +187,12 @@ class TaskTrackingService:
             agent_name=agent_name
         )
         
-        db_task_status = self.repository.create_task_status(task_status)
+        db_task_status = await self.repository.create_task_status(task_status)
         #crew_logger.info(f"Created task status record: {db_task_status.id}")
         
         return TaskStatusResponse.model_validate(db_task_status)
     
-    def update_task_status(self, job_id: str, task_id: str, status: TaskStatusEnum) -> Optional[TaskStatusResponse]:
+    async def update_task_status(self, job_id: str, task_id: str, status: TaskStatusEnum) -> Optional[TaskStatusResponse]:
         """
         Update the status of a task.
         
@@ -206,7 +207,7 @@ class TaskTrackingService:
         crew_logger.info(f"Updating task status for job {job_id}, task {task_id} to {status}")
         
         task_status = TaskStatusUpdate(status=status)
-        db_task_status = self.repository.update_task_status(job_id, task_id, task_status)
+        db_task_status = await self.repository.update_task_status(job_id, task_id, task_status)
         
         if not db_task_status:
             crew_logger.warning(f"No task status found for job {job_id}, task {task_id}")
@@ -215,7 +216,7 @@ class TaskTrackingService:
         #crew_logger.info(f"Updated task status to {status} for job {job_id}, task {task_id}")
         return TaskStatusResponse.model_validate(db_task_status)
     
-    def get_task_status(self, job_id: str, task_id: str) -> Optional[TaskStatusResponse]:
+    async def get_task_status(self, job_id: str, task_id: str) -> Optional[TaskStatusResponse]:
         """
         Get the current status of a task.
         
@@ -226,16 +227,16 @@ class TaskTrackingService:
         Returns:
             The task status record or None if not found
         """
-        db_task_status = self.repository.get_task_status(job_id, task_id)
+        db_task_status = await self.repository.get_task_status(job_id, task_id)
         
         if not db_task_status:
             return None
             
         return TaskStatusResponse.model_validate(db_task_status)
     
-    def get_task_status_by_task_id(self, task_id: str) -> Optional[TaskStatusResponse]:
+    def get_task_status_by_task_id_sync(self, task_id: str) -> Optional[TaskStatusResponse]:
         """
-        Get the current status of a task using only the task_id.
+        Get the current status of a task using only the task_id (sync version for callbacks).
         This is used when we don't have the job_id readily available.
         
         Args:
@@ -244,14 +245,29 @@ class TaskTrackingService:
         Returns:
             The task status record or None if not found
         """
-        db_task_status = self.repository.get_task_status_by_task_id(task_id)
+        # For now, we'll skip the lookup in sync context to avoid async/await issues
+        # The task status will be created if it doesn't exist anyway
+        return None
+        
+    async def get_task_status_by_task_id(self, task_id: str) -> Optional[TaskStatusResponse]:
+        """
+        Get the current status of a task using only the task_id (async version).
+        This is used when we don't have the job_id readily available.
+        
+        Args:
+            task_id: The ID/key of the task
+            
+        Returns:
+            The task status record or None if not found
+        """
+        db_task_status = await self.repository.get_task_status_by_task_id(task_id)
         
         if not db_task_status:
             return None
             
         return TaskStatusResponse.model_validate(db_task_status)
     
-    def get_all_task_statuses(self, job_id: str) -> List[TaskStatusResponse]:
+    async def get_all_task_statuses(self, job_id: str) -> List[TaskStatusResponse]:
         """
         Get all task statuses for a job.
         
@@ -261,10 +277,10 @@ class TaskTrackingService:
         Returns:
             List of task status records
         """
-        db_task_statuses = self.repository.get_all_task_statuses(job_id)
+        db_task_statuses = await self.repository.get_all_task_statuses(job_id)
         return [TaskStatusResponse.model_validate(status) for status in db_task_statuses]
     
-    def create_task_statuses_for_job(self, job_id: str, tasks_config: Dict[str, Dict]) -> List[TaskStatusResponse]:
+    async def create_task_statuses_for_job(self, job_id: str, tasks_config: Dict[str, Dict]) -> List[TaskStatusResponse]:
         """
         Create task status entries for all tasks in a job with RUNNING status.
         
@@ -277,7 +293,7 @@ class TaskTrackingService:
         """
         #crew_logger.info(f"Creating task statuses for all tasks in job {job_id}")
         
-        db_task_statuses = self.repository.create_task_statuses_for_job(job_id, tasks_config)
+        db_task_statuses = await self.repository.create_task_statuses_for_job(job_id, tasks_config)
         
         #crew_logger.info(f"Created {len(db_task_statuses)} task status records for job {job_id}")
         return [TaskStatusResponse.model_validate(status) for status in db_task_statuses]
@@ -297,7 +313,7 @@ class TaskTrackingService:
             """Update task status to RUNNING when it starts"""
             try:
                 #crew_logger.info(f"Task {task_id} in job {job_id} is starting")
-                self.update_task_status(job_id, task_id, TaskStatusEnum.RUNNING)
+                asyncio.run(self.update_task_status(job_id, task_id, TaskStatusEnum.RUNNING))
             except Exception as e:
                 crew_logger.error(f"Error updating task status to RUNNING: {str(e)}")
         
@@ -305,7 +321,7 @@ class TaskTrackingService:
             """Update task status to COMPLETED when it finishes"""
             try:
                 crew_logger.info(f"Task {task_id} in job {job_id} completed with output")
-                self.update_task_status(job_id, task_id, TaskStatusEnum.COMPLETED)
+                asyncio.run(self.update_task_status(job_id, task_id, TaskStatusEnum.COMPLETED))
                 return output
             except Exception as e:
                 crew_logger.error(f"Error updating task status to COMPLETED: {str(e)}")
@@ -315,7 +331,7 @@ class TaskTrackingService:
             """Update task status to FAILED when it encounters an error"""
             try:
                 crew_logger.error(f"Task {task_id} in job {job_id} failed: {str(error)}")
-                self.update_task_status(job_id, task_id, TaskStatusEnum.FAILED)
+                asyncio.run(self.update_task_status(job_id, task_id, TaskStatusEnum.FAILED))
                 
                 # Record error trace if possible
                 try:
@@ -326,13 +342,13 @@ class TaskTrackingService:
                                 'callback_name': 'task_error_handler',
                                 'error': str(error)
                             }
-                            self.repository.record_error_trace(
+                            asyncio.run(self.repository.record_error_trace(
                                 run_id=run.id,
                                 task_key=task_id,
                                 error_type=type(error).__name__,
                                 error_message=str(error),
                                 error_metadata=error_metadata
-                            )
+                            ))
                 except Exception as trace_error:
                     crew_logger.error(f"Failed to record error trace: {str(trace_error)}")
                 

@@ -5,6 +5,7 @@ This module provides event listeners for logging agent traces and task completio
 """
 from typing import Any, Optional, Dict
 from datetime import datetime, timezone
+import asyncio
 import logging
 import queue
 import traceback
@@ -314,11 +315,11 @@ class AgentTraceEventListener(BaseEventListener):
                     service = TaskTrackingService.for_crew_with_repo(uow.task_tracking_repository)
                     
                     # Update the task status using our consistent task_id
-                    service.update_task_status(
+                    asyncio.run(service.update_task_status(
                         job_id=self.job_id, 
                         task_id=task_id, 
                         status=TaskStatusEnum.COMPLETED
-                    )
+                    ))
                     
                     # Commit the changes
                     uow.commit()
@@ -416,16 +417,16 @@ class AgentTraceEventListener(BaseEventListener):
                     # Use the TaskTrackingService with the repository from UnitOfWork
                     service = TaskTrackingService.for_crew_with_repo(uow.task_tracking_repository)
                     
-                    # Check if a task status for this task_id already exists
-                    existing_status = service.get_task_status_by_task_id(task_id)
+                    # Check if a task status for this task_id already exists (sync version for callbacks)
+                    existing_status = service.get_task_status_by_task_id_sync(task_id)
                     
                     if not existing_status:
                         # Create new task status with our consistent task_id
-                        service.create_task_status(
+                        asyncio.run(service.create_task_status(
                             job_id=self.job_id,
                             task_id=task_id,
                             agent_name=agent_name
-                        )
+                        ))
                         logger.info(f"{log_prefix} Created new task status for {task_id} with status RUNNING")
                     else:
                         logger.info(f"{log_prefix} Task status for {task_id} already exists, skipping creation")
@@ -623,6 +624,12 @@ class CrewLoggerHandler(logging.Handler):
             enqueue_log(execution_id=self.job_id, content=log_message)
         except Exception as e:
             # Don't use logging here to avoid potential infinite recursion
-            import sys
-            print(f"Error in CrewLoggerHandler.emit: {e}", file=sys.stderr)
-            traceback.print_exc(file=sys.stderr) 
+            # Use the last resort handler to avoid stream redirection issues
+            try:
+                import sys
+                if hasattr(sys.stderr, 'write') and not sys.stderr.closed:
+                    sys.stderr.write(f"Error in CrewLoggerHandler.emit: {e}\n")
+                    sys.stderr.flush()
+            except:
+                # If even that fails, silently ignore to prevent cascading failures
+                pass 

@@ -341,6 +341,20 @@ class ExecutionHistoryService:
             # Delete execution using repository (after dependent records are gone)
             result = await self.history_repo.delete_execution(execution_id)
             
+            # Clear in-memory execution from ExecutionService and CrewAIExecutionService
+            from src.services.execution_service import ExecutionService
+            from src.services.crewai_execution_service import executions as crewai_executions
+            
+            # Remove from ExecutionService memory
+            if job_id in ExecutionService.executions:
+                del ExecutionService.executions[job_id]
+                logger.info(f"Removed execution {job_id} from ExecutionService memory")
+            
+            # Remove from CrewAIExecutionService memory
+            if job_id in crewai_executions:
+                del crewai_executions[job_id]
+                logger.info(f"Removed execution {job_id} from CrewAIExecutionService memory")
+            
             return DeleteResponse(
                 success=True,
                 message=f"Deleted execution {execution_id} (job_id: {job_id}), "
@@ -384,6 +398,20 @@ class ExecutionHistoryService:
             
             # Delete execution using repository (after dependent records are gone)
             result = await self.history_repo.delete_execution_by_job_id(job_id)
+            
+            # Clear in-memory execution from ExecutionService and CrewAIExecutionService
+            from src.services.execution_service import ExecutionService
+            from src.services.crewai_execution_service import executions as crewai_executions
+            
+            # Remove from ExecutionService memory
+            if job_id in ExecutionService.executions:
+                del ExecutionService.executions[job_id]
+                logger.info(f"Removed execution {job_id} from ExecutionService memory")
+            
+            # Remove from CrewAIExecutionService memory
+            if job_id in crewai_executions:
+                del crewai_executions[job_id]
+                logger.info(f"Removed execution {job_id} from CrewAIExecutionService memory")
             
             return DeleteResponse(
                 success=True,
