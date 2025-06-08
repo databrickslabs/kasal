@@ -39,8 +39,8 @@ class TemplateService:
         Returns:
             An instance of TemplateService with all required dependencies
         """
-        from src.db.session import async_session_factory
-        session = async_session_factory()
+        from src.db.session import SessionLocal
+        session = SessionLocal()
         repository = TemplateRepository(session)
         return cls(repository=repository)
     

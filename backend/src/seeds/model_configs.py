@@ -264,73 +264,71 @@ async def seed_async():
                 continue
             
             # Create a fresh session for each model to avoid transaction conflicts
-            async with async_session_factory() as session:
-                if model_key not in existing_keys:
-                    # Check again to be extra sure - this helps with race conditions
-                    check_result = await session.execute(
-                        select(ModelConfig).filter(ModelConfig.key == model_key)
-                    )
-                    existing_model = check_result.scalars().first()
-                    
-                    if existing_model:
-                        # If it exists now (race condition), update it instead
-                        existing_model.name = model_data["name"]
-                        existing_model.provider = model_data["provider"]
-                        existing_model.temperature = model_data["temperature"]
-                        existing_model.context_window = model_data["context_window"]
-                        existing_model.max_output_tokens = model_data["max_output_tokens"]
-                        existing_model.extended_thinking = model_data.get("extended_thinking", False)
-                        existing_model.enabled = (model_data["provider"] == "databricks")  # Only enable Databricks models
-                        existing_model.updated_at = datetime.now().replace(tzinfo=None)
-                        logger.debug(f"Updating existing model: {model_key}")
-                        models_updated += 1
-                    else:
-                        # Add new model config - only Databricks models are enabled by default
-                        model_config = ModelConfig(
-                            key=model_key,
-                            name=model_data["name"],
-                            provider=model_data["provider"],
-                            temperature=model_data["temperature"],
-                            context_window=model_data["context_window"],
-                            max_output_tokens=model_data["max_output_tokens"],
-                            extended_thinking=model_data.get("extended_thinking", False),
-                            enabled=(model_data["provider"] == "databricks"),  # Only enable Databricks models
-                            created_at=datetime.now().replace(tzinfo=None),
-                            updated_at=datetime.now().replace(tzinfo=None)
+            try:
+                async with async_session_factory() as session:
+                    if model_key not in existing_keys:
+                        # Check again to be extra sure - this helps with race conditions
+                        check_result = await session.execute(
+                            select(ModelConfig).filter(ModelConfig.key == model_key)
                         )
-                        session.add(model_config)
-                        logger.debug(f"Adding new model: {model_key}")
-                        models_added += 1
-                else:
-                    # Update existing model config - only Databricks models are enabled by default
-                    result = await session.execute(
-                        select(ModelConfig).filter(ModelConfig.key == model_key)
-                    )
-                    existing_model = result.scalars().first()
-                    
-                    if existing_model:
-                        existing_model.name = model_data["name"]
-                        existing_model.provider = model_data["provider"]
-                        existing_model.temperature = model_data["temperature"]
-                        existing_model.context_window = model_data["context_window"]
-                        existing_model.max_output_tokens = model_data["max_output_tokens"]
-                        existing_model.extended_thinking = model_data.get("extended_thinking", False)
-                        existing_model.enabled = (model_data["provider"] == "databricks")  # Only enable Databricks models
-                        existing_model.updated_at = datetime.now().replace(tzinfo=None)
-                        logger.debug(f"Updating existing model: {model_key}")
-                        models_updated += 1
-                
-                # Commit the session for this model
-                try:
-                    await session.commit()
-                except Exception as e:
-                    await session.rollback()
-                    if "UNIQUE constraint failed" in str(e):
-                        logger.warning(f"Model {model_key} already exists, skipping insert")
-                        models_skipped += 1
+                        existing_model = check_result.scalars().first()
+                        
+                        if existing_model:
+                            # If it exists now (race condition), update it instead
+                            existing_model.name = model_data["name"]
+                            existing_model.provider = model_data["provider"]
+                            existing_model.temperature = model_data["temperature"]
+                            existing_model.context_window = model_data["context_window"]
+                            existing_model.max_output_tokens = model_data["max_output_tokens"]
+                            existing_model.extended_thinking = model_data.get("extended_thinking", False)
+                            existing_model.enabled = (model_data["provider"] == "databricks")  # Only enable Databricks models
+                            existing_model.updated_at = datetime.now().replace(tzinfo=None)
+                            logger.debug(f"Updating existing model: {model_key}")
+                            models_updated += 1
+                        else:
+                            # Add new model config - only Databricks models are enabled by default
+                            model_config = ModelConfig(
+                                key=model_key,
+                                name=model_data["name"],
+                                provider=model_data["provider"],
+                                temperature=model_data["temperature"],
+                                context_window=model_data["context_window"],
+                                max_output_tokens=model_data["max_output_tokens"],
+                                extended_thinking=model_data.get("extended_thinking", False),
+                                enabled=(model_data["provider"] == "databricks"),  # Only enable Databricks models
+                                created_at=datetime.now().replace(tzinfo=None),
+                                updated_at=datetime.now().replace(tzinfo=None)
+                            )
+                            session.add(model_config)
+                            logger.debug(f"Adding new model: {model_key}")
+                            models_added += 1
                     else:
-                        logger.error(f"Failed to commit model config for {model_key}: {str(e)}")
-                        models_error += 1
+                        # Update existing model config - only Databricks models are enabled by default
+                        result = await session.execute(
+                            select(ModelConfig).filter(ModelConfig.key == model_key)
+                        )
+                        existing_model = result.scalars().first()
+                        
+                        if existing_model:
+                            existing_model.name = model_data["name"]
+                            existing_model.provider = model_data["provider"]
+                            existing_model.temperature = model_data["temperature"]
+                            existing_model.context_window = model_data["context_window"]
+                            existing_model.max_output_tokens = model_data["max_output_tokens"]
+                            existing_model.extended_thinking = model_data.get("extended_thinking", False)
+                            existing_model.enabled = (model_data["provider"] == "databricks")  # Only enable Databricks models
+                            existing_model.updated_at = datetime.now().replace(tzinfo=None)
+                            logger.debug(f"Updating existing model: {model_key}")
+                            models_updated += 1
+                    
+                    # Session auto-commits when context manager exits successfully
+            except Exception as db_error:
+                if "UNIQUE constraint failed" in str(db_error):
+                    logger.warning(f"Model {model_key} already exists, skipping")
+                    models_skipped += 1
+                else:
+                    logger.error(f"Database error for model {model_key}: {str(db_error)}")
+                    models_error += 1
         except Exception as e:
             logger.error(f"Error processing model {model_key}: {str(e)}")
             models_error += 1
@@ -382,72 +380,70 @@ def seed_sync():
                 continue
             
             # Create a fresh session for each model to avoid transaction conflicts
-            with SessionLocal() as session:
-                if model_key not in existing_keys:
-                    # Check again to be extra sure - this helps with race conditions
-                    check_result = session.execute(
-                        select(ModelConfig).filter(ModelConfig.key == model_key)
-                    )
-                    existing_model = check_result.scalars().first()
-                    
-                    if existing_model:
-                        # If it exists now (race condition), update it instead
-                        existing_model.name = model_data["name"]
-                        existing_model.provider = model_data["provider"]
-                        existing_model.temperature = model_data["temperature"]
-                        existing_model.context_window = model_data["context_window"]
-                        existing_model.max_output_tokens = model_data["max_output_tokens"]
-                        existing_model.extended_thinking = model_data.get("extended_thinking", False)
-                        existing_model.updated_at = datetime.now().replace(tzinfo=None)
-                        logger.debug(f"Updating existing model: {model_key}")
-                        models_updated += 1
-                    else:
-                        # Add new model config - only Databricks models are enabled by default
-                        model_config = ModelConfig(
-                            key=model_key,
-                            name=model_data["name"],
-                            provider=model_data["provider"],
-                            temperature=model_data["temperature"],
-                            context_window=model_data["context_window"],
-                            max_output_tokens=model_data["max_output_tokens"],
-                            extended_thinking=model_data.get("extended_thinking", False),
-                            enabled=(model_data["provider"] == "databricks"),  # Only enable Databricks models
-                            created_at=datetime.now().replace(tzinfo=None),
-                            updated_at=datetime.now().replace(tzinfo=None)
+            try:
+                with SessionLocal() as session:
+                    if model_key not in existing_keys:
+                        # Check again to be extra sure - this helps with race conditions
+                        check_result = session.execute(
+                            select(ModelConfig).filter(ModelConfig.key == model_key)
                         )
-                        session.add(model_config)
-                        logger.debug(f"Adding new model: {model_key}")
-                        models_added += 1
-                else:
-                    # Update existing model config - only Databricks models are enabled by default
-                    result = session.execute(
-                        select(ModelConfig).filter(ModelConfig.key == model_key)
-                    )
-                    existing_model = result.scalars().first()
-                    
-                    if existing_model:
-                        existing_model.name = model_data["name"]
-                        existing_model.provider = model_data["provider"]
-                        existing_model.temperature = model_data["temperature"]
-                        existing_model.context_window = model_data["context_window"]
-                        existing_model.max_output_tokens = model_data["max_output_tokens"]
-                        existing_model.extended_thinking = model_data.get("extended_thinking", False)
-                        existing_model.enabled = (model_data["provider"] == "databricks")  # Only enable Databricks models
-                        existing_model.updated_at = datetime.now().replace(tzinfo=None)
-                        logger.debug(f"Updating existing model: {model_key}")
-                        models_updated += 1
-                
-                # Commit the session for this model
-                try:
-                    session.commit()
-                except Exception as e:
-                    session.rollback()
-                    if "UNIQUE constraint failed" in str(e):
-                        logger.warning(f"Model {model_key} already exists, skipping insert")
-                        models_skipped += 1
+                        existing_model = check_result.scalars().first()
+                        
+                        if existing_model:
+                            # If it exists now (race condition), update it instead
+                            existing_model.name = model_data["name"]
+                            existing_model.provider = model_data["provider"]
+                            existing_model.temperature = model_data["temperature"]
+                            existing_model.context_window = model_data["context_window"]
+                            existing_model.max_output_tokens = model_data["max_output_tokens"]
+                            existing_model.extended_thinking = model_data.get("extended_thinking", False)
+                            existing_model.updated_at = datetime.now().replace(tzinfo=None)
+                            logger.debug(f"Updating existing model: {model_key}")
+                            models_updated += 1
+                        else:
+                            # Add new model config - only Databricks models are enabled by default
+                            model_config = ModelConfig(
+                                key=model_key,
+                                name=model_data["name"],
+                                provider=model_data["provider"],
+                                temperature=model_data["temperature"],
+                                context_window=model_data["context_window"],
+                                max_output_tokens=model_data["max_output_tokens"],
+                                extended_thinking=model_data.get("extended_thinking", False),
+                                enabled=(model_data["provider"] == "databricks"),  # Only enable Databricks models
+                                created_at=datetime.now().replace(tzinfo=None),
+                                updated_at=datetime.now().replace(tzinfo=None)
+                            )
+                            session.add(model_config)
+                            logger.debug(f"Adding new model: {model_key}")
+                            models_added += 1
                     else:
-                        logger.error(f"Failed to commit model config for {model_key}: {str(e)}")
-                        models_error += 1
+                        # Update existing model config - only Databricks models are enabled by default
+                        result = session.execute(
+                            select(ModelConfig).filter(ModelConfig.key == model_key)
+                        )
+                        existing_model = result.scalars().first()
+                        
+                        if existing_model:
+                            existing_model.name = model_data["name"]
+                            existing_model.provider = model_data["provider"]
+                            existing_model.temperature = model_data["temperature"]
+                            existing_model.context_window = model_data["context_window"]
+                            existing_model.max_output_tokens = model_data["max_output_tokens"]
+                            existing_model.extended_thinking = model_data.get("extended_thinking", False)
+                            existing_model.enabled = (model_data["provider"] == "databricks")  # Only enable Databricks models
+                            existing_model.updated_at = datetime.now().replace(tzinfo=None)
+                            logger.debug(f"Updating existing model: {model_key}")
+                            models_updated += 1
+                    
+                    # Session auto-commits when context manager exits successfully
+            except Exception as db_error:
+                if "UNIQUE constraint failed" in str(db_error):
+                    logger.warning(f"Model {model_key} already exists, skipping")
+                    models_skipped += 1
+                else:
+                    logger.error(f"Database error for model {model_key}: {str(db_error)}")
+                    models_error += 1
         except Exception as e:
             logger.error(f"Error processing model {model_key}: {str(e)}")
             models_error += 1

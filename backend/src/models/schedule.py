@@ -24,12 +24,10 @@ class Schedule(Base):
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)  # Use timezone-naive UTC time
     
     # Group isolation fields
-    group_id = Column(String(100), nullable=True, index=True)  # Group isolation
-    tenant_id = Column(String(100), nullable=True, index=True)  # Legacy compatibility (will be removed)
-    created_by_email = Column(String(255), nullable=True, index=True)
+    group_id = Column(String(100), nullable=True)  # Group isolation
+    created_by_email = Column(String(255), nullable=True)
 
     __table_args__ = (
         Index('ix_schedule_group_id', 'group_id'),
-        Index('ix_schedule_tenant_id', 'tenant_id'),  # Legacy compatibility
         Index('ix_schedule_created_by_email', 'created_by_email'),
     ) 

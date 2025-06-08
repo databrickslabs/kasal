@@ -56,12 +56,11 @@ class JsonFileStorage(CrewAICallback):
 class DatabaseStorage(CrewAICallback):
     """Stores output in database."""
     
-    def __init__(self, db_session, model_class, **kwargs):
+    def __init__(self, repository, **kwargs):
         super().__init__(**kwargs)
-        self.db_session = db_session
-        self.model_class = model_class
+        self.repository = repository
     
-    def execute(self, output: Any) -> int:
+    async def execute(self, output: Any) -> int:
         # Convert output to dict if needed
         if hasattr(output, 'dict'):
             data = output.dict()
@@ -70,16 +69,16 @@ class DatabaseStorage(CrewAICallback):
         else:
             data = {'output': str(output)}
         
-        # Create database record
-        record = self.model_class(
-            task_key=self.task_key,
-            data=data,
-            metadata=self.metadata,
-            created_at=datetime.now()
-        )
+        # Create database record using repository pattern
+        record_data = {
+            'task_key': self.task_key,
+            'data': data,
+            'metadata': self.metadata,
+            'created_at': datetime.now()
+        }
         
-        self.db_session.add(record)
-        self.db_session.commit()
+        # Use repository to create record (no manual session management)
+        record = await self.repository.create(**record_data)
         
         logger.info(f"Stored output in database with id {record.id}")
         return record.id
