@@ -37,6 +37,7 @@ import FileUploadIcon from '@mui/icons-material/FileUpload';
 import EditFlowForm from '../../Flow/EditFlowForm';
 import { AgentService } from '../../../api/AgentService';
 import { TaskService } from '../../../api/TaskService';
+import { useFlowConfigStore } from '../../../store/flowConfig';
 
 interface TabPanelProps {
   children?: React.ReactNode;
@@ -85,6 +86,14 @@ const CrewFlowSelectionDialog: React.FC<CrewFlowSelectionDialogProps> = ({
   const firstCrewCardRef = useRef<HTMLDivElement>(null);
   const firstFlowCardRef = useRef<HTMLDivElement>(null);
   
+  // Get flow configuration to check if CrewAI flows are enabled
+  const { crewAIFlowEnabled } = useFlowConfigStore();
+  
+  // Helper function to detect if a crew contains flow nodes
+  const isCrewActuallyFlow = (crew: CrewResponse): boolean => {
+    return crew.nodes?.some(node => node.type === 'flowNode') || false;
+  };
+  
   // Refs for file inputs
   const crewFileInputRef = useRef<HTMLInputElement>(null);
   const flowFileInputRef = useRef<HTMLInputElement>(null);
@@ -97,6 +106,13 @@ const CrewFlowSelectionDialog: React.FC<CrewFlowSelectionDialogProps> = ({
       loadFlows();
     }
   }, [open]);
+
+  // Switch to Crews tab if CrewAI flow is disabled and user is on Flows tab
+  useEffect(() => {
+    if (!crewAIFlowEnabled && tabValue === 1) {
+      setTabValue(0);
+    }
+  }, [crewAIFlowEnabled, tabValue]);
 
   // Focus management when dialog opens
   const handleDialogEntered = () => {
@@ -478,6 +494,10 @@ const CrewFlowSelectionDialog: React.FC<CrewFlowSelectionDialogProps> = ({
   };
 
   const handleTabChange = (_event: React.SyntheticEvent, newValue: number) => {
+    // Prevent switching to Flows tab if CrewAI flow is disabled
+    if (newValue === 1 && !crewAIFlowEnabled) {
+      return;
+    }
     setTabValue(newValue);
     // Reset search when changing tabs
     setSearchQuery('');
@@ -894,14 +914,16 @@ const CrewFlowSelectionDialog: React.FC<CrewFlowSelectionDialogProps> = ({
                   aria-controls="tabpanel-0"
                   sx={{ textTransform: 'none' }}
                 />
-                <Tab 
-                  icon={<AccountTreeIcon />} 
-                  iconPosition="start" 
-                  label="Flows" 
-                  id="flow-tab-1" 
-                  aria-controls="tabpanel-1" 
-                  sx={{ textTransform: 'none' }}
-                />
+                {crewAIFlowEnabled && (
+                  <Tab 
+                    icon={<AccountTreeIcon />} 
+                    iconPosition="start" 
+                    label="Flows" 
+                    id="flow-tab-1" 
+                    aria-controls="tabpanel-1" 
+                    sx={{ textTransform: 'none' }}
+                  />
+                )}
               </Tabs>
             </Box>
 
@@ -1015,10 +1037,19 @@ const CrewFlowSelectionDialog: React.FC<CrewFlowSelectionDialogProps> = ({
               ) : (
                 <Grid container spacing={2}>
                   {crews
-                    .filter(crew => 
-                      searchQuery === '' ||
-                      crew.name.toLowerCase().includes(searchQuery.toLowerCase())
-                    )
+                    .filter(crew => {
+                      // Filter out flows if CrewAI flow is disabled
+                      if (!crewAIFlowEnabled && isCrewActuallyFlow(crew)) {
+                        return false;
+                      }
+                      
+                      // Apply search filter
+                      if (searchQuery) {
+                        return crew.name.toLowerCase().includes(searchQuery.toLowerCase());
+                      }
+                      
+                      return true;
+                    })
                     .map((crew, index) => (
                       <Grid item xs={12} sm={6} md={4} key={crew.id}>
                         <Card 
@@ -1134,7 +1165,8 @@ const CrewFlowSelectionDialog: React.FC<CrewFlowSelectionDialogProps> = ({
                 </Grid>
               )}
             </TabPanel>
-            <TabPanel value={tabValue} index={1}>
+            {crewAIFlowEnabled && (
+              <TabPanel value={tabValue} index={1}>
               {loading ? (
                 <Box sx={{ display: 'flex', justifyContent: 'center', p: 4 }}>
                   <CircularProgress />
@@ -1279,6 +1311,7 @@ const CrewFlowSelectionDialog: React.FC<CrewFlowSelectionDialogProps> = ({
                 </Grid>
               )}
             </TabPanel>
+            )}
           </Box>
         </DialogContent>
         <DialogActions>

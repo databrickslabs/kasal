@@ -8,9 +8,10 @@ import { useJobManagementStore } from '../../store/jobManagement';
 
 interface ChatPanelProps {
   onNodesGenerated?: (nodes: Node[], edges: Edge[]) => void;
+  isVisible?: boolean;
 }
 
-const ChatPanel: React.FC<ChatPanelProps> = ({ onNodesGenerated }) => {
+const ChatPanel: React.FC<ChatPanelProps> = ({ onNodesGenerated, isVisible = true }) => {
   const { selectedModel } = useCrewExecutionStore();
   const { selectedTools } = useJobManagementStore();
 
@@ -50,6 +51,7 @@ const ChatPanel: React.FC<ChatPanelProps> = ({ onNodesGenerated }) => {
           onNodesGenerated={onNodesGenerated}
           selectedModel={selectedModel}
           selectedTools={selectedTools}
+          isVisible={isVisible}
         />
       </Box>
     </Paper>
