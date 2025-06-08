@@ -141,6 +141,62 @@ class ModelConfigRepository(BaseRepository[ModelConfig]):
             await self.session.rollback()
             raise 
     
+    async def upsert_model(self, key: str, model_data: dict) -> ModelConfig:
+        """
+        Insert or update a model configuration atomically.
+        
+        Args:
+            key: Model configuration key
+            model_data: Dictionary containing model configuration data
+            
+        Returns:
+            The created or updated ModelConfig instance
+        """
+        import logging
+        from datetime import datetime
+        logger = logging.getLogger(__name__)
+        
+        try:
+            # Try to find existing model first
+            existing_model = await self.find_by_key(key)
+            
+            if existing_model:
+                # Update existing model
+                existing_model.name = model_data.get("name", existing_model.name)
+                existing_model.provider = model_data.get("provider", existing_model.provider)
+                existing_model.temperature = model_data.get("temperature", existing_model.temperature)
+                existing_model.context_window = model_data.get("context_window", existing_model.context_window)
+                existing_model.max_output_tokens = model_data.get("max_output_tokens", existing_model.max_output_tokens)
+                existing_model.extended_thinking = model_data.get("extended_thinking", existing_model.extended_thinking)
+                existing_model.enabled = model_data.get("enabled", existing_model.enabled)
+                existing_model.updated_at = datetime.now().replace(tzinfo=None)
+                
+                logger.debug(f"Updated existing model config: {key}")
+                return existing_model
+            else:
+                # Create new model
+                new_model = ModelConfig(
+                    key=key,
+                    name=model_data["name"],
+                    provider=model_data.get("provider"),
+                    temperature=model_data.get("temperature"),
+                    context_window=model_data.get("context_window"),
+                    max_output_tokens=model_data.get("max_output_tokens"),
+                    extended_thinking=model_data.get("extended_thinking", False),
+                    enabled=model_data.get("enabled", True),
+                    created_at=datetime.now().replace(tzinfo=None),
+                    updated_at=datetime.now().replace(tzinfo=None)
+                )
+                self.session.add(new_model)
+                
+                logger.debug(f"Created new model config: {key}")
+                return new_model
+                
+        except Exception as e:
+            logger.error(f"Error upserting model config {key}: {str(e)}")
+            await self.session.rollback()
+            raise
+
     async def delete_by_key(self, key: str) -> bool:
         """
         Delete a model configuration by key.

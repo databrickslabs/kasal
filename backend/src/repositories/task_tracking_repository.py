@@ -1,6 +1,6 @@
 import logging
 from typing import List, Optional, Dict, Any
-from datetime import datetime, UTC
+from datetime import datetime, timedelta, UTC
 from sqlalchemy.orm import Session
 
 from sqlalchemy import select
@@ -18,13 +18,13 @@ class TaskTrackingRepository:
     Handles data access for Run and TaskStatus models.
     """
     
-    def __init__(self, db: Optional[Session] = None):
+    def __init__(self, db: Optional[AsyncSession] = None):
         """
-        Initialize the repository with optional session.
+        Initialize the repository with optional async session.
         If no session is provided, the repository will manage its own sessions.
         
         Args:
-            db: Optional SQLAlchemy session (sync or async)
+            db: Optional SQLAlchemy async session
         """
         self.db = db
         self._owns_session = db is None
@@ -205,9 +205,9 @@ class TaskTrackingRepository:
         
         return db_task
 
-    def create_task_status(self, task_status: TaskStatusCreate) -> DBTaskStatus:
+    async def create_task_status(self, task_status: TaskStatusCreate) -> DBTaskStatus:
         """
-        Create a new task status entry with RUNNING status (sync version).
+        Create a new task status entry with RUNNING status (async version).
         
         Args:
             task_status: The task status data to create
@@ -217,36 +217,39 @@ class TaskTrackingRepository:
         """
         if self._owns_session:
             # Create a session for this operation
-            from src.db.session import SessionLocal
-            with SessionLocal() as db:
-                return self._create_task_status_sync(db, task_status)
+            async with async_session_factory() as session:
+                return await self._create_task_status_async(session, task_status)
         else:
-            return self._create_task_status_sync(self.db, task_status)
+            return await self._create_task_status_async(self.db, task_status)
             
-    def _create_task_status_sync(self, db: Session, task_status: TaskStatusCreate) -> DBTaskStatus:
+    async def _create_task_status_async(self, session: AsyncSession, task_status: TaskStatusCreate) -> DBTaskStatus:
         """
-        Create a task status with a provided session.
+        Create a task status with a provided async session.
         
         Args:
-            db: SQLAlchemy session
+            session: SQLAlchemy async session
             task_status: The task status data
             
         Returns:
             The created task status
         """
         # Check if status already exists
-        existing = db.query(DBTaskStatus).filter(
+        query = select(DBTaskStatus).where(
             DBTaskStatus.job_id == task_status.job_id,
             DBTaskStatus.task_id == task_status.task_id
-        ).first()
+        )
+        result = await session.execute(query)
+        existing = result.scalars().first()
         
         if existing:
             return existing
         
         # Check if the job exists in the executionhistory table
-        job_exists = db.query(ExecutionHistory).filter(
+        query = select(ExecutionHistory).where(
             ExecutionHistory.job_id == task_status.job_id
-        ).first()
+        )
+        result = await session.execute(query)
+        job_exists = result.scalars().first()
         
         # If job doesn't exist, create it first
         if not job_exists:
@@ -262,8 +265,8 @@ class TaskTrackingRepository:
             )
             
             # Add and commit to ensure it exists
-            db.add(job_record)
-            db.commit()
+            session.add(job_record)
+            await session.commit()
             
             logger.info(f"Created job record for {task_status.job_id}")
         
@@ -277,15 +280,15 @@ class TaskTrackingRepository:
             completed_at=None
         )
         
-        db.add(db_task_status)
-        db.commit()
-        db.refresh(db_task_status)
+        session.add(db_task_status)
+        await session.commit()
+        await session.refresh(db_task_status)
         
         return db_task_status
 
-    def update_task_status(self, job_id: str, task_id: str, task_status: TaskStatusUpdate) -> Optional[DBTaskStatus]:
+    async def update_task_status(self, job_id: str, task_id: str, task_status: TaskStatusUpdate) -> Optional[DBTaskStatus]:
         """
-        Update the status of a task (sync version).
+        Update the status of a task (async version).
         
         Args:
             job_id: The ID of the job
@@ -297,19 +300,18 @@ class TaskTrackingRepository:
         """
         if self._owns_session:
             # Create a session for this operation
-            from src.db.session import SessionLocal
-            with SessionLocal() as db:
-                return self._update_task_status_sync(db, job_id, task_id, task_status)
+            async with async_session_factory() as session:
+                return await self._update_task_status_async(session, job_id, task_id, task_status)
         else:
-            return self._update_task_status_sync(self.db, job_id, task_id, task_status)
+            return await self._update_task_status_async(self.db, job_id, task_id, task_status)
             
-    def _update_task_status_sync(self, db: Session, job_id: str, task_id: str, 
+    async def _update_task_status_async(self, session: AsyncSession, job_id: str, task_id: str, 
                                  task_status: TaskStatusUpdate) -> Optional[DBTaskStatus]:
         """
-        Update task status with a provided session.
+        Update task status with a provided async session.
         
         Args:
-            db: SQLAlchemy session
+            session: SQLAlchemy async session
             job_id: The job ID
             task_id: The task ID
             task_status: The update data
@@ -317,10 +319,12 @@ class TaskTrackingRepository:
         Returns:
             Updated task status or None
         """
-        db_task_status = db.query(DBTaskStatus).filter(
+        query = select(DBTaskStatus).where(
             DBTaskStatus.job_id == job_id,
             DBTaskStatus.task_id == task_id
-        ).first()
+        )
+        result = await session.execute(query)
+        db_task_status = result.scalars().first()
         
         if not db_task_status:
             return None
@@ -332,14 +336,14 @@ class TaskTrackingRepository:
         if task_status.status in [TaskStatusEnum.COMPLETED, TaskStatusEnum.FAILED]:
             db_task_status.completed_at = datetime.now(UTC)
         
-        db.commit()
-        db.refresh(db_task_status)
+        await session.commit()
+        await session.refresh(db_task_status)
         
         return db_task_status
 
-    def get_task_status(self, job_id: str, task_id: str) -> Optional[DBTaskStatus]:
+    async def get_task_status(self, job_id: str, task_id: str) -> Optional[DBTaskStatus]:
         """
-        Get the current status of a task (sync version).
+        Get the current status of a task (async version).
         
         Args:
             job_id: The ID of the job
@@ -350,21 +354,24 @@ class TaskTrackingRepository:
         """
         if self._owns_session:
             # Create a session for this operation
-            from src.db.session import SessionLocal
-            with SessionLocal() as db:
-                return db.query(DBTaskStatus).filter(
+            async with async_session_factory() as session:
+                query = select(DBTaskStatus).where(
                     DBTaskStatus.job_id == job_id,
                     DBTaskStatus.task_id == task_id
-                ).first()
+                )
+                result = await session.execute(query)
+                return result.scalars().first()
         else:
-            return self.db.query(DBTaskStatus).filter(
+            query = select(DBTaskStatus).where(
                 DBTaskStatus.job_id == job_id,
                 DBTaskStatus.task_id == task_id
-            ).first()
+            )
+            result = await self.db.execute(query)
+            return result.scalars().first()
             
-    def get_task_status_by_task_id(self, task_id: str) -> Optional[DBTaskStatus]:
+    async def get_task_status_by_task_id(self, task_id: str) -> Optional[DBTaskStatus]:
         """
-        Get the current status of a task by task_id only (sync version).
+        Get the current status of a task by task_id only (async version).
         Used when job_id is not known or needed.
         
         Args:
@@ -375,19 +382,22 @@ class TaskTrackingRepository:
         """
         if self._owns_session:
             # Create a session for this operation
-            from src.db.session import SessionLocal
-            with SessionLocal() as db:
-                return db.query(DBTaskStatus).filter(
+            async with async_session_factory() as session:
+                query = select(DBTaskStatus).where(
                     DBTaskStatus.task_id == task_id
-                ).first()
+                )
+                result = await session.execute(query)
+                return result.scalars().first()
         else:
-            return self.db.query(DBTaskStatus).filter(
+            query = select(DBTaskStatus).where(
                 DBTaskStatus.task_id == task_id
-            ).first()
+            )
+            result = await self.db.execute(query)
+            return result.scalars().first()
 
-    def get_all_task_statuses(self, job_id: str) -> List[DBTaskStatus]:
+    async def get_all_task_statuses(self, job_id: str) -> List[DBTaskStatus]:
         """
-        Get all task statuses for a job (sync version).
+        Get all task statuses for a job (async version).
         
         Args:
             job_id: The ID of the job
@@ -397,19 +407,22 @@ class TaskTrackingRepository:
         """
         if self._owns_session:
             # Create a session for this operation
-            from src.db.session import SessionLocal
-            with SessionLocal() as db:
-                return db.query(DBTaskStatus).filter(
+            async with async_session_factory() as session:
+                query = select(DBTaskStatus).where(
                     DBTaskStatus.job_id == job_id
-                ).order_by(DBTaskStatus.started_at).all()
+                ).order_by(DBTaskStatus.started_at)
+                result = await session.execute(query)
+                return list(result.scalars().all())
         else:
-            return self.db.query(DBTaskStatus).filter(
+            query = select(DBTaskStatus).where(
                 DBTaskStatus.job_id == job_id
-            ).order_by(DBTaskStatus.started_at).all()
+            ).order_by(DBTaskStatus.started_at)
+            result = await self.db.execute(query)
+            return list(result.scalars().all())
 
-    def create_task_statuses_for_job(self, job_id: str, tasks_config: Dict[str, Dict]) -> List[DBTaskStatus]:
+    async def create_task_statuses_for_job(self, job_id: str, tasks_config: Dict[str, Dict]) -> List[DBTaskStatus]:
         """
-        Create task status entries for all tasks in a job with RUNNING status (sync version).
+        Create task status entries for all tasks in a job with RUNNING status (async version).
         
         Args:
             job_id: The ID of the job
@@ -431,15 +444,15 @@ class TaskTrackingRepository:
                 status=TaskStatusEnum.RUNNING,
                 agent_name=agent_name
             )
-            db_task_status = self.create_task_status(task_status)
+            db_task_status = await self.create_task_status(task_status)
             created_statuses.append(db_task_status)
         
         return created_statuses
         
-    def record_error_trace(self, run_id: int, task_key: str, error_type: str, error_message: str, 
+    async def record_error_trace(self, run_id: int, task_key: str, error_type: str, error_message: str, 
                           error_metadata: Optional[Dict[str, Any]] = None) -> ErrorTrace:
         """
-        Record an error trace for a task (sync version).
+        Record an error trace for a task (async version).
         
         Args:
             run_id: The database ID of the run
@@ -453,23 +466,22 @@ class TaskTrackingRepository:
         """
         if self._owns_session:
             # Create a session for this operation
-            from src.db.session import SessionLocal
-            with SessionLocal() as db:
-                return self._record_error_trace_sync(
-                    db, run_id, task_key, error_type, error_message, error_metadata
+            async with async_session_factory() as session:
+                return await self._record_error_trace_async(
+                    session, run_id, task_key, error_type, error_message, error_metadata
                 )
         else:
-            return self._record_error_trace_sync(
+            return await self._record_error_trace_async(
                 self.db, run_id, task_key, error_type, error_message, error_metadata
             )
             
-    def _record_error_trace_sync(self, db: Session, run_id: int, task_key: str, error_type: str, 
+    async def _record_error_trace_async(self, session: AsyncSession, run_id: int, task_key: str, error_type: str, 
                                 error_message: str, error_metadata: Optional[Dict[str, Any]] = None) -> ErrorTrace:
         """
-        Record an error trace with a provided session.
+        Record an error trace with a provided async session.
         
         Args:
-            db: SQLAlchemy session
+            session: SQLAlchemy async session
             run_id: The run ID
             task_key: The task key
             error_type: The error type
@@ -488,8 +500,8 @@ class TaskTrackingRepository:
             error_metadata=error_metadata or {}
         )
         
-        db.add(error_trace)
-        db.commit()
-        db.refresh(error_trace)
+        session.add(error_trace)
+        await session.commit()
+        await session.refresh(error_trace)
         
         return error_trace 
