@@ -52,21 +52,21 @@ async def get_group_context(
     user_email = x_auth_request_email or x_forwarded_email
     access_token = x_auth_request_access_token or x_forwarded_access_token
     
-    print(f"DEBUG: get_group_context called with:")
-    print(f"  X-Auth-Request-Email: {x_auth_request_email}")
-    print(f"  X-Forwarded-Email: {x_forwarded_email}")
-    print(f"  Final email: {user_email}")
+    logger.debug(f"get_group_context called with:")
+    logger.debug(f"  X-Auth-Request-Email: {x_auth_request_email}")
+    logger.debug(f"  X-Forwarded-Email: {x_forwarded_email}")
+    logger.debug(f"  Final email: {user_email}")
     
     if user_email:
         group_context = await GroupContext.from_email(
             email=user_email,
             access_token=access_token
         )
-        print(f"DEBUG: Created group context: primary_group_id={group_context.primary_group_id}, group_ids={group_context.group_ids}, email={group_context.group_email}")
+        logger.debug(f"Created group context: primary_group_id={group_context.primary_group_id}, group_ids={group_context.group_ids}, email={group_context.group_email}")
         return group_context
     
     # Fallback: No group context available (single-group mode)
-    print("DEBUG: No email header found, returning empty group context")
+    logger.debug("No email header found, returning empty group context")
     return GroupContext()
 
 
@@ -131,7 +131,7 @@ def get_service(
                 return service
             except Exception as inner_e:
                 # Log the error and re-raise
-                print(f"Error creating service: {inner_e}")
+                logger.error(f"Error creating service: {inner_e}")
                 raise
     
     return _get_service 

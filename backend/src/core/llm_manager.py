@@ -317,34 +317,75 @@ class LLMManager:
             prefixed_model = f"ollama/{normalized_model_name}"
             model_params["model"] = prefixed_model
         elif provider == ModelProvider.DATABRICKS:
-            # For Databricks, get token from database and set environment variables
-            # to prevent LiteLLM from reading .databrickscfg file
-            token = await ApiKeysService.get_api_key_value(key_name="DATABRICKS_TOKEN")
-            if not token:
-                token = await ApiKeysService.get_api_key_value(key_name="DATABRICKS_API_KEY")
-            
-            if token:
-                model_params["api_key"] = token
-                # Set environment variables to prevent reading from .databrickscfg
-                os.environ["DATABRICKS_TOKEN"] = token
+            # Use enhanced Databricks authentication system
+            try:
+                from src.utils.databricks_auth import is_databricks_apps_environment, setup_environment_variables
                 
-            # Get workspace URL from database configuration
-            model_params["api_base"] = os.getenv("DATABRICKS_ENDPOINT", "")
-            if not model_params["api_base"]:
-                from src.services.databricks_service import DatabricksService
-                try:
-                    async with UnitOfWork() as uow:
-                        databricks_service = await DatabricksService.from_unit_of_work(uow)
-                        config = await databricks_service.get_databricks_config()
-                        if config and config.workspace_url:
-                            workspace_url = config.workspace_url.rstrip('/')
-                            if not workspace_url.startswith('https://'):
-                                workspace_url = f"https://{workspace_url}"
-                            model_params["api_base"] = f"{workspace_url}/serving-endpoints"
-                            # Set environment variable to prevent file reading
-                            os.environ["DATABRICKS_HOST"] = workspace_url
-                except Exception as e:
-                    logger.error(f"Error getting Databricks workspace URL: {e}")
+                # Check if running in Databricks Apps environment
+                if is_databricks_apps_environment():
+                    logger.info("Using Databricks Apps OAuth authentication for model service")
+                    # Environment variables will be set up automatically by the enhanced auth system
+                    setup_environment_variables()
+                    # Don't set api_key - let OAuth handle authentication
+                else:
+                    # Only use API key service when NOT in Databricks Apps context
+                    token = await ApiKeysService.get_api_key_value(key_name="DATABRICKS_TOKEN")
+                    if not token:
+                        token = await ApiKeysService.get_api_key_value(key_name="DATABRICKS_API_KEY")
+                    
+                    if token:
+                        model_params["api_key"] = token
+                        # Set environment variables to prevent reading from .databrickscfg
+                        os.environ["DATABRICKS_TOKEN"] = token
+                    else:
+                        logger.warning("No Databricks token found and not in Databricks Apps environment")
+                        
+            except ImportError:
+                logger.warning("Enhanced Databricks auth not available, using legacy PAT authentication")
+                # Fallback to legacy PAT authentication
+                token = await ApiKeysService.get_api_key_value(key_name="DATABRICKS_TOKEN")
+                if not token:
+                    token = await ApiKeysService.get_api_key_value(key_name="DATABRICKS_API_KEY")
+                
+                if token:
+                    model_params["api_key"] = token
+                    os.environ["DATABRICKS_TOKEN"] = token
+                
+            # Get workspace URL from environment first, then database configuration
+            workspace_url = os.getenv("DATABRICKS_HOST", "")
+            if workspace_url:
+                # Ensure proper format
+                if not workspace_url.startswith('https://'):
+                    workspace_url = f"https://{workspace_url}"
+                model_params["api_base"] = f"{workspace_url.rstrip('/')}/serving-endpoints"
+                logger.info(f"Using Databricks workspace URL from environment: {workspace_url}")
+            else:
+                # Fallback to database configuration or endpoint env var
+                model_params["api_base"] = os.getenv("DATABRICKS_ENDPOINT", "")
+                if not model_params["api_base"]:
+                    from src.services.databricks_service import DatabricksService
+                    try:
+                        async with UnitOfWork() as uow:
+                            databricks_service = await DatabricksService.from_unit_of_work(uow)
+                            config = await databricks_service.get_databricks_config()
+                            if config and config.workspace_url:
+                                workspace_url = config.workspace_url.rstrip('/')
+                                if not workspace_url.startswith('https://'):
+                                    workspace_url = f"https://{workspace_url}"
+                                model_params["api_base"] = f"{workspace_url}/serving-endpoints"
+                                logger.info(f"Using workspace URL from database: {workspace_url}")
+                            else:
+                                # Try to get from enhanced auth system
+                                try:
+                                    from src.utils.databricks_auth import _databricks_auth
+                                    if hasattr(_databricks_auth, '_workspace_host') and _databricks_auth._workspace_host:
+                                        workspace_url = _databricks_auth._workspace_host
+                                        model_params["api_base"] = f"{workspace_url}/serving-endpoints"
+                                        logger.info(f"Using workspace URL from enhanced auth: {workspace_url}")
+                                except Exception as e:
+                                    logger.debug(f"Could not get workspace URL from enhanced auth: {e}")
+                    except Exception as e:
+                        logger.error(f"Error getting Databricks workspace URL: {e}")
             
             # For Databricks with LiteLLM, we need the databricks/ prefix for provider identification
             if not model_params["model"].startswith("databricks/"):
@@ -426,8 +467,52 @@ class LLMManager:
                 normalized_model_name = normalized_model_name.replace("-", ":")
             prefixed_model = f"ollama/{normalized_model_name}"
         elif provider == ModelProvider.DATABRICKS:
-            api_key = await ApiKeysService.get_provider_api_key("DATABRICKS")
-            api_base = os.getenv("DATABRICKS_ENDPOINT", "")
+            # Use enhanced Databricks authentication for CrewAI LLM
+            try:
+                from src.utils.databricks_auth import is_databricks_apps_environment, setup_environment_variables
+                
+                # Check if running in Databricks Apps environment
+                if is_databricks_apps_environment():
+                    logger.info("Using Databricks Apps OAuth authentication for CrewAI LLM")
+                    # Setup environment variables for LiteLLM compatibility
+                    setup_environment_variables()
+                    api_key = None  # OAuth will be handled by environment variables
+                else:
+                    # Only use API key service when NOT in Databricks Apps context
+                    api_key = await ApiKeysService.get_provider_api_key("DATABRICKS")
+                    
+            except ImportError:
+                logger.warning("Enhanced Databricks auth not available for CrewAI LLM, using legacy PAT")
+                api_key = await ApiKeysService.get_provider_api_key("DATABRICKS")
+                
+            # Get workspace URL from environment first, then database
+            workspace_url = os.getenv("DATABRICKS_HOST", "")
+            if workspace_url:
+                # Ensure proper format
+                if not workspace_url.startswith('https://'):
+                    workspace_url = f"https://{workspace_url}"
+                api_base = f"{workspace_url.rstrip('/')}/serving-endpoints"
+                logger.info(f"Using Databricks workspace URL from environment for CrewAI: {workspace_url}")
+            else:
+                # Fallback to DATABRICKS_ENDPOINT or database
+                api_base = os.getenv("DATABRICKS_ENDPOINT", "")
+                
+                # Try to get workspace URL from database if not set
+                if not api_base:
+                    try:
+                        from src.services.databricks_service import DatabricksService
+                        async with UnitOfWork() as uow:
+                            databricks_service = await DatabricksService.from_unit_of_work(uow)
+                            config = await databricks_service.get_databricks_config()
+                            if config and config.workspace_url:
+                                workspace_url = config.workspace_url.rstrip('/')
+                                if not workspace_url.startswith('https://'):
+                                    workspace_url = f"https://{workspace_url}"
+                                api_base = f"{workspace_url}/serving-endpoints"
+                                logger.info(f"Using workspace URL from database for CrewAI: {workspace_url}")
+                    except Exception as e:
+                        logger.error(f"Error getting Databricks workspace URL for CrewAI: {e}")
+            
             prefixed_model = f"databricks/{model_name_value}"
             
             # Ensure the model string explicitly includes the provider for CrewAI/LiteLLM compatibility
@@ -443,7 +528,7 @@ class LLMManager:
             if api_base:
                 llm_params["api_base"] = api_base
                 
-            logger.info(f"Creating CrewAI LLM with model: {prefixed_model}")
+            logger.info(f"Creating CrewAI LLM with model: {prefixed_model}, has_api_key: {bool(api_key)}, api_base: {api_base}")
             return LLM(**llm_params)
         elif provider == ModelProvider.GEMINI:
             api_key = await ApiKeysService.get_provider_api_key(provider)
@@ -524,26 +609,58 @@ class LLMManager:
             
             # Handle different embedding providers
             if provider == 'databricks' or 'databricks' in embedding_model:
-                # Use Databricks for embeddings - avoid config files by using direct HTTP calls
-                api_key = await ApiKeysService.get_provider_api_key("DATABRICKS")
-                
-                # Get workspace URL from database configuration
-                api_base = None
-                from src.services.databricks_service import DatabricksService
+                # Use enhanced Databricks authentication for embeddings
                 try:
-                    async with UnitOfWork() as uow:
-                        databricks_service = await DatabricksService.from_unit_of_work(uow)
-                        config = await databricks_service.get_databricks_config()
-                        if config and config.workspace_url:
-                            workspace_url = config.workspace_url.rstrip('/')
-                            if not workspace_url.startswith('https://'):
-                                workspace_url = f"https://{workspace_url}"
-                            api_base = f"{workspace_url}/serving-endpoints"
-                except Exception as e:
-                    logger.error(f"Error getting Databricks workspace URL: {e}")
+                    from src.utils.databricks_auth import is_databricks_apps_environment, get_databricks_auth_headers
+                    
+                    # Check if running in Databricks Apps environment
+                    if is_databricks_apps_environment():
+                        logger.info("Using Databricks Apps OAuth authentication for embeddings")
+                        # Get OAuth headers directly from enhanced auth system
+                        headers_result, error = await get_databricks_auth_headers()
+                        if error or not headers_result:
+                            logger.error(f"Failed to get OAuth headers for embeddings: {error}")
+                            return None
+                        headers = headers_result
+                        api_key = None  # OAuth handled by headers
+                    else:
+                        # Only use API key service when NOT in Databricks Apps context
+                        api_key = await ApiKeysService.get_provider_api_key("DATABRICKS")
+                        headers = None
+                        
+                except ImportError:
+                    logger.warning("Enhanced Databricks auth not available for embeddings, using legacy PAT")
+                    api_key = await ApiKeysService.get_provider_api_key("DATABRICKS")
+                    headers = None
                 
-                if not api_key or not api_base:
-                    logger.warning(f"Missing Databricks credentials - API key: {bool(api_key)}, API base: {bool(api_base)}")
+                # Get workspace URL from environment first, then database
+                workspace_url = os.getenv("DATABRICKS_HOST", "")
+                if workspace_url:
+                    # Ensure proper format
+                    if not workspace_url.startswith('https://'):
+                        workspace_url = f"https://{workspace_url}"
+                    api_base = f"{workspace_url.rstrip('/')}/serving-endpoints"
+                    logger.info(f"Using Databricks workspace URL from environment for embeddings: {workspace_url}")
+                else:
+                    # Fallback to database configuration
+                    api_base = None
+                    from src.services.databricks_service import DatabricksService
+                    try:
+                        async with UnitOfWork() as uow:
+                            databricks_service = await DatabricksService.from_unit_of_work(uow)
+                            config = await databricks_service.get_databricks_config()
+                            if config and config.workspace_url:
+                                workspace_url = config.workspace_url.rstrip('/')
+                                if not workspace_url.startswith('https://'):
+                                    workspace_url = f"https://{workspace_url}"
+                                api_base = f"{workspace_url}/serving-endpoints"
+                                logger.info(f"Using workspace URL from database for embeddings: {workspace_url}")
+                    except Exception as e:
+                        logger.error(f"Error getting Databricks workspace URL for embeddings: {e}")
+                
+                # Check if we have either OAuth headers or API key + base URL
+                if not ((headers and api_base) or (api_key and api_base)):
+                    logger.warning(f"Missing Databricks credentials - OAuth headers: {bool(headers)}, API key: {bool(api_key)}, API base: {bool(api_base)}")
                     return None
                 
                 # Ensure model has databricks prefix for litellm
@@ -558,17 +675,23 @@ class LLMManager:
                     # Construct the direct API endpoint
                     endpoint_url = f"{api_base}/{embedding_model.replace('databricks/', '')}/invocations"
                     
-                    headers = {
-                        "Authorization": f"Bearer {api_key}",
-                        "Content-Type": "application/json"
-                    }
+                    # Use OAuth headers if available, otherwise fall back to API key
+                    if headers:
+                        request_headers = headers.copy()
+                        if "Content-Type" not in request_headers:
+                            request_headers["Content-Type"] = "application/json"
+                    else:
+                        request_headers = {
+                            "Authorization": f"Bearer {api_key}",
+                            "Content-Type": "application/json"
+                        }
                     
                     payload = {
                         "input": [text] if isinstance(text, str) else text
                     }
                     
                     async with aiohttp.ClientSession() as session:
-                        async with session.post(endpoint_url, headers=headers, json=payload) as response:
+                        async with session.post(endpoint_url, headers=request_headers, json=payload) as response:
                             if response.status == 200:
                                 result = await response.json()
                                 # Databricks embedding API returns embeddings in 'data' field
