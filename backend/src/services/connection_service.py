@@ -148,8 +148,17 @@ class ConnectionService:
             ValueError: If there's a problem with the generation
             Exception: For any other errors during generation
         """
-        # Default model if not specified
-        model = request.model or os.getenv("CONNECTION_MODEL", "gpt-4o-mini")
+        # Default model if not specified - use Databricks model in Apps environment, OpenAI otherwise
+        default_model = "gpt-4o-mini"
+        try:
+            from src.utils.databricks_auth import is_databricks_apps_environment
+            if is_databricks_apps_environment():
+                default_model = "databricks-llama-4-maverick"
+                logger.info("Using Databricks model in Apps environment")
+        except ImportError:
+            logger.debug("Enhanced Databricks auth not available, using OpenAI default")
+        
+        model = request.model or os.getenv("CONNECTION_MODEL", default_model)
         
         logger.info(f"Generating connections with model: {model}")
         logger.info(f"Number of agents: {len(request.agents)}, Number of tasks: {len(request.tasks)}")

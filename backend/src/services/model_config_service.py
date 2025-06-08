@@ -242,8 +242,31 @@ class ModelConfigService:
             
             # Get API key for the provider using class method
             provider = config["provider"].lower()
+            
+            # Check if we're in Databricks Apps environment for Databricks provider
+            if provider == "databricks":
+                try:
+                    from src.utils.databricks_auth import is_databricks_apps_environment
+                    if is_databricks_apps_environment():
+                        logger.info("Databricks Apps environment detected - skipping API key requirement")
+                        # Don't add API key for Databricks Apps OAuth
+                        return config
+                except ImportError:
+                    logger.warning("Enhanced Databricks auth not available")
+            
+            # For non-Databricks providers or non-Apps environment, get API key
             api_key = await ApiKeysService.get_provider_api_key(provider)
             if not api_key:
+                # Check if we're in Databricks Apps environment for ANY provider
+                try:
+                    from src.utils.databricks_auth import is_databricks_apps_environment
+                    if is_databricks_apps_environment():
+                        logger.warning(f"No API key found for provider {provider} in Databricks Apps environment - this may cause issues if the model requires external API access")
+                        # In Databricks Apps, we might not have external API keys, but we should allow the request to proceed
+                        # The actual LLM call might fail, but that's better than failing here
+                        return config
+                except ImportError:
+                    pass
                 raise ValueError(f"No API key found for provider: {provider}")
             
             # Add API key to config

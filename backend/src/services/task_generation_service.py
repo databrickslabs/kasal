@@ -238,6 +238,16 @@ class TaskGenerationService:
             # Fix output_json if it's a boolean instead of dict/None
             if "output_json" in adv_config and isinstance(adv_config["output_json"], bool):
                 adv_config["output_json"] = None
+            
+            # Fix output_json if it's a string instead of dict/None (parse JSON string)
+            elif "output_json" in adv_config and isinstance(adv_config["output_json"], str):
+                try:
+                    import json
+                    adv_config["output_json"] = json.loads(adv_config["output_json"])
+                    logger.info("Successfully parsed output_json string to dict")
+                except (json.JSONDecodeError, ValueError) as e:
+                    logger.warning(f"Failed to parse output_json string as JSON: {e}, setting to None")
+                    adv_config["output_json"] = None
                 
             # Fix output_pydantic if it's a boolean instead of string/None
             if "output_pydantic" in adv_config and isinstance(adv_config["output_pydantic"], bool):
