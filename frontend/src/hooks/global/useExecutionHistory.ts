@@ -17,6 +17,7 @@ export const useRunHistory = () => {
   const [page, setPage] = useState(1);
   const [sortField, setSortField] = useState<SortField>('created_at');
   const [sortOrder, setSortOrder] = useState<'asc' | 'desc'>('desc');
+  const [showSkeleton, setShowSkeleton] = useState(false);
   const jobsPerPage = 200;
 
   const {
@@ -234,6 +235,26 @@ export const useRunHistory = () => {
     }
   }, [fetchRuns, runHistory]);
 
+  // Debounced loading state management
+  useEffect(() => {
+    let timeoutId: NodeJS.Timeout;
+    
+    if (isLoading && !runHistory.length) {
+      // Show skeleton after a brief delay to prevent flashing for quick loads
+      timeoutId = setTimeout(() => {
+        setShowSkeleton(true);
+      }, 200);
+    } else {
+      setShowSkeleton(false);
+    }
+    
+    return () => {
+      if (timeoutId) {
+        clearTimeout(timeoutId);
+      }
+    };
+  }, [isLoading, runHistory.length]);
+
   // Initial fetch
   useEffect(() => {
     fetchRuns();
@@ -243,6 +264,7 @@ export const useRunHistory = () => {
     runs: sortedRuns,
     searchQuery,
     loading: isLoading,
+    showSkeleton,
     error,
     page,
     totalPages,

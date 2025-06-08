@@ -76,14 +76,6 @@ except ImportError:
         PerplexitySearchTool = None
         logging.warning("Could not import PerplexitySearchTool")
 
-try:
-    from .custom.google_slides_tool import GoogleSlidesTool
-except ImportError:
-    try:
-        from .custom.google_slides_tool import GoogleSlidesTool
-    except ImportError:
-        GoogleSlidesTool = None
-        logging.warning("Could not import GoogleSlidesTool")
 
 try:
     from .custom.genie_tool import GenieTool
@@ -94,50 +86,10 @@ except ImportError:
         GenieTool = None
         logging.warning("Could not import GenieTool")
 
-try:
-    from .custom.sendpulse_tool import SendPulseEmailTool
-except ImportError:
-    try:
-        from .custom.sendpulse_tool import SendPulseEmailTool
-    except ImportError:
-        SendPulseEmailTool = None
-        logging.warning("Could not import SendPulseEmailTool")
 
-try:
-    from .custom.zefix_scraping_tool import ZefixScrapingTool
-except ImportError:
-    try:
-        from .custom.zefix_scraping_tool import ZefixScrapingTool
-    except ImportError:
-        ZefixScrapingTool = None
-        logging.warning("Could not import ZefixScrapingTool")
 
-try:
-    from .custom.browser_use_tool import BrowserUseTool
-except ImportError:
-    try:
-        from .custom.browser_use_tool import BrowserUseTool
-    except ImportError:
-        BrowserUseTool = None
-        logging.warning("Could not import BrowserUseTool")
 
-try:
-    from .custom.nixtla_tool import NixtlaTimeGPTTool
-except ImportError:
-    try:
-        from .custom.nixtla_tool import NixtlaTimeGPTTool
-    except ImportError:
-        NixtlaTimeGPTTool = None
-        logging.warning("Could not import NixtlaTimeGPTTool")
 
-try:
-    from .custom.cro_scraping_tool import CROScrapingTool
-except ImportError:
-    try:
-        from .custom.cro_scraping_tool import CROScrapingTool
-    except ImportError:
-        CROScrapingTool = None
-        logging.warning("Could not import CROScrapingTool")
 
 try:
     from .custom.databricks_custom_tool import DatabricksCustomTool
@@ -186,27 +138,21 @@ class ToolFactory:
         # Map tool names to their implementations
         self._tool_implementations = {
             "PerplexityTool": PerplexitySearchTool,
-            "GoogleSlidesTool": GoogleSlidesTool,
             "Dall-E Tool": DallETool,
             "Vision Tool": VisionTool,
             "GithubSearchTool": GithubSearchTool,
             "ScrapeWebsiteTool": ScrapeWebsiteTool,
             "CodeInterpreterTool": CodeInterpreterTool,
             "CSVSearchTool": CSVSearchTool,
-            "NixtlaTimeGPTTool": NixtlaTimeGPTTool,
             "YoutubeChannelSearchTool": YoutubeChannelSearchTool,
             "YoutubeVideoSearchTool": YoutubeVideoSearchTool,
             "GenieTool": GenieTool,
-            "ZefixScrapingTool": ZefixScrapingTool,
-            "CROScrapingTool": CROScrapingTool,
             "ComposioTool": ComposioTool,
             "SerperDevTool": SerperDevTool,
             "FirecrawlScrapeWebsiteTool": FirecrawlScrapeWebsiteTool,
             "SpiderTool": SpiderTool,
             "WebsiteSearchTool": WebsiteSearchTool,
-            "SendPulseEmailTool": SendPulseEmailTool,
             "DirectoryReadTool": DirectoryReadTool,
-            "BrowserUseTool": BrowserUseTool,
             "FileWriterTool": FileWriterTool,
             "BrowserbaseLoadTool": BrowserbaseLoadTool,
             "CodeDocsSearchTool": CodeDocsSearchTool,
@@ -900,14 +846,6 @@ class ToolFactory:
                 logger.info(f"Creating NL2SQLTool with config: {tool_config_with_uri}")
                 return tool_class(**tool_config_with_uri)
             
-            elif tool_name == "BrowserUseTool":
-                # Pass browser_use_api_url from config
-                browser_use_api_url = tool_config.get('browser_use_api_url')
-                tool_instance = tool_class.from_config(browser_use_api_url=browser_use_api_url)
-                # Set result_as_answer if needed
-                if hasattr(tool_instance, 'result_as_answer'):
-                    tool_instance.result_as_answer = result_as_answer
-                return tool_instance
             
             elif tool_name == "DatabricksCustomTool":
                 # Get configuration from tool_config or use defaults
@@ -1002,10 +940,18 @@ class ToolFactory:
                     genie_tool_config['spaceId'] = tool_config['spaceId']
                     logger.info(f"Using spaceId from config: {tool_config['spaceId']}")
                 
+                # Check for user token in config for OBO authentication
+                user_token = tool_config.get('user_token')
+                
                 # Create the GenieTool instance
                 try:
-                    logger.info(f"Creating GenieTool with config")
-                    return tool_class(tool_config=genie_tool_config, tool_id=tool_id, token_required=False)
+                    logger.info(f"Creating GenieTool with config, OBO: {bool(user_token)}")
+                    return tool_class(
+                        tool_config=genie_tool_config, 
+                        tool_id=tool_id, 
+                        token_required=False,
+                        user_token=user_token
+                    )
                 except Exception as e:
                     logger.error(f"Error creating GenieTool: {e}")
                     return None

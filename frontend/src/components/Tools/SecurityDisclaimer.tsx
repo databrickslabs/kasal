@@ -245,35 +245,6 @@ const TOOL_SECURITY_INFO: Record<string, {
   },
 
   // HIGH RISK TOOLS
-  'BrowserUseTool': {
-    riskLevel: 'HIGH',
-    description: 'Provides automated browser control capabilities',
-    risks: [
-      'Unauthorized web interactions',
-      'Access to authenticated sessions',
-      'Potential for malicious website interactions',
-      'Network requests to internal systems'
-    ],
-    mitigations: [
-      'Implement URL whitelisting',
-      'Use isolated browser sessions',
-      'Monitor and log all web interactions',
-      'Restrict to approved domains only'
-    ],
-    singleTenantRiskLevel: 'MEDIUM',
-    singleTenantRisks: [
-      'Automated web interactions via external API',
-      'Network requests to external services',
-      'Resource consumption for browser operations'
-    ],
-    singleTenantMitigations: [
-      'External API controls browser access',
-      'Network egress controls',
-      'API rate limiting',
-      'Container resource limits'
-    ],
-    deploymentContext: 'Single-tenant with external browser API'
-  },
   'SeleniumScrapingTool': {
     riskLevel: 'HIGH',
     description: 'Full browser automation with web interaction capabilities',
@@ -412,33 +383,6 @@ const TOOL_SECURITY_INFO: Record<string, {
       'Non-root user privileges'
     ],
     deploymentContext: 'Single-tenant containerized deployment'
-  },
-  'SendPulseEmailTool': {
-    riskLevel: 'MEDIUM',
-    description: 'Sends emails without recipient restrictions',
-    risks: [
-      'Spam and phishing email generation',
-      'Unauthorized use of email credentials',
-      'Reputation damage to email domain'
-    ],
-    mitigations: [
-      'Implement recipient whitelisting',
-      'Add email content validation',
-      'Monitor sending patterns and limits'
-    ],
-    singleTenantRiskLevel: 'MEDIUM',
-    singleTenantRisks: [
-      'Email sending via external API service',
-      'Potential for spam or inappropriate emails',
-      'Resource consumption for email operations'
-    ],
-    singleTenantMitigations: [
-      'API key service manages email credentials',
-      'External service rate limiting',
-      'Network egress controls',
-      'Email content monitoring if required'
-    ],
-    deploymentContext: 'Single-tenant with external email API service'
   },
   'DirectorySearchTool': {
     riskLevel: 'HIGH',

@@ -52,12 +52,8 @@ const toolIcons: ToolIcon[] = [
 
 // Custom tools from tool_factory.py
 const customTools = [
-  'NixtlaTimeGPTTool', 
-  'GoogleSlidesTool', 
   'GenieTool', 
-  'BrowserUseTool', 
-  'PerplexityTool',
-  'SendPulseEmailTool'
+  'PerplexityTool'
 ];
 
 const convertServiceToolToTool = (serviceTool: ServiceTool): Tool => {

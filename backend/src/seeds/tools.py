@@ -46,12 +46,8 @@ tools_data = [
     (29, "YoutubeChannelSearchTool", "A specialized RAG tool for searching within YouTube channels, enabling content discovery and analysis across a channel's video library. It performs semantic searches across video titles, descriptions, transcripts, and metadata, making it perfect for content research, trend analysis, and information gathering from educational, news, or specialized YouTube channels.", "video"),
     (30, "YoutubeVideoSearchTool", "A precise RAG tool aimed at searching within specific YouTube videos, allowing deep content exploration of video materials. It works with video transcripts and metadata to enable semantic search within video content, making it ideal for educational research, finding specific information within lectures or presentations, and extracting insights from long-format video content without watching the entire video.", "video"),
     (31, "PerplexityTool", "A powerful search and question-answering tool that leverages the Perplexity AI platform to provide detailed, accurate answers to complex queries. It combines web search capabilities with advanced language processing to generate comprehensive responses with references and citations. Ideal for research tasks, fact-checking, gathering detailed information on specialized topics, and obtaining nuanced explanations of complex subjects.", "search"),
-    (32, "GoogleSlidesTool", "A specialized tool for creating and manipulating Google Slides presentations using Google Apps Script. It enables the programmatic generation of professional presentations with full control over slide content, formatting, transitions, and visual elements. Particularly useful for automatic report generation, creating data-driven presentations, and producing visual content from textual information.", "presentation"),
     (34, "SpiderTool", "An advanced web crawling and content extraction tool designed to systematically navigate through websites, extract content, and return structured information. It features customizable parameters for crawl depth, response formatting, caching, and stealth mode operation, making it ideal for comprehensive web research, content aggregation, and building knowledge bases from web content.", "web"),
     (35, "GenieTool", "A sophisticated database querying tool that enables natural language access to database tables and content. It translates plain language questions into optimized database queries, allowing non-technical users to retrieve complex information from databases without SQL knowledge. Perfect for data analysis, business intelligence applications, and providing database access within conversational interfaces.", "database"),
-    (36, "SendPulseEmailTool", "A comprehensive email communication tool that integrates with the SendPulse platform to enable automated email composition and delivery. It supports personalized messaging with customizable templates, sender information, and recipient management, making it essential for customer communications, marketing campaigns, notifications, and any workflow requiring reliable email delivery.", "email"),
-    (37, "NixtlaTimeGPTTool", "An advanced time series forecasting tool powered by Nixtla's TimeGPT foundational model. It specializes in analyzing temporal data patterns and generating accurate predictions for future trends and values. Particularly valuable for financial forecasting, demand planning, resource allocation, predictive maintenance, and any application requiring precise time-based predictions.", "ai"),
-    (38, "BrowserUseTool", "A versatile browser automation tool that enables programmatic control of web browsers for complex web interactions. It can navigate websites, fill forms, click buttons, and extract information while mimicking human browsing patterns. Essential for web testing, data collection from authenticated sites, process automation, and interacting with complex web applications.", "browser"),
     (39, "FileWriterTool", "A robust file creation and modification tool designed for cross-platform compatibility. It enables writing content to files with configurable parameters for directory paths, encoding formats, and overwrite behavior. Ideal for generating reports, creating data exports, saving processing results, and any workflow requiring persistent storage of information as files.", "file"),
     (40, "AIMindTool", "A sophisticated AI-powered reasoning tool that enhances problem-solving capabilities through advanced cognitive modeling. It employs structured thinking frameworks to break down complex problems, evaluate multiple approaches, and generate comprehensive solutions with explanations. Especially valuable for strategic planning, decision analysis, hypothesis testing, and solving multifaceted problems requiring nuanced thinking.", "ai"),
     (41, "ApifyActorsTool", "A powerful integration tool that connects with the Apify platform to leverage its ecosystem of web scraping and automation actors. It provides access to hundreds of specialized scrapers and automation workflows for various websites and data sources. Particularly useful for large-scale data collection, market monitoring, content aggregation, and automating interactions with websites that require specialized handling.", "web"),
@@ -78,8 +74,6 @@ tools_data = [
     (62, "SerplyWebpageToMarkdownTool", "A specialized content transformation tool that converts web pages into clean, well-formatted Markdown text. It extracts the main content from web pages while removing advertisements, navigation elements, and other distractions, preserving the essential information in a structured format. Ideal for content repurposing, knowledge base creation, and preparing web content for further processing or analysis.", "web"),
     (63, "SnowflakeSearchTool", "A powerful search tool optimized for exploring and querying data within Snowflake data warehouses. It enables semantic search capabilities across massive datasets stored in Snowflake environments, combining the power of natural language understanding with enterprise-grade data storage. Essential for business intelligence, data analysis workflows, and integrating cloud data warehouse content into AI applications.", "database"),
     (64, "WeaviateVectorSearchTool", "An advanced vector search tool that integrates with the Weaviate vector database to provide semantic search capabilities across various data types. It excels at finding information based on meaning rather than exact keyword matches, supporting multimodal search across text, images, and other data formats. Particularly valuable for knowledge graphs, recommendation systems, content discovery, and AI applications requiring nuanced understanding of information relationships.", "search"),
-    (65, "ZefixScrapingTool", "A specialized scraping tool designed specifically for extracting Swiss company information from the Zefix.ch official business registry. It can retrieve detailed corporate data including registration details, company structure, addresses, and identification numbers through company name or UID searches. Essential for business verification, due diligence research, compliance checks, and gathering official corporate information on Swiss entities.", "web"),
-    (66, "CROScrapingTool", "A specialized scraping tool designed for extracting Irish company information from the Companies Registration Office (CRO) at core.cro.ie. It automates searching by company name or number and retrieves official company details for business verification, compliance, and research.", "web"),
     (67, "DatabricksCustomTool", "An enhanced database tool for executing SQL queries against Databricks with full CRUD (Create, Read, Update, Delete) capabilities. It securely connects to Databricks workspaces and allows running SQL operations with proper authentication and configuration from the DatabricksService. Supports all SQL operations including SELECT, INSERT, UPDATE, DELETE, and CREATE statements, with operation-specific result formatting and comprehensive error handling.", "database"),
     (68, "PythonPPTXTool", "A powerful tool for creating Microsoft PowerPoint presentations using the python-pptx library. It converts raw text content into professionally formatted slides with proper styling, titles, and content organization. The tool supports creating presentations from scratch or using templates, customizing styling, and saving to specified locations. Ideal for automating presentation creation, report generation, and converting textual information into visual slide formats.", "presentation"),
     (69, "MCPTool", "An advanced adapter for Model Context Protocol (MCP) servers that enables access to thousands of specialized tools from the MCP ecosystem. This tool establishes and manages connections with MCP servers through SSE (Server-Sent Events), providing seamless integration with community-built tool collections. Perfect for extending agent capabilities with domain-specific tools without requiring custom development or direct integration work.", "integration"),
@@ -261,10 +255,6 @@ def get_tool_configs():
             "perplexity_api_key": "your-perplexity-api-key-here",
             "result_as_answer": False
         },  # PerplexityTool
-        "32": {
-            "credentials_path": "path-to-your-google-credentials-json",
-            "result_as_answer": False
-        },  # GoogleSlidesTool
         "34": {
             "params": {"return_format": "markdown"},
             "request": "smart",
@@ -280,23 +270,6 @@ def get_tool_configs():
             "DATABRICKS_HOST": ["https://your-workspace.cloud.databricks.com/"],
             "result_as_answer": False
         },  # GenieTool
-        "36": {
-            "sendpulse_api_id": "your-sendpulse-api-id",
-            "sendpulse_api_secret": "your-sendpulse-api-secret",
-            "default_from_name": "CrewAI Agent",
-            "default_from_email": "agent@example.com",
-            "default_to_name": "User",
-            "default_to_email": "user@example.com",
-            "result_as_answer": False
-        },  # SendPulseEmailTool
-        "37": {
-            "nixtla_api_key": "your-nixtla-api-key-here",
-            "result_as_answer": False
-        },  # NixtlaTimeGPTTool
-        "38": {
-            "browser_use_api_url": "your-browser-use-api-url-here",
-            "result_as_answer": False
-        },  # BrowserUseTool
         "39": {
             "default_directory": "./file_outputs",
             "overwrite": True,
@@ -381,16 +354,6 @@ def get_tool_configs():
         "64": {
             "result_as_answer": False
         },  # WeaviateVectorSearchTool
-        "65": {
-            "result_as_answer": False,
-            "headless": False,  # Force browser visibility
-            "wait_time": 5  # Default wait time in seconds
-        },   # ZefixScrapingTool
-        "66": {
-            "result_as_answer": False,
-            "headless": False,  # Force browser visibility
-            "wait_time": 5  # Default wait time in seconds
-        },   # CROScrapingTool
         "67": {
             "result_as_answer": False,
             "catalog": None,  # Will use the configured default from DatabricksService
