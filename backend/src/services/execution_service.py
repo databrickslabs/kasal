@@ -248,12 +248,8 @@ class ExecutionService:
         exec_logger.info(f"[run_crew_execution] Config attributes: {dir(config)}")
         
         try:
-            # Update execution status to PREPARING
-            await ExecutionStatusService.update_status(
-                job_id=execution_id,
-                status="preparing",
-                message=f"Preparing {execution_type} execution"
-            )
+            # Execution is already created with RUNNING status, no need to update to PREPARING
+            exec_logger.info(f"[run_crew_execution] Execution {execution_id} already has RUNNING status from creation")
             
             # Create an instance of CrewAIExecutionService
             crew_execution_service = CrewAIExecutionService()
@@ -687,17 +683,17 @@ class ExecutionService:
             # Sanitize inputs to ensure all values are JSON serializable
             sanitized_inputs = ExecutionService.sanitize_for_database(inputs)
 
-            # Create execution data
+            # Create execution data with RUNNING status for immediate visibility
             execution_data = {
                 "job_id": execution_id,
-                "status": ExecutionStatus.PENDING.value, # Initial status
+                "status": ExecutionStatus.RUNNING.value, # Start with RUNNING status for immediate visibility
                 "inputs": sanitized_inputs,
                 "planning": bool(config.planning),  # Ensure boolean type
                 "run_name": run_name,
                 "created_at": datetime.now()  # Remove timezone to match database column type
             }
 
-            crew_logger.debug(f"[ExecutionService.create_execution] Attempting to create DB record for execution_id: {execution_id} with status PENDING")
+            crew_logger.debug(f"[ExecutionService.create_execution] Attempting to create DB record for execution_id: {execution_id} with status RUNNING")
             
             # Use ExecutionStatusService to create the execution
             from src.services.execution_status_service import ExecutionStatusService
@@ -706,16 +702,16 @@ class ExecutionService:
             if not success:
                 raise ValueError(f"Failed to create execution record for {execution_id}")
 
-            crew_logger.info(f"[ExecutionService.create_execution] Successfully created DB record for execution_id: {execution_id} with status PENDING")
+            crew_logger.info(f"[ExecutionService.create_execution] Successfully created DB record for execution_id: {execution_id} with status RUNNING")
 
-            # Add to in-memory storage
+            # Add to in-memory storage with RUNNING status
             ExecutionService.add_execution_to_memory(
                 execution_id=execution_id,
-                status=ExecutionStatus.PENDING.value,
+                status=ExecutionStatus.RUNNING.value,
                 run_name=run_name,
                 created_at=datetime.now()  # Remove timezone to match database column type
             )
-            crew_logger.debug(f"[ExecutionService.create_execution] Added execution_id: {execution_id} to in-memory store with status PENDING")
+            crew_logger.debug(f"[ExecutionService.create_execution] Added execution_id: {execution_id} to in-memory store with status RUNNING")
 
             # Start execution in background
             crew_logger.info(f"[ExecutionService.create_execution] Preparing to launch background task for execution_id: {execution_id}...")
@@ -769,7 +765,7 @@ class ExecutionService:
             from src.schemas.execution import ExecutionCreateResponse
             return ExecutionCreateResponse( # Use Pydantic model for response
                 execution_id=execution_id,
-                status=ExecutionStatus.PENDING.value,
+                status=ExecutionStatus.RUNNING.value, # Return RUNNING status for immediate visibility
                 run_name=run_name
             ).model_dump() # Return as dict
 

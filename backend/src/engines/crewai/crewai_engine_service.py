@@ -121,12 +121,7 @@ class CrewAIEngineService(BaseEngineService):
             # Ensure writer is started before running execution
             await TraceManager.ensure_writer_started()
             
-            logger.info(f"[CrewAIEngineService] Starting run_execution for ID: {execution_id}")
-            await self._update_execution_status(
-                execution_id, 
-                ExecutionStatus.PREPARING.value,
-                "Preparing CrewAI execution"
-            )
+            logger.info(f"[CrewAIEngineService] Starting run_execution for ID: {execution_id} (already has RUNNING status)")
             
             try:
                 # Create services using the Unit of Work pattern
@@ -193,12 +188,8 @@ class CrewAIEngineService(BaseEngineService):
                 # Continue execution without the callbacks - we don't want to fail the entire execution
                 # if trace logging doesn't work
             
-            # Update status to RUNNING
-            await self._update_execution_status(
-                execution_id, 
-                ExecutionStatus.RUNNING.value,
-                "CrewAI execution started"
-            )
+            # Status is already RUNNING from creation, no need to update
+            logger.info(f"[CrewAIEngineService] Execution {execution_id} ready to start (status already RUNNING)")
             
             # Create a task for crew execution
             execution_task = asyncio.create_task(run_crew(

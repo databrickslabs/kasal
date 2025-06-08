@@ -76,12 +76,8 @@ class CrewAIExecutionService:
             Dictionary with execution results
         """
         try:
-            # Update status to PREPARING
-            await ExecutionStatusService.update_status(
-                job_id=execution_id,
-                status=ExecutionStatus.PREPARING.value,
-                message="Preparing crew execution"
-            )
+            # Execution is already created with RUNNING status, just log the progress
+            crew_logger.info(f"Starting crew execution {execution_id} (already has RUNNING status)")
             
             # Prepare the engine
             engine = await self._prepare_engine(config)
@@ -90,12 +86,8 @@ class CrewAIExecutionService:
             if hasattr(engine, '_init_task') and not engine._init_task.done():
                 await engine._init_task
             
-            # Update status to RUNNING
-            await ExecutionStatusService.update_status(
-                job_id=execution_id,
-                status=ExecutionStatus.RUNNING.value,
-                message="Running crew execution"
-            )
+            # No need to update status to RUNNING since it's already set during creation
+            crew_logger.info(f"Engine prepared for execution {execution_id}, starting actual execution")
             
             # Run the crew via the engine - this starts the execution but doesn't wait for it to complete
             # The engine will update the status to COMPLETED or FAILED when done
