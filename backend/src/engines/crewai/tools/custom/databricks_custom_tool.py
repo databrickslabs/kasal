@@ -1,8 +1,11 @@
+import logging
 import os
 from typing import TYPE_CHECKING, Any, Dict, List, Optional, Type, Union
 
 from crewai.tools import BaseTool
 from pydantic import BaseModel, Field, model_validator
+
+logger = logging.getLogger(__name__)
 
 if TYPE_CHECKING:
     from databricks.sdk import WorkspaceClient
@@ -311,7 +314,7 @@ class DatabricksCustomTool(BaseTool):
                     if hasattr(result.result, 'data_array'):
                         # Add defensive check for None data_array
                         if result.result.data_array is None:
-                            print("data_array is None - likely an empty result set or DDL query")
+                            logger.debug("data_array is None - likely an empty result set or DDL query")
                             # Return empty result handling rather than trying to process null data
                             return "Query executed successfully (no data returned)"
 
@@ -352,7 +355,7 @@ class DatabricksCustomTool(BaseTool):
                     # Check if we're getting primarily single characters or the data structure seems off,
                     # we should use special handling
                     if 'is_likely_incorrect_row_structure' in locals() and is_likely_incorrect_row_structure:
-                        print("Data appears to be malformed - will use special row reconstruction")
+                        logger.debug("Data appears to be malformed - will use special row reconstruction")
                         needs_special_string_handling = True
                     else:
                         needs_special_string_handling = False
@@ -360,7 +363,7 @@ class DatabricksCustomTool(BaseTool):
                     # Process results differently based on detection
                     if 'needs_special_string_handling' in locals() and needs_special_string_handling:
                         # We're dealing with data where the rows may be incorrectly structured
-                        print("Using row reconstruction processing mode")
+                        logger.debug("Using row reconstruction processing mode")
 
                         # Collect all values into a flat list
                         all_values = []
@@ -465,7 +468,7 @@ class DatabricksCustomTool(BaseTool):
                             title_idx = columns.index('Title') if 'Title' in columns else -1
 
                             if title_idx >= 0:
-                                print("Attempting title reconstruction method")
+                                logger.debug("Attempting title reconstruction method")
                                 # Try to detect if title is split across multiple values
                                 i = 0
                                 while i < len(all_values):
@@ -500,7 +503,7 @@ class DatabricksCustomTool(BaseTool):
 
                         # If we still don't have rows, use simple chunking as fallback
                         if not reconstructed_rows:
-                            print("Falling back to basic chunking approach")
+                            logger.debug("Falling back to basic chunking approach")
                             chunks = [all_values[i:i+expected_column_count] for i in range(0, len(all_values), expected_column_count)]
 
                             for chunk in chunks:
@@ -521,7 +524,7 @@ class DatabricksCustomTool(BaseTool):
 
                         # Apply post-processing to fix known issues
                         if reconstructed_rows and 'Title' in columns:
-                            print("Applying post-processing to improve data quality")
+                            logger.debug("Applying post-processing to improve data quality")
                             for row in reconstructed_rows:
                                 # Fix titles that might still have issues
                                 if isinstance(row.get('Title'), str) and len(row.get('Title')) <= 1:
@@ -535,7 +538,7 @@ class DatabricksCustomTool(BaseTool):
                         chunk_results = reconstructed_rows
                     else:
                         # Process normal result structure as before
-                        print("Using standard processing mode")
+                        logger.debug("Using standard processing mode")
 
                         # Check different result structures
                         if hasattr(result.result, 'data_array') and result.result.data_array:
@@ -549,7 +552,7 @@ class DatabricksCustomTool(BaseTool):
                                     first_few_values = chunk[:min(5, len(chunk))]
                                     if all(isinstance(val, (str, int, float)) and not isinstance(val, (list, dict)) for val in first_few_values):
                                         if len(chunk) > len(columns) * 3:  # Heuristic: if chunk has way more items than columns
-                                            print("Chunk appears to contain individual values rather than rows - switching to row reconstruction")
+                                            logger.debug("Chunk appears to contain individual values rather than rows - switching to row reconstruction")
 
                                             # This chunk might actually be values of multiple rows - try to reconstruct
                                             values = chunk  # All values in this chunk

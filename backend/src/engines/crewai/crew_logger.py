@@ -550,13 +550,26 @@ class CrewLogger:
             yield
             
         finally:
-            # Restore original stdout/stderr
-            sys.stdout = original_stdout
-            sys.stderr = original_stderr
+            # Restore original stdout/stderr with protection
+            try:
+                if original_stdout and hasattr(original_stdout, 'write'):
+                    sys.stdout = original_stdout
+                if original_stderr and hasattr(original_stderr, 'write'):
+                    sys.stderr = original_stderr
+            except Exception:
+                # If restoration fails, ensure we have working streams
+                import sys as fallback_sys
+                sys.stdout = fallback_sys.__stdout__
+                sys.stderr = fallback_sys.__stderr__
             
             # Process captured output
-            stdout_content = stdout_capture.getvalue()
-            stderr_content = stderr_capture.getvalue()
+            try:
+                stdout_content = stdout_capture.getvalue()
+                stderr_content = stderr_capture.getvalue()
+            except ValueError:
+                # StringIO was closed - handle gracefully
+                stdout_content = ""
+                stderr_content = ""
             
             # Log any stdout/stderr content directly to ensure they reach the execution logs table
             if stdout_content:
@@ -636,8 +649,15 @@ class CrewLoggerHandler(logging.Handler):
             
         except Exception as e:
             # Don't use logging here to avoid potential infinite recursion
-            print(f"Error in CrewLoggerHandler.emit: {e}", file=sys.stderr)
-            traceback.print_exc(file=sys.stderr)
+            # Use the last resort handler to avoid stream redirection issues
+            try:
+                import sys
+                if hasattr(sys.stderr, 'write') and not sys.stderr.closed:
+                    sys.stderr.write(f"Error in CrewLoggerHandler.emit: {e}\n")
+                    sys.stderr.flush()
+            except:
+                # If even that fails, silently ignore to prevent cascading failures
+                pass
 
 
 # Create singleton instance

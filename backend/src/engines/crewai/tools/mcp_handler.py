@@ -283,11 +283,11 @@ async def run_tool():
         # Run the tool
         result = await tool_func(**{json.dumps(kwargs)})
         
-        # Print the result as JSON
-        print(json.dumps(result))
+        # Log the result as JSON
+        logger.debug(f"MCP handler result: {json.dumps(result)}")
         
     except Exception as e:
-        print(json.dumps({{"error": str(e)}}))
+        logger.error(f"MCP handler error: {json.dumps({'error': str(e)})}")
     finally:
         # Clean up
         if 'adapter' in locals():

@@ -6,6 +6,7 @@ import requests
 import time
 import os
 from pathlib import Path
+import asyncio
 
 
 # Configure logger
@@ -57,8 +58,10 @@ class GenieTool(BaseTool):
     _current_conversation_id: str = PrivateAttr(default=None)
     _token: str = PrivateAttr(default=None)
     _tool_id: int = PrivateAttr(default=35)  # Default tool ID
+    _user_token: str = PrivateAttr(default=None)  # For OBO authentication
+    _use_oauth: bool = PrivateAttr(default=False)  # Flag for OAuth authentication
 
-    def __init__(self, tool_config: Optional[dict] = None, tool_id: Optional[int] = None, token_required: bool = True):
+    def __init__(self, tool_config: Optional[dict] = None, tool_id: Optional[int] = None, token_required: bool = True, user_token: str = None):
         super().__init__()
         if tool_config is None:
             tool_config = {}
@@ -67,15 +70,28 @@ class GenieTool(BaseTool):
         if tool_id is not None:
             self._tool_id = tool_id
         
+        # Set user token for OBO authentication if provided
+        if user_token:
+            self._user_token = user_token
+            self._use_oauth = True
+            logger.info("Using user token for OBO authentication")
+        
         # Get configuration from tool_config
         if tool_config:
-            # Check if token is directly provided in config (first priority)
-            if 'DATABRICKS_API_KEY' in tool_config:
-                self._token = tool_config['DATABRICKS_API_KEY']
-                logger.info("Using token from tool_config")
-            elif 'token' in tool_config:
-                self._token = tool_config['token']
-                logger.info("Using token from config")
+            # Check if user token is provided in config
+            if 'user_token' in tool_config:
+                self._user_token = tool_config['user_token']
+                self._use_oauth = True
+                logger.info("Using user token from tool_config for OBO authentication")
+            
+            # Check if token is directly provided in config (fallback to PAT)
+            if not self._use_oauth:
+                if 'DATABRICKS_API_KEY' in tool_config:
+                    self._token = tool_config['DATABRICKS_API_KEY']
+                    logger.info("Using PAT token from tool_config")
+                elif 'token' in tool_config:
+                    self._token = tool_config['token']
+                    logger.info("Using PAT token from config")
             
             # Handle different possible key formats for host
             databricks_host = None
@@ -119,11 +135,26 @@ class GenieTool(BaseTool):
                 self._space_id = tool_config['space_id']
                 logger.info(f"Using space_id from config: {self._space_id}")
         
-        # If token not set from config, try from environment (second priority)
-        if not self._token:
-            self._token = os.getenv("DATABRICKS_API_KEY")
-            if self._token:
-                logger.info("Using DATABRICKS_API_KEY from environment")
+        # Try enhanced authentication if not using OAuth
+        if not self._use_oauth:
+            try:
+                # Try to get authentication through enhanced auth system
+                from src.utils.databricks_auth import is_databricks_apps_environment
+                if is_databricks_apps_environment():
+                    self._use_oauth = True
+                    logger.info("Detected Databricks Apps environment - using OAuth authentication")
+                elif not self._token:
+                    # Fall back to environment variables for PAT
+                    self._token = os.getenv("DATABRICKS_API_KEY")
+                    if self._token:
+                        logger.info("Using DATABRICKS_API_KEY from environment")
+            except ImportError as e:
+                logger.debug(f"Enhanced auth not available: {e}")
+                # Fall back to environment variables
+                if not self._token:
+                    self._token = os.getenv("DATABRICKS_API_KEY")
+                    if self._token:
+                        logger.info("Using DATABRICKS_API_KEY from environment")
             
         # Set fallback values from environment if not set from config
         if not self._host:
@@ -134,10 +165,9 @@ class GenieTool(BaseTool):
             self._space_id = os.getenv("DATABRICKS_SPACE_ID", "01efdd2cd03211d0ab74f620f0023b77")
             logger.info(f"Using spaceId from environment or default: {self._space_id}")
         
-        # If token is required but missing, log a warning instead of raising an error
-        # This allows the tool to be created even without a token
-        if token_required and not self._token:
-            logger.warning("DATABRICKS_API_KEY is required but not provided. Tool will return an error when used.")
+        # Check authentication requirements
+        if token_required and not self._use_oauth and not self._token:
+            logger.warning("DATABRICKS_API_KEY is required but not provided. Tool will attempt OAuth authentication or return an error when used.")
 
         if not self._host:
             logger.warning("Databricks host URL not provided. Using default value.")
@@ -148,13 +178,23 @@ class GenieTool(BaseTool):
         logger.info(f"Tool ID: {self._tool_id}")
         logger.info(f"Host: {self._host}")
         logger.info(f"Space ID: {self._space_id}")
+        logger.info(f"Authentication Method: {'OAuth/OBO' if self._use_oauth else 'PAT'}")
         
         # Log token (masked)
-        if self._token:
+        if self._user_token:
+            masked_token = f"{self._user_token[:4]}...{self._user_token[-4:]}" if len(self._user_token) > 8 else "***"
+            logger.info(f"User Token (masked): {masked_token}")
+        elif self._token:
             masked_token = f"{self._token[:4]}...{self._token[-4:]}" if len(self._token) > 8 else "***"
-            logger.info(f"Token (masked): {masked_token}")
+            logger.info(f"PAT Token (masked): {masked_token}")
         else:
-            logger.warning("No token provided - requests will fail without authentication")
+            logger.warning("No token provided - will attempt to use enhanced authentication")
+
+    def set_user_token(self, user_token: str):
+        """Set user access token for OBO authentication."""
+        self._user_token = user_token
+        self._use_oauth = True
+        logger.info("User token set for OBO authentication")
 
     def _make_url(self, path: str) -> str:
         """Create a full URL from a path."""
@@ -175,17 +215,70 @@ class GenieTool(BaseTool):
             
         return f"https://{host}{path}"
 
+    async def _get_auth_headers(self) -> dict:
+        """Get authentication headers using enhanced auth system."""
+        try:
+            if self._use_oauth:
+                # Use enhanced auth system for OAuth/OBO
+                from src.utils.databricks_auth import get_databricks_auth_headers
+                headers, error = await get_databricks_auth_headers(user_token=self._user_token)
+                if error:
+                    logger.error(f"Failed to get OAuth headers: {error}")
+                    return None
+                return headers
+            else:
+                # Use traditional PAT authentication
+                if not self._token:
+                    logger.error("No authentication token available")
+                    return None
+                return {
+                    "Authorization": f"Bearer {self._token}",
+                    "Content-Type": "application/json"
+                }
+        except ImportError:
+            # Fall back to PAT if enhanced auth not available
+            if not self._token:
+                logger.error("No authentication token available and enhanced auth not available")
+                return None
+            return {
+                "Authorization": f"Bearer {self._token}",
+                "Content-Type": "application/json"
+            }
+        except Exception as e:
+            logger.error(f"Error getting auth headers: {e}")
+            return None
+
     def _start_or_continue_conversation(self, question: str) -> dict:
         """Start a new conversation or continue existing one with a question."""
         try:
             # Ensure space_id is a string
             space_id = str(self._space_id) if self._space_id else "01efdd2cd03211d0ab74f620f0023b77"
             
-            # Create headers with proper authentication
-            headers = {
-                "Authorization": f"Bearer {self._token}",
-                "Content-Type": "application/json"
-            }
+            # Get authentication headers
+            headers = None
+            try:
+                # Try to get headers using async method
+                import asyncio
+                loop = asyncio.new_event_loop()
+                asyncio.set_event_loop(loop)
+                headers = loop.run_until_complete(self._get_auth_headers())
+                loop.close()
+            except Exception as e:
+                logger.debug(f"Async auth failed, falling back to sync: {e}")
+                # Fall back to simple PAT headers
+                if self._user_token:
+                    headers = {
+                        "Authorization": f"Bearer {self._user_token}",
+                        "Content-Type": "application/json"
+                    }
+                elif self._token:
+                    headers = {
+                        "Authorization": f"Bearer {self._token}",
+                        "Content-Type": "application/json"
+                    }
+            
+            if not headers:
+                raise Exception("No authentication headers available")
             
             if self._current_conversation_id:
                 # Continue existing conversation
@@ -268,10 +361,29 @@ class GenieTool(BaseTool):
             f"/api/2.0/genie/spaces/{space_id}/conversations/{conversation_id}/messages/{message_id}"
         )
         
-        headers = {
-            "Authorization": f"Bearer {self._token}",
-            "Content-Type": "application/json"
-        }
+        # Get authentication headers
+        headers = None
+        try:
+            import asyncio
+            loop = asyncio.new_event_loop()
+            asyncio.set_event_loop(loop)
+            headers = loop.run_until_complete(self._get_auth_headers())
+            loop.close()
+        except Exception as e:
+            logger.debug(f"Async auth failed, falling back to sync: {e}")
+            if self._user_token:
+                headers = {
+                    "Authorization": f"Bearer {self._user_token}",
+                    "Content-Type": "application/json"
+                }
+            elif self._token:
+                headers = {
+                    "Authorization": f"Bearer {self._token}",
+                    "Content-Type": "application/json"
+                }
+        
+        if not headers:
+            raise Exception("No authentication headers available")
         
         response = requests.get(url, headers=headers)
         response.raise_for_status()
@@ -284,10 +396,29 @@ class GenieTool(BaseTool):
             f"/api/2.0/genie/spaces/{space_id}/conversations/{conversation_id}/messages/{message_id}/query-result"
         )
         
-        headers = {
-            "Authorization": f"Bearer {self._token}",
-            "Content-Type": "application/json"
-        }
+        # Get authentication headers
+        headers = None
+        try:
+            import asyncio
+            loop = asyncio.new_event_loop()
+            asyncio.set_event_loop(loop)
+            headers = loop.run_until_complete(self._get_auth_headers())
+            loop.close()
+        except Exception as e:
+            logger.debug(f"Async auth failed, falling back to sync: {e}")
+            if self._user_token:
+                headers = {
+                    "Authorization": f"Bearer {self._user_token}",
+                    "Content-Type": "application/json"
+                }
+            elif self._token:
+                headers = {
+                    "Authorization": f"Bearer {self._token}",
+                    "Content-Type": "application/json"
+                }
+        
+        if not headers:
+            raise Exception("No authentication headers available")
         
         response = requests.get(url, headers=headers)
         response.raise_for_status()
@@ -364,9 +495,9 @@ For example:
 This tool can extract information from databases and provide structured data in response to your questions."""
 
         try:
-            # Return early if no token available
-            if not self._token:
-                return "Error: Cannot execute Genie request - no authentication token available. Please configure DATABRICKS_API_KEY."
+            # Check if authentication is available
+            if not self._use_oauth and not self._token and not self._user_token:
+                return "Error: Cannot execute Genie request - no authentication available. Please configure authentication or use Databricks Apps."
                 
             # Start or continue conversation
             try:
