@@ -27,7 +27,7 @@ import TextFormatIcon from '@mui/icons-material/TextFormat';
 import CloudIcon from '@mui/icons-material/Cloud';
 import EngineeringIcon from '@mui/icons-material/Engineering';
 import CloseIcon from '@mui/icons-material/Close';
-import SecurityIcon from '@mui/icons-material/Security';
+// import SecurityIcon from '@mui/icons-material/Security';
 import { useTranslation } from 'react-i18next';
 import { LanguageService } from '../../api/LanguageService';
 import { ThemeConfig as _ThemeConfig } from '../../api/ThemeService';
@@ -40,7 +40,7 @@ import PromptConfiguration from './PromptConfiguration';
 import DatabricksConfiguration from './DatabricksConfiguration';
 import MCPConfiguration from './MCP/MCPConfiguration';
 import EnginesConfiguration from './Engines';
-import SecurityManagement from './SecurityManagement';
+// import SecurityManagement from './SecurityManagement';
 import { LANGUAGES } from '../../config/i18n/config';
 
 interface ConfigurationProps {
@@ -98,50 +98,50 @@ function Configuration({ onClose }: ConfigurationProps): JSX.Element {
       icon: <TranslateIcon fontSize="small" />,
       index: 0
     },
-    {
-      label: t('configuration.security.tab', { defaultValue: 'Security' }),
-      icon: <SecurityIcon fontSize="small" />,
-      index: 1
-    },
+    // {
+    //   label: t('configuration.security.tab', { defaultValue: 'Security' }),
+    //   icon: <SecurityIcon fontSize="small" />,
+    //   index: 1
+    // },
     {
       label: t('configuration.engines.tab', { defaultValue: 'Engines' }),
       icon: <EngineeringIcon fontSize="small" />,
-      index: 2
+      index: 1
     },
     {
       label: t('configuration.mcpServers.tab', { defaultValue: 'MCP Servers' }),
       icon: <CloudIcon fontSize="small" />,
-      index: 3
+      index: 2
     },
     {
       label: t('configuration.models.tab', { defaultValue: 'Models' }),
       icon: <ModelIcon fontSize="small" />,
-      index: 4
+      index: 3
     },
     {
       label: t('configuration.databricks.tab', { defaultValue: 'Databricks' }),
       icon: <KeyIcon fontSize="small" />,
-      index: 5
+      index: 4
     },
     {
       label: t('configuration.apiKeys.tab', { defaultValue: 'API Keys' }),
       icon: <KeyIcon fontSize="small" />,
-      index: 6
+      index: 5
     },
     {
       label: t('configuration.tools.tab', { defaultValue: 'Tools' }),
       icon: <BuildIcon fontSize="small" />,
-      index: 7
+      index: 6
     },
     {
       label: t('configuration.objects.tab', { defaultValue: 'Object Management' }),
       icon: <CodeIcon fontSize="small" />,
-      index: 8
+      index: 7
     },
     {
       label: t('configuration.prompts.tab', { defaultValue: 'Prompts' }),
       icon: <TextFormatIcon fontSize="small" />,
-      index: 9
+      index: 8
     },
   ];
 
@@ -348,39 +348,39 @@ function Configuration({ onClose }: ConfigurationProps): JSX.Element {
             </Box>
           </ContentPanel>
 
-          <ContentPanel value={activeSection} index={1}>
+          {/* <ContentPanel value={activeSection} index={1}>
             <SecurityManagement />
-          </ContentPanel>
+          </ContentPanel> */}
 
-          <ContentPanel value={activeSection} index={2}>
+          <ContentPanel value={activeSection} index={1}>
             <EnginesConfiguration />
           </ContentPanel>
 
-          <ContentPanel value={activeSection} index={3}>
+          <ContentPanel value={activeSection} index={2}>
             <MCPConfiguration />
           </ContentPanel>
           
-          <ContentPanel value={activeSection} index={4}>
+          <ContentPanel value={activeSection} index={3}>
             <ModelConfiguration />
           </ContentPanel>
 
-          <ContentPanel value={activeSection} index={5}>
+          <ContentPanel value={activeSection} index={4}>
             <DatabricksConfiguration onSaved={onClose} />
           </ContentPanel>
 
-          <ContentPanel value={activeSection} index={6}>
+          <ContentPanel value={activeSection} index={5}>
             <APIKeys />
           </ContentPanel>
 
-          <ContentPanel value={activeSection} index={7}>
+          <ContentPanel value={activeSection} index={6}>
             <ToolForm />
           </ContentPanel>
 
-          <ContentPanel value={activeSection} index={8}>
+          <ContentPanel value={activeSection} index={7}>
             <ObjectManagement />
           </ContentPanel>
 
-          <ContentPanel value={activeSection} index={9}>
+          <ContentPanel value={activeSection} index={8}>
             <PromptConfiguration />
           </ContentPanel>
 
