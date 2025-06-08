@@ -1,7 +1,7 @@
 import React, { useCallback, useState, useEffect } from 'react';
 import { Handle, Position, useReactFlow } from 'reactflow';
 import { Box, Typography, Dialog, DialogTitle, DialogContent, Tooltip } from '@mui/material';
-import AssignmentIcon from '@mui/icons-material/Assignment';
+import AddTaskIcon from '@mui/icons-material/AddTask';
 import DeleteIcon from '@mui/icons-material/Delete';
 import IconButton from '@mui/material/IconButton';
 import EditIcon from '@mui/icons-material/Edit';
@@ -266,7 +266,7 @@ const TaskNode: React.FC<TaskNodeProps> = ({ data, id }) => {
       return <Box component="span" sx={iconStyles}>{data.icon}</Box>;
     }
     
-    return <AssignmentIcon sx={iconStyles} />;
+    return <AddTaskIcon sx={iconStyles} />;
   };
 
   const getTaskStyles = () => {
