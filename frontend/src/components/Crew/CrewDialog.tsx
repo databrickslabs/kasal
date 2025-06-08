@@ -34,6 +34,7 @@ import InputAdornment from '@mui/material/InputAdornment';
 import TextField from '@mui/material/TextField';
 import { Node, Edge } from 'reactflow';
 import { useTabManagerStore } from '../../store/tabManager';
+import { useFlowConfigStore } from '../../store/flowConfig';
 
 // Update type definitions for crew ID
 interface CrewDialogProps {
@@ -53,6 +54,7 @@ const CrewDialog: React.FC<CrewDialogProps> = ({ open, onClose, onCrewSelect }):
   const searchInputRef = useRef<HTMLInputElement>(null);
   const theme = useTheme();
   const [searchQuery, setSearchQuery] = useState('');
+  const { crewAIFlowEnabled } = useFlowConfigStore();
 
   useEffect(() => {
     if (open) {
@@ -399,10 +401,25 @@ const CrewDialog: React.FC<CrewDialogProps> = ({ open, onClose, onCrewSelect }):
     setSearchQuery(''); // Clear search query after dialog is fully closed
   };
 
-  const filteredCrews = searchQuery
-    ? crews.filter(crew => 
-        crew.name.toLowerCase().includes(searchQuery.toLowerCase()))
-    : crews;
+  // Helper function to detect if a crew contains flow nodes
+  const isFlow = (crew: CrewResponse): boolean => {
+    return crew.nodes?.some(node => node.type === 'flowNode') || false;
+  };
+
+  const filteredCrews = crews
+    .filter(crew => {
+      // Filter out flows if CrewAI flow is disabled
+      if (!crewAIFlowEnabled && isFlow(crew)) {
+        return false;
+      }
+      
+      // Apply search filter
+      if (searchQuery) {
+        return crew.name.toLowerCase().includes(searchQuery.toLowerCase());
+      }
+      
+      return true;
+    });
 
   return (
     <>
