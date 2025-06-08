@@ -68,7 +68,7 @@ const RightSidebar: React.FC<RightSidebarProps> = ({
     if (!isChatOpen && !chatOpenedByClick) {
       onToggleChat();
     }
-  }, []);
+  }, [isChatOpen, chatOpenedByClick, onToggleChat]);
 
   // Reset chatOpenedByClick when chat is closed
   useEffect(() => {
