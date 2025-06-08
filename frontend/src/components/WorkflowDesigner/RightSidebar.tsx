@@ -5,24 +5,19 @@ import {
   Tooltip,
   Paper,
   useTheme,
-  Typography,
   CircularProgress,
   Divider,
   GlobalStyles,
 } from '@mui/material';
 import {
   SmartToy as SmartToyIcon,
-  Schedule as ScheduleIcon,
   PersonAdd as PersonAddIcon,
   AddTask as AddTaskIcon,
   AccountTree as AccountTreeIcon,
   PlayArrow as PlayArrowIcon,
   Save as SaveIcon,
   MenuBook as MenuBookIcon,
-  AutoFixHigh as AutoFixHighIcon,
-  FolderOpen as WorkflowIcon,
 } from '@mui/icons-material';
-import ScheduleList from '../Schedule/ScheduleList';
 import { useFlowConfigStore } from '../../store/flowConfig';
 
 interface RightSidebarProps {
@@ -32,10 +27,7 @@ interface RightSidebarProps {
   setIsAgentDialogOpen: (open: boolean) => void;
   setIsTaskDialogOpen: (open: boolean) => void;
   setIsFlowDialogOpen: (open: boolean) => void;
-  setIsCrewPlanningOpen?: (open: boolean) => void;
   setIsCrewDialogOpen?: (open: boolean) => void;
-  setIsAgentGenerationDialogOpen?: (open: boolean) => void;
-  setIsTaskGenerationDialogOpen?: (open: boolean) => void;
   handleExecuteCrew?: () => void;
   handleExecuteFlow?: () => void;
   isExecuting?: boolean;
@@ -50,10 +42,7 @@ const RightSidebar: React.FC<RightSidebarProps> = ({
   setIsAgentDialogOpen,
   setIsTaskDialogOpen,
   setIsFlowDialogOpen,
-  setIsCrewPlanningOpen,
   setIsCrewDialogOpen,
-  setIsAgentGenerationDialogOpen,
-  setIsTaskGenerationDialogOpen,
   handleExecuteCrew,
   handleExecuteFlow,
   isExecuting = false,
@@ -61,9 +50,7 @@ const RightSidebar: React.FC<RightSidebarProps> = ({
   showRunHistory = false,
 }) => {
   const theme = useTheme();
-  const [activeSection, setActiveSection] = useState<string | null>(null);
   const [animateAIAssistant, setAnimateAIAssistant] = useState(true);
-  const [shouldKeepChatOpen, setShouldKeepChatOpen] = useState(false);
   const [chatOpenedByClick, setChatOpenedByClick] = useState(false);
   const { crewAIFlowEnabled } = useFlowConfigStore();
 
@@ -75,16 +62,12 @@ const RightSidebar: React.FC<RightSidebarProps> = ({
     }
   }, [animateAIAssistant]);
 
-  // Listen for messages from the chat panel about mouse hover state
-  useEffect(() => {
-    const handleMessage = (event: MessageEvent) => {
-      if (event.data?.type === 'chat-hover-state') {
-        setShouldKeepChatOpen(event.data.isHovering);
-      }
-    };
 
-    window.addEventListener('message', handleMessage);
-    return () => window.removeEventListener('message', handleMessage);
+  // Open chat by default on mount
+  useEffect(() => {
+    if (!isChatOpen && !chatOpenedByClick) {
+      onToggleChat();
+    }
   }, []);
 
   // Reset chatOpenedByClick when chat is closed
@@ -94,785 +77,72 @@ const RightSidebar: React.FC<RightSidebarProps> = ({
     }
   }, [isChatOpen]);
 
-  const handleSectionClick = (sectionId: string) => {
-    setActiveSection(activeSection === sectionId ? null : sectionId);
-  };
-
-  // Calculate the proper height accounting for TabBar and optional bottom panel
-  const contentHeight = showRunHistory 
-    ? 'calc(100vh - 48px - 200px - 20px)' // TabBar (48px) + Bottom panel (200px) + padding
-    : 'calc(100vh - 48px - 20px)'; // Just TabBar (48px) + padding
 
   const sidebarItems = [
     {
       id: 'chat',
       icon: <SmartToyIcon />,
       tooltip: 'Kasal',
-      content: (
-        <Box
-          sx={{
-            maxHeight: contentHeight,
-            overflowY: 'auto',
-            p: 1,
-            width: '100%',
-            boxSizing: 'border-box'
-          }}
-        >
-          <Box sx={{ 
-            mb: 2,
-            width: '100%',
-            boxSizing: 'border-box',
-            px: 1
-          }}>
-            <Box
-              onClick={onToggleChat}
-              sx={{
-                display: 'flex',
-                alignItems: 'center',
-                gap: 1,
-                py: 1,
-                px: 1,
-                borderRadius: 1,
-                cursor: 'pointer',
-                border: `1px solid ${isChatOpen ? theme.palette.primary.main : theme.palette.divider}`,
-                backgroundColor: isChatOpen ? 'action.selected' : 'background.paper',
-                transition: 'all 0.2s ease-in-out',
-                width: '220px',
-                boxSizing: 'border-box',
-                ml: 2,
-                '&:hover': {
-                  backgroundColor: 'action.hover',
-                  borderColor: theme.palette.primary.main,
-                  transform: 'translateY(-1px)',
-                  boxShadow: theme.shadows[2],
-                },
-              }}
-            >
-              <SmartToyIcon 
-                sx={{ 
-                  fontSize: '1.2rem', 
-                  color: theme.palette.primary.main 
-                }} 
-              />
-              <Box>
-                <Typography 
-                  variant="body2" 
-                  sx={{ 
-                    fontWeight: 500,
-                    color: 'text.primary'
-                  }}
-                >
-                  {isChatOpen ? 'Hide Kasal' : 'Show Kasal'}
-                </Typography>
-                <Typography 
-                  variant="caption" 
-                  sx={{ 
-                    color: 'text.secondary',
-                    fontSize: '0.7rem'
-                  }}
-                >
-                  Get help with workflow design and automation
-                </Typography>
-              </Box>
-            </Box>
-          </Box>
-        </Box>
-      )
+      onClick: onToggleChat
+    },
+    {
+      id: 'execute-crew',
+      icon: isExecuting ? <CircularProgress size={20} /> : <PlayArrowIcon />,
+      tooltip: 'Execute Crew',
+      onClick: handleExecuteCrew,
+      disabled: isExecuting
     },
     {
       id: 'separator1',
       isSeparator: true
     },
     {
-      id: 'execute',
-      icon: <PlayArrowIcon />,
-      tooltip: 'Execute Workflow',
-      content: (
-        <Box
-          sx={{
-            maxHeight: contentHeight,
-            overflowY: 'auto',
-            p: 1,
-            width: '100%',
-            boxSizing: 'border-box'
-          }}
-        >
-          <Box sx={{ 
-            mb: 2,
-            width: '100%',
-            boxSizing: 'border-box',
-            px: 1
-          }}>
-            <Typography 
-              variant="subtitle2" 
-              sx={{ 
-                color: theme.palette.primary.main, 
-                mb: 1,
-                fontWeight: 600,
-                textTransform: 'uppercase',
-                letterSpacing: '0.5px',
-                fontSize: '0.7rem'
-              }}
-            >
-              Execute Workflow
-            </Typography>
-            
-            <Box
-              onClick={handleExecuteCrew}
-              sx={{
-                display: 'flex',
-                alignItems: 'center',
-                gap: 1,
-                py: 1,
-                px: 1,
-                borderRadius: 1,
-                cursor: isExecuting ? 'not-allowed' : 'pointer',
-                border: `1px solid ${theme.palette.divider}`,
-                backgroundColor: 'background.paper',
-                transition: 'all 0.2s ease-in-out',
-                opacity: isExecuting ? 0.6 : 1,
-                width: '220px',
-                boxSizing: 'border-box',
-                ml: 2,
-                '&:hover': !isExecuting ? {
-                  backgroundColor: 'action.hover',
-                  borderColor: theme.palette.primary.main,
-                  transform: 'translateY(-1px)',
-                  boxShadow: theme.shadows[2],
-                } : {},
-                mb: 1
-              }}
-            >
-              {isExecuting ? (
-                <CircularProgress size={20} sx={{ color: theme.palette.primary.main }} />
-              ) : (
-                <PlayArrowIcon 
-                  sx={{ 
-                    fontSize: '1.2rem', 
-                    color: theme.palette.primary.main 
-                  }} 
-                />
-              )}
-              <Box>
-                <Typography 
-                  variant="body2" 
-                  sx={{ 
-                    fontWeight: 500,
-                    color: 'text.primary'
-                  }}
-                >
-                  Execute Crew
-                </Typography>
-                <Typography 
-                  variant="caption" 
-                  sx={{ 
-                    color: 'text.secondary',
-                    fontSize: '0.7rem'
-                  }}
-                >
-                  Run the current crew
-                </Typography>
-              </Box>
-            </Box>
-
-            {crewAIFlowEnabled && (
-              <Box
-                onClick={handleExecuteFlow}
-                sx={{
-                  display: 'flex',
-                  alignItems: 'center',
-                  gap: 1,
-                  py: 1,
-                  px: 1,
-                  borderRadius: 1,
-                  cursor: isExecuting ? 'not-allowed' : 'pointer',
-                  border: `1px solid ${theme.palette.divider}`,
-                  backgroundColor: 'background.paper',
-                  transition: 'all 0.2s ease-in-out',
-                  opacity: isExecuting ? 0.6 : 1,
-                  width: '220px',
-                  boxSizing: 'border-box',
-                  ml: 2,
-                  '&:hover': !isExecuting ? {
-                    backgroundColor: 'action.hover',
-                    borderColor: theme.palette.primary.main,
-                    transform: 'translateY(-1px)',
-                    boxShadow: theme.shadows[2],
-                  } : {},
-                  mb: 1
-                }}
-              >
-                {isExecuting ? (
-                  <CircularProgress size={20} sx={{ color: theme.palette.primary.main }} />
-                ) : (
-                  <PlayArrowIcon 
-                    sx={{ 
-                      fontSize: '1.2rem', 
-                      color: theme.palette.primary.main 
-                    }} 
-                  />
-                )}
-                <Box>
-                  <Typography 
-                    variant="body2" 
-                    sx={{ 
-                      fontWeight: 500,
-                      color: 'text.primary'
-                    }}
-                  >
-                    Execute Flow
-                  </Typography>
-                  <Typography 
-                    variant="caption" 
-                    sx={{ 
-                      color: 'text.secondary',
-                      fontSize: '0.7rem'
-                    }}
-                  >
-                    Run the current flow
-                  </Typography>
-                </Box>
-              </Box>
-            )}
-          </Box>
-        </Box>
-      )
-    },
-    {
-      id: 'separator1',
-      isSeparator: true
-    },
-    {
-      id: 'workflow',
-      icon: <WorkflowIcon />,
-      tooltip: 'Workflow Actions',
-      content: (
-        <Box
-          sx={{
-            maxHeight: contentHeight,
-            overflowY: 'auto',
-            p: 1,
-            width: '100%',
-            boxSizing: 'border-box'
-          }}
-        >
-          <Box sx={{ 
-            mb: 2,
-            width: '100%',
-            boxSizing: 'border-box',
-            px: 1
-          }}>
-            <Typography 
-              variant="subtitle2" 
-              sx={{ 
-                color: theme.palette.primary.main, 
-                mb: 1,
-                fontWeight: 600,
-                textTransform: 'uppercase',
-                letterSpacing: '0.5px',
-                fontSize: '0.7rem'
-              }}
-            >
-              Save & Load
-            </Typography>
-            
-            <Box
-              onClick={onSaveCrewClick}
-              sx={{
-                display: 'flex',
-                alignItems: 'center',
-                gap: 1,
-                py: 1,
-                px: 1,
-                borderRadius: 1,
-                cursor: 'pointer',
-                border: `1px solid ${theme.palette.divider}`,
-                backgroundColor: 'background.paper',
-                transition: 'all 0.2s ease-in-out',
-                width: '220px',
-                boxSizing: 'border-box',
-                ml: 2,
-                '&:hover': {
-                  backgroundColor: 'action.hover',
-                  borderColor: theme.palette.primary.main,
-                  transform: 'translateY(-1px)',
-                  boxShadow: theme.shadows[2],
-                },
-                mb: 1
-              }}
-            >
-              <SaveIcon 
-                sx={{ 
-                  fontSize: '1.2rem', 
-                  color: theme.palette.primary.main 
-                }} 
-              />
-              <Box>
-                <Typography 
-                  variant="body2" 
-                  sx={{ 
-                    fontWeight: 500,
-                    color: 'text.primary'
-                  }}
-                >
-                  Save Crew
-                </Typography>
-                <Typography 
-                  variant="caption" 
-                  sx={{ 
-                    color: 'text.secondary',
-                    fontSize: '0.7rem'
-                  }}
-                >
-                  Save current workflow
-                </Typography>
-              </Box>
-            </Box>
-
-            <Box
-              onClick={() => setIsCrewDialogOpen?.(true)}
-              sx={{
-                display: 'flex',
-                alignItems: 'center',
-                gap: 1,
-                py: 1,
-                px: 1,
-                borderRadius: 1,
-                cursor: 'pointer',
-                border: `1px solid ${theme.palette.divider}`,
-                backgroundColor: 'background.paper',
-                transition: 'all 0.2s ease-in-out',
-                width: '220px',
-                boxSizing: 'border-box',
-                ml: 2,
-                '&:hover': {
-                  backgroundColor: 'action.hover',
-                  borderColor: theme.palette.primary.main,
-                  transform: 'translateY(-1px)',
-                  boxShadow: theme.shadows[2],
-                }
-              }}
-            >
-              <MenuBookIcon 
-                sx={{ 
-                  fontSize: '1.2rem', 
-                  color: theme.palette.primary.main 
-                }} 
-              />
-              <Box>
-                <Typography 
-                  variant="body2" 
-                  sx={{ 
-                    fontWeight: 500,
-                    color: 'text.primary'
-                  }}
-                >
-                  Open Workflow
-                </Typography>
-                <Typography 
-                  variant="caption" 
-                  sx={{ 
-                    color: 'text.secondary',
-                    fontSize: '0.7rem'
-                  }}
-                >
-                  Load saved crew or flow
-                </Typography>
-              </Box>
-            </Box>
-          </Box>
-        </Box>
-      )
-    },
-    {
-      id: 'creation',
+      id: 'add-agent',
       icon: <PersonAddIcon />,
-      tooltip: 'Create & Generate',
-      content: (
-        <Box
-          sx={{
-            maxHeight: contentHeight,
-            overflowY: 'auto',
-            p: 1,
-            width: '100%',
-            boxSizing: 'border-box'
-          }}
-        >
-          <Box sx={{ 
-            mb: 2,
-            width: '100%',
-            boxSizing: 'border-box',
-            px: 1
-          }}>
-            <Typography 
-              variant="subtitle2" 
-              sx={{ 
-                color: theme.palette.primary.main, 
-                mb: 1,
-                fontWeight: 600,
-                textTransform: 'uppercase',
-                letterSpacing: '0.5px',
-                fontSize: '0.7rem'
-              }}
-            >
-              Create Elements
-            </Typography>
-            
-            <Box
-              onClick={() => setIsAgentDialogOpen(true)}
-              sx={{
-                display: 'flex',
-                alignItems: 'center',
-                gap: 1,
-                py: 1,
-                px: 1,
-                borderRadius: 1,
-                cursor: 'pointer',
-                border: `1px solid ${theme.palette.divider}`,
-                backgroundColor: 'background.paper',
-                transition: 'all 0.2s ease-in-out',
-                width: '220px',
-                boxSizing: 'border-box',
-                ml: 2,
-                '&:hover': {
-                  backgroundColor: 'action.hover',
-                  borderColor: theme.palette.primary.main,
-                  transform: 'translateY(-1px)',
-                  boxShadow: theme.shadows[2],
-                },
-                mb: 1
-              }}
-            >
-              <PersonAddIcon 
-                sx={{ 
-                  fontSize: '1.2rem', 
-                  color: theme.palette.primary.main 
-                }} 
-              />
-              <Box>
-                <Typography 
-                  variant="body2" 
-                  sx={{ 
-                    fontWeight: 500,
-                    color: 'text.primary'
-                  }}
-                >
-                  Add Agent
-                </Typography>
-                <Typography 
-                  variant="caption" 
-                  sx={{ 
-                    color: 'text.secondary',
-                    fontSize: '0.7rem'
-                  }}
-                >
-                  Create a new agent
-                </Typography>
-              </Box>
-            </Box>
-
-            <Box
-              onClick={() => setIsTaskDialogOpen(true)}
-              sx={{
-                display: 'flex',
-                alignItems: 'center',
-                gap: 1,
-                py: 1,
-                px: 1,
-                borderRadius: 1,
-                cursor: 'pointer',
-                border: `1px solid ${theme.palette.divider}`,
-                backgroundColor: 'background.paper',
-                transition: 'all 0.2s ease-in-out',
-                width: '220px',
-                boxSizing: 'border-box',
-                ml: 2,
-                '&:hover': {
-                  backgroundColor: 'action.hover',
-                  borderColor: theme.palette.primary.main,
-                  transform: 'translateY(-1px)',
-                  boxShadow: theme.shadows[2],
-                },
-                mb: 1
-              }}
-            >
-              <AddTaskIcon 
-                sx={{ 
-                  fontSize: '1.2rem', 
-                  color: theme.palette.primary.main 
-                }} 
-              />
-              <Box>
-                <Typography 
-                  variant="body2" 
-                  sx={{ 
-                    fontWeight: 500,
-                    color: 'text.primary'
-                  }}
-                >
-                  Add Task
-                </Typography>
-                <Typography 
-                  variant="caption" 
-                  sx={{ 
-                    color: 'text.secondary',
-                    fontSize: '0.7rem'
-                  }}
-                >
-                  Create a new task
-                </Typography>
-              </Box>
-            </Box>
-
-            {crewAIFlowEnabled && (
-              <Box
-                onClick={() => setIsFlowDialogOpen(true)}
-                sx={{
-                  display: 'flex',
-                  alignItems: 'center',
-                  gap: 1,
-                  py: 1,
-                  px: 1,
-                  borderRadius: 1,
-                  cursor: 'pointer',
-                  border: `1px solid ${theme.palette.divider}`,
-                  backgroundColor: 'background.paper',
-                  transition: 'all 0.2s ease-in-out',
-                  width: '220px',
-                  boxSizing: 'border-box',
-                  ml: 2,
-                  '&:hover': {
-                    backgroundColor: 'action.hover',
-                    borderColor: theme.palette.primary.main,
-                    transform: 'translateY(-1px)',
-                    boxShadow: theme.shadows[2],
-                  },
-                  mb: 1
-                }}
-              >
-                <AccountTreeIcon 
-                  sx={{ 
-                    fontSize: '1.2rem', 
-                    color: theme.palette.primary.main 
-                  }} 
-                />
-                <Box>
-                  <Typography 
-                    variant="body2" 
-                    sx={{ 
-                      fontWeight: 500,
-                      color: 'text.primary'
-                    }}
-                  >
-                    Add Flow
-                  </Typography>
-                  <Typography 
-                    variant="caption" 
-                    sx={{ 
-                      color: 'text.secondary',
-                      fontSize: '0.7rem'
-                    }}
-                  >
-                    Create a new flow
-                  </Typography>
-                </Box>
-              </Box>
-            )}
-
-            <Divider sx={{ my: 2 }} />
-            <Typography 
-              variant="subtitle2" 
-              sx={{ 
-                color: theme.palette.primary.main, 
-                mb: 1,
-                fontWeight: 600,
-                textTransform: 'uppercase',
-                letterSpacing: '0.5px',
-                fontSize: '0.7rem'
-              }}
-            >
-              AI Generation
-            </Typography>
-
-            <Box
-              onClick={() => setIsAgentGenerationDialogOpen?.(true)}
-              sx={{
-                display: 'flex',
-                alignItems: 'center',
-                gap: 1,
-                py: 1,
-                px: 1,
-                borderRadius: 1,
-                cursor: 'pointer',
-                border: `1px solid ${theme.palette.divider}`,
-                backgroundColor: 'background.paper',
-                transition: 'all 0.2s ease-in-out',
-                width: '220px',
-                boxSizing: 'border-box',
-                ml: 2,
-                '&:hover': {
-                  backgroundColor: 'action.hover',
-                  borderColor: theme.palette.primary.main,
-                  transform: 'translateY(-1px)',
-                  boxShadow: theme.shadows[2],
-                },
-                mb: 1
-              }}
-            >
-              <AutoFixHighIcon 
-                sx={{ 
-                  fontSize: '1.2rem', 
-                  color: theme.palette.primary.main 
-                }} 
-              />
-              <Box>
-                <Typography 
-                  variant="body2" 
-                  sx={{ 
-                    fontWeight: 500,
-                    color: 'text.primary'
-                  }}
-                >
-                  Generate Agent with AI
-                </Typography>
-                <Typography 
-                  variant="caption" 
-                  sx={{ 
-                    color: 'text.secondary',
-                    fontSize: '0.7rem'
-                  }}
-                >
-                  AI-powered agent creation
-                </Typography>
-              </Box>
-            </Box>
-
-            <Box
-              onClick={() => setIsTaskGenerationDialogOpen?.(true)}
-              sx={{
-                display: 'flex',
-                alignItems: 'center',
-                gap: 1,
-                py: 1,
-                px: 1,
-                borderRadius: 1,
-                cursor: 'pointer',
-                border: `1px solid ${theme.palette.divider}`,
-                backgroundColor: 'background.paper',
-                transition: 'all 0.2s ease-in-out',
-                width: '220px',
-                boxSizing: 'border-box',
-                ml: 2,
-                '&:hover': {
-                  backgroundColor: 'action.hover',
-                  borderColor: theme.palette.primary.main,
-                  transform: 'translateY(-1px)',
-                  boxShadow: theme.shadows[2],
-                },
-                mb: 1
-              }}
-            >
-              <AutoFixHighIcon 
-                sx={{ 
-                  fontSize: '1.2rem', 
-                  color: theme.palette.primary.main 
-                }} 
-              />
-              <Box>
-                <Typography 
-                  variant="body2" 
-                  sx={{ 
-                    fontWeight: 500,
-                    color: 'text.primary'
-                  }}
-                >
-                  Generate Task with AI
-                </Typography>
-                <Typography 
-                  variant="caption" 
-                  sx={{ 
-                    color: 'text.secondary',
-                    fontSize: '0.7rem'
-                  }}
-                >
-                  AI-powered task creation
-                </Typography>
-              </Box>
-            </Box>
-
-            <Box
-              onClick={() => setIsCrewPlanningOpen?.(true)}
-              sx={{
-                display: 'flex',
-                alignItems: 'center',
-                gap: 1,
-                py: 1,
-                px: 1,
-                borderRadius: 1,
-                cursor: 'pointer',
-                border: `1px solid ${theme.palette.divider}`,
-                backgroundColor: 'background.paper',
-                transition: 'all 0.2s ease-in-out',
-                width: '220px',
-                boxSizing: 'border-box',
-                ml: 2,
-                '&:hover': {
-                  backgroundColor: 'action.hover',
-                  borderColor: theme.palette.primary.main,
-                  transform: 'translateY(-1px)',
-                  boxShadow: theme.shadows[2],
-                }
-              }}
-            >
-              <AutoFixHighIcon 
-                sx={{ 
-                  fontSize: '1.2rem', 
-                  color: theme.palette.primary.main 
-                }} 
-              />
-              <Box>
-                <Typography 
-                  variant="body2" 
-                  sx={{ 
-                    fontWeight: 500,
-                    color: 'text.primary'
-                  }}
-                >
-                  Generate Crew
-                </Typography>
-                <Typography 
-                  variant="caption" 
-                  sx={{ 
-                    color: 'text.secondary',
-                    fontSize: '0.7rem'
-                  }}
-                >
-                  AI-powered crew generation
-                </Typography>
-              </Box>
-            </Box>
-          </Box>
-        </Box>
-      )
+      tooltip: 'Add Agent',
+      onClick: () => setIsAgentDialogOpen(true)
     },
     {
-      id: 'schedule',
-      icon: <ScheduleIcon />,
-      tooltip: 'Schedules',
-      content: (
-        <Box
-          sx={{
-            maxHeight: contentHeight,
-            overflowY: 'auto',
-            p: 1,
-            width: '100%',
-            boxSizing: 'border-box'
-          }}
-        >
-          <ScheduleList />
-        </Box>
-      )
+      id: 'add-task',
+      icon: <AddTaskIcon />,
+      tooltip: 'Add Task',
+      onClick: () => setIsTaskDialogOpen(true)
     },
+    {
+      id: 'separator2',
+      isSeparator: true
+    },
+    {
+      id: 'save-crew',
+      icon: <SaveIcon />,
+      tooltip: 'Save Crew',
+      onClick: onSaveCrewClick
+    },
+    {
+      id: 'open-catalog',
+      icon: <MenuBookIcon />,
+      tooltip: 'Open Catalog',
+      onClick: () => setIsCrewDialogOpen?.(true)
+    },
+    ...(crewAIFlowEnabled ? [
+      {
+        id: 'separator3',
+        isSeparator: true
+      },
+      {
+        id: 'add-flow',
+        icon: <AccountTreeIcon />,
+        tooltip: 'Add Flow',
+        onClick: () => setIsFlowDialogOpen(true)
+      },
+      {
+        id: 'execute-flow',
+        icon: isExecuting ? <CircularProgress size={20} /> : <PlayArrowIcon />,
+        tooltip: 'Execute Flow',
+        onClick: handleExecuteFlow,
+        disabled: isExecuting
+      }
+    ] : [])
   ];
 
   return (
@@ -897,32 +167,7 @@ const RightSidebar: React.FC<RightSidebarProps> = ({
           display: 'flex',
           flexDirection: 'row'
         }}
-        onMouseLeave={() => {
-          setActiveSection(null);
-          // Only close chat if it was opened by hover (not click) and mouse is not over the chat panel
-          if (isChatOpen && !shouldKeepChatOpen && !chatOpenedByClick) {
-            onToggleChat();
-          }
-        }}
       >
-        {/* Side Panel Content */}
-        {activeSection && (
-          <Paper
-            elevation={2}
-            sx={{
-              width: 320,
-              height: '100%',
-              bgcolor: 'background.paper',
-              borderRadius: 0,
-              borderLeft: '1px solid',
-              borderColor: 'divider',
-              overflow: 'hidden',
-              transition: 'all 0.2s ease-in-out'
-            }}
-          >
-            {sidebarItems.find(item => item.id === activeSection)?.content}
-          </Paper>
-        )}
 
         {/* Activity Bar (like VS Code) */}
         <Paper
@@ -952,50 +197,30 @@ const RightSidebar: React.FC<RightSidebarProps> = ({
               ) : (
                 <Tooltip title={item.tooltip} placement="left">
                   <IconButton
-                    onMouseEnter={() => {
-                      // Special handling for chat - open it directly only if not opened by click
-                      if (item.id === 'chat' && !isChatOpen) {
-                        // Don't set chatOpenedByClick when opening via hover
-                        onToggleChat();
-                      }
-                      // For other icons, close chat if it's open (unless opened by click) and set active section
-                      else if (item.id !== 'chat') {
-                        if (isChatOpen && !shouldKeepChatOpen && !chatOpenedByClick) {
-                          onToggleChat();
-                        }
-                        setActiveSection(item.id);
-                      }
-                    }}
                     onClick={() => {
-                      if (item.id === 'chat') {
-                        // Toggle the click state when clicking chat
-                        setChatOpenedByClick(!isChatOpen);
-                        onToggleChat();
-                      } else if (item.id === 'schedule') {
-                        // Close chat if it's open when switching to schedule section
-                        if (isChatOpen) {
-                          setChatOpenedByClick(false);
-                          onToggleChat();
+                      if (item.onClick) {
+                        // Chat icon toggles chat visibility
+                        if (item.id === 'chat') {
+                          setChatOpenedByClick(!chatOpenedByClick);
+                          item.onClick();
                         }
-                        handleSectionClick(item.id);
-                      } else {
-                        // Close chat if it's open when switching to other sections
-                        if (isChatOpen) {
-                          setChatOpenedByClick(false);
-                          onToggleChat();
+                        // Other items execute their actions if not disabled
+                        else if (!item.disabled) {
+                          item.onClick();
                         }
-                        handleSectionClick(item.id);
                       }
                     }}
+                    disabled={item.disabled}
                     sx={{
                       width: 40,
                       height: 40,
                       mb: 1,
-                      color: item.id === 'chat' ? theme.palette.primary.main : 'text.secondary',
-                      backgroundColor: (item.id === 'chat' && isChatOpen) || activeSection === item.id 
+                      color: item.id === 'chat' ? theme.palette.primary.main : 
+                            item.id === 'execute-crew' ? theme.palette.primary.main : 'text.secondary',
+                      backgroundColor: (item.id === 'chat' && isChatOpen)
                         ? 'action.selected'
                         : 'transparent',
-                      borderRight: (item.id === 'chat' && isChatOpen) || activeSection === item.id 
+                      borderRight: (item.id === 'chat' && isChatOpen)
                         ? `2px solid ${theme.palette.primary.main}`
                         : '2px solid transparent',
                       borderRadius: '50%',
@@ -1003,10 +228,13 @@ const RightSidebar: React.FC<RightSidebarProps> = ({
                       alignItems: 'center',
                       justifyContent: 'center',
                       transition: 'all 0.2s cubic-bezier(.4,2,.6,1)',
-                      '&:hover': {
+                      opacity: item.disabled ? 0.6 : 1,
+                      cursor: item.disabled ? 'not-allowed' : 'pointer',
+                      '&:hover': !item.disabled ? {
                         backgroundColor: 'action.hover',
-                        color: item.id === 'chat' ? theme.palette.primary.main : 'text.primary',
-                      },
+                        color: item.id === 'chat' ? theme.palette.primary.main : 
+                              item.id === 'execute-crew' ? theme.palette.primary.main : 'text.primary',
+                      } : {},
                       animation: item.id === 'chat' && animateAIAssistant ? 'ai-bounce 1.2s' : 'none',
                     }}
                   >

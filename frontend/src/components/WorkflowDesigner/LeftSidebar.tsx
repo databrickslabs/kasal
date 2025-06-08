@@ -27,9 +27,11 @@ import {
   Memory as ModelIcon,
   Settings as SettingsIcon,
   Assessment as LogsIcon,
+  Schedule as ScheduleIcon,
 } from '@mui/icons-material';
 
 import { ShortcutConfig } from '../../types/shortcuts';
+import ScheduleList from '../Schedule/ScheduleList';
 import { useShortcutsStore } from '../../store/shortcuts';
 import { Models } from '../../types/models';
 import { ModelService } from '../../api/ModelService';
@@ -157,14 +159,17 @@ const LeftSidebar: React.FC<LeftSidebarProps> = ({
 
   // Group shortcuts by category, filtering out non-functional shortcuts
   const groupedShortcuts = useMemo(() => {
-    // List of shortcuts that are defined but don't have working implementations
+    // List of shortcuts that are defined but don't have working implementations or are removed
     const nonFunctionalActions = new Set([
       'undo',
       'redo', 
       'selectAll',
       'copy',
       'paste',
-      'toggleFullscreen'
+      'toggleFullscreen',
+      'openAgentDialog',
+      'openTaskDialog',
+      'openCrewPlanningDialog'
     ]);
 
     const result: Record<string, ShortcutConfig[]> = {
@@ -559,6 +564,22 @@ const LeftSidebar: React.FC<LeftSidebarProps> = ({
               </Box>
             );
           })}
+        </Box>
+      )
+    },
+    {
+      id: 'schedule',
+      icon: <ScheduleIcon />,
+      tooltip: 'Schedules',
+      content: (
+        <Box
+          sx={{
+            maxHeight: showRunHistory ? 'calc(100vh - 48px - 200px - 20px)' : 'calc(100vh - 48px - 20px)',
+            overflowY: 'auto',
+            p: 1,
+          }}
+        >
+          <ScheduleList />
         </Box>
       )
     }
