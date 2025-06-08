@@ -501,10 +501,13 @@ const WorkflowDesigner: React.FC<WorkflowDesignerProps> = (): JSX.Element => {
                   backgroundColor: 'background.paper',
                   zIndex: 6 // Higher than RightSidebar (5)
                 }}>
-                <ChatPanel onNodesGenerated={(newNodes, newEdges) => {
-                  setNodes(currentNodes => [...currentNodes, ...newNodes]);
-                  setEdges(currentEdges => [...currentEdges, ...newEdges]);
-                }} />
+                <ChatPanel 
+                  onNodesGenerated={(newNodes, newEdges) => {
+                    setNodes(currentNodes => [...currentNodes, ...newNodes]);
+                    setEdges(currentEdges => [...currentEdges, ...newEdges]);
+                  }}
+                  isVisible={showChatPanel}
+                />
               </Box>
             )}
           </Box>
@@ -726,16 +729,7 @@ const WorkflowDesigner: React.FC<WorkflowDesignerProps> = (): JSX.Element => {
           setIsAgentDialogOpen={setIsAgentDialogOpen}
           setIsTaskDialogOpen={setIsTaskDialogOpen}
           setIsFlowDialogOpen={dialogManager.setIsFlowDialogOpen}
-          setIsCrewPlanningOpen={dialogManager.setCrewPlanningOpen}
           setIsCrewDialogOpen={openCrewOrFlowDialog}
-          setIsAgentGenerationDialogOpen={() => {
-            const event = new CustomEvent('openAgentGenerationDialog');
-            window.dispatchEvent(event);
-          }}
-          setIsTaskGenerationDialogOpen={() => {
-            const event = new CustomEvent('openTaskGenerationDialog');
-            window.dispatchEvent(event);
-          }}
           handleExecuteCrew={() => executeCrew(nodes, edges)}
           handleExecuteFlow={() => executeFlow(nodes, edges)}
           isExecuting={isExecuting}

@@ -22,8 +22,23 @@ export const useConnectionGenerator = ({
     setIsGeneratingConnections(true);
     try {
       const nodes = reactFlowInstanceRef.current.getNodes();
+      const edges = reactFlowInstanceRef.current.getEdges();
+      
+      // Check if there are existing edges on the canvas
+      if (edges.length > 0) {
+        setSuccessMessage('Cannot generate connections: existing edges found on canvas. Please clear existing connections first.');
+        setShowSuccess(true);
+        return false;
+      }
+      
       const agentNodes = nodes.filter(node => node.type === 'agentNode');
       const taskNodes = nodes.filter(node => node.type === 'taskNode');
+      
+      if (agentNodes.length === 0 || taskNodes.length === 0) {
+        setSuccessMessage('Cannot generate connections: need both agent and task nodes on canvas');
+        setShowSuccess(true);
+        return false;
+      }
       
       let connectionsCreated = 0;
       for (const agentNode of agentNodes) {

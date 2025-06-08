@@ -22,9 +22,7 @@ import useShortcuts from '../../hooks/global/useShortcuts';
 import { Agent } from '../../types/agent';
 import { ToolService } from '../../api/ToolService';
 import { Tool as ToolType } from '../../types/agent';
-import { Tool as PlanningTool } from '../../types/tool';
 import { useJobManagementStore } from '../../store/jobManagement';
-import { RunHistoryRef } from '../../components/Jobs/ExecutionHistory';
 import { useCrewExecutionStore } from '../../store/crewExecution';
 import { useErrorStore } from '../../store/error';
 import { useRunStatusStore } from '../../store/runStatus';
@@ -100,52 +98,6 @@ interface CrewCanvasProps {
   showRunHistory?: boolean;
 }
 
-// Utility function to convert crew plan to nodes and edges
-const convertCrewPlanToGraph = (crewPlan: Crew): { nodes: Node[]; edges: Edge[] } => {
-  // Create a map of agent names to indices
-  const agentIndices = new Map<string, number>();
-  crewPlan.agents.forEach((agent, index) => {
-    agentIndices.set(agent.name, index);
-  });
-
-  // Convert agents to nodes
-  const agentNodes: Node[] = crewPlan.agents.map((agent: CrewAgent, index: number) => ({
-    id: `agent-${index}`,
-    type: 'agentNode',
-    data: { ...agent },
-    position: { x: 100 * index, y: 100 }
-  }));
-
-  // Convert tasks to nodes
-  const taskNodes: Node[] = crewPlan.tasks.map((task: CrewTask, index: number) => ({
-    id: `task-${index}`,
-    type: 'taskNode',
-    data: { ...task },
-    position: { x: 100 * index, y: 300 }
-  }));
-
-  // Create edges based on task assignments
-  const edges: Edge[] = [];
-  crewPlan.tasks.forEach((task: CrewTask, taskIndex: number) => {
-    if (task.agent_id) {
-      // Find the agent index by name
-      const agentIndex = agentIndices.get(task.agent_id);
-      if (agentIndex !== undefined) {
-        edges.push({
-          id: `edge-${taskIndex}`,
-          source: `agent-${agentIndex}`,
-          target: `task-${taskIndex}`,
-          type: 'default'
-        });
-      }
-    }
-  });
-
-  return {
-    nodes: [...agentNodes, ...taskNodes],
-    edges
-  };
-};
 
 const CrewCanvas: React.FC<CrewCanvasProps> = ({
   nodes,
@@ -239,21 +191,12 @@ const CrewCanvas: React.FC<CrewCanvasProps> = ({
   const { 
     selectedTools: _selectedAgentGenerationTools, 
     setSelectedTools: _setSelectedAgentGenerationTools,
-    tools: jobTrackerTools,
     selectedTools: _jobTrackerSelectedTools,
     setSelectedTools: _setJobTrackerSelectedTools
   } = useJobManagementStore();
 
   const { selectedModel: _selectedModel } = useCrewExecutionStore();
   const { handleExecuteCrew, isExecuting: _isExecuting } = useCrewExecution();
-
-  const _runHistoryRef = useRef<RunHistoryRef>(null);
-
-  const _planningTools = jobTrackerTools.map((tool: ToolType) => ({
-    ...tool,
-    icon: tool.icon || '',
-    enabled: tool.enabled !== false
-  })) as PlanningTool[];
 
   const {
     handleEdgesChange,
@@ -548,9 +491,6 @@ const CrewCanvas: React.FC<CrewCanvasProps> = ({
       }
       return undefined;
     },
-    onOpenAgentDialog: () => setIsAgentGenerationDialogOpen(true),
-    onOpenTaskDialog: () => setIsTaskGenerationDialogOpen(true),
-    onOpenCrewPlanningDialog: () => setIsCrewPlanningDialogOpen(true),
     onGenerateConnections: handleGenerateConnectionsWrapper,
     onOpenSaveCrew: () => {
       const event = new CustomEvent('openSaveCrewDialog');
@@ -575,7 +515,7 @@ const CrewCanvas: React.FC<CrewCanvasProps> = ({
 
   useEffect(() => {
     const checkDialogState = () => {
-      const _hasOpenDialog = document.querySelector('.MuiDialog-root') !== null;
+      document.querySelector('.MuiDialog-root') !== null;
     };
 
     const observer = new MutationObserver(checkDialogState);
@@ -633,32 +573,25 @@ const CrewCanvas: React.FC<CrewCanvasProps> = ({
       setIsTaskGenerationDialogOpen(true);
     };
     
+    const handleEdgeDelete = (event: CustomEvent) => {
+      const { id } = event.detail;
+      console.log('Deleting edge:', id);
+      onEdgesChange([{ type: 'remove', id }]);
+    };
+    
     window.addEventListener('fitViewToNodes', fitViewToNodes);
     window.addEventListener('openAgentGenerationDialog', openAgentGenerationDialog);
     window.addEventListener('openTaskGenerationDialog', openTaskGenerationDialog);
+    window.addEventListener('edge:delete', handleEdgeDelete as EventListener);
     
     return () => {
       window.removeEventListener('fitViewToNodes', fitViewToNodes);
       window.removeEventListener('openAgentGenerationDialog', openAgentGenerationDialog);
       window.removeEventListener('openTaskGenerationDialog', openTaskGenerationDialog);
+      window.removeEventListener('edge:delete', handleEdgeDelete as EventListener);
     };
-  }, [nodes, onNodesChange, errorStore]);
+  }, [nodes, onNodesChange, onEdgesChange, errorStore]);
 
-  // Handler for crew plan generation
-  const _handleCrewPlanGenerated = useCallback((crewPlan: Crew, shouldExecute: boolean) => {
-    const { nodes: crewNodes, edges: crewEdges } = convertCrewPlanToGraph(crewPlan);
-    _handleCrewSelect(crewNodes, crewEdges);
-    if (shouldExecute) {
-      handleExecuteCrewButtonClick();
-    }
-  }, [_handleCrewSelect, handleExecuteCrewButtonClick]);
-
-  // Add _handleOpenCrewPlanningDialog callback
-  const _handleOpenCrewPlanningDialog = useCallback(() => {
-    setIsCrewPlanningDialogOpen(true);
-    setSuccessMessage('Crew Planning dialog opened');
-    setShowSuccess(true);
-  }, [setSuccessMessage, setShowSuccess]);
 
   // Handler for max RPM selection
   const _handleMaxRPMSelected = useCallback(async (maxRPM: string) => {
@@ -792,8 +725,6 @@ const CrewCanvas: React.FC<CrewCanvasProps> = ({
             setIsAgentDialogOpen={setIsAgentDialogOpen}
             setIsTaskDialogOpen={setIsTaskDialogOpen}
             setIsFlowDialogOpen={setIsFlowDialogOpen}
-            setIsAgentGenerationDialogOpen={setIsAgentGenerationDialogOpen}
-            setIsTaskGenerationDialogOpen={setIsTaskGenerationDialogOpen}
             showRunHistory={showRunHistory}
           />
 
