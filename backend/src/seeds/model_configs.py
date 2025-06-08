@@ -7,6 +7,7 @@ from sqlalchemy import select
 
 from src.db.session import async_session_factory, SessionLocal
 from src.models.model_config import ModelConfig
+from src.core.unit_of_work import UnitOfWork
 
 # Configure logging
 logger = logging.getLogger(__name__)
@@ -220,120 +221,97 @@ DEFAULT_MODELS = {
 }
 
 async def seed_async():
-    """Seed model configurations into the database using async session."""
-    logger.info("Seeding model_configs table (async)...")
+    """Seed model configurations using Unit of Work pattern."""
+    logger.info("Seeding model_configs table with Unit of Work pattern...")
     
-    # Get existing model keys to avoid duplicates (outside the loop to reduce DB queries)
-    async with async_session_factory() as session:
-        result = await session.execute(select(ModelConfig.key))
-        existing_keys = {row[0] for row in result.scalars().all()}
+    # Required fields for validation
+    required_fields = ["name", "temperature", "provider", "context_window", "max_output_tokens"]
     
-    # Insert new models
+    # Counters for summary
     models_added = 0
     models_updated = 0
     models_skipped = 0
     models_error = 0
     
-    # Required fields for a valid model config
-    required_fields = ["name", "temperature", "provider", "context_window", "max_output_tokens"]
-    
-    # Process each model individually with its own session to avoid transaction problems
-    for model_key, model_data in DEFAULT_MODELS.items():
+    # Use Unit of Work pattern for clean transaction management
+    async with UnitOfWork() as uow:
         try:
-            # Validate model data structure
-            missing_fields = [field for field in required_fields if field not in model_data]
-            if missing_fields:
-                logger.error(f"Model {model_key} is missing required fields: {missing_fields}")
-                models_error += 1
-                continue
-                
-            # Validate data types
-            if not isinstance(model_data["temperature"], (int, float)):
-                logger.error(f"Model {model_key}: temperature must be a number")
-                models_error += 1
-                continue
-                
-            if not isinstance(model_data["context_window"], int):
-                logger.error(f"Model {model_key}: context_window must be an integer")
-                models_error += 1
-                continue
-                
-            if not isinstance(model_data["max_output_tokens"], int):
-                logger.error(f"Model {model_key}: max_output_tokens must be an integer")
-                models_error += 1
-                continue
+            repository = uow.model_config_repository
             
-            # Create a fresh session for each model to avoid transaction conflicts
-            try:
-                async with async_session_factory() as session:
-                    if model_key not in existing_keys:
-                        # Check again to be extra sure - this helps with race conditions
-                        check_result = await session.execute(
-                            select(ModelConfig).filter(ModelConfig.key == model_key)
-                        )
-                        existing_model = check_result.scalars().first()
+            # Get existing model keys to avoid unnecessary queries
+            existing_models = await repository.find_all()
+            existing_keys = {model.key for model in existing_models}
+            
+            # Process each model configuration
+            for model_key, model_data in DEFAULT_MODELS.items():
+                try:
+                    # Validate model data structure
+                    missing_fields = [field for field in required_fields if field not in model_data]
+                    if missing_fields:
+                        logger.error(f"Model {model_key} is missing required fields: {missing_fields}")
+                        models_error += 1
+                        continue
                         
-                        if existing_model:
-                            # If it exists now (race condition), update it instead
-                            existing_model.name = model_data["name"]
-                            existing_model.provider = model_data["provider"]
-                            existing_model.temperature = model_data["temperature"]
-                            existing_model.context_window = model_data["context_window"]
-                            existing_model.max_output_tokens = model_data["max_output_tokens"]
-                            existing_model.extended_thinking = model_data.get("extended_thinking", False)
-                            existing_model.enabled = (model_data["provider"] == "databricks")  # Only enable Databricks models
-                            existing_model.updated_at = datetime.now().replace(tzinfo=None)
-                            logger.debug(f"Updating existing model: {model_key}")
-                            models_updated += 1
-                        else:
-                            # Add new model config - only Databricks models are enabled by default
-                            model_config = ModelConfig(
-                                key=model_key,
-                                name=model_data["name"],
-                                provider=model_data["provider"],
-                                temperature=model_data["temperature"],
-                                context_window=model_data["context_window"],
-                                max_output_tokens=model_data["max_output_tokens"],
-                                extended_thinking=model_data.get("extended_thinking", False),
-                                enabled=(model_data["provider"] == "databricks"),  # Only enable Databricks models
-                                created_at=datetime.now().replace(tzinfo=None),
-                                updated_at=datetime.now().replace(tzinfo=None)
-                            )
-                            session.add(model_config)
-                            logger.debug(f"Adding new model: {model_key}")
-                            models_added += 1
-                    else:
-                        # Update existing model config - only Databricks models are enabled by default
-                        result = await session.execute(
-                            select(ModelConfig).filter(ModelConfig.key == model_key)
-                        )
-                        existing_model = result.scalars().first()
+                    # Validate data types
+                    if not isinstance(model_data["temperature"], (int, float)):
+                        logger.error(f"Model {model_key}: temperature must be a number")
+                        models_error += 1
+                        continue
                         
-                        if existing_model:
-                            existing_model.name = model_data["name"]
-                            existing_model.provider = model_data["provider"]
-                            existing_model.temperature = model_data["temperature"]
-                            existing_model.context_window = model_data["context_window"]
-                            existing_model.max_output_tokens = model_data["max_output_tokens"]
-                            existing_model.extended_thinking = model_data.get("extended_thinking", False)
-                            existing_model.enabled = (model_data["provider"] == "databricks")  # Only enable Databricks models
-                            existing_model.updated_at = datetime.now().replace(tzinfo=None)
-                            logger.debug(f"Updating existing model: {model_key}")
-                            models_updated += 1
+                    if not isinstance(model_data["context_window"], int):
+                        logger.error(f"Model {model_key}: context_window must be an integer")
+                        models_error += 1
+                        continue
+                        
+                    if not isinstance(model_data["max_output_tokens"], int):
+                        logger.error(f"Model {model_key}: max_output_tokens must be an integer")
+                        models_error += 1
+                        continue
                     
-                    # Session auto-commits when context manager exits successfully
-            except Exception as db_error:
-                if "UNIQUE constraint failed" in str(db_error):
-                    logger.warning(f"Model {model_key} already exists, skipping")
-                    models_skipped += 1
-                else:
-                    logger.error(f"Database error for model {model_key}: {str(db_error)}")
+                    # Prepare model data with defaults
+                    model_attrs = {
+                        "key": model_key,
+                        "name": model_data["name"],
+                        "provider": model_data["provider"],
+                        "temperature": model_data["temperature"],
+                        "context_window": model_data["context_window"],
+                        "max_output_tokens": model_data["max_output_tokens"],
+                        "extended_thinking": model_data.get("extended_thinking", False),
+                        "enabled": (model_data["provider"] == "databricks"),  # Only enable Databricks models
+                        "updated_at": datetime.now().replace(tzinfo=None)
+                    }
+                    
+                    if model_key in existing_keys:
+                        # Update existing model
+                        existing_model = await repository.find_by_key(model_key)
+                        if existing_model:
+                            # Update attributes without using base repository's auto-commit
+                            for attr, value in model_attrs.items():
+                                if attr != "key":  # Don't update the key
+                                    setattr(existing_model, attr, value)
+                            
+                            logger.debug(f"Updated existing model: {model_key}")
+                            models_updated += 1
+                    else:
+                        # Create new model
+                        model_attrs["created_at"] = datetime.now().replace(tzinfo=None)
+                        model_config = ModelConfig(**model_attrs)
+                        
+                        # Add to session without auto-commit (UoW will handle commit)
+                        repository.session.add(model_config)
+                        logger.debug(f"Added new model: {model_key}")
+                        models_added += 1
+                        
+                except Exception as model_error:
+                    logger.error(f"Error processing model {model_key}: {str(model_error)}")
                     models_error += 1
-        except Exception as e:
-            logger.error(f"Error processing model {model_key}: {str(e)}")
-            models_error += 1
-    
-    logger.info(f"Model configs seeding summary: Added {models_added}, Updated {models_updated}, Skipped {models_skipped}, Errors {models_error}")
+            
+            # UoW commits automatically on successful exit
+            logger.info(f"Model configs seeding summary: Added {models_added}, Updated {models_updated}, Skipped {models_skipped}, Errors {models_error}")
+            
+        except Exception as uow_error:
+            logger.error(f"Unit of Work error during model seeding: {str(uow_error)}")
+            raise
 
 def seed_sync():
     """Seed model configurations into the database using sync session."""
