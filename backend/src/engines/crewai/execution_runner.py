@@ -138,7 +138,27 @@ async def run_crew(execution_id: str, crew: Crew, running_jobs: Dict, group_cont
                 from src.services.api_keys_service import ApiKeysService
                 
                 # Explicitly set up API keys for common providers
-                await ApiKeysService.setup_openai_api_key()
+                # Handle OpenAI API key properly in Databricks Apps environment
+                try:
+                    from src.utils.databricks_auth import is_databricks_apps_environment
+                    if not is_databricks_apps_environment():
+                        await ApiKeysService.setup_openai_api_key()
+                    else:
+                        # In Databricks Apps, check if OpenAI key is configured
+                        openai_key = await ApiKeysService.get_provider_api_key("openai")
+                        if openai_key:
+                            # OpenAI key is configured, set it up normally
+                            import os
+                            os.environ["OPENAI_API_KEY"] = openai_key
+                            logger.info("OpenAI API key configured and set up in Databricks Apps environment")
+                        else:
+                            # No OpenAI key configured, set dummy key to satisfy CrewAI validation
+                            import os
+                            os.environ["OPENAI_API_KEY"] = "sk-dummy-databricks-apps-validation-key"
+                            logger.info("No OpenAI API key configured, set dummy key for validation in Databricks Apps environment")
+                except ImportError:
+                    await ApiKeysService.setup_openai_api_key()
+                
                 await ApiKeysService.setup_anthropic_api_key()
                 await ApiKeysService.setup_gemini_api_key()  # Ensure Gemini API key is properly set
                 

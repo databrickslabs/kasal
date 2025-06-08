@@ -258,6 +258,48 @@ class CrewPreparation:
                 'memory': True
             }
             
+            # Set default LLM for crew manager using the submitted model
+            try:
+                import os
+                from src.utils.databricks_auth import is_databricks_apps_environment
+                from src.core.llm_manager import LLMManager
+                
+                # In Databricks Apps environment, handle OpenAI API key properly
+                if is_databricks_apps_environment():
+                    logger.info("Databricks Apps environment detected - skipping API key requirement")
+                    # Note: OpenAI API key handling is done later before crew creation
+                
+                # Get the model from the execution config or crew config
+                requested_model = self.config.get('model') or crew_config.get('model')
+                
+                # Only set manager_llm if not already specified in crew_config
+                if 'manager_llm' not in crew_config:
+                    if requested_model:
+                        logger.info(f"Using submitted model for crew manager: {requested_model}")
+                        try:
+                            manager_llm = await LLMManager.get_llm(requested_model)
+                            crew_kwargs['manager_llm'] = manager_llm
+                            logger.info(f"Set crew manager LLM to: {requested_model}")
+                        except Exception as llm_error:
+                            logger.warning(f"Could not create LLM for model {requested_model}: {llm_error}")
+                            # Fall back to environment-appropriate default
+                            if is_databricks_apps_environment():
+                                logger.info("Falling back to Databricks model in Apps environment")
+                                fallback_llm = await LLMManager.get_llm("databricks-llama-4-maverick")
+                                crew_kwargs['manager_llm'] = fallback_llm
+                    elif is_databricks_apps_environment():
+                        logger.info("No model specified - using Databricks default in Apps environment")
+                        default_llm = await LLMManager.get_llm("databricks-llama-4-maverick")
+                        crew_kwargs['manager_llm'] = default_llm
+                    else:
+                        logger.info("No model specified - will use CrewAI defaults")
+                        
+            except ImportError:
+                logger.warning("Enhanced Databricks auth not available for crew preparation")
+            except Exception as e:
+                logger.warning(f"Error configuring crew manager LLM: {e}")
+                # Continue without setting manager_llm - CrewAI will handle defaults
+            
             # Configure embedder for memory using CrewAI's native configuration
             embedder_config = None
             for agent_config in self.config.get('agents', []):
@@ -280,39 +322,93 @@ class CrewPreparation:
                 config = embedder_config.get('config', {})
                 
                 if provider == 'databricks':
-                    # For Databricks, create a custom embedding function using LiteLLM
+                    # For Databricks, create a custom embedding function using enhanced auth
                     try:
+                        from src.utils.databricks_auth import is_databricks_apps_environment, get_databricks_auth_headers
                         from src.services.api_keys_service import ApiKeysService
                         
-                        # Get Databricks credentials directly with async/await
-                        databricks_key = await ApiKeysService.get_provider_api_key("DATABRICKS")
+                        # Use enhanced Databricks authentication
+                        databricks_key = None
+                        auth_headers = None
                         
-                        if databricks_key:
+                        if is_databricks_apps_environment():
+                            logger.info("Using Databricks Apps OAuth for embeddings in crew")
+                            # Get OAuth headers for embeddings
+                            auth_headers, error = await get_databricks_auth_headers()
+                            if error:
+                                logger.error(f"Failed to get OAuth headers for embeddings: {error}")
+                        else:
+                            logger.info("Using enhanced Databricks auth for embeddings in local environment")
+                            # Use enhanced auth system for local development too
+                            auth_headers, error = await get_databricks_auth_headers()
+                            if error:
+                                logger.warning(f"Enhanced auth failed, falling back to API key: {error}")
+                                # Fallback to API key if enhanced auth fails
+                                databricks_key = await ApiKeysService.get_provider_api_key("DATABRICKS")
+                        
+                        if databricks_key or auth_headers:
                             import os
                             from chromadb import EmbeddingFunction, Documents, Embeddings
                             import litellm
                             from typing import cast
                             
-                            # Get Databricks endpoint
-                            databricks_endpoint = os.getenv('DATABRICKS_ENDPOINT', '')
+                            # Get Databricks endpoint - prioritize environment variable
+                            databricks_endpoint = os.getenv('DATABRICKS_HOST', '')
+                            if databricks_endpoint and not databricks_endpoint.startswith('https://'):
+                                databricks_endpoint = f"https://{databricks_endpoint}"
+                            if not databricks_endpoint:
+                                databricks_endpoint = os.getenv('DATABRICKS_ENDPOINT', '')
+                            
                             model_name = config.get('model', 'databricks-gte-large-en')
                             
                             # Create custom embedding function for Databricks
                             class DatabricksEmbeddingFunction(EmbeddingFunction):
-                                def __init__(self, api_key: str, api_base: str, model: str):
+                                def __init__(self, api_key: str = None, api_base: str = None, model: str = None, auth_headers: dict = None):
                                     self.api_key = api_key
                                     self.api_base = api_base 
                                     self.model = model if model.startswith('databricks/') else f"databricks/{model}"
+                                    self.auth_headers = auth_headers
                                 
                                 def __call__(self, input: Documents) -> Embeddings:
                                     try:
-                                        # Use LiteLLM for Databricks embeddings
-                                        response = litellm.embedding(
-                                            model=self.model,
-                                            input=input,
-                                            api_key=self.api_key,
-                                            api_base=self.api_base
-                                        )
+                                        # Use direct HTTP request for OAuth or LiteLLM for API key
+                                        if self.auth_headers:
+                                            # Use direct HTTP request with OAuth headers
+                                            import aiohttp
+                                            import asyncio
+                                            import json
+                                            
+                                            async def get_embeddings():
+                                                endpoint_url = f"{self.api_base}/{self.model.replace('databricks/', '')}/invocations"
+                                                payload = {"input": input if isinstance(input, list) else [input]}
+                                                
+                                                async with aiohttp.ClientSession() as session:
+                                                    async with session.post(endpoint_url, headers=self.auth_headers, json=payload) as response:
+                                                        if response.status == 200:
+                                                            result = await response.json()
+                                                            if 'data' in result and len(result['data']) > 0:
+                                                                embeddings = [item.get('embedding', item) for item in result['data']]
+                                                                return embeddings
+                                                        else:
+                                                            error_text = await response.text()
+                                                            raise Exception(f"Embedding API error {response.status}: {error_text}")
+                                            
+                                            # Run async function in sync context
+                                            loop = asyncio.new_event_loop()
+                                            asyncio.set_event_loop(loop)
+                                            try:
+                                                embeddings = loop.run_until_complete(get_embeddings())
+                                                return cast(Embeddings, embeddings)
+                                            finally:
+                                                loop.close()
+                                        else:
+                                            # Use LiteLLM for API key authentication
+                                            response = litellm.embedding(
+                                                model=self.model,
+                                                input=input,
+                                                api_key=self.api_key,
+                                                api_base=self.api_base
+                                            )
                                         
                                         # Extract embeddings from response
                                         embeddings = [item['embedding'] for item in response['data']]
@@ -324,8 +420,9 @@ class CrewPreparation:
                             # Create the custom embedding function instance
                             databricks_embedder = DatabricksEmbeddingFunction(
                                 api_key=databricks_key,
-                                api_base=databricks_endpoint,
-                                model=model_name
+                                api_base=f"{databricks_endpoint.rstrip('/')}/serving-endpoints" if databricks_endpoint else '',
+                                model=model_name,
+                                auth_headers=auth_headers
                             )
                             
                             crew_kwargs['embedder'] = {
@@ -415,6 +512,31 @@ class CrewPreparation:
                 crew_kwargs['reasoning_llm'] = crew_config['reasoning_llm']
             
             # Create the crew instance
+            # Handle OpenAI API key properly in Databricks Apps environment
+            try:
+                import os
+                from src.utils.databricks_auth import is_databricks_apps_environment
+                if is_databricks_apps_environment():
+                    # Check if OpenAI API key is configured in the database
+                    from src.services.api_keys_service import ApiKeysService
+                    try:
+                        openai_key = await ApiKeysService.get_provider_api_key("openai")
+                        if openai_key:
+                            # OpenAI key is configured, keep it for CrewAI to use
+                            os.environ["OPENAI_API_KEY"] = openai_key
+                            logger.info("OpenAI API key is configured, keeping it for CrewAI")
+                        else:
+                            # No OpenAI key configured, set dummy key to satisfy CrewAI validation
+                            # This won't be used since we explicitly set manager_llm and agent LLMs
+                            os.environ["OPENAI_API_KEY"] = "sk-dummy-databricks-apps-validation-key"
+                            logger.info("No OpenAI API key configured, set dummy key for CrewAI validation")
+                    except Exception as api_error:
+                        logger.warning(f"Error checking OpenAI API key configuration: {api_error}")
+                        # Fall back to removing the env var to prevent validation error
+                        os.environ.pop("OPENAI_API_KEY", None)
+            except Exception as e:
+                logger.warning(f"Error handling OpenAI API key for Databricks Apps: {e}")
+            
             self.crew = Crew(**crew_kwargs)
             
             if not self.crew:
