@@ -60,8 +60,8 @@ const Tutorial: React.FC<TutorialProps> = ({ isOpen, onClose }) => {
       target: 'button[data-tour="save-crew"]',
     },
     {
-      title: '🚀 Keep Chatting with Kasal',
-      content: 'Remember: Kasal chat is your command center for everything. Ask questions, request modifications, get help, or create new crews. Your AI assistant is always ready to help you accomplish more with AI teams!',
+      title: '🚀 Keep Creating with Kasal',
+      content: 'Remember: Kasal chat is your creation command center. Use it to create agents, tasks, and crews with natural language. Type "Create agent: Data Scientist" or "Create crew: Social media team" anytime you need new AI specialists!',
       target: 'button[data-tour="kasal-chat"]',
     }
   ];
