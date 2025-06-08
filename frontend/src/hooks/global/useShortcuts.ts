@@ -28,10 +28,7 @@ export const DEFAULT_SHORTCUTS: ShortcutConfig[] = [
   { action: 'copy', keys: ['Control', 'c'], description: 'Copy selected nodes' },
   { action: 'paste', keys: ['Control', 'v'], description: 'Paste copied nodes' },
   
-  // Agent Operations
-  { action: 'openAgentDialog', keys: ['g', 'a'], description: 'Open Generate Agent dialog' },
-  { action: 'openTaskDialog', keys: ['g', 't'], description: 'Open Generate Task dialog' },
-  { action: 'openCrewPlanningDialog', keys: ['g', 'c'], description: 'Open Generate Crew Plan dialog' },
+  // Connection Operations
   { action: 'generateConnections', keys: ['c', 'c'], description: 'Generate connections between agents and tasks' },
   
   // Crew Operations
@@ -68,9 +65,6 @@ interface UseShortcutsOptions {
   onZoomOut?: () => void;
   onFitView?: () => void;
   onToggleFullscreen?: () => void;
-  onOpenAgentDialog?: () => void;
-  onOpenTaskDialog?: () => void;
-  onOpenCrewPlanningDialog?: () => void;
   onGenerateConnections?: () => void;
   onOpenSaveCrew?: () => void;
   onExecuteCrew?: () => void;
@@ -105,9 +99,6 @@ const useShortcuts = ({
   onZoomOut,
   onFitView,
   onToggleFullscreen,
-  onOpenAgentDialog,
-  onOpenTaskDialog,
-  onOpenCrewPlanningDialog,
   onGenerateConnections,
   onOpenSaveCrew,
   onExecuteCrew,
@@ -234,9 +225,6 @@ const useShortcuts = ({
         }
       },
       'fitView': () => onFitView?.(),
-      'openAgentDialog': () => onOpenAgentDialog?.(),
-      'openTaskDialog': () => onOpenTaskDialog?.(),
-      'openCrewPlanningDialog': () => onOpenCrewPlanningDialog?.(),
       'openSaveCrew': () => onOpenSaveCrew?.(),
       'executeCrew': async () => {
         if (onExecuteCrew) {
@@ -318,7 +306,7 @@ const useShortcuts = ({
     return baseHandlers;
   }, [
     onDeleteSelected, flowInstance, enableWorkflowStore, nodes, edges, setNodes, setEdges, filterNodes, filterEdges,
-    onClearCanvas, clearWorkflow, onFitView, onOpenAgentDialog, onOpenTaskDialog, onOpenCrewPlanningDialog,
+    onClearCanvas, clearWorkflow, onFitView,
     onOpenSaveCrew, onExecuteCrew, onExecuteFlow, onOpenCrewFlowDialog, onOpenFlowDialog, onUndo, onRedo, onSelectAll,
     onCopy, onPaste, onZoomIn, onZoomOut, onToggleFullscreen, onGenerateConnections,
     onChangeLLMForAllAgents, onChangeMaxRPMForAllAgents, onChangeToolsForAllAgents,
