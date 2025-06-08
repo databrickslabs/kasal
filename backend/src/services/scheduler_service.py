@@ -183,7 +183,7 @@ class SchedulerService:
         
         logger.error(f"DEBUG: Found {len(schedules)} schedules")
         for schedule in schedules:
-            logger.error(f"DEBUG:   Schedule ID: {schedule.id}, Name: {schedule.name}, Tenant: {schedule.tenant_id}")
+            logger.error(f"DEBUG:   Schedule ID: {schedule.id}, Name: {schedule.name}, Group: {schedule.group_id}")
         
         return ScheduleListResponse(
             schedules=[ScheduleResponse.model_validate(schedule) for schedule in schedules],

@@ -76,12 +76,12 @@ class ScheduleRepository:
         Find all schedules belonging to a specific tenant.
         
         Args:
-            tenant_id: ID of the tenant to filter schedules by
+            tenant_id: ID of the tenant to filter schedules by (mapped to group_id)
             
         Returns:
             List of Schedule objects belonging to the tenant
         """
-        query = select(Schedule).where(Schedule.tenant_id == tenant_id)
+        query = select(Schedule).where(Schedule.group_id == tenant_id)
         result = await self.session.execute(query)
         return list(result.scalars().all())
     

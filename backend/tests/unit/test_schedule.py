@@ -131,20 +131,18 @@ class TestSchedule:
         
         assert schedule.group_id == "group_123"
         assert schedule.created_by_email == "user@group.com"
-        assert schedule.tenant_id is None  # Legacy field should be None
     
-    def test_schedule_legacy_tenant_fields(self):
-        """Test Schedule legacy tenant fields."""
+    def test_schedule_group_fields(self):
+        """Test Schedule group fields."""
         schedule = Schedule(
-            name="Tenant Schedule",
+            name="Group Schedule",
             cron_expression="0 18 * * *",
             agents_yaml=[],
             tasks_yaml=[],
-            tenant_id="tenant_456"
+            group_id="group_456"
         )
         
-        assert schedule.tenant_id == "tenant_456"
-        assert schedule.group_id is None  # New field should be None
+        assert schedule.group_id == "group_456"
     
     def test_schedule_inactive(self):
         """Test Schedule with is_active=False."""
@@ -552,7 +550,6 @@ class TestScheduleFieldTypes:
         assert schedule.last_run_at is None
         assert schedule.next_run_at is None
         assert schedule.group_id is None
-        assert schedule.tenant_id is None
         assert schedule.created_by_email is None
 
 
@@ -714,13 +711,12 @@ class TestScheduleUsagePatterns:
     
     def test_schedule_migration_compatibility(self):
         """Test Schedule migration compatibility between tenant and group fields."""
-        # Legacy tenant-based schedule
+        # Schedule without group assignment
         tenant_schedule = Schedule(
-            name="Legacy Tenant Schedule",
+            name="Unassigned Schedule",
             cron_expression="0 12 * * *",
             agents_yaml=[],
-            tasks_yaml=[],
-            tenant_id="tenant_123"
+            tasks_yaml=[]
         )
         
         # New group-based schedule
@@ -733,12 +729,10 @@ class TestScheduleUsagePatterns:
             created_by_email="user@group.com"
         )
         
-        # Verify both can coexist
-        assert tenant_schedule.tenant_id == "tenant_123"
+        # Verify group-based scheduling
         assert tenant_schedule.group_id is None
         
         assert group_schedule.group_id == "group_456"
-        assert group_schedule.tenant_id is None
     
     def test_schedule_planning_workflow(self):
         """Test Schedule with planning workflow."""
