@@ -30,39 +30,39 @@ const Tutorial: React.FC<TutorialProps> = ({ isOpen, onClose }) => {
   // Define tutorial steps
   const steps: TutorialStep[] = [
     {
-      title: 'Welcome to Kasal!',
-      content: 'Let\'s walk through how to create and manage your AI crews.',
-      target: 'body',
+      title: '🤖 Meet Your Kasal Assistant',
+      content: 'Welcome to Kasal! Your AI assistant is your main companion for everything. Click the Kasal chat icon to open your personal AI helper who will guide you through creating and managing AI crews.',
+      target: 'button[data-tour="kasal-chat"]',
     },
     {
-      title: 'Add Agents',
-      content: 'Start by adding agents to your crew. Use the "Add Agent" button to create new agents and define their specific roles and capabilities.',
-      target: 'button[data-tour="add-agent"]',
+      title: '💬 Chat with Kasal',
+      content: 'This is where the magic happens! Chat with Kasal to create agents, tasks, or entire crews. Try commands like: "Create agent: Marketing Specialist" or "Create task: Write blog posts" or "Create crew: Content marketing team". Kasal understands natural language and will build exactly what you need.',
+      target: 'div[data-tour="chat-panel"]',
     },
     {
-      title: 'Add Tasks',
-      content: 'Next, add tasks for your agents. Use the "Add Task" button to create tasks and assign them to specific agents. You can also connect tasks on the canvas to establish dependencies between them.',
-      target: 'button[data-tour="add-task"]',
+      title: '📚 Your Crew Catalog',
+      content: 'Click "Open Workflow" to see your crew catalog. Initially empty, this becomes your team\'s library of reusable AI crews. Once you create useful templates, your entire team can load and deploy them instantly for similar projects.',
+      target: 'button[data-tour="open-workflow"]',
     },
     {
-      title: 'Save Plan',
-      content: 'Once you\'ve set up your agents and tasks, save your plan. This stores your entire workflow for future use.',
-      target: 'button[data-tour="save-plan"]',
+      title: '🎬 Watch Your Team Work',
+      content: 'Once you have a crew (from chat generation or catalog), hit "Execute Crew" to watch your AI team spring into action! You\'ll see real-time updates as agents collaborate and deliver results automatically.',
+      target: 'button[data-tour="execute-crew"]',
     },
     {
-      title: 'Load Plan',
-      content: 'Alternatively, you can load previously saved plans here instead of creating them from scratch.',
-      target: 'button[data-tour="load-plan"]',
+      title: '👀 Monitor the Action',
+      content: 'Your workflow appears on this canvas! Agents (WHO) have person icons - they\'re AI specialists like Marketing Expert or Data Analyst. Tasks (WHAT) have task icons - the actual work like "Write report" or "Analyze data". Watch connections light up as agents complete tasks and pass results. Remember: iterate to improve quality by adjusting tools, models, guardrails, and agent skills.',
+      target: 'canvas[data-tour="workflow-canvas"]',
     },
     {
-      title: 'Generate Plan',
-      content: 'Another option is to use the Generate Plan feature, which will automatically create all the agents, tasks, and dependencies for you. After generation, you can either run the plan directly or fine-tune it to your needs.',
-      target: 'button[data-tour="generate-plan"]',
+      title: '💾 Save Your Success',
+      content: 'Found a crew that works perfectly? Save it to your personal catalog! Your saved crews become instant solutions for similar future projects. Build your library of AI specialists.',
+      target: 'button[data-tour="save-crew"]',
     },
     {
-      title: 'Run Plan',
-      content: 'When you\'re ready, click "Run Plan" to execute your plan and watch your AI crew in action!',
-      target: 'button[data-tour="run-plan"]',
+      title: '🚀 Keep Chatting with Kasal',
+      content: 'Remember: Kasal chat is your command center for everything. Ask questions, request modifications, get help, or create new crews. Your AI assistant is always ready to help you accomplish more with AI teams!',
+      target: 'button[data-tour="kasal-chat"]',
     }
   ];
 
@@ -118,10 +118,13 @@ const Tutorial: React.FC<TutorialProps> = ({ isOpen, onClose }) => {
           sx: { borderRadius: 2 }
         }}
       >
-        <DialogTitle>Welcome to Kasal!</DialogTitle>
+        <DialogTitle>🚀 Welcome to Kasal!</DialogTitle>
         <DialogContent>
-          <Typography>
-            Would you like to take a quick tour to learn how to use the application?
+          <Typography sx={{ mb: 2 }}>
+            Ready to build AI teams that work autonomously? Kasal makes it as easy as having a conversation.
+          </Typography>
+          <Typography variant="body2" color="text.secondary">
+            Take a 2-minute tour to discover how to chat with AI, load proven crew templates, and watch autonomous agents collaborate in real-time.
           </Typography>
         </DialogContent>
         <DialogActions>
