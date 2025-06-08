@@ -21,8 +21,9 @@ import PersonIcon from '@mui/icons-material/Person';
 import GroupIcon from '@mui/icons-material/Group';
 import AssignmentIcon from '@mui/icons-material/Assignment';
 import AccountTreeIcon from '@mui/icons-material/AccountTree';
+import SettingsIcon from '@mui/icons-material/Settings';
 import { toast } from 'react-hot-toast';
-import DispatcherService, { DispatchResult } from '../../api/DispatcherService';
+import DispatcherService, { DispatchResult, ConfigureCrewResult } from '../../api/DispatcherService';
 import { useWorkflowStore } from '../../store/workflow';
 import { Node, Edge } from 'reactflow';
 import { Agent } from '../../types/agent';
@@ -73,12 +74,14 @@ interface WorkflowChatProps {
   onNodesGenerated?: (nodes: Node[], edges: Edge[]) => void;
   selectedModel?: string;
   selectedTools?: string[];
+  isVisible?: boolean;
 }
 
 const WorkflowChat: React.FC<WorkflowChatProps> = ({
   onNodesGenerated,
   selectedModel = 'databricks-llama-4-maverick',
   selectedTools = [],
+  isVisible = true,
 }) => {
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [inputValue, setInputValue] = useState('');
@@ -96,6 +99,44 @@ const WorkflowChat: React.FC<WorkflowChatProps> = ({
     scrollToBottom();
   }, [messages]);
 
+  // Focus the input when component mounts and when page loads
+  useEffect(() => {
+    // Multiple focus attempts to ensure it works on page load
+    const focusAttempts = [0, 100, 300, 500, 1000];
+    const timeouts: NodeJS.Timeout[] = [];
+    
+    focusAttempts.forEach(delay => {
+      const timeoutId = setTimeout(() => {
+        inputRef.current?.focus();
+      }, delay);
+      timeouts.push(timeoutId);
+    });
+    
+    return () => {
+      timeouts.forEach(clearTimeout);
+    };
+  }, []);
+
+  // Restore focus when loading completes
+  useEffect(() => {
+    if (!isLoading) {
+      const timeoutId = setTimeout(() => {
+        inputRef.current?.focus();
+      }, 100);
+      return () => clearTimeout(timeoutId);
+    }
+  }, [isLoading]);
+
+  // Focus input when component becomes visible
+  useEffect(() => {
+    if (isVisible) {
+      const timeoutId = setTimeout(() => {
+        inputRef.current?.focus();
+      }, 100);
+      return () => clearTimeout(timeoutId);
+    }
+  }, [isVisible]);
+
   const getIntentIcon = (intent?: string) => {
     switch (intent) {
       case 'generate_agent':
@@ -104,6 +145,8 @@ const WorkflowChat: React.FC<WorkflowChatProps> = ({
         return <AssignmentIcon />;
       case 'generate_crew':
         return <GroupIcon />;
+      case 'configure_crew':
+        return <SettingsIcon />;
       default:
         return <AccountTreeIcon />;
     }
@@ -210,12 +253,26 @@ const WorkflowChat: React.FC<WorkflowChatProps> = ({
         });
         
         toast.success(`Agent "${savedAgent.name}" created and saved successfully!`);
+        // Aggressive focus restoration after successful agent creation
+        const focusDelays = [100, 300, 500, 800, 1200];
+        focusDelays.forEach(delay => {
+          setTimeout(() => {
+            inputRef.current?.focus();
+          }, delay);
+        });
       } else {
         throw new Error('Failed to save agent');
       }
     } catch (error) {
       console.error('Error saving agent:', error);
       toast.error(`Failed to save agent "${agentData.name}". Please try again.`);
+      // Aggressive focus restoration even after error
+      const focusDelays = [100, 300, 500, 800];
+      focusDelays.forEach(delay => {
+        setTimeout(() => {
+          inputRef.current?.focus();
+        }, delay);
+      });
       
       // Still create the node even if saving failed, but with a warning
       setNodes((nodes) => {
@@ -266,13 +323,38 @@ const WorkflowChat: React.FC<WorkflowChatProps> = ({
 
   const handleTaskGenerated = async (taskData: GeneratedTask) => {
     try {
+      // Check if there are any agents available for auto-assignment
+      const { nodes, edges } = useWorkflowStore.getState();
+      const agentNodes = nodes.filter(n => n.type === 'agentNode');
+      
+      let assignedAgentId = "";
+      
+      // Auto-assign to first agent that doesn't have any connections
+      if (agentNodes.length > 0) {
+        // Find agents that don't have any outgoing connections to tasks
+        const agentsWithoutConnections = agentNodes.filter(agentNode => {
+          const hasTaskConnection = edges.some(edge => 
+            edge.source === agentNode.id && 
+            nodes.find(n => n.id === edge.target)?.type === 'taskNode'
+          );
+          return !hasTaskConnection;
+        });
+        
+        // If we found agents without connections, use the first one
+        if (agentsWithoutConnections.length > 0) {
+          const agentData = agentsWithoutConnections[0].data;
+          assignedAgentId = agentData.agentId || "";
+          console.log(`Auto-assigning task "${taskData.name}" to agent "${agentData.label}" (ID: ${assignedAgentId})`);
+        }
+      }
+
       // First, persist the task via TaskService (same pattern as handleAgentGenerated)
       const taskToCreate = {
         name: taskData.name,
         description: taskData.description,
         expected_output: taskData.expected_output,
         tools: taskData.tools || [],
-        agent_id: "",
+        agent_id: assignedAgentId,
         async_execution: Boolean(taskData.advanced_config?.async_execution) || false,
         markdown: Boolean(taskData.advanced_config?.markdown) || false,
         context: [],
@@ -357,13 +439,47 @@ const WorkflowChat: React.FC<WorkflowChatProps> = ({
           return updated;
         });
         
-        toast.success(`Task "${savedTask.name}" created and saved successfully!`);
+        // If task was auto-assigned to an agent, create the visual connection
+        if (assignedAgentId) {
+          setEdges((edges) => {
+            const agentNodeId = `agent-${assignedAgentId}`;
+            const taskNodeId = `task-${savedTask.id}`;
+            
+            // Create the edge between agent and task
+            const newEdge: Edge = {
+              id: `edge-${agentNodeId}-${taskNodeId}`,
+              source: agentNodeId,
+              target: taskNodeId,
+              animated: true,
+            };
+            
+            return [...edges, newEdge];
+          });
+          
+          toast.success(`Task "${savedTask.name}" created and auto-assigned to agent!`);
+        } else {
+          toast.success(`Task "${savedTask.name}" created and saved successfully!`);
+        }
+        // Aggressive focus restoration after successful task creation
+        const focusDelays = [100, 300, 500, 800, 1200];
+        focusDelays.forEach(delay => {
+          setTimeout(() => {
+            inputRef.current?.focus();
+          }, delay);
+        });
       } else {
         throw new Error('Failed to save task');
       }
     } catch (error) {
       console.error('Error saving task:', error);
       toast.error(`Failed to save task "${taskData.name}". Please try again.`);
+      // Aggressive focus restoration even after error
+      const focusDelays = [100, 300, 500, 800];
+      focusDelays.forEach(delay => {
+        setTimeout(() => {
+          inputRef.current?.focus();
+        }, delay);
+      });
       
       // Still create the node even if saving failed, but with a warning
       setNodes((nodes) => {
@@ -513,6 +629,52 @@ const WorkflowChat: React.FC<WorkflowChatProps> = ({
     }
 
     toast.success(`Crew with ${nodes.length} components created successfully!`);
+    // Aggressive focus restoration after crew creation
+    const focusDelays = [100, 300, 500, 800, 1200];
+    focusDelays.forEach(delay => {
+      setTimeout(() => {
+        inputRef.current?.focus();
+      }, delay);
+    });
+  };
+
+  const handleConfigureCrew = (configResult: ConfigureCrewResult) => {
+    // Extract configuration type and actions from the result
+    const { config_type, actions } = configResult;
+    
+    // Dispatch custom events to open dialogs (following existing pattern in CrewCanvas)
+    if (actions?.open_llm_dialog) {
+      setTimeout(() => {
+        const event = new CustomEvent('openLLMDialog');
+        window.dispatchEvent(event);
+      }, 100);
+    }
+    
+    if (actions?.open_maxr_dialog) {
+      setTimeout(() => {
+        const event = new CustomEvent('openMaxRPMDialog');
+        window.dispatchEvent(event);
+      }, 200);
+    }
+    
+    if (actions?.open_tools_dialog) {
+      setTimeout(() => {
+        const event = new CustomEvent('openToolDialog');
+        window.dispatchEvent(event);
+      }, 300);
+    }
+
+    // Show a toast message about what configuration is being opened
+    if (config_type === 'general') {
+      toast.success('Opening configuration dialogs for LLM, Max RPM, and Tools');
+    } else {
+      toast.success(`Opening ${config_type.toUpperCase()} configuration dialog`);
+    }
+
+    // Restore focus to input after dialogs are opened
+    setTimeout(() => {
+      inputRef.current?.focus();
+    }, 500);
   };
 
   const handleSendMessage = async () => {
@@ -564,6 +726,9 @@ const WorkflowChat: React.FC<WorkflowChatProps> = ({
           case 'generate_crew':
             handleCrewGenerated(result.generation_result as GeneratedCrew);
             break;
+          case 'configure_crew':
+            handleConfigureCrew(result.generation_result as ConfigureCrewResult);
+            break;
         }
       }
     } catch (error) {
@@ -580,7 +745,13 @@ const WorkflowChat: React.FC<WorkflowChatProps> = ({
       setMessages(prev => [...prev, errorMessage]);
     } finally {
       setIsLoading(false);
-      inputRef.current?.focus();
+      // Aggressive focus attempts to ensure it sticks after all async operations
+      const focusDelays = [0, 50, 100, 200, 300, 500, 800, 1200];
+      focusDelays.forEach(delay => {
+        setTimeout(() => {
+          inputRef.current?.focus();
+        }, delay);
+      });
     }
   };
 
@@ -716,8 +887,10 @@ const WorkflowChat: React.FC<WorkflowChatProps> = ({
             placeholder="Describe what you want to create..."
             value={inputValue}
             onChange={(e) => setInputValue(e.target.value)}
-            onKeyPress={handleKeyPress}
-            onKeyDown={(e) => e.stopPropagation()} // Prevent keyboard shortcuts
+            onKeyDown={(e) => {
+              handleKeyPress(e);
+              e.stopPropagation(); // Prevent keyboard shortcuts
+            }}
             disabled={isLoading}
             multiline
             maxRows={4}

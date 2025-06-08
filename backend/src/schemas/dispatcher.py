@@ -15,6 +15,8 @@ class IntentType(str, Enum):
     GENERATE_AGENT = "generate_agent"
     GENERATE_TASK = "generate_task"
     GENERATE_CREW = "generate_crew"
+    CONFIGURE_CREW = "configure_crew"
+    CONVERSATION = "conversation"
     UNKNOWN = "unknown"
 
 

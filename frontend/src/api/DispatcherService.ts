@@ -7,10 +7,22 @@ export interface DispatcherRequest {
 }
 
 export interface DispatcherResponse {
-  intent: 'generate_agent' | 'generate_task' | 'generate_crew' | 'unknown';
+  intent: 'generate_agent' | 'generate_task' | 'generate_crew' | 'configure_crew' | 'conversation' | 'unknown';
   confidence: number;
   extracted_info: Record<string, unknown>;
   suggested_prompt?: string;
+}
+
+export interface ConfigureCrewResult {
+  type: 'configure_crew';
+  config_type: 'llm' | 'maxr' | 'tools' | 'general';
+  message: string;
+  actions: {
+    open_llm_dialog: boolean;
+    open_maxr_dialog: boolean;
+    open_tools_dialog: boolean;
+  };
+  extracted_info: Record<string, unknown>;
 }
 
 export interface DispatchResult {
