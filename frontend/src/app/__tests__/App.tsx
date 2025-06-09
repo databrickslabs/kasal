@@ -9,6 +9,7 @@ import ToolForm from '../../components/Tools/ToolForm';
 import ShortcutsCircle from '../../components/ShortcutsCircle';
 import { LanguageService } from '../../api/LanguageService';
 import { WorkflowTest } from '../../components/WorkflowTest';
+import { Documentation } from '../../components/Documentation';
 import '../../config/i18n/config';
 
 function App() {
@@ -50,6 +51,7 @@ function App() {
           <Route path="/runs" element={<RunHistory />} />
           <Route path="/tools" element={<ToolForm />} />
           <Route path="/workflow-test" element={<WorkflowTest />} />
+          <Route path="/docs/*" element={<Documentation />} />
         </Routes>
       </Box>
     </ThemeProvider>

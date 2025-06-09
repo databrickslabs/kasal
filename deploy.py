@@ -1,11 +1,19 @@
 #!/usr/bin/env python3
+"""
+Direct deployment script for Kasal application.
+
+This script deploys the backend code as-is and uses import-dir for frontend_static.
+"""
 
 import os
+import shutil
+import subprocess
 import sys
-import argparse
 import logging
 import time
+import argparse
 from pathlib import Path
+from datetime import datetime
 
 from databricks.sdk import WorkspaceClient
 from databricks.sdk.service.apps import AppDeploymentMode, App, AppDeployment
@@ -20,8 +28,7 @@ logging.basicConfig(
 
 logger = logging.getLogger("deploy")
 
-def deploy_wheel_to_databricks(
-    wheel_path, 
+def deploy_source_to_databricks(
     app_name="kasal",
     user_name=None,
     workspace_dir=None,
@@ -30,14 +37,13 @@ def deploy_wheel_to_databricks(
     token=None, 
     description=None,
     oauth_scopes=None,
-    config_template=None
+    config_template=None,
+    api_url=None
 ):
-    """Deploy a wheel file to Databricks Apps"""
-    wheel_path = Path(wheel_path)
-    if not wheel_path.exists():
-        raise FileNotFoundError(f"Wheel file not found: {wheel_path}")
+    """Deploy source code to Databricks Apps"""
+    root_dir = Path(os.path.dirname(os.path.abspath(__file__)))
     
-    logger.info(f"Deploying wheel file: {wheel_path}")
+    logger.info(f"Deploying source code from: {root_dir}")
     
     # Set default workspace directory if not provided
     if user_name is None:
@@ -65,40 +71,61 @@ def deploy_wheel_to_databricks(
         logger.error(f"Failed to connect to Databricks: {e}")
         raise
     
-    # Create app.yaml in the dist folder with OAuth scopes
-    dist_dir = os.path.dirname(wheel_path)
-    app_yaml_path = os.path.join(dist_dir, "app.yaml")
-    logger.info(f"Creating app.yaml at {app_yaml_path}")
+    # Check that frontend_static exists
+    frontend_static_dir = root_dir / "frontend_static"
+    if not frontend_static_dir.exists():
+        logger.error("frontend_static directory does not exist. Please run 'python build.py' first to build the frontend.")
+        raise FileNotFoundError("frontend_static directory not found")
     
-    # Use template file if provided
-    if config_template and os.path.exists(config_template):
-        logger.info(f"Using config template: {config_template}")
-        import shutil
-        shutil.copy2(config_template, app_yaml_path)
-    else:
-        # Create app.yaml from scratch
-        with open(app_yaml_path, "w") as f:
-            f.write("command: ['python', '-m', 'kasal']\n")
-            f.write("environment_vars:\n")
-            f.write("  PYTHONPATH: '.:${PYTHONPATH}'\n")
-            f.write("  PYTHONUNBUFFERED: '1'\n")  # Ensures logs appear immediately
-            f.write("apt_packages:\n")
-            f.write("  - libpq-dev\n")  # PostgreSQL development headers for asyncpg
-            f.write("\n# OAuth scopes required for the application\n")
-            f.write("oauth_scopes:\n")
-            
-            # Use provided scopes or default comprehensive set
-            if oauth_scopes:
-                for scope in oauth_scopes:
-                    f.write(f"  - {scope}\n")
-            else:
-                # Default scopes for full functionality
-                default_scopes = [
-                    "all-apis",  # Access to all Databricks REST APIs (includes Genie)
-                    "sql"  # Access to SQL APIs and warehouses
-                ]
-                for scope in default_scopes:
-                    f.write(f"  - {scope}  # {scope.replace('.', ' ').title()}\n")
+    # Verify app.yaml exists
+    app_yaml_path = root_dir / "app.yaml"
+    if not app_yaml_path.exists():
+        logger.error("app.yaml not found in root directory. Please ensure app.yaml exists.")
+        raise FileNotFoundError("app.yaml not found")
+    
+    logger.info(f"Using existing app.yaml at {app_yaml_path}")
+    
+    # Create requirements.txt
+    requirements_path = root_dir / "requirements.txt"
+    if not requirements_path.exists():
+        logger.info("Creating requirements.txt")
+        requirements_content = """fastapi>=0.110.0
+uvicorn[standard]>=0.27.0
+sqlalchemy>=2.0.27
+pydantic>=2.6.1
+pydantic-settings>=2.1.0
+alembic>=1.13.1
+asyncpg>=0.29.0
+httpx>=0.26.0
+python-jose[cryptography]>=3.3.0
+passlib[bcrypt]>=1.7.4
+python-multipart>=0.0.9
+tenacity>=8.2.3
+greenlet>=3.0.3
+aiosqlite
+litellm
+cryptography
+databricks
+databricks-sdk
+croniter
+crewai
+pydantic[email]
+email-validator
+google-api-python-client
+pysendpulse
+langchain
+crewai_tools==0.45.0
+nixtla
+selenium
+python-pptx
+urllib3>=1.26.6
+mcp==1.9.0
+mcpadapt
+bcrypt==4.0.1
+starlette==0.40.0
+"""
+        with open(requirements_path, "w") as f:
+            f.write(requirements_content)
     
     try:
         # Check if app exists, create if not
@@ -132,99 +159,116 @@ def deploy_wheel_to_databricks(
             logger.error(f"Error checking/creating app: {e}")
             raise
         
-        # Create workspace directory and upload files
+        # Create databricksdist folder with only the files we need
         try:
-            # Ensure the workspace directory exists
-            logger.info(f"Creating workspace directory: {workspace_dir}")
-            client.workspace.mkdirs(path=workspace_dir)
+            databricks_dist = root_dir / "databricksdist"
+            logger.info(f"Creating clean databricks deployment directory: {databricks_dist}")
             
-            # Upload app.yaml file
-            logger.info("Uploading app.yaml file")
-            yaml_remote_path = f"{workspace_dir}/app.yaml"
-            with open(app_yaml_path, "rb") as f:
-                yaml_content = f.read()
-                client.workspace.upload(
-                    path=yaml_remote_path,
-                    content=yaml_content,
-                    overwrite=True,
-                    format=ImportFormat.AUTO
-                )
+            # Remove and recreate databricksdist directory
+            if databricks_dist.exists():
+                shutil.rmtree(databricks_dist)
+            databricks_dist.mkdir()
             
-            # Upload requirements.txt file if it exists
-            requirements_path = os.path.join(dist_dir, "requirements.txt")
-            if os.path.exists(requirements_path):
-                logger.info(f"Uploading requirements.txt file")
-                req_remote_path = f"{workspace_dir}/requirements.txt"
-                with open(requirements_path, "rb") as f:
-                    req_content = f.read()
-                    client.workspace.upload(
-                        path=req_remote_path,
-                        content=req_content,
-                        overwrite=True,
-                        format=ImportFormat.AUTO
-                    )
+            # Copy backend folder
+            logger.info("Copying backend folder...")
+            backend_src = root_dir / "backend"
+            backend_dst = databricks_dist / "backend"
+            if backend_src.exists():
+                shutil.copytree(backend_src, backend_dst, ignore=shutil.ignore_patterns('__pycache__', '*.pyc', '*.pyo', 'logs', '*.log'))
+                logger.info(f"Copied backend folder")
             else:
-                # Create a requirements.txt file that installs the wheel
-                logger.info("Creating requirements.txt file with wheel installation")
-                wheel_install = f"./{wheel_path.name}\n"
-                req_remote_path = f"{workspace_dir}/requirements.txt"
-                client.workspace.upload(
-                    path=req_remote_path,
-                    content=wheel_install.encode(),
-                    overwrite=True,
-                    format=ImportFormat.AUTO
-                )
+                logger.error("Backend folder not found!")
+                raise FileNotFoundError("Backend folder not found")
             
-            # Upload the wheel file
-            logger.info(f"Uploading wheel file: {wheel_path.name}")
-            wheel_remote_path = f"{workspace_dir}/{wheel_path.name}"
-            with open(wheel_path, "rb") as f:
-                wheel_content = f.read()
-                client.workspace.upload(
-                    path=wheel_remote_path,
-                    content=wheel_content,
-                    overwrite=True,
-                    format=ImportFormat.AUTO
-                )
+            # Copy frontend_static folder
+            logger.info("Copying frontend_static folder...")
+            frontend_static_src = root_dir / "frontend_static"
+            frontend_static_dst = databricks_dist / "frontend_static"
+            if frontend_static_src.exists():
+                shutil.copytree(frontend_static_src, frontend_static_dst)
+                logger.info(f"Copied frontend_static folder")
+            else:
+                logger.error("frontend_static folder not found!")
+                raise FileNotFoundError("frontend_static folder not found")
             
-            logger.info("All files uploaded successfully")
+            # Copy essential files
+            essential_files = ["app.yaml", "requirements.txt", "entrypoint.py"]
+            for file_name in essential_files:
+                src_file = root_dir / file_name
+                dst_file = databricks_dist / file_name
+                if src_file.exists():
+                    shutil.copy2(src_file, dst_file)
+                    logger.info(f"Copied {file_name}")
+                else:
+                    logger.warning(f"{file_name} not found, skipping")
+            
+            
+            # Upload databricksdist folder using databricks CLI import-dir
+            logger.info(f"Uploading clean deployment folder to workspace using import-dir")
+            
+            import_cmd = [
+                "databricks", "workspace", "import-dir", 
+                "--overwrite",
+                str(databricks_dist), 
+                workspace_dir
+            ]
+            
+            logger.info(f"About to run command: {' '.join(import_cmd)}")
+            logger.info(f"Uploading from: {databricks_dist}")
+            logger.info(f"Contents: backend/, frontend_static/, app.yaml, requirements.txt, entrypoint.py")
+            confirmation = input("Do you want to proceed with this command? (y/N): ")
+            
+            if confirmation.lower() not in ['y', 'yes']:
+                logger.info("Upload cancelled by user")
+                return False
+            
+            logger.info("Proceeding with upload...")
+            result = subprocess.run(import_cmd, check=True, capture_output=True, text=True)
+            
+            logger.info("Source code uploaded successfully using import-dir")
+            logger.info(f"Upload output: {result.stdout}")
+            if result.stderr:
+                logger.warning(f"Upload warnings: {result.stderr}")
+            
+            # Clean up databricksdist directory
+            logger.info("Cleaning up databricksdist directory")
+            shutil.rmtree(databricks_dist)
+            
+            logger.info("✅ Upload completed successfully!")
+                
+        except subprocess.CalledProcessError as e:
+            logger.error(f"Error uploading source code: {e}")
+            if e.stdout:
+                logger.error(f"Stdout: {e.stdout}")
+            if e.stderr:
+                logger.error(f"Stderr: {e.stderr}")
+            raise
         except Exception as e:
-            logger.error(f"Error uploading files: {e}")
+            logger.error(f"Error during upload: {e}")
             raise
         
-        # Deploy using absolute minimum code with enhanced logging
+        # Now deploy the app using the uploaded files
+        logger.info("=" * 60)
+        logger.info("🚀 Starting app deployment...")
+        logger.info("=" * 60)
         try:
             logger.info(f"Deploying app {app_name} from {workspace_dir}")
-            
-            # Log all imported classes and their attributes
-            logger.info(f"AppDeploymentMode type: {type(AppDeploymentMode)}")
-            logger.info(f"AppDeploymentMode class dir: {dir(AppDeploymentMode)}")
-            logger.info(f"AppDeploymentMode values: {[mode for mode in AppDeploymentMode]}")
             
             # Create an AppDeployment object to use with deploy
             try:
                 logger.info(f"Creating AppDeployment object with workspace_dir={workspace_dir}")
                 app_deployment = AppDeployment(
                     source_code_path=workspace_dir,
-                    mode=AppDeploymentMode.SNAPSHOT  # Using SNAPSHOT mode since WORKSPACE is not available
+                    mode=AppDeploymentMode.SNAPSHOT
                 )
                 logger.info(f"AppDeployment object created successfully")
-                logger.info(f"AppDeployment object type: {type(app_deployment)}")
-                logger.info(f"AppDeployment object dir: {dir(app_deployment)}")
-                logger.info(f"AppDeployment object __dict__: {app_deployment.__dict__}")
             except Exception as e:
                 logger.error(f"Error creating AppDeployment object: {e}")
                 raise
-                
-            # Log the deploy method signature
-            import inspect
-            logger.info(f"apps.deploy method signature: {inspect.signature(client.apps.deploy)}")
             
-            # Try with different formats based on SDK version 0.53.0
+            # Deploy the app
             try:
-                # Format for SDK version 0.53.0
-                logger.info("Using correct parameters for SDK version 0.53.0")
-                # Pass app_deployment as a positional argument
+                logger.info("Deploying application")
                 waiter = client.apps.deploy(
                     app_name=app_name,
                     app_deployment=app_deployment
@@ -239,7 +283,6 @@ def deploy_wheel_to_databricks(
                 try:
                     # Try with minimal parameters
                     logger.info("Attempt 2: Using minimal parameters")
-                    # Create a new deployment with the app name and app_deployment
                     result = client.apps.deploy(
                         app_name=app_name,
                         app_deployment=app_deployment
@@ -267,7 +310,6 @@ def deploy_wheel_to_databricks(
                     logger.info("App is already running - deployment successful!")
                     return True
                 logger.error(f"Error starting app: {start_error}")
-                # Try to get more details from the app's status
                 try:
                     app_info = client.apps.get(name=app_name)
                     logger.info(f"App info: {app_info}")
@@ -280,7 +322,6 @@ def deploy_wheel_to_databricks(
         except Exception as e:
             logger.error(f"Error during deployment: {e}")
             logger.error(f"Error type: {type(e)}")
-            # Try to dump the full error details
             import traceback
             logger.error(f"Traceback: {traceback.format_exc()}")
             raise
@@ -290,9 +331,7 @@ def deploy_wheel_to_databricks(
         raise
 
 def main():
-    parser = argparse.ArgumentParser(description="Deploy a wheel file to Databricks Apps")
-    parser.add_argument("--wheel", default="dist/kasal-0.1.0-py3-none-any.whl", 
-                        help="Path to the wheel file to deploy")
+    parser = argparse.ArgumentParser(description="Deploy source code to Databricks Apps")
     parser.add_argument("--app-name", default="kasal", required=True,
                         help="Name for the Databricks App (lowercase with hyphens only)")
     parser.add_argument("--user-name", default="nehme.tohme@databricks.com", required=True,
@@ -304,9 +343,11 @@ def main():
     parser.add_argument("--token", help="Databricks API token")
     parser.add_argument("--description", help="Description for the app")
     parser.add_argument("--oauth-scopes", nargs="*", 
-                        help="Custom OAuth scopes for the app (default: comprehensive set including dashboards.genie)")
+                        help="Custom OAuth scopes for the app (default: comprehensive set)")
     parser.add_argument("--config-template", 
                         help="Path to app.yaml template file (default: use built-in template)")
+    parser.add_argument("--api-url", 
+                        help="API URL to use in the frontend build (e.g. https://kasal-xxx.aws.databricksapps.com/api/v1)")
     
     args = parser.parse_args()
     
@@ -317,8 +358,7 @@ def main():
         sys.exit(1)
     
     try:
-        success = deploy_wheel_to_databricks(
-            wheel_path=args.wheel,
+        success = deploy_source_to_databricks(
             app_name=args.app_name,
             user_name=args.user_name,
             workspace_dir=args.workspace_dir,
@@ -327,7 +367,8 @@ def main():
             token=args.token,
             description=args.description,
             oauth_scopes=getattr(args, 'oauth_scopes', None),
-            config_template=getattr(args, 'config_template', None)
+            config_template=getattr(args, 'config_template', None),
+            api_url=args.api_url
         )
         
         if success:
@@ -341,4 +382,4 @@ def main():
         sys.exit(1)
 
 if __name__ == "__main__":
-    main() 
+    main()

@@ -30,10 +30,4 @@ bcrypt==4.0.1
 # Add compatible starlette version for fastapi 0.115.0
 starlette==0.40.0
 
-# Documentation
-mkdocs>=1.6.0
-mkdocs-material>=9.4.0
-mkdocstrings[python]>=0.24.0
-mkdocs-git-revision-date-localized-plugin>=1.2.0
-
 # Add any other dependencies your project requires below

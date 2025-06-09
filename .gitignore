@@ -9,6 +9,8 @@ node_modules/
 # Production
 /build
 /dist
+/databricksdist
+databricksdist/
 
 # Environment files
 .env

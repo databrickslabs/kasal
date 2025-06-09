@@ -2,25 +2,13 @@ import os
 import sys
 import logging
 import asyncio
-import warnings
 from datetime import datetime
 from contextlib import asynccontextmanager
-from pathlib import Path
 from sqlalchemy import text
-
-# Suppress known deprecation warnings from third-party libraries
-warnings.filterwarnings("ignore", category=DeprecationWarning, module="httpx")
-warnings.filterwarnings("ignore", category=DeprecationWarning, module="chromadb")
-warnings.filterwarnings("ignore", category=DeprecationWarning, module="websockets")
-warnings.filterwarnings("ignore", message=".*Use 'content=.*' to upload raw bytes/text content.*")
-warnings.filterwarnings("ignore", message=".*Accessing the 'model_fields' attribute on the instance is deprecated.*")
-warnings.filterwarnings("ignore", message=".*remove second argument of ws_handler.*")
 
 from fastapi import FastAPI, HTTPException, Request, Depends
 from fastapi.middleware.cors import CORSMiddleware
 from starlette.middleware.base import BaseHTTPMiddleware
-from fastapi.staticfiles import StaticFiles
-from fastapi.responses import RedirectResponse
 
 from src.config.settings import settings
 from src.api import api_router
@@ -44,19 +32,6 @@ os.environ["LOG_DIR"] = log_path
 # Create logs directory if it doesn't exist
 os.makedirs(log_path, exist_ok=True)
 
-# Define paths for docs
-package_dir = Path(__file__).parent.parent.parent.parent  # Go up to the package root
-docs_path = package_dir / "docs" / "site"  # Path to MkDocs static site
-
-# If we're running from the wheel package
-if not docs_path.exists():
-    kasal_package = None
-    for path in sys.path:
-        potential_path = Path(path) / "kasal" / "docs" / "site"
-        if potential_path.exists():
-            docs_path = potential_path
-            kasal_package = Path(path) / "kasal"
-            break
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
@@ -75,7 +50,6 @@ async def lifespan(app: FastAPI):
     
     # Import needed for DB init
     # pylint: disable=unused-import,import-outside-toplevel
-    from src.db.base import Base
     import src.db.all_models  # noqa
     from src.db.session import init_db
     
@@ -199,7 +173,7 @@ app = FastAPI(
     description=settings.PROJECT_DESCRIPTION,
     version=settings.VERSION,
     lifespan=lifespan,
-    # Move API docs to /api-docs to free up /docs for MkDocs
+    # Move API docs to /api-docs
     docs_url="/api-docs" if settings.DOCS_ENABLED else None,
     redoc_url="/api-redoc" if settings.DOCS_ENABLED else None,
     openapi_url="/api-openapi.json" if settings.DOCS_ENABLED else None,
@@ -223,27 +197,6 @@ app.add_middleware(BaseHTTPMiddleware, dispatch=user_context_middleware)
 # Include the main API router
 app.include_router(api_router, prefix=settings.API_V1_STR)
 
-# Mount the MkDocs static site at /docs if it exists
-if docs_path.exists():
-    logger.info(f"Mounting MkDocs documentation at /docs from {docs_path}")
-    app.mount("/docs", StaticFiles(directory=str(docs_path), html=True), name="docs")
-    
-    # Override the automatic redirect to ensure it works
-    @app.get("/docs", include_in_schema=False)
-    async def docs_redirect():
-        return RedirectResponse(url="/docs/index.html")
-        
-    @app.get("/", include_in_schema=False)
-    async def root_redirect():
-        """Redirect root to documentation"""
-        return RedirectResponse(url="/docs/index.html")
-else:
-    logger.warning(f"MkDocs documentation path not found at {docs_path}")
-    
-    # If MkDocs site is not available, redirect /docs to /api-docs
-    @app.get("/docs", include_in_schema=False)
-    async def fallback_docs_redirect():
-        return RedirectResponse(url="/api-docs")
 
 @app.on_event("startup")
 async def startup_event():
@@ -251,12 +204,7 @@ async def startup_event():
     # Any additional startup tasks can go here
     logger.info("Application startup event triggered")
     
-    # Log docs path status
-    if docs_path.exists():
-        logger.info(f"MkDocs documentation is available at /docs")
-    else:
-        logger.warning(f"MkDocs documentation path not found at {docs_path}")
-        logger.info("API documentation is available at /api-docs")
+    logger.info("API documentation is available at /api-docs")
 
 @app.on_event("shutdown")
 async def shutdown_event():
