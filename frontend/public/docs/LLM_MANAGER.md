@@ -1,4 +1,4 @@
-# LLM Manager
+# Kasal LLM Manager
 
 ## Overview
 

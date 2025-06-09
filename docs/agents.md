@@ -1,10 +1,10 @@
-# Agents Component Documentation
+# Kasal Agent Components
 
-This document provides an overview of the Agents components in the CrewAI Manager frontend application.
+This document provides an overview of the AI agent components in Kasal's frontend application for creating and managing autonomous AI agents.
 
 ## Overview
 
-The Agents components are responsible for creating, managing, editing, and visualizing agents within the CrewAI system. They handle agent configuration, tool selection, LLM model selection, knowledge source management, and more.
+The agent components handle the full lifecycle of AI agent management in Kasal - from creation and configuration to execution and monitoring. They integrate with the CrewAI engine to provide autonomous AI capabilities.
 
 ## Components Structure
 

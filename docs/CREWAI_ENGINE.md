@@ -4,6 +4,8 @@
 
 The CrewAI Engine is a modular service that integrates the [CrewAI framework](https://docs.crewai.com) into the application. It orchestrates autonomous AI agents that collaborate to perform complex tasks through a well-defined workflow. The engine is designed with a clean separation of concerns, allowing for maintainability, extensibility, and testing.
 
+⚠️ **Note**: CrewAI Flow concepts are experimental and not completely tested. While crew execution is stable and production-ready, flow execution should be used with caution in production environments.
+
 ## Core Architecture
 
 The engine follows a layered architecture pattern:
@@ -93,22 +95,22 @@ Specialized functions for specific aspects of agent/task management:
 - `task_helpers.py`: Task creation and conditional logic
 - `conversion_helpers.py`: YAML parsing and configuration conversion
 
-### Tool Registry
+### Tool Factory
 
-Central repository for available tools:
-- Discovers and registers available CrewAI tools
+Central factory for available tools:
+- Discovers and creates available CrewAI tools
 - Manages custom tool implementations
 - Provides tools to agents on demand
 - Handles API key integration
 
-**Source**: `backend/src/engines/crewai/tools/registry.py`
+**Source**: `backend/src/engines/crewai/tools/tool_factory.py`
 
 ## Execution Flow
 
 1. **Initialization**
    - Engine is initialized at application startup
    - Trace writer tasks are started
-   - Tool registry loads available tools and configurations
+   - Tool factory loads available tools and configurations
 
 2. **Configuration**
    - Frontend submits execution configuration
@@ -159,9 +161,9 @@ The engine uses an asynchronous trace processing mechanism to:
 
 ### Tool Management
 
-The tool registry provides a flexible approach to tools:
+The tool factory provides a flexible approach to tools:
 - Auto-discovery of built-in CrewAI tools
-- Registration of custom tools
+- Creation of custom tools
 - API key management
 - Context-sensitive tool provisioning
 
@@ -228,21 +230,63 @@ Important configuration options include:
 backend/src/engines/crewai/
 ├── __init__.py
 ├── crewai_engine_service.py    # Main engine service
+├── crewai_flow_service.py      # Flow execution service
 ├── config_adapter.py           # Configuration adapter
 ├── crew_preparation.py         # Crew preparation module
+├── flow_preparation.py         # Flow preparation module
 ├── execution_runner.py         # Execution runner module
 ├── trace_management.py         # Trace management module
-├── callbacks/                  # Event callbacks
 ├── crew_logger.py              # CrewAI logger
+├── memory_config.py            # Memory configuration
+├── callbacks/                  # Event callbacks
+│   ├── __init__.py
+│   ├── base.py
+│   ├── logging_callbacks.py
+│   ├── output_combiner_callbacks.py
+│   ├── storage_callbacks.py
+│   ├── streaming_callbacks.py
+│   ├── transformation_callbacks.py
+│   └── validation_callbacks.py
+├── flow/                       # Flow-specific modules
+│   ├── __init__.py
+│   ├── backend_flow.py
+│   ├── flow_runner_service.py
+│   └── modules/
+│       ├── __init__.py
+│       ├── agent_config.py
+│       ├── callback_manager.py
+│       ├── flow_builder.py
+│       └── task_config.py
+├── guardrails/                 # Guardrail implementations
+│   ├── README.md
+│   ├── __init__.py
+│   ├── base_guardrail.py
+│   └── [various guardrail implementations]
 ├── helpers/                    # Helper modules
 │   ├── __init__.py
 │   ├── agent_helpers.py
 │   ├── task_helpers.py
 │   ├── tool_helpers.py
-│   └── conversion_helpers.py
+│   ├── conversion_helpers.py
+│   ├── model_conversion_handler.py
+│   └── task_callbacks.py
+├── mcp/                        # MCP integration
+│   ├── README.md
+│   └── __init__.py
 └── tools/                      # Tool implementations
     ├── __init__.py
-    └── registry.py
+    ├── tool_factory.py
+    ├── mcp_handler.py
+    ├── custom/
+    │   ├── __init__.py
+    │   ├── databricks_custom_tool.py
+    │   ├── genie_tool.py
+    │   ├── perplexity_tool.py
+    │   └── python_pptx_tool.py
+    ├── native/
+    │   └── __init__.py
+    └── schemas/
+        └── __init__.py
 ```
 
 ## Best Practices

@@ -1,4 +1,4 @@
-# Database Migrations Guide
+# Kasal Database Migrations Guide
 
 ## Overview
 

@@ -2,6 +2,8 @@
 
 This directory contains components related to Flow management in the application, leveraging crewAI Flow concepts.
 
+⚠️ **Note**: CrewAI Flow concepts are experimental and not completely tested. Use with caution in production environments.
+
 ## Components
 
 - **FlowForm.tsx**: Main form for creating and editing flows

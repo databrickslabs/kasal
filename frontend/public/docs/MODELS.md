@@ -1,6 +1,6 @@
-# SQLAlchemy Models Guide
+# Kasal Database Models Guide
 
-This document provides comprehensive documentation for SQLAlchemy models in our backend architecture.
+This document provides comprehensive documentation for SQLAlchemy models in Kasal's AI agent workflow orchestration platform.
 
 ## Table of Contents
 
@@ -16,49 +16,63 @@ This document provides comprehensive documentation for SQLAlchemy models in our 
 
 ## Overview
 
-SQLAlchemy models represent database tables and are a core component of the **Database Layer** in our architecture. They:
+SQLAlchemy models represent database tables and define the core entities in Kasal's AI workflow orchestration system. They:
 
-- Define the data structure and relationships in the database
-- Map Python objects to database records
-- Provide a type-safe interface for working with data
-- Handle database constraints and validations
+- Define AI agent, task, crew, and execution data structures
+- Map Python objects to database records for AI workflow components
+- Provide type-safe interfaces for agent management and execution tracking
+- Handle database constraints and relationships for AI workflows
 
-Models are stored in the `src/models/` directory, with each model typically in its own file.
+Models are stored in the `backend/src/models/` directory, with each AI domain entity in its own file.
 
 ## Structure and Conventions
 
 ### File Organization
 
 ```
-src/models/
-├── __init__.py           # Exposes models for easier imports
-├── item.py               # Models related to items
-├── user.py               # Models related to users
-└── other_domain.py       # Other domain-specific models
+backend/src/models/
+├── __init__.py                     # Exposes models for easier imports
+├── agent.py                        # AI agent definitions
+├── crew.py                         # AI crew configurations
+├── task.py                         # AI task definitions
+├── execution_history.py            # Workflow execution tracking
+├── execution_logs.py               # Execution logging
+├── execution_trace.py              # Detailed execution traces
+├── flow.py                         # CrewAI flow definitions
+├── flow_execution.py               # Flow execution tracking
+├── tool.py                         # AI tool configurations
+├── model_config.py                 # LLM model configurations
+├── template.py                     # Prompt templates
+├── user.py                         # User management
+├── group.py                        # Multi-tenant groups
+├── api_key.py                      # API key management
+├── databricks_config.py            # Databricks integration
+├── schedule.py                     # Workflow scheduling
+└── documentation_embedding.py      # Vectorized documentation
 ```
 
 ### Naming Conventions
 
-- Model class names: **PascalCase**
+- Model class names: **PascalCase** (e.g., `Agent`, `ExecutionHistory`)
 - Table names: **snake_case** (auto-generated from class name)
-- Column names: **snake_case**
-- Primary key: `id` (standard across all models)
-- Foreign keys: `{table_name}_id` (e.g., `user_id`)
+- Column names: **snake_case** 
+- Primary key: `id` (UUID string for most Kasal entities)
+- Foreign keys: `{table_name}_id` (e.g., `agent_id`, `crew_id`)
+- Multi-tenant isolation: `group_id` column for tenant separation
 
 ## Base Model Configuration
 
-All models inherit from a common `Base` class which provides consistent behavior:
+All Kasal models inherit from a common `Base` class which provides consistent behavior:
 
 ```python
-# src/db/base.py
+# backend/src/db/base.py
 from typing import Any
-
 from sqlalchemy.ext.declarative import declared_attr
 from sqlalchemy.orm import DeclarativeBase
 
 
 class Base(DeclarativeBase):
-    """Base class for all database models."""
+    """Base class for all Kasal database models."""
     
     id: Any
     
@@ -67,6 +81,16 @@ class Base(DeclarativeBase):
     def __tablename__(cls) -> str:
         return cls.__name__.lower()
 ```
+
+### Key Kasal Model Patterns
+
+Most Kasal models follow these patterns:
+
+- **UUID Primary Keys**: String UUIDs for distributed system compatibility
+- **Multi-tenant Support**: `group_id` column for data isolation
+- **Audit Fields**: `created_at`, `updated_at`, `created_by_email` for tracking
+- **JSON Configuration**: Complex AI configurations stored as JSON
+- **Soft Delete**: `is_active` flags instead of hard deletes
 
 ## Model Relationships
 

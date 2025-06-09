@@ -1,6 +1,6 @@
-# Pydantic Schemas Guide
+# Kasal Pydantic Schemas Guide
 
-This document provides comprehensive documentation for Pydantic schemas in our backend architecture.
+This document provides comprehensive documentation for Pydantic schemas in Kasal's AI agent workflow orchestration platform.
 
 ## Table of Contents
 
@@ -17,7 +17,7 @@ This document provides comprehensive documentation for Pydantic schemas in our b
 
 ## Overview
 
-Pydantic schemas are Python classes that provide data validation, serialization, and documentation. In our architecture, they serve several critical purposes:
+Pydantic schemas in Kasal provide data validation, serialization, and API documentation for AI agent workflows. They serve several critical purposes in the AI orchestration platform:
 
 - **API Input Validation**: Validate incoming request data
 - **Response Serialization**: Format outgoing response data

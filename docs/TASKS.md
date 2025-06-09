@@ -1,10 +1,10 @@
-# Tasks Component Documentation
+# Kasal Task Components
 
-This document provides an overview of the Tasks components in the CrewAI Manager frontend application.
+This document provides an overview of the AI task components in Kasal's frontend application for creating and managing agent tasks.
 
 ## Overview
 
-The Tasks components are responsible for creating, managing, editing, and visualizing tasks within the CrewAI system. These components handle task configuration, tool assignment, conditional execution settings, and advanced parameters like caching, callbacks, and error handling.
+The task components handle the creation and management of AI agent tasks in Kasal. Tasks define specific objectives that agents execute as part of workflows, with support for conditional execution, error handling, and advanced configuration options.
 
 ## Components Structure
 

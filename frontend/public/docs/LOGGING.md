@@ -1,10 +1,10 @@
-# Logging Guide
+# Kasal Logging System
 
-This document provides comprehensive documentation for the logging system in our backend architecture.
+This document provides comprehensive documentation for the logging system in Kasal's AI agent workflow orchestration platform.
 
 ## Overview
 
-The application uses a structured logging approach that separates configuration from log storage. This design follows best practices for maintainability, observability, and separation of concerns.
+Kasal uses a structured logging approach designed for AI agent workflow monitoring and debugging. The system captures execution traces, agent interactions, and system events to provide comprehensive observability for autonomous AI operations.
 
 ## Logging Architecture
 
@@ -21,129 +21,228 @@ backend/
 ├── src/
 │   ├── config/
 │   │   └── logging.py     # Logging configuration
-│   └── ...
-├── logs/                 # Log files (gitignored)
-│   ├── backend.2023-06-15.log
-│   ├── backend.error.2023-06-15.log
-│   └── ...
+│   ├── core/
+│   │   └── logger.py      # Logger utilities
+│   └── engines/crewai/
+│       └── crew_logger.py # CrewAI-specific logging
+├── logs/                  # Log files (gitignored)
+│   ├── kasal.2023-06-15.log
+│   ├── kasal.error.2023-06-15.log
+│   ├── execution.2023-06-15.log
+│   └── agent_traces.2023-06-15.log
 └── ...
 ```
 
 ## Log File Naming Convention
 
-Log files follow this naming pattern:
+Kasal log files follow domain-specific naming patterns:
 
-- Regular logs: `backend.{date}.log`
-- Error logs: `backend.error.{date}.log`
+- **Application logs**: `kasal.{date}.log`
+- **Error logs**: `kasal.error.{date}.log`
+- **Execution logs**: `execution.{date}.log`
+- **Agent traces**: `agent_traces.{date}.log`
+- **CrewAI engine**: `crewai_engine.{date}.log`
 
-For example: `backend.2023-06-15.log` or `backend.error.2023-06-15.log`
+For example: `kasal.2023-06-15.log` or `execution.2023-06-15.log`
 
 ## Configuration Details
 
-The logging system is configured in `src/config/logging.py` and provides:
+Kasal's logging system is configured in `backend/src/config/logging.py` and provides specialized logging for AI operations:
 
 ### Environment-Based Configuration
 
-The logging configuration adapts based on the application environment:
+The logging configuration adapts based on deployment environment:
 
-- **Development**: Verbose console output with DEBUG level, formatted for readability
-- **Staging**: More structured output with INFO level
-- **Production**: Minimal console output but comprehensive file logging
+- **Development**: Verbose console output with DEBUG level for agent debugging
+- **Databricks Apps**: Structured output optimized for Databricks logging infrastructure
+- **Production**: Comprehensive file logging with execution trace collection
 
 ### Log Handlers
 
-Three types of handlers are configured:
+Kasal configures specialized handlers for different types of operations:
 
-1. **Console Handler**: Outputs logs to the console (stdout)
-2. **File Handler**: Writes all INFO and above logs to a daily log file
-3. **Error File Handler**: Writes only ERROR and above logs to a separate error log file
+1. **Console Handler**: Real-time output for development and debugging
+2. **Application File Handler**: General Kasal application events and system logs
+3. **Execution File Handler**: Agent execution events, workflow progress, and completion status
+4. **Trace File Handler**: Detailed agent interaction traces and CrewAI framework events
+5. **Error File Handler**: Error events, failed executions, and system exceptions
 
 ### Log Formatting
 
-Two formats are available:
+Kasal uses context-aware formatting for different log types:
 
 1. **Simple Format**: `%(asctime)s - %(levelname)s - %(message)s`
    - Used for development console output
-   - Example: `2023-06-15 14:30:45 - INFO - Application started`
+   - Example: `2023-06-15 14:30:45 - INFO - CrewAI engine initialized`
 
-2. **Verbose Format**: `%(asctime)s - %(name)s - %(levelname)s - [%(filename)s:%(lineno)d] - %(message)s`
-   - Used for file logging and production environments
-   - Example: `2023-06-15 14:30:45 - myapp.services - INFO - [user_service.py:45] - User created with ID 123`
+2. **Execution Format**: `%(asctime)s - %(name)s - %(levelname)s - [EXEC:%(execution_id)s] - %(message)s`
+   - Used for agent execution tracking
+   - Example: `2023-06-15 14:30:45 - crewai.engine - INFO - [EXEC:abc123] - Agent started task execution`
+
+3. **Verbose Format**: `%(asctime)s - %(name)s - %(levelname)s - [%(filename)s:%(lineno)d] - %(message)s`
+   - Used for file logging and system events
+   - Example: `2023-06-15 14:30:45 - kasal.services.agent - INFO - [agent_service.py:45] - Agent created with ID abc123`
 
 ## Using the Logging System
 
 ### Getting a Logger
 
-To use the logging system in your code:
+To use the logging system in Kasal code:
 
 ```python
-from src.config.logging import get_logger
+from src.core.logger import logger
 
-# Use the module name for the logger
-logger = get_logger(__name__)
-
-# Now use the logger
-logger.debug("Detailed debugging information")
-logger.info("Normal application event")
-logger.warning("Something unexpected but not critical")
-logger.error("Something failed but application continues")
-logger.critical("Application cannot continue")
+# Use the centralized logger for consistency
+logger.debug("Agent configuration validated")
+logger.info("Crew execution started")
+logger.warning("LLM rate limit approaching")
+logger.error("Agent execution failed")
+logger.critical("CrewAI engine crashed")
 ```
 
-### Logging Best Practices
+### Execution Context Logging
 
-1. **Use Structured Logging**: Include relevant context in your log messages
+For agent executions, include execution context:
 
 ```python
-# Instead of:
-logger.info(f"User {user_id} created")
+from src.core.logger import logger
 
-# Use:
-logger.info("User created", extra={"user_id": user_id, "email": email})
+# Log with execution ID for traceability
+execution_id = "exec_abc123"
+logger.info(f"[{execution_id}] Starting agent execution")
+logger.info(f"[{execution_id}] Agent completed task: {task_name}")
+logger.error(f"[{execution_id}] Agent failed: {error_message}")
 ```
 
-2. **Choose Appropriate Log Levels**:
-   - `DEBUG`: Detailed information for debugging
-   - `INFO`: Confirmation that things are working
-   - `WARNING`: Something unexpected but not an error
-   - `ERROR`: An error that prevents a function from working
-   - `CRITICAL`: An error that prevents the application from working
+### Kasal-Specific Logging Best Practices
 
-3. **Include Exception Information**:
+1. **Use Structured Logging for AI Operations**: Include relevant context
+
+```python
+# Agent creation
+logger.info("Agent created", extra={
+    "agent_id": agent_id, 
+    "agent_name": agent.name,
+    "tools": agent.tools,
+    "model": agent.model_config
+})
+
+# Execution tracking
+logger.info("Execution started", extra={
+    "execution_id": execution_id,
+    "crew_size": len(crew.agents),
+    "tasks_count": len(crew.tasks)
+})
+```
+
+2. **Choose Appropriate Log Levels for AI Operations**:
+   - `DEBUG`: Tool interactions, model API calls, detailed agent reasoning
+   - `INFO`: Execution milestones, agent task completion, workflow progress
+   - `WARNING`: LLM rate limits, tool failures, performance issues
+   - `ERROR`: Agent execution failures, invalid configurations, API errors
+   - `CRITICAL`: CrewAI engine crashes, system-wide failures
+
+3. **Handle AI-Specific Exceptions**:
 
 ```python
 try:
-    # Some code that might raise an exception
-    result = complex_operation()
+    result = await crew.kickoff()
+except CrewAIException as e:
+    logger.exception(f"CrewAI execution failed for {execution_id}")
+except LLMRateLimitError as e:
+    logger.warning(f"Rate limit hit during execution {execution_id}")
 except Exception as e:
-    logger.exception("Failed to perform complex operation")
-    # The exception() method automatically includes the stack trace
+    logger.exception(f"Unexpected error in execution {execution_id}")
 ```
 
 ## Log Rotation
 
-Log files are automatically rotated when they reach 10MB, with a maximum of 5 backup files kept for each log type. This prevents logs from consuming excessive disk space.
+Kasal log files are automatically rotated to manage disk space:
+
+- **Size-based rotation**: When files reach 10MB
+- **Backup retention**: Maximum of 5 backup files per log type
+- **Daily rotation**: Execution and trace logs rotate daily for better organization
+- **Compression**: Older log files are compressed to save space
 
 ## Production Considerations
 
-In production environments, consider:
+For Kasal production deployments (especially Databricks Apps):
 
-1. **External Log Aggregation**: Configure additional handlers for services like ELK, Datadog, or Sentry
-2. **Log Security**: Ensure logs don't contain sensitive information (PII, credentials, etc.)
-3. **Monitoring**: Set up alerts based on ERROR and CRITICAL log events
+1. **Databricks Integration**: Logs automatically integrate with Databricks logging infrastructure
+2. **External Monitoring**: Configure additional handlers for Datadog, Sentry, or ELK stack
+3. **Security**: Ensure logs don't contain sensitive information:
+   - API keys and credentials
+   - User data processed by agents
+   - Proprietary business logic in agent prompts
+4. **Performance Monitoring**: Set up alerts for:
+   - Agent execution failures
+   - LLM API errors
+   - High execution times
+   - Resource usage spikes
+5. **Trace Sampling**: In high-volume environments, consider sampling agent traces to reduce log volume
 
 ## Initializing the Logging System
 
-The logging system is automatically initialized when the application starts:
+Kasal's logging system is automatically initialized during FastAPI startup:
 
 ```python
-# In main.py or startup code
+# In backend/src/main.py
 from src.config.logging import setup_logging
+from src.core.logger import logger
 
-# Initialize logging with the current environment
-setup_logging(env="development")  # or "production", "staging"
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    # Initialize logging based on environment
+    setup_logging()
+    logger.info("Kasal logging system initialized")
+    
+    # Initialize AI engines with logging
+    await initialize_engines()
+    
+    yield
+    
+    logger.info("Kasal shutdown complete")
 ```
+
+## CrewAI Engine Logging
+
+The CrewAI engine has specialized logging for AI operations:
+
+```python
+# In backend/src/engines/crewai/crew_logger.py
+class CrewLogger:
+    def log_agent_start(self, agent_name: str, task: str):
+        logger.info(f"Agent {agent_name} starting task: {task}")
+    
+    def log_tool_use(self, agent_name: str, tool_name: str, input_data: str):
+        logger.debug(f"Agent {agent_name} using tool {tool_name}: {input_data}")
+    
+    def log_agent_complete(self, agent_name: str, result: str):
+        logger.info(f"Agent {agent_name} completed task with result: {result[:100]}...")
+```
+
+## Monitoring AI Agent Workflows
+
+Kasal's logging system provides comprehensive monitoring for AI agent workflows:
+
+### Execution Tracking
+- Agent lifecycle events (start, task completion, finish)
+- Tool usage and API calls
+- LLM interactions and token usage
+- Workflow progress and decision points
+
+### Performance Monitoring
+- Execution duration and resource usage
+- LLM response times and rate limiting
+- Tool performance and failure rates
+- System resource utilization
+
+### Debugging Support
+- Detailed execution traces for failed workflows
+- Agent reasoning and decision logging
+- Tool input/output capture
+- Error context and stack traces
 
 ## Conclusion
 
-Following these logging practices ensures that our application produces consistent, useful logs that aid in debugging, monitoring, and understanding system behavior across all environments. 
+Kasal's logging system is designed specifically for AI agent workflow orchestration, providing the observability needed to monitor, debug, and optimize autonomous AI operations across development and production environments. 

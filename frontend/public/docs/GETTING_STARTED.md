@@ -6,8 +6,6 @@ This guide will help you set up and run the Kasal platform on your local machine
 
 - **Python 3.9 or higher** for the backend
 - **Node.js 16 or higher** for the frontend
-- **Poetry** for Python dependency management
-- **npm** for frontend dependency management
 
 ## Project Setup
 
@@ -18,52 +16,33 @@ git clone https://github.com/yourusername/kasal.git
 cd kasal
 ```
 
-### 2. Backend Setup
-
-#### Install Dependencies
+### 2. Start the Backend
 
 ```bash
-cd backend
-poetry install
+./run.sh
+```
+
+#### Database Options
+
+```bash
+# For SQLite database (default for development)
+./run.sh sqlite
+
+# For PostgreSQL database
+./run.sh postgres
 ```
 
 #### Environment Configuration
 
-Create a `.env` file in the backend directory:
-
-```bash
-cp .env.example .env
-```
-
-Edit the `.env` file to configure:
+Create a `.env` file in the backend directory if needed for custom settings:
 
 - Database settings (SQLite by default for development)
 - API keys for any integrated LLM services
 - Other environment-specific settings
 
-#### Initialize the Database
-
-Run database migrations:
-
-```bash
-poetry run alembic upgrade head
-```
-
-The application is configured to automatically seed the database with initial data on startup. If you want to disable this, set `AUTO_SEED_DATABASE=false` in your `.env` file.
-
-#### Start the Backend Server
-
-```bash
-# Either use the provided script
-./run.sh
-
-# Or start with uvicorn directly
-poetry run uvicorn src.main:app --reload
-```
-
 The backend API will be available at http://localhost:8000.
 
-### 3. Frontend Setup
+### 3. Frontend Setup (for UI deployment only)
 
 #### Install Dependencies
 
@@ -80,51 +59,25 @@ npm start
 
 The frontend will be available at http://localhost:3000.
 
-## Building the Documentation
+## Documentation
 
-Kasal uses MkDocs with the Material theme for documentation. To build and view the documentation locally:
+Documentation files are written in Markdown and located in the `docs/` directory.
 
-### 1. Install MkDocs and the Material theme
+### Accessing Documentation
 
-```bash
-pip install mkdocs mkdocs-material
-```
+- **Project Documentation**: Available in the `docs/` directory
 
-### 2. Build the documentation
+### Editing Documentation
 
-```bash
-# From the project root
-mkdocs build
-```
-
-This will generate the documentation site in the `docs/site` directory.
-
-### 3. Serve the documentation locally
-
-```bash
-# From the project root
-mkdocs serve
-```
-
-This will start a local server at http://127.0.0.1:8000/ where you can view the documentation.
-
-### 4. Editing Documentation
-
-Documentation files are written in Markdown and located in the `docs/` directory. To update the Getting Started guide:
-
-1. Edit the `docs/GETTING_STARTED.md` file
-2. Run `mkdocs serve` to preview changes in real-time
-3. Once satisfied, commit your changes to the repository
-
-The backend server will automatically serve the documentation at http://localhost:8000/docs when running.
+1. Edit any `.md` file in the `docs/` directory
+2. Documentation is available both locally and when deployed
 
 ## Accessing the Application
 
-Once both the backend and frontend are running, you can access:
+Once the backend is running, you can access:
 
-- **Kasal Web Interface**: http://localhost:3000
-- **API Documentation**: http://localhost:8000/api-docs
-- **Project Documentation**: http://localhost:8000/docs
+- **Web Interface**: http://localhost:3000 (if frontend is running)
+- **Health Check**: http://localhost:8000/health
 
 ## Project Structure
 
@@ -148,18 +101,14 @@ backend/
 └── tests/               # Test suite
 ```
 
-### Frontend (React + TypeScript)
+### Frontend (for UI deployment only)
 
 ```
 frontend/
-├── src/                 # Application source code
-│   ├── components/      # Reusable UI components
-│   ├── pages/           # Page components
-│   ├── hooks/           # Custom React hooks
-│   ├── services/        # API services
-│   ├── store/           # State management with Zustand
-│   ├── types/           # TypeScript type definitions
-│   ├── utils/           # Utility functions
+├── src/                 # React application source
+│   ├── components/      # UI components
+│   ├── api/             # API client services
+│   └── ...              # Other frontend files
 └── public/              # Static assets
 ```
 
@@ -167,27 +116,25 @@ frontend/
 
 ### Creating Your First Agent Workflow
 
-1. Access the Kasal web interface at http://localhost:3000
-2. Navigate to the workspace page
-3. Use the visual designer to:
-   - Create agents by dragging them onto the canvas
-   - Define agent properties, tools, and memory
-   - Connect agents to create workflows
-   - Configure task dependencies
+Use the REST API to create AI agent workflows:
+
+1. Create agents via `POST /api/v1/agents`
+2. Define tasks via `POST /api/v1/tasks`
+3. Build crews via `POST /api/v1/crews`
+4. Configure LLM models and tools
 
 ### Running Your Workflow
 
-1. Save your workflow
-2. Click the "Execute" button to run the workflow
-3. Monitor execution in real-time
-4. View results in the execution panel
+1. Execute crews via `POST /api/v1/executions`
+2. Monitor execution status via `GET /api/v1/executions/{id}`
+3. View logs and traces via execution endpoints
+4. Access results through the API
 
 ## Development Guidelines
 
 - **Backend Development**: Follow the clean architecture pattern with clear separation between layers
 - **API Design**: Use RESTful principles for all endpoints
 - **Database Changes**: Create migrations using Alembic for any model changes
-- **Frontend Development**: Use TypeScript for all components and maintain a consistent UI design
 - **Testing**: Write tests for all new features
 
 ## Troubleshooting
@@ -195,20 +142,19 @@ frontend/
 ### Common Issues
 
 - **Database Errors**: Verify your database configuration in `.env`
-- **Connection Refused**: Ensure both backend and frontend servers are running
+- **Connection Refused**: Ensure backend server is running
 - **Authentication Errors**: Check API keys and credentials in `.env`
-- **Frontend Build Errors**: Clean node_modules and reinstall dependencies
+- **API Errors**: Check logs in `backend/logs/` for detailed error information
 
 ### Getting Help
 
 If you encounter issues:
 
 1. Check the logs in `backend/logs/`
-2. Review the API documentation at http://localhost:8000/api-docs
-3. Consult the comprehensive documentation at http://localhost:8000/docs
+2. Consult the documentation in the `docs/` directory
+3. Check the health endpoint at http://localhost:8000/health
 
 ## Next Steps
 
 - Learn about [Kasal Architecture](ARCHITECTURE.md)
-- Explore the [CrewAI Engine](CREWAI_ENGINE.md) integration
-- Understand [Frontend State Management](zustand.md) 
+- Explore the [CrewAI Engine](CREWAI_ENGINE.md) integration 

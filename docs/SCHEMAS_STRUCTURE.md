@@ -1,103 +1,138 @@
-# Schemas Folder Structure
+# Kasal Schemas Structure
 
-This document provides a detailed guide to the organization and structure of the schemas folder in our FastAPI backend.
+This document provides a detailed guide to the organization and structure of the schemas folder in Kasal's FastAPI backend.
 
 ## Overview
 
-The `src/schemas/` directory contains all Pydantic models used for data validation, serialization, and documentation. These schemas are organized by domain and follow a consistent pattern to ensure maintainability and scalability.
+The `backend/src/schemas/` directory contains all Pydantic models used for AI agent workflow validation, serialization, and API documentation. These schemas are organized by Kasal domain concepts and follow consistent patterns for AI orchestration.
 
 ## Directory Structure
 
 ```
-src/schemas/
+backend/src/schemas/
 ├── __init__.py                 # Re-exports important schemas for easier imports
-├── base.py                     # Common base schemas and mixins
-├── item/                       # Item domain schemas
-│   ├── __init__.py             # Re-exports from this domain
-│   ├── item.py                 # Main item schemas
-│   └── item_category.py        # Related item category schemas
-├── user/                       # User domain schemas
-│   ├── __init__.py             # Re-exports from this domain
-│   ├── user.py                 # Main user schemas
-│   ├── profile.py              # User profile schemas
-│   └── auth.py                 # Authentication-related schemas
-├── order/                      # Order domain schemas
-│   ├── __init__.py             # Re-exports from this domain
-│   ├── order.py                # Main order schemas
-│   └── order_item.py           # Order item schemas
-└── common/                     # Shared/common schemas
-    ├── __init__.py             # Re-exports common schemas
-    ├── pagination.py           # Pagination schemas
-    ├── responses.py            # Common response schemas
-    └── filters.py              # Query filter schemas
+├── agent.py                    # AI agent configuration and response schemas
+├── api_key.py                  # API key management schemas
+├── connection.py               # Database and external connection schemas
+├── crew.py                     # AI crew configuration and workflow schemas
+├── databricks_config.py        # Databricks integration schemas
+├── databricks_secret.py        # Databricks secrets management
+├── dispatcher.py               # Task dispatching and routing schemas
+├── documentation_embedding.py  # Documentation vectorization schemas
+├── engine_config.py            # AI engine configuration schemas
+├── execution.py                # Agent execution and monitoring schemas
+├── execution_history.py        # Execution tracking and history
+├── execution_logs.py           # Execution logging and trace schemas
+├── execution_trace.py          # Detailed execution trace schemas
+├── flow.py                     # CrewAI flow configuration schemas
+├── flow_execution.py           # Flow execution management
+├── group.py                    # User group and tenant schemas
+├── job_execution.py            # Job execution wrapper schemas
+├── log.py                      # System logging schemas
+├── mcp.py                      # Model Context Protocol schemas
+├── memory.py                   # Agent memory and context schemas
+├── model_config.py             # LLM model configuration schemas
+├── model_provider.py           # LLM provider integration schemas
+├── schedule.py                 # Workflow scheduling schemas
+├── scheduler.py                # Scheduler management schemas
+├── schema.py                   # JSON schema validation schemas
+├── task.py                     # AI task definition schemas
+├── task_generation.py          # AI-powered task generation
+├── task_tracking.py            # Task execution monitoring
+├── template.py                 # Prompt template schemas
+├── template_generation.py      # AI template generation schemas
+├── tool.py                     # AI tool configuration schemas
+├── uc_function.py              # Unity Catalog function schemas
+├── uc_tool.py                  # Unity Catalog tool integration
+├── upload.py                   # File upload and management schemas
+└── user.py                     # User management and authentication schemas
 ```
 
 ## Organization Principles
 
-### Domain-Based Organization
+### AI Domain-Based Organization
 
-Schemas are organized by domain (business entity) to maintain separation of concerns:
+Kasal schemas are organized by AI workflow domains to maintain clear separation of concerns:
 
-- Each major domain has its own subdirectory (`item/`, `user/`, `order/`, etc.)
-- Related schemas within a domain are grouped in the same file or closely related files
-- Common/shared schemas are kept in the `common/` directory
+- **Core AI entities**: `agent.py`, `crew.py`, `task.py`, `tool.py`
+- **Execution management**: `execution.py`, `execution_history.py`, `execution_logs.py`, `execution_trace.py`
+- **Configuration**: `engine_config.py`, `model_config.py`, `databricks_config.py`
+- **Generation and AI assistance**: `task_generation.py`, `template_generation.py`
+- **Integration**: `mcp.py`, `uc_function.py`, `uc_tool.py`
+- **Infrastructure**: `user.py`, `group.py`, `api_key.py`, `schedule.py`
 
 ### Re-export Pattern
 
-To make imports cleaner throughout the application, we use the re-export pattern:
+Kasal uses the re-export pattern for cleaner imports throughout the application:
 
 ```python
-# src/schemas/__init__.py
-from src.schemas.item import Item, ItemCreate, ItemUpdate
+# backend/src/schemas/__init__.py
+from src.schemas.agent import Agent, AgentCreate, AgentUpdate, AgentResponse
+from src.schemas.crew import Crew, CrewCreate, CrewConfig
+from src.schemas.task import Task, TaskCreate, TaskUpdate
+from src.schemas.execution import ExecutionCreate, ExecutionResponse
 from src.schemas.user import User, UserCreate, UserUpdate
-from src.schemas.common import PaginatedResponse, ErrorResponse
 
 # This allows imports like:
-# from src.schemas import User, ItemCreate
+# from src.schemas import Agent, CrewConfig, ExecutionResponse
 # Instead of:
-# from src.schemas.user import User
-# from src.schemas.item import ItemCreate
+# from src.schemas.agent import Agent
+# from src.schemas.crew import CrewConfig
+# from src.schemas.execution import ExecutionResponse
 ```
 
 ### File Naming Conventions
 
-- Use singular nouns for schema files (`item.py`, not `items.py`)
+- Use singular nouns for schema files (`agent.py`, not `agents.py`)
 - Use snake_case for filenames
-- Name files after the primary entity they represent
-- Use descriptive suffixes for related schemas (e.g., `item_category.py`)
+- Name files after the primary AI entity they represent
+- Use descriptive suffixes for related functionality:
+  - `task_generation.py` for AI-powered task creation
+  - `execution_history.py` for execution tracking
+  - `databricks_config.py` for platform-specific configuration
 
 ## Schema Organization Within Files
 
-Each schema file follows a consistent organization pattern:
+Each Kasal schema file follows a consistent organization pattern:
 
 ```python
 # Imports
 from datetime import datetime
-from typing import List, Optional
+from typing import List, Optional, Dict, Any
 
 from pydantic import BaseModel, Field
 
 # Base schemas
-class BaseItem(BaseModel):
-    """Base schema with common item attributes."""
-    name: str
-    description: Optional[str] = None
+class BaseAgent(BaseModel):
+    """Base schema with common agent attributes."""
+    name: str = Field(..., description="Agent name")
+    role: str = Field(..., description="Agent role description")
+    goal: str = Field(..., description="Agent goal")
+    backstory: str = Field(..., description="Agent backstory")
     
 # Input schemas
-class ItemCreate(BaseItem):
-    """Schema for creating a new item."""
-    category_id: int
+class AgentCreate(BaseAgent):
+    """Schema for creating a new AI agent."""
+    tools: List[str] = Field(default_factory=list, description="List of tool names")
+    model_config: Optional[Dict[str, Any]] = Field(None, description="LLM configuration")
+    max_rpm: Optional[int] = Field(10, description="Maximum requests per minute")
 
-class ItemUpdate(BaseModel):
-    """Schema for updating an existing item."""
+class AgentUpdate(BaseModel):
+    """Schema for updating an existing agent."""
     name: Optional[str] = None
-    description: Optional[str] = None
-    category_id: Optional[int] = None
+    role: Optional[str] = None
+    goal: Optional[str] = None
+    backstory: Optional[str] = None
+    tools: Optional[List[str]] = None
+    model_config: Optional[Dict[str, Any]] = None
     
 # Response schemas
-class Item(BaseItem):
-    """Schema for item responses."""
-    id: int
+class AgentResponse(BaseAgent):
+    """Schema for agent API responses."""
+    id: str = Field(..., description="Agent UUID")
+    tools: List[str]
+    model_config: Optional[Dict[str, Any]]
+    is_active: bool
     created_at: datetime
     updated_at: datetime
     
@@ -105,72 +140,88 @@ class Item(BaseItem):
         from_attributes = True
 ```
 
-## Common Schema Types in Each Domain
+## Common Schema Types in Kasal Domains
 
-Each domain typically includes these schema types:
+Each Kasal domain typically includes these schema types:
 
-1. **Base Schemas**: Common attributes shared across schemas (e.g., `BaseItem`)
-2. **Create Schemas**: Validation for resource creation (e.g., `ItemCreate`)
-3. **Update Schemas**: Validation for resource updates (e.g., `ItemUpdate`)
-4. **Response Schemas**: Shapes of API responses (e.g., `Item`)
-5. **Query Schemas**: Parameters for filtering/querying (e.g., `ItemQuery`)
+1. **Base Schemas**: Common AI entity attributes (e.g., `BaseAgent`, `BaseTask`)
+2. **Create Schemas**: Validation for AI resource creation (e.g., `AgentCreate`, `CrewCreate`)
+3. **Update Schemas**: Validation for AI resource updates (e.g., `AgentUpdate`, `TaskUpdate`)
+4. **Response Schemas**: API response shapes (e.g., `AgentResponse`, `ExecutionResponse`)
+5. **Config Schemas**: Configuration for AI operations (e.g., `CrewConfig`, `ModelConfig`)
+6. **Generation Schemas**: AI-powered generation requests (e.g., `TaskGenerationRequest`)
 
-## Common Folder
+## AI-Specific Schema Patterns
 
-The `common/` folder contains schemas that are used across multiple domains:
+Kasal implements specialized schema patterns for AI operations:
 
-- **Pagination**: Schemas for paginated responses
-- **Responses**: Standard response wrappers (success, error)
-- **Filters**: Common query parameter schemas
+### Configuration Schemas
+Complex nested configurations for AI engines and models:
 
-Example:
 ```python
-# src/schemas/common/pagination.py
-from typing import Generic, List, TypeVar
-from pydantic import BaseModel
-
-T = TypeVar('T')
-
-class PaginationParams(BaseModel):
-    """Query parameters for pagination."""
-    page: int = 1
-    limit: int = 10
-
-class PaginatedResponse(BaseModel, Generic[T]):
-    """A paginated response containing items of type T."""
-    items: List[T]
-    total: int
-    page: int
-    limit: int
-    pages: int
+# backend/src/schemas/model_config.py
+class ModelConfig(BaseModel):
+    """LLM model configuration schema."""
+    provider: str = Field(..., description="LLM provider (openai, anthropic, etc.)")
+    model: str = Field(..., description="Model name")
+    temperature: float = Field(0.7, ge=0.0, le=2.0)
+    max_tokens: Optional[int] = Field(None, gt=0)
+    api_key: Optional[str] = Field(None, description="Provider API key")
 ```
 
-## Best Practices for Schema Organization
+### Execution Schemas
+Schemas for tracking AI agent execution state:
 
-1. **Keep related schemas together**: Group schemas that are commonly used together
-2. **Don't over-nest**: Avoid creating deep directory hierarchies
-3. **Be consistent with naming**: Follow established naming conventions
-4. **Provide re-exports**: Make imports easier with proper re-exports
-5. **Document relationships**: Comment on how schemas relate to each other
-6. **Avoid circular imports**: Structure files to prevent circular dependencies
+```python
+# backend/src/schemas/execution.py
+class ExecutionCreate(BaseModel):
+    """Schema for creating agent executions."""
+    crew_config: CrewConfig
+    inputs: Optional[Dict[str, Any]] = None
+    
+class ExecutionResponse(BaseModel):
+    """Schema for execution status responses."""
+    id: str
+    status: ExecutionStatus
+    result: Optional[str] = None
+    error: Optional[str] = None
+    started_at: Optional[datetime] = None
+    completed_at: Optional[datetime] = None
+```
 
-## Integration with API Routes
+## Best Practices for Kasal Schema Organization
 
-The schema folder structure should mirror the API route structure where possible:
+1. **Group AI-related schemas**: Keep agent, task, and execution schemas logically grouped
+2. **Use flat structure**: Avoid deep nesting since AI domains are well-defined
+3. **Be consistent with AI naming**: Follow AI/ML terminology conventions
+4. **Provide comprehensive re-exports**: Make AI schema imports clean and intuitive
+5. **Document AI relationships**: Comment on agent-task-crew relationships
+6. **Avoid circular imports**: Especially important with complex AI workflow dependencies
+7. **Validate AI configurations**: Use Pydantic validators for tool configs and model parameters
+8. **Support extensibility**: Design schemas to accommodate new AI engines and tools
 
-- For `/api/v1/items` endpoints, use schemas from `schemas/item/`
-- For `/api/v1/users` endpoints, use schemas from `schemas/user/`
+## Integration with Kasal API Routes
 
-This makes it easier to locate the relevant schemas for each endpoint.
+The schema structure aligns with Kasal's AI-focused API routes:
 
-## Schema Evolution and Versioning
+- For `/api/v1/agents` endpoints, use schemas from `schemas/agent.py`
+- For `/api/v1/crews` endpoints, use schemas from `schemas/crew.py`
+- For `/api/v1/executions` endpoints, use schemas from `schemas/execution.py`
+- For `/api/v1/tasks` endpoints, use schemas from `schemas/task.py`
+- For AI generation endpoints, use schemas from `schemas/task_generation.py`, `schemas/template_generation.py`
 
-When APIs evolve, schemas may need versioning:
+This alignment makes it intuitive to locate AI-specific schemas for each endpoint.
 
-- Keep backwards-compatible changes in existing schemas when possible
-- For breaking changes, consider creating versioned schemas (e.g., `item_v2.py`)
-- Document deprecated schemas and fields with appropriate warnings
+## AI Schema Evolution and Versioning
+
+As Kasal's AI capabilities evolve, schemas require careful versioning:
+
+- **Backwards compatibility**: Keep existing AI workflows functional when adding new capabilities
+- **Engine updates**: When CrewAI or other engines update, create versioned schemas if needed
+- **Model evolution**: Support new LLM providers and models without breaking existing configurations
+- **Tool expansion**: Design tool schemas to accommodate new AI tools and capabilities
+- **Deprecation warnings**: Document deprecated AI features with migration paths
 
 ## Conclusion
 
-Following these organization principles makes our schema structure maintainable, scalable, and easy to navigate. The domain-driven organization ensures that related schemas are grouped together logically, while the consistent file and schema naming makes the codebase more predictable and easier to work with. 
+Kasal's schema organization is specifically designed for AI agent workflow orchestration. The flat, domain-driven structure ensures that AI-related schemas are easily discoverable and maintainable. The consistent naming and organization patterns make it straightforward to add new AI capabilities while maintaining backwards compatibility for existing workflows. 

@@ -45,7 +45,6 @@ const docSections: DocSection[] = [
       { label: 'Overview', file: 'ARCHITECTURE' },
       { label: 'Authorization', file: 'AUTHORIZATION' },
       { label: 'Security Model', file: 'SECURITY_MODEL' },
-      { label: 'Repository Pattern', file: 'REPOSITORY_PATTERN' },
       { label: 'Database Migrations', file: 'DATABASE_MIGRATIONS' },
       { label: 'Database Seeding', file: 'DATABASE_SEEDING' },
       { label: 'Models', file: 'MODELS' },
@@ -54,32 +53,26 @@ const docSections: DocSection[] = [
     ],
   },
   {
-    label: 'Features',
+    label: 'Backend Features',
     items: [
-      { label: 'Generation Features', file: 'generation' },
       { label: 'CrewAI Engine', file: 'CREWAI_ENGINE' },
       { label: 'LLM Manager', file: 'LLM_MANAGER' },
       { label: 'Logging', file: 'LOGGING' },
-      { label: 'Workflows', file: 'workflow' },
-      { label: 'Tasks', file: 'task' },
-      { label: 'Jobs', file: 'job' },
-      { label: 'Flows', file: 'flows' },
-      { label: 'Agents', file: 'agents' },
-      { label: 'Crew', file: 'crew' },
+      { label: 'Tasks', file: 'TASKS' },
+      { label: 'Agents', file: 'AGENTS' },
     ],
   },
   {
-    label: 'Development',
+    label: 'API & Usage',
     items: [
-      { label: 'Zustand State Management', file: 'zustand' },
-      { label: 'Node Decorators', file: 'nodeDecorator' },
-      { label: 'Shortcuts', file: 'shortcuts' },
+      { label: 'REST API', file: 'API' },
+      { label: 'Shortcuts', file: 'SHORTCUTS' },
     ],
   },
   {
-    label: 'Build & Deploy',
+    label: 'Deployment',
     items: [
-      { label: 'Build Guide', file: 'BUILD' },
+      { label: 'Deployment Guide', file: 'DEPLOYMENT_GUIDE' },
     ],
   },
 ];

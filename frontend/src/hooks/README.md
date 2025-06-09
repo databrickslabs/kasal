@@ -1,8 +1,17 @@
 # Hooks Documentation
 
+This directory contains React hooks organized by usage pattern and functionality.
+
+## Directory Structure
+
+- **`components/`** - Component-specific hooks
+- **`context/`** - Context-related hooks  
+- **`global/`** - Application-wide hooks
+- **`workflow/`** - Workflow and canvas management hooks
+
 ## useShortcuts
 
-The `useShortcuts` hook provides keyboard shortcut functionality for canvas components and other parts of the application.
+The `useShortcuts` hook provides keyboard shortcut functionality for canvas components and workflow operations.
 
 ### Usage
 
@@ -210,46 +219,14 @@ const CanvasWithShortcuts: React.FC = () => {
 export default CanvasWithShortcuts;
 ```
 
-### Default Shortcuts
+### Key Features
 
-The hook comes with the following default shortcuts:
+- **Multi-key sequences** - Support for vim-style key combinations
+- **Dialog awareness** - Automatically disabled when dialogs are open
+- **Workflow integration** - Built-in validation for crew/flow operations
+- **Extensible** - Easy to add new shortcuts and handlers
 
-| Action | Keyboard Shortcut | Description |
-|--------|------------------|-------------|
-| Delete Selected | `Delete` or `Backspace` or `dd` | Delete selected nodes or edges |
-| Clear Canvas | `dd` | Clear entire canvas |
-| Undo | `Ctrl+Z` | Undo last action |
-| Redo | `Ctrl+Shift+Z` or `Ctrl+Y` | Redo last undone action |
-| Select All | `Ctrl+A` | Select all nodes |
-| Copy | `Ctrl+C` | Copy selected nodes |
-| Paste | `Ctrl+V` | Paste copied nodes |
-| Zoom In | `Ctrl+=` | Zoom in |
-| Zoom Out | `Ctrl+-` | Zoom out |
-| Fit View | `ff` | Fit view to all nodes |
-| Toggle Fullscreen | `F` | Toggle fullscreen mode |
-
-### Customizing Shortcuts
-
-You can customize the shortcuts by passing your own configuration:
-
-```tsx
-import useShortcuts, { ShortcutConfig } from '../hooks/useShortcuts';
-
-// Custom shortcuts
-const myShortcuts: ShortcutConfig[] = [
-  { action: 'deleteSelected', keys: ['x'], description: 'Delete selected nodes' },
-  { action: 'clearCanvas', keys: ['Shift', 'c'], description: 'Clear canvas' },
-  // Add your custom shortcuts here
-];
-
-// In your component
-useShortcuts({
-  shortcuts: myShortcuts,
-  flowInstance: flowInstanceRef.current,
-  onDeleteSelected: handleDeleteSelected,
-  // other handlers
-});
-```
+For a complete list of available shortcuts, see **[Keyboard Shortcuts Guide](../../../docs/SHORTCUTS.md)**.
 
 ### API
 

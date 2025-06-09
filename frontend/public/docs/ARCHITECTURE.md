@@ -1,6 +1,6 @@
-# Modern Python Backend Architecture
+# Kasal Application Architecture
 
-This document provides a comprehensive guide to the architecture and design patterns used in our modern Python backend, built with FastAPI and SQLAlchemy 2.0.
+This document provides a comprehensive guide to the architecture and design patterns used in Kasal, an AI agent workflow orchestration platform built with FastAPI and React.
 
 ## Table of Contents
 
@@ -19,47 +19,47 @@ This document provides a comprehensive guide to the architecture and design patt
 
 ## Architecture Overview
 
-This backend follows a layered architecture pattern with clear separation of concerns, promoting maintainability, testability, and scalability. The architecture is inspired by Domain-Driven Design (DDD) principles and Clean Architecture.
+Kasal is a full-stack application for building and managing AI agent workflows. The architecture follows a layered pattern with clear separation between frontend and backend concerns.
 
 ```
-┌─────────────────┐
-│                 │
-│    API Layer    │ FastAPI Routes
-│                 │
-└────────┬────────┘
-         │
-         ▼
-┌─────────────────┐
-│                 │
-│  Service Layer  │ Business Logic
-│                 │
-└────────┬────────┘
-         │
-         ▼
-┌─────────────────┐
-│                 │
-│ Repository Layer│ Data Access 
-│                 │
-└────────┬────────┘
-         │
-         ▼
-┌─────────────────┐
-│                 │
-│ Database Layer  │ SQLAlchemy Models
-│                 │
-└─────────────────┘
+┌─────────────────────────────────────────────────────────┐
+│                    Frontend (React)                     │
+│  ┌─────────────┐  ┌─────────────┐  ┌─────────────────┐  │
+│  │ Components  │  │   Hooks     │  │ State (Zustand) │  │
+│  └─────────────┘  └─────────────┘  └─────────────────┘  │
+│  ┌─────────────┐  ┌─────────────┐  ┌─────────────────┐  │
+│  │   Canvas    │  │   Dialogs   │  │   API Service   │  │
+│  └─────────────┘  └─────────────┘  └─────────────────┘  │
+└─────────────────────┬───────────────────────────────────┘
+                      │ HTTP/WebSocket
+                      ▼
+┌─────────────────────────────────────────────────────────┐
+│                   Backend (FastAPI)                    │
+│  ┌─────────────┐  ┌─────────────┐  ┌─────────────────┐  │
+│  │ API Routes  │  │  Services   │  │   Repositories  │  │
+│  └─────────────┘  └─────────────┘  └─────────────────┘  │
+│  ┌─────────────┐  ┌─────────────┐  ┌─────────────────┐  │
+│  │ CrewAI      │  │   LLM       │  │   Models        │  │
+│  │ Engine      │  │  Manager    │  │  (SQLAlchemy)   │  │
+│  └─────────────┘  └─────────────┘  └─────────────────┘  │
+└─────────────────────┬───────────────────────────────────┘
+                      │
+                      ▼
+┌─────────────────────────────────────────────────────────┐
+│              Database (SQLite/PostgreSQL)              │
+└─────────────────────────────────────────────────────────┘
 ```
 
 ### Key Features
 
-- **Fully Asynchronous**: Uses Python's async/await throughout all layers for maximum performance
-- **Type Safety**: Comprehensive type hints for improved code quality and IDE support
-- **Clean Separation**: Each layer has distinct responsibilities with well-defined interfaces
-- **Dependency Injection**: Ensures loose coupling and easier testing
-- **Repository Pattern**: Abstracts database access logic
-- **Unit of Work Pattern**: Manages database transactions consistently
-- **Database Seeding**: Idempotent population of predefined data
-- **Consolidated Services**: Related functionality grouped in cohesive service modules
+- **Visual Workflow Designer**: React-based drag-and-drop interface for building AI agent workflows
+- **AI Agent Orchestration**: CrewAI engine integration for managing autonomous AI agents
+- **Multi-LLM Support**: LLM manager supporting OpenAI, Anthropic, DeepSeek, Ollama, and Databricks
+- **Real-time Execution**: Live monitoring of agent workflows with detailed logging and tracing
+- **Extensible Tools**: Rich toolkit including Genie, custom APIs, MCP servers, and data connectors
+- **Enterprise Security**: OAuth integration, role-based access control, and secure deployment
+- **Database Flexibility**: Support for both SQLite (development) and PostgreSQL (production)
+- **Databricks Integration**: Native deployment to Databricks Apps with OAuth scope management
 
 ## Design Patterns
 

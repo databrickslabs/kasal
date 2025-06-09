@@ -1,20 +1,21 @@
 # Databricks Apps Deployment Guide
 
-This guide explains how to deploy your application to Databricks Apps with proper OAuth scopes configuration.
+This guide explains how to deploy your application to Databricks Apps.
+
+## Prerequisites
+
+1. **Build the frontend**: Run `python build.py` to create the `frontend_static` directory
+2. **Configure app.yaml**: Ensure `app.yaml` exists in the root directory with proper OAuth scopes
+3. **Databricks CLI**: Ensure the Databricks CLI is installed and configured
 
 ## Quick Start
 
 ```bash
-# Deploy with default comprehensive scopes (recommended)
+# First, build the frontend
+python build.py
+
+# Then deploy the application
 python deploy.py --app-name my-kasal-app --user-name your.email@company.com
-
-# Deploy with minimal scopes for Genie functionality only
-python deploy.py --app-name my-kasal-app --user-name your.email@company.com \
-  --oauth-scopes dashboards.genie sql sql.warehouses sql.statement-execution
-
-# Deploy using a custom configuration template
-python deploy.py --app-name my-kasal-app --user-name your.email@company.com \
-  --config-template app-config-template.yaml
 ```
 
 ## OAuth Scopes
@@ -46,25 +47,31 @@ The application supports the following OAuth scopes:
 ### File Operations
 - `files.files` - File operations
 
-## Configuration Options
+## OAuth Scopes Configuration
 
-### Using Custom Scopes
-```bash
-python deploy.py --app-name my-app --user-name user@company.com \
-  --oauth-scopes dashboards.genie sql sql.warehouses sql.statement-execution
+OAuth scopes must be configured in the Databricks Apps UI after deployment, not in the app.yaml file.
+
+### Required OAuth Scopes Setup
+
+1. Deploy your application using `python deploy.py`
+2. Navigate to your Databricks workspace → "Apps" → [Your App] → "Authorization"
+3. Configure the required OAuth scopes based on your tools:
+
+**Essential scopes for most use cases:**
+```
+dashboards.genie
+sql
+sql.warehouses
+sql.statement-execution
+serving.serving-endpoints
+serving.serving-endpoints-data-plane
 ```
 
-### Using Configuration Template
-1. Copy `app-config-template.yaml` to your custom configuration
-2. Modify the `oauth_scopes` section as needed
-3. Deploy with `--config-template` parameter
+### Scope Dependencies by Tool
 
-```bash
-cp app-config-template.yaml my-app-config.yaml
-# Edit my-app-config.yaml to customize scopes
-python deploy.py --app-name my-app --user-name user@company.com \
-  --config-template my-app-config.yaml
-```
+- **Genie Tool**: `dashboards.genie`, `sql`, `sql.warehouses`, `sql.statement-execution`
+- **Model Serving**: `serving.serving-endpoints`, `serving.serving-endpoints-data-plane`
+- **Vector Search**: `vectorsearch.vector-search-endpoints`, `vectorsearch.vector-search-indexes`
 
 ## Authentication Flow
 
@@ -103,10 +110,10 @@ oauth_scopes:
 ## Complete Deployment Example
 
 ```bash
-# Build the wheel
+# Build the frontend
 python build.py
 
-# Deploy with comprehensive scopes
+# Deploy the application
 python deploy.py \
   --app-name kasal-production \
   --user-name admin@company.com \
@@ -114,10 +121,13 @@ python deploy.py \
   --profile production
 ```
 
-The deployment will:
-1. Create an `app.yaml` with the specified OAuth scopes
-2. Upload the wheel file and dependencies
-3. Deploy to Databricks Apps
-4. Start the application
+### Post-Deployment Steps
 
-Users will be prompted to grant consent for the requested scopes when they first access the app.
+1. **Configure OAuth Scopes**: Go to Databricks Apps UI → [Your App] → Authorization and add required scopes
+2. **Test the Application**: Access the app URL and verify functionality
+3. **User Authorization**: Users will be prompted to grant consent for the requested scopes when they first access the app
+
+The deployment will:
+1. Upload the backend code and frontend static files
+2. Deploy to Databricks Apps using the existing `app.yaml`
+3. Start the application

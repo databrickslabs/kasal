@@ -1,8 +1,8 @@
-# Security Model
+# Kasal Security Model
 
 ## Overview
 
-Kasal implements a comprehensive hybrid multi-group security model with Role-Based Access Control (RBAC) that provides both individual privacy and team collaboration capabilities. The system automatically adapts security boundaries based on group membership without requiring user configuration.
+Kasal implements a multi-tenant security model with Role-Based Access Control (RBAC) designed for AI agent workflow orchestration. The system provides data isolation between users and groups while enabling secure collaboration on AI workflows.
 
 ## Table of Contents
 
