@@ -31,9 +31,10 @@ logger_manager = LoggerManager()
 class LogCaptureHandler(logging.Handler):
     """Captures all log records for a specific job."""
     
-    def __init__(self, job_id: str):
+    def __init__(self, job_id: str, group_context=None):
         super().__init__()
         self.job_id = job_id
+        self.group_context = group_context
         self.buffer = []
         self.buffer_size = 50  # Maximum number of individual log entries to hold
         
@@ -100,11 +101,12 @@ class LogCaptureHandler(logging.Handler):
                 
                 logger_manager.system.info(f"[flush] Processing group {i+1}/{len(grouped_logs)}")
                 
-                # Enqueue log directly to the queue system
+                # Enqueue log directly to the queue system with group context
                 success = enqueue_log(
                     execution_id=self.job_id,
                     content=combined_message,
-                    timestamp=timestamp
+                    timestamp=timestamp,
+                    group_context=self.group_context
                 )
                 
                 if success:
@@ -130,14 +132,15 @@ class LogCaptureHandler(logging.Handler):
 class JobOutputCallback(CrewAICallback):
     """Callback for streaming job output to the database."""
     
-    def __init__(self, job_id: str, task_key: str = None, config: Dict[str, Any] = None, max_retries: int = 3):
+    def __init__(self, job_id: str, task_key: str = None, config: Dict[str, Any] = None, max_retries: int = 3, group_context=None):
         super().__init__(max_retries)
         self.job_id = job_id
         self.task_key = task_key
         self.config = config
+        self.group_context = group_context
         
-        # Create and configure the log handler
-        self.log_handler = LogCaptureHandler(job_id)
+        # Create and configure the log handler with group context
+        self.log_handler = LogCaptureHandler(job_id, group_context)
         self.log_handler.setFormatter(
             logging.Formatter(
                 '[%(name)s] %(asctime)s - %(levelname)s - %(message)s',
@@ -154,10 +157,11 @@ class JobOutputCallback(CrewAICallback):
         
         logger_manager.system.info(f"Initialized JobOutputCallback for job {job_id}")
         
-        # Send initialization message
+        # Send initialization message with group context
         enqueue_log(
             execution_id=job_id,
-            content=f"[INITIALIZATION] Job {job_id} started at {datetime.now(UTC).isoformat()}"
+            content=f"[INITIALIZATION] Job {job_id} started at {datetime.now(UTC).isoformat()}",
+            group_context=self.group_context
         )
         logger_manager.system.info(f"Sent initialization message for job {job_id}")
         
@@ -171,7 +175,8 @@ class JobOutputCallback(CrewAICallback):
                 # Log the configuration
                 enqueue_log(
                     execution_id=job_id,
-                    content=config_message
+                    content=config_message,
+                    group_context=self.group_context
                 )
                 logger_manager.system.info(f"Logged configuration for job {job_id}")
             except Exception as e:
@@ -219,10 +224,11 @@ class JobOutputCallback(CrewAICallback):
                 logger_manager.system.info("[JobOutputCallback.execute] Logging non-empty message to crew logger")
                 logger_manager.crew.info(message)
                 
-                # Directly enqueue message for database persistence
+                # Directly enqueue message for database persistence with group context
                 success = enqueue_log(
                     execution_id=self.job_id,
-                    content=message
+                    content=message,
+                    group_context=self.group_context
                 )
                 
                 if success:
@@ -237,7 +243,8 @@ class JobOutputCallback(CrewAICallback):
                         logger_manager.system.info(f"[JobOutputCallback.execute] Sending task completion marker")
                         enqueue_log(
                             execution_id=self.job_id,
-                            content=completion_message
+                            content=completion_message,
+                            group_context=self.group_context
                         )
                         logger_manager.system.info("[JobOutputCallback.execute] Task completion marker sent successfully")
                     except Exception as e:
@@ -271,10 +278,11 @@ class JobOutputCallback(CrewAICallback):
             logging.getLogger('LiteLLM').removeHandler(self.log_handler)
             self.log_handler.close()
             
-            # Send finalization message
+            # Send finalization message with group context
             enqueue_log(
                 execution_id=self.job_id,
-                content=f"[FINALIZATION] Job {self.job_id} completed at {datetime.now(UTC).isoformat()}"
+                content=f"[FINALIZATION] Job {self.job_id} completed at {datetime.now(UTC).isoformat()}",
+                group_context=self.group_context
             )
             logger_manager.system.info(f"Finalized JobOutputCallback for job {self.job_id}")
         except Exception as e:
@@ -287,16 +295,18 @@ class EventStreamingCallback:
     Uses the event bus system to capture and stream events in real-time.
     """
     
-    def __init__(self, job_id: str, config: Dict[str, Any] = None):
+    def __init__(self, job_id: str, config: Dict[str, Any] = None, group_context=None):
         """
         Initialize the event streaming callback.
         
         Args:
             job_id: The execution/job ID to associate logs with
             config: Optional configuration dictionary
+            group_context: Group context for logging isolation
         """
         self.job_id = job_id
         self.config = config
+        self.group_context = group_context
         self._setup_event_handlers()
         logger_manager.system.info(f"Initialized EventStreamingCallback for job {job_id}")
         
@@ -307,10 +317,11 @@ class EventStreamingCallback:
                 sanitized_config = self._sanitize_config(self.config)
                 config_message = f"[CONFIG] Job configuration:\n{json.dumps(sanitized_config, indent=2)}"
                 
-                # Log the configuration
+                # Log the configuration with group context
                 enqueue_log(
                     execution_id=job_id,
-                    content=config_message
+                    content=config_message,
+                    group_context=self.group_context
                 )
                 logger_manager.system.info(f"Logged configuration for job {job_id}")
             except Exception as e:
@@ -365,10 +376,11 @@ Parameters: {params_str[:500]}...
 Timestamp: {datetime.now(UTC).isoformat()}
 """
                 
-                # Stream the message
+                # Stream the message with group context
                 enqueue_log(
                     execution_id=self.job_id,
-                    content=message
+                    content=message,
+                    group_context=self.group_context
                 )
                 
             except Exception as e:

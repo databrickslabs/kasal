@@ -121,16 +121,18 @@ from src.schemas.tool import ToolUpdate
 from src.utils.encryption_utils import EncryptionUtils
 
 class ToolFactory:
-    def __init__(self, config, api_keys_service=None):
+    def __init__(self, config, api_keys_service=None, user_token=None):
         """
         Initialize the tool factory with configuration
         
         Args:
             config: Configuration dictionary for the factory
             api_keys_service: Optional ApiKeysService for retrieving API keys
+            user_token: User access token for OAuth authentication
         """
         self.config = config
         self.api_keys_service = api_keys_service
+        self.user_token = user_token
         # Store tools by both ID and title for easy lookup
         self._available_tools: Dict[str, object] = {}
         self._tool_implementations = {}
@@ -204,18 +206,19 @@ class ToolFactory:
         self._initialized = False
     
     @classmethod
-    async def create(cls, config, api_keys_service=None):
+    async def create(cls, config, api_keys_service=None, user_token=None):
         """
         Async factory method to create and initialize a ToolFactory instance.
         
         Args:
             config: Configuration dictionary for the factory
             api_keys_service: Optional ApiKeysService for retrieving API keys
+            user_token: User access token for OAuth authentication
             
         Returns:
             Initialized ToolFactory instance
         """
-        instance = cls(config, api_keys_service)
+        instance = cls(config, api_keys_service, user_token)
         await instance.initialize()
         return instance
     
@@ -871,65 +874,94 @@ class ToolFactory:
                 # Create a copy of the config
                 genie_tool_config = {**tool_config}
                 
-                # Get API key from tool config
-                api_key = tool_config.get('api_key', '')
+                # Try to get user token from multiple sources for OAuth/OBO authentication
+                user_token = tool_config.get('user_token') or self.user_token
                 
-                # Try to get the key from environment first
-                databricks_api_key = os.environ.get("DATABRICKS_API_KEY")
+                # If no user token in config or factory, try to get from context
+                if not user_token:
+                    try:
+                        from src.utils.user_context import UserContext
+                        user_token = UserContext.get_user_token()
+                        if user_token:
+                            logger.info(f"Extracted user token from context for GenieTool OBO authentication: {user_token[:10]}...")
+                        else:
+                            logger.warning("No user token found in context for GenieTool")
+                            # Also check if group context has a token
+                            group_context = UserContext.get_group_context()
+                            if group_context and group_context.access_token:
+                                user_token = group_context.access_token
+                                logger.info(f"Found user token in group context: {user_token[:10]}...")
+                            else:
+                                logger.warning("No user token in group context either")
+                    except Exception as e:
+                        logger.error(f"Could not extract user token from context: {e}")
+                        import traceback
+                        logger.error(traceback.format_exc())
                 
-                # If not found in environment, try to get it from the service
-                if not databricks_api_key and not api_key:
-                    # Use the API keys service if provided, otherwise use the normal methods
-                    if self.api_keys_service is not None:
-                        logger.info("Using ApiKeysService to get DATABRICKS_API_KEY")
-                        try:
-                            # Check if we're in an async context
-                            asyncio.get_running_loop()
-                            # Use ThreadPoolExecutor to call async method from sync context
-                            import concurrent.futures
-                            with concurrent.futures.ThreadPoolExecutor() as pool:
-                                db_api_key = pool.submit(
-                                    self._run_in_new_loop,
-                                    self._get_api_key_async, 
-                                    "DATABRICKS_API_KEY"
-                                ).result()
-                        except RuntimeError:
-                            # Not in async context
-                            loop = asyncio.new_event_loop()
+                # Check if we should use OAuth authentication (Databricks Apps environment)
+                use_oauth = bool(user_token)
+                
+                # If we don't have a user token, try traditional API key approach
+                if not use_oauth:
+                    # Get API key from tool config
+                    api_key = tool_config.get('api_key', '')
+                    
+                    # Try to get the key from environment first
+                    databricks_api_key = os.environ.get("DATABRICKS_API_KEY")
+                    
+                    # If not found in environment, try to get it from the service
+                    if not databricks_api_key and not api_key:
+                        # Use the API keys service if provided, otherwise use the normal methods
+                        if self.api_keys_service is not None:
+                            logger.info("Using ApiKeysService to get DATABRICKS_API_KEY")
                             try:
-                                asyncio.set_event_loop(loop)
-                                db_api_key = loop.run_until_complete(
-                                    self._get_api_key_async("DATABRICKS_API_KEY")
-                                )
-                            finally:
-                                loop.close()
-                    else:
-                        # Fallback to original method
-                        logger.info("No ApiKeysService provided, using fallback method for DATABRICKS_API_KEY")
-                        try:
-                            # Check if we're already in an event loop
-                            current_loop = asyncio.get_running_loop()
-                            # We're in an async context, use ThreadPoolExecutor
-                            import concurrent.futures
-                            with concurrent.futures.ThreadPoolExecutor() as pool:
-                                db_api_key = pool.submit(self._run_in_new_loop, 
-                                                        self._get_api_key_async, 
-                                                        "DATABRICKS_API_KEY").result()
-                        except RuntimeError:
-                            # We're not in an async context, use direct method
-                            db_api_key = self._get_api_key("DATABRICKS_API_KEY")
-                        
-                        if db_api_key:
-                            # Set in environment for tools that read from there
-                            os.environ["DATABRICKS_API_KEY"] = db_api_key
-                            databricks_api_key = db_api_key
-                
-                # Use tool configuration or environment
-                final_api_key = api_key or databricks_api_key
-                
-                # Add api key to config
-                if final_api_key:
-                    genie_tool_config['DATABRICKS_API_KEY'] = final_api_key
+                                # Check if we're in an async context
+                                asyncio.get_running_loop()
+                                # Use ThreadPoolExecutor to call async method from sync context
+                                import concurrent.futures
+                                with concurrent.futures.ThreadPoolExecutor() as pool:
+                                    db_api_key = pool.submit(
+                                        self._run_in_new_loop,
+                                        self._get_api_key_async, 
+                                        "DATABRICKS_API_KEY"
+                                    ).result()
+                            except RuntimeError:
+                                # Not in async context
+                                loop = asyncio.new_event_loop()
+                                try:
+                                    asyncio.set_event_loop(loop)
+                                    db_api_key = loop.run_until_complete(
+                                        self._get_api_key_async("DATABRICKS_API_KEY")
+                                    )
+                                finally:
+                                    loop.close()
+                        else:
+                            # Fallback to original method
+                            logger.warning("DATABRICKS_API_KEY not found via service")
+                            try:
+                                # Check if we're already in an event loop
+                                current_loop = asyncio.get_running_loop()
+                                # We're in an async context, use ThreadPoolExecutor
+                                import concurrent.futures
+                                with concurrent.futures.ThreadPoolExecutor() as pool:
+                                    db_api_key = pool.submit(self._run_in_new_loop, 
+                                                            self._get_api_key_async, 
+                                                            "DATABRICKS_API_KEY").result()
+                            except RuntimeError:
+                                # We're not in an async context, use direct method
+                                db_api_key = self._get_api_key("DATABRICKS_API_KEY")
+                            
+                            if db_api_key:
+                                # Set in environment for tools that read from there
+                                os.environ["DATABRICKS_API_KEY"] = db_api_key
+                                databricks_api_key = db_api_key
+                    
+                    # Use tool configuration or environment
+                    final_api_key = api_key or databricks_api_key
+                    
+                    # Add api key to config
+                    if final_api_key:
+                        genie_tool_config['DATABRICKS_API_KEY'] = final_api_key
                 
                 # Ensure DATABRICKS_HOST and spaceId are in config
                 if 'DATABRICKS_HOST' in tool_config:
@@ -939,13 +971,14 @@ class ToolFactory:
                 if 'spaceId' in tool_config:
                     genie_tool_config['spaceId'] = tool_config['spaceId']
                     logger.info(f"Using spaceId from config: {tool_config['spaceId']}")
-                
-                # Check for user token in config for OBO authentication
-                user_token = tool_config.get('user_token')
+                else:
+                    # Use the test space ID for debugging
+                    genie_tool_config['spaceId'] = "01f04453107910c39e800ec7e0825cf5"
+                    logger.info(f"Using default test spaceId: 01f04453107910c39e800ec7e0825cf5")
                 
                 # Create the GenieTool instance
                 try:
-                    logger.info(f"Creating GenieTool with config, OBO: {bool(user_token)}")
+                    logger.info(f"Creating GenieTool with config, OBO: {bool(user_token)}, token preview: {user_token[:10] + '...' if user_token else 'None'}")
                     return tool_class(
                         tool_config=genie_tool_config, 
                         tool_id=tool_id, 

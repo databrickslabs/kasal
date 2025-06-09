@@ -15,7 +15,7 @@ from src.models.execution_status import ExecutionStatus
 
 # Import helper modules
 from src.engines.crewai.trace_management import TraceManager
-from src.engines.crewai.execution_runner import run_crew, update_execution_status_with_retry
+from src.engines.crewai.execution_runner import run_crew
 from src.engines.crewai.config_adapter import normalize_config, normalize_flow_config
 from src.engines.crewai.crew_preparation import CrewPreparation
 from src.engines.crewai.flow_preparation import FlowPreparation
@@ -135,9 +135,12 @@ class CrewAIEngineService(BaseEngineService):
                     tool_service = await ToolService.from_unit_of_work(uow)
                     api_keys_service = await ApiKeysService.from_unit_of_work(uow)
                     
-                    # Create a tool factory instance with API keys service
-                    tool_factory = await ToolFactory.create(execution_config, api_keys_service)
-                    logger.info(f"[CrewAIEngineService] Created ToolFactory for {execution_id}")
+                    # Extract user token from group context for tool factory
+                    user_token = group_context.access_token if group_context else None
+                    
+                    # Create a tool factory instance with API keys service and user token
+                    tool_factory = await ToolFactory.create(execution_config, api_keys_service, user_token)
+                    logger.info(f"[CrewAIEngineService] Created ToolFactory for {execution_id} with user token: {bool(user_token)}")
                     
                     # Use the CrewPreparation class for crew setup with tool_service and tool_factory
                     crew_preparation = CrewPreparation(execution_config, tool_service, tool_factory)
@@ -191,12 +194,16 @@ class CrewAIEngineService(BaseEngineService):
             # Status is already RUNNING from creation, no need to update
             logger.info(f"[CrewAIEngineService] Execution {execution_id} ready to start (status already RUNNING)")
             
+            # User token was already extracted and passed to tool factory above
+            user_token = group_context.access_token if group_context else None
+            
             # Create a task for crew execution
             execution_task = asyncio.create_task(run_crew(
                 execution_id=execution_id, 
                 crew=crew,
                 running_jobs=self._running_jobs,
-                group_context=group_context
+                group_context=group_context,
+                user_token=user_token
             ))
             
             # Store job info

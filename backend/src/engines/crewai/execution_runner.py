@@ -18,7 +18,7 @@ from src.utils.user_context import GroupContext
 
 logger = logging.getLogger(__name__)
 
-async def run_crew(execution_id: str, crew: Crew, running_jobs: Dict, group_context: GroupContext = None) -> None:
+async def run_crew(execution_id: str, crew: Crew, running_jobs: Dict, group_context: GroupContext = None, user_token: str = None) -> None:
     """
     Run the crew in a separate task, ensuring final status update
     occurs within its own database session scope.
@@ -28,7 +28,22 @@ async def run_crew(execution_id: str, crew: Crew, running_jobs: Dict, group_cont
         crew: The CrewAI crew to run
         running_jobs: Dictionary tracking running jobs
         group_context: Group context for logging isolation
+        user_token: User access token for OAuth authentication
     """
+    # Set user context for this execution to enable OAuth authentication in tools
+    if user_token or group_context:
+        from src.utils.user_context import UserContext
+        
+        if user_token:
+            UserContext.set_user_token(user_token)
+            logger.info(f"Set user token for execution {execution_id}")
+        
+        if group_context:
+            UserContext.set_group_context(group_context)
+            logger.info(f"Set group context for execution {execution_id}: {group_context.primary_group_id}")
+    else:
+        logger.warning(f"No user token or group context provided for execution {execution_id}")
+    
     # First, ensure status is set to RUNNING
     from src.services.execution_status_service import ExecutionStatusService
     await ExecutionStatusService.update_status(
@@ -74,8 +89,8 @@ async def run_crew(execution_id: str, crew: Crew, running_jobs: Dict, group_cont
     # Initialize logging for this job
     crew_logger.setup_for_job(execution_id, group_context)
     
-    # Initialize event streaming with configuration
-    event_streaming = EventStreamingCallback(job_id=execution_id, config=config)
+    # Initialize event streaming with configuration and group context
+    event_streaming = EventStreamingCallback(job_id=execution_id, config=config, group_context=group_context)
     
     # Retry counter
     retry_count = 0

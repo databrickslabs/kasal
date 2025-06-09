@@ -599,15 +599,17 @@ class CrewLoggerHandler(logging.Handler):
     and redirects them to the job_output_queue.
     """
     
-    def __init__(self, job_id: str):
+    def __init__(self, job_id: str, group_context=None):
         """
-        Initialize the handler with a job ID.
+        Initialize the handler with a job ID and group context.
         
         Args:
             job_id: The execution/job ID to associate logs with
+            group_context: Group context for logging isolation
         """
         super().__init__()
         self.job_id = job_id
+        self.group_context = group_context
         
     def emit(self, record: logging.LogRecord):
         """
@@ -620,8 +622,8 @@ class CrewLoggerHandler(logging.Handler):
             # Format the log message
             log_message = self.format(record)
             
-            # Enqueue the log message with the job ID
-            enqueue_log(execution_id=self.job_id, content=log_message)
+            # Enqueue the log message with the job ID and group context
+            enqueue_log(execution_id=self.job_id, content=log_message, group_context=self.group_context)
         except Exception as e:
             # Don't use logging here to avoid potential infinite recursion
             # Use the last resort handler to avoid stream redirection issues
