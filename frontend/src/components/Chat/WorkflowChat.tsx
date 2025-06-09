@@ -329,7 +329,7 @@ const WorkflowChat: React.FC<WorkflowChatProps> = ({
       
       let assignedAgentId = "";
       
-      // Auto-assign to first agent that doesn't have any connections
+      // Auto-assign to agents with priority: agents without connections first, then agents with connections
       if (agentNodes.length > 0) {
         // Find agents that don't have any outgoing connections to tasks
         const agentsWithoutConnections = agentNodes.filter(agentNode => {
@@ -340,11 +340,17 @@ const WorkflowChat: React.FC<WorkflowChatProps> = ({
           return !hasTaskConnection;
         });
         
-        // If we found agents without connections, use the first one
+        // Priority 1: Use agents without connections first
         if (agentsWithoutConnections.length > 0) {
           const agentData = agentsWithoutConnections[0].data;
           assignedAgentId = agentData.agentId || "";
-          console.log(`Auto-assigning task "${taskData.name}" to agent "${agentData.label}" (ID: ${assignedAgentId})`);
+          console.log(`Auto-assigning task "${taskData.name}" to agent "${agentData.label}" (ID: ${assignedAgentId}) - Priority: No connections`);
+        } 
+        // Priority 2: If no agents without connections, fall back to any available agent
+        else if (agentNodes.length > 0) {
+          const agentData = agentNodes[0].data;
+          assignedAgentId = agentData.agentId || "";
+          console.log(`Auto-assigning task "${taskData.name}" to agent "${agentData.label}" (ID: ${assignedAgentId}) - Priority: Has connections (fallback)`);
         }
       }
 

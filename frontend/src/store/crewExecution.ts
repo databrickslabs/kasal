@@ -226,10 +226,40 @@ export const useCrewExecutionStore = create<CrewExecutionState>((set, get) => ({
       return response;
     } catch (error) {
       console.error('[CrewExecution] Error executing crew:', error);
+      
+      // Check if this is a 409 conflict error (another job running)
+      let errorMessage = 'Failed to execute crew';
+      if (error instanceof Error) {
+        if (error.message.includes('409:') || error.message.includes('another job is currently running')) {
+          errorMessage = error.message.replace('409: ', '');
+        } else {
+          errorMessage = error.message;
+        }
+      }
+      
       set({ 
-        errorMessage: error instanceof Error ? error.message : 'Failed to execute crew',
+        errorMessage,
         showError: true 
       });
+      
+      // Show toast notification immediately
+      import('react-hot-toast').then(({ toast }) => {
+        console.log('[CrewExecution] Showing error toast:', errorMessage);
+        toast.error(errorMessage, {
+          duration: 6000,
+          position: 'top-center',
+          style: {
+            maxWidth: '500px',
+            fontSize: '14px',
+            padding: '12px',
+          },
+        });
+      }).catch((error) => {
+        console.error('[CrewExecution] Failed to load toast:', error);
+        // Fallback: show alert if toast fails to load
+        alert(`Execution Error: ${errorMessage}`);
+      });
+      
       return null;
     } finally {
       set({ isExecuting: false });
@@ -333,8 +363,19 @@ export const useCrewExecutionStore = create<CrewExecutionState>((set, get) => ({
       return response;
     } catch (error) {
       console.error('[FlowExecution] Error executing flow:', error);
+      
+      // Check if this is a 409 conflict error (another job running)
+      let errorMessage = 'Failed to execute flow';
+      if (error instanceof Error) {
+        if (error.message.includes('409:') || error.message.includes('another job is currently running')) {
+          errorMessage = error.message.replace('409: ', '');
+        } else {
+          errorMessage = error.message;
+        }
+      }
+      
       set({ 
-        errorMessage: error instanceof Error ? error.message : 'Failed to execute flow',
+        errorMessage,
         showError: true 
       });
       return null;

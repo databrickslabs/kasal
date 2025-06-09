@@ -87,9 +87,15 @@ const WorkflowToolbar: React.FC<WorkflowToolbarProps> = ({
     setAnchorEl(null);
   }, []);
 
-  const handleExecuteCrew = useCallback(() => {
-    executeCrew(nodes, edges);
-  }, [executeCrew, nodes, edges]);
+  const handleExecuteCrew = useCallback(async () => {
+    handleMenuClose();
+    try {
+      await executeCrew(nodes, edges);
+    } catch (error) {
+      console.error('[WorkflowToolbar] Error executing crew:', error);
+      // The error will also be handled by the store and useEffect, but this provides backup
+    }
+  }, [executeCrew, nodes, edges, handleMenuClose]);
   
   const handleExecuteFlow = useCallback(async () => {
     handleMenuClose();
@@ -135,9 +141,26 @@ const WorkflowToolbar: React.FC<WorkflowToolbarProps> = ({
 
   // Add error and success message handling
   useEffect(() => {
-    if (showError) {
-      // Show error message using your preferred notification system
-      console.error(errorMessage);
+    console.log('[WorkflowToolbar] useEffect triggered - showError:', showError, 'errorMessage:', errorMessage);
+    if (showError && errorMessage) {
+      console.log('[WorkflowToolbar] Conditions met, showing toast...');
+      // Import toast from react-hot-toast and show error
+      import('react-hot-toast').then(({ toast }) => {
+        console.log('[WorkflowToolbar] Toast loaded, showing error toast:', errorMessage);
+        toast.error(errorMessage, {
+          duration: 6000,
+          position: 'top-center',
+          style: {
+            maxWidth: '500px',
+            fontSize: '14px',
+            padding: '12px',
+          },
+        });
+      }).catch((error) => {
+        console.error('[WorkflowToolbar] Failed to load toast:', error);
+        // Fallback: show alert if toast fails to load
+        alert(`Execution Error: ${errorMessage}`);
+      });
       setShowError(false);
     }
   }, [showError, errorMessage, setShowError]);

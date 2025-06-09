@@ -1,6 +1,7 @@
 import { useEffect } from 'react';
 import { Box } from '@mui/material';
 import { Routes, Route, Navigate } from 'react-router-dom';
+import { Toaster } from 'react-hot-toast';
 import ThemeProvider from '../../config/theme/ThemeProvider';
 import RunHistory from '../../components/Jobs/ExecutionHistory';
 import WorkflowDesigner from '../../components/WorkflowDesigner';
@@ -23,6 +24,15 @@ function App() {
 
   return (
     <ThemeProvider>
+      <Toaster 
+        position="top-center"
+        toastOptions={{
+          duration: 6000,
+          style: {
+            maxWidth: '500px',
+          },
+        }}
+      />
       <ShortcutsCircle />
       <Box
         component="main"
