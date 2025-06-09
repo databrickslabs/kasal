@@ -1,0 +1,48 @@
+# Databricks App Configuration Template
+# This template shows all available OAuth scopes for Databricks Apps
+
+command: ['python', '-m', 'kasal']
+
+environment_vars:
+  PYTHONPATH: '.:${PYTHONPATH}'
+  PYTHONUNBUFFERED: '1'
+
+apt_packages:
+  - libpq-dev  # PostgreSQL development headers for asyncpg
+
+# OAuth scopes required for the application
+# Choose only the scopes your application needs
+oauth_scopes:
+  # Essential scopes for Genie functionality
+  - dashboards.genie  # Required for Genie tool functionality
+  
+  # SQL-related scopes
+  - sql  # Basic SQL operations
+  - sql.alerts  # SQL alerts management
+  - sql.alerts-legacy  # Legacy SQL alerts
+  - sql.dashboards  # Dashboard access
+  - sql.data-sources  # Data sources management
+  - sql.dbsql-permissions  # DB SQL permissions
+  - sql.queries  # Access to SQL queries
+  - sql.queries-legacy  # Legacy SQL queries
+  - sql.query-history  # Query history access
+  - sql.statement-execution  # Execute SQL statements
+  - sql.warehouses  # Access to SQL warehouses
+  
+  # Vector search scopes
+  - vectorsearch.vector-search-endpoints  # Vector search capabilities
+  - vectorsearch.vector-search-indexes  # Vector search indexes
+  
+  # Model serving scopes
+  - serving.serving-endpoints  # Model serving endpoints
+  - serving.serving-endpoints-data-plane  # Model serving data plane
+  
+  # File operations
+  - files.files  # File operations
+
+# Example minimal configuration for Genie-only apps:
+# oauth_scopes:
+#   - dashboards.genie
+#   - sql
+#   - sql.warehouses
+#   - sql.statement-execution
