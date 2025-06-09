@@ -29,7 +29,7 @@ yarn-error.log*
 .vscode/
 *.swp
 *.swo
-cursorrules
+.cursorrules
 
 # OS generated files
 .DS_Store
