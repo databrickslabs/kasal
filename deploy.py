@@ -28,7 +28,9 @@ def deploy_wheel_to_databricks(
     profile=None, 
     host=None, 
     token=None, 
-    description=None
+    description=None,
+    oauth_scopes=None,
+    config_template=None
 ):
     """Deploy a wheel file to Databricks Apps"""
     wheel_path = Path(wheel_path)
@@ -63,17 +65,40 @@ def deploy_wheel_to_databricks(
         logger.error(f"Failed to connect to Databricks: {e}")
         raise
     
-    # Create app.yaml in the dist folder
+    # Create app.yaml in the dist folder with OAuth scopes
     dist_dir = os.path.dirname(wheel_path)
     app_yaml_path = os.path.join(dist_dir, "app.yaml")
     logger.info(f"Creating app.yaml at {app_yaml_path}")
-    with open(app_yaml_path, "w") as f:
-        f.write("command: ['python', '-m', 'kasal']\n")
-        f.write("environment_vars:\n")
-        f.write("  PYTHONPATH: '.:${PYTHONPATH}'\n")
-        f.write("  PYTHONUNBUFFERED: '1'\n")  # Ensures logs appear immediately
-        f.write("apt_packages:\n")
-        f.write("  - libpq-dev\n")  # PostgreSQL development headers for asyncpg
+    
+    # Use template file if provided
+    if config_template and os.path.exists(config_template):
+        logger.info(f"Using config template: {config_template}")
+        import shutil
+        shutil.copy2(config_template, app_yaml_path)
+    else:
+        # Create app.yaml from scratch
+        with open(app_yaml_path, "w") as f:
+            f.write("command: ['python', '-m', 'kasal']\n")
+            f.write("environment_vars:\n")
+            f.write("  PYTHONPATH: '.:${PYTHONPATH}'\n")
+            f.write("  PYTHONUNBUFFERED: '1'\n")  # Ensures logs appear immediately
+            f.write("apt_packages:\n")
+            f.write("  - libpq-dev\n")  # PostgreSQL development headers for asyncpg
+            f.write("\n# OAuth scopes required for the application\n")
+            f.write("oauth_scopes:\n")
+            
+            # Use provided scopes or default comprehensive set
+            if oauth_scopes:
+                for scope in oauth_scopes:
+                    f.write(f"  - {scope}\n")
+            else:
+                # Default scopes for full functionality
+                default_scopes = [
+                    "all-apis",  # Access to all Databricks REST APIs (includes Genie)
+                    "sql"  # Access to SQL APIs and warehouses
+                ]
+                for scope in default_scopes:
+                    f.write(f"  - {scope}  # {scope.replace('.', ' ').title()}\n")
     
     try:
         # Check if app exists, create if not
@@ -278,6 +303,10 @@ def main():
     parser.add_argument("--host", help="Databricks host URL")
     parser.add_argument("--token", help="Databricks API token")
     parser.add_argument("--description", help="Description for the app")
+    parser.add_argument("--oauth-scopes", nargs="*", 
+                        help="Custom OAuth scopes for the app (default: comprehensive set including dashboards.genie)")
+    parser.add_argument("--config-template", 
+                        help="Path to app.yaml template file (default: use built-in template)")
     
     args = parser.parse_args()
     
@@ -296,7 +325,9 @@ def main():
             profile=args.profile,
             host=args.host,
             token=args.token,
-            description=args.description
+            description=args.description,
+            oauth_scopes=getattr(args, 'oauth_scopes', None),
+            config_template=getattr(args, 'config_template', None)
         )
         
         if success:

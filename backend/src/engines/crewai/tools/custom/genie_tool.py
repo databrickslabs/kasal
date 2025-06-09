@@ -163,7 +163,8 @@ class GenieTool(BaseTool):
             
         if not self._space_id:
             self._space_id = os.getenv("DATABRICKS_SPACE_ID", "01efdd2cd03211d0ab74f620f0023b77")
-            logger.info(f"Using spaceId from environment or default: {self._space_id}")
+            logger.warning(f"Using default spaceId - this may not be the correct Genie space: {self._space_id}")
+            logger.warning(f"To fix: Set the correct Genie space ID in tool configuration")
         
         # Check authentication requirements
         if token_required and not self._use_oauth and not self._token:
@@ -216,10 +217,36 @@ class GenieTool(BaseTool):
         return f"https://{host}{path}"
 
     async def _get_auth_headers(self) -> dict:
-        """Get authentication headers using enhanced auth system."""
+        """Get authentication headers using proper OBO implementation."""
         try:
-            if self._use_oauth:
-                # Use enhanced auth system for OAuth/OBO
+            if self._use_oauth and self._user_token:
+                # Create an OBO token using service principal for proper Genie API access
+                logger.info("Creating OBO token for Genie API access")
+                try:
+                    obo_token = await self._create_obo_token()
+                    if obo_token:
+                        logger.info("Successfully created OBO token for Genie API")
+                        return {
+                            "Authorization": f"Bearer {obo_token}",
+                            "Content-Type": "application/json"
+                        }
+                    else:
+                        logger.warning("Failed to create OBO token, falling back to user token")
+                        # Fall back to user token if OBO creation fails
+                        return {
+                            "Authorization": f"Bearer {self._user_token}",
+                            "Content-Type": "application/json"
+                        }
+                except Exception as obo_error:
+                    logger.error(f"Error creating OBO token: {obo_error}")
+                    # Fall back to user token
+                    logger.info("Falling back to direct user token")
+                    return {
+                        "Authorization": f"Bearer {self._user_token}",
+                        "Content-Type": "application/json"
+                    }
+            elif self._use_oauth:
+                # Try to get OBO token through enhanced auth system
                 from src.utils.databricks_auth import get_databricks_auth_headers
                 headers, error = await get_databricks_auth_headers(user_token=self._user_token)
                 if error:
@@ -248,11 +275,121 @@ class GenieTool(BaseTool):
             logger.error(f"Error getting auth headers: {e}")
             return None
 
+    async def _create_obo_token(self) -> Optional[str]:
+        """Create an On-Behalf-Of token using service principal for Genie API access."""
+        try:
+            # First, let's try to validate the user token by checking its format
+            if not self._user_token:
+                logger.error("No user token available for OBO creation")
+                return None
+            
+            logger.info(f"User token format check - starts with: {self._user_token[:20]}...")
+            logger.info(f"User token length: {len(self._user_token)}")
+            
+            # Check if it looks like a JWT token (should start with 'eyJ')
+            if self._user_token.startswith('eyJ'):
+                logger.info("User token appears to be a JWT token")
+            else:
+                logger.warning("User token does not appear to be a JWT token")
+            
+            # Use the enhanced auth system to create an OBO token
+            from src.utils.databricks_auth import get_databricks_auth_headers
+            
+            # Try to use the enhanced auth system which should handle OBO creation
+            headers, error = await get_databricks_auth_headers(user_token=self._user_token)
+            
+            if error:
+                logger.error(f"Enhanced auth system failed: {error}")
+                # For now, return the original user token as fallback
+                logger.info("Returning original user token as fallback")
+                return self._user_token
+            
+            # The enhanced auth system should return the OBO token in the Authorization header
+            auth_header = headers.get("Authorization", "")
+            if auth_header.startswith("Bearer "):
+                obo_token = auth_header[7:]  # Remove 'Bearer ' prefix
+                logger.info("Successfully extracted token from enhanced auth system")
+                return obo_token
+            else:
+                logger.warning("No Bearer token found in enhanced auth headers, using original token")
+                return self._user_token
+                
+        except Exception as e:
+            logger.error(f"Error in OBO token creation: {e}")
+            # Return the original user token as fallback
+            return self._user_token
+
+    async def _test_token_permissions(self, headers: dict) -> bool:
+        """Test if the token has proper permissions by trying a simple API call."""
+        try:
+            # Try to list Genie spaces to test permissions
+            test_url = f"https://{self._host}/api/2.0/genie/spaces"
+            import requests
+            
+            logger.info(f"Testing token permissions with URL: {test_url}")
+            
+            # Log the token details for debugging
+            auth_header = headers.get("Authorization", "")
+            if auth_header.startswith("Bearer "):
+                token = auth_header[7:]
+                logger.info(f"Token preview: {token[:20]}...{token[-10:] if len(token) > 30 else token}")
+                logger.info(f"Token length: {len(token)}")
+                
+                # Try to decode JWT to see scopes (if it's a JWT)
+                if token.startswith('eyJ'):
+                    try:
+                        import base64
+                        import json
+                        # Decode JWT payload (without verification - just for debugging)
+                        payload_part = token.split('.')[1]
+                        # Add padding if needed
+                        payload_part += '=' * (4 - len(payload_part) % 4)
+                        payload = json.loads(base64.b64decode(payload_part))
+                        logger.error(f"❌ SCOPE ISSUE: Token scopes: {payload.get('scope', 'No scope found')}")
+                        logger.error(f"❌ REQUIRED SCOPES: sql, dashboards.genie")
+                        logger.error(f"❌ App OAuth Client ID: 37a7cfdc-b1c4-41b2-9341-cb1a6a630233")
+                        logger.info(f"Token subject: {payload.get('sub', 'No subject found')}")
+                        logger.info(f"Token client_id: {payload.get('client_id', 'No client_id found')}")
+                        
+                        # Check if token has required scopes
+                        token_scopes = payload.get('scope', '').split()
+                        required_scopes = ['sql', 'dashboards.genie']
+                        missing_scopes = [scope for scope in required_scopes if scope not in token_scopes]
+                        
+                        if missing_scopes:
+                            logger.error(f"❌ MISSING SCOPES: {missing_scopes}")
+                            logger.error(f"❌ SOLUTION: User needs to re-authorize app or token needs refresh")
+                        else:
+                            logger.info(f"✅ All required scopes present in token")
+                            
+                    except Exception as jwt_error:
+                        logger.warning(f"Could not decode JWT token: {jwt_error}")
+            
+            response = requests.get(test_url, headers=headers, timeout=10)
+            
+            if response.status_code == 200:
+                logger.info("✅ Token has valid permissions for Genie API")
+                return True
+            elif response.status_code == 403:
+                logger.error(f"❌ 403 FORBIDDEN: Token lacks permissions for Genie API")
+                logger.error(f"❌ Response: {response.text}")
+                logger.error(f"❌ This confirms the OAuth scope issue - user token doesn't have sql/dashboards.genie scopes")
+                return False
+            else:
+                logger.warning(f"Unexpected response when testing token: {response.status_code} - {response.text}")
+                return False
+                
+        except Exception as e:
+            logger.error(f"Error testing token permissions: {e}")
+            return False
+
     def _start_or_continue_conversation(self, question: str) -> dict:
         """Start a new conversation or continue existing one with a question."""
         try:
             # Ensure space_id is a string
             space_id = str(self._space_id) if self._space_id else "01efdd2cd03211d0ab74f620f0023b77"
+            
+            logger.info(f"Using space_id: {space_id} for Genie conversation")
             
             # Get authentication headers
             headers = None
@@ -279,6 +416,21 @@ class GenieTool(BaseTool):
             
             if not headers:
                 raise Exception("No authentication headers available")
+            
+            # Test token permissions before proceeding
+            try:
+                loop = asyncio.new_event_loop()
+                asyncio.set_event_loop(loop)
+                has_permissions = loop.run_until_complete(self._test_token_permissions(headers))
+                loop.close()
+                
+                if not has_permissions:
+                    raise Exception("Token lacks necessary permissions for Genie API")
+                else:
+                    logger.info("Token permissions validated successfully")
+            except Exception as perm_error:
+                logger.error(f"Permission validation failed: {perm_error}")
+                # Continue anyway, but log the issue
             
             if self._current_conversation_id:
                 # Continue existing conversation

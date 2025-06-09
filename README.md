@@ -100,6 +100,38 @@ To build and deploy the application to Databricks Apps:
 
 The wheel package will be created in the `dist` directory and then deployed to your Databricks workspace. Once deployed, the app will be available under "Apps" in your Databricks workspace.
 
+### ⚠️ Important: OAuth Scope Authorization
+
+**After deploying to Databricks Apps, users must complete OAuth scope authorization to access certain features (like Genie tool).**
+
+The app is configured with OAuth scopes including:
+- `sql` - Required for SQL warehouse and database access
+- `dashboards.genie` - Required for Genie AI/BI functionality
+
+**Required Steps for Users:**
+
+1. **First-time access**: When users first visit the deployed app, they will see an OAuth consent screen
+2. **Grant permissions**: Users must click "Authorize" to grant the app access to the required scopes
+3. **Re-authorization needed**: If scopes are updated after deployment, existing users need to:
+   - Clear their browser cache/session
+   - Log out of Databricks completely  
+   - Visit the app URL again to trigger the OAuth consent flow
+   - Re-authorize with the new scopes
+
+**Troubleshooting OAuth Issues:**
+
+If users encounter "403 Forbidden" errors when using tools like GenieTool:
+
+1. Check the app's OAuth configuration in Databricks workspace under "Apps" → [Your App] → "Authorization"
+2. Verify the user has granted consent for `sql` and `dashboards.genie` scopes
+3. If scopes appear correct but tools still fail, the user should:
+   - Log out of Databricks completely
+   - Clear browser cache
+   - Access the app URL fresh to re-trigger OAuth consent
+   - Look for and approve any new scope authorization prompts
+
+The OAuth token forwarded via `X-Forwarded-Access-Token` header will only contain scopes the user has explicitly consented to, regardless of what the app is configured to request.
+
 ### API Configuration
 
 The frontend automatically picks up the API URL in the following priority order:
