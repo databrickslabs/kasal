@@ -18,6 +18,7 @@ warnings.filterwarnings("ignore", message=".*remove second argument of ws_handle
 
 from fastapi import FastAPI, HTTPException, Request, Depends
 from fastapi.middleware.cors import CORSMiddleware
+from starlette.middleware.base import BaseHTTPMiddleware
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import RedirectResponse
 
@@ -214,6 +215,10 @@ app.add_middleware(
     allow_headers=["*"],
     expose_headers=["*"]
 )
+
+# Add user context middleware to extract user tokens from Databricks Apps headers
+from src.utils.user_context import user_context_middleware
+app.add_middleware(BaseHTTPMiddleware, dispatch=user_context_middleware)
 
 # Include the main API router
 app.include_router(api_router, prefix=settings.API_V1_STR)

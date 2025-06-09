@@ -6,9 +6,11 @@ CRUD operations, error handling, and transaction management.
 """
 import pytest
 import uuid
+from datetime import datetime, UTC
 from unittest.mock import AsyncMock, MagicMock, patch
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select, update
+from sqlalchemy import Column, String
+from sqlalchemy.dialects.postgresql import UUID
 
 from src.core.base_repository import BaseRepository
 from src.db.base import Base
@@ -18,7 +20,12 @@ from src.db.base import Base
 class MockModel(Base):
     __tablename__ = "mock_model"
     
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    name = Column(String(255), nullable=False)
+    description = Column(String(500))
+    
     def __init__(self, **kwargs):
+        super().__init__()
         for key, value in kwargs.items():
             setattr(self, key, value)
 
@@ -148,29 +155,23 @@ class TestBaseRepository:
         """Test successful create operation."""
         test_data = {"name": "Test Model", "description": "Test description"}
         
-        # Mock the model creation
-        with patch.object(MockModel, "__init__", return_value=None) as mock_init:
-            mock_instance = MagicMock()
-            mock_instance.id = str(uuid.uuid4())
+        # Mock session methods
+        mock_session.add = MagicMock()
+        mock_session.flush = AsyncMock()
+        mock_session.commit = AsyncMock()
+        mock_session.refresh = AsyncMock()
+        
+        # Create expected instance
+        expected_instance = MockModel(**test_data)
+        expected_instance.id = uuid.uuid4()
+        
+        with patch.object(MockModel, "__new__", return_value=expected_instance):
+            result = await base_repository.create(test_data)
             
-            with patch.object(base_repository, "model", return_value=mock_instance):
-                # Mock session methods
-                mock_session.add = MagicMock()
-                mock_session.flush = AsyncMock()
-                mock_session.commit = AsyncMock()
-                mock_session.refresh = AsyncMock()
-                
-                # Create a real MockModel instance
-                created_instance = MockModel(**test_data)
-                created_instance.id = str(uuid.uuid4())
-                
-                with patch("src.core.base_repository.MockModel", return_value=created_instance):
-                    result = await base_repository.create(test_data)
-                    
-                    mock_session.add.assert_called_once()
-                    mock_session.flush.assert_called_once()
-                    mock_session.commit.assert_called_once()
-                    mock_session.refresh.assert_called_once()
+            mock_session.add.assert_called_once()
+            mock_session.flush.assert_called_once()
+            mock_session.commit.assert_called_once()
+            mock_session.refresh.assert_called_once()
     
     @pytest.mark.asyncio
     async def test_create_with_exception(self, base_repository, mock_session):

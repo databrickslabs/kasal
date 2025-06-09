@@ -96,6 +96,9 @@ async def create_execution(
         # Return the result as an API response
         return ExecutionCreateResponse(**result)
         
+    except HTTPException:
+        # Re-raise HTTP exceptions (like 409 conflicts) as-is
+        raise
     except ValueError as e:
         # Handle validation errors with 400 status
         logger.warning(f"Validation error: {str(e)}")

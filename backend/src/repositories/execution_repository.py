@@ -32,15 +32,17 @@ class ExecutionRepository(BaseRepository[ExecutionHistory]):
         self, 
         limit: int = 50, 
         offset: int = 0,
-        group_ids: List[str] = None
+        group_ids: List[str] = None,
+        status_filter: List[str] = None
     ) -> Tuple[List[ExecutionHistory], int]:
         """
-        Get paginated execution history with group filtering.
+        Get paginated execution history with group and status filtering.
         
         Args:
             limit: Maximum number of items to return
             offset: Number of items to skip
             group_ids: List of group IDs for filtering
+            status_filter: List of status values to filter by
             
         Returns:
             Tuple of (list of executions, total count)
@@ -49,6 +51,14 @@ class ExecutionRepository(BaseRepository[ExecutionHistory]):
         base_filter = True
         if group_ids and len(group_ids) > 0:
             base_filter = ExecutionHistory.group_id.in_(group_ids)
+        
+        # Add status filtering
+        if status_filter and len(status_filter) > 0:
+            status_condition = ExecutionHistory.status.in_(status_filter)
+            if base_filter is True:
+                base_filter = status_condition
+            else:
+                base_filter = base_filter & status_condition
         
         # Get total count
         count_stmt = select(func.count()).select_from(ExecutionHistory).where(base_filter)

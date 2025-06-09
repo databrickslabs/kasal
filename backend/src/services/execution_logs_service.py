@@ -156,18 +156,19 @@ class ExecutionLogsService:
             logger.error("[create_execution_log] Exception details:", exc_info=True)
             return False
 
-    async def broadcast_to_execution(self, execution_id: str, message: str):
+    async def broadcast_to_execution(self, execution_id: str, message: str, group_context: GroupContext = None):
         """
         Broadcast a log message to all clients connected to an execution.
         
         Args:
             execution_id: ID of the execution to broadcast to
             message: Content message to broadcast
+            group_context: Group context for logging isolation
         """
         logger.debug(f"[broadcast_to_execution] Starting broadcast for execution {execution_id}")
         
-        # Enqueue the log message to be written to the database asynchronously
-        success = enqueue_log(execution_id=execution_id, content=message)
+        # Enqueue the log message to be written to the database asynchronously with group context
+        success = enqueue_log(execution_id=execution_id, content=message, group_context=group_context)
         if not success:
             logger.error(f"[broadcast_to_execution] Failed to enqueue log for execution {execution_id}")
 

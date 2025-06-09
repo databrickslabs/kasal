@@ -12,6 +12,7 @@ from src.core.logger import LoggerManager
 from src.services.execution_logs_service import execution_logs_service
 from src.schemas.execution_logs import ExecutionLogResponse, ExecutionLogsResponse
 from src.core.dependencies import GroupContextDep
+from src.utils.user_context import GroupContext
 
 # Get logger from the centralized logging system
 logger = LoggerManager.get_instance().system
@@ -124,7 +125,7 @@ async def get_run_logs(
         raise HTTPException(status_code=500, detail=f"Failed to fetch run logs: {str(e)}")
 
 # Export the send_execution_log function for use in other modules
-async def send_execution_log(execution_id: str, message: str):
+async def send_execution_log(execution_id: str, message: str, group_context: GroupContext = None):
     """
     Send an execution log message to all connected clients.
     
@@ -134,5 +135,6 @@ async def send_execution_log(execution_id: str, message: str):
     Args:
         execution_id: ID of the execution the log belongs to
         message: Content of the log message
+        group_context: Group context for logging isolation
     """
-    await execution_logs_service.broadcast_to_execution(execution_id, message) 
+    await execution_logs_service.broadcast_to_execution(execution_id, message, group_context) 
