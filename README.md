@@ -33,7 +33,7 @@ Quick setup for testing and development - requires Python 3.9+ and Node.js.
 
 ## See It in Action
 
-![Kasal UI Screenshot](docs/images/kasal-ui-screenshot.png)
+![Kasal UI Screenshot](src/docs/images/kasal-ui-screenshot.png)
 *Visual workflow designer for creating AI agent collaborations*
 
 Create your first agent workflow in under 2 minutes:
@@ -48,21 +48,21 @@ Create your first agent workflow in under 2 minutes:
 
 | Topic | Description |
 |-------|-------------|
-| **[Getting Started](docs/GETTING_STARTED.md)** | Complete setup guide for development and deployment |
-| **[Build & Deploy](docs/BUILD.md)** | Building frontend and deployment instructions |
-| **[Deployment Guide](docs/DEPLOYMENT_GUIDE.md)** | Databricks Apps deployment with OAuth configuration |
-| **[Architecture](docs/ARCHITECTURE.md)** | System architecture and design patterns |
-| **[CrewAI Engine](docs/CREWAI_ENGINE.md)** | AI agent orchestration engine documentation |
-| **[Database Migrations](docs/DATABASE_MIGRATIONS.md)** | Database schema management with Alembic |
-| **[Models & Schemas](docs/MODELS.md)** | SQLAlchemy models and Pydantic schemas |
-| **[Repository Pattern](docs/REPOSITORY_PATTERN.md)** | Data access layer implementation |
-| **[LLM Manager](docs/LLM_MANAGER.md)** | Multi-provider LLM configuration and management |
+| **[Getting Started](src/docs/GETTING_STARTED.md)** | Complete setup guide for development and deployment |
+| **[Build & Deploy](src/docs/BUILD.md)** | Building frontend and deployment instructions |
+| **[Deployment Guide](src/docs/DEPLOYMENT_GUIDE.md)** | Databricks Apps deployment with OAuth configuration |
+| **[Architecture](src/docs/ARCHITECTURE.md)** | System architecture and design patterns |
+| **[CrewAI Engine](src/docs/CREWAI_ENGINE.md)** | AI agent orchestration engine documentation |
+| **[Database Migrations](src/docs/DATABASE_MIGRATIONS.md)** | Database schema management with Alembic |
+| **[Models & Schemas](src/docs/MODELS.md)** | SQLAlchemy models and Pydantic schemas |
+| **[Repository Pattern](src/docs/REPOSITORY_PATTERN.md)** | Data access layer implementation |
+| **[LLM Manager](src/docs/LLM_MANAGER.md)** | Multi-provider LLM configuration and management |
 
 ### More Documentation
-- **[API Documentation](docs/)** - Complete API reference
-- **[Best Practices](docs/BEST_PRACTICES.md)** - Development guidelines
-- **[Security Model](docs/SECURITY_MODEL.md)** - Authentication and authorization
-- **[Testing Guide](backend/tests/README.md)** - Testing strategy and coverage
+- **[API Documentation](src/docs/)** - Complete API reference
+- **[Best Practices](src/docs/BEST_PRACTICES.md)** - Development guidelines
+- **[Security Model](src/docs/SECURITY_MODEL.md)** - Authentication and authorization
+- **[Testing Guide](src/backend/tests/README.md)** - Testing strategy and coverage
 
 ---
 
@@ -76,4 +76,4 @@ The CrewAI Engine integrates at the service layer for intelligent agent orchestr
 
 ## 📄 License
 
-Licensed under the [Databricks License](LICENSE)
+Licensed under the [Databricks License](src/LICENSE)
