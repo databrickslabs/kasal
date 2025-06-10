@@ -227,8 +227,9 @@ export const useWorkflowStore = create<WorkflowState>()(
     {
       name: 'workflow-storage',
       partialize: (state) => ({
-        nodes: state.nodes,
-        edges: state.edges,
+        // Don't persist nodes and edges - they should be managed by tab-manager-storage
+        // nodes: state.nodes,
+        // edges: state.edges,
         hasSeenTutorial: state.hasSeenTutorial,
         hasSeenHandlebar: state.hasSeenHandlebar,
         manuallyPositionedNodes: state.manuallyPositionedNodes

@@ -2,14 +2,13 @@ import { Connection, Edge } from 'reactflow';
 
 /**
  * Generates a standardized edge ID based on the connection parameters
- * Format: reactflow__edge-${source}-${target}-${sourceHandle || ''}-${targetHandle || ''}-${randomSuffix}
- * Added a random suffix to ensure uniqueness even for the same connection parameters
+ * Format: reactflow__edge-${source}-${target}-${sourceHandle || 'default'}-${targetHandle || 'default'}
+ * Deterministic ID generation to prevent duplicate edges
  */
 export const generateEdgeId = (connection: Connection): string => {
   const { source, target, sourceHandle, targetHandle } = connection;
-  // Add a random suffix to ensure uniqueness
-  const randomSuffix = Math.random().toString(36).substring(2, 8);
-  return `reactflow__edge-${source}-${target}-${sourceHandle || ''}-${targetHandle || ''}-${randomSuffix}`;
+  // Use deterministic ID without random suffix to prevent duplicates
+  return `reactflow__edge-${source}-${target}-${sourceHandle || 'default'}-${targetHandle || 'default'}`;
 };
 
 /**

@@ -9,14 +9,13 @@ import ReactFlow, {
   OnSelectionChangeParams,
   ReactFlowInstance,
   ConnectionMode,
-  NodeTypes,
-  EdgeTypes,
   BackgroundVariant,
   getConnectedEdges
 } from 'reactflow';
 import 'reactflow/dist/style.css';
 import { Box, Snackbar, Alert, Button } from '@mui/material';
 import { useThemeManager } from '../../hooks/workflow/useThemeManager';
+import { nodeTypes as importedNodeTypes, edgeTypes as importedEdgeTypes } from './flow-config';
 
 import useShortcuts from '../../hooks/global/useShortcuts';
 import { Agent } from '../../types/agent';
@@ -38,12 +37,7 @@ import { useDialogHandlers } from '../../hooks/workflow/useDialogHandlers';
 import LeftSidebar from './LeftSidebar';
 import RightSidebar from './RightSidebar';
 
-// Node types
-import AgentNode from '../Agents/AgentNode';
-import TaskNode from '../Tasks/TaskNode';
-
-// Edge type
-import AnimatedEdge from '../Common/AnimatedEdge';
+// Node and edge types are imported from flow-config
 
 // Import dialog components
 import AgentGenerationDialog from '../Agents/AgentGenerationDialog';
@@ -58,15 +52,9 @@ import MCPConfigDialog from '../Dialogs/MCPConfigDialog';
 // Import types
 import { Crew, CrewAgent, CrewTask } from '../../types/crewPlan';
 
-// Node and edge types configuration
-const nodeTypes: NodeTypes = {
-  agentNode: AgentNode,
-  taskNode: TaskNode
-};
-
-const edgeTypes: EdgeTypes = {
-  default: AnimatedEdge
-};
+// Use imported node and edge types from flow-config
+const nodeTypes = importedNodeTypes;
+const edgeTypes = importedEdgeTypes;
 
 interface CrewCanvasProps {
   nodes: Node[];
@@ -133,31 +121,31 @@ const CrewCanvas: React.FC<CrewCanvasProps> = ({
   // Add CSS for proper stacking order (edges behind nodes)
   useEffect(() => {
     const styleId = 'reactflow-stacking-order-fix';
-    if (!document.getElementById(styleId)) {
-      const style = document.createElement('style');
-      style.id = styleId;
-      style.textContent = `
-        /* Force edges to stay behind nodes */
-        .react-flow__edges {
-          z-index: 0 !important;
-        }
-        .react-flow__edge {
-          z-index: 0 !important;
-        }
-        /* Ensure nodes are above edges */
-        .react-flow__nodes {
-          z-index: 5 !important;
-        }
-        .react-flow__node {
-          z-index: 10 !important;
-        }
-        /* Ensure hovered nodes are at the very top */
-        .react-flow__node:hover {
-          z-index: 1000 !important;
-        }
-      `;
-      document.head.appendChild(style);
+    // Remove any existing style to prevent conflicts
+    const existingStyle = document.getElementById(styleId);
+    if (existingStyle) {
+      existingStyle.remove();
     }
+    
+    const style = document.createElement('style');
+    style.id = styleId;
+    style.textContent = `
+      /* Ensure proper edge rendering without z-index conflicts */
+      .react-flow__edge-path {
+        pointer-events: stroke;
+      }
+      .react-flow__edge {
+        pointer-events: all;
+      }
+    `;
+    document.head.appendChild(style);
+    
+    return () => {
+      const styleElement = document.getElementById(styleId);
+      if (styleElement) {
+        styleElement.remove();
+      }
+    };
   }, []);
   
   const errorStore = useErrorStore();
@@ -433,20 +421,38 @@ const CrewCanvas: React.FC<CrewCanvasProps> = ({
     try {
       const crewNodeIds = new Set(nodes.map(node => node.id));
       
-      const filteredEdges = edges.filter(edge => 
-        edge && 
-        typeof edge === 'object' &&
-        edge.source && 
-        edge.target && 
-        crewNodeIds.has(edge.source) && 
-        crewNodeIds.has(edge.target)
-      );
+      // First, deduplicate edges by creating a Map with edge key
+      const edgeMap = new Map<string, Edge>();
+      
+      edges.forEach(edge => {
+        if (edge && 
+            typeof edge === 'object' &&
+            edge.source && 
+            edge.target && 
+            crewNodeIds.has(edge.source) && 
+            crewNodeIds.has(edge.target)) {
+          
+          // Create a unique key for the edge
+          const edgeKey = `${edge.source}-${edge.target}-${edge.sourceHandle || 'default'}-${edge.targetHandle || 'default'}`;
+          
+          // Only keep the first occurrence of each edge
+          if (!edgeMap.has(edgeKey)) {
+            edgeMap.set(edgeKey, edge);
+          }
+        }
+      });
+      
+      // Convert map back to array
+      const uniqueEdges = Array.from(edgeMap.values());
       
       // Apply animation to edges when jobs are running
-      const edgesWithAnimation = filteredEdges.map(edge => ({
+      const edgesWithAnimation = uniqueEdges.map(edge => ({
         ...edge,
+        type: edge.type || 'default', // Ensure edge type is set
         animated: runStatusStore.hasRunningJobs // Make edges animated when jobs are running
       }));
+      
+      console.log(`CrewCanvas: Edges - Total: ${edges.length}, Unique: ${edgesWithAnimation.length}`);
       
       // Log edge details for debugging
       logEdgeDetails(edgesWithAnimation, "CrewCanvas: Filtered crew edges:");
@@ -653,6 +659,8 @@ const CrewCanvas: React.FC<CrewCanvasProps> = ({
           edges={crewEdges}
           onNodesChange={handleNodesChange}
           onEdgesChange={handleEdgesChange}
+          edgeUpdaterRadius={10}
+          reconnectRadius={10}
           onConnect={onConnect}
           onSelectionChange={onSelectionChange}
           onPaneContextMenu={onPaneContextMenu}
@@ -670,6 +678,7 @@ const CrewCanvas: React.FC<CrewCanvasProps> = ({
           nodesDraggable={true}
           nodesConnectable={true}
           elementsSelectable={true}
+          edgesFocusable={false}
           selectNodesOnDrag={true}
           selectionOnDrag={true}
           panOnDrag={[1, 2]}
@@ -680,7 +689,7 @@ const CrewCanvas: React.FC<CrewCanvasProps> = ({
           multiSelectionKeyCode="Shift"
           selectionKeyCode="Shift"
           deleteKeyCode="Delete"
-          elevateEdgesOnSelect={true}
+          elevateEdgesOnSelect={false}
           elevateNodesOnSelect={true}
         >
           <Background

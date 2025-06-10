@@ -465,6 +465,7 @@ const WorkflowChat: React.FC<WorkflowChatProps> = ({
               id: `edge-${agentNodeId}-${taskNodeId}`,
               source: agentNodeId,
               target: taskNodeId,
+              type: 'default',
               animated: true,
             };
             
@@ -612,6 +613,7 @@ const WorkflowChat: React.FC<WorkflowChatProps> = ({
               id: `edge-${agentNodeId}-${taskNodeId}`,
               source: agentNodeId,
               target: taskNodeId,
+              type: 'default',
               animated: true,
             });
           }
@@ -626,6 +628,7 @@ const WorkflowChat: React.FC<WorkflowChatProps> = ({
                 id: `edge-${sourceTaskId}-${taskNodeId}`,
                 source: sourceTaskId,
                 target: taskNodeId,
+                type: 'default',
                 animated: true,
                 style: { stroke: '#ff9800' },
               });
