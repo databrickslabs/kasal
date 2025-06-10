@@ -1230,11 +1230,11 @@ const WorkflowChat: React.FC<WorkflowChatProps> = ({
             }}
             disabled={isLoading}
             multiline
-            maxRows={4}
+            maxRows={6}
             size="small"
             sx={{
               '& .MuiOutlinedInput-root': {
-                paddingRight: selectedModel?.includes('databricks') ? '180px' : '140px', // Adjust based on model name length
+                paddingRight: '100px', // Reduced padding to allow more space for placeholder text
               },
             }}
             InputProps={{
