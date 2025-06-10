@@ -84,6 +84,15 @@ interface ChatMessage {
   result?: unknown;
 }
 
+interface ModelConfig {
+  name: string;
+  temperature?: number;
+  context_window?: number;
+  max_output_tokens?: number;
+  enabled: boolean;
+  provider?: string;
+}
+
 interface WorkflowChatProps {
   onNodesGenerated?: (nodes: Node[], edges: Edge[]) => void;
   onLoadingStateChange?: (isLoading: boolean) => void;
@@ -109,7 +118,7 @@ const WorkflowChat: React.FC<WorkflowChatProps> = ({
   const [showSessionList, setShowSessionList] = useState(false);
   const [isLoadingSessions, setIsLoadingSessions] = useState(false);
   const [currentSessionName, setCurrentSessionName] = useState('New Chat');
-  const [models, setModels] = useState<Record<string, any>>({});
+  const [models, setModels] = useState<Record<string, ModelConfig>>({});
   const [isLoadingModels, setIsLoadingModels] = useState(false);
   const [modelMenuAnchor, setModelMenuAnchor] = useState<null | HTMLElement>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
@@ -260,7 +269,7 @@ const WorkflowChat: React.FC<WorkflowChatProps> = ({
       try {
         const modelService = ModelService.getInstance();
         const response = await modelService.getEnabledModels();
-        setModels(response);
+        setModels(response as Record<string, ModelConfig>);
       } catch (error) {
         console.error('Error fetching models:', error);
         // Fallback to a default model if fetch fails
