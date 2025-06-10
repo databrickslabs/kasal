@@ -38,13 +38,15 @@ interface TabBarProps {
   isRunning?: boolean;
   runningTabId?: string | null;
   onLoadCrew?: () => void;
+  disabled?: boolean;
 }
 
 const TabBar: React.FC<TabBarProps> = ({ 
   onRunTab, 
   isRunning = false, 
   runningTabId = null,
-  onLoadCrew
+  onLoadCrew,
+  disabled = false
 }) => {
   const { isDarkMode } = useThemeManager();
   const {
@@ -90,6 +92,9 @@ const TabBar: React.FC<TabBarProps> = ({
   });
 
   const handleTabChange = (_event: React.SyntheticEvent, newValue: string) => {
+    if (disabled) {
+      return; // Prevent tab switching when disabled
+    }
     setActiveTab(newValue);
   };
 
@@ -102,6 +107,9 @@ const TabBar: React.FC<TabBarProps> = ({
   };
 
   const handleNewEmptyCanvas = () => {
+    if (disabled) {
+      return; // Prevent creating new tabs when disabled
+    }
     createTab();
     handleNewTabMenuClose();
   };
@@ -114,6 +122,9 @@ const TabBar: React.FC<TabBarProps> = ({
   };
 
   const handleCloseTab = (tabId: string, event: React.MouseEvent) => {
+    if (disabled) {
+      return; // Prevent closing tabs when disabled
+    }
     event.stopPropagation();
     
     const tab = tabs.find(t => t.id === tabId);
@@ -222,6 +233,9 @@ const TabBar: React.FC<TabBarProps> = ({
   };
 
   const handleContextMenu = (event: React.MouseEvent, tabId: string) => {
+    if (disabled) {
+      return; // Prevent context menu when disabled
+    }
     event.preventDefault();
     setContextMenu({
       mouseX: event.clientX - 2,
@@ -309,6 +323,8 @@ const TabBar: React.FC<TabBarProps> = ({
             scrollButtons="auto"
             sx={{
               minWidth: 0, // Allow tabs to shrink
+              opacity: disabled ? 0.6 : 1,
+              pointerEvents: disabled ? 'none' : 'auto',
               '& .MuiTab-root': {
                 minHeight: '40px',
                 textTransform: 'none',
@@ -317,6 +333,7 @@ const TabBar: React.FC<TabBarProps> = ({
                 padding: '8px 12px',
                 minWidth: 'auto',
                 maxWidth: '200px',
+                cursor: disabled ? 'not-allowed' : 'pointer',
                 '&.Mui-selected': {
                   color: isDarkMode ? '#90caf9' : '#1976d2',
                 }
@@ -407,9 +424,10 @@ const TabBar: React.FC<TabBarProps> = ({
             ))}
           </Tabs>
 
-          <Tooltip title="New Tab Options">
+          <Tooltip title={disabled ? "Tab operations disabled during processing" : "New Tab Options"}>
             <IconButton
               onClick={handleNewTabMenuOpen}
+              disabled={disabled}
               size="small"
               sx={{
                 marginLeft: 1,
@@ -418,6 +436,9 @@ const TabBar: React.FC<TabBarProps> = ({
                 '&:hover': {
                   backgroundColor: isDarkMode ? 'rgba(255,255,255,0.1)' : 'rgba(0,0,0,0.1)',
                   color: isDarkMode ? 'rgba(255,255,255,0.9)' : 'rgba(0,0,0,0.8)'
+                },
+                '&.Mui-disabled': {
+                  color: isDarkMode ? 'rgba(255,255,255,0.3)' : 'rgba(0,0,0,0.3)',
                 }
               }}
             >

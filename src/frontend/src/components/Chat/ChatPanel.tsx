@@ -8,10 +8,11 @@ import { useJobManagementStore } from '../../store/jobManagement';
 
 interface ChatPanelProps {
   onNodesGenerated?: (nodes: Node[], edges: Edge[]) => void;
+  onLoadingStateChange?: (isLoading: boolean) => void;
   isVisible?: boolean;
 }
 
-const ChatPanel: React.FC<ChatPanelProps> = ({ onNodesGenerated, isVisible = true }) => {
+const ChatPanel: React.FC<ChatPanelProps> = ({ onNodesGenerated, onLoadingStateChange, isVisible = true }) => {
   const { selectedModel } = useCrewExecutionStore();
   const { selectedTools } = useJobManagementStore();
 
@@ -49,6 +50,7 @@ const ChatPanel: React.FC<ChatPanelProps> = ({ onNodesGenerated, isVisible = tru
       <Box sx={{ flex: 1, overflow: 'hidden' }}>
         <WorkflowChat
           onNodesGenerated={onNodesGenerated}
+          onLoadingStateChange={onLoadingStateChange}
           selectedModel={selectedModel}
           selectedTools={selectedTools}
           isVisible={isVisible}

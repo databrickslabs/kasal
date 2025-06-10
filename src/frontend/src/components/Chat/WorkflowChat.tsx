@@ -72,6 +72,7 @@ interface ChatMessage {
 
 interface WorkflowChatProps {
   onNodesGenerated?: (nodes: Node[], edges: Edge[]) => void;
+  onLoadingStateChange?: (isLoading: boolean) => void;
   selectedModel?: string;
   selectedTools?: string[];
   isVisible?: boolean;
@@ -79,6 +80,7 @@ interface WorkflowChatProps {
 
 const WorkflowChat: React.FC<WorkflowChatProps> = ({
   onNodesGenerated,
+  onLoadingStateChange,
   selectedModel = 'databricks-llama-4-maverick',
   selectedTools = [],
   isVisible = true,
@@ -98,6 +100,13 @@ const WorkflowChat: React.FC<WorkflowChatProps> = ({
   useEffect(() => {
     scrollToBottom();
   }, [messages]);
+
+  // Notify parent of loading state changes
+  useEffect(() => {
+    if (onLoadingStateChange) {
+      onLoadingStateChange(isLoading);
+    }
+  }, [isLoading, onLoadingStateChange]);
 
   // Focus the input when component mounts and when page loads
   useEffect(() => {

@@ -176,6 +176,7 @@ const WorkflowDesigner: React.FC<WorkflowDesignerProps> = (): JSX.Element => {
 
   // Connection generation state
   const [isGeneratingConnections, setIsGeneratingConnections] = React.useState(false);
+  const [isChatProcessing, setIsChatProcessing] = React.useState(false);
 
   // Use crew execution store
   const {
@@ -385,6 +386,7 @@ const WorkflowDesigner: React.FC<WorkflowDesignerProps> = (): JSX.Element => {
           isRunning={isExecuting}
           runningTabId={activeTabId}
           onLoadCrew={() => setIsCrewFlowDialogOpen(true)}
+          disabled={isChatProcessing || isGeneratingConnections}
         />
         
         <Box sx={{ 
@@ -506,6 +508,7 @@ const WorkflowDesigner: React.FC<WorkflowDesignerProps> = (): JSX.Element => {
                     setNodes(currentNodes => [...currentNodes, ...newNodes]);
                     setEdges(currentEdges => [...currentEdges, ...newEdges]);
                   }}
+                  onLoadingStateChange={setIsChatProcessing}
                   isVisible={showChatPanel}
                 />
               </Box>
