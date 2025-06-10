@@ -1273,7 +1273,9 @@ const WorkflowChat: React.FC<WorkflowChatProps> = ({
                         {(() => {
                           const modelName = models[selectedModel]?.name || selectedModel;
                           // Shorten common model names
-                          if (modelName.includes('databricks-llama-4-maverick')) return 'Llama 4 Maverick';
+                          if (modelName.includes('databricks-llama-4-maverick')) return 'Llama 4';
+                          if (modelName.includes('databricks-meta-llama-3-1-405b-instruct')) return 'Llama 3';
+                          if (modelName.includes('databricks-meta-llama-3-3-70b-instruct')) return 'Llama 3';
                           if (modelName.includes('databricks-llama-70b')) return 'Llama 3 70B';
                           if (modelName.includes('databricks-llama-405b')) return 'Llama 3 405B';
                           if (modelName.includes('gpt-4')) return 'GPT-4';
