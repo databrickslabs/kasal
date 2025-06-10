@@ -349,6 +349,25 @@ const useShortcuts = ({
         return;
       }
 
+      // Check if an input field is focused to allow normal copy/paste/cut operations
+      const activeElement = document.activeElement;
+      const isInputFocused = activeElement && (
+        activeElement.tagName === 'INPUT' ||
+        activeElement.tagName === 'TEXTAREA' ||
+        (activeElement as HTMLElement).contentEditable === 'true' ||
+        activeElement.closest('.MuiTextField-root') !== null ||
+        activeElement.closest('[contenteditable]') !== null
+      );
+
+      // Check if there's any text selection for copy operations
+      const selection = window.getSelection();
+      const hasTextSelection = selection && selection.toString().length > 0;
+
+      // Allow default browser behavior for copy/paste/cut in input fields or when text is selected
+      if ((isInputFocused || hasTextSelection) && (event.ctrlKey || event.metaKey) && ['c', 'v', 'x', 'a'].includes(event.key.toLowerCase())) {
+        return;
+      }
+
       // Build current key combination including modifiers
       const currentCombination: string[] = [];
       if (event.ctrlKey || event.metaKey) currentCombination.push('Control');
