@@ -1,5 +1,9 @@
 import React from 'react';
-import { Paper, Box, Typography } from '@mui/material';
+import { 
+  Paper, 
+  Box, 
+  Typography, 
+} from '@mui/material';
 import SmartToyIcon from '@mui/icons-material/SmartToy';
 import WorkflowChat from './WorkflowChat';
 import { Node, Edge } from 'reactflow';
@@ -13,7 +17,7 @@ interface ChatPanelProps {
 }
 
 const ChatPanel: React.FC<ChatPanelProps> = ({ onNodesGenerated, onLoadingStateChange, isVisible = true }) => {
-  const { selectedModel } = useCrewExecutionStore();
+  const { selectedModel, setSelectedModel } = useCrewExecutionStore();
   const { selectedTools } = useJobManagementStore();
 
   return (
@@ -54,6 +58,7 @@ const ChatPanel: React.FC<ChatPanelProps> = ({ onNodesGenerated, onLoadingStateC
           selectedModel={selectedModel}
           selectedTools={selectedTools}
           isVisible={isVisible}
+          setSelectedModel={setSelectedModel}
         />
       </Box>
     </Paper>

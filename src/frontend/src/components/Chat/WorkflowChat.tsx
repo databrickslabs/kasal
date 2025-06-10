@@ -14,6 +14,11 @@ import {
   ListItemAvatar,
   Avatar,
   Divider,
+  ListItemButton,
+  Tooltip,
+  Stack,
+  Menu,
+  MenuItem,
 } from '@mui/material';
 import SendIcon from '@mui/icons-material/Send';
 import SmartToyIcon from '@mui/icons-material/SmartToy';
@@ -22,6 +27,12 @@ import GroupIcon from '@mui/icons-material/Group';
 import AssignmentIcon from '@mui/icons-material/Assignment';
 import AccountTreeIcon from '@mui/icons-material/AccountTree';
 import SettingsIcon from '@mui/icons-material/Settings';
+import HistoryIcon from '@mui/icons-material/History';
+import AddIcon from '@mui/icons-material/Add';
+import DeleteIcon from '@mui/icons-material/Delete';
+import RefreshIcon from '@mui/icons-material/Refresh';
+import CloseIcon from '@mui/icons-material/Close';
+import KeyboardArrowDownIcon from '@mui/icons-material/KeyboardArrowDown';
 import { toast } from 'react-hot-toast';
 import DispatcherService, { DispatchResult, ConfigureCrewResult } from '../../api/DispatcherService';
 import { useWorkflowStore } from '../../store/workflow';
@@ -30,6 +41,9 @@ import { Agent } from '../../types/agent';
 import { Task } from '../../types/task';
 import { AgentService } from '../../api/AgentService';
 import { TaskService } from '../../api/TaskService';
+import ChatHistoryService, { SaveMessageRequest, ChatSession, ChatMessage as BackendChatMessage } from '../../api/ChatHistoryService';
+import { v4 as uuidv4 } from 'uuid';
+import { ModelService } from '../../api/ModelService';
 
 interface GeneratedAgent {
   name: string;
@@ -76,6 +90,7 @@ interface WorkflowChatProps {
   selectedModel?: string;
   selectedTools?: string[];
   isVisible?: boolean;
+  setSelectedModel?: (model: string) => void;
 }
 
 const WorkflowChat: React.FC<WorkflowChatProps> = ({
@@ -84,15 +99,23 @@ const WorkflowChat: React.FC<WorkflowChatProps> = ({
   selectedModel = 'databricks-llama-4-maverick',
   selectedTools = [],
   isVisible = true,
+  setSelectedModel,
 }) => {
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [inputValue, setInputValue] = useState('');
   const [isLoading, setIsLoading] = useState(false);
+  const [sessionId, setSessionId] = useState<string>(uuidv4());
+  const [chatSessions, setChatSessions] = useState<ChatSession[]>([]);
+  const [showSessionList, setShowSessionList] = useState(false);
+  const [isLoadingSessions, setIsLoadingSessions] = useState(false);
+  const [currentSessionName, setCurrentSessionName] = useState('New Chat');
+  const [models, setModels] = useState<Record<string, any>>({});
+  const [isLoadingModels, setIsLoadingModels] = useState(false);
+  const [modelMenuAnchor, setModelMenuAnchor] = useState<null | HTMLElement>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
-
   const { setNodes, setEdges } = useWorkflowStore();
-
+  
   const scrollToBottom = () => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   };
@@ -100,6 +123,90 @@ const WorkflowChat: React.FC<WorkflowChatProps> = ({
   useEffect(() => {
     scrollToBottom();
   }, [messages]);
+
+  // Initialize session on component mount
+  useEffect(() => {
+    const initializeSession = () => {
+      // Generate a new session ID for this chat instance
+      const newSessionId = ChatHistoryService.generateSessionId();
+      setSessionId(newSessionId);
+    };
+    
+    initializeSession();
+  }, []);
+
+  // Load chat history when session is set
+  useEffect(() => {
+    const loadChatHistory = async () => {
+      if (!sessionId) return;
+      
+      try {
+        // For now, we'll start with a fresh session each time
+        // In the future, we could implement session persistence or loading previous sessions
+        console.log(`Initialized new chat session: ${sessionId}`);
+      } catch (error) {
+        console.error('Error loading chat history:', error);
+        // Don't show error to user, just continue with empty chat
+      }
+    };
+
+    loadChatHistory();
+  }, [sessionId]);
+
+  // Load user's chat sessions
+  const loadChatSessions = async () => {
+    setIsLoadingSessions(true);
+    try {
+      const response = await ChatHistoryService.getGroupSessions();
+      setChatSessions(response.sessions || []);
+    } catch (error) {
+      console.error('Error loading chat sessions:', error);
+      toast.error('Failed to load chat history');
+    } finally {
+      setIsLoadingSessions(false);
+    }
+  };
+
+  // Load messages from a specific session
+  const loadSessionMessages = async (selectedSessionId: string) => {
+    setIsLoading(true);
+    try {
+      const response = await ChatHistoryService.getSessionMessages(selectedSessionId);
+      
+      // Convert backend messages to frontend format
+      const loadedMessages: ChatMessage[] = response.messages.map((msg: BackendChatMessage) => ({
+        id: msg.id,
+        type: msg.message_type as 'user' | 'assistant',
+        content: msg.content,
+        timestamp: new Date(msg.timestamp),
+        intent: msg.intent,
+        confidence: msg.confidence ? parseFloat(msg.confidence) : undefined,
+        result: msg.generation_result,
+      }));
+      
+      setMessages(loadedMessages);
+      setSessionId(selectedSessionId);
+      setCurrentSessionName(`Session from ${new Date(response.messages[0]?.timestamp || Date.now()).toLocaleDateString()}`);
+      setShowSessionList(false);
+      
+      // Scroll to bottom after loading messages
+      setTimeout(scrollToBottom, 100);
+    } catch (error) {
+      console.error('Error loading session messages:', error);
+      toast.error('Failed to load session messages');
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  // Create a new chat session
+  const startNewChat = () => {
+    const newSessionId = ChatHistoryService.generateSessionId();
+    setSessionId(newSessionId);
+    setMessages([]);
+    setCurrentSessionName('New Chat');
+    setShowSessionList(false);
+  };
 
   // Notify parent of loading state changes
   useEffect(() => {
@@ -146,6 +253,33 @@ const WorkflowChat: React.FC<WorkflowChatProps> = ({
     }
   }, [isVisible]);
 
+  // Fetch models when component mounts
+  useEffect(() => {
+    const fetchModels = async () => {
+      setIsLoadingModels(true);
+      try {
+        const modelService = ModelService.getInstance();
+        const response = await modelService.getEnabledModels();
+        setModels(response);
+      } catch (error) {
+        console.error('Error fetching models:', error);
+        // Fallback to a default model if fetch fails
+        setModels({
+          'databricks-llama-4-maverick': {
+            name: 'databricks-llama-4-maverick',
+            temperature: 0.7,
+            context_window: 128000,
+            max_output_tokens: 4096,
+            enabled: true
+          }
+        });
+      } finally {
+        setIsLoadingModels(false);
+      }
+    };
+    fetchModels();
+  }, []);
+
   const getIntentIcon = (intent?: string) => {
     switch (intent) {
       case 'generate_agent':
@@ -171,6 +305,32 @@ const WorkflowChat: React.FC<WorkflowChatProps> = ({
         return 'success';
       default:
         return 'default';
+    }
+  };
+
+  // Save message to backend
+  const saveMessageToBackend = async (message: ChatMessage): Promise<void> => {
+    if (!sessionId) return;
+    
+    try {
+      const saveRequest: SaveMessageRequest = {
+        session_id: sessionId,
+        message_type: message.type,
+        content: message.content,
+        intent: message.intent,
+        confidence: message.confidence,
+        generation_result: message.result
+      };
+
+      await ChatHistoryService.saveMessage(saveRequest);
+      console.log(`Message saved successfully to session ${sessionId}`);
+    } catch (error) {
+      console.error('Error saving message to backend:', error);
+      // Show a subtle warning but don't interrupt the chat
+      toast.error('Failed to save message to history', {
+        duration: 2000,
+        position: 'bottom-right',
+      });
     }
   };
 
@@ -711,6 +871,9 @@ const WorkflowChat: React.FC<WorkflowChatProps> = ({
     setInputValue('');
     setIsLoading(true);
 
+    // Save user message to backend (async, don't wait)
+    saveMessageToBackend(userMessage);
+
     try {
       console.log('Calling dispatcher service...'); // Debug log
       const result: DispatchResult = await DispatcherService.dispatch({
@@ -731,6 +894,9 @@ const WorkflowChat: React.FC<WorkflowChatProps> = ({
       };
 
       setMessages(prev => [...prev, assistantMessage]);
+      
+      // Save assistant message to backend (async, don't wait)
+      saveMessageToBackend(assistantMessage);
 
       // Handle the generated result based on intent
       if (result.generation_result) {
@@ -761,6 +927,9 @@ const WorkflowChat: React.FC<WorkflowChatProps> = ({
       };
       
       setMessages(prev => [...prev, errorMessage]);
+      
+      // Save error message to backend (async, don't wait)
+      saveMessageToBackend(errorMessage);
     } finally {
       setIsLoading(false);
       // Aggressive focus attempts to ensure it sticks after all async operations
@@ -815,8 +984,158 @@ const WorkflowChat: React.FC<WorkflowChatProps> = ({
   };
 
   return (
-    <Box sx={{ height: '100%', display: 'flex', flexDirection: 'column' }}>
+    <Box sx={{ height: '100%', display: 'flex', flexDirection: 'column', position: 'relative' }}>
+      {/* Header with session controls */}
+      <Box sx={{ 
+        p: 1, 
+        borderBottom: 1, 
+        borderColor: 'divider',
+        display: 'flex',
+        alignItems: 'center',
+        justifyContent: 'space-between',
+        backgroundColor: theme => theme.palette.mode === 'dark' ? 'grey.900' : 'grey.50'
+      }}>
+        <Typography variant="subtitle2" sx={{ fontWeight: 600 }}>
+          {currentSessionName}
+        </Typography>
+        <Stack direction="row" spacing={1}>
+          <Tooltip title="New Chat">
+            <IconButton size="small" onClick={startNewChat}>
+              <AddIcon fontSize="small" />
+            </IconButton>
+          </Tooltip>
+          <Tooltip title="Chat History">
+            <IconButton 
+              size="small" 
+              onClick={() => {
+                setShowSessionList(true);
+                loadChatSessions();
+              }}
+            >
+              <HistoryIcon fontSize="small" />
+            </IconButton>
+          </Tooltip>
+        </Stack>
+      </Box>
 
+      {/* Session List - Slides over the chat content */}
+      <Box
+        sx={{
+          position: 'absolute',
+          top: 0,
+          right: showSessionList ? 0 : '-450px',
+          width: 450,
+          height: '100%',
+          backgroundColor: theme => theme.palette.background.paper,
+          boxShadow: theme => showSessionList ? theme.shadows[8] : 'none',
+          transition: 'right 0.3s ease-in-out',
+          zIndex: 10,
+          display: 'flex',
+          flexDirection: 'column',
+        }}
+      >
+        {/* Header matching chat panel style */}
+        <Box sx={{ 
+          p: 1.5, 
+          borderBottom: 1, 
+          borderColor: 'divider',
+          backgroundColor: theme => theme.palette.mode === 'dark' ? 'grey.900' : 'grey.50',
+          display: 'flex', 
+          alignItems: 'center', 
+          justifyContent: 'space-between'
+        }}>
+          <Typography variant="subtitle2" sx={{ fontWeight: 600 }}>Chat History</Typography>
+          <Stack direction="row" spacing={0.5}>
+            <Tooltip title="Refresh">
+              <IconButton 
+                size="small" 
+                onClick={loadChatSessions}
+                disabled={isLoadingSessions}
+              >
+                {isLoadingSessions ? <CircularProgress size={20} /> : <RefreshIcon />}
+              </IconButton>
+            </Tooltip>
+            <Tooltip title="Close">
+              <IconButton 
+                size="small" 
+                onClick={() => setShowSessionList(false)}
+              >
+                <CloseIcon fontSize="small" />
+              </IconButton>
+            </Tooltip>
+          </Stack>
+        </Box>
+        
+        {/* Session list content */}
+        <Box sx={{ flex: 1, overflow: 'auto', p: 2 }}>
+          {chatSessions.length === 0 ? (
+            <Typography variant="body2" color="text.secondary" sx={{ textAlign: 'center', mt: 4 }}>
+              No previous chat sessions found
+            </Typography>
+          ) : (
+            <List sx={{ p: 0 }}>
+              {chatSessions.map((session) => (
+              <ListItemButton
+                key={session.session_id}
+                onClick={() => loadSessionMessages(session.session_id)}
+                selected={session.session_id === sessionId}
+                sx={{ 
+                  borderRadius: 1, 
+                  mb: 1,
+                  border: 1,
+                  borderColor: 'divider',
+                  '&.Mui-selected': {
+                    backgroundColor: theme => theme.palette.action.selected,
+                    borderColor: theme => theme.palette.primary.main,
+                  },
+                  '&:hover': {
+                    backgroundColor: theme => theme.palette.action.hover,
+                  }
+                }}
+              >
+                <ListItemText
+                  primary={`Session ${new Date(session.latest_timestamp).toLocaleDateString()}`}
+                  secondary={`${new Date(session.latest_timestamp).toLocaleTimeString()} • ${session.message_count || 0} messages`}
+                />
+                <Tooltip title="Delete Session">
+                  <IconButton
+                    edge="end"
+                    size="small"
+                    onClick={async (e) => {
+                      e.stopPropagation();
+                      try {
+                        await ChatHistoryService.deleteSession(session.session_id);
+                        toast.success('Session deleted');
+                        loadChatSessions();
+                      } catch (error) {
+                        toast.error('Failed to delete session');
+                      }
+                    }}
+                  >
+                    <DeleteIcon fontSize="small" />
+                  </IconButton>
+                </Tooltip>
+              </ListItemButton>
+            ))}
+            </List>
+          )}
+        </Box>
+      </Box>
+
+      {/* Backdrop for closing when clicking outside */}
+      {showSessionList && (
+        <Box
+          onClick={() => setShowSessionList(false)}
+          sx={{
+            position: 'absolute',
+            top: 0,
+            left: -1000,
+            right: 450,
+            bottom: 0,
+            zIndex: 9,
+          }}
+        />
+      )}
 
       <Box sx={{ flex: 1, overflow: 'auto', p: 2 }}>
         {messages.length === 0 ? (
@@ -897,7 +1216,7 @@ const WorkflowChat: React.FC<WorkflowChatProps> = ({
       </Box>
 
       <Paper elevation={3} sx={{ p: 2, borderTop: 1, borderColor: 'divider' }}>
-        <Box sx={{ display: 'flex', gap: 1 }}>
+        <Box sx={{ display: 'flex', gap: 1, alignItems: 'flex-end' }}>
           <TextField
             ref={inputRef}
             fullWidth
@@ -913,6 +1232,129 @@ const WorkflowChat: React.FC<WorkflowChatProps> = ({
             multiline
             maxRows={4}
             size="small"
+            sx={{
+              '& .MuiOutlinedInput-root': {
+                paddingRight: selectedModel?.includes('databricks') ? '180px' : '140px', // Adjust based on model name length
+              },
+            }}
+            InputProps={{
+              endAdornment: (
+                <Box
+                  sx={{
+                    position: 'absolute',
+                    right: 8,
+                    bottom: 8, // Position at the bottom
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: 1,
+                  }}
+                >
+                  {/* Subtle Model Selector */}
+                  {setSelectedModel && (
+                    <Box
+                      onClick={(e) => setModelMenuAnchor(e.currentTarget)}
+                      sx={{
+                        display: 'flex',
+                        alignItems: 'center',
+                        gap: 0.25,
+                        cursor: 'pointer',
+                        padding: '2px 6px',
+                        borderRadius: 0.5,
+                        fontSize: '0.75rem',
+                        color: 'text.secondary',
+                        transition: 'all 0.2s',
+                        '&:hover': {
+                          backgroundColor: 'action.hover',
+                          color: 'text.primary',
+                        },
+                      }}
+                    >
+                      <Typography variant="caption" sx={{ fontSize: '0.75rem' }}>
+                        {(() => {
+                          const modelName = models[selectedModel]?.name || selectedModel;
+                          // Shorten common model names
+                          if (modelName.includes('databricks-llama-4-maverick')) return 'Llama 3';
+                          if (modelName.includes('databricks-llama')) return 'Llama 3';
+                          if (modelName.includes('gpt-4')) return 'GPT-4';
+                          if (modelName.includes('gpt-3.5')) return 'GPT-3.5';
+                          if (modelName.includes('claude')) return 'Claude';
+                          if (modelName.length > 15) return modelName.substring(0, 15) + '...';
+                          return modelName;
+                        })()}
+                      </Typography>
+                      <KeyboardArrowDownIcon sx={{ fontSize: 14 }} />
+                    </Box>
+                  )}
+                  <Menu
+                    anchorEl={modelMenuAnchor}
+                    open={Boolean(modelMenuAnchor)}
+                    onClose={() => setModelMenuAnchor(null)}
+                    anchorOrigin={{
+                      vertical: 'top',
+                      horizontal: 'right',
+                    }}
+                    transformOrigin={{
+                      vertical: 'bottom',
+                      horizontal: 'right',
+                    }}
+                    PaperProps={{
+                      sx: {
+                        mt: -1,
+                        minWidth: 250,
+                        maxHeight: 400,
+                      },
+                    }}
+                  >
+                    {isLoadingModels ? (
+                      <MenuItem disabled>
+                        <CircularProgress size={16} sx={{ mr: 1 }} />
+                        Loading models...
+                      </MenuItem>
+                    ) : Object.keys(models).length === 0 ? (
+                      <MenuItem disabled>No models available</MenuItem>
+                    ) : (
+                      Object.entries(models).map(([key, model]) => (
+                        <MenuItem
+                          key={key}
+                          onClick={() => {
+                            if (setSelectedModel) {
+                              setSelectedModel(key);
+                            }
+                            setModelMenuAnchor(null);
+                          }}
+                          selected={key === selectedModel}
+                          sx={{
+                            fontSize: '0.813rem',
+                            py: 0.75,
+                            '&.Mui-selected': {
+                              backgroundColor: 'action.selected',
+                            },
+                          }}
+                        >
+                          <Box sx={{ width: '100%' }}>
+                            <Typography variant="body2" sx={{ fontSize: '0.813rem' }}>
+                              {model.name}
+                            </Typography>
+                            {model.provider && (
+                              <Typography
+                                variant="caption"
+                                sx={{
+                                  fontSize: '0.688rem',
+                                  color: 'text.secondary',
+                                  display: 'block',
+                                }}
+                              >
+                                {model.provider}
+                              </Typography>
+                            )}
+                          </Box>
+                        </MenuItem>
+                      ))
+                    )}
+                  </Menu>
+                </Box>
+              ),
+            }}
           />
           <IconButton
             color="primary"

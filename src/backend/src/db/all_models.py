@@ -27,6 +27,7 @@ from src.models.mcp_server import MCPServer
 from src.models.mcp_settings import MCPSettings
 # Multi-group models (formerly multi-tenant)
 from src.models.group import Group, GroupUser
+from src.models.chat_history import ChatHistory
 
 # User and RBAC models
 from src.models.user import User, UserProfile, RefreshToken, ExternalIdentity, Role, Privilege, RolePrivilege, UserRole, IdentityProvider
@@ -66,6 +67,7 @@ __all__ = [
     # Multi-group models
     "Group",
     "GroupUser",
+    "ChatHistory",
     # User and RBAC models
     "User",
     "UserProfile", 

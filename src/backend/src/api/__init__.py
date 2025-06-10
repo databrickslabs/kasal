@@ -41,6 +41,7 @@ from src.api.privileges_router import router as privileges_router
 from src.api.user_roles_router import router as user_roles_router
 from src.api.identity_providers_router import router as identity_providers_router
 from src.api.group_router import router as group_router
+from src.api.chat_history_router import router as chat_history_router
 
 # Create the main API router
 api_router = APIRouter()
@@ -87,6 +88,7 @@ api_router.include_router(privileges_router)
 api_router.include_router(user_roles_router)
 api_router.include_router(identity_providers_router)
 api_router.include_router(group_router)
+api_router.include_router(chat_history_router)
 
 __all__ = [
     "api_router",
@@ -128,5 +130,6 @@ __all__ = [
     "privileges_router",
     "user_roles_router",
     "identity_providers_router",
-    "group_router"
+    "group_router",
+    "chat_history_router"
 ]
