@@ -722,8 +722,7 @@ const CrewCanvas: React.FC<CrewCanvasProps> = ({
             setReasoningEnabled={setReasoningEnabled}
             schemaDetectionEnabled={schemaDetectionEnabled}
             setSchemaDetectionEnabled={setSchemaDetectionEnabled}
-            selectedModel={selectedModel}
-            setSelectedModel={setSelectedModel}
+
             showRunHistory={showRunHistory}
           />
 

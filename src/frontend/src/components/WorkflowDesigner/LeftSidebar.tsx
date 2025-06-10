@@ -24,7 +24,7 @@ import {
   AccountTree as GenerateConnectionsIcon,
   Keyboard as KeyboardIcon,
   Tune as TuneIcon,
-  Memory as ModelIcon,
+
   Settings as SettingsIcon,
   Assessment as LogsIcon,
   Schedule as ScheduleIcon,
@@ -63,9 +63,7 @@ interface LeftSidebarProps {
   setReasoningEnabled: (enabled: boolean) => void;
   schemaDetectionEnabled: boolean;
   setSchemaDetectionEnabled: (enabled: boolean) => void;
-  // Model selection props
-  selectedModel: string;
-  setSelectedModel: (model: string) => void;
+
   // New prop for configuration
   setIsConfigurationDialogOpen?: (open: boolean) => void;
   // Logs dialog prop
@@ -88,8 +86,6 @@ const LeftSidebar: React.FC<LeftSidebarProps> = ({
   setReasoningEnabled,
   schemaDetectionEnabled,
   setSchemaDetectionEnabled,
-  selectedModel,
-  setSelectedModel,
   setIsConfigurationDialogOpen,
   onOpenLogsDialog,
   showRunHistory
@@ -153,9 +149,7 @@ const LeftSidebar: React.FC<LeftSidebarProps> = ({
     setReasoningLLM(value);
   }, [setReasoningLLM]);
 
-  const handleMainModelChange = useCallback((event: SelectChangeEvent) => {
-    setSelectedModel(event.target.value);
-  }, [setSelectedModel]);
+
 
   // Group shortcuts by category, filtering out non-functional shortcuts
   const groupedShortcuts = useMemo(() => {
@@ -209,71 +203,7 @@ const LeftSidebar: React.FC<LeftSidebarProps> = ({
       tooltip: 'Configuration',
       content: null // No expandable content, handled by direct click
     },
-    {
-      id: 'model-selection',
-      icon: <ModelIcon />,
-      tooltip: 'Model Selection',
-      content: (
-        <Box
-          sx={{
-            maxHeight: showRunHistory ? 'calc(100vh - 48px - 200px - 20px)' : 'calc(100vh - 48px - 20px)',
-            overflowY: 'auto',
-            p: 1,
-          }}
-        >
-          <Box sx={{ mb: 2 }}>
-            <Typography 
-              variant="subtitle2" 
-              sx={{ 
-                color: theme.palette.primary.main, 
-                mb: 1,
-                fontWeight: 600,
-                textTransform: 'uppercase',
-                letterSpacing: '0.5px',
-                fontSize: '0.7rem'
-              }}
-            >
-              Main Model
-            </Typography>
-            <Divider sx={{ mb: 1 }} />
-            
-            <FormControl size="small" fullWidth>
-              <InputLabel sx={{ fontSize: '0.75rem' }}>Selected Model</InputLabel>
-              <Select
-                value={selectedModel}
-                onChange={handleMainModelChange}
-                label="Selected Model"
-                disabled={isLoadingModels}
-                sx={{ fontSize: '0.75rem' }}
-                renderValue={(selected: string) => {
-                  const model = models[selected];
-                  return model ? model.name : selected;
-                }}
-              >
-                {isLoadingModels ? (
-                  <MenuItem value="">
-                    <CircularProgress size={16} />
-                  </MenuItem>
-                ) : Object.keys(models).length === 0 ? (
-                  <MenuItem value="">No models available</MenuItem>
-                ) : (
-                  Object.entries(models).map(([key, model]) => (
-                    <MenuItem key={key} value={key} sx={{ fontSize: '0.75rem' }}>
-                      <Box sx={{ display: 'flex', flexDirection: 'column', width: '100%' }}>
-                        <span>{model.name}</span>
-                        {model.provider && (
-                          <span style={{ fontSize: '0.65rem', opacity: 0.7 }}>{model.provider}</span>
-                        )}
-                      </Box>
-                    </MenuItem>
-                  ))
-                )}
-              </Select>
-            </FormControl>
-          </Box>
-        </Box>
-      )
-    },
+
     {
       id: 'runtime-features',
       icon: <TuneIcon />,

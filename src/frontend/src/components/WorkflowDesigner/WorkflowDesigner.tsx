@@ -493,7 +493,7 @@ const WorkflowDesigner: React.FC<WorkflowDesignerProps> = (): JSX.Element => {
                   position: 'absolute',
                   top: 0,
                   right: 48, // Position to the left of RightSidebar (48px width)
-                  width: '350px',
+                  width: '450px', // Increased from 350px
                   height: '100%',
                   display: 'flex',
                   flexDirection: 'column',
@@ -920,8 +920,7 @@ const WorkflowDesigner: React.FC<WorkflowDesignerProps> = (): JSX.Element => {
           setReasoningEnabled={setReasoningEnabled}
           schemaDetectionEnabled={schemaDetectionEnabled}
           setSchemaDetectionEnabled={setSchemaDetectionEnabled}
-          selectedModel={selectedModel}
-          setSelectedModel={setSelectedModel}
+
           setIsConfigurationDialogOpen={dialogManager.setIsConfigurationDialogOpen}
           onOpenLogsDialog={() => dialogManager.setIsLogsDialogOpen(true)}
           showRunHistory={showRunHistory}
