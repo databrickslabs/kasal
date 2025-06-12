@@ -75,21 +75,29 @@ class CallbackManager:
                 logger.warning(f"Error creating AgentTraceEventListener: {e}", exc_info=True)
                 agent_trace_cb = None
                 
-            # Create task completion logger
-            try:
-                from src.engines.crewai.callbacks.logging_callbacks import TaskCompletionLogger
-                task_completion_cb = TaskCompletionLogger(job_id=job_id)
-                logger.info(f"Created TaskCompletionLogger for job {job_id}")
-                handlers.append(task_completion_cb)
-                callbacks_dict['task_completion'] = task_completion_cb
-            except Exception as e:
-                logger.warning(f"Error creating TaskCompletionLogger: {e}", exc_info=True)
-                task_completion_cb = None
+            # Create task completion logger - DISABLED to prevent duplicates
+            # The AgentTraceEventListener already handles task completion events
+            # try:
+            #     from src.engines.crewai.callbacks.logging_callbacks import TaskCompletionLogger
+            #     task_completion_cb = TaskCompletionLogger(job_id=job_id)
+            #     logger.info(f"Created TaskCompletionLogger for job {job_id}")
+            #     handlers.append(task_completion_cb)
+            #     callbacks_dict['task_completion'] = task_completion_cb
+            # except Exception as e:
+            #     logger.warning(f"Error creating TaskCompletionLogger: {e}", exc_info=True)
+            #     task_completion_cb = None
             
-            # IMPORTANT: Explicitly ensure event listeners are registered
-            CallbackManager.ensure_event_listeners_registered([
-                handler for handler in handlers if handler is not None
-            ])
+            # IMPORTANT: Event listeners inheriting from BaseEventListener are automatically 
+            # registered in their __init__ method, so we don't need to register them again.
+            # Only register listeners that don't inherit from BaseEventListener
+            non_base_listeners = []
+            for handler in handlers:
+                if handler is not None and not hasattr(handler, 'setup_listeners'):
+                    # This handler doesn't inherit from BaseEventListener
+                    non_base_listeners.append(handler)
+            
+            if non_base_listeners:
+                CallbackManager.ensure_event_listeners_registered(non_base_listeners)
             
             # Ensure the trace writer is started
             callbacks_dict['start_trace_writer'] = True

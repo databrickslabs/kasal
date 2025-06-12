@@ -36,6 +36,9 @@ from src.core.unit_of_work import SyncUnitOfWork
 from src.db.session import SessionLocal
 from src.models.task import Task  # Import the Task model directly
 
+# Import shared utilities
+from src.engines.crewai.utils.agent_utils import extract_agent_name_from_event
+
 logger = logging.getLogger(__name__)
 
 class AgentTraceEventListener(BaseEventListener):
@@ -59,6 +62,7 @@ class AgentTraceEventListener(BaseEventListener):
         # since BaseEventListener calls setup_listeners in its __init__
         self.job_id = job_id
         self._queue = get_trace_queue()
+        self._init_time = datetime.now(timezone.utc)
         
         # Initialize task registry for this job
         if job_id not in AgentTraceEventListener._task_registry:
@@ -66,7 +70,7 @@ class AgentTraceEventListener(BaseEventListener):
         
         log_prefix = f"[AgentTraceEventListener][{self.job_id}]"
         if job_id not in AgentTraceEventListener._init_logged:
-            logger.info(f"{log_prefix} Initializing with CrewAI event listeners. Using shared trace queue: {id(self._queue)}")
+            logger.info(f"{log_prefix} Initializing with CrewAI event listeners at {self._init_time.isoformat()}. Using shared trace queue: {id(self._queue)}")
             AgentTraceEventListener._init_logged.add(job_id)
         
         try:
@@ -150,11 +154,17 @@ class AgentTraceEventListener(BaseEventListener):
         log_prefix = f"[AgentTraceEventListener][{self.job_id}]"
         logger.info(f"{log_prefix} Setting up event listeners")
         
+        # Add debugging to track duplicate registrations
+        import inspect
+        caller_frame = inspect.currentframe().f_back
+        caller_info = f"{caller_frame.f_code.co_filename}:{caller_frame.f_lineno}" if caller_frame else "unknown"
+        logger.info(f"{log_prefix} setup_listeners called from {caller_info}")
+        
         @crewai_event_bus.on(AgentExecutionCompletedEvent)
         def on_agent_execution_completed(source, event):
             """Handle agent execution completion events."""
             try:
-                agent_name = event.agent.role if hasattr(event.agent, 'role') else "Unknown"
+                agent_name = extract_agent_name_from_event(event, log_prefix, source)
                 task_name = event.task.description if hasattr(event.task, 'description') else "Unknown"
                 
                 logger.info(f"{log_prefix} Event: AgentExecutionCompleted for agent: {agent_name}")
@@ -188,7 +198,7 @@ class AgentTraceEventListener(BaseEventListener):
         def on_tool_usage_finished(source, event):
             """Handle tool usage completion events."""
             try:
-                agent_name = event.agent.role if hasattr(event.agent, 'role') else "Unknown"
+                agent_name = extract_agent_name_from_event(event, log_prefix, source)
                 # Get task name from context if available, otherwise use "Unknown"
                 task_name = "Unknown"
                 if hasattr(event, 'context') and hasattr(event.context, 'task'):
@@ -217,14 +227,7 @@ class AgentTraceEventListener(BaseEventListener):
         def on_llm_call_completed(source, event):
             """Handle LLM call completion events."""
             try:
-                # CrewAI events might have different structures in different versions
-                # For LLMCallCompletedEvent, the agent might be in agent or in context.agent
-                if hasattr(event, 'agent'):
-                    agent_name = event.agent.role if hasattr(event.agent, 'role') else "Unknown"
-                elif hasattr(event, 'context') and hasattr(event.context, 'agent'):
-                    agent_name = event.context.agent.role if hasattr(event.context.agent, 'role') else "Unknown"
-                else:
-                    agent_name = "Unknown"
+                agent_name = extract_agent_name_from_event(event, log_prefix, source)
                 
                 # Similarly for task
                 if hasattr(event, 'task'):
@@ -267,14 +270,7 @@ class AgentTraceEventListener(BaseEventListener):
         def on_task_completed(source, event):
             """Handle task completion events."""
             try:
-                # CrewAI events might have different structures in different versions
-                # For TaskCompletedEvent, the agent might be in agent or in context.agent
-                if hasattr(event, 'agent'):
-                    agent_name = event.agent.role if hasattr(event.agent, 'role') else "Unknown"
-                elif hasattr(event, 'context') and hasattr(event.context, 'agent'):
-                    agent_name = event.context.agent.role if hasattr(event.context.agent, 'role') else "Unknown"
-                else:
-                    agent_name = "Unknown"
+                agent_name = extract_agent_name_from_event(event, log_prefix, source)
                 
                 # Similarly for task
                 if hasattr(event, 'task'):
@@ -360,12 +356,7 @@ class AgentTraceEventListener(BaseEventListener):
             """Handle task started events."""
             try:
                 # Extract agent and task information
-                if hasattr(event, 'agent'):
-                    agent_name = event.agent.role if hasattr(event.agent, 'role') else "Unknown"
-                elif hasattr(event, 'context') and hasattr(event.context, 'agent'):
-                    agent_name = event.context.agent.role if hasattr(event.context.agent, 'role') else "Unknown"
-                else:
-                    agent_name = "Unknown"
+                agent_name = extract_agent_name_from_event(event, log_prefix, source)
                 
                 if hasattr(event, 'task'):
                     task_name = event.task.description if hasattr(event.task, 'description') else "Unknown"
@@ -418,10 +409,11 @@ class AgentTraceEventListener(BaseEventListener):
         """
         log_prefix = f"[AgentTraceEventListener][{self.job_id}]"
         try:
-            # Log at the beginning to confirm method is called
-            logger.info(f"{log_prefix} EVENT[{event_type}] ⏳ Enqueuing trace for agent: {agent_name} and task: {task_name[:30]}...")
-            
             timestamp = datetime.now(timezone.utc)
+            time_since_init = (timestamp - self._init_time).total_seconds()
+            
+            # Log at the beginning to confirm method is called with timing info
+            logger.info(f"{log_prefix} EVENT[{event_type}] ⏳ Enqueuing trace for agent: {agent_name} and task: {task_name[:30]}... (T+{time_since_init:.2f}s)")
             
             # Create trace data for queue
             trace_data = {
@@ -431,7 +423,8 @@ class AgentTraceEventListener(BaseEventListener):
                 "event_type": event_type,
                 "timestamp": timestamp.isoformat(),
                 "output_content": output_content,
-                "extra_data": extra_data or {}
+                "extra_data": extra_data or {},
+                "time_since_init": time_since_init
             }
             
             # Log trace data shape before enqueueing

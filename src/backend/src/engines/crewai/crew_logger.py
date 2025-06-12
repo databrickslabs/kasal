@@ -39,6 +39,9 @@ from crewai.utilities.events import (
     crewai_event_bus
 )
 
+# Import shared utilities
+from src.engines.crewai.utils.agent_utils import extract_agent_name_from_event
+
 # Try to import additional events if available
 try:
     from crewai.utilities.events import (
@@ -178,7 +181,8 @@ class CrewLogger:
         # Store job info
         self._active_jobs[job_id] = {
             "handler": handler,
-            "original_print_method": None
+            "original_print_method": None,
+            "event_handlers": []  # Store event handler references for cleanup
         }
         
         # Attach handler to crew logger
@@ -230,6 +234,14 @@ class CrewLogger:
         Args:
             job_id: The execution/job ID
         """
+        logger.info(f"[CrewLogger] Registering event listeners for job {job_id}")
+        
+        # Check if we already have event handlers for any job
+        # This is a temporary fix to prevent duplicate registrations
+        if self._event_handlers:
+            logger.warning(f"[CrewLogger] Event handlers already exist from previous jobs. Skipping registration for job {job_id} to prevent duplicates.")
+            return
+        
         # Register Crew-level events
         self._register_crew_events(job_id)
         
@@ -248,6 +260,9 @@ class CrewLogger:
         # Register extended events if available
         if EXTENDED_EVENTS_AVAILABLE:
             self._register_extended_events(job_id)
+        
+        # Mark that we have registered handlers
+        self._event_handlers[job_id] = True
     
     def _register_crew_events(self, job_id: str) -> None:
         """Register crew-level event handlers."""
@@ -311,7 +326,7 @@ class CrewLogger:
         @crewai_event_bus.on(AgentExecutionStartedEvent)
         def on_agent_execution_started(source, event):
             try:
-                agent_role = getattr(event.agent, 'role', 'Unknown Agent') if hasattr(event, 'agent') else 'Unknown Agent'
+                agent_role = extract_agent_name_from_event(event, f"[CrewLogger][{job_id}]")
                 task_desc = getattr(event.task, 'description', 'Unknown Task') if hasattr(event, 'task') else 'Unknown Task'
                 task_preview = task_desc[:100] + "..." if len(task_desc) > 100 else task_desc
                 log_message = f"AGENT STARTED: {agent_role} - Task: {task_preview}"
@@ -334,7 +349,7 @@ class CrewLogger:
         @crewai_event_bus.on(AgentExecutionCompletedEvent)
         def on_agent_execution_completed(source, event):
             try:
-                agent_role = getattr(event.agent, 'role', 'Unknown Agent') if hasattr(event, 'agent') else 'Unknown Agent'
+                agent_role = extract_agent_name_from_event(event, f"[CrewLogger][{job_id}]")
                 task_desc = getattr(event.task, 'description', 'Unknown Task') if hasattr(event, 'task') else 'Unknown Task'
                 task_preview = task_desc[:100] + "..." if len(task_desc) > 100 else task_desc
                 output = getattr(event, 'output', 'No output')
@@ -350,7 +365,7 @@ class CrewLogger:
         def on_task_started(source, event):
             try:
                 task_desc = getattr(event.task, 'description', 'Unknown Task') if hasattr(event, 'task') else 'Unknown Task'
-                agent_role = getattr(event.task.agent, 'role', 'Unknown Agent') if hasattr(event, 'task') and hasattr(event.task, 'agent') else 'Unknown Agent'
+                agent_role = extract_agent_name_from_event(event, f"[CrewLogger][{job_id}]")
                 task_preview = task_desc[:120] + "..." if len(task_desc) > 120 else task_desc
                 log_message = f"TASK STARTED: {task_preview} (Agent: {agent_role})"
                 self._crew_logger.info(log_message)
@@ -373,7 +388,7 @@ class CrewLogger:
         def on_task_completed(source, event):
             try:
                 task_desc = getattr(event.task, 'description', 'Unknown Task') if hasattr(event, 'task') else 'Unknown Task'
-                agent_role = getattr(event.task.agent, 'role', 'Unknown Agent') if hasattr(event, 'task') and hasattr(event.task, 'agent') else 'Unknown Agent'
+                agent_role = extract_agent_name_from_event(event, f"[CrewLogger][{job_id}]")
                 task_preview = task_desc[:120] + "..." if len(task_desc) > 120 else task_desc
                 output = getattr(event, 'output', 'No output')
                 output_preview = str(output)[:150] + "..." if len(str(output)) > 150 else str(output)
@@ -388,7 +403,7 @@ class CrewLogger:
         def on_tool_usage_started(source, event):
             try:
                 tool_name = getattr(event, 'tool_name', 'Unknown Tool')
-                agent_role = getattr(event.agent, 'role', 'Unknown Agent') if hasattr(event, 'agent') else 'Unknown Agent'
+                agent_role = extract_agent_name_from_event(event, f"[CrewLogger][{job_id}]")
                 tool_args = getattr(event, 'args', {})
                 args_preview = str(tool_args)[:100] + "..." if len(str(tool_args)) > 100 else str(tool_args)
                 self._crew_logger.info(f"TOOL STARTED: {tool_name} (Agent: {agent_role}) - Args: {args_preview}")
@@ -399,7 +414,7 @@ class CrewLogger:
         def on_tool_usage_finished(source, event):
             try:
                 tool_name = getattr(event, 'tool_name', 'Unknown Tool')
-                agent_role = getattr(event.agent, 'role', 'Unknown Agent') if hasattr(event, 'agent') else 'Unknown Agent'
+                agent_role = extract_agent_name_from_event(event, f"[CrewLogger][{job_id}]")
                 output = getattr(event, 'output', 'No output')
                 output_preview = str(output)[:120] + "..." if len(str(output)) > 120 else str(output)
                 self._crew_logger.info(f"TOOL COMPLETED: {tool_name} (Agent: {agent_role}) - Result: {output_preview}")
@@ -412,7 +427,7 @@ class CrewLogger:
         @crewai_event_bus.on(LLMCallStartedEvent)
         def on_llm_call_started(source, event):
             try:
-                agent_role = getattr(event.agent, 'role', 'Unknown Agent') if hasattr(event, 'agent') else 'Unknown Agent'
+                agent_role = extract_agent_name_from_event(event, f"[CrewLogger][{job_id}]", source)
                 self._crew_logger.info(f"LLM CALL STARTED: Agent {agent_role}")
             except Exception as e:
                 self._crew_logger.error(f"Error in LLM call started handler: {e}")
@@ -420,7 +435,7 @@ class CrewLogger:
         @crewai_event_bus.on(LLMCallCompletedEvent)
         def on_llm_call_completed(source, event):
             try:
-                agent_role = getattr(event.agent, 'role', 'Unknown Agent') if hasattr(event, 'agent') else 'Unknown Agent'
+                agent_role = extract_agent_name_from_event(event, f"[CrewLogger][{job_id}]", source)
                 output = getattr(event, 'output', 'No output')
                 output_preview = str(output)[:100] + "..." if len(str(output)) > 100 else str(output)
                 self._crew_logger.info(f"LLM CALL COMPLETED: Agent {agent_role} - Response: {output_preview}")
@@ -435,7 +450,7 @@ class CrewLogger:
                 @crewai_event_bus.on(AgentExecutionErrorEvent)
                 def on_agent_execution_error(source, event):
                     try:
-                        agent_role = getattr(event.agent, 'role', 'Unknown Agent') if hasattr(event, 'agent') else 'Unknown Agent'
+                        agent_role = extract_agent_name_from_event(event, f"[CrewLogger][{job_id}]")
                         error = getattr(event, 'error', 'Unknown error')
                         self._crew_logger.error(f"AGENT ERROR: {agent_role} - Error: {str(error)}")
                     except Exception as e:
