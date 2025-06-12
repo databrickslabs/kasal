@@ -184,7 +184,7 @@ class AgentService(BaseService[Agent, AgentCreate]):
             # If no group context, return empty list for security
             return []
         
-        # Filter by group IDs
-        stmt = select(Agent).where(Agent.group_id.in_(group_context.group_ids))
+        # Filter by group IDs and order by created_at descending (newest first)
+        stmt = select(Agent).where(Agent.group_id.in_(group_context.group_ids)).order_by(Agent.created_at.desc())
         result = await self.session.execute(stmt)
         return result.scalars().all() 
