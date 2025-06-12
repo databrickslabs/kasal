@@ -167,7 +167,7 @@ class SyncUnitOfWork:
             self.api_key_repository = ApiKeyRepository(self._session)
             self.model_config_repository = ModelConfigRepository(self._session)
             self.template_repository = TemplateRepository(self._session)
-            self.task_tracking_repository = TaskTrackingRepository(self._session)
+            self.task_tracking_repository = TaskTrackingRepository(None)
             self.schema_repository = SchemaRepository(self._session)
             self.databricks_config_repository = DatabricksConfigRepository(self._session)
             self.mcp_server_repository = MCPServerRepository(self._session)

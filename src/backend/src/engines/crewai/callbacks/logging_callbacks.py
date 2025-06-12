@@ -5,7 +5,6 @@ This module provides event listeners for logging agent traces and task completio
 """
 from typing import Any, Optional, Dict
 from datetime import datetime, timezone
-import asyncio
 import logging
 import queue
 import traceback
@@ -304,27 +303,10 @@ class AgentTraceEventListener(BaseEventListener):
                     output_content=output_content
                 )
                 
-                # Update task status via service, using the UnitOfWork pattern
+                # TODO: Re-enable database operations when async callback context is properly handled
+                # For now, just log the completion to avoid event loop conflicts
                 try:
-                    # Get UnitOfWork singleton and ensure it's initialized
-                    uow = SyncUnitOfWork.get_instance()
-                    if not getattr(uow, '_initialized', False):
-                        uow.initialize()
-                    
-                    # Use the TaskTrackingService with the repository from UnitOfWork
-                    service = TaskTrackingService.for_crew_with_repo(uow.task_tracking_repository)
-                    
-                    # Update the task status using our consistent task_id
-                    asyncio.run(service.update_task_status(
-                        job_id=self.job_id, 
-                        task_id=task_id, 
-                        status=TaskStatusEnum.COMPLETED
-                    ))
-                    
-                    # Commit the changes
-                    uow.commit()
-                    
-                    logger.info(f"{log_prefix} Updated task status for {task_id} to COMPLETED")
+                    logger.info(f"{log_prefix} Task {task_id} completed (database update disabled temporarily)")
                 except Exception as e:
                     # Check if it's a missing table error and handle gracefully
                     if "no such table" in str(e):
@@ -407,32 +389,10 @@ class AgentTraceEventListener(BaseEventListener):
                     output_content=f"Task '{task_name}' started by agent '{agent_name}'"
                 )
                 
-                # Create or update task status via service, using the UnitOfWork pattern
+                # TODO: Re-enable database operations when async callback context is properly handled
+                # For now, just log the task start to avoid event loop conflicts
                 try:
-                    # Get UnitOfWork singleton and ensure it's initialized
-                    uow = SyncUnitOfWork.get_instance()
-                    if not getattr(uow, '_initialized', False):
-                        uow.initialize()
-                    
-                    # Use the TaskTrackingService with the repository from UnitOfWork
-                    service = TaskTrackingService.for_crew_with_repo(uow.task_tracking_repository)
-                    
-                    # Check if a task status for this task_id already exists (sync version for callbacks)
-                    existing_status = service.get_task_status_by_task_id_sync(task_id)
-                    
-                    if not existing_status:
-                        # Create new task status with our consistent task_id
-                        asyncio.run(service.create_task_status(
-                            job_id=self.job_id,
-                            task_id=task_id,
-                            agent_name=agent_name
-                        ))
-                        logger.info(f"{log_prefix} Created new task status for {task_id} with status RUNNING")
-                    else:
-                        logger.info(f"{log_prefix} Task status for {task_id} already exists, skipping creation")
-                    
-                    # Commit the changes
-                    uow.commit()
+                    logger.info(f"{log_prefix} Task {task_id} started with agent {agent_name} (database update disabled temporarily)")
                     
                 except Exception as e:
                     # Check if it's a missing table error and handle gracefully

@@ -104,6 +104,7 @@ src/
 - All code must pass type checking with mypy
 - Follow clean architecture principles
 - Never commit without running linting tools
+- **CRITICAL: All operations must be async and non-blocking** - Never use sync operations that could block the event loop
 
 ## AI Engine Integration
 
