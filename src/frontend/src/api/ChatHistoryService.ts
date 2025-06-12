@@ -9,7 +9,7 @@ export interface ChatMessage {
   timestamp: string;
   intent?: string;
   confidence?: string;
-  generation_result?: any;
+  generation_result?: unknown;
   group_id?: string;
   group_email?: string;
 }
@@ -20,7 +20,7 @@ export interface SaveMessageRequest {
   content: string;
   intent?: string;
   confidence?: number;
-  generation_result?: any;
+  generation_result?: unknown;
 }
 
 export interface ChatSession {
@@ -101,7 +101,7 @@ class ChatHistoryService {
     perPage = 20,
     userId?: string
   ): Promise<ChatSessionListResponse> {
-    const params: any = { page, per_page: perPage };
+    const params: Record<string, string | number> = { page, per_page: perPage };
     if (userId) {
       params.user_id = userId;
     }

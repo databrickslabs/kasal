@@ -277,7 +277,7 @@ const Documentation: React.FC = () => {
                     {children}
                   </Typography>
                 ),
-                code: ({ children, ...props }: any) => (
+                code: ({ children, ...props }: { children?: React.ReactNode; inline?: boolean }) => (
                   props.inline ? (
                     <Box
                       component="code"
