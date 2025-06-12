@@ -24,6 +24,8 @@ python-pptx
 urllib3>=1.26.6
 mcp==1.9.0
 mcpadapt
+pytest
+pytest-asyncio
 
 # Add explicit version of bcrypt to prevent version conflicts
 bcrypt==4.0.1

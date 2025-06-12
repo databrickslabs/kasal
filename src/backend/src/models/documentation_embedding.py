@@ -7,19 +7,30 @@ from sqlalchemy.types import TypeDecorator, UserDefinedType
 from src.db.base import Base
 
 
-# Define a custom type for pgvector
+# Define a custom type for pgvector with SQLite fallback
 class Vector(UserDefinedType):
     def __init__(self, dim=1024):
         self.dim = dim
 
     def get_col_spec(self, **kw):
+        # Use vector type for PostgreSQL, TEXT for SQLite
+        if hasattr(self, 'dialect') and 'sqlite' in str(self.dialect).lower():
+            return "TEXT"
         return f"vector({self.dim})"
     
     def bind_processor(self, dialect):
         def process(value):
             if value is None:
                 return None
-            # Convert list of floats to PostgreSQL vector string format
+            
+            # For SQLite: store as JSON string
+            if 'sqlite' in dialect.name.lower():
+                if isinstance(value, list):
+                    import json
+                    return json.dumps(value)
+                return value
+            
+            # For PostgreSQL: convert to vector format
             if isinstance(value, list):
                 return f"[{','.join(str(x) for x in value)}]"
             return value
@@ -27,6 +38,17 @@ class Vector(UserDefinedType):
     
     def result_processor(self, dialect, coltype):
         def process(value):
+            if value is None:
+                return None
+                
+            # For SQLite: parse JSON string back to list
+            if 'sqlite' in dialect.name.lower():
+                if isinstance(value, str):
+                    try:
+                        import json
+                        return json.loads(value)
+                    except:
+                        return value
             return value
         return process
 

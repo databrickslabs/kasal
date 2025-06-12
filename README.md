@@ -57,6 +57,7 @@ Create your first agent workflow in under 2 minutes:
 | **[Models & Schemas](src/docs/MODELS.md)** | SQLAlchemy models and Pydantic schemas |
 | **[Repository Pattern](src/docs/REPOSITORY_PATTERN.md)** | Data access layer implementation |
 | **[LLM Manager](src/docs/LLM_MANAGER.md)** | Multi-provider LLM configuration and management |
+| **[Embeddings](src/docs/EMBEDDINGS.md)** | Documentation embeddings for enhanced crew generation |
 
 ### More Documentation
 - **[API Documentation](src/docs/)** - Complete API reference

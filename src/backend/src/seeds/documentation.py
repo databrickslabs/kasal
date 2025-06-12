@@ -141,6 +141,13 @@ async def create_documentation_chunks(url: str) -> List[Dict[str, Any]]:
 
 async def setup_pgvector_extension(session: AsyncSession) -> None:
     """Setup pgvector extension in PostgreSQL if it doesn't exist."""
+    from src.config.settings import settings
+    
+    # Skip pgvector setup for SQLite
+    if settings.DATABASE_TYPE.lower() == "sqlite":
+        logger.info("Skipping pgvector extension setup for SQLite database")
+        return
+    
     try:
         # Check if pgvector extension exists
         query = text("SELECT 1 FROM pg_extension WHERE extname = 'vector'")
