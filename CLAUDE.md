@@ -81,6 +81,12 @@ src/
 
 ## Development Patterns
 
+### Frontend Patterns
+- **API Configuration**: All frontend services must use `apiClient` from `src/frontend/src/config/api/ApiConfig.ts` for backend communication
+- **Service Layer**: Frontend services should use static methods and `apiClient` for HTTP requests (not the legacy `ApiService`)
+- **TypeScript**: Strong typing for all API responses and requests using generic types like `apiClient.get<ResponseType>()`
+- **Component State**: Use Zustand stores for global state management
+
 ### Backend Patterns
 - **Repository Pattern**: All database access goes through repositories
 - **Unit of Work**: Transaction management for complex operations

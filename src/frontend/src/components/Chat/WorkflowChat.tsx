@@ -41,7 +41,7 @@ import { Agent } from '../../types/agent';
 import { Task } from '../../types/task';
 import { AgentService } from '../../api/AgentService';
 import { TaskService } from '../../api/TaskService';
-import ChatHistoryService, { SaveMessageRequest, ChatSession, ChatMessage as BackendChatMessage } from '../../api/ChatHistoryService';
+import { ChatHistoryService, SaveMessageRequest, ChatSession, ChatMessage as BackendChatMessage } from '../../api/ChatHistoryService';
 import { v4 as uuidv4 } from 'uuid';
 import { ModelService } from '../../api/ModelService';
 

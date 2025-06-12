@@ -1,4 +1,4 @@
-import ApiService from './ApiService';
+import { apiClient } from '../config/api/ApiConfig';
 
 export interface ChatMessage {
   id: string;
@@ -45,31 +45,26 @@ export interface ChatSessionListResponse {
   per_page: number;
 }
 
-class ChatHistoryService {
-  private baseUrl: string;
-
-  constructor() {
-    this.baseUrl = '/chat-history';
-  }
+export class ChatHistoryService {
 
   /**
    * Save a chat message to the backend
    */
-  async saveMessage(messageData: SaveMessageRequest): Promise<ChatMessage> {
-    const response = await ApiService.post(`${this.baseUrl}/messages`, messageData);
+  static async saveMessage(messageData: SaveMessageRequest): Promise<ChatMessage> {
+    const response = await apiClient.post<ChatMessage>('/chat-history/messages', messageData);
     return response.data;
   }
 
   /**
    * Get messages for a specific chat session
    */
-  async getSessionMessages(
+  static async getSessionMessages(
     sessionId: string, 
     page = 0, 
     perPage = 50
   ): Promise<ChatHistoryListResponse> {
-    const response = await ApiService.get(
-      `${this.baseUrl}/sessions/${sessionId}/messages`,
+    const response = await apiClient.get<ChatHistoryListResponse>(
+      `/chat-history/sessions/${sessionId}/messages`,
       {
         params: { page, per_page: perPage }
       }
@@ -80,12 +75,12 @@ class ChatHistoryService {
   /**
    * Get user's chat sessions (latest message from each session)
    */
-  async getUserSessions(
+  static async getUserSessions(
     page = 0, 
     perPage = 20
   ): Promise<ChatMessage[]> {
-    const response = await ApiService.get(
-      `${this.baseUrl}/users/sessions`,
+    const response = await apiClient.get<ChatMessage[]>(
+      '/chat-history/users/sessions',
       {
         params: { page, per_page: perPage }
       }
@@ -96,7 +91,7 @@ class ChatHistoryService {
   /**
    * Get group chat sessions with optional user filtering
    */
-  async getGroupSessions(
+  static async getGroupSessions(
     page = 0, 
     perPage = 20,
     userId?: string
@@ -106,7 +101,7 @@ class ChatHistoryService {
       params.user_id = userId;
     }
 
-    const response = await ApiService.get(`${this.baseUrl}/sessions`, {
+    const response = await apiClient.get<ChatSessionListResponse>('/chat-history/sessions', {
       params
     });
     return response.data;
@@ -115,22 +110,22 @@ class ChatHistoryService {
   /**
    * Delete a complete chat session
    */
-  async deleteSession(sessionId: string): Promise<void> {
-    await ApiService.delete(`${this.baseUrl}/sessions/${sessionId}`);
+  static async deleteSession(sessionId: string): Promise<void> {
+    await apiClient.delete(`/chat-history/sessions/${sessionId}`);
   }
 
   /**
    * Create a new chat session
    */
-  async createNewSession(): Promise<{ session_id: string }> {
-    const response = await ApiService.post(`${this.baseUrl}/sessions/new`);
+  static async createNewSession(): Promise<{ session_id: string }> {
+    const response = await apiClient.post<{ session_id: string }>('/chat-history/sessions/new');
     return response.data;
   }
 
   /**
    * Generate a new session ID locally (UUID)
    */
-  generateSessionId(): string {
+  static generateSessionId(): string {
     return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, function(c) {
       const r = Math.random() * 16 | 0;
       const v = c === 'x' ? r : (r & 0x3 | 0x8);
@@ -138,5 +133,3 @@ class ChatHistoryService {
     });
   }
 }
-
-export default new ChatHistoryService();
