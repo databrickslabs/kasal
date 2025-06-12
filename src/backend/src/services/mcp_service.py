@@ -2,7 +2,6 @@ from typing import List, Optional, Dict, Any
 import logging
 import aiohttp
 import asyncio
-import requests
 import json
 
 from fastapi import HTTPException, status
@@ -426,27 +425,33 @@ class MCPService:
             
             # Check if the command exists (this is a very basic check)
             try:
-                # Run with timeout in a separate thread to avoid blocking
-                def check_command():
+                # Use async HTTP request instead of blocking requests
+                async def check_command_async():
                     try:
-                        result = requests.get(test_data.server_url, timeout=test_data.timeout_seconds)
-                        return result.status_code == 200
+                        async with aiohttp.ClientSession() as session:
+                            async with session.get(
+                                test_data.server_url, 
+                                timeout=aiohttp.ClientTimeout(total=test_data.timeout_seconds)
+                            ) as response:
+                                return response.status == 200
                     except:
-                        import subprocess
+                        # If HTTP fails, try checking if command exists
                         try:
-                            # Try to run the command with --help or -h to see if it exists
-                            subprocess.run(
-                                [command, "--help"], 
-                                stdout=subprocess.PIPE, 
-                                stderr=subprocess.PIPE,
-                                timeout=1
+                            process = await asyncio.create_subprocess_exec(
+                                command, "--help",
+                                stdout=asyncio.subprocess.PIPE,
+                                stderr=asyncio.subprocess.PIPE
                             )
-                            return True
+                            try:
+                                await asyncio.wait_for(process.communicate(), timeout=1)
+                                return True
+                            except asyncio.TimeoutError:
+                                process.kill()
+                                return False
                         except:
                             return False
                 
-                loop = asyncio.get_event_loop()
-                command_exists = await loop.run_in_executor(None, check_command)
+                command_exists = await check_command_async()
                 
                 if command_exists:
                     return MCPTestConnectionResponse(

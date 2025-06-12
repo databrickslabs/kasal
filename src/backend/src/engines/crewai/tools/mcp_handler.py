@@ -6,7 +6,7 @@ import sys
 import subprocess
 import concurrent.futures
 import traceback
-import requests
+import aiohttp
 from src.utils.databricks_auth import get_databricks_auth_headers, get_mcp_auth_headers
 
 logger = logging.getLogger(__name__)
@@ -26,9 +26,9 @@ def register_mcp_adapter(adapter_id, adapter):
     _active_mcp_adapters[adapter_id] = adapter
     logger.info(f"Registered MCP adapter with ID {adapter_id}")
 
-def stop_all_adapters():
+async def stop_all_adapters():
     """
-    Stop all active MCP adapters that have been registered
+    Stop all active MCP adapters that have been registered (async version)
     
     This function is used during cleanup to ensure that all MCP resources
     are properly released, especially important for stdio adapters that
@@ -45,7 +45,7 @@ def stop_all_adapters():
         if adapter:
             try:
                 logger.info(f"Stopping MCP adapter: {adapter_id}")
-                stop_mcp_adapter(adapter)
+                await stop_mcp_adapter(adapter)
                 # Remove from tracked adapters
                 del _active_mcp_adapters[adapter_id]
             except Exception as e:
@@ -90,9 +90,9 @@ async def get_databricks_workspace_host():
         logger.error(f"Error getting workspace host: {e}")
         return None, str(e)
 
-def call_databricks_api(endpoint, method="GET", data=None, params=None):
+async def call_databricks_api(endpoint, method="GET", data=None, params=None):
     """
-    Call the Databricks API directly as a fallback when MCP fails
+    Call the Databricks API directly as a fallback when MCP fails (async version)
     
     Args:
         endpoint: The API endpoint path (without host)
@@ -104,37 +104,41 @@ def call_databricks_api(endpoint, method="GET", data=None, params=None):
         The API response (parsed JSON)
     """
     try:
-        # Get authentication headers (this will also get the host internally)
-        headers, error = asyncio.run(get_databricks_auth_headers())
+        # Get authentication headers (already async)
+        headers, error = await get_databricks_auth_headers()
         if error:
             raise ValueError(f"Authentication error: {error}")
         if not headers:
             raise ValueError("Failed to get authentication headers")
         
-        # Get the workspace host
-        workspace_host, host_error = asyncio.run(get_databricks_workspace_host())
+        # Get the workspace host (already async)
+        workspace_host, host_error = await get_databricks_workspace_host()
         if host_error:
             raise ValueError(f"Configuration error: {host_error}")
         
         # Construct the API URL
         url = f"https://{workspace_host}{endpoint}"
         
-        # Make the API call
-        if method.upper() == "GET":
-            response = requests.get(url, headers=headers, params=params)
-        elif method.upper() == "POST":
-            response = requests.post(url, headers=headers, json=data, params=params)
-        elif method.upper() == "PUT":
-            response = requests.put(url, headers=headers, json=data, params=params)
-        elif method.upper() == "DELETE":
-            response = requests.delete(url, headers=headers, params=params)
-        else:
-            raise ValueError(f"Unsupported HTTP method: {method}")
-        
-        response.raise_for_status()
-        
-        # Return the response as a dictionary
-        return response.json()
+        # Make the async API call
+        async with aiohttp.ClientSession() as session:
+            if method.upper() == "GET":
+                async with session.get(url, headers=headers, params=params) as response:
+                    response.raise_for_status()
+                    return await response.json()
+            elif method.upper() == "POST":
+                async with session.post(url, headers=headers, json=data, params=params) as response:
+                    response.raise_for_status()
+                    return await response.json()
+            elif method.upper() == "PUT":
+                async with session.put(url, headers=headers, json=data, params=params) as response:
+                    response.raise_for_status()
+                    return await response.json()
+            elif method.upper() == "DELETE":
+                async with session.delete(url, headers=headers, params=params) as response:
+                    response.raise_for_status()
+                    return await response.json()
+            else:
+                raise ValueError(f"Unsupported HTTP method: {method}")
     except Exception as e:
         logger.error(f"Error calling Databricks API: {e}")
         return {"error": f"API error: {str(e)}"}
@@ -169,35 +173,52 @@ def wrap_mcp_tool(tool):
                 
                 try:
                     logger.debug(f"Running {tool_name} in separate process")
-                    result = run_in_separate_process(tool_name, kwargs)
+                    # Use a new event loop to avoid conflicts
+                    loop = asyncio.new_event_loop()
+                    asyncio.set_event_loop(loop)
+                    try:
+                        result = loop.run_until_complete(run_in_separate_process(tool_name, kwargs))
+                    finally:
+                        loop.close()
                     
                     # If result indicates an error, try direct API call
                     if isinstance(result, str) and result.startswith("Error:"):
                         logger.warning(f"Process isolation failed for {tool_name}, attempting direct API call")
                         
-                        # Try the direct API approach based on the tool
-                        if tool_name == "get_space" and "space_id" in kwargs:
-                            space_id = kwargs["space_id"]
-                            return call_databricks_api(f"/api/2.0/genie/spaces/{space_id}")
-                            
-                        elif tool_name == "start_conversation" and "space_id" in kwargs and "content" in kwargs:
-                            space_id = kwargs["space_id"]
-                            content = kwargs["content"]
-                            return call_databricks_api(
-                                f"/api/2.0/genie/spaces/{space_id}/conversations",
-                                method="POST",
-                                data={"content": content}
-                            )
-                            
-                        elif tool_name == "create_message" and "space_id" in kwargs and "conversation_id" in kwargs and "content" in kwargs:
-                            space_id = kwargs["space_id"]
-                            conversation_id = kwargs["conversation_id"]
-                            content = kwargs["content"]
-                            return call_databricks_api(
-                                f"/api/2.0/genie/spaces/{space_id}/conversations/{conversation_id}/messages",
-                                method="POST",
-                                data={"content": content}
-                            )
+                        # Try the direct API approach based on the tool (now async)
+                        # Note: We can't use asyncio.run here as we're already in an async context
+                        # Instead, we'll need to run this in a new event loop or use a different approach
+                        try:
+                            loop = asyncio.new_event_loop()
+                            asyncio.set_event_loop(loop)
+                            try:
+                                if tool_name == "get_space" and "space_id" in kwargs:
+                                    space_id = kwargs["space_id"]
+                                    return loop.run_until_complete(call_databricks_api(f"/api/2.0/genie/spaces/{space_id}"))
+                                    
+                                elif tool_name == "start_conversation" and "space_id" in kwargs and "content" in kwargs:
+                                    space_id = kwargs["space_id"]
+                                    content = kwargs["content"]
+                                    return loop.run_until_complete(call_databricks_api(
+                                        f"/api/2.0/genie/spaces/{space_id}/conversations",
+                                        method="POST",
+                                        data={"content": content}
+                                    ))
+                                    
+                                elif tool_name == "create_message" and "space_id" in kwargs and "conversation_id" in kwargs and "content" in kwargs:
+                                    space_id = kwargs["space_id"]
+                                    conversation_id = kwargs["conversation_id"]
+                                    content = kwargs["content"]
+                                    return loop.run_until_complete(call_databricks_api(
+                                        f"/api/2.0/genie/spaces/{space_id}/conversations/{conversation_id}/messages",
+                                        method="POST",
+                                        data={"content": content}
+                                    ))
+                            finally:
+                                loop.close()
+                        except Exception as api_error:
+                            logger.error(f"Error with direct API call for {tool_name}: {api_error}")
+                            return f"API call failed: {str(api_error)}"
                     
                     return result
                 except Exception as e:
@@ -226,7 +247,13 @@ def wrap_mcp_tool(tool):
                 # Start a fresh process with a new MCP connection
                 try:
                     logger.debug(f"Running {tool_name} in separate process")
-                    return run_in_separate_process(tool_name, kwargs)
+                    # Use a new event loop to avoid conflicts
+                    loop = asyncio.new_event_loop()
+                    asyncio.set_event_loop(loop)
+                    try:
+                        return loop.run_until_complete(run_in_separate_process(tool_name, kwargs))
+                    finally:
+                        loop.close()
                 except Exception as e:
                     logger.error(f"Error running MCP tool {tool_name} in separate process: {e}")
                     return f"Error executing tool: {str(e)}"
@@ -245,9 +272,9 @@ def wrap_mcp_tool(tool):
     
     return tool
 
-def run_in_separate_process(tool_name, kwargs):
+async def run_in_separate_process(tool_name, kwargs):
     """
-    Run an MCP tool in a separate process to avoid event loop issues
+    Run an MCP tool in a separate process to avoid event loop issues (async version)
     
     Args:
         tool_name: Name of the tool to run
@@ -256,6 +283,7 @@ def run_in_separate_process(tool_name, kwargs):
     Returns:
         The result of running the tool
     """
+    script_path = None
     try:
         # Get the absolute path to the backend directory
         backend_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", "..", ".."))
@@ -284,10 +312,10 @@ async def run_tool():
         result = await tool_func(**{json.dumps(kwargs)})
         
         # Log the result as JSON
-        logger.debug(f"MCP handler result: {json.dumps(result)}")
+        print(json.dumps(result))
         
     except Exception as e:
-        logger.error(f"MCP handler error: {json.dumps({'error': str(e)})}")
+        print(json.dumps({{'error': str(e)}}))
     finally:
         # Clean up
         if 'adapter' in locals():
@@ -302,71 +330,81 @@ asyncio.run(run_tool())
         with open(script_path, "w") as f:
             f.write(script_content)
         
-        # Run the script in a separate process
+        # Run the script in a separate process using async subprocess
         env = os.environ.copy()
         env["PYTHONPATH"] = backend_dir
         
-        result = subprocess.run(
-            [sys.executable, script_path],
-            capture_output=True,
-            text=True,
-            env=env,
-            check=True
+        process = await asyncio.create_subprocess_exec(
+            sys.executable, script_path,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE,
+            env=env
         )
+        
+        stdout, stderr = await process.communicate()
+        
+        if process.returncode != 0:
+            return {"error": f"Process error: {stderr.decode()}"}
         
         # Parse the result
         try:
-            return json.loads(result.stdout)
+            return json.loads(stdout.decode())
         except json.JSONDecodeError:
-            return {"error": f"Failed to parse result: {result.stdout}"}
+            return {"error": f"Failed to parse result: {stdout.decode()}"}
             
-    except subprocess.CalledProcessError as e:
-        return {"error": f"Process error: {e.stderr}"}
     except Exception as e:
         return {"error": f"Error running tool: {str(e)}"}
     finally:
         # Clean up the temporary script
-        try:
-            os.remove(script_path)
-        except:
-            pass
+        if script_path:
+            try:
+                os.remove(script_path)
+            except:
+                pass
 
 async def create_mcp_adapter():
     """
-    Create a new MCP adapter with proper authentication.
+    Create a new MCP adapter with proper authentication (fully async version).
     
     Returns:
-        MCPAdapter: A new MCP adapter instance
+        AsyncMCPAdapter: A new async MCP adapter instance
     """
     try:
         # Get the MCP server URL
         mcp_url = "https://mcpgenie-1444828305810485.aws.databricksapps.com/sse"
         
-        # Get MCP authentication headers
+        # Get MCP authentication headers (already async)
         headers, error = await get_mcp_auth_headers(mcp_url)
         if error:
             raise ValueError(f"Failed to get MCP auth headers: {error}")
             
-        # Create the adapter
-        from src.engines.crewai.tools.mcp_adapter import MCPAdapter
-        adapter = MCPAdapter(mcp_url, headers)
+        # Create the async adapter
+        from src.engines.crewai.tools.mcp_adapter import AsyncMCPAdapter
         
-        # Initialize the adapter
+        # Prepare server parameters
+        server_params = {"url": mcp_url}
+        if headers:
+            server_params["headers"] = headers
+            
+        adapter = AsyncMCPAdapter(server_params)
+        
+        # Initialize the adapter asynchronously
         await adapter.initialize()
         
         # Register the adapter for tracking
         adapter_id = id(adapter)
         register_mcp_adapter(adapter_id, adapter)
         
+        logger.info(f"Successfully created async MCP adapter with {len(adapter.tools) if adapter.tools else 0} tools")
         return adapter
         
     except Exception as e:
         logger.error(f"Error creating MCP adapter: {e}")
         raise
 
-def stop_mcp_adapter(adapter):
+async def stop_mcp_adapter(adapter):
     """
-    Safely stop an MCP adapter
+    Safely stop an MCP adapter (async version)
     
     Args:
         adapter: The MCP adapter to stop
@@ -378,8 +416,14 @@ def stop_mcp_adapter(adapter):
             logger.warning("Attempted to stop None adapter")
             return
             
-        # Force close any connections and resources
-        adapter.stop()
+        # Check if this is an async adapter
+        if hasattr(adapter, 'stop') and asyncio.iscoroutinefunction(adapter.stop):
+            # Async adapter
+            await adapter.stop()
+        elif hasattr(adapter, 'stop'):
+            # Sync adapter - run in thread pool
+            loop = asyncio.get_event_loop()
+            await loop.run_in_executor(None, adapter.stop)
         
         # Add extra cleanup steps to ensure clean shutdown
         if hasattr(adapter, '_connections'):

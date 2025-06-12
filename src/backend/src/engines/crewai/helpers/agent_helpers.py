@@ -186,7 +186,6 @@ async def create_agent(
                     # Use the MCP handler to create tools for this server
                     if server_detail.server_type.lower() == 'sse':
                         from src.engines.crewai.tools.mcp_handler import wrap_mcp_tool
-                        from crewai_tools import MCPServerAdapter
                         
                         # Get the server URL
                         server_url = server_detail.server_url
@@ -252,10 +251,14 @@ async def create_agent(
                         if headers:
                             server_params["headers"] = headers
                         
-                        # Initialize the SSE adapter
+                        # Initialize the SSE adapter (async version)
                         try:
                             logger.info(f"Creating MCP SSE adapter for server {server_detail.name} at {server_url}")
-                            mcp_adapter = MCPServerAdapter(server_params)
+                            
+                            # Use our async adapter instead
+                            from src.engines.crewai.tools.mcp_adapter import AsyncMCPAdapter
+                            mcp_adapter = AsyncMCPAdapter(server_params)
+                            await mcp_adapter.initialize()
                             
                             # Register adapter for cleanup
                             from src.engines.crewai.tools.mcp_handler import register_mcp_adapter
@@ -285,7 +288,6 @@ async def create_agent(
                     
                     elif server_detail.server_type.lower() == 'stdio':
                         from src.engines.crewai.tools.mcp_handler import wrap_mcp_tool
-                        from crewai_tools import MCPServerAdapter
                         
                         try:
                             # Get the command and arguments
@@ -310,13 +312,16 @@ async def create_agent(
                             logger.info(f"Creating MCP STDIO adapter for server {server_detail.name}")
                             from mcp import StdioServerParameters
                             
-                            server_params = StdioServerParameters(
+                            stdio_params = StdioServerParameters(
                                 command=command,
                                 args=args,
                                 env={**os.environ, **env}
                             )
                             
-                            mcp_adapter = MCPServerAdapter(server_params)
+                            # Use our async adapter instead
+                            from src.engines.crewai.tools.mcp_adapter import AsyncMCPAdapter
+                            mcp_adapter = AsyncMCPAdapter(stdio_params)
+                            await mcp_adapter.initialize()
                             
                             # Register adapter for cleanup
                             from src.engines.crewai.tools.mcp_handler import register_mcp_adapter
