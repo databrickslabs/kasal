@@ -178,7 +178,7 @@ const AgentDialog: React.FC<AgentDialogProps> = ({
           <Divider sx={{ my: 2 }} />
           
           <List sx={{ maxHeight: '50vh', overflow: 'auto' }}>
-            {[...agents].reverse().map((agent) => (
+            {agents.map((agent) => (
               <ListItemButton 
                 key={agent.id}
                 onClick={() => handleAgentToggle(agent)}
