@@ -48,12 +48,13 @@ class AgentTraceEventListener(BaseEventListener):
     # Static task registry to track tasks by job
     _task_registry: Dict[str, Dict[str, str]] = {}
     
-    def __init__(self, job_id: str):
+    def __init__(self, job_id: str, group_context=None):
         """
         Initialize the event listener.
         
         Args:
             job_id: Unique identifier for the job
+            group_context: Group context for multi-tenant isolation
         """
         if not job_id or not isinstance(job_id, str):
             raise ValueError("job_id must be a non-empty string")
@@ -61,6 +62,7 @@ class AgentTraceEventListener(BaseEventListener):
         # Set job_id BEFORE calling super().__init__() 
         # since BaseEventListener calls setup_listeners in its __init__
         self.job_id = job_id
+        self.group_context = group_context
         self._queue = get_trace_queue()
         self._init_time = datetime.now(timezone.utc)
         
@@ -426,6 +428,11 @@ class AgentTraceEventListener(BaseEventListener):
                 "extra_data": extra_data or {},
                 "time_since_init": time_since_init
             }
+            
+            # Add group context if available
+            if self.group_context:
+                trace_data["group_id"] = self.group_context.primary_group_id
+                trace_data["group_email"] = self.group_context.group_email
             
             # Log trace data shape before enqueueing
             logger.debug(f"{log_prefix} EVENT[{event_type}] Trace data prepared with keys: {', '.join(trace_data.keys())}")

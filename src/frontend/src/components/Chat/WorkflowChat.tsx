@@ -20,7 +20,7 @@ import {
   Menu,
   MenuItem,
 } from '@mui/material';
-import SendIcon from '@mui/icons-material/Send';
+import ArrowUpwardIcon from '@mui/icons-material/ArrowUpward';
 import SmartToyIcon from '@mui/icons-material/SmartToy';
 import PersonIcon from '@mui/icons-material/Person';
 import GroupIcon from '@mui/icons-material/Group';
@@ -33,6 +33,7 @@ import DeleteIcon from '@mui/icons-material/Delete';
 import RefreshIcon from '@mui/icons-material/Refresh';
 import CloseIcon from '@mui/icons-material/Close';
 import KeyboardArrowDownIcon from '@mui/icons-material/KeyboardArrowDown';
+import ChevronLeftIcon from '@mui/icons-material/ChevronLeft';
 import { toast } from 'react-hot-toast';
 import DispatcherService, { DispatchResult, ConfigureCrewResult } from '../../api/DispatcherService';
 import { useWorkflowStore } from '../../store/workflow';
@@ -44,6 +45,7 @@ import { TaskService } from '../../api/TaskService';
 import { ChatHistoryService, SaveMessageRequest, ChatSession, ChatMessage as BackendChatMessage } from '../../api/ChatHistoryService';
 import { v4 as uuidv4 } from 'uuid';
 import { ModelService } from '../../api/ModelService';
+import TraceService from '../../api/TraceService';
 
 interface GeneratedAgent {
   name: string;
@@ -76,12 +78,16 @@ interface GeneratedCrew {
 
 interface ChatMessage {
   id: string;
-  type: 'user' | 'assistant';
+  type: 'user' | 'assistant' | 'execution' | 'trace';
   content: string;
   timestamp: Date;
   intent?: string;
   confidence?: number;
   result?: unknown;
+  isIntermediate?: boolean;
+  agentName?: string;
+  taskName?: string;
+  jobId?: string;
 }
 
 interface ModelConfig {
@@ -100,6 +106,10 @@ interface WorkflowChatProps {
   selectedTools?: string[];
   isVisible?: boolean;
   setSelectedModel?: (model: string) => void;
+  nodes?: Node[];
+  edges?: Edge[];
+  onExecuteCrew?: () => void;
+  onToggleCollapse?: () => void;
 }
 
 const WorkflowChat: React.FC<WorkflowChatProps> = ({
@@ -109,6 +119,10 @@ const WorkflowChat: React.FC<WorkflowChatProps> = ({
   selectedTools = [],
   isVisible = true,
   setSelectedModel,
+  nodes = [],
+  edges = [],
+  onExecuteCrew,
+  onToggleCollapse,
 }) => {
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [inputValue, setInputValue] = useState('');
@@ -117,10 +131,14 @@ const WorkflowChat: React.FC<WorkflowChatProps> = ({
   const [chatSessions, setChatSessions] = useState<ChatSession[]>([]);
   const [showSessionList, setShowSessionList] = useState(false);
   const [isLoadingSessions, setIsLoadingSessions] = useState(false);
-  const [currentSessionName, setCurrentSessionName] = useState('New Chat');
+  const [_currentSessionName, setCurrentSessionName] = useState('New Chat');
   const [models, setModels] = useState<Record<string, ModelConfig>>({});
   const [isLoadingModels, setIsLoadingModels] = useState(false);
   const [modelMenuAnchor, setModelMenuAnchor] = useState<null | HTMLElement>(null);
+  const [executingJobId, setExecutingJobId] = useState<string | null>(null);
+  const [lastExecutionJobId, setLastExecutionJobId] = useState<string | null>(null);
+  const [processedTraceIds, setProcessedTraceIds] = useState<Set<string>>(new Set());
+  const [executionStartTime, setExecutionStartTime] = useState<Date | null>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
   const { setNodes, setEdges } = useWorkflowStore();
@@ -262,6 +280,207 @@ const WorkflowChat: React.FC<WorkflowChatProps> = ({
     }
   }, [isVisible]);
 
+  // Listen for execution events and capture trace data
+  useEffect(() => {
+    const handleJobCreated = (event: CustomEvent) => {
+      const { jobId, jobName } = event.detail;
+      setExecutingJobId(jobId);
+      setLastExecutionJobId(jobId); // Track the last execution
+      setProcessedTraceIds(new Set()); // Reset processed traces for new execution
+      setExecutionStartTime(new Date()); // Track when execution started
+      
+      // Add execution start message
+      const executionMessage: ChatMessage = {
+        id: `exec-start-${Date.now()}`,
+        type: 'execution',
+        content: `🚀 Started execution: ${jobName}`,
+        timestamp: new Date(),
+        jobId
+      };
+      
+      setMessages(prev => [...prev, executionMessage]);
+    };
+
+    const handleJobCompleted = (event: CustomEvent) => {
+      const { jobId, result } = event.detail;
+      if (jobId === executingJobId) {
+        // Add execution completion message
+        const completionMessage: ChatMessage = {
+          id: `exec-complete-${Date.now()}`,
+          type: 'execution',
+          content: `✅ Execution completed successfully`,
+          timestamp: new Date(),
+          result,
+          jobId
+        };
+        
+        setMessages(prev => [...prev, completionMessage]);
+        
+        // Delay clearing execution state to allow final traces to be captured
+        setTimeout(() => {
+          setExecutingJobId(null);
+          setExecutionStartTime(null);
+          setProcessedTraceIds(new Set());
+        }, 5000); // Wait 5 seconds before stopping polling
+      }
+    };
+
+    const handleJobFailed = (event: CustomEvent) => {
+      const { jobId, error } = event.detail;
+      if (jobId === executingJobId) {
+        // Add execution failure message
+        const failureMessage: ChatMessage = {
+          id: `exec-failed-${Date.now()}`,
+          type: 'execution',
+          content: `❌ Execution failed: ${error}`,
+          timestamp: new Date(),
+          jobId
+        };
+        
+        setMessages(prev => [...prev, failureMessage]);
+        
+        // Delay clearing execution state to allow final traces to be captured
+        setTimeout(() => {
+          setExecutingJobId(null);
+          setExecutionStartTime(null);
+          setProcessedTraceIds(new Set());
+        }, 5000); // Wait 5 seconds before stopping polling
+      }
+    };
+
+    // Listen for trace updates (intermediate outputs)
+    const handleTraceUpdate = (event: CustomEvent) => {
+      const { jobId, trace } = event.detail;
+      if (jobId === executingJobId && trace) {
+        // Add trace message (intermediate output)
+        const traceMessage: ChatMessage = {
+          id: `trace-${trace.id || Date.now()}`,
+          type: 'trace',
+          content: typeof trace.output === 'string' ? trace.output : JSON.stringify(trace.output, null, 2),
+          timestamp: new Date(trace.created_at || Date.now()),
+          isIntermediate: true,
+          agentName: trace.agent_name,
+          taskName: trace.task_name,
+          jobId
+        };
+        
+        setMessages(prev => [...prev, traceMessage]);
+      }
+    };
+
+    // Add event listeners
+    window.addEventListener('jobCreated', handleJobCreated as EventListener);
+    window.addEventListener('jobCompleted', handleJobCompleted as EventListener);
+    window.addEventListener('jobFailed', handleJobFailed as EventListener);
+    window.addEventListener('traceUpdate', handleTraceUpdate as EventListener);
+
+    return () => {
+      window.removeEventListener('jobCreated', handleJobCreated as EventListener);
+      window.removeEventListener('jobCompleted', handleJobCompleted as EventListener);
+      window.removeEventListener('jobFailed', handleJobFailed as EventListener);
+      window.removeEventListener('traceUpdate', handleTraceUpdate as EventListener);
+    };
+  }, [executingJobId, processedTraceIds, executionStartTime]);
+
+  // Monitor traces for the executing job
+  const monitorTraces = React.useCallback(async (jobId: string) => {
+    try {
+      console.log(`[ChatPanel] Monitoring traces for job ${jobId}`);
+      
+      // Get traces directly for this execution
+      const traces = await TraceService.getTraces(jobId);
+      
+      console.log(`[ChatPanel] Found ${traces?.length || 0} total traces for job ${jobId}`);
+      
+      if (traces && Array.isArray(traces)) {
+        // Filter traces to only show ones that haven't been processed yet
+        const relevantTraces = traces.filter(trace => {
+          const traceId = `${trace.id}-${trace.created_at}`;
+          const isNew = !processedTraceIds.has(traceId);
+          return isNew;
+        });
+        
+        console.log(`[ChatPanel] ${relevantTraces.length} new traces to display`);
+        
+        // Add new traces to chat
+        relevantTraces.forEach((trace) => {
+          // Extract content from trace output
+          let content = '';
+          if (typeof trace.output === 'string') {
+            content = trace.output;
+          } else if (trace.output?.agent_execution && typeof trace.output.agent_execution === 'string') {
+            content = trace.output.agent_execution;
+          } else if (trace.output?.content && typeof trace.output.content === 'string') {
+            content = trace.output.content;
+          } else if (trace.output) {
+            content = JSON.stringify(trace.output, null, 2);
+          }
+          
+          // Skip empty content
+          if (!content.trim()) {
+            return;
+          }
+          
+          const traceId = `${trace.id}-${trace.created_at}`;
+          const traceMessage: ChatMessage = {
+            id: `trace-${traceId}`,
+            type: 'trace',
+            content,
+            timestamp: new Date(trace.created_at || Date.now()),
+            isIntermediate: true,
+            agentName: trace.agent_name,
+            taskName: trace.task_name,
+            jobId
+          };
+          
+          setMessages(prev => [...prev, traceMessage]);
+          
+          // Mark this trace as processed
+          setProcessedTraceIds(prev => {
+            const newSet = new Set(prev);
+            newSet.add(traceId);
+            return newSet;
+          });
+        });
+      }
+    } catch (error) {
+      console.error('[ChatPanel] Error monitoring traces:', error);
+      // Log more details about the error
+      if (error instanceof Error) {
+        console.error('[ChatPanel] Error details:', error.message);
+        console.error('[ChatPanel] Error stack:', error.stack);
+      }
+    }
+  }, [processedTraceIds]);
+
+  // Start trace monitoring when execution begins
+  useEffect(() => {
+    let interval: NodeJS.Timeout | null = null;
+    
+    if (executingJobId) {
+      // Initial check after a short delay
+      const initialTimeout = setTimeout(() => monitorTraces(executingJobId), 2000);
+      
+      // Start polling for traces every 2 seconds (more frequent for better UX)
+      interval = setInterval(() => {
+        monitorTraces(executingJobId);
+      }, 2000);
+      
+      return () => {
+        clearTimeout(initialTimeout);
+        if (interval) {
+          clearInterval(interval);
+        }
+      };
+    }
+    
+    return () => {
+      if (interval) {
+        clearInterval(interval);
+      }
+    };
+  }, [executingJobId, monitorTraces]);
+
   // Fetch models when component mounts
   useEffect(() => {
     const fetchModels = async () => {
@@ -317,9 +536,9 @@ const WorkflowChat: React.FC<WorkflowChatProps> = ({
     }
   };
 
-  // Save message to backend
+  // Save message to backend (only user and assistant messages)
   const saveMessageToBackend = async (message: ChatMessage): Promise<void> => {
-    if (!sessionId) return;
+    if (!sessionId || (message.type !== 'user' && message.type !== 'assistant')) return;
     
     try {
       const saveRequest: SaveMessageRequest = {
@@ -430,7 +649,7 @@ const WorkflowChat: React.FC<WorkflowChatProps> = ({
           return updated;
         });
         
-        toast.success(`Agent "${savedAgent.name}" created and saved successfully!`);
+        // Success feedback shown in chat only
         // Aggressive focus restoration after successful agent creation
         const focusDelays = [100, 300, 500, 800, 1200];
         focusDelays.forEach(delay => {
@@ -641,9 +860,9 @@ const WorkflowChat: React.FC<WorkflowChatProps> = ({
             return [...edges, newEdge];
           });
           
-          toast.success(`Task "${savedTask.name}" created and auto-assigned to agent!`);
+          // Success feedback shown in chat only
         } else {
-          toast.success(`Task "${savedTask.name}" created and saved successfully!`);
+          // Success feedback shown in chat only
         }
         // Aggressive focus restoration after successful task creation
         const focusDelays = [100, 300, 500, 800, 1200];
@@ -815,7 +1034,7 @@ const WorkflowChat: React.FC<WorkflowChatProps> = ({
       onNodesGenerated(nodes, edges);
     }
 
-    toast.success(`Crew with ${nodes.length} components created successfully!`);
+    // Success feedback shown in chat only
     // Aggressive focus restoration after crew creation
     const focusDelays = [100, 300, 500, 800, 1200];
     focusDelays.forEach(delay => {
@@ -853,9 +1072,9 @@ const WorkflowChat: React.FC<WorkflowChatProps> = ({
 
     // Show a toast message about what configuration is being opened
     if (config_type === 'general') {
-      toast.success('Opening configuration dialogs for LLM, Max RPM, and Tools');
+      // Configuration dialogs opened - feedback in chat only
     } else {
-      toast.success(`Opening ${config_type.toUpperCase()} configuration dialog`);
+      // Configuration dialog opened - feedback in chat only
     }
 
     // Restore focus to input after dialogs are opened
@@ -864,8 +1083,150 @@ const WorkflowChat: React.FC<WorkflowChatProps> = ({
     }, 500);
   };
 
+  // Smart context detection
+  const hasCrewContent = () => {
+    const hasAgents = nodes.some(node => node.type === 'agentNode');
+    const hasTask = nodes.some(node => node.type === 'taskNode');
+    return hasAgents && hasTask;
+  };
+
+  const isExecuteCommand = (message: string) => {
+    const trimmed = message.trim().toLowerCase();
+    return trimmed === 'execute crew' || trimmed === 'ec' || trimmed === 'run' || trimmed === 'execute' || trimmed.startsWith('ec ') || trimmed.startsWith('execute crew ');
+  };
+
+  const extractJobIdFromCommand = (message: string): string | null => {
+    const trimmed = message.trim().toLowerCase();
+    if (trimmed.startsWith('ec ')) {
+      return message.trim().substring(3).trim();
+    }
+    if (trimmed.startsWith('execute crew ')) {
+      return message.trim().substring(13).trim();
+    }
+    return null;
+  };
+
   const handleSendMessage = async () => {
     if (!inputValue.trim() || isLoading) return;
+
+    // Check if user wants to see execution traces
+    if (isExecuteCommand(inputValue)) {
+      // Add user message for the execute command
+      const userMessage: ChatMessage = {
+        id: `msg-${Date.now()}`,
+        type: 'user',
+        content: inputValue,
+        timestamp: new Date(),
+      };
+      
+      setMessages(prev => [...prev, userMessage]);
+      setInputValue('');
+      
+      // Save user message to backend
+      saveMessageToBackend(userMessage);
+      
+      // Check if user provided a specific job ID
+      const specificJobId = extractJobIdFromCommand(inputValue);
+      
+      // Determine which job ID to use
+      let jobIdToFetch: string | null = null;
+      if (specificJobId) {
+        jobIdToFetch = specificJobId;
+      } else if (executingJobId || lastExecutionJobId) {
+        jobIdToFetch = executingJobId || lastExecutionJobId;
+      }
+      
+      if (jobIdToFetch) {
+        setIsLoading(true);
+        
+        try {
+          // Fetch all traces for this job
+          const traces = await TraceService.getTraces(jobIdToFetch);
+          
+          if (traces && traces.length > 0) {
+            // Add assistant message indicating we're showing traces
+            const assistantMessage: ChatMessage = {
+              id: `msg-${Date.now() + 1}`,
+              type: 'assistant',
+              content: `Showing ${traces.length} execution traces for job ${jobIdToFetch}:`,
+              timestamp: new Date(),
+            };
+            setMessages(prev => [...prev, assistantMessage]);
+            
+            // Add each trace as a separate message
+            traces.forEach((trace, index) => {
+              // Extract content from trace output
+              let content = '';
+              if (typeof trace.output === 'string') {
+                content = trace.output;
+              } else if (trace.output?.agent_execution && typeof trace.output.agent_execution === 'string') {
+                content = trace.output.agent_execution;
+              } else if (trace.output?.content && typeof trace.output.content === 'string') {
+                content = trace.output.content;
+              } else if (trace.output) {
+                content = JSON.stringify(trace.output, null, 2);
+              }
+              
+              // Skip empty content
+              if (!content.trim()) {
+                return;
+              }
+              
+              const traceMessage: ChatMessage = {
+                id: `trace-display-${trace.id}-${index}`,
+                type: 'trace',
+                content,
+                timestamp: new Date(trace.created_at || Date.now()),
+                isIntermediate: false, // Not intermediate since this is intentional display
+                agentName: trace.agent_name,
+                taskName: trace.task_name,
+                jobId: jobIdToFetch || undefined
+              };
+              
+              setMessages(prev => [...prev, traceMessage]);
+            });
+          } else {
+            // No traces found
+            const assistantMessage: ChatMessage = {
+              id: `msg-${Date.now() + 1}`,
+              type: 'assistant',
+              content: `No execution traces found for job ${jobIdToFetch}.`,
+              timestamp: new Date(),
+            };
+            setMessages(prev => [...prev, assistantMessage]);
+          }
+        } catch (error) {
+          console.error('Error fetching execution traces:', error);
+          const errorMessage: ChatMessage = {
+            id: `msg-${Date.now() + 1}`,
+            type: 'assistant',
+            content: 'Failed to fetch execution traces. Please try again.',
+            timestamp: new Date(),
+          };
+          setMessages(prev => [...prev, errorMessage]);
+        } finally {
+          setIsLoading(false);
+        }
+        
+        return;
+      }
+      
+      // If user has a crew but no recent execution, execute it
+      if (hasCrewContent() && onExecuteCrew) {
+        onExecuteCrew();
+        return;
+      }
+      
+      // No crew or recent execution
+      const assistantMessage: ChatMessage = {
+        id: `msg-${Date.now() + 1}`,
+        type: 'assistant',
+        content: 'No recent execution found. Please run a crew first or provide a job ID.',
+        timestamp: new Date(),
+      };
+      setMessages(prev => [...prev, assistantMessage]);
+      return;
+    }
 
     console.log('Sending message:', inputValue); // Debug log
 
@@ -1004,8 +1365,17 @@ const WorkflowChat: React.FC<WorkflowChatProps> = ({
         justifyContent: 'space-between',
         backgroundColor: theme => theme.palette.mode === 'dark' ? 'grey.900' : 'grey.50'
       }}>
-        <Typography variant="subtitle2" sx={{ fontWeight: 600 }}>
-          {currentSessionName}
+        <Typography 
+          variant="subtitle2" 
+          sx={{ 
+            display: 'flex', 
+            alignItems: 'center', 
+            gap: 1,
+            fontWeight: 600
+          }}
+        >
+          <SmartToyIcon fontSize="small" />
+          Kasal
         </Typography>
         <Stack direction="row" spacing={1}>
           <Tooltip title="New Chat">
@@ -1022,6 +1392,14 @@ const WorkflowChat: React.FC<WorkflowChatProps> = ({
               }}
             >
               <HistoryIcon fontSize="small" />
+            </IconButton>
+          </Tooltip>
+          <Tooltip title="Collapse Chat">
+            <IconButton 
+              size="small" 
+              onClick={onToggleCollapse}
+            >
+              <ChevronLeftIcon fontSize="small" />
             </IconButton>
           </Tooltip>
         </Stack>
@@ -1180,15 +1558,23 @@ const WorkflowChat: React.FC<WorkflowChatProps> = ({
                 <Box>
                   <ListItem alignItems="flex-start" sx={{ px: 0 }}>
                     <ListItemAvatar>
-                      <Avatar sx={{ bgcolor: message.type === 'user' ? 'primary.main' : 'secondary.main' }}>
-                        {message.type === 'user' ? <PersonIcon /> : <SmartToyIcon />}
+                      <Avatar sx={{ 
+                        bgcolor: message.type === 'user' ? 'primary.main' : 
+                                message.type === 'execution' ? 'success.main' :
+                                message.type === 'trace' ? 'grey.500' : 'secondary.main' 
+                      }}>
+                        {message.type === 'user' ? <PersonIcon /> : 
+                         message.type === 'execution' ? <AccountTreeIcon /> :
+                         message.type === 'trace' ? <PersonIcon /> : <SmartToyIcon />}
                       </Avatar>
                     </ListItemAvatar>
                     <ListItemText
                       primary={
                         <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
                           <Typography variant="subtitle2">
-                            {message.type === 'user' ? 'You' : 'Assistant'}
+                            {message.type === 'user' ? 'You' : 
+                             message.type === 'execution' ? 'Workflow' :
+                             message.type === 'trace' ? (message.agentName || 'Agent') : 'Assistant'}
                           </Typography>
                           {message.intent && (
                             <Chip
@@ -1209,7 +1595,21 @@ const WorkflowChat: React.FC<WorkflowChatProps> = ({
                         </Box>
                       }
                       secondary={
-                        <Typography variant="body2" sx={{ mt: 1, whiteSpace: 'pre-wrap' }}>
+                        <Typography 
+                          variant="body2" 
+                          sx={{ 
+                            mt: 1, 
+                            whiteSpace: 'pre-wrap',
+                            color: message.isIntermediate ? 'text.secondary' : 'text.primary',
+                            fontStyle: message.isIntermediate ? 'italic' : 'normal',
+                            opacity: message.isIntermediate ? 0.7 : 1
+                          }}
+                        >
+                          {message.taskName && message.type === 'trace' && (
+                            <Typography variant="caption" display="block" sx={{ mb: 0.5, color: 'primary.main' }}>
+                              Task: {message.taskName}
+                            </Typography>
+                          )}
                           {message.content}
                         </Typography>
                       }
@@ -1224,13 +1624,13 @@ const WorkflowChat: React.FC<WorkflowChatProps> = ({
         <div ref={messagesEndRef} />
       </Box>
 
-      <Paper elevation={3} sx={{ p: 2, borderTop: 1, borderColor: 'divider' }}>
-        <Box sx={{ display: 'flex', gap: 1, alignItems: 'flex-end' }}>
+      <Paper elevation={3} sx={{ p: 2, borderTop: 1, borderColor: 'divider', borderRadius: 0 }}>
+        <Box sx={{ position: 'relative' }}>
           <TextField
             ref={inputRef}
             fullWidth
             variant="outlined"
-            placeholder="Describe what you want to create..."
+            placeholder={hasCrewContent() ? "Type 'execute crew' or 'ec'..." : "Describe what you want to create..."}
             value={inputValue}
             onChange={(e) => setInputValue(e.target.value)}
             onKeyDown={(e) => {
@@ -1243,7 +1643,12 @@ const WorkflowChat: React.FC<WorkflowChatProps> = ({
             size="small"
             sx={{
               '& .MuiOutlinedInput-root': {
-                paddingRight: '100px', // Reduced padding to allow more space for placeholder text
+                paddingRight: '40px', // Just enough space for the send button
+                borderColor: hasCrewContent() ? 'primary.main' : undefined,
+                borderRadius: 1, // Make text input field edgy/rectangular
+                '&:hover': {
+                  borderColor: hasCrewContent() ? 'primary.main' : undefined,
+                },
               },
             }}
             InputProps={{
@@ -1251,7 +1656,7 @@ const WorkflowChat: React.FC<WorkflowChatProps> = ({
                 <Box
                   sx={{
                     position: 'absolute',
-                    right: 8,
+                    right: 40, // Move further left to avoid send button overlap
                     bottom: 8, // Position at the bottom
                     display: 'flex',
                     alignItems: 'center',
@@ -1272,6 +1677,7 @@ const WorkflowChat: React.FC<WorkflowChatProps> = ({
                         fontSize: '0.75rem',
                         color: 'text.secondary',
                         transition: 'all 0.2s',
+                        backgroundColor: 'rgba(255, 255, 255, 0.8)', // Add background for better visibility
                         '&:hover': {
                           backgroundColor: 'action.hover',
                           color: 'text.primary',
@@ -1309,11 +1715,13 @@ const WorkflowChat: React.FC<WorkflowChatProps> = ({
                       vertical: 'bottom',
                       horizontal: 'right',
                     }}
-                    PaperProps={{
-                      sx: {
-                        mt: -1,
-                        minWidth: 250,
-                        maxHeight: 400,
+                    slotProps={{
+                      paper: {
+                        sx: {
+                          mt: -1,
+                          minWidth: 250,
+                          maxHeight: 400,
+                        },
                       },
                     }}
                   >
@@ -1368,13 +1776,31 @@ const WorkflowChat: React.FC<WorkflowChatProps> = ({
               ),
             }}
           />
+          {/* Send button positioned inside the text field */}
           <IconButton
             color="primary"
             onClick={handleSendMessage}
             disabled={!inputValue.trim() || isLoading}
-            sx={{ alignSelf: 'flex-end' }}
+            sx={{ 
+              position: 'absolute',
+              right: 8,
+              bottom: 8,
+              padding: '6px',
+              backgroundColor: 'primary.main',
+              color: 'primary.contrastText',
+              borderRadius: '50%',
+              width: 28,
+              height: 28,
+              '&:hover': {
+                backgroundColor: 'primary.dark',
+              },
+              '&.Mui-disabled': {
+                backgroundColor: 'action.disabledBackground',
+                color: 'action.disabled',
+              },
+            }}
           >
-            {isLoading ? <CircularProgress size={24} /> : <SendIcon />}
+            {isLoading ? <CircularProgress size={16} sx={{ color: 'inherit' }} /> : <ArrowUpwardIcon sx={{ fontSize: 16 }} />}
           </IconButton>
         </Box>
       </Paper>

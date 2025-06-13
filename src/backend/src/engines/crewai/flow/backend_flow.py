@@ -196,7 +196,8 @@ class BackendFlow:
         """
         self._config['callbacks'] = CallbackManager.init_callbacks(
             job_id=self._job_id,
-            config=self._config
+            config=self._config,
+            group_context=self._config.get('group_context')
         )
 
     async def kickoff(self) -> Dict[str, Any]:

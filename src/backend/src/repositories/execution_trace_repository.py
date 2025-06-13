@@ -342,6 +342,11 @@ class ExecutionTraceRepository:
                         trace_data["run_id"] = job_record.id
                     
                     logger.info(f"Created job record for {job_id} with ID {job_record.id}")
+                else:
+                    # Job exists, ensure run_id is set in trace_data
+                    if "run_id" not in trace_data and job_exists:
+                        trace_data["run_id"] = job_exists.id
+                        logger.info(f"Setting run_id={job_exists.id} for existing job {job_id}")
             
             # Now create the trace with the existing or newly created job
             return await self._create(session, trace_data)

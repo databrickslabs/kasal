@@ -2,7 +2,12 @@ import React, { useRef } from 'react';
 import { Box, Paper } from '@mui/material';
 import ExecutionHistory, { RunHistoryRef } from './ExecutionHistory';
 
-const JobsPanel: React.FC = () => {
+interface JobsPanelProps {
+  executionHistoryHeight?: number;
+  onExecutionCountChange?: (count: number) => void;
+}
+
+const JobsPanel: React.FC<JobsPanelProps> = ({ executionHistoryHeight = 200, onExecutionCountChange }) => {
   const runHistoryRef = useRef<RunHistoryRef>(null);
 
   return (
@@ -10,6 +15,8 @@ const JobsPanel: React.FC = () => {
       <Box sx={{ flex: 1, overflow: 'hidden' }}>
         <ExecutionHistory 
           ref={runHistoryRef}
+          executionHistoryHeight={executionHistoryHeight}
+          onExecutionCountChange={onExecutionCountChange}
         />
       </Box>
     </Paper>

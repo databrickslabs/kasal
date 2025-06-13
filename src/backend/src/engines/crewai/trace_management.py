@@ -165,6 +165,12 @@ class TraceManager:
                                             "trace_metadata": trace_data.get("extra_data", {})
                                         }
                                         
+                                        # Add group context if available in trace data
+                                        if "group_id" in trace_data:
+                                            trace_dict["group_id"] = trace_data["group_id"]
+                                        if "group_email" in trace_data:
+                                            trace_dict["group_email"] = trace_data["group_email"]
+                                        
                                         try:
                                             # Use the ExecutionTraceService to create the trace
                                             await ExecutionTraceService.create_trace(trace_dict)

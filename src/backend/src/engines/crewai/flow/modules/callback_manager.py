@@ -18,7 +18,7 @@ class CallbackManager:
     """
     
     @staticmethod
-    def init_callbacks(job_id=None, config=None):
+    def init_callbacks(job_id=None, config=None, group_context=None):
         """
         Initialize all necessary callbacks for flow execution.
         This ensures all event listeners are properly set up and registered 
@@ -27,6 +27,7 @@ class CallbackManager:
         Args:
             job_id: Optional job ID for tracking
             config: Optional configuration dictionary
+            group_context: Optional group context for multi-tenant isolation
             
         Returns:
             dict: Dictionary containing initialized callbacks
@@ -45,7 +46,7 @@ class CallbackManager:
             # Create streaming callback for job output
             try:
                 from src.engines.crewai.callbacks.streaming_callbacks import JobOutputCallback
-                streaming_cb = JobOutputCallback(job_id=job_id, max_retries=3)
+                streaming_cb = JobOutputCallback(job_id=job_id, max_retries=3, group_context=group_context)
                 logger.info(f"Created JobOutputCallback for job {job_id}")
                 handlers.append(streaming_cb)
                 callbacks_dict['streaming'] = streaming_cb
@@ -56,7 +57,7 @@ class CallbackManager:
             # Create event streaming callback to capture CrewAI events
             try:
                 from src.engines.crewai.callbacks.streaming_callbacks import EventStreamingCallback
-                event_streaming_cb = EventStreamingCallback(job_id=job_id, config=config)
+                event_streaming_cb = EventStreamingCallback(job_id=job_id, config=config, group_context=group_context)
                 logger.info(f"Created EventStreamingCallback for job {job_id}")
                 handlers.append(event_streaming_cb)
                 callbacks_dict['event_streaming'] = event_streaming_cb
@@ -67,7 +68,7 @@ class CallbackManager:
             # Create agent trace event listener for database trace recording
             try:
                 from src.engines.crewai.callbacks.logging_callbacks import AgentTraceEventListener
-                agent_trace_cb = AgentTraceEventListener(job_id=job_id)
+                agent_trace_cb = AgentTraceEventListener(job_id=job_id, group_context=group_context)
                 logger.info(f"Created AgentTraceEventListener for job {job_id}")
                 handlers.append(agent_trace_cb)
                 callbacks_dict['agent_trace'] = agent_trace_cb

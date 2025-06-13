@@ -4,19 +4,17 @@ import {
   IconButton,
   Tooltip,
   Paper,
-  useTheme,
-  CircularProgress,
   Divider,
   GlobalStyles,
 } from '@mui/material';
 import {
-  SmartToy as SmartToyIcon,
   PersonAdd as PersonAddIcon,
   AddTask as AddTaskIcon,
   AccountTree as AccountTreeIcon,
-  PlayArrow as PlayArrowIcon,
   Save as SaveIcon,
   MenuBook as MenuBookIcon,
+  Schedule as ScheduleIcon,
+  Assessment as LogsIcon,
 } from '@mui/icons-material';
 import { useFlowConfigStore } from '../../store/flowConfig';
 
@@ -28,11 +26,10 @@ interface RightSidebarProps {
   setIsTaskDialogOpen: (open: boolean) => void;
   setIsFlowDialogOpen: (open: boolean) => void;
   setIsCrewDialogOpen?: (open: boolean) => void;
-  handleExecuteCrew?: () => void;
-  handleExecuteFlow?: () => void;
-  isExecuting?: boolean;
   onSaveCrewClick?: () => void;
   showRunHistory?: boolean;
+  executionHistoryHeight?: number;
+  onOpenSchedulesDialog?: () => void;
 }
 
 const RightSidebar: React.FC<RightSidebarProps> = ({
@@ -43,16 +40,15 @@ const RightSidebar: React.FC<RightSidebarProps> = ({
   setIsTaskDialogOpen,
   setIsFlowDialogOpen,
   setIsCrewDialogOpen,
-  handleExecuteCrew,
-  handleExecuteFlow,
-  isExecuting = false,
   onSaveCrewClick,
   showRunHistory = false,
+  executionHistoryHeight = 200,
+  onOpenSchedulesDialog,
 }) => {
-  const theme = useTheme();
   const [animateAIAssistant, setAnimateAIAssistant] = useState(true);
   const [chatOpenedByClick, setChatOpenedByClick] = useState(false);
   const { crewAIFlowEnabled } = useFlowConfigStore();
+
 
   useEffect(() => {
     // Trigger animation on mount, then stop after 1.5s
@@ -80,33 +76,18 @@ const RightSidebar: React.FC<RightSidebarProps> = ({
 
   const sidebarItems = [
     {
-      id: 'chat',
-      icon: <SmartToyIcon />,
-      tooltip: 'Kasal',
-      onClick: onToggleChat
-    },
-    {
-      id: 'execute-crew',
-      icon: isExecuting ? <CircularProgress size={20} /> : <PlayArrowIcon />,
-      tooltip: 'Execute Crew',
-      onClick: handleExecuteCrew,
-      disabled: isExecuting
-    },
-    {
-      id: 'separator1',
-      isSeparator: true
-    },
-    {
       id: 'add-agent',
       icon: <PersonAddIcon />,
       tooltip: 'Add Agent',
-      onClick: () => setIsAgentDialogOpen(true)
+      onClick: () => setIsAgentDialogOpen(true),
+      disabled: false
     },
     {
       id: 'add-task',
       icon: <AddTaskIcon />,
       tooltip: 'Add Task',
-      onClick: () => setIsTaskDialogOpen(true)
+      onClick: () => setIsTaskDialogOpen(true),
+      disabled: false
     },
     {
       id: 'separator2',
@@ -116,13 +97,15 @@ const RightSidebar: React.FC<RightSidebarProps> = ({
       id: 'save-crew',
       icon: <SaveIcon />,
       tooltip: 'Save Crew',
-      onClick: onSaveCrewClick
+      onClick: onSaveCrewClick,
+      disabled: false
     },
     {
       id: 'open-catalog',
       icon: <MenuBookIcon />,
       tooltip: 'Open Catalog',
-      onClick: () => setIsCrewDialogOpen?.(true)
+      onClick: () => setIsCrewDialogOpen?.(true),
+      disabled: false
     },
     ...(crewAIFlowEnabled ? [
       {
@@ -133,16 +116,28 @@ const RightSidebar: React.FC<RightSidebarProps> = ({
         id: 'add-flow',
         icon: <AccountTreeIcon />,
         tooltip: 'Add Flow',
-        onClick: () => setIsFlowDialogOpen(true)
-      },
-      {
-        id: 'execute-flow',
-        icon: isExecuting ? <CircularProgress size={20} /> : <PlayArrowIcon />,
-        tooltip: 'Execute Flow',
-        onClick: handleExecuteFlow,
-        disabled: isExecuting
+        onClick: () => setIsFlowDialogOpen(true),
+        disabled: false
       }
-    ] : [])
+    ] : []),
+    {
+      id: 'separator4',
+      isSeparator: true
+    },
+    {
+      id: 'view-logs',
+      icon: <LogsIcon />,
+      tooltip: 'View System Logs',
+      onClick: onOpenLogsDialog,
+      disabled: false
+    },
+    {
+      id: 'schedules',
+      icon: <ScheduleIcon />,
+      tooltip: 'Schedules',
+      onClick: onOpenSchedulesDialog,
+      disabled: !onOpenSchedulesDialog
+    }
   ];
 
   return (
@@ -162,7 +157,7 @@ const RightSidebar: React.FC<RightSidebarProps> = ({
           position: 'absolute',
           top: '48px', // Account for TabBar height
           right: 0,
-          height: showRunHistory ? 'calc(100% - 48px - 200px)' : 'calc(100% - 48px)', // Account for TabBar and execution history
+          height: showRunHistory ? `calc(100% - 48px - ${executionHistoryHeight}px)` : 'calc(100% - 48px)', // Account for TabBar and execution history
           zIndex: 5,
           display: 'flex',
           flexDirection: 'row'
@@ -177,7 +172,7 @@ const RightSidebar: React.FC<RightSidebarProps> = ({
             top: 48,
             right: 0,
             width: 48,
-            height: showRunHistory ? 'calc(100% - 48px - 200px)' : 'calc(100% - 48px)',
+            height: showRunHistory ? `calc(100% - 48px - ${executionHistoryHeight}px)` : 'calc(100% - 48px)',
             display: 'flex',
             flexDirection: 'column',
             alignItems: 'center',
@@ -198,16 +193,8 @@ const RightSidebar: React.FC<RightSidebarProps> = ({
                 <Tooltip title={item.tooltip} placement="left">
                   <IconButton
                     onClick={() => {
-                      if (item.onClick) {
-                        // Chat icon toggles chat visibility
-                        if (item.id === 'chat') {
-                          setChatOpenedByClick(!chatOpenedByClick);
-                          item.onClick();
-                        }
-                        // Other items execute their actions if not disabled
-                        else if (!item.disabled) {
-                          item.onClick();
-                        }
+                      if (item.onClick && !item.disabled) {
+                        item.onClick();
                       }
                     }}
                     disabled={item.disabled}
@@ -215,14 +202,9 @@ const RightSidebar: React.FC<RightSidebarProps> = ({
                       width: 40,
                       height: 40,
                       mb: 1,
-                      color: item.id === 'chat' ? theme.palette.primary.main : 
-                            item.id === 'execute-crew' ? theme.palette.primary.main : 'text.secondary',
-                      backgroundColor: (item.id === 'chat' && isChatOpen)
-                        ? 'action.selected'
-                        : 'transparent',
-                      borderRight: (item.id === 'chat' && isChatOpen)
-                        ? `2px solid ${theme.palette.primary.main}`
-                        : '2px solid transparent',
+                      color: 'text.secondary',
+                      backgroundColor: 'transparent',
+                      borderRight: '2px solid transparent',
                       borderRadius: '50%',
                       display: 'flex',
                       alignItems: 'center',
@@ -232,17 +214,12 @@ const RightSidebar: React.FC<RightSidebarProps> = ({
                       cursor: item.disabled ? 'not-allowed' : 'pointer',
                       '&:hover': !item.disabled ? {
                         backgroundColor: 'action.hover',
-                        color: item.id === 'chat' ? theme.palette.primary.main : 
-                              item.id === 'execute-crew' ? theme.palette.primary.main : 'text.primary',
+                        color: 'text.primary',
                       } : {},
-                      animation: item.id === 'chat' && animateAIAssistant ? 'ai-bounce 1.2s' : 'none',
+                      animation: 'none',
                     }}
                   >
-                    {item.id === 'chat' ? (
-                      <SmartToyIcon sx={{ fontSize: '2rem', color: theme.palette.primary.main }} />
-                    ) : (
-                      item.icon
-                    )}
+                    {item.icon}
                   </IconButton>
                 </Tooltip>
               )}

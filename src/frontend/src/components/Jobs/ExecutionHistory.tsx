@@ -55,7 +55,12 @@ interface ScheduleCreateData {
   planning: boolean;
 }
 
-const RunHistory = forwardRef<RunHistoryRef>((_, ref) => {
+interface RunHistoryProps {
+  executionHistoryHeight?: number;
+  onExecutionCountChange?: (count: number) => void;
+}
+
+const RunHistory = forwardRef<RunHistoryRef, RunHistoryProps>(({ executionHistoryHeight = 200, onExecutionCountChange }, ref) => {
   const { t } = useTranslation();
   const { showRunResult, selectedRun, isOpen, closeRunResult } = useRunResult();
   const {
@@ -112,8 +117,12 @@ const RunHistory = forwardRef<RunHistoryRef>((_, ref) => {
   const previousLogsDialogRef = useRef<boolean>(false);
   const userActivityTimeoutRef = useRef<NodeJS.Timeout | null>(null);
 
-  // Calculate items for current page (4 items per page)
-  const itemsPerPage = 4;
+  // Calculate items per page based on execution history height
+  // Each row is approximately 32px, header is ~40px, pagination is ~40px
+  const itemsPerPage = React.useMemo(() => {
+    const availableHeight = executionHistoryHeight - 80; // Subtract header and pagination
+    return Math.max(6, Math.floor(availableHeight / 32)); // At least 6 items
+  }, [executionHistoryHeight]);
   const startIndex = (localPage - 1) * itemsPerPage;
   const endIndex = startIndex + itemsPerPage;
   const displayedRuns = runs.slice(startIndex, endIndex);
@@ -129,6 +138,13 @@ const RunHistory = forwardRef<RunHistoryRef>((_, ref) => {
   useEffect(() => {
     setLocalPage(1);
   }, [runs.length, searchQuery]);
+
+  // Notify parent of execution count changes
+  useEffect(() => {
+    if (onExecutionCountChange) {
+      onExecutionCountChange(runs.length);
+    }
+  }, [runs.length, onExecutionCountChange]);
   
   // Effect for periodic job status check
   useEffect(() => {
@@ -818,7 +834,7 @@ const RunHistory = forwardRef<RunHistoryRef>((_, ref) => {
             </Table>
           </TableContainer>
 
-          {runs.length > itemsPerPage && (
+          {totalLocalPages > 1 && (
             <Box sx={{ 
               display: 'flex', 
               justifyContent: 'center', 

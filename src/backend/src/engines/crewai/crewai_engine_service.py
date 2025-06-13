@@ -173,8 +173,8 @@ class CrewAIEngineService(BaseEngineService):
             try:
                 # Create the event listeners with proper error handling
                 # Just creating the instances is enough - they'll register with the event bus during init
-                agent_trace_callback = AgentTraceEventListener(job_id=execution_id)
-                logger.info(f"[CrewAIEngineService] Successfully created AgentTraceEventListener for {execution_id}")
+                agent_trace_callback = AgentTraceEventListener(job_id=execution_id, group_context=group_context)
+                logger.info(f"[CrewAIEngineService] Successfully created AgentTraceEventListener for {execution_id} with group_context")
                 
                 # Add task completion logger
                 task_completion_logger = TaskCompletionLogger(job_id=execution_id)
@@ -361,13 +361,14 @@ class CrewAIEngineService(BaseEngineService):
             logger.error(f"Error cancelling execution {execution_id}: {str(e)}")
             return False 
 
-    async def run_flow(self, execution_id: str, flow_config: Dict[str, Any]) -> str:
+    async def run_flow(self, execution_id: str, flow_config: Dict[str, Any], group_context: GroupContext = None) -> str:
         """
         Run a CrewAI flow with the given configuration.
         
         Args:
             execution_id: Unique ID for this flow execution
             flow_config: Configuration for the flow
+            group_context: Group context for multi-tenant isolation
             
         Returns:
             Execution ID
@@ -375,6 +376,10 @@ class CrewAIEngineService(BaseEngineService):
         try:
             # Normalize flow config
             flow_config = normalize_flow_config(flow_config)
+            
+            # Add group context to flow config so it can be passed to callbacks
+            if group_context:
+                flow_config['group_context'] = group_context
             
             # Setup output directory
             output_dir = self._setup_output_directory(execution_id)

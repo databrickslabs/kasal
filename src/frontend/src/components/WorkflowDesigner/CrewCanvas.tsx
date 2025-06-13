@@ -84,6 +84,7 @@ interface CrewCanvasProps {
   setIsFlowDialogOpen: (open: boolean) => void;
   // Execution history visibility
   showRunHistory?: boolean;
+  executionHistoryHeight?: number;
 }
 
 
@@ -110,7 +111,8 @@ const CrewCanvas: React.FC<CrewCanvasProps> = ({
   setIsAgentDialogOpen,
   setIsTaskDialogOpen,
   setIsFlowDialogOpen,
-  showRunHistory
+  showRunHistory,
+  executionHistoryHeight = 200
 }) => {
   const [isRendering, setIsRendering] = useState(true);
   const containerRef = useRef<HTMLDivElement>(null);
@@ -734,6 +736,7 @@ const CrewCanvas: React.FC<CrewCanvasProps> = ({
             setIsTaskDialogOpen={setIsTaskDialogOpen}
             setIsFlowDialogOpen={setIsFlowDialogOpen}
             showRunHistory={showRunHistory}
+            executionHistoryHeight={executionHistoryHeight}
           />
 
         </ReactFlow>

@@ -293,7 +293,8 @@ class ExecutionService:
                     nodes=sanitized_config.get('nodes'),
                     edges=sanitized_config.get('edges'),
                     job_id=execution_id,
-                    config=sanitized_config
+                    config=sanitized_config,
+                    group_context=group_context
                 )
                 exec_logger.info(f"[run_crew_execution] Flow execution initiated: {result}")
                 return result

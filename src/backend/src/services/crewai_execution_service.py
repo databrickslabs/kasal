@@ -308,7 +308,8 @@ class CrewAIExecutionService:
         nodes: Optional[List[Dict[str, Any]]] = None,
         edges: Optional[List[Dict[str, Any]]] = None,
         job_id: Optional[str] = None,
-        config: Optional[Dict[str, Any]] = None
+        config: Optional[Dict[str, Any]] = None,
+        group_context: GroupContext = None
     ) -> Dict[str, Any]:
         """
         Run a flow execution with the provided configuration.
@@ -320,6 +321,7 @@ class CrewAIExecutionService:
             edges: Optional list of edges for a dynamic flow
             job_id: Optional job ID for tracking the execution
             config: Optional configuration parameters
+            group_context: Group context for multi-tenant isolation
             
         Returns:
             Dictionary with execution result
@@ -387,6 +389,10 @@ class CrewAIExecutionService:
             # Make sure flow_id is in the config
             if flow_id:
                 execution_config['flow_id'] = flow_id
+            
+            # Add group context to config if provided
+            if group_context:
+                execution_config['group_context'] = group_context
             
             # Create a flow service instance
             flow_service = CrewAIFlowService()

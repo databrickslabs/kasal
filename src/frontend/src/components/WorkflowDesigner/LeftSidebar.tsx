@@ -26,12 +26,9 @@ import {
   Tune as TuneIcon,
 
   Settings as SettingsIcon,
-  Assessment as LogsIcon,
-  Schedule as ScheduleIcon,
 } from '@mui/icons-material';
 
 import { ShortcutConfig } from '../../types/shortcuts';
-import ScheduleList from '../Schedule/ScheduleList';
 import { useShortcutsStore } from '../../store/shortcuts';
 import { Models } from '../../types/models';
 import { ModelService } from '../../api/ModelService';
@@ -70,6 +67,7 @@ interface LeftSidebarProps {
   onOpenLogsDialog?: () => void;
   // Execution history visibility
   showRunHistory?: boolean;
+  executionHistoryHeight?: number;
 }
 
 const LeftSidebar: React.FC<LeftSidebarProps> = ({
@@ -88,7 +86,8 @@ const LeftSidebar: React.FC<LeftSidebarProps> = ({
   setSchemaDetectionEnabled,
   setIsConfigurationDialogOpen,
   onOpenLogsDialog,
-  showRunHistory
+  showRunHistory,
+  executionHistoryHeight = 200
 }) => {
   const theme = useTheme();
   const [activeSection, setActiveSection] = useState<string | null>(null);
@@ -211,7 +210,7 @@ const LeftSidebar: React.FC<LeftSidebarProps> = ({
       content: (
         <Box
           sx={{
-            maxHeight: showRunHistory ? 'calc(100vh - 48px - 200px - 20px)' : 'calc(100vh - 48px - 20px)',
+            maxHeight: showRunHistory ? `calc(100vh - 48px - ${executionHistoryHeight}px - 20px)` : 'calc(100vh - 48px - 20px)',
             overflowY: 'auto',
             p: 1,
           }}
@@ -407,7 +406,7 @@ const LeftSidebar: React.FC<LeftSidebarProps> = ({
       content: (
         <Box
           sx={{
-            maxHeight: showRunHistory ? 'calc(100vh - 48px - 200px - 20px)' : 'calc(100vh - 48px - 20px)',
+            maxHeight: showRunHistory ? `calc(100vh - 48px - ${executionHistoryHeight}px - 20px)` : 'calc(100vh - 48px - 20px)',
             overflowY: 'auto',
             p: 1,
           }}
@@ -496,22 +495,6 @@ const LeftSidebar: React.FC<LeftSidebarProps> = ({
           })}
         </Box>
       )
-    },
-    {
-      id: 'schedule',
-      icon: <ScheduleIcon />,
-      tooltip: 'Schedules',
-      content: (
-        <Box
-          sx={{
-            maxHeight: showRunHistory ? 'calc(100vh - 48px - 200px - 20px)' : 'calc(100vh - 48px - 20px)',
-            overflowY: 'auto',
-            p: 1,
-          }}
-        >
-          <ScheduleList />
-        </Box>
-      )
     }
   ];
 
@@ -530,7 +513,7 @@ const LeftSidebar: React.FC<LeftSidebarProps> = ({
         position: 'absolute',
         top: '48px', // Account for TabBar height
         left: 0,
-        height: showRunHistory ? 'calc(100% - 48px - 200px)' : 'calc(100% - 48px)',
+        height: showRunHistory ? `calc(100% - 48px - ${executionHistoryHeight}px)` : 'calc(100% - 48px)',
         zIndex: 10,
         display: 'flex',
         flexDirection: 'row'
@@ -709,51 +692,6 @@ const LeftSidebar: React.FC<LeftSidebarProps> = ({
                       </IconButton>
                     </Tooltip>
 
-                    {/* Separator before Keyboard Shortcuts */}
-                    <Box
-                      sx={{
-                        width: '80%',
-                        height: '1px',
-                        backgroundColor: 'divider',
-                        mb: 1,
-                        alignSelf: 'center'
-                      }}
-                    />
-                  </>
-                )}
-                {/* Add View Logs button after Keyboard Shortcuts with separator */}
-                {item.id === 'shortcuts' && onOpenLogsDialog && (
-                  <>
-                    {/* Separator */}
-                    <Box
-                      sx={{
-                        width: '80%',
-                        height: '1px',
-                        backgroundColor: 'divider',
-                        mb: 1,
-                        alignSelf: 'center'
-                      }}
-                    />
-                    
-                    <Tooltip title="View System Logs" placement="right">
-                      <IconButton
-                        onClick={onOpenLogsDialog}
-                        sx={{
-                          width: 40,
-                          height: 40,
-                          mb: 1,
-                          color: 'text.secondary',
-                          borderRadius: 0,
-                          transition: 'all 0.2s ease-in-out',
-                          '&:hover': {
-                            backgroundColor: 'action.hover',
-                            color: 'text.primary'
-                          }
-                        }}
-                      >
-                        <LogsIcon fontSize="small" />
-                      </IconButton>
-                    </Tooltip>
                   </>
                 )}
               </React.Fragment>

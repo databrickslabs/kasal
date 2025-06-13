@@ -26,7 +26,7 @@ import { createEdge as _createEdge } from '../../utils/edgeUtils';
 import CloseIcon from '@mui/icons-material/Close';
 
 // Component Imports
-import { BottomPanelToggle, RightPanelToggle } from './WorkflowToolbarStyle';
+import { RightPanelToggle } from './WorkflowToolbarStyle';
 import WorkflowPanels from './WorkflowPanels';
 import TabBar from './TabBar';
 import ChatPanel from '../Chat/ChatPanel';
@@ -165,7 +165,7 @@ const WorkflowDesigner: React.FC<WorkflowDesignerProps> = (): JSX.Element => {
     handleResetPanel: _handleResetPanel,
     toggleFlowsVisibility,
     showRunHistory,
-    setShowRunHistory,
+    setShowRunHistory: _setShowRunHistory,
     showChatPanel,
     setShowChatPanel: _setShowChatPanel,
     toggleChatPanel
@@ -177,6 +177,106 @@ const WorkflowDesigner: React.FC<WorkflowDesignerProps> = (): JSX.Element => {
   // Connection generation state
   const [isGeneratingConnections, setIsGeneratingConnections] = React.useState(false);
   const [isChatProcessing, setIsChatProcessing] = React.useState(false);
+  const [isChatCollapsed, setIsChatCollapsed] = React.useState(false);
+  const [chatPanelWidth, setChatPanelWidth] = React.useState(450);
+  const [isResizing, setIsResizing] = React.useState(false);
+  const [executionHistoryHeight, setExecutionHistoryHeight] = React.useState(60); // Start with 1 row height
+  const [isResizingHistory, setIsResizingHistory] = React.useState(false);
+  const [hasManuallyResized, setHasManuallyResized] = React.useState(false);
+  const [executionCount, setExecutionCount] = React.useState(0);
+
+  // Chat panel resize handlers
+  const handleResizeStart = React.useCallback((e: React.MouseEvent) => {
+    e.preventDefault();
+    setIsResizing(true);
+  }, []);
+
+  const handleResizeMove = React.useCallback((e: MouseEvent) => {
+    if (!isResizing) return;
+    
+    const newWidth = window.innerWidth - e.clientX - 48; // 48px for right sidebar
+    const minWidth = 280; // Minimum usable width
+    const maxWidth = Math.min(800, window.innerWidth * 0.6); // Max 60% of screen or 800px
+    
+    setChatPanelWidth(Math.min(Math.max(newWidth, minWidth), maxWidth));
+  }, [isResizing]);
+
+  const handleResizeEnd = React.useCallback(() => {
+    setIsResizing(false);
+  }, []);
+
+  React.useEffect(() => {
+    if (isResizing) {
+      document.addEventListener('mousemove', handleResizeMove);
+      document.addEventListener('mouseup', handleResizeEnd);
+      document.body.style.cursor = 'ew-resize';
+      document.body.style.userSelect = 'none';
+      
+      return () => {
+        document.removeEventListener('mousemove', handleResizeMove);
+        document.removeEventListener('mouseup', handleResizeEnd);
+        document.body.style.cursor = '';
+        document.body.style.userSelect = '';
+      };
+    }
+  }, [isResizing, handleResizeMove, handleResizeEnd]);
+
+  // Execution history resize handlers
+  const handleHistoryResizeStart = React.useCallback((e: React.MouseEvent) => {
+    e.preventDefault();
+    setIsResizingHistory(true);
+  }, []);
+
+  const handleHistoryResizeMove = React.useCallback((e: MouseEvent) => {
+    if (!isResizingHistory) return;
+    
+    const newHeight = window.innerHeight - e.clientY;
+    const minHeight = 100; // Minimum usable height
+    const maxHeight = Math.min(500, window.innerHeight * 0.5); // Max 50% of screen or 500px
+    
+    setExecutionHistoryHeight(Math.min(Math.max(newHeight, minHeight), maxHeight));
+  }, [isResizingHistory]);
+
+  const handleHistoryResizeEnd = React.useCallback(() => {
+    setIsResizingHistory(false);
+    setHasManuallyResized(true); // User has manually resized, stop auto-adjusting
+  }, []);
+
+  React.useEffect(() => {
+    if (isResizingHistory) {
+      document.addEventListener('mousemove', handleHistoryResizeMove);
+      document.addEventListener('mouseup', handleHistoryResizeEnd);
+      document.body.style.cursor = 'ns-resize';
+      document.body.style.userSelect = 'none';
+      
+      return () => {
+        document.removeEventListener('mousemove', handleHistoryResizeMove);
+        document.removeEventListener('mouseup', handleHistoryResizeEnd);
+        document.body.style.cursor = '';
+        document.body.style.userSelect = '';
+      };
+    }
+  }, [isResizingHistory, handleHistoryResizeMove, handleHistoryResizeEnd]);
+
+  // Auto-adjust execution history height based on execution count
+  React.useEffect(() => {
+    if (!hasManuallyResized && showRunHistory) {
+      // Calculate height based on execution count
+      // Header ~40px, each row ~32px, pagination ~40px, padding ~20px
+      const baseHeight = 40 + 40 + 20; // Header + pagination + padding
+      const rowHeight = 32;
+      const maxRows = 4; // Maximum 4 rows before scrolling
+      
+      if (executionCount === 0) {
+        // Just header with "no executions" message
+        setExecutionHistoryHeight(baseHeight + rowHeight);
+      } else {
+        // Show up to 4 rows
+        const visibleRows = Math.min(executionCount, maxRows);
+        setExecutionHistoryHeight(baseHeight + (visibleRows * rowHeight));
+      }
+    }
+  }, [executionCount, hasManuallyResized, showRunHistory]);
 
   // Use crew execution store
   const {
@@ -196,7 +296,7 @@ const WorkflowDesigner: React.FC<WorkflowDesignerProps> = (): JSX.Element => {
     handleGenerateCrew,
     executeTab,
     executeCrew,
-    executeFlow,
+    executeFlow: _executeFlow,
     setNodes: setCrewExecutionNodes,
     setEdges: setCrewExecutionEdges
   } = useCrewExecutionStore();
@@ -370,7 +470,7 @@ const WorkflowDesigner: React.FC<WorkflowDesignerProps> = (): JSX.Element => {
         width: '100%', 
         height: '100vh', // Set full viewport height
         position: 'relative',
-        bgcolor: isDarkMode ? '#1a1a1a' : '#ffffff',
+        // Remove background - let body/app background show through
         display: 'flex',
         flexDirection: 'column',
         overflow: 'hidden' // Prevent scrolling
@@ -406,7 +506,7 @@ const WorkflowDesigner: React.FC<WorkflowDesignerProps> = (): JSX.Element => {
           }}>
             <WorkflowPanels
               areFlowsVisible={areFlowsVisible}
-              showRunHistory={showRunHistory}
+              showRunHistory={false}
               panelPosition={panelPosition}
               isDraggingPanel={isDraggingPanel}
               isDarkMode={isDarkMode}
@@ -491,26 +591,53 @@ const WorkflowDesigner: React.FC<WorkflowDesignerProps> = (): JSX.Element => {
                 }}
                 sx={{ 
                   position: 'absolute',
-                  top: 0,
+                  top: 0, // Start from top of container
                   right: 48, // Position to the left of RightSidebar (48px width)
-                  width: '450px', // Increased from 350px
-                  height: '100%',
+                  bottom: showRunHistory ? `${executionHistoryHeight - 0}px` : 0, // Extend 20px into execution history for subtle intersection
+                  width: isChatCollapsed ? '60px' : `${chatPanelWidth}px`, // Dynamic width
                   display: 'flex',
-                  flexDirection: 'column',
+                  flexDirection: 'row', // Change to row to accommodate resize handle
                   overflow: 'hidden',
                   borderLeft: 1,
                   borderColor: 'divider',
                   backgroundColor: 'background.paper',
-                  zIndex: 6 // Higher than RightSidebar (5)
+                  zIndex: 10, // Higher than execution history (8) and right sidebar
+                  transition: isChatCollapsed ? 'width 0.3s ease-in-out' : 'none', // Smooth animation only for collapse
                 }}>
-                <ChatPanel 
-                  onNodesGenerated={(newNodes, newEdges) => {
-                    setNodes(currentNodes => [...currentNodes, ...newNodes]);
-                    setEdges(currentEdges => [...currentEdges, ...newEdges]);
-                  }}
-                  onLoadingStateChange={setIsChatProcessing}
-                  isVisible={showChatPanel}
-                />
+                {/* Resize Handle */}
+                {!isChatCollapsed && (
+                  <Box
+                    onMouseDown={handleResizeStart}
+                    sx={{
+                      width: 4,
+                      height: '100%',
+                      backgroundColor: 'divider',
+                      cursor: 'ew-resize',
+                      '&:hover': {
+                        backgroundColor: 'primary.main',
+                      },
+                      transition: 'background-color 0.2s ease',
+                      zIndex: 7,
+                    }}
+                  />
+                )}
+                
+                {/* Chat Panel Content */}
+                <Box sx={{ flex: 1, display: 'flex', flexDirection: 'column' }}>
+                  <ChatPanel 
+                    onNodesGenerated={(newNodes, newEdges) => {
+                      setNodes(currentNodes => [...currentNodes, ...newNodes]);
+                      setEdges(currentEdges => [...currentEdges, ...newEdges]);
+                    }}
+                    onLoadingStateChange={setIsChatProcessing}
+                    isVisible={showChatPanel}
+                    nodes={nodes}
+                    edges={edges}
+                    onExecuteCrew={() => executeCrew(nodes, edges)}
+                    isCollapsed={isChatCollapsed}
+                    onToggleCollapse={() => setIsChatCollapsed(!isChatCollapsed)}
+                  />
+                </Box>
               </Box>
             )}
           </Box>
@@ -526,26 +653,58 @@ const WorkflowDesigner: React.FC<WorkflowDesignerProps> = (): JSX.Element => {
           />
         )}
         
-        <BottomPanelToggle
-          isVisible={showRunHistory}
-          togglePanel={() => setShowRunHistory(!showRunHistory)}
-          position="bottom"
-          tooltip={showRunHistory ? "Hide Jobs Panel" : "Show Jobs Panel (Run History)"}
-        />
         
 
 
-        {/* Jobs Panel with Run History and Kasal */}
+        {/* Jobs Panel with Run History and Kasal - Overlay on canvas */}
         {showRunHistory && (
           <Box sx={{ 
-            height: '200px', // Adjusted to fit 4 rows, header, and pagination
-            backgroundColor: isDarkMode ? '#1a1a1a' : '#ffffff',
+            position: 'absolute',
+            bottom: 0,
+            left: 0,
+            right: 0,
+            height: `${executionHistoryHeight}px`, // Dynamic height
+            backgroundColor: isDarkMode ? 'rgba(26, 26, 26, 0.95)' : 'rgba(255, 255, 255, 0.95)', // Semi-transparent background
+            backdropFilter: 'blur(8px)', // Glass effect
             display: 'flex',
             flexDirection: 'column',
             borderTop: 1,
-            borderColor: 'divider'
+            borderColor: 'divider',
+            zIndex: 8, // Above canvas but below chat panel
+            // Don't extend under chat panel - let chat panel overlap
           }}>
-            <JobsPanel />
+            {/* Resize Handle */}
+            <Box
+              onMouseDown={handleHistoryResizeStart}
+              sx={{
+                position: 'absolute',
+                top: 0,
+                left: 0,
+                right: 0,
+                height: 4,
+                backgroundColor: 'divider',
+                cursor: 'ns-resize',
+                '&:hover': {
+                  backgroundColor: 'primary.main',
+                },
+                transition: 'background-color 0.2s ease',
+                zIndex: 7,
+              }}
+            />
+            
+            {/* Jobs Panel Content */}
+            <Box sx={{ 
+              flex: 1, 
+              paddingTop: '4px', // Space for resize handle
+              overflow: 'hidden',
+              display: 'flex',
+              flexDirection: 'column'
+            }}>
+              <JobsPanel 
+                executionHistoryHeight={executionHistoryHeight} 
+                onExecutionCountChange={setExecutionCount}
+              />
+            </Box>
           </Box>
         )}
 
@@ -733,14 +892,16 @@ const WorkflowDesigner: React.FC<WorkflowDesignerProps> = (): JSX.Element => {
           setIsTaskDialogOpen={setIsTaskDialogOpen}
           setIsFlowDialogOpen={dialogManager.setIsFlowDialogOpen}
           setIsCrewDialogOpen={openCrewOrFlowDialog}
-          handleExecuteCrew={() => executeCrew(nodes, edges)}
-          handleExecuteFlow={() => executeFlow(nodes, edges)}
-          isExecuting={isExecuting}
           onSaveCrewClick={() => {
             const event = new CustomEvent('openSaveCrewDialog');
             window.dispatchEvent(event);
           }}
           showRunHistory={showRunHistory}
+          executionHistoryHeight={executionHistoryHeight}
+          onOpenSchedulesDialog={() => {
+            // Open schedule dialog
+            dialogManager.setScheduleDialogOpen(true);
+          }}
         />
 
         {/* Left Sidebar */}
@@ -924,6 +1085,7 @@ const WorkflowDesigner: React.FC<WorkflowDesignerProps> = (): JSX.Element => {
           setIsConfigurationDialogOpen={dialogManager.setIsConfigurationDialogOpen}
           onOpenLogsDialog={() => dialogManager.setIsLogsDialogOpen(true)}
           showRunHistory={showRunHistory}
+          executionHistoryHeight={executionHistoryHeight}
         />
       </Box>
     </div>
