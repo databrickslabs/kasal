@@ -50,7 +50,6 @@ class LLMUsageBilling(Base):
     
     # Multi-group fields for billing isolation
     group_id = Column(String(100), index=True, nullable=True)  # Group isolation
-    tenant_id = Column(String(100), index=True, nullable=True)  # Legacy compatibility
     user_email = Column(String(255), index=True, nullable=True)  # User who triggered the execution
     
     # Timestamps
@@ -84,9 +83,8 @@ class BillingPeriod(Base):
     period_end = Column(DateTime, nullable=False, index=True)
     period_type = Column(String, nullable=False, default="monthly")  # 'daily', 'weekly', 'monthly', 'custom'
     
-    # Group/tenant isolation
+    # Group isolation
     group_id = Column(String(100), index=True, nullable=True)
-    tenant_id = Column(String(100), index=True, nullable=True)  # Legacy compatibility
     
     # Aggregated metrics
     total_cost_usd = Column(Numeric(precision=10, scale=2), default=0.00)
@@ -130,7 +128,6 @@ class BillingAlert(Base):
     
     # Target (group/user/global)
     group_id = Column(String(100), index=True, nullable=True)
-    tenant_id = Column(String(100), index=True, nullable=True)  # Legacy compatibility
     user_email = Column(String(255), nullable=True)  # Specific user alert
     
     # Alert state

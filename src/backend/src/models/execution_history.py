@@ -38,9 +38,7 @@ class ExecutionHistory(Base):
     
     # Multi-group fields
     group_id = Column(String(100), index=True, nullable=True)  # Group isolation
-    tenant_id = Column(String(100), index=True, nullable=True)  # Legacy compatibility (will be removed)
     group_email = Column(String(255), index=True, nullable=True)  # User email for audit
-    tenant_email = Column(String(255), index=True, nullable=True)  # Legacy compatibility (will be removed)
     
     # Relationships
     task_statuses = relationship("TaskStatus", back_populates="execution_history", 

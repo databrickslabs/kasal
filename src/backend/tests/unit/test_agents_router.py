@@ -32,9 +32,7 @@ def mock_agent_service():
     
     # Setup service method returns
     service.create_with_group.return_value = mock_agent
-    service.create_with_tenant.return_value = mock_agent
     service.find_by_group.return_value = [mock_agent]
-    service.find_by_tenant.return_value = [mock_agent]
     service.get.return_value = mock_agent
     service.update_with_partial_data.return_value = mock_agent
     service.update_limited_fields.return_value = mock_agent
@@ -53,13 +51,6 @@ def mock_group_context():
     return context
 
 
-@pytest.fixture
-def mock_tenant_context():
-    """Create a mock tenant context."""
-    context = MagicMock()
-    context.is_valid.return_value = True
-    context.tenant_id = str(uuid.uuid4())
-    return context
 
 
 @pytest.fixture
@@ -103,7 +94,7 @@ class TestAgentsRouter:
     """Test cases for AgentsRouter."""
     
     @pytest.mark.asyncio
-    async def test_create_agent_with_group_context(self, mock_agent_service, mock_group_context, mock_tenant_context, agent_create_data):
+    async def test_create_agent_with_group_context(self, mock_agent_service, mock_group_context, agent_create_data):
         """Test successful agent creation with group context."""
         with patch("src.api.agents_router.get_agent_service", return_value=mock_agent_service):
             from src.api.agents_router import create_agent
@@ -111,40 +102,19 @@ class TestAgentsRouter:
             result = await create_agent(
                 agent_create_data,
                 service=mock_agent_service,
-                group_context=mock_group_context,
-                tenant_context=mock_tenant_context
+                group_context=mock_group_context
             )
             
             assert result is not None
             assert result.name == "Test Agent"
             mock_agent_service.create_with_group.assert_called_once_with(agent_create_data, mock_group_context)
     
-    @pytest.mark.asyncio
-    async def test_create_agent_with_tenant_context(self, mock_agent_service, mock_tenant_context, agent_create_data):
-        """Test agent creation falling back to tenant context."""
-        invalid_group_context = MagicMock()
-        invalid_group_context.is_valid.return_value = False
-        
-        with patch("src.api.agents_router.get_agent_service", return_value=mock_agent_service):
-            from src.api.agents_router import create_agent
-            
-            result = await create_agent(
-                agent_create_data,
-                service=mock_agent_service,
-                group_context=invalid_group_context,
-                tenant_context=mock_tenant_context
-            )
-            
-            assert result is not None
-            mock_agent_service.create_with_tenant.assert_called_once_with(agent_create_data, mock_tenant_context)
     
     @pytest.mark.asyncio
     async def test_create_agent_no_valid_context(self, mock_agent_service, agent_create_data):
         """Test agent creation with no valid context."""
         invalid_group_context = MagicMock()
         invalid_group_context.is_valid.return_value = False
-        invalid_tenant_context = MagicMock()
-        invalid_tenant_context.is_valid.return_value = False
         
         with patch("src.api.agents_router.get_agent_service", return_value=mock_agent_service):
             from src.api.agents_router import create_agent
@@ -153,62 +123,40 @@ class TestAgentsRouter:
                 await create_agent(
                     agent_create_data,
                     service=mock_agent_service,
-                    group_context=invalid_group_context,
-                    tenant_context=invalid_tenant_context
+                    group_context=invalid_group_context
                 )
             
             assert exc_info.value.status_code == 400
-            assert "No valid group or tenant context provided" in str(exc_info.value.detail)
+            assert "No valid group context provided" in str(exc_info.value.detail)
     
     @pytest.mark.asyncio
-    async def test_list_agents_with_group_context(self, mock_agent_service, mock_group_context, mock_tenant_context):
+    async def test_list_agents_with_group_context(self, mock_agent_service, mock_group_context):
         """Test successful agent listing with group context."""
         with patch("src.api.agents_router.get_agent_service", return_value=mock_agent_service):
             from src.api.agents_router import list_agents
             
             result = await list_agents(
                 service=mock_agent_service,
-                group_context=mock_group_context,
-                tenant_context=mock_tenant_context
+                group_context=mock_group_context
             )
             
             assert len(result) == 1
             assert result[0].name == "Test Agent"
             mock_agent_service.find_by_group.assert_called_once_with(mock_group_context)
     
-    @pytest.mark.asyncio
-    async def test_list_agents_with_tenant_context(self, mock_agent_service, mock_tenant_context):
-        """Test agent listing falling back to tenant context."""
-        invalid_group_context = MagicMock()
-        invalid_group_context.is_valid.return_value = False
-        
-        with patch("src.api.agents_router.get_agent_service", return_value=mock_agent_service):
-            from src.api.agents_router import list_agents
-            
-            result = await list_agents(
-                service=mock_agent_service,
-                group_context=invalid_group_context,
-                tenant_context=mock_tenant_context
-            )
-            
-            assert len(result) == 1
-            mock_agent_service.find_by_tenant.assert_called_once_with(mock_tenant_context)
     
     @pytest.mark.asyncio
     async def test_list_agents_no_valid_context(self, mock_agent_service):
         """Test agent listing with no valid context returns empty list."""
         invalid_group_context = MagicMock()
         invalid_group_context.is_valid.return_value = False
-        invalid_tenant_context = MagicMock()
-        invalid_tenant_context.is_valid.return_value = False
         
         with patch("src.api.agents_router.get_agent_service", return_value=mock_agent_service):
             from src.api.agents_router import list_agents
             
             result = await list_agents(
                 service=mock_agent_service,
-                group_context=invalid_group_context,
-                tenant_context=invalid_tenant_context
+                group_context=invalid_group_context
             )
             
             assert result == []
@@ -363,7 +311,7 @@ class TestAgentsRouter:
             assert "Cannot delete agents because some are still referenced by tasks" in str(exc_info.value.detail)
     
     @pytest.mark.asyncio
-    async def test_create_agent_generic_error(self, mock_agent_service, mock_group_context, mock_tenant_context, agent_create_data):
+    async def test_create_agent_generic_error(self, mock_agent_service, mock_group_context, agent_create_data):
         """Test agent creation with generic error."""
         mock_agent_service.create_with_group.side_effect = Exception("Database error")
         
@@ -374,14 +322,13 @@ class TestAgentsRouter:
                 await create_agent(
                     agent_create_data,
                     service=mock_agent_service,
-                    group_context=mock_group_context,
-                    tenant_context=mock_tenant_context
+                    group_context=mock_group_context
                 )
             
             assert exc_info.value.status_code == 500
     
     @pytest.mark.asyncio
-    async def test_list_agents_generic_error(self, mock_agent_service, mock_group_context, mock_tenant_context):
+    async def test_list_agents_generic_error(self, mock_agent_service, mock_group_context):
         """Test agent listing with generic error."""
         mock_agent_service.find_by_group.side_effect = Exception("Database error")
         
@@ -391,8 +338,7 @@ class TestAgentsRouter:
             with pytest.raises(HTTPException) as exc_info:
                 await list_agents(
                     service=mock_agent_service,
-                    group_context=mock_group_context,
-                    tenant_context=mock_tenant_context
+                    group_context=mock_group_context
                 )
             
             assert exc_info.value.status_code == 500

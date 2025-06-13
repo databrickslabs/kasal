@@ -29,9 +29,7 @@ class ChatHistory(Base):
     
     # Multi-group fields (REQUIRED for all models)
     group_id = Column(String(100), index=True, nullable=True)  # Group isolation
-    tenant_id = Column(String(100), index=True, nullable=True)  # Legacy compatibility
     group_email = Column(String(255), nullable=True)           # Creator email for audit
-    tenant_email = Column(String(255), nullable=True)          # Legacy compatibility
     
     # Database indexes for performance
     __table_args__ = (

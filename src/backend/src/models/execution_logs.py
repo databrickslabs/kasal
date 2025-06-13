@@ -28,16 +28,11 @@ class ExecutionLog(Base):
     
     # Multi-group fields
     group_id = Column(String(100), index=True, nullable=True)  # Group isolation
-    tenant_id = Column(String(100), index=True, nullable=True)  # Legacy compatibility (will be removed)
     group_email = Column(String(255), index=True, nullable=True)  # User email for audit
-    tenant_email = Column(String(255), index=True, nullable=True)  # Legacy compatibility (will be removed)
     
-    # Create indexes for faster queries including group/tenant filtering
+    # Create indexes for faster queries including group filtering
     __table_args__ = (
         Index('idx_execution_logs_exec_id_timestamp', 'execution_id', 'timestamp'),
         Index('idx_execution_logs_group_timestamp', 'group_id', 'timestamp'),
         Index('idx_execution_logs_group_exec_id', 'group_id', 'execution_id'),
-        # Legacy tenant indexes (will be removed)
-        Index('idx_execution_logs_tenant_timestamp', 'tenant_id', 'timestamp'),
-        Index('idx_execution_logs_tenant_exec_id', 'tenant_id', 'execution_id'),
     ) 

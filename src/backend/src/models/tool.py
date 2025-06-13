@@ -21,7 +21,6 @@ class Tool(Base):
     
     # Multi-group fields
     group_id = Column(String(100), index=True, nullable=True)  # Group isolation
-    tenant_id = Column(String(100), index=True, nullable=True)  # Legacy compatibility (will be removed)
     created_by_email = Column(String(255), nullable=True)  # Creator email for audit
     
     # Metadata

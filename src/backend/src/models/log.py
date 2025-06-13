@@ -24,6 +24,4 @@ class LLMLog(Base):
     
     # Multi-group fields
     group_id = Column(String(100), index=True, nullable=True)  # Group isolation
-    tenant_id = Column(String(100), index=True, nullable=True)  # Legacy compatibility (will be removed)
-    group_email = Column(String(255), nullable=True)  # Creator email for audit
-    tenant_email = Column(String(255), nullable=True)  # Legacy compatibility (will be removed) 
+    group_email = Column(String(255), nullable=True)  # Creator email for audit 
