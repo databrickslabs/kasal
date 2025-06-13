@@ -41,6 +41,13 @@ export const useFlowInstanceHandlers = () => {
 
   const handleCrewFlowInit = useCallback((instance: ReactFlowInstance) => {
     crewFlowInstanceRef.current = instance;
+    
+    // Dispatch event to notify that ReactFlow is initialized
+    setTimeout(() => {
+      window.dispatchEvent(new CustomEvent('crewFlowInitialized', { 
+        detail: { instance } 
+      }));
+    }, 100);
   }, []);
 
   const handleFlowFlowInit = useCallback((instance: ReactFlowInstance) => {

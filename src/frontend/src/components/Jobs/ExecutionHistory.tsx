@@ -297,6 +297,9 @@ const RunHistory = forwardRef<RunHistoryRef, RunHistoryProps>(({ executionHistor
 
   const handleShowLogs = async (jobId: string) => {
     try {
+      // Dispatch event to track this job as viewed
+      window.dispatchEvent(new CustomEvent('jobViewed', { detail: { jobId } }));
+      
       setIsConnecting(true);
       setConnectionError(null);
       setSelectedJobId(jobId);

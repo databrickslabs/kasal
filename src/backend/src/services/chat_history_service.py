@@ -90,10 +90,7 @@ class ChatHistoryService(BaseService[ChatHistory, ChatHistoryCreate]):
         if group_context:
             message_data.update({
                 'group_id': group_context.primary_group_id,
-                'group_email': group_context.group_email,
-                # Legacy fields for compatibility
-                'tenant_id': group_context.primary_group_id,
-                'tenant_email': group_context.group_email
+                'group_email': group_context.group_email
             })
 
         return await self.repository.create(message_data)

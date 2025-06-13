@@ -16,7 +16,8 @@ import {
   Typography,
   Chip,
   ListItemIcon,
-  ListItemText
+  ListItemText,
+  Divider
 } from '@mui/material';
 import {
   Add as AddIcon,
@@ -28,7 +29,8 @@ import {
   Warning as WarningIcon,
   NoteAdd as NewCanvasIcon,
   FolderOpen as LoadCrewIcon,
-  ArrowDropDown as ArrowDropDownIcon
+  ArrowDropDown as ArrowDropDownIcon,
+  Clear as ClearAllIcon
 } from '@mui/icons-material';
 import { useTabManagerStore } from '../../store/tabManager';
 import { useThemeManager } from '../../hooks/workflow/useThemeManager';
@@ -56,7 +58,9 @@ const TabBar: React.FC<TabBarProps> = ({
     closeTab,
     setActiveTab,
     updateTabName,
-    duplicateTab
+    duplicateTab,
+    clearAllTabs,
+    clearTabExecutionStatus
   } = useTabManagerStore();
 
   const [contextMenu, setContextMenu] = useState<{
@@ -90,6 +94,8 @@ const TabBar: React.FC<TabBarProps> = ({
     tabId: '',
     tabName: ''
   });
+
+  const [closeAllConfirmDialog, setCloseAllConfirmDialog] = useState(false);
 
   const handleTabChange = (_event: React.SyntheticEvent, newValue: string) => {
     if (disabled) {
@@ -299,6 +305,32 @@ const TabBar: React.FC<TabBarProps> = ({
     }
   }, [tabs.length, createTab]);
 
+  // Auto-clear execution status after 5 minutes
+  React.useEffect(() => {
+    const timers: NodeJS.Timeout[] = [];
+    
+    tabs.forEach(tab => {
+      if (tab.executionStatus && tab.executionStatus !== 'running' && tab.lastExecutionTime) {
+        const timeSinceExecution = Date.now() - new Date(tab.lastExecutionTime).getTime();
+        const timeRemaining = 5 * 60 * 1000 - timeSinceExecution; // 5 minutes
+        
+        if (timeRemaining > 0) {
+          const timer = setTimeout(() => {
+            clearTabExecutionStatus(tab.id);
+          }, timeRemaining);
+          timers.push(timer);
+        } else {
+          // Clear immediately if more than 5 minutes have passed
+          clearTabExecutionStatus(tab.id);
+        }
+      }
+    });
+    
+    return () => {
+      timers.forEach(timer => clearTimeout(timer));
+    };
+  }, [tabs, clearTabExecutionStatus]);
+
   return (
     <>
       <Box
@@ -388,7 +420,7 @@ const TabBar: React.FC<TabBarProps> = ({
                         </Tooltip>
                       )}
                       
-                      {runningTabId === tab.id && isRunning && (
+                      {(runningTabId === tab.id && isRunning) || tab.executionStatus === 'running' ? (
                         <Chip
                           size="small"
                           label="Running"
@@ -399,6 +431,38 @@ const TabBar: React.FC<TabBarProps> = ({
                             '& .MuiChip-label': { px: 0.5 }
                           }}
                         />
+                      ) : null}
+                      
+                      {tab.executionStatus === 'completed' && (
+                        <Tooltip title={tab.lastExecutionTime ? `Completed at ${new Date(tab.lastExecutionTime).toLocaleTimeString()}` : 'Completed'}>
+                          <Chip
+                            size="small"
+                            label="Completed"
+                            color="success"
+                            variant="outlined"
+                            sx={{ 
+                              height: 16, 
+                              fontSize: '0.6rem',
+                              '& .MuiChip-label': { px: 0.5 }
+                            }}
+                          />
+                        </Tooltip>
+                      )}
+                      
+                      {tab.executionStatus === 'failed' && (
+                        <Tooltip title={tab.lastExecutionTime ? `Failed at ${new Date(tab.lastExecutionTime).toLocaleTimeString()}` : 'Failed'}>
+                          <Chip
+                            size="small"
+                            label="Failed"
+                            color="error"
+                            variant="outlined"
+                            sx={{ 
+                              height: 16, 
+                              fontSize: '0.6rem',
+                              '& .MuiChip-label': { px: 0.5 }
+                            }}
+                          />
+                        </Tooltip>
                       )}
                       
                       {tabs.length > 1 && (
@@ -515,6 +579,18 @@ const TabBar: React.FC<TabBarProps> = ({
           <RunIcon sx={{ mr: 1, fontSize: 18 }} />
           Run This Tab
         </MenuItem>
+        {(() => {
+          const tab = tabs.find(t => t.id === contextMenu?.tabId);
+          return tab?.executionStatus && tab.executionStatus !== 'running' ? (
+            <MenuItem onClick={() => {
+              clearTabExecutionStatus(contextMenu?.tabId || '');
+              handleContextMenuClose();
+            }}>
+              <CloseIcon sx={{ mr: 1, fontSize: 18 }} />
+              Clear Execution Status
+            </MenuItem>
+          ) : null;
+        })()}
         {tabs.length > 1 && (
           <MenuItem onClick={() => {
             const tab = tabs.find(t => t.id === contextMenu?.tabId);
@@ -532,6 +608,26 @@ const TabBar: React.FC<TabBarProps> = ({
             <CloseIcon sx={{ mr: 1, fontSize: 18 }} />
             Close Tab
           </MenuItem>
+        )}
+        {tabs.length > 0 && (
+          <>
+            <Divider />
+            <MenuItem onClick={() => {
+              // Check if any tabs have unsaved changes
+              const hasUnsavedChanges = tabs.some(tab => tab.isDirty);
+              if (hasUnsavedChanges) {
+                setCloseAllConfirmDialog(true);
+              } else {
+                clearAllTabs();
+                // Create a new empty tab after clearing all
+                createTab();
+              }
+              handleContextMenuClose();
+            }}>
+              <ClearAllIcon sx={{ mr: 1, fontSize: 18 }} />
+              Close All Tabs
+            </MenuItem>
+          </>
         )}
       </Menu>
 
@@ -595,6 +691,69 @@ const TabBar: React.FC<TabBarProps> = ({
           </Button>
           <Button onClick={() => handleConfirmClose('save')} variant="contained" color="primary">
             Save & Close
+          </Button>
+        </DialogActions>
+      </Dialog>
+
+      {/* Close All Confirmation Dialog */}
+      <Dialog
+        open={closeAllConfirmDialog}
+        onClose={() => setCloseAllConfirmDialog(false)}
+        maxWidth="sm"
+        fullWidth
+      >
+        <DialogTitle>
+          <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+            <WarningIcon color="warning" />
+            Close All Tabs
+          </Box>
+        </DialogTitle>
+        <DialogContent>
+          <Typography>
+            Some tabs have unsaved changes. Do you want to save all changes before closing?
+          </Typography>
+          {tabs.filter(tab => tab.isDirty).length > 0 && (
+            <Box sx={{ mt: 2 }}>
+              <Typography variant="body2" color="text.secondary">
+                Tabs with unsaved changes:
+              </Typography>
+              <Box sx={{ mt: 1 }}>
+                {tabs.filter(tab => tab.isDirty).map(tab => (
+                  <Chip 
+                    key={tab.id}
+                    label={tab.name}
+                    size="small"
+                    sx={{ mr: 1, mb: 1 }}
+                  />
+                ))}
+              </Box>
+            </Box>
+          )}
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={() => setCloseAllConfirmDialog(false)} color="inherit">
+            Cancel
+          </Button>
+          <Button 
+            onClick={() => {
+              clearAllTabs();
+              createTab(); // Create a new empty tab
+              setCloseAllConfirmDialog(false);
+            }} 
+            color="error"
+          >
+            Discard All Changes
+          </Button>
+          <Button 
+            onClick={() => {
+              // For now, just close without saving
+              // In future, could implement a save all functionality
+              setCloseAllConfirmDialog(false);
+            }} 
+            variant="contained" 
+            color="primary"
+          >
+            Save All & Close
           </Button>
         </DialogActions>
       </Dialog>

@@ -242,23 +242,15 @@ export const useCrewExecutionStore = create<CrewExecutionState>((set, get) => ({
         showError: true 
       });
       
-      // Show toast notification immediately
-      import('react-hot-toast').then(({ toast }) => {
-        console.log('[CrewExecution] Showing error toast:', errorMessage);
-        toast.error(errorMessage, {
-          duration: 6000,
-          position: 'top-center',
-          style: {
-            maxWidth: '500px',
-            fontSize: '14px',
-            padding: '12px',
-          },
-        });
-      }).catch((error) => {
-        console.error('[CrewExecution] Failed to load toast:', error);
-        // Fallback: show alert if toast fails to load
-        alert(`Execution Error: ${errorMessage}`);
+      // Dispatch error event for chat panel to handle
+      const errorEvent = new CustomEvent('executionError', {
+        detail: {
+          message: errorMessage,
+          type: 'crew'
+        }
       });
+      console.log('[CrewExecution] Dispatching executionError event:', errorEvent.detail);
+      window.dispatchEvent(errorEvent);
       
       return null;
     } finally {

@@ -560,17 +560,8 @@ const CrewCanvas: React.FC<CrewCanvasProps> = ({
 
   useEffect(() => {
     const fitViewToNodes = () => {
-      if (reactFlowInstanceRef.current) {
-        try {
-          reactFlowInstanceRef.current.fitView({
-            padding: 0.2,
-            includeHiddenNodes: false,
-            duration: 800
-          });
-        } catch (error) {
-          console.warn('Error fitting view in CrewCanvas:', error);
-        }
-      }
+      // Dispatch the internal event that triggers UI-aware fit view
+      window.dispatchEvent(new Event('fitViewToNodesInternal'));
     };
     
     const openAgentGenerationDialog = () => {

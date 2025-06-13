@@ -75,7 +75,7 @@ const WorkflowPanels: React.FC<WorkflowPanelsProps> = ({
   if (areFlowsVisible && crewAIFlowEnabled) {
       return (
     <Box sx={{ 
-      height: showRunHistory ? 'calc(100vh - 64px - 160px)' : 'calc(100vh - 64px - 40px)', 
+      height: '100%', // Take full height of parent
       position: 'relative', 
       mt: 0, // No margin top since TabBar is above
       mb: 0, // Remove bottom margin
@@ -189,7 +189,7 @@ const WorkflowPanels: React.FC<WorkflowPanelsProps> = ({
   // Single column layout when flows are hidden
   return (
     <Box sx={{ 
-      height: showRunHistory ? 'calc(100vh - 64px - 160px)' : 'calc(100vh - 64px - 40px)', 
+      height: '100%', // Take full height of parent
       position: 'relative', 
       mt: 0, // No margin top since TabBar is above
       mb: 0, // Remove bottom margin

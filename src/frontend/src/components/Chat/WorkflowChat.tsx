@@ -27,14 +27,14 @@ import GroupIcon from '@mui/icons-material/Group';
 import AssignmentIcon from '@mui/icons-material/Assignment';
 import AccountTreeIcon from '@mui/icons-material/AccountTree';
 import SettingsIcon from '@mui/icons-material/Settings';
-import HistoryIcon from '@mui/icons-material/History';
+import ChatIcon from '@mui/icons-material/Chat';
 import AddIcon from '@mui/icons-material/Add';
 import DeleteIcon from '@mui/icons-material/Delete';
 import RefreshIcon from '@mui/icons-material/Refresh';
 import CloseIcon from '@mui/icons-material/Close';
 import KeyboardArrowDownIcon from '@mui/icons-material/KeyboardArrowDown';
 import ChevronLeftIcon from '@mui/icons-material/ChevronLeft';
-import { toast } from 'react-hot-toast';
+import TerminalIcon from '@mui/icons-material/Terminal';
 import DispatcherService, { DispatchResult, ConfigureCrewResult } from '../../api/DispatcherService';
 import { useWorkflowStore } from '../../store/workflow';
 import { Node, Edge } from 'reactflow';
@@ -46,6 +46,8 @@ import { ChatHistoryService, SaveMessageRequest, ChatSession, ChatMessage as Bac
 import { v4 as uuidv4 } from 'uuid';
 import { ModelService } from '../../api/ModelService';
 import TraceService from '../../api/TraceService';
+import { CanvasLayoutManager } from '../../utils/CanvasLayoutManager';
+import { useUILayoutState } from '../../store/uiLayout';
 
 interface GeneratedAgent {
   name: string;
@@ -110,6 +112,8 @@ interface WorkflowChatProps {
   edges?: Edge[];
   onExecuteCrew?: () => void;
   onToggleCollapse?: () => void;
+  chatSessionId?: string;
+  onOpenLogs?: (jobId: string) => void;
 }
 
 const WorkflowChat: React.FC<WorkflowChatProps> = ({
@@ -123,11 +127,13 @@ const WorkflowChat: React.FC<WorkflowChatProps> = ({
   edges = [],
   onExecuteCrew,
   onToggleCollapse,
+  chatSessionId: providedChatSessionId,
+  onOpenLogs,
 }) => {
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [inputValue, setInputValue] = useState('');
   const [isLoading, setIsLoading] = useState(false);
-  const [sessionId, setSessionId] = useState<string>(uuidv4());
+  const [sessionId, setSessionId] = useState<string>(providedChatSessionId || uuidv4());
   const [chatSessions, setChatSessions] = useState<ChatSession[]>([]);
   const [showSessionList, setShowSessionList] = useState(false);
   const [isLoadingSessions, setIsLoadingSessions] = useState(false);
@@ -139,38 +145,152 @@ const WorkflowChat: React.FC<WorkflowChatProps> = ({
   const [lastExecutionJobId, setLastExecutionJobId] = useState<string | null>(null);
   const [processedTraceIds, setProcessedTraceIds] = useState<Set<string>>(new Set());
   const [executionStartTime, setExecutionStartTime] = useState<Date | null>(null);
+  const [chatHistoryDisabled, setChatHistoryDisabled] = useState(false);
+  
+  // Debug logging
+  useEffect(() => {
+    console.log('WorkflowChat - executingJobId:', executingJobId, 'lastExecutionJobId:', lastExecutionJobId, 'isLoading:', isLoading);
+  }, [executingJobId, lastExecutionJobId, isLoading]);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
   const { setNodes, setEdges } = useWorkflowStore();
+  const uiLayoutState = useUILayoutState();
+  
+  // Create enhanced layout manager instance
+  const layoutManagerRef = useRef<CanvasLayoutManager>(
+    new CanvasLayoutManager({
+      margin: 20,
+      minNodeSpacing: 50,
+      defaultUIState: {
+        chatPanelVisible: isVisible,
+        chatPanelCollapsed: false,
+        chatPanelWidth: 450,
+      }
+    })
+  );
   
   const scrollToBottom = () => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   };
 
+  // Update layout manager when UI state changes
+  React.useEffect(() => {
+    // Update UI state in layout manager
+    layoutManagerRef.current.updateUIState({
+      ...uiLayoutState,
+      chatPanelVisible: isVisible,
+    });
+    
+    // Only trigger layout recalculation when certain UI properties change
+    // Don't trigger on every state change to prevent infinite loops
+  }, [isVisible, uiLayoutState]);
+
+  // Update screen dimensions on window resize
+  React.useEffect(() => {
+    const handleResize = () => {
+      if (typeof window !== 'undefined') {
+        layoutManagerRef.current.updateScreenDimensions(window.innerWidth, window.innerHeight);
+      }
+    };
+
+    if (typeof window !== 'undefined') {
+      window.addEventListener('resize', handleResize);
+      
+      // Add debug function to window for troubleshooting
+      (window as unknown as Record<string, unknown>).debugCanvasLayout = () => {
+        const debug = layoutManagerRef.current.getLayoutDebugInfo();
+        console.log('🎯 Canvas Layout Debug Info:', debug);
+        return debug;
+      };
+      
+      return () => {
+        window.removeEventListener('resize', handleResize);
+        delete (window as unknown as Record<string, unknown>).debugCanvasLayout;
+      };
+    }
+  }, []);
+
   useEffect(() => {
     scrollToBottom();
   }, [messages]);
 
-  // Initialize session on component mount
+  // Initialize session on component mount or when providedChatSessionId changes
   useEffect(() => {
     const initializeSession = () => {
-      // Generate a new session ID for this chat instance
-      const newSessionId = ChatHistoryService.generateSessionId();
-      setSessionId(newSessionId);
+      if (providedChatSessionId) {
+        // Use the provided session ID from the tab
+        console.log(`[WorkflowChat] Using provided chat session ID: ${providedChatSessionId}`);
+        setSessionId(providedChatSessionId);
+      } else {
+        // Generate a new session ID for this chat instance
+        const newSessionId = ChatHistoryService.generateSessionId();
+        console.log(`[WorkflowChat] Generated new chat session ID: ${newSessionId}`);
+        setSessionId(newSessionId);
+      }
     };
     
     initializeSession();
-  }, []);
+  }, [providedChatSessionId]);
 
-  // Load chat history when session is set
+  // Load chat history when session is set or changes
   useEffect(() => {
     const loadChatHistory = async () => {
       if (!sessionId) return;
       
       try {
-        // For now, we'll start with a fresh session each time
-        // In the future, we could implement session persistence or loading previous sessions
-        console.log(`Initialized new chat session: ${sessionId}`);
+        // Clear current messages when switching to a new session
+        console.log(`[WorkflowChat] Loading chat history for session: ${sessionId}`);
+        setMessages([]);
+        
+        // Try to load existing messages for this session
+        try {
+          const response = await ChatHistoryService.getSessionMessages(sessionId);
+          if (response.messages && response.messages.length > 0) {
+            // Convert backend messages to frontend format
+            const loadedMessages: ChatMessage[] = response.messages.map((msg: BackendChatMessage) => {
+              const baseMessage: ChatMessage = {
+                id: msg.id,
+                type: msg.message_type as 'user' | 'assistant' | 'execution' | 'trace',
+                content: msg.content,
+                timestamp: new Date(msg.timestamp),
+                intent: msg.intent,
+                confidence: msg.confidence ? parseFloat(msg.confidence) : undefined,
+                result: msg.generation_result,
+              };
+
+              // For execution and trace messages, restore additional fields from generation_result
+              if ((msg.message_type === 'execution' || msg.message_type === 'trace') && msg.generation_result) {
+                const genResult = msg.generation_result as Record<string, unknown> & {
+            jobId?: string;
+            agentName?: string;
+            taskName?: string;
+            isIntermediate?: boolean;
+          };
+                baseMessage.jobId = genResult.jobId;
+                baseMessage.agentName = genResult.agentName;
+                baseMessage.taskName = genResult.taskName;
+                baseMessage.isIntermediate = genResult.isIntermediate;
+                
+                // Remove the additional fields from result to clean it up
+                if (genResult.jobId !== undefined || genResult.agentName !== undefined || 
+                    genResult.taskName !== undefined || genResult.isIntermediate !== undefined) {
+                  const { jobId, agentName, taskName, isIntermediate, ...cleanResult } = genResult;
+                  baseMessage.result = Object.keys(cleanResult).length > 0 ? cleanResult : undefined;
+                }
+              }
+
+              return baseMessage;
+            });
+            
+            setMessages(loadedMessages);
+            console.log(`[WorkflowChat] Loaded ${loadedMessages.length} messages for session: ${sessionId}`);
+          } else {
+            console.log(`[WorkflowChat] Initialized new/empty chat session: ${sessionId}`);
+          }
+        } catch (sessionError) {
+          // If loading session fails, just start with empty chat
+          console.log(`[WorkflowChat] Starting new chat session: ${sessionId}`);
+        }
       } catch (error) {
         console.error('Error loading chat history:', error);
         // Don't show error to user, just continue with empty chat
@@ -188,7 +308,14 @@ const WorkflowChat: React.FC<WorkflowChatProps> = ({
       setChatSessions(response.sessions || []);
     } catch (error) {
       console.error('Error loading chat sessions:', error);
-      toast.error('Failed to load chat history');
+      // Show error in chat instead of toast
+      const errorMessage: ChatMessage = {
+        id: `error-${Date.now()}`,
+        type: 'assistant',
+        content: '❌ Failed to load chat history. Please try again.',
+        timestamp: new Date(),
+      };
+      setMessages(prev => [...prev, errorMessage]);
     } finally {
       setIsLoadingSessions(false);
     }
@@ -200,16 +327,50 @@ const WorkflowChat: React.FC<WorkflowChatProps> = ({
     try {
       const response = await ChatHistoryService.getSessionMessages(selectedSessionId);
       
+      // Load the stored job name for this session
+      const sessionJobNames = JSON.parse(localStorage.getItem('chatSessionJobNames') || '{}');
+      const jobName = sessionJobNames[selectedSessionId];
+      if (jobName) {
+        setCurrentSessionName(jobName);
+      } else {
+        setCurrentSessionName('New Chat');
+      }
+      
       // Convert backend messages to frontend format
-      const loadedMessages: ChatMessage[] = response.messages.map((msg: BackendChatMessage) => ({
-        id: msg.id,
-        type: msg.message_type as 'user' | 'assistant',
-        content: msg.content,
-        timestamp: new Date(msg.timestamp),
-        intent: msg.intent,
-        confidence: msg.confidence ? parseFloat(msg.confidence) : undefined,
-        result: msg.generation_result,
-      }));
+      const loadedMessages: ChatMessage[] = response.messages.map((msg: BackendChatMessage) => {
+        const baseMessage: ChatMessage = {
+          id: msg.id,
+          type: msg.message_type as 'user' | 'assistant' | 'execution' | 'trace',
+          content: msg.content,
+          timestamp: new Date(msg.timestamp),
+          intent: msg.intent,
+          confidence: msg.confidence ? parseFloat(msg.confidence) : undefined,
+          result: msg.generation_result,
+        };
+
+        // For execution and trace messages, restore additional fields from generation_result
+        if ((msg.message_type === 'execution' || msg.message_type === 'trace') && msg.generation_result) {
+          const genResult = msg.generation_result as Record<string, unknown> & {
+            jobId?: string;
+            agentName?: string;
+            taskName?: string;
+            isIntermediate?: boolean;
+          };
+          baseMessage.jobId = genResult.jobId;
+          baseMessage.agentName = genResult.agentName;
+          baseMessage.taskName = genResult.taskName;
+          baseMessage.isIntermediate = genResult.isIntermediate;
+          
+          // Remove the additional fields from result to clean it up
+          if (genResult.jobId !== undefined || genResult.agentName !== undefined || 
+              genResult.taskName !== undefined || genResult.isIntermediate !== undefined) {
+            const { jobId, agentName, taskName, isIntermediate, ...cleanResult } = genResult;
+            baseMessage.result = Object.keys(cleanResult).length > 0 ? cleanResult : undefined;
+          }
+        }
+
+        return baseMessage;
+      });
       
       setMessages(loadedMessages);
       setSessionId(selectedSessionId);
@@ -220,7 +381,14 @@ const WorkflowChat: React.FC<WorkflowChatProps> = ({
       setTimeout(scrollToBottom, 100);
     } catch (error) {
       console.error('Error loading session messages:', error);
-      toast.error('Failed to load session messages');
+      // Show error in chat instead of toast
+      const errorMessage: ChatMessage = {
+        id: `error-${Date.now()}`,
+        type: 'assistant',
+        content: '❌ Failed to load session messages. Please try again.',
+        timestamp: new Date(),
+      };
+      setMessages(prev => [...prev, errorMessage]);
     } finally {
       setIsLoading(false);
     }
@@ -234,6 +402,59 @@ const WorkflowChat: React.FC<WorkflowChatProps> = ({
     setCurrentSessionName('New Chat');
     setShowSessionList(false);
   };
+
+  // Save message to backend (user, assistant, execution, and trace messages)
+  const saveMessageToBackend = React.useCallback(async (message: ChatMessage): Promise<void> => {
+    // Skip saving if chat history is disabled or no session ID
+    if (!sessionId || chatHistoryDisabled) return;
+    
+    try {
+      // For execution and trace messages, store additional fields in generation_result
+      let generationResult = message.result;
+      if (message.type === 'execution' || message.type === 'trace') {
+        generationResult = {
+          ...(message.result || {}),
+          jobId: message.jobId,
+          agentName: message.agentName,
+          taskName: message.taskName,
+          isIntermediate: message.isIntermediate
+        };
+      }
+
+      const saveRequest: SaveMessageRequest = {
+        session_id: sessionId,
+        message_type: message.type,
+        content: message.content,
+        intent: message.intent,
+        confidence: message.confidence,
+        generation_result: generationResult
+      };
+
+      await ChatHistoryService.saveMessage(saveRequest);
+      console.log(`Message saved successfully to session ${sessionId}`);
+    } catch (error) {
+      console.error('Error saving message to backend:', error);
+      // Disable chat history for this session to prevent further errors
+      setChatHistoryDisabled(true);
+      
+      // Show error message in chat instead of toast
+      const errorMessage: ChatMessage = {
+        id: `error-${Date.now()}`,
+        type: 'assistant',
+        content: '⚠️ Chat history is temporarily disabled due to service issues. Your messages will not be saved.',
+        timestamp: new Date(),
+      };
+      
+      // Only add the error message if it's not already shown
+      setMessages(prev => {
+        const hasErrorMessage = prev.some(msg => msg.content.includes('Chat history is temporarily disabled'));
+        if (!hasErrorMessage) {
+          return [...prev, errorMessage];
+        }
+        return prev;
+      });
+    }
+  }, [sessionId, chatHistoryDisabled]);
 
   // Notify parent of loading state changes
   useEffect(() => {
@@ -284,12 +505,40 @@ const WorkflowChat: React.FC<WorkflowChatProps> = ({
   useEffect(() => {
     const handleJobCreated = (event: CustomEvent) => {
       const { jobId, jobName } = event.detail;
+      console.log('[WorkflowChat] Received jobCreated event:', { jobId, jobName });
       setExecutingJobId(jobId);
       setLastExecutionJobId(jobId); // Track the last execution
       setProcessedTraceIds(new Set()); // Reset processed traces for new execution
       setExecutionStartTime(new Date()); // Track when execution started
       
-      // Add execution start message
+      // Store the job name associated with this session
+      const sessionJobNames = JSON.parse(localStorage.getItem('chatSessionJobNames') || '{}');
+      sessionJobNames[sessionId] = jobName;
+      localStorage.setItem('chatSessionJobNames', JSON.stringify(sessionJobNames));
+      
+      // Update current session name
+      setCurrentSessionName(jobName);
+      
+      // Replace any "Preparing" message with the actual execution start message
+      setMessages(prev => {
+        // Remove any recent "Preparing" messages
+        const filtered = prev.filter(msg => 
+          !(msg.type === 'execution' && msg.content.includes('⏳ Preparing to execute crew...'))
+        );
+        
+        // Add execution start message
+        const executionMessage: ChatMessage = {
+          id: `exec-start-${Date.now()}`,
+          type: 'execution',
+          content: `🚀 Started execution: ${jobName}`,
+          timestamp: new Date(),
+          jobId
+        };
+        
+        return [...filtered, executionMessage];
+      });
+      
+      // Save execution message to backend
       const executionMessage: ChatMessage = {
         id: `exec-start-${Date.now()}`,
         type: 'execution',
@@ -297,13 +546,15 @@ const WorkflowChat: React.FC<WorkflowChatProps> = ({
         timestamp: new Date(),
         jobId
       };
-      
-      setMessages(prev => [...prev, executionMessage]);
+      saveMessageToBackend(executionMessage);
     };
 
     const handleJobCompleted = (event: CustomEvent) => {
       const { jobId, result } = event.detail;
-      if (jobId === executingJobId) {
+      console.log('[WorkflowChat] Job completed event:', { jobId, executingJobId });
+      
+      // Always add completion message if we have an executing job
+      if (executingJobId || jobId === lastExecutionJobId) {
         // Add execution completion message
         const completionMessage: ChatMessage = {
           id: `exec-complete-${Date.now()}`,
@@ -316,18 +567,25 @@ const WorkflowChat: React.FC<WorkflowChatProps> = ({
         
         setMessages(prev => [...prev, completionMessage]);
         
-        // Delay clearing execution state to allow final traces to be captured
-        setTimeout(() => {
-          setExecutingJobId(null);
-          setExecutionStartTime(null);
-          setProcessedTraceIds(new Set());
-        }, 5000); // Wait 5 seconds before stopping polling
+        // Save execution completion message to backend
+        saveMessageToBackend(completionMessage);
+        
+        // Clear execution state immediately to unblock chat
+        setExecutingJobId(null);
+        setExecutionStartTime(null);
+        setProcessedTraceIds(new Set());
+        
+        // Dispatch event to clear any stuck tab states
+        window.dispatchEvent(new CustomEvent('forceClearExecution'));
       }
     };
 
     const handleJobFailed = (event: CustomEvent) => {
       const { jobId, error } = event.detail;
-      if (jobId === executingJobId) {
+      console.log('[WorkflowChat] Job failed event:', { jobId, executingJobId });
+      
+      // Always add failure message if we have an executing job
+      if (executingJobId || jobId === lastExecutionJobId) {
         // Add execution failure message
         const failureMessage: ChatMessage = {
           id: `exec-failed-${Date.now()}`,
@@ -339,12 +597,16 @@ const WorkflowChat: React.FC<WorkflowChatProps> = ({
         
         setMessages(prev => [...prev, failureMessage]);
         
-        // Delay clearing execution state to allow final traces to be captured
-        setTimeout(() => {
-          setExecutingJobId(null);
-          setExecutionStartTime(null);
-          setProcessedTraceIds(new Set());
-        }, 5000); // Wait 5 seconds before stopping polling
+        // Save execution failure message to backend
+        saveMessageToBackend(failureMessage);
+        
+        // Clear execution state immediately to unblock chat
+        setExecutingJobId(null);
+        setExecutionStartTime(null);
+        setProcessedTraceIds(new Set());
+        
+        // Dispatch event to clear any stuck tab states
+        window.dispatchEvent(new CustomEvent('forceClearExecution'));
       }
     };
 
@@ -365,22 +627,70 @@ const WorkflowChat: React.FC<WorkflowChatProps> = ({
         };
         
         setMessages(prev => [...prev, traceMessage]);
+        
+        // Save trace message to backend
+        saveMessageToBackend(traceMessage);
       }
     };
 
+    // Handle execution errors (like multiple jobs running)
+    const handleExecutionError = (event: CustomEvent) => {
+      const { message } = event.detail;
+      console.log('[WorkflowChat] Received executionError event:', message);
+      
+      // Clear any executing job state since execution failed
+      setExecutingJobId(null);
+      
+      // Remove any "Started execution" or "Preparing" messages that were just added
+      setMessages(prev => {
+        // Find and remove any recent execution start messages (within last 5 seconds)
+        const fiveSecondsAgo = Date.now() - 5000;
+        const filtered = prev.filter(msg => {
+          if (msg.type === 'execution' && 
+              (msg.content.includes('🚀 Started execution:') || 
+               msg.content.includes('⏳ Preparing to execute crew...'))) {
+            return msg.timestamp.getTime() < fiveSecondsAgo;
+          }
+          return true;
+        });
+        
+        // Add error message
+        const errorMessage: ChatMessage = {
+          id: `exec-error-${Date.now()}`,
+          type: 'execution',
+          content: `❌ ${message}`,
+          timestamp: new Date(),
+        };
+        
+        return [...filtered, errorMessage];
+      });
+    };
+
     // Add event listeners
+    // Handle force clear execution (for stuck states)
+    const handleForceClearExecution = () => {
+      console.log('[WorkflowChat] Force clearing execution state');
+      setExecutingJobId(null);
+      setExecutionStartTime(null);
+      setProcessedTraceIds(new Set());
+    };
+
     window.addEventListener('jobCreated', handleJobCreated as EventListener);
     window.addEventListener('jobCompleted', handleJobCompleted as EventListener);
     window.addEventListener('jobFailed', handleJobFailed as EventListener);
     window.addEventListener('traceUpdate', handleTraceUpdate as EventListener);
+    window.addEventListener('executionError', handleExecutionError as EventListener);
+    window.addEventListener('forceClearExecution', handleForceClearExecution);
 
     return () => {
       window.removeEventListener('jobCreated', handleJobCreated as EventListener);
       window.removeEventListener('jobCompleted', handleJobCompleted as EventListener);
       window.removeEventListener('jobFailed', handleJobFailed as EventListener);
       window.removeEventListener('traceUpdate', handleTraceUpdate as EventListener);
+      window.removeEventListener('executionError', handleExecutionError as EventListener);
+      window.removeEventListener('forceClearExecution', handleForceClearExecution);
     };
-  }, [executingJobId, processedTraceIds, executionStartTime]);
+  }, [executingJobId, lastExecutionJobId, processedTraceIds, executionStartTime, saveMessageToBackend, sessionId]);
 
   // Monitor traces for the executing job
   const monitorTraces = React.useCallback(async (jobId: string) => {
@@ -435,6 +745,9 @@ const WorkflowChat: React.FC<WorkflowChatProps> = ({
           
           setMessages(prev => [...prev, traceMessage]);
           
+          // Save trace message to backend
+          saveMessageToBackend(traceMessage);
+          
           // Mark this trace as processed
           setProcessedTraceIds(prev => {
             const newSet = new Set(prev);
@@ -451,7 +764,7 @@ const WorkflowChat: React.FC<WorkflowChatProps> = ({
         console.error('[ChatPanel] Error stack:', error.stack);
       }
     }
-  }, [processedTraceIds]);
+  }, [processedTraceIds, saveMessageToBackend]);
 
   // Start trace monitoring when execution begins
   useEffect(() => {
@@ -536,32 +849,6 @@ const WorkflowChat: React.FC<WorkflowChatProps> = ({
     }
   };
 
-  // Save message to backend (only user and assistant messages)
-  const saveMessageToBackend = async (message: ChatMessage): Promise<void> => {
-    if (!sessionId || (message.type !== 'user' && message.type !== 'assistant')) return;
-    
-    try {
-      const saveRequest: SaveMessageRequest = {
-        session_id: sessionId,
-        message_type: message.type,
-        content: message.content,
-        intent: message.intent,
-        confidence: message.confidence,
-        generation_result: message.result
-      };
-
-      await ChatHistoryService.saveMessage(saveRequest);
-      console.log(`Message saved successfully to session ${sessionId}`);
-    } catch (error) {
-      console.error('Error saving message to backend:', error);
-      // Show a subtle warning but don't interrupt the chat
-      toast.error('Failed to save message to history', {
-        duration: 2000,
-        position: 'bottom-right',
-      });
-    }
-  };
-
   const handleAgentGenerated = async (agentData: GeneratedAgent) => {
     try {
       // First, persist the agent via AgentService
@@ -603,21 +890,8 @@ const WorkflowChat: React.FC<WorkflowChatProps> = ({
       
       if (savedAgent) {
         setNodes((nodes) => {
-          // Find existing agent nodes to determine positioning
-          const agentNodes = nodes.filter(n => n.type === 'agentNode');
-          
-          let position = { x: 100, y: 100 }; // Default position for first agent
-          
-          if (agentNodes.length > 0) {
-            // If there are existing agent nodes, position the new agent below the lowest one
-            const lowestAgent = agentNodes.reduce((lowest, current) => 
-              current.position.y > lowest.position.y ? current : lowest
-            );
-            position = {
-              x: lowestAgent.position.x, // Same x position as the first/lowest agent
-              y: lowestAgent.position.y + 150 // 150px below for clear separation
-            };
-          }
+          // Use enhanced layout manager to get optimal position for new agent
+          const position = layoutManagerRef.current.getAgentNodePosition(nodes, 'crew');
 
           // Create the node with the persisted agent data
           const newNode: Node = {
@@ -662,7 +936,16 @@ const WorkflowChat: React.FC<WorkflowChatProps> = ({
       }
     } catch (error) {
       console.error('Error saving agent:', error);
-      toast.error(`Failed to save agent "${agentData.name}". Please try again.`);
+      
+      // Show error in chat instead of toast
+      const errorMsg: ChatMessage = {
+        id: `error-${Date.now()}`,
+        type: 'assistant',
+        content: `❌ Failed to save agent "${agentData.name}". The agent will be created locally but won't be persisted.`,
+        timestamp: new Date(),
+      };
+      setMessages(prev => [...prev, errorMsg]);
+      
       // Aggressive focus restoration even after error
       const focusDelays = [100, 300, 500, 800];
       focusDelays.forEach(delay => {
@@ -673,21 +956,8 @@ const WorkflowChat: React.FC<WorkflowChatProps> = ({
       
       // Still create the node even if saving failed, but with a warning
       setNodes((nodes) => {
-        // Find existing agent nodes to determine positioning
-        const agentNodes = nodes.filter(n => n.type === 'agentNode');
-        
-        let position = { x: 100, y: 100 }; // Default position for first agent
-        
-        if (agentNodes.length > 0) {
-          // If there are existing agent nodes, position the new agent below the lowest one
-          const lowestAgent = agentNodes.reduce((lowest, current) => 
-            current.position.y > lowest.position.y ? current : lowest
-          );
-          position = {
-            x: lowestAgent.position.x, // Same x position as the first/lowest agent
-            y: lowestAgent.position.y + 150 // 150px below for clear separation
-          };
-        }
+        // Use enhanced layout manager to get optimal position for new agent
+        const position = layoutManagerRef.current.getAgentNodePosition(nodes, 'crew');
 
         const newNode: Node = {
           id: `agent-${Date.now()}`,
@@ -786,31 +1056,8 @@ const WorkflowChat: React.FC<WorkflowChatProps> = ({
       
       if (savedTask) {
         setNodes((nodes) => {
-          // Find existing task nodes to determine positioning
-          const taskNodes = nodes.filter(n => n.type === 'taskNode');
-          const agentNodes = nodes.filter(n => n.type === 'agentNode');
-          
-          let position = { x: 300, y: 100 };
-          
-          if (taskNodes.length > 0) {
-            // If there are existing task nodes, position the new task below the lowest one
-            const lowestTask = taskNodes.reduce((lowest, current) => 
-              current.position.y > lowest.position.y ? current : lowest
-            );
-            position = {
-              x: lowestTask.position.x, // Same x position as the lowest task
-              y: lowestTask.position.y + 180 // 180px below for clear separation
-            };
-          } else if (agentNodes.length > 0) {
-            // If no task nodes but there are agent nodes, position to the right of the rightmost agent
-            const rightmostAgent = agentNodes.reduce((rightmost, current) => 
-              current.position.x > rightmost.position.x ? current : rightmost
-            );
-            position = {
-              x: rightmostAgent.position.x + 260, // 260px to the right for a clear gap
-              y: rightmostAgent.position.y
-            };
-          }
+          // Use enhanced layout manager to get optimal position for new task
+          const position = layoutManagerRef.current.getTaskNodePosition(nodes, 'crew');
 
           // Create the node with the persisted task data
           const newNode: Node = {
@@ -876,7 +1123,16 @@ const WorkflowChat: React.FC<WorkflowChatProps> = ({
       }
     } catch (error) {
       console.error('Error saving task:', error);
-      toast.error(`Failed to save task "${taskData.name}". Please try again.`);
+      
+      // Show error in chat instead of toast
+      const errorMsg: ChatMessage = {
+        id: `error-${Date.now()}`,
+        type: 'assistant',
+        content: `❌ Failed to save task "${taskData.name}". The task will be created locally but won't be persisted.`,
+        timestamp: new Date(),
+      };
+      setMessages(prev => [...prev, errorMsg]);
+      
       // Aggressive focus restoration even after error
       const focusDelays = [100, 300, 500, 800];
       focusDelays.forEach(delay => {
@@ -887,31 +1143,8 @@ const WorkflowChat: React.FC<WorkflowChatProps> = ({
       
       // Still create the node even if saving failed, but with a warning
       setNodes((nodes) => {
-        // Find existing task nodes to determine positioning
-        const taskNodes = nodes.filter(n => n.type === 'taskNode');
-        const agentNodes = nodes.filter(n => n.type === 'agentNode');
-        
-        let position = { x: 300, y: 100 };
-        
-        if (taskNodes.length > 0) {
-          // If there are existing task nodes, position the new task below the lowest one
-          const lowestTask = taskNodes.reduce((lowest, current) => 
-            current.position.y > lowest.position.y ? current : lowest
-          );
-          position = {
-            x: lowestTask.position.x, // Same x position as the lowest task
-            y: lowestTask.position.y + 180 // 180px below for clear separation
-          };
-        } else if (agentNodes.length > 0) {
-          // If no task nodes but there are agent nodes, position to the right of the rightmost agent
-          const rightmostAgent = agentNodes.reduce((rightmost, current) => 
-            current.position.x > rightmost.position.x ? current : rightmost
-          );
-          position = {
-            x: rightmostAgent.position.x + 260, // 260px to the right for a clear gap
-            y: rightmostAgent.position.y
-          };
-        }
+        // Use enhanced layout manager to get optimal position for new task
+        const position = layoutManagerRef.current.getTaskNodePosition(nodes, 'crew');
 
         const newNode: Node = {
           id: `task-${Date.now()}`,
@@ -946,6 +1179,27 @@ const WorkflowChat: React.FC<WorkflowChatProps> = ({
     const nodes: Node[] = [];
     const edges: Edge[] = [];
     const agentIdMap = new Map<string, string>();
+    
+    // Clear any previous execution job IDs when creating a new crew
+    setLastExecutionJobId(null);
+    setExecutingJobId(null);
+
+    // Get optimal positions for all crew nodes using enhanced layout manager
+    const agentCount = crewData.agents?.length || 0;
+    const taskCount = crewData.tasks?.length || 0;
+    const layoutResult = layoutManagerRef.current.getCrewLayoutPositions(agentCount, taskCount, 'crew');
+    const { agentPositions, taskPositions, layoutBounds, shouldAutoFit } = layoutResult;
+
+    // Log debug information
+    const debugInfo = layoutManagerRef.current.getLayoutDebugInfo();
+    console.log('[CrewGeneration] Layout calculation:', {
+      agentCount,
+      taskCount,
+      availableArea: layoutManagerRef.current.getAvailableCanvasArea('crew'),
+      layoutBounds,
+      shouldAutoFit,
+      debugInfo
+    });
 
     // Create agent nodes
     if (crewData.agents) {
@@ -956,7 +1210,7 @@ const WorkflowChat: React.FC<WorkflowChatProps> = ({
         nodes.push({
           id: nodeId,
           type: 'agentNode',
-          position: { x: 100, y: 100 + index * 150 },
+          position: agentPositions[index] || { x: 100, y: 100 + index * 150 },
           data: {
             label: agent.name,
             agentId: agent.id,
@@ -979,7 +1233,7 @@ const WorkflowChat: React.FC<WorkflowChatProps> = ({
         nodes.push({
           id: taskNodeId,
           type: 'taskNode',
-          position: { x: 400, y: 100 + index * 150 },
+          position: taskPositions[index] || { x: 400, y: 100 + index * 150 },
           data: {
             label: task.name,
             taskId: task.id,
@@ -1034,9 +1288,30 @@ const WorkflowChat: React.FC<WorkflowChatProps> = ({
       onNodesGenerated(nodes, edges);
     }
 
+    // Auto-fit the view to show all generated nodes if needed
+    if (shouldAutoFit) {
+      console.log('[CrewGeneration] Auto-fitting view to show all nodes');
+      
+      // Delay the fit view to ensure nodes are rendered
+      setTimeout(() => {
+        // Trigger auto-fit event for the ReactFlow instance
+        window.dispatchEvent(new CustomEvent('autoFitCrewNodes', {
+          detail: { 
+            layoutBounds,
+            zoom: layoutManagerRef.current.getAutoFitZoom(layoutBounds, 'crew')
+          }
+        }));
+      }, 200);
+    } else {
+      // Still trigger a gentle fit view to center the nodes
+      setTimeout(() => {
+        window.dispatchEvent(new Event('fitViewToNodesInternal'));
+      }, 100);
+    }
+
     // Success feedback shown in chat only
     // Aggressive focus restoration after crew creation
-    const focusDelays = [100, 300, 500, 800, 1200];
+    const focusDelays = [300, 500, 800, 1200]; // Slightly delayed to allow for auto-fit
     focusDelays.forEach(delay => {
       setTimeout(() => {
         inputRef.current?.focus();
@@ -1128,27 +1403,20 @@ const WorkflowChat: React.FC<WorkflowChatProps> = ({
       // Check if user provided a specific job ID
       const specificJobId = extractJobIdFromCommand(inputValue);
       
-      // Determine which job ID to use
-      let jobIdToFetch: string | null = null;
+      // If user provided a specific job ID, show traces for that job
       if (specificJobId) {
-        jobIdToFetch = specificJobId;
-      } else if (executingJobId || lastExecutionJobId) {
-        jobIdToFetch = executingJobId || lastExecutionJobId;
-      }
-      
-      if (jobIdToFetch) {
         setIsLoading(true);
         
         try {
           // Fetch all traces for this job
-          const traces = await TraceService.getTraces(jobIdToFetch);
+          const traces = await TraceService.getTraces(specificJobId);
           
           if (traces && traces.length > 0) {
             // Add assistant message indicating we're showing traces
             const assistantMessage: ChatMessage = {
               id: `msg-${Date.now() + 1}`,
               type: 'assistant',
-              content: `Showing ${traces.length} execution traces for job ${jobIdToFetch}:`,
+              content: `Showing ${traces.length} execution traces for job ${specificJobId}:`,
               timestamp: new Date(),
             };
             setMessages(prev => [...prev, assistantMessage]);
@@ -1180,13 +1448,106 @@ const WorkflowChat: React.FC<WorkflowChatProps> = ({
                 isIntermediate: false, // Not intermediate since this is intentional display
                 agentName: trace.agent_name,
                 taskName: trace.task_name,
+                jobId: specificJobId || undefined
+              };
+              
+              setMessages(prev => [...prev, traceMessage]);
+              
+              // Save trace message to backend
+              saveMessageToBackend(traceMessage);
+            });
+          } else {
+            // No traces found
+            const assistantMessage: ChatMessage = {
+              id: `msg-${Date.now() + 1}`,
+              type: 'assistant',
+              content: `No execution traces found for job ${specificJobId}.`,
+              timestamp: new Date(),
+            };
+            setMessages(prev => [...prev, assistantMessage]);
+          }
+        } catch (error) {
+          console.error('Error fetching execution traces:', error);
+          const errorMessage: ChatMessage = {
+            id: `msg-${Date.now() + 1}`,
+            type: 'assistant',
+            content: 'Failed to fetch execution traces. Please try again.',
+            timestamp: new Date(),
+          };
+          setMessages(prev => [...prev, errorMessage]);
+        } finally {
+          setIsLoading(false);
+        }
+        
+        return;
+      }
+      
+      // If user has a crew, execute it (regardless of previous executions)
+      if (hasCrewContent() && onExecuteCrew) {
+        // Add a pending execution message that will be removed if execution fails
+        const pendingMessage: ChatMessage = {
+          id: `exec-pending-${Date.now()}`,
+          type: 'execution',
+          content: `⏳ Preparing to execute crew...`,
+          timestamp: new Date(),
+        };
+        setMessages(prev => [...prev, pendingMessage]);
+        
+        onExecuteCrew();
+        return;
+      }
+      
+      // Check if there's a previous execution to show traces for
+      if (executingJobId || lastExecutionJobId) {
+        const jobIdToFetch = executingJobId || lastExecutionJobId;
+        if (!jobIdToFetch) return; // Type guard to ensure jobIdToFetch is not null
+        
+        setIsLoading(true);
+        
+        try {
+          // Fetch all traces for this job
+          const traces = await TraceService.getTraces(jobIdToFetch);
+          
+          if (traces && traces.length > 0) {
+            // Show traces for previous execution
+            const assistantMessage: ChatMessage = {
+              id: `msg-${Date.now() + 1}`,
+              type: 'assistant',
+              content: `Showing ${traces.length} execution traces for job ${jobIdToFetch}:`,
+              timestamp: new Date(),
+            };
+            setMessages(prev => [...prev, assistantMessage]);
+            
+            // Add trace messages...
+            traces.forEach((trace) => {
+              let content = '';
+              if (typeof trace.output === 'string') {
+                content = trace.output;
+              } else if (trace.output?.agent_execution && typeof trace.output.agent_execution === 'string') {
+                content = trace.output.agent_execution;
+              } else if (trace.output?.content && typeof trace.output.content === 'string') {
+                content = trace.output.content;
+              } else if (trace.output) {
+                content = JSON.stringify(trace.output, null, 2);
+              }
+              
+              if (!content.trim()) return;
+              
+              const traceMessage: ChatMessage = {
+                id: `trace-display-${trace.id}`,
+                type: 'trace',
+                content,
+                timestamp: new Date(trace.created_at || Date.now()),
+                isIntermediate: false,
+                agentName: trace.agent_name,
+                taskName: trace.task_name,
                 jobId: jobIdToFetch || undefined
               };
               
               setMessages(prev => [...prev, traceMessage]);
+              saveMessageToBackend(traceMessage);
             });
           } else {
-            // No traces found
             const assistantMessage: ChatMessage = {
               id: `msg-${Date.now() + 1}`,
               type: 'assistant',
@@ -1211,17 +1572,11 @@ const WorkflowChat: React.FC<WorkflowChatProps> = ({
         return;
       }
       
-      // If user has a crew but no recent execution, execute it
-      if (hasCrewContent() && onExecuteCrew) {
-        onExecuteCrew();
-        return;
-      }
-      
-      // No crew or recent execution
+      // No crew and no recent execution
       const assistantMessage: ChatMessage = {
         id: `msg-${Date.now() + 1}`,
         type: 'assistant',
-        content: 'No recent execution found. Please run a crew first or provide a job ID.',
+        content: 'No crew found. Please create a crew first using natural language.',
         timestamp: new Date(),
       };
       setMessages(prev => [...prev, assistantMessage]);
@@ -1287,12 +1642,11 @@ const WorkflowChat: React.FC<WorkflowChatProps> = ({
       }
     } catch (error) {
       console.error('Error processing message:', error);
-      toast.error('Failed to process your request. Please try again.');
       
       const errorMessage: ChatMessage = {
         id: `msg-${Date.now() + 1}`,
         type: 'assistant',
-        content: 'I encountered an error processing your request. Please try again or rephrase your message.',
+        content: '❌ Failed to process your request. Please try again or rephrase your message.',
         timestamp: new Date(),
       };
       
@@ -1365,18 +1719,31 @@ const WorkflowChat: React.FC<WorkflowChatProps> = ({
         justifyContent: 'space-between',
         backgroundColor: theme => theme.palette.mode === 'dark' ? 'grey.900' : 'grey.50'
       }}>
-        <Typography 
-          variant="subtitle2" 
-          sx={{ 
-            display: 'flex', 
-            alignItems: 'center', 
-            gap: 1,
-            fontWeight: 600
-          }}
-        >
-          <SmartToyIcon fontSize="small" />
-          Kasal
-        </Typography>
+        <Box sx={{ display: 'flex', flexDirection: 'column' }}>
+          <Typography 
+            variant="subtitle2" 
+            sx={{ 
+              display: 'flex', 
+              alignItems: 'center', 
+              gap: 1,
+              fontWeight: 600
+            }}
+          >
+            <SmartToyIcon fontSize="small" />
+            Kasal
+          </Typography>
+          {_currentSessionName !== 'New Chat' && (
+            <Typography 
+              variant="caption" 
+              sx={{ 
+                color: 'text.secondary',
+                ml: 3
+              }}
+            >
+              {_currentSessionName}
+            </Typography>
+          )}
+        </Box>
         <Stack direction="row" spacing={1}>
           <Tooltip title="New Chat">
             <IconButton size="small" onClick={startNewChat}>
@@ -1391,9 +1758,27 @@ const WorkflowChat: React.FC<WorkflowChatProps> = ({
                 loadChatSessions();
               }}
             >
-              <HistoryIcon fontSize="small" />
+              <ChatIcon fontSize="small" />
             </IconButton>
           </Tooltip>
+          {onOpenLogs && (
+            <Tooltip title={executingJobId || lastExecutionJobId ? "Execution Logs" : "No execution logs available"}>
+              <span>
+                <IconButton 
+                  size="small" 
+                  onClick={() => {
+                    const jobId = executingJobId || lastExecutionJobId;
+                    if (jobId) {
+                      onOpenLogs(jobId);
+                    }
+                  }}
+                  disabled={!executingJobId && !lastExecutionJobId}
+                >
+                  <TerminalIcon fontSize="small" />
+                </IconButton>
+              </span>
+            </Tooltip>
+          )}
           <Tooltip title="Collapse Chat">
             <IconButton 
               size="small" 
@@ -1481,7 +1866,12 @@ const WorkflowChat: React.FC<WorkflowChatProps> = ({
                 }}
               >
                 <ListItemText
-                  primary={`Session ${new Date(session.latest_timestamp).toLocaleDateString()}`}
+                  primary={(() => {
+                    // Get stored job name for this session
+                    const sessionJobNames = JSON.parse(localStorage.getItem('chatSessionJobNames') || '{}');
+                    const jobName = sessionJobNames[session.session_id];
+                    return jobName || `Session ${new Date(session.latest_timestamp).toLocaleDateString()}`;
+                  })()}
                   secondary={`${new Date(session.latest_timestamp).toLocaleTimeString()} • ${session.message_count || 0} messages`}
                 />
                 <Tooltip title="Delete Session">
@@ -1492,10 +1882,24 @@ const WorkflowChat: React.FC<WorkflowChatProps> = ({
                       e.stopPropagation();
                       try {
                         await ChatHistoryService.deleteSession(session.session_id);
-                        toast.success('Session deleted');
+                        
+                        // Clean up stored job name for this session
+                        const sessionJobNames = JSON.parse(localStorage.getItem('chatSessionJobNames') || '{}');
+                        delete sessionJobNames[session.session_id];
+                        localStorage.setItem('chatSessionJobNames', JSON.stringify(sessionJobNames));
+                        
+                        // Success - just reload sessions
                         loadChatSessions();
                       } catch (error) {
-                        toast.error('Failed to delete session');
+                        console.error('Failed to delete session:', error);
+                        // Error - show in chat
+                        const errorMessage: ChatMessage = {
+                          id: `error-${Date.now()}`,
+                          type: 'assistant',
+                          content: '❌ Failed to delete session. Please try again.',
+                          timestamp: new Date(),
+                        };
+                        setMessages(prev => [...prev, errorMessage]);
                       }
                     }}
                   >
@@ -1630,20 +2034,20 @@ const WorkflowChat: React.FC<WorkflowChatProps> = ({
             ref={inputRef}
             fullWidth
             variant="outlined"
-            placeholder={hasCrewContent() ? "Type 'execute crew' or 'ec'..." : "Describe what you want to create..."}
+            placeholder={executingJobId ? "Execution in progress..." : hasCrewContent() ? "Type 'execute crew' or 'ec'..." : "Describe what you want to create..."}
             value={inputValue}
             onChange={(e) => setInputValue(e.target.value)}
             onKeyDown={(e) => {
               handleKeyPress(e);
               e.stopPropagation(); // Prevent keyboard shortcuts
             }}
-            disabled={isLoading}
+            disabled={isLoading || !!executingJobId}
             multiline
             maxRows={6}
             size="small"
             sx={{
               '& .MuiOutlinedInput-root': {
-                paddingRight: '40px', // Just enough space for the send button
+                paddingRight: '120px', // Balanced space for both model selector and send button
                 borderColor: hasCrewContent() ? 'primary.main' : undefined,
                 borderRadius: 1, // Make text input field edgy/rectangular
                 '&:hover': {
@@ -1678,13 +2082,23 @@ const WorkflowChat: React.FC<WorkflowChatProps> = ({
                         color: 'text.secondary',
                         transition: 'all 0.2s',
                         backgroundColor: 'rgba(255, 255, 255, 0.8)', // Add background for better visibility
+                        maxWidth: '110px', // Slightly increased width
                         '&:hover': {
                           backgroundColor: 'action.hover',
                           color: 'text.primary',
                         },
                       }}
                     >
-                      <Typography variant="caption" sx={{ fontSize: '0.75rem' }}>
+                      <Typography 
+                        variant="caption" 
+                        sx={{ 
+                          fontSize: '0.75rem',
+                          overflow: 'hidden',
+                          textOverflow: 'ellipsis',
+                          whiteSpace: 'nowrap',
+                          maxWidth: '90px'
+                        }}
+                      >
                         {(() => {
                           const modelName = models[selectedModel]?.name || selectedModel;
                           // Shorten common model names
@@ -1780,7 +2194,7 @@ const WorkflowChat: React.FC<WorkflowChatProps> = ({
           <IconButton
             color="primary"
             onClick={handleSendMessage}
-            disabled={!inputValue.trim() || isLoading}
+            disabled={!inputValue.trim() || isLoading || !!executingJobId}
             sx={{ 
               position: 'absolute',
               right: 8,
@@ -1800,7 +2214,7 @@ const WorkflowChat: React.FC<WorkflowChatProps> = ({
               },
             }}
           >
-            {isLoading ? <CircularProgress size={16} sx={{ color: 'inherit' }} /> : <ArrowUpwardIcon sx={{ fontSize: 16 }} />}
+            {isLoading || executingJobId ? <CircularProgress size={16} sx={{ color: 'inherit' }} /> : <ArrowUpwardIcon sx={{ fontSize: 16 }} />}
           </IconButton>
         </Box>
       </Paper>

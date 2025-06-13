@@ -15,6 +15,7 @@ import {
   MenuBook as MenuBookIcon,
   Schedule as ScheduleIcon,
   Assessment as LogsIcon,
+  History as HistoryIcon,
 } from '@mui/icons-material';
 import { useFlowConfigStore } from '../../store/flowConfig';
 
@@ -30,6 +31,7 @@ interface RightSidebarProps {
   showRunHistory?: boolean;
   executionHistoryHeight?: number;
   onOpenSchedulesDialog?: () => void;
+  onToggleExecutionHistory?: () => void;
 }
 
 const RightSidebar: React.FC<RightSidebarProps> = ({
@@ -44,6 +46,7 @@ const RightSidebar: React.FC<RightSidebarProps> = ({
   showRunHistory = false,
   executionHistoryHeight = 200,
   onOpenSchedulesDialog,
+  onToggleExecutionHistory,
 }) => {
   const [animateAIAssistant, setAnimateAIAssistant] = useState(true);
   const [chatOpenedByClick, setChatOpenedByClick] = useState(false);
@@ -127,9 +130,17 @@ const RightSidebar: React.FC<RightSidebarProps> = ({
     {
       id: 'view-logs',
       icon: <LogsIcon />,
-      tooltip: 'View System Logs',
+      tooltip: 'View Assistant Logs',
       onClick: onOpenLogsDialog,
       disabled: false
+    },
+    {
+      id: 'toggle-execution-history',
+      icon: <HistoryIcon />,
+      tooltip: showRunHistory ? 'Hide Execution History' : 'Show Execution History',
+      onClick: onToggleExecutionHistory,
+      disabled: !onToggleExecutionHistory,
+      isActive: showRunHistory
     },
     {
       id: 'schedules',
@@ -202,8 +213,8 @@ const RightSidebar: React.FC<RightSidebarProps> = ({
                       width: 40,
                       height: 40,
                       mb: 1,
-                      color: 'text.secondary',
-                      backgroundColor: 'transparent',
+                      color: (item as any).isActive ? 'primary.main' : 'text.secondary',
+                      backgroundColor: (item as any).isActive ? 'primary.light' : 'transparent',
                       borderRight: '2px solid transparent',
                       borderRadius: '50%',
                       display: 'flex',
@@ -213,8 +224,8 @@ const RightSidebar: React.FC<RightSidebarProps> = ({
                       opacity: item.disabled ? 0.6 : 1,
                       cursor: item.disabled ? 'not-allowed' : 'pointer',
                       '&:hover': !item.disabled ? {
-                        backgroundColor: 'action.hover',
-                        color: 'text.primary',
+                        backgroundColor: (item as any).isActive ? 'primary.dark' : 'action.hover',
+                        color: (item as any).isActive ? 'primary.contrastText' : 'text.primary',
                       } : {},
                       animation: 'none',
                     }}

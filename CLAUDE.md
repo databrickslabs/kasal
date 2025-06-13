@@ -146,3 +146,11 @@ The CrewAI engine integrates at the service layer:
 - **Component Tests**: React Testing Library
 - **Hook Tests**: Custom hooks testing
 - **E2E Tests**: Cypress for user workflows
+
+## Important Notes
+
+### Service Management
+- **DO NOT restart backend or frontend services** - They are managed externally and automatically reload when code changes
+- The backend uses `--reload` flag and will automatically detect and apply code changes
+- The frontend uses hot module replacement (HMR) and will automatically update in the browser
+- If you need to check if services are running, use `ps aux | grep uvicorn` for backend or `ps aux | grep "npm start"` for frontend

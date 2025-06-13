@@ -17,6 +17,7 @@ import { useCrewExecutionStore } from '../../store/crewExecution';
 import { useTabManagerStore } from '../../store/tabManager';
 import { useFlowConfigStore } from '../../store/flowConfig';
 import { useTabSync } from '../../hooks/workflow/useTabSync';
+import { useRunStatusStore } from '../../store/runStatus';
 import { v4 as _uuidv4 } from 'uuid';
 import { FlowService as _FlowService } from '../../api/FlowService';
 import { useAPIKeysStore as _useAPIKeysStore } from '../../store/apiKeys';
@@ -32,6 +33,8 @@ import TabBar from './TabBar';
 import ChatPanel from '../Chat/ChatPanel';
 import RightSidebar from './RightSidebar';
 import LeftSidebar from './LeftSidebar';
+import { useUILayoutStore } from '../../store/uiLayout';
+import { CanvasLayoutManager } from '../../utils/CanvasLayoutManager';
 
 // Dialog Imports
 import AgentDialog from '../Agents/AgentDialog';
@@ -43,6 +46,9 @@ import JobsPanel from '../Jobs/JobsPanel';
 import Tutorial from '../Tutorial/Tutorial';
 import APIKeys from '../Configuration/APIKeys/APIKeys';
 import Logs from '../Jobs/LLMLogs';
+import ShowLogs from '../Jobs/ShowLogs';
+import { executionLogService } from '../../api/ExecutionLogs';
+import type { LogEntry } from '../../api/ExecutionLogs';
 import Configuration from '../Configuration/Configuration';
 import ToolForm from '../Tools/ToolForm';
 import { AddFlowDialog } from '../Flow';
@@ -98,11 +104,16 @@ const WorkflowDesigner: React.FC<WorkflowDesignerProps> = (): JSX.Element => {
   
   // Use tab manager for multi-tab support
   const {
-    tabs
+    tabs,
+    getActiveTab,
+    updateTabExecutionStatus
   } = useTabManagerStore();
 
   // Use flow configuration store
   const { crewAIFlowEnabled } = useFlowConfigStore();
+  
+  // Use run status store for fallback job monitoring
+  const { runHistory, startPolling: startRunStatusPolling, stopPolling: stopRunStatusPolling } = useRunStatusStore();
 
   // Use flow store for node/edge management
   const { 
@@ -120,7 +131,7 @@ const WorkflowDesigner: React.FC<WorkflowDesignerProps> = (): JSX.Element => {
   } = useFlowManager({ showErrorMessage });
 
   // Use tab sync to keep tabs and flow manager in sync
-  const { activeTabId } = useTabSync({ nodes, edges, setNodes, setEdges });
+  const { activeTabId: _activeTabId } = useTabSync({ nodes, edges, setNodes, setEdges });
 
   // Use agent and task managers with original flow manager
   const {
@@ -149,27 +160,82 @@ const WorkflowDesigner: React.FC<WorkflowDesignerProps> = (): JSX.Element => {
     setNodes
   });
 
+  // UI Layout store
+  const {
+    updateScreenDimensions,
+    setChatPanelWidth,
+    setChatPanelCollapsed,
+    setChatPanelVisible,
+    setExecutionHistoryHeight,
+    setExecutionHistoryVisible,
+    setPanelPosition: setUIStorePanelPosition,
+    setAreFlowsVisible: setUIStoreAreFlowsVisible,
+    chatPanelWidth,
+    chatPanelCollapsed: isChatCollapsed,
+    executionHistoryHeight,
+    chatPanelVisible: showChatPanel,
+    executionHistoryVisible: showRunHistory,
+    panelPosition,
+    areFlowsVisible,
+  } = useUILayoutStore();
+
   // Use the panel manager
   const {
-    panelPosition,
-    setPanelPosition,
     isDraggingPanel,
     setIsDraggingPanel,
     panelState,
     setPanelState: _setPanelState,
-    areFlowsVisible,
-    setAreFlowsVisible: _setAreFlowsVisible,
     handlePanelDragStart: _handlePanelDragStart,
     handleSnapToLeft: _handleSnapToLeft,
     handleSnapToRight: _handleSnapToRight,
     handleResetPanel: _handleResetPanel,
-    toggleFlowsVisibility,
-    showRunHistory,
-    setShowRunHistory: _setShowRunHistory,
-    showChatPanel,
-    setShowChatPanel: _setShowChatPanel,
-    toggleChatPanel
   } = usePanelManager();
+
+  // Sync panel manager with UI store
+  const toggleFlowsVisibility = React.useCallback(() => {
+    setUIStoreAreFlowsVisible(!areFlowsVisible);
+  }, [areFlowsVisible, setUIStoreAreFlowsVisible]);
+
+  const toggleChatPanel = React.useCallback(() => {
+    setChatPanelVisible(!showChatPanel);
+    // Trigger node repositioning when toggling chat panel visibility
+    setTimeout(() => {
+      const event = new CustomEvent('recalculateNodePositions', {
+        detail: { reason: 'chat-panel-visibility-toggle' }
+      });
+      window.dispatchEvent(event);
+    }, 350); // Wait for animation to complete
+  }, [showChatPanel, setChatPanelVisible]);
+
+  // Sync panel position with store
+  const setPanelPosition = React.useCallback((position: number | ((prev: number) => number)) => {
+    const newPosition = typeof position === 'function' ? position(panelPosition) : position;
+    setUIStorePanelPosition(newPosition);
+  }, [panelPosition, setUIStorePanelPosition]);
+
+  // Toggle functions for execution history
+  const _setShowRunHistory = React.useCallback((show: boolean | ((prev: boolean) => boolean)) => {
+    const newShow = typeof show === 'function' ? show(showRunHistory) : show;
+    setExecutionHistoryVisible(newShow);
+  }, [showRunHistory, setExecutionHistoryVisible]);
+
+  const _setShowChatPanel = React.useCallback((show: boolean | ((prev: boolean) => boolean)) => {
+    const newShow = typeof show === 'function' ? show(showChatPanel) : show;
+    setChatPanelVisible(newShow);
+    // Trigger node repositioning when changing chat panel visibility
+    setTimeout(() => {
+      const event = new CustomEvent('recalculateNodePositions', {
+        detail: { reason: 'chat-panel-visibility-change' }
+      });
+      window.dispatchEvent(event);
+    }, 350); // Wait for animation to complete
+  }, [showChatPanel, setChatPanelVisible]);
+
+
+  // Toggle execution history function
+  const toggleExecutionHistory = React.useCallback(() => {
+    setExecutionHistoryVisible(!showRunHistory);
+  }, [showRunHistory, setExecutionHistoryVisible]);
 
   // Use the dialog manager
   const dialogManager = useDialogManager(hasSeenTutorial, setHasSeenTutorial);
@@ -177,13 +243,19 @@ const WorkflowDesigner: React.FC<WorkflowDesignerProps> = (): JSX.Element => {
   // Connection generation state
   const [isGeneratingConnections, setIsGeneratingConnections] = React.useState(false);
   const [isChatProcessing, setIsChatProcessing] = React.useState(false);
-  const [isChatCollapsed, setIsChatCollapsed] = React.useState(false);
-  const [chatPanelWidth, setChatPanelWidth] = React.useState(450);
   const [isResizing, setIsResizing] = React.useState(false);
-  const [executionHistoryHeight, setExecutionHistoryHeight] = React.useState(60); // Start with 1 row height
   const [isResizingHistory, setIsResizingHistory] = React.useState(false);
   const [hasManuallyResized, setHasManuallyResized] = React.useState(false);
   const [executionCount, setExecutionCount] = React.useState(0);
+  
+  // Execution logs dialog state
+  const [showExecutionLogsDialog, setShowExecutionLogsDialog] = React.useState(false);
+  const [selectedJobLogs, setSelectedJobLogs] = React.useState<LogEntry[]>([]);
+  const [selectedExecutionJobId, setSelectedExecutionJobId] = React.useState<string | null>(null);
+  const [isConnectingLogs, setIsConnectingLogs] = React.useState(false);
+  const [connectionError, setConnectionError] = React.useState<string | null>(null);
+  const [lastViewedJobId, setLastViewedJobId] = React.useState<string | null>(null);
+  const [runningTabId, setRunningTabId] = React.useState<string | null>(null);
 
   // Chat panel resize handlers
   const handleResizeStart = React.useCallback((e: React.MouseEvent) => {
@@ -198,11 +270,26 @@ const WorkflowDesigner: React.FC<WorkflowDesignerProps> = (): JSX.Element => {
     const minWidth = 280; // Minimum usable width
     const maxWidth = Math.min(800, window.innerWidth * 0.6); // Max 60% of screen or 800px
     
-    setChatPanelWidth(Math.min(Math.max(newWidth, minWidth), maxWidth));
-  }, [isResizing]);
+    const clampedWidth = Math.min(Math.max(newWidth, minWidth), maxWidth);
+    setChatPanelWidth(clampedWidth);
+    
+    // Trigger node repositioning during resize for real-time adjustment
+    const event = new CustomEvent('recalculateNodePositions', {
+      detail: { reason: 'chat-panel-resizing' }
+    });
+    window.dispatchEvent(event);
+  }, [isResizing, setChatPanelWidth]);
 
   const handleResizeEnd = React.useCallback(() => {
     setIsResizing(false);
+    
+    // Trigger node repositioning after chat panel resize
+    setTimeout(() => {
+      const event = new CustomEvent('recalculateNodePositions', {
+        detail: { reason: 'chat-panel-resize' }
+      });
+      window.dispatchEvent(event);
+    }, 100); // Small delay to ensure state is updated
   }, []);
 
   React.useEffect(() => {
@@ -221,6 +308,19 @@ const WorkflowDesigner: React.FC<WorkflowDesignerProps> = (): JSX.Element => {
     }
   }, [isResizing, handleResizeMove, handleResizeEnd]);
 
+  // Update screen dimensions in store on window resize
+  React.useEffect(() => {
+    const handleResize = () => {
+      updateScreenDimensions(window.innerWidth, window.innerHeight);
+    };
+
+    // Set initial dimensions
+    updateScreenDimensions(window.innerWidth, window.innerHeight);
+    
+    window.addEventListener('resize', handleResize);
+    return () => window.removeEventListener('resize', handleResize);
+  }, [updateScreenDimensions]);
+
   // Execution history resize handlers
   const handleHistoryResizeStart = React.useCallback((e: React.MouseEvent) => {
     e.preventDefault();
@@ -235,7 +335,7 @@ const WorkflowDesigner: React.FC<WorkflowDesignerProps> = (): JSX.Element => {
     const maxHeight = Math.min(500, window.innerHeight * 0.5); // Max 50% of screen or 500px
     
     setExecutionHistoryHeight(Math.min(Math.max(newHeight, minHeight), maxHeight));
-  }, [isResizingHistory]);
+  }, [isResizingHistory, setExecutionHistoryHeight]);
 
   const handleHistoryResizeEnd = React.useCallback(() => {
     setIsResizingHistory(false);
@@ -276,7 +376,7 @@ const WorkflowDesigner: React.FC<WorkflowDesignerProps> = (): JSX.Element => {
         setExecutionHistoryHeight(baseHeight + (visibleRows * rowHeight));
       }
     }
-  }, [executionCount, hasManuallyResized, showRunHistory]);
+  }, [executionCount, hasManuallyResized, showRunHistory, setExecutionHistoryHeight]);
 
   // Use crew execution store
   const {
@@ -301,6 +401,33 @@ const WorkflowDesigner: React.FC<WorkflowDesignerProps> = (): JSX.Element => {
     setEdges: setCrewExecutionEdges
   } = useCrewExecutionStore();
 
+  // Debug logging for running tab
+  React.useEffect(() => {
+    console.log('[WorkflowDesigner] runningTabId:', runningTabId, 'isExecuting:', isExecuting);
+  }, [runningTabId, isExecuting]);
+  
+  // Add debug function once on mount
+  React.useEffect(() => {
+    if (typeof window !== 'undefined') {
+      (window as Window & { clearStuckTabs?: () => void }).clearStuckTabs = () => {
+        console.log('[WorkflowDesigner] Manually clearing all stuck tabs');
+        const state = useTabManagerStore.getState();
+        state.tabs.forEach(tab => {
+          if (tab.executionStatus === 'running') {
+            console.log('[WorkflowDesigner] Clearing stuck tab:', tab.id, tab.name);
+            state.updateTabExecutionStatus(tab.id, 'completed');
+          }
+        });
+      };
+    }
+    
+    return () => {
+      if (typeof window !== 'undefined') {
+        delete (window as Window & { clearStuckTabs?: () => void }).clearStuckTabs;
+      }
+    };
+  }, []); // Empty dependency array - only run once
+
   // Sync nodes and edges with crew execution store
   useEffect(() => {
     setCrewExecutionNodes(nodes);
@@ -321,6 +448,213 @@ const WorkflowDesigner: React.FC<WorkflowDesignerProps> = (): JSX.Element => {
       setHasSeenHandlebar(true);
     }
   }, [setHasSeenHandlebar]);
+
+  // Listen for job view events from execution history
+  useEffect(() => {
+    const handleJobViewed = (event: CustomEvent) => {
+      const { jobId } = event.detail;
+      console.log('[WorkflowDesigner] Job viewed from execution history:', jobId);
+      setLastViewedJobId(jobId);
+    };
+
+    window.addEventListener('jobViewed', handleJobViewed as EventListener);
+
+    return () => {
+      window.removeEventListener('jobViewed', handleJobViewed as EventListener);
+    };
+  }, []);
+
+  // Track the currently executing job ID
+  const [executingJobId, setExecutingJobId] = React.useState<string | null>(null);
+  const runningTabTimeoutRef = React.useRef<NodeJS.Timeout | null>(null);
+
+  // Listen for job created events to track the executing job
+  useEffect(() => {
+    const handleJobCreated = (event: CustomEvent) => {
+      const { jobId } = event.detail;
+      console.log('[WorkflowDesigner] Job created, tracking job ID:', jobId);
+      setExecutingJobId(jobId);
+      
+      // Ensure polling is running to monitor job status
+      console.log('[WorkflowDesigner] Starting run status polling for job monitoring');
+      startRunStatusPolling();
+    };
+
+    window.addEventListener('jobCreated', handleJobCreated as EventListener);
+    return () => {
+      window.removeEventListener('jobCreated', handleJobCreated as EventListener);
+    };
+  }, [startRunStatusPolling]);
+
+  // Listen for job completion events to clear running tab and update status
+  useEffect(() => {
+    const handleJobCompleted = (event: CustomEvent) => {
+      console.log('[WorkflowDesigner] Job completed event received:', event.detail);
+      console.log('[WorkflowDesigner] Current runningTabId:', runningTabId);
+      
+      // Get the active tab to ensure we clear the right one
+      const activeTab = getActiveTab();
+      console.log('[WorkflowDesigner] Active tab:', activeTab?.id, 'status:', activeTab?.executionStatus);
+      
+      // Also log all tabs to debug
+      const tabManagerState = useTabManagerStore.getState();
+      console.log('[WorkflowDesigner] All tabs:', tabManagerState.tabs.map(t => ({ id: t.id, name: t.name, status: t.executionStatus })));
+      
+      if (runningTabId) {
+        console.log('[WorkflowDesigner] Clearing running tab:', runningTabId);
+        tabManagerState.updateTabExecutionStatus(runningTabId, 'completed');
+        setRunningTabId(null);
+      } else if (activeTab?.executionStatus === 'running') {
+        // Fallback: if no runningTabId but active tab is running, clear it
+        console.log('[WorkflowDesigner] Fallback: clearing active tab running status:', activeTab.id);
+        tabManagerState.updateTabExecutionStatus(activeTab.id, 'completed');
+      } else {
+        // Extra fallback: check all tabs for running status
+        console.log('[WorkflowDesigner] No runningTabId or active tab running, checking all tabs...');
+        tabManagerState.tabs.forEach(tab => {
+          if (tab.executionStatus === 'running') {
+            console.log('[WorkflowDesigner] Found running tab:', tab.id, '- clearing it');
+            tabManagerState.updateTabExecutionStatus(tab.id, 'completed');
+          }
+        });
+      }
+      
+      // Clear the safety timeout
+      if (runningTabTimeoutRef.current) {
+        clearTimeout(runningTabTimeoutRef.current);
+        runningTabTimeoutRef.current = null;
+      }
+      
+      setExecutingJobId(null);
+    };
+
+    const handleJobFailed = (event: CustomEvent) => {
+      console.log('[WorkflowDesigner] Job failed event received:', event.detail);
+      console.log('[WorkflowDesigner] Current runningTabId:', runningTabId);
+      
+      // Get the active tab to ensure we clear the right one
+      const activeTab = getActiveTab();
+      console.log('[WorkflowDesigner] Active tab:', activeTab?.id, 'status:', activeTab?.executionStatus);
+      
+      // Also log all tabs to debug
+      const tabManagerState = useTabManagerStore.getState();
+      console.log('[WorkflowDesigner] All tabs:', tabManagerState.tabs.map(t => ({ id: t.id, name: t.name, status: t.executionStatus })));
+      
+      if (runningTabId) {
+        console.log('[WorkflowDesigner] Clearing running tab:', runningTabId);
+        tabManagerState.updateTabExecutionStatus(runningTabId, 'failed');
+        setRunningTabId(null);
+      } else if (activeTab?.executionStatus === 'running') {
+        // Fallback: if no runningTabId but active tab is running, clear it
+        console.log('[WorkflowDesigner] Fallback: clearing active tab running status:', activeTab.id);
+        tabManagerState.updateTabExecutionStatus(activeTab.id, 'failed');
+      } else {
+        // Extra fallback: check all tabs for running status
+        console.log('[WorkflowDesigner] No runningTabId or active tab running, checking all tabs...');
+        tabManagerState.tabs.forEach(tab => {
+          if (tab.executionStatus === 'running') {
+            console.log('[WorkflowDesigner] Found running tab:', tab.id, '- marking as failed');
+            tabManagerState.updateTabExecutionStatus(tab.id, 'failed');
+          }
+        });
+      }
+      
+      // Clear the safety timeout
+      if (runningTabTimeoutRef.current) {
+        clearTimeout(runningTabTimeoutRef.current);
+        runningTabTimeoutRef.current = null;
+      }
+      
+      setExecutingJobId(null);
+    };
+
+    window.addEventListener('jobCompleted', handleJobCompleted as EventListener);
+    window.addEventListener('jobFailed', handleJobFailed as EventListener);
+
+    // Debug: log when listeners are attached
+    console.log('[WorkflowDesigner] Job completion event listeners attached, runningTabId:', runningTabId);
+
+    return () => {
+      window.removeEventListener('jobCompleted', handleJobCompleted as EventListener);
+      window.removeEventListener('jobFailed', handleJobFailed as EventListener);
+    };
+  }, [runningTabId, getActiveTab]);
+
+  // Fallback: Monitor job status directly from runHistory
+  useEffect(() => {
+    console.log('[WorkflowDesigner] Fallback monitor - executingJobId:', executingJobId, 'runHistory length:', runHistory.length);
+    
+    if (executingJobId && runHistory.length > 0) {
+      const job = runHistory.find(run => run.job_id === executingJobId);
+      if (job) {
+        console.log(`[WorkflowDesigner] Fallback check - Job ${executingJobId} status: ${job.status}`);
+        
+        if (job.status.toLowerCase() === 'completed' || job.status.toLowerCase() === 'failed') {
+          console.log(`[WorkflowDesigner] Fallback detected job ${executingJobId} ${job.status}, clearing running state`);
+          console.log('[WorkflowDesigner] Current runningTabId before clearing:', runningTabId);
+          
+          // Clear the running tab if it's still set
+          if (runningTabId) {
+            console.log('[WorkflowDesigner] Fallback clearing tab:', runningTabId);
+            updateTabExecutionStatus(runningTabId, job.status.toLowerCase() as 'completed' | 'failed');
+            setRunningTabId(null);
+          }
+          
+          // Also check all tabs for stuck running status
+          // Get tabs directly from store to avoid dependency issues
+          const tabManagerState = useTabManagerStore.getState();
+          tabManagerState.tabs.forEach(tab => {
+            if (tab.executionStatus === 'running') {
+              console.log('[WorkflowDesigner] Fallback found stuck tab:', tab.id, '- clearing it');
+              tabManagerState.updateTabExecutionStatus(tab.id, job.status.toLowerCase() as 'completed' | 'failed');
+            }
+          });
+          
+          // Clear the executing job ID
+          setExecutingJobId(null);
+          
+          // Manually dispatch the event in case it was missed
+          // Skip dispatching - let the runStatus store handle it to avoid duplicates
+          console.log('[WorkflowDesigner] Fallback detected completion but NOT dispatching event to avoid duplicates');
+        }
+      } else {
+        console.log('[WorkflowDesigner] Fallback - job not found in runHistory for ID:', executingJobId);
+      }
+    }
+  }, [executingJobId, runHistory, runningTabId, updateTabExecutionStatus]);
+
+  // Add event listener to force clear stuck execution state
+  useEffect(() => {
+    const handleForceClearExecution = () => {
+      console.log('[WorkflowDesigner] Force clearing execution state');
+      
+      // Clear any running tabs
+      // Get tabs directly from store to avoid dependency issues
+      const tabManagerState = useTabManagerStore.getState();
+      tabManagerState.tabs.forEach(tab => {
+        if (tab.executionStatus === 'running') {
+          console.log('[WorkflowDesigner] Force clearing running status for tab:', tab.id);
+          tabManagerState.updateTabExecutionStatus(tab.id, 'completed');
+        }
+      });
+      
+      if (runningTabId) {
+        setRunningTabId(null);
+      }
+      setExecutingJobId(null);
+      
+      // Also clear safety timeout
+      if (runningTabTimeoutRef.current) {
+        clearTimeout(runningTabTimeoutRef.current);
+        runningTabTimeoutRef.current = null;
+      }
+    };
+
+    window.addEventListener('forceClearExecution', handleForceClearExecution);
+    return () => {
+      window.removeEventListener('forceClearExecution', handleForceClearExecution);
+    };
+  }, [runningTabId]);
 
   // Use context menu handlers
   const {
@@ -349,8 +683,10 @@ const WorkflowDesigner: React.FC<WorkflowDesignerProps> = (): JSX.Element => {
     return () => {
       // Component unmount
       unmountedRef.current = true;
+      // Clean up polling when component unmounts
+      stopRunStatusPolling();
     };
-  }, []);
+  }, [stopRunStatusPolling]);
 
   // Use node positioning logic
   useNodePositioning(
@@ -417,28 +753,152 @@ const WorkflowDesigner: React.FC<WorkflowDesignerProps> = (): JSX.Element => {
   const handleRunTab = useCallback(async (tabId: string) => {
     const tab = tabs.find(t => t.id === tabId);
     if (tab) {
-      // Execute the tab directly with its nodes and edges
-      await executeTab(tabId, tab.nodes, tab.edges, tab.name);
+      console.log('[WorkflowDesigner] Starting execution for tab:', tabId);
+      // Set this tab as running
+      setRunningTabId(tabId);
+      updateTabExecutionStatus(tabId, 'running');
+      
+      try {
+        // Execute the tab directly with its nodes and edges
+        await executeTab(tabId, tab.nodes, tab.edges, tab.name);
+        console.log('[WorkflowDesigner] Execution started for tab:', tabId);
+        // Don't clear running state here - let the job completion events handle it
+      } catch (error) {
+        // Clear running state on error
+        console.error('Error executing tab:', error);
+        setRunningTabId(null);
+        updateTabExecutionStatus(tabId, 'failed');
+      }
     }
-  }, [tabs, executeTab]);
+  }, [tabs, executeTab, updateTabExecutionStatus]);
+
+  // Handle showing execution logs
+  const handleShowExecutionLogs = useCallback(async (jobId?: string) => {
+    try {
+      // If no jobId provided, try to get the last viewed job
+      const jobToShow = jobId || lastViewedJobId;
+      
+      if (!jobToShow) {
+        // Dispatch event for chat panel to show error
+        const errorEvent = new CustomEvent('executionError', {
+          detail: {
+            message: 'No execution found. Please run a crew first or select an execution from the history.',
+            type: 'logs'
+          }
+        });
+        window.dispatchEvent(errorEvent);
+        return;
+      }
+      
+      setIsConnectingLogs(true);
+      setConnectionError(null);
+      setSelectedExecutionJobId(jobToShow);
+      setShowExecutionLogsDialog(true);
+      setLastViewedJobId(jobToShow); // Track this as the last viewed job
+      
+      // Fetch historical logs and connect to WebSocket
+      const historicalLogs = await executionLogService.getHistoricalLogs(jobToShow);
+      setSelectedJobLogs(historicalLogs.map(({ job_id, execution_id, ...rest }) => ({
+        ...rest,
+        output: rest.output || rest.content,
+        id: rest.id || Date.now()
+      })));
+      
+      executionLogService.connectToJobLogs(jobToShow);
+      
+      const unsubscribeConnect = executionLogService.onConnected(jobToShow, () => {
+        setIsConnectingLogs(false);
+        console.log('Connected to WebSocket for job logs:', jobToShow);
+      });
+      
+      const unsubscribeLogs = executionLogService.onJobLogs(jobToShow, (logMessage) => {
+        setSelectedJobLogs(prevLogs => [...prevLogs, {
+          id: logMessage.id || Date.now(),
+          output: logMessage.output || logMessage.content,
+          timestamp: logMessage.timestamp
+        }]);
+      });
+      
+      const unsubscribeError = executionLogService.onError(jobToShow, (error: Event | Error) => {
+        console.error('WebSocket error:', error);
+        setConnectionError('Failed to connect to log stream');
+        setIsConnectingLogs(false);
+      });
+      
+      const unsubscribeClose = executionLogService.onClose(jobToShow, (event: CloseEvent) => {
+        console.log('WebSocket closed:', event);
+        setIsConnectingLogs(false);
+      });
+      
+      // Store the unsubscribe functions to be called on cleanup
+      return () => {
+        unsubscribeConnect();
+        unsubscribeLogs();
+        unsubscribeError();
+        unsubscribeClose();
+        executionLogService.disconnectFromJobLogs(jobToShow);
+      };
+    } catch (error) {
+      console.error('Error loading execution logs:', error);
+      setConnectionError('Failed to load execution logs');
+      setIsConnectingLogs(false);
+    }
+  }, [lastViewedJobId]);
+
+  // UI-aware fitView function that respects canvas boundaries
+  const handleUIAwareFitView = useCallback(() => {
+    if (!crewFlowInstanceRef.current || nodes.length === 0) return;
+    
+    // Get current UI state and calculate available canvas area
+    const layoutManager = new CanvasLayoutManager();
+    const currentUIState = useUILayoutStore.getState().getUILayoutState();
+    layoutManager.updateUIState(currentUIState);
+    
+    const canvasArea = layoutManager.getAvailableCanvasArea('crew');
+    
+    // Calculate bounds of all nodes
+    let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+    nodes.forEach(node => {
+      if (node.position) {
+        minX = Math.min(minX, node.position.x);
+        minY = Math.min(minY, node.position.y);
+        maxX = Math.max(maxX, node.position.x + (node.width || 200));
+        maxY = Math.max(maxY, node.position.y + (node.height || 150));
+      }
+    });
+    
+    if (minX === Infinity || minY === Infinity) return;
+    
+    const nodesWidth = maxX - minX;
+    const nodesHeight = maxY - minY;
+    
+    // Calculate zoom to fit nodes within canvas area with padding
+    const padding = 20; // Further reduced padding for closer view
+    const zoomX = (canvasArea.width - 2 * padding) / nodesWidth;
+    const zoomY = (canvasArea.height - 2 * padding) / nodesHeight;
+    const baseZoom = Math.min(zoomX, zoomY, 2.5); // Increased max zoom
+    const zoom = baseZoom * 1.5; // Zoom in 50% more
+    
+    // Calculate viewport position to center nodes in available canvas area
+    // Add extra offset to move more to the right
+    const rightOffset = 250; // Further increased pixels to shift right
+    const viewportX = canvasArea.x + (canvasArea.width - nodesWidth * zoom) / 2 - minX * zoom + rightOffset;
+    const viewportY = canvasArea.y + (canvasArea.height - nodesHeight * zoom) / 2 - minY * zoom;
+    
+    // Apply the viewport with animation
+    crewFlowInstanceRef.current.setViewport({
+      x: viewportX,
+      y: viewportY,
+      zoom: zoom
+    }, { duration: 800 });
+  }, [nodes, crewFlowInstanceRef]);
 
   // Internal fitView function to handle both canvas instances
   const handleFitViewToNodesInternal = useCallback(() => {
-    // Attempt to fit view on both crew and flow instances
-    if (crewFlowInstanceRef.current) {
-      try {
-        setTimeout(() => {
-          crewFlowInstanceRef.current?.fitView({
-            padding: 0.2,
-            includeHiddenNodes: false,
-            duration: 800
-          });
-        }, 100);
-      } catch (error) {
-        console.error('Error fitting view to nodes in CrewCanvas:', error);
-      }
-    }
+    // Use UI-aware fit view for crew canvas
+    handleUIAwareFitView();
     
+    // Standard fit view for flow canvas
     if (flowFlowInstanceRef.current) {
       try {
         setTimeout(() => {
@@ -452,16 +912,148 @@ const WorkflowDesigner: React.FC<WorkflowDesignerProps> = (): JSX.Element => {
         console.error('Error fitting view to nodes in FlowCanvas:', error);
       }
     }
-  }, [crewFlowInstanceRef, flowFlowInstanceRef]);
+  }, [handleUIAwareFitView, flowFlowInstanceRef]);
 
-  // Listen for the internal fit view event
+  // Auto-fit crew nodes with specific zoom
+  const handleAutoFitCrewNodes = useCallback((event: CustomEvent) => {
+    const { layoutBounds } = event.detail;
+    
+    if (crewFlowInstanceRef.current) {
+      try {
+        console.log('[AutoFit] Applying UI-aware auto-fit with bounds:', layoutBounds);
+        
+        // Get current UI state and calculate available canvas area
+        const layoutManager = new CanvasLayoutManager();
+        const currentUIState = useUILayoutStore.getState().getUILayoutState();
+        layoutManager.updateUIState(currentUIState);
+        
+        const canvasArea = layoutManager.getAvailableCanvasArea('crew');
+        
+        // Calculate zoom to fit nodes within canvas area
+        const padding = 20; // Further reduced padding for closer view
+        const zoomX = (canvasArea.width - 2 * padding) / layoutBounds.width;
+        const zoomY = (canvasArea.height - 2 * padding) / layoutBounds.height;
+        const baseZoom = Math.min(zoomX, zoomY, 2.2); // Increased max zoom
+        const zoom = baseZoom * 1.5; // Zoom in 50% more
+        
+        // Calculate viewport position to center nodes in available canvas area
+        // Add extra offset to move more to the right
+        const rightOffset = 240; // Further increased pixels to shift right
+        const viewportX = canvasArea.x + (canvasArea.width - layoutBounds.width * zoom) / 2 - layoutBounds.x * zoom + rightOffset;
+        const viewportY = canvasArea.y + (canvasArea.height - layoutBounds.height * zoom) / 2 - layoutBounds.y * zoom;
+        
+        console.log('[AutoFit] Setting UI-aware viewport - x:', viewportX, 'y:', viewportY, 'zoom:', zoom);
+        
+        // Set zoom and center on the layout
+        crewFlowInstanceRef.current.setViewport({
+          x: viewportX,
+          y: viewportY,
+          zoom: zoom
+        });
+        
+        // Also use fitView as backup with calculated zoom
+        setTimeout(() => {
+          crewFlowInstanceRef.current?.fitView({
+            padding: 0.1,
+            includeHiddenNodes: false,
+            duration: 1000,
+            maxZoom: zoom
+          });
+        }, 100);
+      } catch (error) {
+        console.error('Error auto-fitting crew nodes:', error);
+        // Fallback to regular fit view
+        handleFitViewToNodesInternal();
+      }
+    }
+  }, [crewFlowInstanceRef, handleFitViewToNodesInternal]);
+
+  // Handle automatic node repositioning when UI layout changes
+  const handleRecalculateNodePositions = React.useCallback((event?: Event) => {
+    if (nodes.length === 0) return;
+    
+    // Prevent infinite loops by checking the reason
+    const customEvent = event as CustomEvent;
+    const reason = customEvent?.detail?.reason;
+    
+    // Only reorganize for specific reasons, not general UI changes
+    if (reason !== 'chat-panel-resize' && reason !== 'execution-history-resize') {
+      return;
+    }
+    
+    // Create a layout manager instance with current UI state
+    const layoutManager = new CanvasLayoutManager({
+      margin: 20,
+      minNodeSpacing: 50
+    });
+    
+    // Update with current UI state from store
+    const currentUIState = useUILayoutStore.getState().getUILayoutState();
+    layoutManager.updateUIState(currentUIState);
+    
+    // Reorganize existing nodes to prevent overlaps
+    const reorganizedNodes = layoutManager.reorganizeNodes(nodes, 'crew');
+    
+    // Update node positions
+    setNodes(reorganizedNodes);
+    
+    console.log('[Layout] Recalculated positions for', nodes.length, 'nodes due to', reason);
+    
+    // Trigger UI-aware fit view after repositioning
+    setTimeout(() => {
+      handleUIAwareFitView();
+    }, 100);
+  }, [nodes, setNodes, handleUIAwareFitView]);
+
+  // Listen for the internal fit view event and layout recalculation
   useEffect(() => {
     window.addEventListener('fitViewToNodesInternal', handleFitViewToNodesInternal);
+    window.addEventListener('autoFitCrewNodes', handleAutoFitCrewNodes as EventListener);
+    window.addEventListener('recalculateNodePositions', handleRecalculateNodePositions as EventListener);
     
     return () => {
       window.removeEventListener('fitViewToNodesInternal', handleFitViewToNodesInternal);
+      window.removeEventListener('autoFitCrewNodes', handleAutoFitCrewNodes as EventListener);
+      window.removeEventListener('recalculateNodePositions', handleRecalculateNodePositions as EventListener);
     };
-  }, [handleFitViewToNodesInternal]);
+  }, [handleFitViewToNodesInternal, handleAutoFitCrewNodes, handleRecalculateNodePositions]);
+
+  // Apply custom viewport when page loads/refreshes with existing nodes
+  useEffect(() => {
+    let initialViewportApplied = false;
+    
+    // Wait for ReactFlow to be initialized and nodes to be loaded
+    const applyInitialViewport = () => {
+      if (!initialViewportApplied && crewFlowInstanceRef.current && nodes.length > 0) {
+        console.log('[WorkflowDesigner] Applying custom viewport on page load with', nodes.length, 'nodes');
+        initialViewportApplied = true;
+        // Apply UI-aware fit view
+        handleUIAwareFitView();
+      }
+    };
+
+    // Listen for ReactFlow initialization
+    const handleCrewFlowInitialized = () => {
+      // Give a small delay to ensure nodes are rendered
+      setTimeout(applyInitialViewport, 200);
+    };
+
+    window.addEventListener('crewFlowInitialized', handleCrewFlowInitialized);
+
+    // Also check if nodes are already loaded (from persisted state)
+    if (nodes.length > 0 && crewFlowInstanceRef.current) {
+      // Delay to ensure ReactFlow is fully initialized
+      const timer = setTimeout(applyInitialViewport, 500);
+      return () => {
+        clearTimeout(timer);
+        window.removeEventListener('crewFlowInitialized', handleCrewFlowInitialized);
+      };
+    }
+
+    return () => {
+      window.removeEventListener('crewFlowInitialized', handleCrewFlowInitialized);
+    };
+  }, [nodes.length, handleUIAwareFitView, crewFlowInstanceRef]);
 
   // Render the component
   return (
@@ -483,8 +1075,8 @@ const WorkflowDesigner: React.FC<WorkflowDesignerProps> = (): JSX.Element => {
         {/* Tab Bar */}
         <TabBar 
           onRunTab={handleRunTab}
-          isRunning={isExecuting}
-          runningTabId={activeTabId}
+          isRunning={!!runningTabId}
+          runningTabId={runningTabId}
           onLoadCrew={() => setIsCrewFlowDialogOpen(true)}
           disabled={isChatProcessing || isGeneratingConnections}
         />
@@ -498,11 +1090,16 @@ const WorkflowDesigner: React.FC<WorkflowDesignerProps> = (): JSX.Element => {
         }}>
           {/* Main content area with WorkflowPanels */}
           <Box sx={{ 
-            flex: 1, 
+            flex: 1,
             display: 'flex', 
             flexDirection: 'column',
             overflow: 'hidden',
-            position: 'relative'
+            position: 'relative',
+            // Adjust width based on chat panel visibility and state
+            width: showChatPanel 
+              ? `calc(100% - ${isChatCollapsed ? 60 : chatPanelWidth}px)` // Subtract only chat panel width (right sidebar is already positioned)
+              : '100%', // Full width when chat is hidden
+            transition: 'width 0.3s ease-in-out'
           }}>
             <WorkflowPanels
               areFlowsVisible={areFlowsVisible}
@@ -633,9 +1230,46 @@ const WorkflowDesigner: React.FC<WorkflowDesignerProps> = (): JSX.Element => {
                     isVisible={showChatPanel}
                     nodes={nodes}
                     edges={edges}
-                    onExecuteCrew={() => executeCrew(nodes, edges)}
+                    onExecuteCrew={() => {
+                      // Set current tab as running when executing from chat
+                      const activeTab = getActiveTab();
+                      if (activeTab) {
+                        setRunningTabId(activeTab.id);
+                        updateTabExecutionStatus(activeTab.id, 'running');
+                        
+                        // Clear any existing timeout
+                        if (runningTabTimeoutRef.current) {
+                          clearTimeout(runningTabTimeoutRef.current);
+                        }
+                        
+                        // Set a safety timeout to clear running state after 5 minutes
+                        const tabIdToTimeout = activeTab.id; // Capture the tab ID
+                        runningTabTimeoutRef.current = setTimeout(() => {
+                          console.log('[WorkflowDesigner] Safety timeout: clearing stuck running state for tab:', tabIdToTimeout);
+                          setRunningTabId((currentRunningTabId) => {
+                            if (currentRunningTabId === tabIdToTimeout) {
+                              return null;
+                            }
+                            return currentRunningTabId;
+                          });
+                          updateTabExecutionStatus(tabIdToTimeout, 'completed');
+                        }, 5 * 60 * 1000); // 5 minutes
+                      }
+                      executeCrew(nodes, edges);
+                    }}
                     isCollapsed={isChatCollapsed}
-                    onToggleCollapse={() => setIsChatCollapsed(!isChatCollapsed)}
+                    onToggleCollapse={() => {
+                      setChatPanelCollapsed(!isChatCollapsed);
+                      // Trigger node repositioning when toggling collapse
+                      setTimeout(() => {
+                        const event = new CustomEvent('recalculateNodePositions', {
+                          detail: { reason: 'chat-panel-toggle' }
+                        });
+                        window.dispatchEvent(event);
+                      }, 350); // Wait for animation to complete
+                    }}
+                    chatSessionId={getActiveTab()?.chatSessionId}
+                    onOpenLogs={handleShowExecutionLogs}
                   />
                 </Box>
               </Box>
@@ -883,10 +1517,25 @@ const WorkflowDesigner: React.FC<WorkflowDesignerProps> = (): JSX.Element => {
           />
         )}
 
+        {/* Execution Logs Dialog */}
+        <ShowLogs
+          open={showExecutionLogsDialog}
+          onClose={() => {
+            setShowExecutionLogsDialog(false);
+            if (selectedExecutionJobId) {
+              executionLogService.disconnectFromJobLogs(selectedExecutionJobId);
+            }
+          }}
+          logs={selectedJobLogs}
+          jobId={selectedExecutionJobId || ''}
+          isConnecting={isConnectingLogs}
+          connectionError={connectionError}
+        />
+
         {/* Right Sidebar */}
         <RightSidebar
           onOpenLogsDialog={() => dialogManager.setIsLogsDialogOpen(true)}
-          onToggleChat={() => _setShowChatPanel(!showChatPanel)}
+          onToggleChat={() => setChatPanelVisible(!showChatPanel)}
           isChatOpen={showChatPanel}
           setIsAgentDialogOpen={setIsAgentDialogOpen}
           setIsTaskDialogOpen={setIsTaskDialogOpen}
@@ -902,6 +1551,7 @@ const WorkflowDesigner: React.FC<WorkflowDesignerProps> = (): JSX.Element => {
             // Open schedule dialog
             dialogManager.setScheduleDialogOpen(true);
           }}
+          onToggleExecutionHistory={toggleExecutionHistory}
         />
 
         {/* Left Sidebar */}
@@ -1066,10 +1716,8 @@ const WorkflowDesigner: React.FC<WorkflowDesignerProps> = (): JSX.Element => {
             }
           }}
           onFitView={() => {
-            const reactFlowInstance = crewFlowInstanceRef.current || flowFlowInstanceRef.current;
-            if (reactFlowInstance) {
-              reactFlowInstance.fitView({ padding: 0.2, duration: 200 });
-            }
+            // Use the UI-aware fit view that respects canvas boundaries
+            handleUIAwareFitView();
           }}
           onToggleInteractivity={() => {
             // Toggle interactivity if needed

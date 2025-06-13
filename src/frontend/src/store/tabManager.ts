@@ -16,6 +16,11 @@ export interface TabData {
   savedCrewId?: string; // ID of the saved crew
   savedCrewName?: string; // Name of the saved crew
   lastSavedAt?: Date; // When the crew was last saved
+  // Chat session
+  chatSessionId?: string; // ID of the chat session for this tab
+  // Execution status
+  executionStatus?: 'running' | 'completed' | 'failed';
+  lastExecutionTime?: Date;
 }
 
 interface TabManagerState {
@@ -39,6 +44,9 @@ interface TabManagerState {
   updateTabCrewInfo: (tabId: string, crewId: string, crewName: string) => void;
   clearTabCrewInfo: (tabId: string) => void;
   isTabSaved: (tabId: string) => boolean;
+  // New methods for execution status
+  updateTabExecutionStatus: (tabId: string, status: 'running' | 'completed' | 'failed') => void;
+  clearTabExecutionStatus: (tabId: string) => void;
 }
 
 // Helper function to compare nodes for actual content changes
@@ -119,7 +127,8 @@ export const useTabManagerStore = create<TabManagerState>()(
           isActive: true,
           isDirty: false,
           createdAt: new Date(),
-          lastModified: new Date()
+          lastModified: new Date(),
+          chatSessionId: uuidv4() // Generate unique chat session for each tab
         };
 
         set(state => ({
@@ -199,6 +208,9 @@ export const useTabManagerStore = create<TabManagerState>()(
           const nodesChanged = nodesHaveActuallyChanged(tab.nodes, nodes);
           const shouldMarkDirty = nodesChanged && (!tab.savedCrewId || tab.isDirty);
           
+          // Clear execution status when nodes are meaningfully changed
+          const shouldClearExecutionStatus = nodesChanged && tab.executionStatus;
+          
           return {
             tabs: state.tabs.map(t =>
               t.id === tabId
@@ -210,7 +222,10 @@ export const useTabManagerStore = create<TabManagerState>()(
                       data: { ...node.data }
                     })), 
                     isDirty: shouldMarkDirty, 
-                    lastModified: new Date() 
+                    lastModified: new Date(),
+                    // Clear execution status if nodes changed
+                    executionStatus: shouldClearExecutionStatus ? undefined : t.executionStatus,
+                    lastExecutionTime: shouldClearExecutionStatus ? undefined : t.lastExecutionTime
                   }
                 : t
             )
@@ -226,6 +241,9 @@ export const useTabManagerStore = create<TabManagerState>()(
           const edgesChanged = edgesHaveActuallyChanged(tab.edges, edges);
           const shouldMarkDirty = edgesChanged && (!tab.savedCrewId || tab.isDirty);
           
+          // Clear execution status when edges are meaningfully changed
+          const shouldClearExecutionStatus = edgesChanged && tab.executionStatus;
+          
           return {
             tabs: state.tabs.map(t =>
               t.id === tabId
@@ -236,7 +254,10 @@ export const useTabManagerStore = create<TabManagerState>()(
                       data: edge.data ? { ...edge.data } : undefined
                     })), 
                     isDirty: shouldMarkDirty, 
-                    lastModified: new Date() 
+                    lastModified: new Date(),
+                    // Clear execution status if edges changed
+                    executionStatus: shouldClearExecutionStatus ? undefined : t.executionStatus,
+                    lastExecutionTime: shouldClearExecutionStatus ? undefined : t.lastExecutionTime
                   }
                 : t
             )
@@ -289,7 +310,8 @@ export const useTabManagerStore = create<TabManagerState>()(
           // Don't copy crew info for duplicated tabs
           savedCrewId: undefined,
           savedCrewName: undefined,
-          lastSavedAt: undefined
+          lastSavedAt: undefined,
+          chatSessionId: uuidv4() // New chat session for duplicated tab
         };
 
         // Update edge references to point to new node IDs
@@ -367,6 +389,35 @@ export const useTabManagerStore = create<TabManagerState>()(
       isTabSaved: (tabId: string) => {
         const tab = get().getTab(tabId);
         return tab ? !tab.isDirty && !!tab.savedCrewId : false;
+      },
+
+      // New methods for execution status
+      updateTabExecutionStatus: (tabId: string, status: 'running' | 'completed' | 'failed') => {
+        set(state => ({
+          tabs: state.tabs.map(tab =>
+            tab.id === tabId
+              ? { 
+                  ...tab, 
+                  executionStatus: status,
+                  lastExecutionTime: new Date()
+                }
+              : tab
+          )
+        }));
+      },
+
+      clearTabExecutionStatus: (tabId: string) => {
+        set(state => ({
+          tabs: state.tabs.map(tab =>
+            tab.id === tabId
+              ? { 
+                  ...tab, 
+                  executionStatus: undefined,
+                  lastExecutionTime: undefined
+                }
+              : tab
+          )
+        }));
       }
     }),
     {
@@ -376,7 +427,10 @@ export const useTabManagerStore = create<TabManagerState>()(
           ...tab,
           createdAt: tab.createdAt.toISOString(),
           lastModified: tab.lastModified.toISOString(),
-          lastSavedAt: tab.lastSavedAt?.toISOString()
+          lastSavedAt: tab.lastSavedAt?.toISOString(),
+          lastExecutionTime: tab.lastExecutionTime?.toISOString(),
+          // Don't persist 'running' status, only completed/failed
+          executionStatus: tab.executionStatus === 'running' ? undefined : tab.executionStatus
         })),
         activeTabId: state.activeTabId
       }),
@@ -387,7 +441,8 @@ export const useTabManagerStore = create<TabManagerState>()(
             ...tab,
             createdAt: new Date(tab.createdAt),
             lastModified: new Date(tab.lastModified),
-            lastSavedAt: tab.lastSavedAt ? new Date(tab.lastSavedAt) : undefined
+            lastSavedAt: tab.lastSavedAt ? new Date(tab.lastSavedAt) : undefined,
+            lastExecutionTime: tab.lastExecutionTime ? new Date(tab.lastExecutionTime) : undefined
           }));
         }
       }

@@ -28,6 +28,7 @@ interface RunStatusState {
   backoffInterval: number;
   isUserActive: boolean;
   pollingInterval: NodeJS.Timeout | null;
+  processedCompletions: Set<string>; // Track which jobs we've already sent completion events for
 
   // Actions
   addRun: (run: ExtendedRun) => void;
@@ -111,6 +112,7 @@ export const useRunStatusStore = create<RunStatusState>((set, get) => {
     backoffInterval: INTERVALS.INITIAL_BACKOFF,
     isUserActive: true,
     pollingInterval: null,
+    processedCompletions: new Set<string>(),
 
     addRun: (run) => {
       set((state) => {
@@ -119,7 +121,7 @@ export const useRunStatusStore = create<RunStatusState>((set, get) => {
         
         return {
           runHistory: [run, ...filteredHistory], // Add new run at the beginning for visibility
-          hasRunningJobs: state.hasRunningJobs || run.status === 'running' || run.status === 'queued'
+          hasRunningJobs: state.hasRunningJobs || run.status.toLowerCase() === 'running' || run.status.toLowerCase() === 'queued'
         };
       });
     },
@@ -149,7 +151,7 @@ export const useRunStatusStore = create<RunStatusState>((set, get) => {
         
         // For completed or failed jobs, make sure we set the completed_at time
         let completedAt = currentRun.completed_at;
-        if ((status === 'completed' || status === 'failed') && !completedAt) {
+        if ((status.toLowerCase() === 'completed' || status.toLowerCase() === 'failed') && !completedAt) {
           console.log(`[RunStatusStore] Setting completed_at timestamp for newly completed job ${jobId}`);
           completedAt = now;
         }
@@ -184,7 +186,7 @@ export const useRunStatusStore = create<RunStatusState>((set, get) => {
           },
           runHistory: updatedHistory,
           currentRun: state.currentRun?.job_id === jobId ? updatedRun : state.currentRun,
-          hasRunningJobs: state.hasRunningJobs || status === 'running' || status === 'queued' || status === 'pending'
+          hasRunningJobs: state.hasRunningJobs || status.toLowerCase() === 'running' || status.toLowerCase() === 'queued' || status.toLowerCase() === 'pending'
         };
       });
     },
@@ -222,11 +224,70 @@ export const useRunStatusStore = create<RunStatusState>((set, get) => {
         // Simplified approach: always fetch all recent runs from scratch
         const response = await runService.getRuns(50, 0);
         
+        // Get current processedCompletions set
+        const currentProcessedCompletions = new Set(state.processedCompletions);
+        
         // Process the response data to ensure we have proper status information
         const processedRuns = response.runs.map(run => {
+          // Check if this run's status has changed from running to completed/failed
+          const currentActiveRun = state.activeRuns[run.job_id];
+          
+          // Also check runHistory for the previous status
+          const previousRun = state.runHistory.find(r => r.job_id === run.job_id);
+          const wasRunning = currentActiveRun?.status?.toLowerCase() === 'running' || 
+                            currentActiveRun?.status?.toLowerCase() === 'queued' ||
+                            previousRun?.status?.toLowerCase() === 'running' ||
+                            previousRun?.status?.toLowerCase() === 'queued';
+          
+          if (wasRunning && (run.status.toLowerCase() === 'completed' || run.status.toLowerCase() === 'failed')) {
+            // Check if we've already processed this completion to avoid duplicate events
+            const completionKey = `${run.job_id}-${run.status.toLowerCase()}`;
+            if (currentProcessedCompletions.has(completionKey)) {
+              console.log(`[RunStatusStore] Already processed ${run.status} event for job ${run.job_id}, skipping`);
+              return run;
+            }
+            
+            // Dispatch appropriate event for status change
+            console.log(`[RunStatusStore] Job ${run.job_id} status changed to ${run.status} (was running/queued)`);
+            console.log(`[RunStatusStore] Job details - status: ${run.status}, error: ${run.error}, result: ${JSON.stringify(run.result)}`);
+            
+            // Check if status is COMPLETED but there's an error field
+            if (run.status.toLowerCase() === 'completed' && run.error) {
+              console.warn(`[RunStatusStore] WARNING: Job ${run.job_id} has status COMPLETED but also has error: ${run.error}`);
+              // If status is COMPLETED, ignore the error field and treat as success
+            }
+            
+            // Only dispatch ONE event based on status, ignoring error field if status is completed
+            if (run.status.toLowerCase() === 'completed') {
+              console.log(`[RunStatusStore] Dispatching jobCompleted event for job ${run.job_id}`);
+              
+              // Mark as processed before dispatching
+              currentProcessedCompletions.add(completionKey);
+              
+              window.dispatchEvent(new CustomEvent('jobCompleted', { 
+                detail: { 
+                  jobId: run.job_id,
+                  result: run.result
+                }
+              }));
+            } else if (run.status.toLowerCase() === 'failed') {
+              console.log(`[RunStatusStore] Dispatching jobFailed event for job ${run.job_id} with error: ${run.error}`);
+              
+              // Mark as processed before dispatching
+              currentProcessedCompletions.add(completionKey);
+              
+              window.dispatchEvent(new CustomEvent('jobFailed', { 
+                detail: { 
+                  jobId: run.job_id,
+                  error: run.error || 'Job execution failed'
+                }
+              }));
+            }
+          }
+          
           // Ensure status is properly set from the database
           // If it's completed or failed, make sure updated_at is set
-          if ((run.status === 'completed' || run.status === 'failed')) {
+          if ((run.status.toLowerCase() === 'completed' || run.status.toLowerCase() === 'failed')) {
             // Ensure the completed job has a completed_at timestamp
             if (!run.completed_at) {
               console.log(`[RunStatusStore] Fixing missing completed_at for job ${run.job_id} with status ${run.status}`);
@@ -254,7 +315,7 @@ export const useRunStatusStore = create<RunStatusState>((set, get) => {
 
         // Update the running jobs flag and reset counters if we got data
         const hasActiveJobs = processedRuns.some(run => 
-          run.status === 'running' || run.status === 'queued' || run.status === 'pending'
+          run.status.toLowerCase() === 'running' || run.status.toLowerCase() === 'queued' || run.status.toLowerCase() === 'pending'
         );
         
         // Reset counters if we got data with active jobs
@@ -268,9 +329,10 @@ export const useRunStatusStore = create<RunStatusState>((set, get) => {
           set({ hasRunningJobs: false });
         }
 
-        // Always update the fetch time
+        // Always update the fetch time and processed completions
         set({ 
           lastFetchTime: Date.now(),
+          processedCompletions: currentProcessedCompletions,
           lastFetchAttempt: Date.now()
         });
 
@@ -280,7 +342,7 @@ export const useRunStatusStore = create<RunStatusState>((set, get) => {
         // Only keep truly active runs (running, queued, or pending)
         processedRuns.forEach(run => {
           // Add to active runs if it's running, queued, or pending
-          if (run.status === 'running' || run.status === 'queued' || run.status === 'pending') {
+          if (run.status.toLowerCase() === 'running' || run.status.toLowerCase() === 'queued' || run.status.toLowerCase() === 'pending') {
             updatedActiveRuns[run.job_id] = run;
           }
         });

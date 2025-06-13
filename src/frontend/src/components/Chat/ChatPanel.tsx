@@ -23,6 +23,8 @@ interface ChatPanelProps {
   onExecuteCrew?: () => void;
   isCollapsed?: boolean;
   onToggleCollapse?: () => void;
+  chatSessionId?: string;
+  onOpenLogs?: (jobId: string) => void;
 }
 
 const ChatPanel: React.FC<ChatPanelProps> = ({ 
@@ -33,7 +35,9 @@ const ChatPanel: React.FC<ChatPanelProps> = ({
   edges = [], 
   onExecuteCrew,
   isCollapsed = false,
-  onToggleCollapse
+  onToggleCollapse,
+  chatSessionId,
+  onOpenLogs
 }) => {
   const { selectedModel, setSelectedModel } = useCrewExecutionStore();
   const { selectedTools } = useJobManagementStore();
@@ -118,6 +122,8 @@ const ChatPanel: React.FC<ChatPanelProps> = ({
           edges={edges}
           onExecuteCrew={onExecuteCrew}
           onToggleCollapse={onToggleCollapse}
+          chatSessionId={chatSessionId}
+          onOpenLogs={onOpenLogs}
         />
       </Box>
     </Paper>
