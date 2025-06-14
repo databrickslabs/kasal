@@ -158,8 +158,8 @@ class TraceManager:
                                         # Prepare trace data in the format expected by ExecutionTraceService
                                         trace_dict = {
                                             "job_id": job_id,
-                                            "agent_name": trace_data.get("agent_name", "Unknown Agent"),
-                                            "task_name": trace_data.get("task_name", "Unknown Task"),
+                                            "event_source": trace_data.get("event_source", event_type),  # Use event_type as fallback
+                                            "event_context": trace_data.get("event_context", ""),
                                             "event_type": event_type,
                                             "output": trace_data.get("output_content", ""),
                                             "trace_metadata": trace_data.get("extra_data", {})

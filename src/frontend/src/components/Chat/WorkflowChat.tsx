@@ -87,8 +87,9 @@ interface ChatMessage {
   confidence?: number;
   result?: unknown;
   isIntermediate?: boolean;
-  agentName?: string;
-  taskName?: string;
+  eventSource?: string;
+  eventContext?: string;
+  eventType?: string;
   jobId?: string;
 }
 
@@ -267,8 +268,8 @@ const WorkflowChat: React.FC<WorkflowChatProps> = ({
             isIntermediate?: boolean;
           };
                 baseMessage.jobId = genResult.jobId;
-                baseMessage.agentName = genResult.agentName;
-                baseMessage.taskName = genResult.taskName;
+                baseMessage.eventSource = genResult.agentName;
+                baseMessage.eventContext = genResult.taskName;
                 baseMessage.isIntermediate = genResult.isIntermediate;
                 
                 // Remove the additional fields from result to clean it up
@@ -357,8 +358,8 @@ const WorkflowChat: React.FC<WorkflowChatProps> = ({
             isIntermediate?: boolean;
           };
           baseMessage.jobId = genResult.jobId;
-          baseMessage.agentName = genResult.agentName;
-          baseMessage.taskName = genResult.taskName;
+          baseMessage.eventSource = genResult.agentName;
+          baseMessage.eventContext = genResult.taskName;
           baseMessage.isIntermediate = genResult.isIntermediate;
           
           // Remove the additional fields from result to clean it up
@@ -415,8 +416,8 @@ const WorkflowChat: React.FC<WorkflowChatProps> = ({
         generationResult = {
           ...(message.result || {}),
           jobId: message.jobId,
-          agentName: message.agentName,
-          taskName: message.taskName,
+          agentName: message.eventSource,
+          taskName: message.eventContext,
           isIntermediate: message.isIntermediate
         };
       }
@@ -621,8 +622,9 @@ const WorkflowChat: React.FC<WorkflowChatProps> = ({
           content: typeof trace.output === 'string' ? trace.output : JSON.stringify(trace.output, null, 2),
           timestamp: new Date(trace.created_at || Date.now()),
           isIntermediate: true,
-          agentName: trace.agent_name,
-          taskName: trace.task_name,
+          eventSource: trace.event_source,
+          eventContext: trace.event_context,
+          eventType: trace.event_type,
           jobId
         };
         
@@ -738,8 +740,9 @@ const WorkflowChat: React.FC<WorkflowChatProps> = ({
             content,
             timestamp: new Date(trace.created_at || Date.now()),
             isIntermediate: true,
-            agentName: trace.agent_name,
-            taskName: trace.task_name,
+            eventSource: trace.event_source,
+            eventContext: trace.event_context,
+            eventType: trace.event_type,
             jobId
           };
           
@@ -1446,8 +1449,9 @@ const WorkflowChat: React.FC<WorkflowChatProps> = ({
                 content,
                 timestamp: new Date(trace.created_at || Date.now()),
                 isIntermediate: false, // Not intermediate since this is intentional display
-                agentName: trace.agent_name,
-                taskName: trace.task_name,
+                eventSource: trace.event_source,
+                eventContext: trace.event_context,
+                eventType: trace.event_type,
                 jobId: specificJobId || undefined
               };
               
@@ -1539,8 +1543,9 @@ const WorkflowChat: React.FC<WorkflowChatProps> = ({
                 content,
                 timestamp: new Date(trace.created_at || Date.now()),
                 isIntermediate: false,
-                agentName: trace.agent_name,
-                taskName: trace.task_name,
+                eventSource: trace.event_source,
+                eventContext: trace.event_context,
+                eventType: trace.event_type,
                 jobId: jobIdToFetch || undefined
               };
               
@@ -1978,7 +1983,7 @@ const WorkflowChat: React.FC<WorkflowChatProps> = ({
                           <Typography variant="subtitle2">
                             {message.type === 'user' ? 'You' : 
                              message.type === 'execution' ? 'Workflow' :
-                             message.type === 'trace' ? (message.agentName || 'Agent') : 'Assistant'}
+                             message.type === 'trace' ? (message.eventType || 'Trace') : 'Assistant'}
                           </Typography>
                           {message.intent && (
                             <Chip
@@ -2009,9 +2014,9 @@ const WorkflowChat: React.FC<WorkflowChatProps> = ({
                             opacity: message.isIntermediate ? 0.7 : 1
                           }}
                         >
-                          {message.taskName && message.type === 'trace' && (
+                          {message.eventContext && message.type === 'trace' && (
                             <Typography variant="caption" display="block" sx={{ mb: 0.5, color: 'primary.main' }}>
-                              Task: {message.taskName}
+                              Context: {message.eventContext}
                             </Typography>
                           )}
                           {message.content}

@@ -16,9 +16,9 @@ class ExecutionTrace(Base):
     id = Column(Integer, primary_key=True)
     run_id = Column(Integer, ForeignKey('executionhistory.id'))
     job_id = Column(String, ForeignKey('executionhistory.job_id'), index=True)
-    agent_name = Column(String, nullable=False)
-    task_name = Column(String, nullable=False)
-    event_type = Column(String, nullable=True, index=True)
+    event_source = Column(String, nullable=False)  # was agent_name
+    event_context = Column(String, nullable=False)  # was task_name
+    event_type = Column(String, nullable=False, index=True)  # now required
     output = Column(JSON)
     trace_metadata = Column(JSON, nullable=True)
     created_at = Column(DateTime, default=datetime.utcnow)

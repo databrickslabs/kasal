@@ -6,8 +6,9 @@ export interface ShowTraceProps {
 
 export interface Trace {
   id: string;
-  agent_name: string;
-  task_name: string;
+  event_source: string;
+  event_context: string;
+  event_type: string;
   task_id?: string;
   created_at: string;
   output: string | Record<string, unknown>;

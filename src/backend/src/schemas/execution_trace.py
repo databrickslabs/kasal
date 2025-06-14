@@ -19,8 +19,9 @@ class ExecutionTraceItem(BaseModel):
     job_id: Optional[str] = None
     timestamp: Optional[datetime] = None
     created_at: Optional[datetime] = None
-    agent_name: Optional[str] = None
-    task_name: Optional[str] = None
+    event_source: Optional[str] = None
+    event_context: Optional[str] = None
+    event_type: Optional[str] = None
     input_data: Optional[Dict[str, Any]] = None
     output_data: Optional[Dict[str, Any]] = None
     output: Optional[Any] = None  # Accept any type of output (dict or string)

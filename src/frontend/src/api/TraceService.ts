@@ -34,8 +34,8 @@ interface BackendTraceData {
   id: number;
   run_id?: number;
   job_id?: string;
-  agent_name?: string;
-  task_name?: string;
+  event_source?: string;
+  event_context?: string;
   task_id?: string;
   event_type?: string;
   created_at?: string;
@@ -218,8 +218,9 @@ export const TraceService = {
           // Map the backend trace model to the frontend Trace interface
           return {
             id: trace.id.toString(),
-            agent_name: trace.agent_name || '',
-            task_name: trace.task_name || '',
+            event_source: trace.event_source || '',
+            event_context: trace.event_context || '',
+            event_type: trace.event_type || '',
             task_id: trace.task_id || undefined,
             created_at: trace.created_at || trace.timestamp || new Date().toISOString(),
             // Handle the case where the output might be in output_data, output, or directly in the trace
@@ -232,8 +233,9 @@ export const TraceService = {
           // Map array items to match Trace interface
           return response.data.map((item: BackendTraceData) => ({
             id: item.id.toString(),
-            agent_name: item.agent_name || '',
-            task_name: item.task_name || '',
+            event_source: item.event_source || '',
+            event_context: item.event_context || '',
+            event_type: item.event_type || '',
             task_id: item.task_id || undefined,
             created_at: item.created_at || item.timestamp || new Date().toISOString(),
             output: item.output || item.output_data || ''

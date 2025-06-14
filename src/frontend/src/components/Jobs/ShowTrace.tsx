@@ -201,7 +201,7 @@ const ShowTrace: React.FC<ShowTraceProps> = ({ open, onClose, runId }) => {
     if (trace.task_id && taskDetails[trace.task_id] && taskDetails[trace.task_id].name) {
       return `Task: ${taskDetails[trace.task_id].name}`;
     }
-    return `Task: ${trace.task_name}`;
+    return trace.event_context || '';
   };
 
   const MarkdownParagraph = React.forwardRef<HTMLParagraphElement, MarkdownProps>((props, ref) => (
@@ -449,7 +449,7 @@ const ShowTrace: React.FC<ShowTraceProps> = ({ open, onClose, runId }) => {
                 >
                   <Box sx={{ display: 'flex', flexDirection: 'column', gap: 0.5 }}>
                     <Typography variant="subtitle1" color="primary">
-                      {trace.agent_name}
+                      {trace.event_type}
                     </Typography>
                     <Typography variant="caption" color="text.secondary">
                       {getTaskName(trace)}

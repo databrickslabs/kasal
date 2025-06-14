@@ -187,8 +187,8 @@ class AgentTraceEventListener(BaseEventListener):
                     extra_data['markdown'] = True
                 
                 self._enqueue_trace(
-                    agent_name=agent_name,
-                    task_name=task_name,
+                    event_source=agent_name,  # Agent role is the source
+                    event_context=task_name,   # Task description is the context
                     event_type="agent_execution",
                     output_content=output_content,
                     extra_data=extra_data
@@ -216,11 +216,11 @@ class AgentTraceEventListener(BaseEventListener):
                 output_content = str(event.output) if event.output is not None else "None"
                 
                 self._enqueue_trace(
-                    agent_name=agent_name,
-                    task_name=task_name,
+                    event_source=tool_name,    # Tool name is the source
+                    event_context=agent_name,  # Agent using the tool is context
                     event_type="tool_usage",
                     output_content=output_content,
-                    extra_data={"tool_name": tool_name}
+                    extra_data={"agent_role": agent_name, "task": task_name}
                 )
             except Exception as e:
                 logger.error(f"{log_prefix} Error in on_tool_usage_finished: {e}", exc_info=True)
@@ -260,8 +260,8 @@ class AgentTraceEventListener(BaseEventListener):
                 logger.debug(f"{log_prefix} LLMCallCompletedEvent attributes: {[attr for attr in dir(event) if not attr.startswith('_')]}")
                 
                 self._enqueue_trace(
-                    agent_name=agent_name,
-                    task_name=task_name,
+                    event_source="llm",
+                    event_context=str(event.call_type) if hasattr(event, 'call_type') else "call",
                     event_type="llm_call",
                     output_content=output_content
                 )
@@ -295,8 +295,8 @@ class AgentTraceEventListener(BaseEventListener):
                 output_content = str(event.output) if event.output is not None else "None"
                 
                 self._enqueue_trace(
-                    agent_name=agent_name,
-                    task_name=task_name,
+                    event_source="task",
+                    event_context=task_name,
                     event_type="task_completed",
                     output_content=output_content
                 )
@@ -322,8 +322,8 @@ class AgentTraceEventListener(BaseEventListener):
                 logger.info(f"{log_prefix} Event: CrewKickoffStarted for crew: {event.crew_name}")
                 
                 self._enqueue_trace(
-                    agent_name="Crew",
-                    task_name="Initialization",
+                    event_source="crew",
+                    event_context=event.crew_name or "crew",
                     event_type="crew_started",
                     output_content=f"Crew '{event.crew_name}' execution started"
                 )
@@ -345,8 +345,8 @@ class AgentTraceEventListener(BaseEventListener):
                 output_content = str(event.output) if event.output is not None else "None"
                 
                 self._enqueue_trace(
-                    agent_name="Crew",
-                    task_name="Completion",
+                    event_source="crew",
+                    event_context=event.crew_name or "crew",
                     event_type="crew_completed",
                     output_content=output_content
                 )
@@ -376,8 +376,8 @@ class AgentTraceEventListener(BaseEventListener):
                 logger.info(f"{log_prefix} Event: TaskStarted for task: {task_name} and agent: {agent_name} with ID: {task_id}")
                 
                 self._enqueue_trace(
-                    agent_name=agent_name,
-                    task_name=task_name,
+                    event_source="task",
+                    event_context=task_name,
                     event_type="task_started",
                     output_content=f"Task '{task_name}' started by agent '{agent_name}'"
                 )
@@ -397,14 +397,14 @@ class AgentTraceEventListener(BaseEventListener):
             except Exception as e:
                 logger.error(f"{log_prefix} Error in on_task_started: {e}", exc_info=True)
     
-    def _enqueue_trace(self, agent_name: str, task_name: str, event_type: str, 
+    def _enqueue_trace(self, event_source: str, event_context: str, event_type: str, 
                       output_content: str, extra_data: dict = None) -> None:
         """
         Enqueue a trace entry to be processed by the trace writer.
         
         Args:
-            agent_name: Name of the agent
-            task_name: Name of the task
+            event_source: Source of the event (e.g., agent role, "crew", "llm")
+            event_context: Context of the event (e.g., task description, crew name)
             event_type: Type of event
             output_content: Content to be logged
             extra_data: Additional metadata
@@ -415,13 +415,13 @@ class AgentTraceEventListener(BaseEventListener):
             time_since_init = (timestamp - self._init_time).total_seconds()
             
             # Log at the beginning to confirm method is called with timing info
-            logger.info(f"{log_prefix} EVENT[{event_type}] ⏳ Enqueuing trace for agent: {agent_name} and task: {task_name[:30]}... (T+{time_since_init:.2f}s)")
+            logger.info(f"{log_prefix} EVENT[{event_type}] ⏳ Enqueuing trace for source: {event_source} and context: {event_context[:30]}... (T+{time_since_init:.2f}s)")
             
             # Create trace data for queue
             trace_data = {
                 "job_id": self.job_id,
-                "agent_name": agent_name,
-                "task_name": task_name,
+                "event_source": event_source,
+                "event_context": event_context,
                 "event_type": event_type,
                 "timestamp": timestamp.isoformat(),
                 "output_content": output_content,
@@ -442,7 +442,7 @@ class AgentTraceEventListener(BaseEventListener):
             self._queue.put_nowait(trace_data)
             
             # Log successful enqueuing with more info
-            logger.info(f"{log_prefix} EVENT[{event_type}] ✅ Successfully enqueued trace for Agent: {agent_name}, Task: {task_name[:30]}...")
+            logger.info(f"{log_prefix} EVENT[{event_type}] ✅ Successfully enqueued trace for Source: {event_source}, Context: {event_context[:30]}...")
         except queue.Full:
              logger.error(f"{log_prefix} EVENT[{event_type}] ❌ Trace queue is full! Discarding trace data.")
         except Exception as e:
