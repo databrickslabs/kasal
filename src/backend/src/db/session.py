@@ -116,6 +116,53 @@ async def init_db() -> None:
         importlib.reload(src.db.all_models)  # Ensure models are freshly loaded
         from src.db.all_models import Base
         
+        # For PostgreSQL, check if database exists and create if not
+        if str(settings.DATABASE_URI).startswith('postgresql'):
+            import asyncpg
+            
+            # Extract connection parameters
+            db_name = settings.POSTGRES_DB
+            host = settings.POSTGRES_SERVER
+            port = settings.POSTGRES_PORT
+            user = settings.POSTGRES_USER
+            password = settings.POSTGRES_PASSWORD
+            
+            try:
+                # First, try to connect to the specified database
+                test_conn = await asyncpg.connect(
+                    host=host,
+                    port=port,
+                    user=user,
+                    password=password,
+                    database=db_name
+                )
+                await test_conn.close()
+                logger.info(f"Database '{db_name}' exists and is accessible")
+            except asyncpg.InvalidCatalogNameError:
+                # Database doesn't exist, create it
+                logger.info(f"Database '{db_name}' does not exist. Creating it...")
+                
+                # Connect to postgres database to create the new database
+                admin_conn = await asyncpg.connect(
+                    host=host,
+                    port=port,
+                    user=user,
+                    password=password,
+                    database='postgres'  # Connect to default postgres database
+                )
+                
+                try:
+                    # Create the database
+                    await admin_conn.execute(f'CREATE DATABASE "{db_name}"')
+                    logger.info(f"Database '{db_name}' created successfully")
+                except asyncpg.DuplicateDatabaseError:
+                    logger.info(f"Database '{db_name}' already exists")
+                except Exception as e:
+                    logger.error(f"Error creating database: {e}")
+                    raise
+                finally:
+                    await admin_conn.close()
+        
         # For SQLite, ensure database file exists
         if str(settings.DATABASE_URI).startswith('sqlite'):
             db_path = settings.SQLITE_DB_PATH

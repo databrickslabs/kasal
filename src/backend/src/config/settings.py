@@ -30,7 +30,7 @@ class Settings(BaseSettings):
     POSTGRES_SERVER: str = "localhost"
     POSTGRES_USER: str = "postgres"
     POSTGRES_PASSWORD: str = "postgres"
-    POSTGRES_DB: str = "app"
+    POSTGRES_DB: str = "kasal"
     POSTGRES_PORT: str = "5432"
     DATABASE_URI: Optional[str] = None
     SYNC_DATABASE_URI: Optional[str] = None
