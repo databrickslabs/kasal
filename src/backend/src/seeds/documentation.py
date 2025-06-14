@@ -215,6 +215,28 @@ async def seed_documentation_embeddings(session: AsyncSession) -> None:
     # Initialize service
     doc_embedding_service = DocumentationEmbeddingService()
     
+    # Check if we can create embeddings - fail fast if not configured
+    embedding_available = False
+    use_mock_embeddings = False
+    try:
+        embedder_config = {
+            'provider': 'databricks',
+            'config': {'model': EMBEDDING_MODEL}
+        }
+        test_embedding = await LLMManager.get_embedding(
+            text="test",
+            model=EMBEDDING_MODEL,
+            embedder_config=embedder_config
+        )
+        if test_embedding:
+            embedding_available = True
+            logger.info("✅ Embedding service is available and configured")
+    except Exception as e:
+        logger.warning(f"⚠️ Embedding service not available: {str(e)}")
+        logger.warning("Will use mock embeddings for all documentation.")
+        logger.warning("To enable real embeddings, configure Databricks in the frontend settings.")
+        use_mock_embeddings = True
+    
     # Process each documentation URL
     total_chunks_processed = 0
     
@@ -227,20 +249,24 @@ async def seed_documentation_embeddings(session: AsyncSession) -> None:
             # Create embedding for each chunk and store in database
             for chunk in chunks:
                 try:
-                    # Create embedding using LLMManager with Databricks configuration
-                    try:
-                        embedder_config = {
-                            'provider': 'databricks',
-                            'config': {'model': EMBEDDING_MODEL}
-                        }
-                        embedding = await LLMManager.get_embedding(
-                            text=chunk["content"],
-                            model=EMBEDDING_MODEL,
-                            embedder_config=embedder_config
-                        )
-                    except Exception as e:
-                        logger.warning(f"Error with LLMManager.get_embedding: {str(e)}. Using mock embeddings instead.")
+                    # Create embedding - use real if available, otherwise mock
+                    if use_mock_embeddings or not embedding_available:
                         embedding = await mock_create_embedding(chunk["content"])
+                    else:
+                        try:
+                            embedder_config = {
+                                'provider': 'databricks',
+                                'config': {'model': EMBEDDING_MODEL}
+                            }
+                            embedding = await LLMManager.get_embedding(
+                                text=chunk["content"],
+                                model=EMBEDDING_MODEL,
+                                embedder_config=embedder_config
+                            )
+                        except Exception as e:
+                            # If embedding fails after initial test passed, use mock for this chunk
+                            logger.debug(f"Embedding failed for chunk, using mock: {str(e)}")
+                            embedding = await mock_create_embedding(chunk["content"])
                     
                     # Create schema for database record
                     doc_embedding_create = DocumentationEmbeddingCreate(

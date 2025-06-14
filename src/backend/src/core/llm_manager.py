@@ -263,6 +263,11 @@ __all__ = ['LLMManager']
 class LLMManager:
     """Manager for LLM configurations and interactions."""
     
+    # Circuit breaker for embeddings to prevent repeated failures
+    _embedding_failures = {}  # Track failures by provider
+    _embedding_failure_threshold = 3  # Number of failures before circuit opens
+    _circuit_reset_time = 300  # Reset circuit after 5 minutes
+    
     @staticmethod
     async def configure_litellm(model: str) -> Dict[str, Any]:
         """
@@ -605,6 +610,23 @@ class LLMManager:
                 provider = 'openai'
                 embedding_model = model
             
+            # Check circuit breaker for this provider
+            current_time = time.time()
+            if provider in LLMManager._embedding_failures:
+                failure_info = LLMManager._embedding_failures[provider]
+                failure_count = failure_info.get('count', 0)
+                last_failure_time = failure_info.get('last_failure', 0)
+                
+                # If circuit is open, check if it should be reset
+                if failure_count >= LLMManager._embedding_failure_threshold:
+                    if current_time - last_failure_time < LLMManager._circuit_reset_time:
+                        logger.warning(f"Circuit breaker OPEN for {provider} embeddings. Failing fast.")
+                        return None
+                    else:
+                        # Reset circuit after timeout
+                        logger.info(f"Resetting circuit breaker for {provider} embeddings")
+                        LLMManager._embedding_failures[provider] = {'count': 0, 'last_failure': 0}
+            
             logger.info(f"Creating embedding using provider: {provider}, model: {embedding_model}")
             
             # Handle different embedding providers
@@ -669,7 +691,6 @@ class LLMManager:
                 
                 # Use direct HTTP request to avoid config file issues
                 import aiohttp
-                import json
                 
                 try:
                     # Construct the direct API endpoint
@@ -762,11 +783,30 @@ class LLMManager:
             if response and "data" in response and len(response["data"]) > 0:
                 embedding = response["data"][0]["embedding"]
                 logger.info(f"Successfully created embedding with {len(embedding)} dimensions using {provider}")
+                # Reset failure count on success
+                if provider in LLMManager._embedding_failures:
+                    LLMManager._embedding_failures[provider] = {'count': 0, 'last_failure': 0}
                 return embedding
             else:
                 logger.warning("Failed to get embedding from response")
+                # Track failure
+                if provider not in LLMManager._embedding_failures:
+                    LLMManager._embedding_failures[provider] = {'count': 0, 'last_failure': 0}
+                LLMManager._embedding_failures[provider]['count'] += 1
+                LLMManager._embedding_failures[provider]['last_failure'] = time.time()
                 return None
                 
         except Exception as e:
             logger.error(f"Error creating embedding: {str(e)}")
+            # Track failure for circuit breaker
+            if provider not in LLMManager._embedding_failures:
+                LLMManager._embedding_failures[provider] = {'count': 0, 'last_failure': 0}
+            LLMManager._embedding_failures[provider]['count'] += 1
+            LLMManager._embedding_failures[provider]['last_failure'] = time.time()
+            
+            # Log circuit breaker status
+            failure_count = LLMManager._embedding_failures[provider]['count']
+            if failure_count >= LLMManager._embedding_failure_threshold:
+                logger.error(f"Circuit breaker tripped for {provider} embeddings after {failure_count} failures")
+            
             return None
