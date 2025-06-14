@@ -475,6 +475,8 @@ const RunHistory = forwardRef<RunHistoryRef, RunHistoryProps>(({ executionHistor
   };
 
   const handleOpenScheduleDialog = (run: Run) => {
+    // Reset state before opening
+    setCronExpression('0 0 * * *');
     setSelectedRunForSchedule(run);
     setScheduleName(`${
       run.run_name?.startsWith('"') && run.run_name?.endsWith('"') 
@@ -886,7 +888,12 @@ const RunHistory = forwardRef<RunHistoryRef, RunHistoryProps>(({ executionHistor
             scheduleNameInputRef={scheduleNameInputRef}
             deleteRunDialogOpen={deleteRunDialogOpen}
             onCloseDeleteDialog={() => setDeleteDialogOpen(false)}
-            onCloseScheduleDialog={() => setScheduleDialogOpen(false)}
+            onCloseScheduleDialog={() => {
+              setScheduleDialogOpen(false);
+              setScheduleName('');
+              setCronExpression('0 0 * * *');
+              setSelectedRunForSchedule(null);
+            }}
             onCloseDeleteRunDialog={() => setDeleteRunDialogOpen(false)}
             onDeleteAllRuns={handleDeleteAllRunsClick}
             onDeleteRun={handleDeleteRunConfirm}

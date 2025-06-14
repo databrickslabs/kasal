@@ -27,6 +27,7 @@ import {
   Grid,
   Snackbar,
   Alert,
+  Chip,
 } from '@mui/material';
 import DeleteIcon from '@mui/icons-material/Delete';
 import EditIcon from '@mui/icons-material/Edit';
@@ -34,7 +35,6 @@ import { ScheduleService } from '../../api/ScheduleService';
 import { toast } from 'react-hot-toast';
 import InfoIcon from '@mui/icons-material/Info';
 import { Schedule, ScheduleDialogProps, ConfigViewerDialogProps } from '../../types/schedule';
-import { AgentYaml, TaskYaml } from '../../types/crew';
 import CloseIcon from '@mui/icons-material/Close';
 
 type CronMode = 'manual' | 'visual';
@@ -105,10 +105,10 @@ const ConfigViewerDialog: React.FC<ConfigViewerDialogProps> = ({ open, onClose, 
 const ScheduleDialog: React.FC<ScheduleDialogProps> = ({ 
   open, 
   onClose, 
-  nodes, 
-  edges,
-  planningEnabled,
-  selectedModel
+  nodes: _nodes, 
+  edges: _edges,
+  planningEnabled: _planningEnabled,
+  selectedModel: _selectedModel
 }) => {
   const [schedules, setSchedules] = useState<Schedule[]>([]);
   const [name, setName] = useState('');
@@ -117,6 +117,7 @@ const ScheduleDialog: React.FC<ScheduleDialogProps> = ({
   const [cronMode, setCronMode] = useState<CronMode>('visual');
   const [dialogMode, setDialogMode] = useState<DialogMode>('create');
   const [editingScheduleId, setEditingScheduleId] = useState<number | null>(null);
+  const [viewMode, setViewMode] = useState<'list' | 'edit'>('list');
 
   const [frequency, setFrequency] = useState('daily');
   const [selectedTime, setSelectedTime] = useState({ hour: '0', minute: '0' });
@@ -126,7 +127,7 @@ const ScheduleDialog: React.FC<ScheduleDialogProps> = ({
 
   const [selectedSchedule, setSelectedSchedule] = useState<Schedule | null>(null);
   const [isConfigViewerOpen, setIsConfigViewerOpen] = useState(false);
-  const [inputs, setInputs] = useState<Record<string, unknown>>({});
+  const [_inputs, setInputs] = useState<Record<string, unknown>>({});
   const [error, setError] = useState<string | null>(null);
 
   const resetForm = useCallback(() => {
@@ -141,6 +142,7 @@ const ScheduleDialog: React.FC<ScheduleDialogProps> = ({
     setDialogMode('create');
     setEditingScheduleId(null);
     setInputs({});
+    setViewMode('list');
   }, []);
 
   const loadSchedules = useCallback(async () => {
@@ -196,6 +198,7 @@ const ScheduleDialog: React.FC<ScheduleDialogProps> = ({
     setCronExpression(schedule.cron_expression);
     setInputs(schedule.inputs || {});
     parseCronExpression(schedule.cron_expression);
+    setViewMode('edit');
   };
 
   const updateCronFromVisual = useCallback(() => {
@@ -248,7 +251,6 @@ const ScheduleDialog: React.FC<ScheduleDialogProps> = ({
     try {
       setLoading(true);
       
-      let scheduleData;
       if (dialogMode === 'edit' && editingScheduleId) {
         // When editing, keep the existing configuration
         const existingSchedule = schedules.find(s => s.id === editingScheduleId);
@@ -256,7 +258,7 @@ const ScheduleDialog: React.FC<ScheduleDialogProps> = ({
           toast.error('Schedule not found');
           return;
         }
-        scheduleData = {
+        const scheduleData = {
           name,
           cron_expression: cronExpression,
           agents_yaml: existingSchedule.agents_yaml,
@@ -266,77 +268,9 @@ const ScheduleDialog: React.FC<ScheduleDialogProps> = ({
           planning: existingSchedule.planning,
           model: existingSchedule.model
         };
-      } else {
-        // When creating new, validate that there are agents and tasks on the canvas
-        if (nodes.length === 0) {
-          setError('Please build your agent configuration on the canvas before creating a schedule. Add agents and tasks to get started.');
-          return;
-        }
-
-        const agentNodes = nodes.filter(node => node.type === 'agentNode');
-        const taskNodes = nodes.filter(node => node.type === 'taskNode');
-
-        if (agentNodes.length === 0 || taskNodes.length === 0) {
-          setError('Your configuration must include at least one agent and one task. Please add both to the canvas.');
-          return;
-        }
-
-        // When creating new, use the current flow state
-        const agentsYaml: Record<string, AgentYaml> = {};
-        const tasksYaml: Record<string, TaskYaml> = {};
-
-        nodes.forEach(node => {
-          if (node.type === 'agentNode') {
-            const agentData = node.data as AgentYaml;
-            agentsYaml[`agent_${node.id}`] = agentData;
-          } else if (node.type === 'taskNode') {
-            const taskData = node.data as TaskYaml;
-            tasksYaml[`task_${node.id}`] = taskData;
-          }
-        });
-
-        // Validate that all tasks are assigned to agents
-        const unassignedTasks = taskNodes.filter(taskNode => {
-          return !edges.some(edge => 
-            edge.target === taskNode.id && 
-            nodes.find(n => n.id === edge.source)?.type === 'agentNode'
-          );
-        });
-
-        if (unassignedTasks.length > 0) {
-          toast.error('All tasks must be assigned to an agent. Please connect your tasks to agents on the canvas.');
-          return;
-        }
-
-        edges.forEach(edge => {
-          if (edge.source && edge.target) {
-            const sourceNode = nodes.find(n => n.id === edge.source);
-            const targetNode = nodes.find(n => n.id === edge.target);
-
-            if (sourceNode?.type === 'agentNode' && targetNode?.type === 'taskNode') {
-              tasksYaml[`task_${edge.target}`].agent = `agent_${edge.source}`;
-            }
-          }
-        });
-
-        scheduleData = {
-          name,
-          cron_expression: cronExpression,
-          agents_yaml: agentsYaml,
-          tasks_yaml: tasksYaml,
-          inputs: inputs,
-          is_active: true,
-          planning: planningEnabled,
-          model: selectedModel
-        };
-      }
-
-      if (dialogMode === 'edit' && editingScheduleId) {
+        
         await ScheduleService.updateSchedule(editingScheduleId, scheduleData);
         toast.success('Schedule updated successfully');
-      } else {
-        await ScheduleService.createSchedule(scheduleData);
-        toast.success('Schedule created successfully');
       }
 
       resetForm();
@@ -516,17 +450,13 @@ const ScheduleDialog: React.FC<ScheduleDialogProps> = ({
 
   // Add a warning message when editing
   const renderEditWarning = () => {
-    if (dialogMode === 'edit') {
-      return (
-        <Box sx={{ mt: 2, mb: 2, p: 2, bgcolor: 'warning.light', borderRadius: 1 }}>
-          <Typography variant="body2" color="warning.dark">
-            Note: When editing a schedule, the existing agent and task configuration will be preserved.
-            To modify the configuration, create a new schedule instead.
-          </Typography>
-        </Box>
-      );
-    }
-    return null;
+    return (
+      <Box sx={{ mt: 2, mb: 2, p: 2, bgcolor: 'info.light', borderRadius: 1 }}>
+        <Typography variant="body2" color="info.dark">
+          Note: Only the schedule name and timing can be edited. To modify the workflow configuration, create a new schedule from the Execution History.
+        </Typography>
+      </Box>
+    );
   };
 
   return (
@@ -540,7 +470,7 @@ const ScheduleDialog: React.FC<ScheduleDialogProps> = ({
           borderBottom: '1px solid',
           borderColor: 'divider'
         }}>
-          <Typography variant="h6">Schedule Manager</Typography>
+          <Typography variant="h6">Schedules</Typography>
           <IconButton 
             onClick={onClose}
             size="small"
@@ -555,128 +485,204 @@ const ScheduleDialog: React.FC<ScheduleDialogProps> = ({
           </IconButton>
         </DialogTitle>
         <DialogContent>
-          <Box sx={{ mb: 4 }}>
-            <Typography variant="h6" gutterBottom>
-              {dialogMode === 'create' ? 'Create New Schedule' : 'Edit Schedule'}
-            </Typography>
-
-            {renderEditWarning()}
-
-            <TextField
-              fullWidth
-              label="Schedule Name"
-              value={name}
-              onChange={(e) => setName(e.target.value)}
-              margin="normal"
-            />
-
-            <Box sx={{ mb: 2, mt: 2 }}>
-              <ToggleButtonGroup
-                value={cronMode}
-                exclusive
-                onChange={(e, newMode) => newMode && setCronMode(newMode)}
-                sx={{ mb: 2 }}
-              >
-                <ToggleButton value="visual">Simple Schedule</ToggleButton>
-                <ToggleButton value="manual">Advanced (Cron)</ToggleButton>
-              </ToggleButtonGroup>
-
-              {cronMode === 'manual' ? (
-                <TextField
-                  fullWidth
-                  label="Cron Expression"
-                  value={cronExpression}
-                  onChange={(e) => setCronExpression(e.target.value)}
-                  helperText="Example: '0 0 * * *' for daily at midnight"
-                />
+          {viewMode === 'list' ? (
+            // List View
+            <Box>
+              <Box sx={{ mb: 3, mt: 2 }}>
+                <Typography variant="subtitle1" sx={{ fontWeight: 600 }}>
+                  Active Schedules ({schedules.length})
+                </Typography>
+              </Box>
+              {schedules.length === 0 ? (
+                <Box sx={{ 
+                  textAlign: 'center', 
+                  py: 8,
+                  px: 2,
+                  backgroundColor: 'background.default',
+                  borderRadius: 2,
+                  border: '1px dashed',
+                  borderColor: 'divider'
+                }}>
+                  <Typography variant="h6" color="text.secondary" gutterBottom>
+                    No schedules found
+                  </Typography>
+                  <Typography variant="body2" color="text.secondary">
+                    Schedule jobs from the Execution History table
+                  </Typography>
+                </Box>
               ) : (
-                renderVisualCronBuilder()
-              )}
-            </Box>
-
-            <Button
-              variant="contained"
-              onClick={handleSaveSchedule}
-              disabled={loading || !name || !cronExpression}
-              sx={{ mt: 2 }}
-            >
-              {dialogMode === 'create' ? 'Create Schedule' : 'Update Schedule'}
-            </Button>
-            {dialogMode === 'edit' && (
-              <Button
-                variant="outlined"
-                onClick={resetForm}
-                sx={{ mt: 2, ml: 2 }}
-              >
-                Cancel Edit
-              </Button>
-            )}
-          </Box>
-
-          <Typography variant="h6" gutterBottom>Existing Schedules ({schedules.length})</Typography>
-          {schedules.length === 0 && (
-            <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
-              No schedules found.
-            </Typography>
-          )}
-          <List>
+                <List sx={{ p: 0 }}>
             {schedules.map((schedule) => (
-              <ListItem key={schedule.id}>
+              <ListItem 
+                key={schedule.id}
+                sx={{
+                  mb: 1.5,
+                  p: 2,
+                  borderRadius: 2,
+                  border: '1px solid',
+                  borderColor: 'divider',
+                  backgroundColor: 'background.paper',
+                  '&:hover': {
+                    backgroundColor: 'action.hover',
+                    borderColor: 'primary.light',
+                  },
+                  transition: 'all 0.2s ease'
+                }}
+              >
                 <ListItemText
-                  primary={schedule.name}
+                  primary={
+                    <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+                      <Typography variant="h6" sx={{ fontWeight: 500, fontSize: '1.1rem' }}>
+                        {schedule.name}
+                      </Typography>
+                      <Chip 
+                        label={schedule.is_active ? 'Active' : 'Inactive'}
+                        size="small"
+                        color={schedule.is_active ? 'success' : 'default'}
+                        sx={{ height: 22 }}
+                      />
+                    </Box>
+                  }
                   secondary={
-                    <>
-                      <Typography component="span" variant="body2" color="text.primary">
+                    <Box sx={{ mt: 0.5 }}>
+                      <Typography component="span" variant="body2" color="text.secondary" sx={{ fontFamily: 'monospace' }}>
                         {schedule.cron_expression}
                       </Typography>
-                      <br />
                       {schedule.next_run_at && (
-                        <Typography component="span" variant="body2">
-                          Next run: {new Date(schedule.next_run_at).toLocaleString()}
+                        <Typography component="span" variant="body2" color="text.secondary" sx={{ ml: 2 }}>
+                          • Next run: {new Date(schedule.next_run_at).toLocaleString()}
                         </Typography>
                       )}
-                    </>
+                    </Box>
                   }
                 />
                 <ListItemSecondaryAction>
-                  <Tooltip title="View Configuration">
-                    <IconButton
-                      edge="end"
-                      onClick={() => handleViewConfig(schedule)}
-                      sx={{ ml: 1 }}
-                    >
-                      <InfoIcon />
-                    </IconButton>
-                  </Tooltip>
-                  <Tooltip title="Toggle Schedule">
-                    <Switch
-                      edge="end"
-                      checked={schedule.is_active}
-                      onChange={() => handleToggleSchedule(schedule.id)}
-                    />
-                  </Tooltip>
-                  <Tooltip title="Edit Schedule">
-                    <IconButton
-                      edge="end"
-                      onClick={() => handleEditSchedule(schedule)}
-                      sx={{ ml: 1 }}
-                    >
-                      <EditIcon />
-                    </IconButton>
-                  </Tooltip>
-                  <Tooltip title="Delete Schedule">
-                    <IconButton
-                      edge="end"
-                      onClick={() => handleDeleteSchedule(schedule.id)}
-                      sx={{ ml: 1 }}
-                    >
-                      <DeleteIcon />
-                    </IconButton>
-                  </Tooltip>
+                  <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5 }}>
+                    <Tooltip title="View Configuration">
+                      <IconButton
+                        size="small"
+                        onClick={() => handleViewConfig(schedule)}
+                      >
+                        <InfoIcon fontSize="small" />
+                      </IconButton>
+                    </Tooltip>
+                    <Tooltip title="Toggle Schedule">
+                      <Switch
+                        size="small"
+                        checked={schedule.is_active}
+                        onChange={() => handleToggleSchedule(schedule.id)}
+                        sx={{
+                          '& .MuiSwitch-switchBase': {
+                            padding: '6px',
+                          },
+                          '& .MuiSwitch-thumb': {
+                            width: 18,
+                            height: 18,
+                          }
+                        }}
+                      />
+                    </Tooltip>
+                    <Tooltip title="Edit Schedule">
+                      <IconButton
+                        size="small"
+                        onClick={() => handleEditSchedule(schedule)}
+                        color="primary"
+                      >
+                        <EditIcon fontSize="small" />
+                      </IconButton>
+                    </Tooltip>
+                    <Tooltip title="Delete Schedule">
+                      <IconButton
+                        size="small"
+                        onClick={() => handleDeleteSchedule(schedule.id)}
+                        color="error"
+                      >
+                        <DeleteIcon fontSize="small" />
+                      </IconButton>
+                    </Tooltip>
+                  </Box>
                 </ListItemSecondaryAction>
               </ListItem>
             ))}
-          </List>
+                </List>
+              )}
+            </Box>
+          ) : (
+            // Form View
+            <Box>
+              <Box sx={{ display: 'flex', alignItems: 'center', mb: 3, mt: 2 }}>
+                <IconButton 
+                  onClick={resetForm} 
+                  size="small"
+                  sx={{ mr: 1 }}
+                >
+                  <CloseIcon />
+                </IconButton>
+                <Typography variant="h6">
+                  Edit Schedule
+                </Typography>
+              </Box>
+
+              {renderEditWarning()}
+
+              <TextField
+                fullWidth
+                label="Schedule Name"
+                value={name}
+                onChange={(e) => setName(e.target.value)}
+                margin="normal"
+                autoFocus
+              />
+
+              <Box sx={{ mb: 2, mt: 2 }}>
+                <ToggleButtonGroup
+                  value={cronMode}
+                  exclusive
+                  onChange={(_e, newMode) => newMode && setCronMode(newMode)}
+                  sx={{ mb: 2 }}
+                >
+                  <ToggleButton value="visual">Simple Schedule</ToggleButton>
+                  <ToggleButton value="manual">Advanced (Cron)</ToggleButton>
+                </ToggleButtonGroup>
+
+                {cronMode === 'manual' ? (
+                  <TextField
+                    fullWidth
+                    label="Cron Expression"
+                    value={cronExpression}
+                    onChange={(e) => setCronExpression(e.target.value)}
+                    helperText="Example: '0 0 * * *' for daily at midnight"
+                  />
+                ) : (
+                  renderVisualCronBuilder()
+                )}
+              </Box>
+
+              {cronMode === 'visual' && (
+                <Box sx={{ mt: 2, p: 2, bgcolor: 'grey.50', borderRadius: 1 }}>
+                  <Typography variant="body2" color="text.secondary">
+                    <strong>Generated Cron Expression:</strong> {cronExpression}
+                  </Typography>
+                </Box>
+              )}
+
+              <Box sx={{ mt: 3, display: 'flex', gap: 2 }}>
+                <Button
+                  variant="contained"
+                  onClick={handleSaveSchedule}
+                  disabled={loading || !name || !cronExpression}
+                >
+                  Update Schedule
+                </Button>
+                <Button
+                  variant="outlined"
+                  onClick={resetForm}
+                >
+                  Cancel
+                </Button>
+              </Box>
+            </Box>
+          )}
         </DialogContent>
         <DialogActions>
           <Button onClick={onClose}>Close</Button>

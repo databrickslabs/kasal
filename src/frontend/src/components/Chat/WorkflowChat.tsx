@@ -19,6 +19,7 @@ import {
   Stack,
   Menu,
   MenuItem,
+  Link,
 } from '@mui/material';
 import ArrowUpwardIcon from '@mui/icons-material/ArrowUpward';
 import SmartToyIcon from '@mui/icons-material/SmartToy';
@@ -35,6 +36,9 @@ import CloseIcon from '@mui/icons-material/Close';
 import KeyboardArrowDownIcon from '@mui/icons-material/KeyboardArrowDown';
 import ChevronLeftIcon from '@mui/icons-material/ChevronLeft';
 import TerminalIcon from '@mui/icons-material/Terminal';
+import OpenInNewIcon from '@mui/icons-material/OpenInNew';
+import ReactMarkdown from 'react-markdown';
+import remarkGfm from 'remark-gfm';
 import DispatcherService, { DispatchResult, ConfigureCrewResult } from '../../api/DispatcherService';
 import { useWorkflowStore } from '../../store/workflow';
 import { Node, Edge } from 'reactflow';
@@ -172,6 +176,55 @@ const WorkflowChat: React.FC<WorkflowChatProps> = ({
   
   const scrollToBottom = () => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+  };
+
+  // URL detection regex pattern
+  const urlPattern = /(https?:\/\/[^\s]+)/g;
+
+  // Check if text contains markdown patterns
+  const isMarkdown = (text: string): boolean => {
+    const markdownPatterns = [
+      /^#+ /m,           // Headers
+      /\*\*.+\*\*/,      // Bold
+      /_.+_/,            // Italic
+      /\[.+\]\(.+\)/,    // Links
+      /^\s*[-*+]\s/m,    // Lists
+      /^\s*\d+\.\s/m,    // Numbered lists
+      /```[\s\S]*```/,   // Code blocks
+      /^\s*>/m,          // Blockquotes
+    ];
+    return markdownPatterns.some(pattern => pattern.test(text));
+  };
+
+  // Render text with clickable links
+  const renderWithLinks = (text: string) => {
+    const parts = text.split(urlPattern);
+    return parts.map((part, index) => {
+      if (part.match(urlPattern)) {
+        return (
+          <Link
+            key={index}
+            href={part}
+            target="_blank"
+            rel="noopener noreferrer"
+            sx={{
+              display: 'inline-flex',
+              alignItems: 'center',
+              gap: 0.5,
+              color: 'primary.main',
+              textDecoration: 'none',
+              '&:hover': {
+                textDecoration: 'underline'
+              }
+            }}
+          >
+            {part}
+            <OpenInNewIcon sx={{ fontSize: 16 }} />
+          </Link>
+        );
+      }
+      return part;
+    });
   };
 
   // Update layout manager when UI state changes
@@ -2014,12 +2067,145 @@ const WorkflowChat: React.FC<WorkflowChatProps> = ({
                             opacity: message.isIntermediate ? 0.7 : 1
                           }}
                         >
-                          {message.eventContext && message.type === 'trace' && (
-                            <Typography variant="caption" display="block" sx={{ mb: 0.5, color: 'primary.main' }}>
-                              Context: {message.eventContext}
-                            </Typography>
-                          )}
-                          {message.content}
+                          <>
+                            {message.eventContext && message.type === 'trace' && (
+                              <Typography variant="caption" display="block" sx={{ mb: 0.5, color: 'primary.main' }}>
+                                Context: {message.eventContext}
+                              </Typography>
+                            )}
+                            {message.content}
+                            {message.result && (
+                              <Box sx={{ 
+                                mt: 2, 
+                                p: 2, 
+                                bgcolor: theme => theme.palette.mode === 'light' ? 'grey.50' : 'grey.900',
+                                borderRadius: 1.5,
+                                border: '1px solid',
+                                borderColor: theme => theme.palette.mode === 'light' ? 'grey.200' : 'grey.800',
+                              }}>
+                                <Typography variant="caption" display="block" sx={{ mb: 1, fontWeight: 'bold', color: 'primary.main' }}>
+                                  Final Result:
+                                </Typography>
+                                {(() => {
+                                  // Extract the actual result value if it's wrapped in an object with 'value' field
+                                  let actualResult = message.result;
+                                  if (typeof actualResult === 'object' && actualResult !== null && 'value' in actualResult) {
+                                    actualResult = (actualResult as any).value;
+                                  }
+                                  
+                                  // Now render based on the actual result type
+                                  if (typeof actualResult === 'string' && isMarkdown(actualResult)) {
+                                    return (
+                                  <Box sx={{
+                                    '& .markdown-body': {
+                                      fontSize: '0.9rem',
+                                      lineHeight: 1.6,
+                                      '& h1, & h2, & h3, & h4, & h5, & h6': {
+                                        color: 'primary.main',
+                                        fontWeight: 600,
+                                        marginTop: 2,
+                                        marginBottom: 1,
+                                      },
+                                      '& p': {
+                                        marginBottom: 1.5,
+                                      },
+                                      '& ul, & ol': {
+                                        paddingLeft: 2.5,
+                                        marginBottom: 1.5,
+                                      },
+                                      '& li': {
+                                        marginBottom: 0.5,
+                                      },
+                                      '& code': {
+                                        backgroundColor: theme => theme.palette.mode === 'light' ? 'rgba(0, 0, 0, 0.04)' : 'rgba(255, 255, 255, 0.1)',
+                                        padding: '2px 4px',
+                                        borderRadius: 4,
+                                        fontSize: '0.85em',
+                                      },
+                                      '& pre': {
+                                        backgroundColor: theme => theme.palette.mode === 'light' ? 'rgba(0, 0, 0, 0.04)' : 'rgba(255, 255, 255, 0.1)',
+                                        padding: 2,
+                                        borderRadius: 4,
+                                        overflow: 'auto',
+                                        '& code': {
+                                          backgroundColor: 'transparent',
+                                          padding: 0,
+                                        },
+                                      },
+                                      '& blockquote': {
+                                        borderLeft: '4px solid',
+                                        borderColor: 'primary.main',
+                                        margin: 0,
+                                        padding: '0.5rem 1rem',
+                                        backgroundColor: theme => theme.palette.mode === 'light' ? 'rgba(0, 0, 0, 0.04)' : 'rgba(255, 255, 255, 0.1)',
+                                      },
+                                      '& a': {
+                                        color: 'primary.main',
+                                        textDecoration: 'none',
+                                        '&:hover': {
+                                          textDecoration: 'underline',
+                                        },
+                                      },
+                                    },
+                                  }}>
+                                    <ReactMarkdown 
+                                      className="markdown-body"
+                                      remarkPlugins={[remarkGfm]}
+                                      components={{
+                                        a: ({node, children, href, ...props}) => (
+                                          <a
+                                            href={href}
+                                            target="_blank"
+                                            rel="noopener noreferrer"
+                                            style={{
+                                              display: 'inline-flex',
+                                              alignItems: 'center',
+                                              gap: '4px',
+                                            }}
+                                            {...props}
+                                          >
+                                            {children}
+                                            <OpenInNewIcon style={{ fontSize: 16 }} />
+                                          </a>
+                                        ),
+                                      }}
+                                    >
+                                      {actualResult}
+                                    </ReactMarkdown>
+                                  </Box>
+                                    );
+                                  } else if (typeof actualResult === 'string') {
+                                    return (
+                                      <Typography 
+                                        variant="body2" 
+                                        sx={{ 
+                                          whiteSpace: 'pre-wrap',
+                                          fontSize: '0.875rem',
+                                          wordBreak: 'break-word',
+                                        }}
+                                      >
+                                        {renderWithLinks(actualResult)}
+                                      </Typography>
+                                    );
+                                  } else {
+                                    return (
+                                      <Typography 
+                                        variant="body2" 
+                                        sx={{ 
+                                          whiteSpace: 'pre-wrap',
+                                          fontFamily: 'monospace',
+                                          fontSize: '0.875rem',
+                                          wordBreak: 'break-word',
+                                        }}
+                                      >
+                                        {JSON.stringify(actualResult, null, 2)}
+                                      </Typography>
+                                    );
+                                  }
+                                })()}
+                              </Box>
+                            )}
+                          </>
                         </Typography>
                       }
                     />

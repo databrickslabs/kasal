@@ -173,17 +173,17 @@ class SchedulerService:
         Returns:
             ScheduleListResponse with list of schedules
         """
-        logger.error(f"DEBUG: get_all_schedules called with group_context: {group_context}")
+        logger.debug(f"get_all_schedules called with group_context: {group_context}")
         if group_context and group_context.primary_group_id:
-            logger.error(f"DEBUG: Filtering by group_id: {group_context.primary_group_id}")
+            logger.debug(f"Filtering by group_id: {group_context.primary_group_id}")
             schedules = await self.repository.find_by_group(group_context.primary_group_id)
         else:
-            logger.error(f"DEBUG: No valid group context (context={group_context}, group_id={getattr(group_context, 'primary_group_id', None)}), getting all schedules")
+            logger.debug(f"No valid group context (context={group_context}, group_id={getattr(group_context, 'primary_group_id', None)}), getting all schedules")
             schedules = await self.repository.find_all()
         
-        logger.error(f"DEBUG: Found {len(schedules)} schedules")
+        logger.debug(f"Found {len(schedules)} schedules")
         for schedule in schedules:
-            logger.error(f"DEBUG:   Schedule ID: {schedule.id}, Name: {schedule.name}, Group: {schedule.group_id}")
+            logger.debug(f"  Schedule ID: {schedule.id}, Name: {schedule.name}, Group: {schedule.group_id}")
         
         return ScheduleListResponse(
             schedules=[ScheduleResponse.model_validate(schedule) for schedule in schedules],
