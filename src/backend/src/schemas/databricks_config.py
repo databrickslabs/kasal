@@ -1,6 +1,6 @@
 from datetime import datetime
 from typing import List, Optional
-from pydantic import BaseModel, Field, validator
+from pydantic import BaseModel, Field, model_validator
 
 
 class DatabricksConfigBase(BaseModel):
@@ -24,26 +24,16 @@ class DatabricksConfigCreate(DatabricksConfigBase):
             return ["warehouse_id", "catalog", "db_schema", "secret_scope"]
         return []
     
-    @validator('*', pre=True)
-    def validate_required_fields(cls, v, values, **kwargs):
+    @model_validator(mode='after')
+    def validate_required_fields(self):
         """Validate required fields based on configuration."""
-        field_name = kwargs.get('field_name')
-        
-        # Skip validation for non-field properties
-        if field_name is None:
-            return v
-            
-        # Only validate if we've processed all fields
-        if field_name != 'apps_enabled':
-            return v
-            
         # Only validate if Databricks is enabled
-        if not values.get('enabled', True):
-            return v
+        if not self.enabled:
+            return self
 
         # If apps are enabled, skip validation
-        if values.get('apps_enabled', False):
-            return v
+        if self.apps_enabled:
+            return self
 
         # Check required fields
         required_fields = ["warehouse_id", "catalog", "db_schema", "secret_scope"]
@@ -52,9 +42,9 @@ class DatabricksConfigCreate(DatabricksConfigBase):
         for field in required_fields:
             # Handle the schema field
             if field == "db_schema":
-                value = values.get("db_schema", "")
+                value = self.db_schema
             else:
-                value = values.get(field, "")
+                value = getattr(self, field, "")
                 
             if not value:
                 empty_fields.append(field)
@@ -62,7 +52,7 @@ class DatabricksConfigCreate(DatabricksConfigBase):
         if empty_fields:
             raise ValueError(f"Invalid configuration: {', '.join(empty_fields)} must be non-empty when Databricks is enabled and apps are disabled")
             
-        return v
+        return self
 
 
 class DatabricksConfigUpdate(DatabricksConfigBase):

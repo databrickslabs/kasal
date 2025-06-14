@@ -1,6 +1,6 @@
 from crewai.tools import BaseTool
 from typing import Optional, Type, Union, Dict, Any, List
-from pydantic import BaseModel, Field, PrivateAttr, validator
+from pydantic import BaseModel, Field, PrivateAttr, field_validator
 import logging
 import requests
 import time
@@ -16,7 +16,8 @@ class GenieInput(BaseModel):
     """Input schema for Genie."""
     question: str = Field(..., description="The question to be answered using Genie.")
     
-    @validator('question', pre=True)
+    @field_validator('question', mode='before')
+    @classmethod
     def parse_question(cls, value):
         """
         Handle complex input formats for question, especially dictionaries

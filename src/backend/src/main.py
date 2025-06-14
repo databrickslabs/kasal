@@ -197,20 +197,6 @@ app.add_middleware(BaseHTTPMiddleware, dispatch=user_context_middleware)
 # Include the main API router
 app.include_router(api_router, prefix=settings.API_V1_STR)
 
-
-@app.on_event("startup")
-async def startup_event():
-    """Run on application startup."""
-    # Any additional startup tasks can go here
-    logger.info("Application startup event triggered")
-    
-    logger.info("API documentation is available at /api-docs")
-
-@app.on_event("shutdown")
-async def shutdown_event():
-    """Clean up resources on shutdown."""
-    logger.info("Shutting down...")
-
 @app.get("/health")
 async def health():
     """Health check endpoint."""
