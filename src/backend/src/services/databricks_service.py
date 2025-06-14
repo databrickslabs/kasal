@@ -310,8 +310,33 @@ class DatabricksService:
             DatabricksService: Service instance using the UnitOfWork's repository
         """
         service = cls(databricks_repository=uow.databricks_config_repository)
-        # Set the API key repository in the secrets service
-        service.secrets_service.set_api_key_repository(uow.api_key_repository)
+        # Note: API keys service should be set separately if needed
+        return service
+    
+    @classmethod
+    def from_session(cls, session, api_keys_service=None):
+        """
+        Create a service instance from a database session.
+        
+        Args:
+            session: Database session
+            api_keys_service: Optional ApiKeysService instance
+            
+        Returns:
+            DatabricksService: Service instance with all dependencies
+        """
+        from src.repositories.databricks_config_repository import DatabricksConfigRepository
+        
+        # Create repository
+        databricks_repository = DatabricksConfigRepository(session)
+        
+        # Create service
+        service = cls(databricks_repository)
+        
+        # Set the API keys service if provided
+        if api_keys_service:
+            service.secrets_service.set_api_keys_service(api_keys_service)
+        
         return service
         
     async def check_databricks_connection(self) -> Dict[str, Any]:
@@ -334,5 +359,153 @@ class DatabricksService:
             return {
                 "status": "disabled",
                 "message": "Databricks integration is disabled",
+                "connected": False
+            }
+        
+        # If we have apps enabled, check if token is available
+        if config.apps_enabled:
+            # Check if we have a personal access token
+            token = await self.secrets_service.get_personal_access_token()
+            if token:
+                return {
+                    "status": "success",
+                    "message": "Databricks Apps integration is enabled with personal access token",
+                    "connected": True
+                }
+            else:
+                return {
+                    "status": "error",
+                    "message": "Databricks Apps integration is enabled but no personal access token found",
+                    "connected": False
+                }
+        
+        # For standard Databricks integration, check required fields
+        required_fields = ["workspace_url", "warehouse_id", "catalog", "schema", "secret_scope"]
+        missing_fields = []
+        
+        for field in required_fields:
+            value = getattr(config, field, None)
+            if not value:
+                missing_fields.append(field)
+        
+        if missing_fields:
+            return {
+                "status": "error",
+                "message": f"Missing required fields: {', '.join(missing_fields)}",
+                "connected": False
+            }
+        
+        # All required fields are present, now test actual connection
+        try:
+            # Prepare the workspace URL
+            workspace_url = config.workspace_url
+            if not workspace_url.startswith('https://'):
+                workspace_url = f"https://{workspace_url}"
+            if workspace_url.endswith('/'):
+                workspace_url = workspace_url[:-1]
+            
+            # Try to list warehouses as a connection test
+            test_url = f"{workspace_url}/api/2.0/sql/warehouses"
+            
+            # Get authentication headers
+            headers = None
+            
+            # Check if we're using enhanced auth or PAT
+            try:
+                from src.utils.databricks_auth import get_databricks_auth_headers, is_databricks_apps_environment
+                
+                if is_databricks_apps_environment():
+                    # Use OAuth headers in Databricks Apps
+                    headers_result, error = await get_databricks_auth_headers()
+                    if error or not headers_result:
+                        return {
+                            "status": "error",
+                            "message": f"Failed to get OAuth authentication: {error or 'Unknown error'}",
+                            "connected": False
+                        }
+                    headers = headers_result
+                else:
+                    # Use PAT if available
+                    token = await self.secrets_service.get_personal_access_token()
+                    if not token:
+                        # Try to get from API keys
+                        from src.services.api_keys_service import ApiKeysService
+                        token = await ApiKeysService.get_provider_api_key("DATABRICKS")
+                    
+                    if token:
+                        headers = {
+                            "Authorization": f"Bearer {token}",
+                            "Content-Type": "application/json"
+                        }
+            except ImportError:
+                # Fallback to PAT only
+                token = await self.secrets_service.get_personal_access_token()
+                if not token:
+                    from src.services.api_keys_service import ApiKeysService
+                    token = await ApiKeysService.get_provider_api_key("DATABRICKS")
+                
+                if token:
+                    headers = {
+                        "Authorization": f"Bearer {token}",
+                        "Content-Type": "application/json"
+                    }
+            
+            if not headers:
+                return {
+                    "status": "error",
+                    "message": "No authentication credentials available (PAT or OAuth)",
+                    "connected": False
+                }
+            
+            # Make the actual API call to test connection
+            response = requests.get(test_url, headers=headers, timeout=10)
+            
+            if response.status_code == 200:
+                return {
+                    "status": "success",
+                    "message": "Successfully connected to Databricks",
+                    "connected": True,
+                    "config": {
+                        "workspace_url": config.workspace_url,
+                        "warehouse_id": config.warehouse_id,
+                        "catalog": config.catalog,
+                        "schema": config.schema
+                    }
+                }
+            elif response.status_code == 401:
+                return {
+                    "status": "error",
+                    "message": "Authentication failed - invalid credentials",
+                    "connected": False
+                }
+            elif response.status_code == 403:
+                return {
+                    "status": "error",
+                    "message": "Access forbidden - check permissions",
+                    "connected": False
+                }
+            else:
+                return {
+                    "status": "error",
+                    "message": f"Connection failed with status {response.status_code}: {response.text}",
+                    "connected": False
+                }
+                
+        except requests.exceptions.ConnectionError:
+            return {
+                "status": "error",
+                "message": f"Failed to connect to {config.workspace_url} - check workspace URL",
+                "connected": False
+            }
+        except requests.exceptions.Timeout:
+            return {
+                "status": "error",
+                "message": "Connection timeout - check network and workspace URL",
+                "connected": False
+            }
+        except Exception as e:
+            return {
+                "status": "error",
+                "message": f"Connection test failed: {str(e)}",
                 "connected": False
             } 

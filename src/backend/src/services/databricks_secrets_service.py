@@ -15,7 +15,6 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.core.base_service import BaseService
 from src.repositories.databricks_config_repository import DatabricksConfigRepository
-from src.repositories.api_key_repository import ApiKeyRepository
 
 # Initialize logger
 logger = logging.getLogger(__name__)
@@ -32,7 +31,7 @@ class DatabricksSecretsService(BaseService):
             databricks_repository: Repository for Databricks configuration
         """
         self.databricks_repository = databricks_repository
-        self.api_key_repository = None
+        self.api_keys_service = None
         self.databricks_service = None  # Will be set later
     
     def set_databricks_service(self, databricks_service):
@@ -47,14 +46,14 @@ class DatabricksSecretsService(BaseService):
         if not hasattr(self, 'databricks_service') or self.databricks_service is None:
             self.databricks_service = databricks_service
     
-    def set_api_key_repository(self, api_key_repository: ApiKeyRepository):
+    def set_api_keys_service(self, api_keys_service):
         """
-        Set the API key repository
+        Set the API keys service for accessing API keys.
         
         Args:
-            api_key_repository: ApiKeyRepository instance
+            api_keys_service: ApiKeysService instance
         """
-        self.api_key_repository = api_key_repository
+        self.api_keys_service = api_keys_service
     
     async def validate_databricks_config(self) -> Tuple[str, str]:
         """
@@ -451,7 +450,12 @@ class DatabricksSecretsService(BaseService):
             str: The personal access token or empty string if not found
         """
         try:
-            token = await self.api_key_repository.get_api_key_value("DATABRICKS_PERSONAL_ACCESS_TOKEN")
+            if not self.api_keys_service:
+                logger.error("API keys service not initialized")
+                return ""
+            
+            # Use the service method to get the API key value
+            token = await self.api_keys_service.get_api_key_value("DATABRICKS_PERSONAL_ACCESS_TOKEN")
             return token or ""
         except Exception as e:
             logger.error(f"Error getting personal access token: {str(e)}")
@@ -468,7 +472,13 @@ class DatabricksSecretsService(BaseService):
             str: The provider API key or empty string if not found
         """
         try:
-            key = await self.api_key_repository.get_provider_api_key(provider)
+            if not self.api_keys_service:
+                logger.error("API keys service not initialized")
+                return ""
+            
+            # Use the service static method to get provider API key
+            from src.services.api_keys_service import ApiKeysService
+            key = await ApiKeysService.get_provider_api_key(provider)
             return key or ""
         except Exception as e:
             logger.error(f"Error getting provider API key: {str(e)}")
@@ -491,7 +501,9 @@ class DatabricksSecretsService(BaseService):
             ]
             
             for key in token_keys:
-                value = await self.api_key_repository.get_api_key_value(key)
+                if not self.api_keys_service:
+                    continue
+                value = await self.api_keys_service.get_api_key_value(key)
                 if value:
                     tokens.append(value)
             

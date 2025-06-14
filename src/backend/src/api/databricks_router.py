@@ -1,11 +1,12 @@
-from typing import Dict
+from typing import Dict, Annotated
 import logging
 
 from fastapi import APIRouter, Depends, HTTPException
 
 from src.schemas.databricks_config import DatabricksConfigCreate, DatabricksConfigResponse
 from src.services.databricks_service import DatabricksService
-from src.core.unit_of_work import UnitOfWork
+from src.services.api_keys_service import ApiKeysService
+from src.core.dependencies import SessionDep
 
 router = APIRouter(
     prefix="/databricks",
@@ -15,23 +16,33 @@ router = APIRouter(
 
 logger = logging.getLogger(__name__)
 
-# Dependency to get DatabricksService using UnitOfWork pattern
-async def get_databricks_service():
+# Dependency to get ApiKeysService
+def get_api_keys_service(session: SessionDep) -> ApiKeysService:
+    """Get ApiKeysService instance."""
+    return ApiKeysService(session)
+
+# Dependency to get DatabricksService
+def get_databricks_service(
+    session: SessionDep,
+    api_keys_service: Annotated[ApiKeysService, Depends(get_api_keys_service)]
+) -> DatabricksService:
     """
-    Get a properly initialized DatabricksService instance using UnitOfWork.
+    Get a properly initialized DatabricksService instance.
     
+    Args:
+        session: Database session from dependency injection
+        api_keys_service: ApiKeysService instance
+        
     Returns:
-        Initialized DatabricksService
+        Initialized DatabricksService with all dependencies
     """
-    async with UnitOfWork() as uow:
-        service = await DatabricksService.from_unit_of_work(uow)
-        yield service
+    return DatabricksService.from_session(session, api_keys_service)
 
 
 @router.post("/config", response_model=Dict)
 async def set_databricks_config(
     request: DatabricksConfigCreate,
-    service: DatabricksService = Depends(get_databricks_service),
+    service: Annotated[DatabricksService, Depends(get_databricks_service)],
 ):
     """
     Set Databricks configuration.
@@ -52,7 +63,7 @@ async def set_databricks_config(
 
 @router.get("/config", response_model=DatabricksConfigResponse)
 async def get_databricks_config(
-    service: DatabricksService = Depends(get_databricks_service),
+    service: Annotated[DatabricksService, Depends(get_databricks_service)],
 ):
     """
     Get current Databricks configuration.
@@ -74,7 +85,7 @@ async def get_databricks_config(
 
 @router.get("/status/personal-token-required", response_model=Dict)
 async def check_personal_token_required(
-    service: DatabricksService = Depends(get_databricks_service),
+    service: Annotated[DatabricksService, Depends(get_databricks_service)],
 ):
     """
     Check if personal access token is required for Databricks.
@@ -94,7 +105,7 @@ async def check_personal_token_required(
 
 @router.get("/connection", response_model=Dict)
 async def check_databricks_connection(
-    service: DatabricksService = Depends(get_databricks_service),
+    service: Annotated[DatabricksService, Depends(get_databricks_service)],
 ):
     """
     Check connection to Databricks.
