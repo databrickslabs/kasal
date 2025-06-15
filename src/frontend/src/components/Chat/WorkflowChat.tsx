@@ -1357,7 +1357,7 @@ const WorkflowChat: React.FC<WorkflowChatProps> = ({
             zoom: layoutManagerRef.current.getAutoFitZoom(layoutBounds, 'crew')
           }
         }));
-      }, 200);
+      }, 400); // Increased delay to allow chat panel layout to stabilize
     } else {
       // Still trigger a gentle fit view to center the nodes
       setTimeout(() => {
