@@ -30,6 +30,8 @@ class Flow(Base):
     
     def __init__(self, **kwargs):
         super(Flow, self).__init__(**kwargs)
+        if self.id is None:
+            self.id = uuid.uuid4()
         if self.nodes is None:
             self.nodes = []
         if self.edges is None:
@@ -37,4 +39,8 @@ class Flow(Base):
         if self.flow_config is None:
             self.flow_config = {"actions": []}
         elif isinstance(self.flow_config, dict) and "actions" not in self.flow_config:
-            self.flow_config["actions"] = [] 
+            self.flow_config["actions"] = []
+        if self.created_at is None:
+            self.created_at = datetime.utcnow()
+        if self.updated_at is None:
+            self.updated_at = datetime.utcnow() 

@@ -63,6 +63,9 @@ async def save_chat_message(
             generation_result=message_request.generation_result,
             group_context=group_context
         )
+    except HTTPException:
+        # Re-raise HTTPException as-is
+        raise
     except Exception as e:
         logger.error(f"Error saving chat message: {e}")
         raise HTTPException(status_code=500, detail="Failed to save chat message")
@@ -113,6 +116,9 @@ async def get_chat_session_messages(
             per_page=per_page,
             session_id=session_id
         )
+    except HTTPException:
+        # Re-raise HTTPException as-is
+        raise
     except Exception as e:
         logger.error(f"Error getting chat session messages: {e}")
         raise HTTPException(status_code=500, detail="Failed to get chat session messages")
@@ -150,6 +156,9 @@ async def get_user_chat_sessions(
             per_page=per_page,
             group_context=group_context
         )
+    except HTTPException:
+        # Re-raise HTTPException as-is
+        raise
     except Exception as e:
         logger.error(f"Error getting user chat sessions: {e}")
         raise HTTPException(status_code=500, detail="Failed to get user chat sessions")
@@ -193,6 +202,9 @@ async def get_group_chat_sessions(
             page=page,
             per_page=per_page
         )
+    except HTTPException:
+        # Re-raise HTTPException as-is
+        raise
     except Exception as e:
         logger.error(f"Error getting group chat sessions: {e}")
         raise HTTPException(status_code=500, detail="Failed to get group chat sessions")
@@ -253,6 +265,9 @@ async def create_new_chat_session(
         session_id = service.generate_session_id()
         
         return {"session_id": session_id}
+    except HTTPException:
+        # Re-raise HTTPException as-is
+        raise
     except Exception as e:
         logger.error(f"Error creating new chat session: {e}")
         raise HTTPException(status_code=500, detail="Failed to create new chat session")

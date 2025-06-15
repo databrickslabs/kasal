@@ -121,7 +121,7 @@ class TestChatHistoryService:
         assert call_args['intent'] == intent
         assert call_args['confidence'] == "0.95"
         assert call_args['generation_result'] == generation_result
-        assert call_args['group_id'] == mock_group_context.group_id
+        assert call_args['group_id'] == mock_group_context.primary_group_id
         assert call_args['group_email'] == mock_group_context.group_email
 
     @pytest.mark.asyncio
@@ -402,25 +402,7 @@ class TestChatHistoryService:
         assert len(session_id1) == 36  # Standard UUID length
         assert len(session_id2) == 36
 
-    @pytest.mark.asyncio
-    async def test_save_message_with_legacy_fields(self, chat_history_service, mock_repository, mock_group_context, mock_chat_history):
-        """Test that legacy tenant fields are set for backward compatibility."""
-        # Arrange
-        mock_repository.create.return_value = mock_chat_history
-        
-        # Act
-        await chat_history_service.save_message(
-            session_id="session-123",
-            user_id="user-456",
-            message_type="user",
-            content="Test message",
-            group_context=mock_group_context
-        )
-        
-        # Assert
-        call_args = mock_repository.create.call_args[0][0]
-        assert call_args['tenant_id'] == mock_group_context.group_id
-        assert call_args['tenant_email'] == mock_group_context.group_email
+    # Legacy tenant functionality has been removed - test deleted
 
     @pytest.mark.asyncio
     async def test_save_message_timestamp_auto_generated(self, chat_history_service, mock_repository, mock_chat_history):

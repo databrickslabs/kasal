@@ -24,4 +24,9 @@ class LLMLog(Base):
     
     # Multi-group fields
     group_id = Column(String(100), index=True, nullable=True)  # Group isolation
-    group_email = Column(String(255), nullable=True)  # Creator email for audit 
+    group_email = Column(String(255), nullable=True)  # Creator email for audit
+    
+    def __init__(self, **kwargs):
+        super(LLMLog, self).__init__(**kwargs)
+        if self.created_at is None:
+            self.created_at = datetime.utcnow() 

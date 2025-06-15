@@ -434,6 +434,7 @@ async def seed_async():
                         logger.error(f"Failed to commit template {template_data['name']}: {str(e)}")
                         templates_error += 1
         except Exception as e:
+            await session.rollback()
             logger.error(f"Error processing template {template_data['name']}: {str(e)}")
             templates_error += 1
     
@@ -514,6 +515,7 @@ def seed_sync():
                         logger.error(f"Failed to commit template {template_data['name']}: {str(e)}")
                         templates_error += 1
         except Exception as e:
+            session.rollback()
             logger.error(f"Error processing template {template_data['name']}: {str(e)}")
             templates_error += 1
     

@@ -29,6 +29,11 @@ class GroupUpdateRequest(BaseModel):
     status: Optional[GroupStatus] = Field(None, description="Group status")
 
 
+# Backward compatibility aliases
+GroupCreate = GroupCreateRequest
+GroupUpdate = GroupUpdateRequest
+
+
 class GroupResponse(GroupBase):
     """Schema for group responses."""
     id: str = Field(..., description="Unique group identifier")

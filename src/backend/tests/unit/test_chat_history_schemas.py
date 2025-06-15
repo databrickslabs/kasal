@@ -78,7 +78,9 @@ class TestChatHistoryBase:
                 content="Test message"
             )
         
-        assert "String should match pattern" in str(exc_info.value)
+        # Check for pattern matching error (Pydantic v2 format)
+        error_str = str(exc_info.value)
+        assert "String should match pattern" in error_str or "string_pattern_mismatch" in error_str
 
     def test_empty_content(self):
         """Test ChatHistoryBase with empty content."""
@@ -91,7 +93,9 @@ class TestChatHistoryBase:
                 content=""
             )
         
-        assert "ensure this value has at least 1 characters" in str(exc_info.value)
+        # Check for the error about string length (Pydantic v2 format)
+        error_str = str(exc_info.value).lower()
+        assert "at least 1 character" in error_str or "string_too_short" in error_str
 
     def test_missing_required_fields(self):
         """Test ChatHistoryBase with missing required fields."""
@@ -103,7 +107,9 @@ class TestChatHistoryBase:
                 # Missing message_type and content
             )
         
-        assert "field required" in str(exc_info.value)
+        # Check for field required error (Pydantic v2 format)
+        error_str = str(exc_info.value).lower()
+        assert "field required" in error_str or "missing" in error_str
 
 
 class TestChatHistoryCreate:
@@ -181,7 +187,9 @@ class TestChatHistoryUpdate:
         with pytest.raises(ValidationError) as exc_info:
             ChatHistoryUpdate(content="")
         
-        assert "ensure this value has at least 1 characters" in str(exc_info.value)
+        # Check for the error about string length (Pydantic v2 format)
+        error_str = str(exc_info.value).lower()
+        assert "at least 1 character" in error_str or "string_too_short" in error_str
 
 
 class TestChatHistoryResponse:
@@ -387,7 +395,9 @@ class TestSaveMessageRequest:
                 content="Test",
                 confidence=-0.1
             )
-        assert "ensure this value is greater than or equal to 0" in str(exc_info.value)
+        # Check for minimum value error (Pydantic v2 format)
+        error_str = str(exc_info.value).lower()
+        assert "greater than or equal to 0" in error_str or "greater_than_equal" in error_str
         
         # Test invalid confidence (too high)
         with pytest.raises(ValidationError) as exc_info:
@@ -397,7 +407,9 @@ class TestSaveMessageRequest:
                 content="Test",
                 confidence=1.1
             )
-        assert "ensure this value is less than or equal to 1" in str(exc_info.value)
+        # Check for maximum value error (Pydantic v2 format)
+        error_str = str(exc_info.value).lower()
+        assert "less than or equal to 1" in error_str or "less_than_equal" in error_str
 
     def test_save_message_request_message_type_validation(self):
         """Test SaveMessageRequest message type validation."""
@@ -417,7 +429,9 @@ class TestSaveMessageRequest:
                 message_type="invalid",
                 content="Test message"
             )
-        assert "string does not match expected pattern" in str(exc_info.value)
+        # Check for pattern matching error (Pydantic v2 format)
+        error_str = str(exc_info.value)
+        assert "string does not match expected pattern" in error_str or "string_pattern_mismatch" in error_str or "String should match pattern" in error_str
 
 
 class TestGetSessionRequest:
@@ -446,17 +460,23 @@ class TestGetSessionRequest:
         # Test negative page
         with pytest.raises(ValidationError) as exc_info:
             GetSessionRequest(page=-1)
-        assert "ensure this value is greater than or equal to 0" in str(exc_info.value)
+        # Check for minimum value error (Pydantic v2 format)
+        error_str = str(exc_info.value).lower()
+        assert "greater than or equal to 0" in error_str or "greater_than_equal" in error_str
         
         # Test per_page too high
         with pytest.raises(ValidationError) as exc_info:
             GetSessionRequest(per_page=101)
-        assert "ensure this value is less than or equal to 100" in str(exc_info.value)
+        # Check for maximum value error (Pydantic v2 format)
+        error_str = str(exc_info.value).lower()
+        assert "less than or equal to 100" in error_str or "less_than_equal" in error_str
         
         # Test per_page too low
         with pytest.raises(ValidationError) as exc_info:
             GetSessionRequest(per_page=0)
-        assert "ensure this value is greater than or equal to 1" in str(exc_info.value)
+        # Check for minimum value error (Pydantic v2 format)
+        error_str = str(exc_info.value).lower()
+        assert "greater than or equal to 1" in error_str or "greater_than_equal" in error_str
 
 
 class TestGetUserSessionsRequest:
@@ -485,7 +505,9 @@ class TestGetUserSessionsRequest:
         # Test per_page too high
         with pytest.raises(ValidationError) as exc_info:
             GetUserSessionsRequest(per_page=51)
-        assert "ensure this value is less than or equal to 50" in str(exc_info.value)
+        # Check for maximum value error (Pydantic v2 format)
+        error_str = str(exc_info.value).lower()
+        assert "less than or equal to 50" in error_str or "less_than_equal" in error_str
 
 
 class TestSchemaInteroperability:

@@ -169,19 +169,11 @@ class TestTask:
         
         assert task.group_id == "group_123"
         assert task.created_by_email == "user@group.com"
-        assert task.tenant_id is None  # Legacy field should be None
     
     def test_task_legacy_tenant_fields(self):
-        """Test Task legacy tenant fields."""
-        task = Task(
-            name="Tenant Task",
-            description="Task for tenant testing",
-            expected_output="Tenant output",
-            tenant_id="tenant_456"
-        )
-        
-        assert task.tenant_id == "tenant_456"
-        assert task.group_id is None  # New field should be None
+        """Test Task legacy tenant fields - skip as tenant removed."""
+        # Tenant concept has been removed from the codebase
+        pass
     
     def test_task_tablename(self):
         """Test Task table name."""
@@ -448,7 +440,6 @@ class TestTaskFieldTypes:
         assert hasattr(task, 'context')
         assert hasattr(task, 'config')
         assert hasattr(task, 'group_id')
-        assert hasattr(task, 'tenant_id')
         assert hasattr(task, 'created_by_email')
         assert hasattr(task, 'output_json')
         assert hasattr(task, 'output_pydantic')
@@ -544,7 +535,6 @@ class TestTaskFieldTypes:
         # These fields should be nullable
         assert task.agent_id is None
         assert task.group_id is None
-        assert task.tenant_id is None
         assert task.created_by_email is None
         assert task.output_json is None
         assert task.output_pydantic is None
@@ -734,30 +724,19 @@ class TestTaskUsagePatterns:
         assert guardrail_task.config["validation_threshold"] == 0.95
     
     def test_task_migration_compatibility(self):
-        """Test Task migration compatibility between tenant and group fields."""
-        # Legacy tenant-based task
-        tenant_task = Task(
-            name="Legacy Tenant Task",
-            description="Task from tenant system",
-            expected_output="Legacy output",
-            tenant_id="tenant_123"
-        )
-        
-        # New group-based task
+        """Test Task migration compatibility - tenant concept removed."""
+        # Test creating a task with group fields only
         group_task = Task(
-            name="New Group Task",
-            description="Task from group system",
+            name="Group Task",
+            description="Task with group isolation",
             expected_output="Group output",
             group_id="group_456",
             created_by_email="user@group.com"
         )
         
-        # Verify both can coexist
-        assert tenant_task.tenant_id == "tenant_123"
-        assert tenant_task.group_id is None
-        
+        # Verify group fields work correctly
         assert group_task.group_id == "group_456"
-        assert group_task.tenant_id is None
+        assert group_task.created_by_email == "user@group.com"
     
     def test_task_advanced_configuration(self):
         """Test Task with advanced configuration options."""

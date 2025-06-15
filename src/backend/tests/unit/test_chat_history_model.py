@@ -93,8 +93,6 @@ class TestChatHistory:
         assert chat_history.generation_result is None
         assert chat_history.group_id is None
         assert chat_history.group_email is None
-        assert chat_history.tenant_id is None
-        assert chat_history.tenant_email is None
 
     def test_chat_history_table_name(self):
         """Test that the table name is correctly set."""
@@ -156,8 +154,6 @@ class TestChatHistory:
         # Arrange
         group_id = "group-123"
         group_email = "admin@company.com"
-        tenant_id = "tenant-456"  # Legacy field
-        tenant_email = "legacy@company.com"  # Legacy field
         
         # Act
         chat_history = ChatHistory(
@@ -166,16 +162,12 @@ class TestChatHistory:
             message_type="user",
             content="Test message",
             group_id=group_id,
-            group_email=group_email,
-            tenant_id=tenant_id,
-            tenant_email=tenant_email
+            group_email=group_email
         )
         
         # Assert
         assert chat_history.group_id == group_id
         assert chat_history.group_email == group_email
-        assert chat_history.tenant_id == tenant_id
-        assert chat_history.tenant_email == tenant_email
 
     def test_chat_history_json_generation_result(self):
         """Test ChatHistory with complex JSON generation result."""

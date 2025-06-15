@@ -35,4 +35,9 @@ class ExecutionLog(Base):
         Index('idx_execution_logs_exec_id_timestamp', 'execution_id', 'timestamp'),
         Index('idx_execution_logs_group_timestamp', 'group_id', 'timestamp'),
         Index('idx_execution_logs_group_exec_id', 'group_id', 'execution_id'),
-    ) 
+    )
+    
+    def __init__(self, **kwargs):
+        super(ExecutionLog, self).__init__(**kwargs)
+        if self.timestamp is None:
+            self.timestamp = datetime.utcnow() 

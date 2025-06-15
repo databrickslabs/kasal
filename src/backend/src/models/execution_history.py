@@ -55,6 +55,21 @@ class ExecutionHistory(Base):
     execution_traces_by_job_id = relationship("ExecutionTrace", 
                                              foreign_keys="ExecutionTrace.job_id",
                                              primaryjoin="ExecutionHistory.job_id == ExecutionTrace.job_id")
+    
+    def __init__(self, **kwargs):
+        super(ExecutionHistory, self).__init__(**kwargs)
+        if self.job_id is None:
+            self.job_id = generate_job_id()
+        if self.status is None:
+            self.status = "pending"
+        if self.inputs is None:
+            self.inputs = {}
+        if self.planning is None:
+            self.planning = False
+        if self.trigger_type is None:
+            self.trigger_type = "api"
+        if self.created_at is None:
+            self.created_at = datetime.utcnow()
 
 
 class TaskStatus(Base):
@@ -74,6 +89,11 @@ class TaskStatus(Base):
     
     # Relationship to the run
     execution_history = relationship("ExecutionHistory", back_populates="task_statuses")
+    
+    def __init__(self, **kwargs):
+        super(TaskStatus, self).__init__(**kwargs)
+        if self.started_at is None:
+            self.started_at = datetime.utcnow()
 
 
 class ErrorTrace(Base):
@@ -92,4 +112,11 @@ class ErrorTrace(Base):
     error_metadata = Column(JSON, default=dict)
     
     # Relationship to the run
-    execution_history = relationship("ExecutionHistory", back_populates="error_traces") 
+    execution_history = relationship("ExecutionHistory", back_populates="error_traces")
+    
+    def __init__(self, **kwargs):
+        super(ErrorTrace, self).__init__(**kwargs)
+        if self.error_metadata is None:
+            self.error_metadata = {}
+        if self.timestamp is None:
+            self.timestamp = datetime.now(timezone.utc) 

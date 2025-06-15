@@ -37,3 +37,11 @@ class ChatHistory(Base):
         Index('idx_chat_history_user_timestamp', 'user_id', 'timestamp'),
         Index('idx_chat_history_group_timestamp', 'group_id', 'timestamp'),
     )
+    
+    def __init__(self, **kwargs):
+        """Initialize ChatHistory with default values."""
+        super(ChatHistory, self).__init__(**kwargs)
+        if self.id is None:
+            self.id = generate_uuid()
+        if self.timestamp is None:
+            self.timestamp = datetime.utcnow()

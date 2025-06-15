@@ -24,7 +24,6 @@ class TestAPIInit:
             agents_router,
             crews_router,
             databricks_router,
-            db_management_router,
             flows_router,
             healthcheck_router,
             logs_router,
@@ -39,7 +38,6 @@ class TestAPIInit:
             uc_tools_router,
             task_tracking_router,
             scheduler_router,
-            memory_router,
             uc_functions_router,
             agent_generation_router,
             connections_router,
@@ -60,22 +58,24 @@ class TestAPIInit:
             privileges_router,
             user_roles_router,
             identity_providers_router,
-            group_router
+            group_router,
+            chat_history_router
         )
         
         # Test that all routers are APIRouter instances
         routers = [
-            agents_router, crews_router, databricks_router, db_management_router,
+            agents_router, crews_router, databricks_router,
             flows_router, healthcheck_router, logs_router, models_router,
             databricks_secrets_router, api_keys_router, tasks_router, templates_router,
             schemas_router, tools_router, upload_router, uc_tools_router,
-            task_tracking_router, scheduler_router, memory_router, uc_functions_router,
+            task_tracking_router, scheduler_router, uc_functions_router,
             agent_generation_router, connections_router, crew_generation_router,
             task_generation_router, template_generation_router, executions_router,
             execution_history_router, execution_trace_router, flow_execution_router,
             mcp_router, dispatcher_router, engine_config_router, databricks_role_router,
             auth_router, users_router, roles_router, privileges_router,
-            user_roles_router, identity_providers_router, group_router
+            user_roles_router, identity_providers_router, group_router,
+            chat_history_router
         ]
         
         for router in routers:
@@ -100,7 +100,7 @@ class TestAPIInit:
         """Test that routers have appropriate prefixes and tags."""
         from src.api import (
             agents_router, crews_router, users_router, roles_router,
-            groups_router as group_router
+            group_router
         )
         
         # Test agents router
@@ -132,7 +132,6 @@ class TestAPIInit:
             "agents_router",
             "crews_router",
             "databricks_router",
-            "db_management_router",
             "flows_router",
             "healthcheck_router",
             "logs_router",
@@ -147,7 +146,6 @@ class TestAPIInit:
             "uc_tools_router",
             "task_tracking_router",
             "scheduler_router",
-            "memory_router",
             "uc_functions_router",
             "agent_generation_router",
             "connections_router",
@@ -168,7 +166,9 @@ class TestAPIInit:
             "privileges_router",
             "user_roles_router",
             "identity_providers_router",
-            "group_router"
+            "group_router",
+            "databricks_role_router",
+            "chat_history_router"
         ]
         
         for export in expected_exports:
@@ -247,8 +247,9 @@ class TestAPIInit:
         from src.api.agents_router import router as agents_router
         from src.api.users_router import router as users_router
         
-        # Check that routers have 404 error responses configured
+        # Check that routers have error responses configured
         assert agents_router.responses is not None
         assert 404 in agents_router.responses
         assert users_router.responses is not None
-        assert 404 in users_router.responses
+        # Users router has 401 for unauthorized instead of 404
+        assert 401 in users_router.responses

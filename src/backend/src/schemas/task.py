@@ -93,4 +93,8 @@ class TaskInDBBase(TaskBase):
 # Properties to return to client
 class Task(TaskInDBBase):
     """Pydantic model for returning tasks to clients."""
-    pass 
+    pass
+
+
+# Backward compatibility alias
+TaskResponse = Task

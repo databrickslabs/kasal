@@ -66,6 +66,10 @@ class TestLoggingConfig:
             # Mock the LoggerManager instance
             mock_instance = MagicMock()
             mock_instance._log_dir = None  # Not initialized
+            # After initialize is called, set the log dir
+            def set_log_dir(*args):
+                mock_instance._log_dir = "/custom/log/dir"
+            mock_instance.initialize.side_effect = set_log_dir
             mock_logger_manager.get_instance.return_value = mock_instance
             
             with patch.dict(os.environ, {"LOG_DIR": "/custom/log/dir"}):
@@ -80,6 +84,10 @@ class TestLoggingConfig:
             # Mock the LoggerManager instance
             mock_instance = MagicMock()
             mock_instance._log_dir = None  # Not initialized
+            # After initialize is called, set the default log dir
+            def set_default_log_dir(*args):
+                mock_instance._log_dir = "/default/log/dir"
+            mock_instance.initialize.side_effect = set_default_log_dir
             mock_logger_manager.get_instance.return_value = mock_instance
             
             with patch.dict(os.environ, {}, clear=True):
@@ -100,7 +108,9 @@ class TestLoggingConfig:
             # Console handler
             console_handler = config["handlers"]["console"]
             assert console_handler["class"] == "logging.StreamHandler"
-            assert console_handler["stream"] == "sys.stdout"
+            # Check that stream is stdout (comparing object not string)
+            import sys
+            assert console_handler["stream"] == sys.stdout
             
             # File handler
             file_handler = config["handlers"]["file"]

@@ -192,12 +192,13 @@ class TestCreateDocumentationChunks:
     """Test cases for create_documentation_chunks function."""
     
     @patch('src.seeds.documentation.fetch_url')
-    @patch('src.seeds.documentation.RecursiveCharacterTextSplitter')
+    @patch('langchain.text_splitter.RecursiveCharacterTextSplitter')
     def test_create_documentation_chunks_success(self, mock_splitter_class, mock_fetch):
         """Test successful documentation chunk creation."""
-        # Mock fetch_url
-        mock_fetch.return_value = asyncio.Future()
-        mock_fetch.return_value.set_result("<html><main>Test documentation content</main></html>")
+        # Mock fetch_url to return a coroutine that returns a string
+        async def mock_fetch_url(url):
+            return "<html><main>Test documentation content</main></html>"
+        mock_fetch.side_effect = mock_fetch_url
         
         # Mock text splitter
         mock_splitter = MagicMock()
@@ -221,8 +222,9 @@ class TestCreateDocumentationChunks:
     @patch('src.seeds.documentation.fetch_url')
     def test_create_documentation_chunks_no_content(self, mock_fetch):
         """Test chunk creation with no content."""
-        mock_fetch.return_value = asyncio.Future()
-        mock_fetch.return_value.set_result("")
+        async def mock_fetch_url(url):
+            return ""
+        mock_fetch.side_effect = mock_fetch_url
         
         result = asyncio.run(create_documentation_chunks("https://empty.com"))
         
@@ -231,8 +233,9 @@ class TestCreateDocumentationChunks:
     @patch('src.seeds.documentation.fetch_url')
     def test_create_documentation_chunks_fetch_failure(self, mock_fetch):
         """Test chunk creation when fetch fails."""
-        mock_fetch.return_value = asyncio.Future()
-        mock_fetch.return_value.set_result("")
+        async def mock_fetch_url(url):
+            return ""
+        mock_fetch.side_effect = mock_fetch_url
         
         result = asyncio.run(create_documentation_chunks("https://failed.com"))
         
@@ -362,11 +365,9 @@ class TestSeedDocumentationEmbeddings:
         """Test successful documentation embeddings seeding."""
         mock_session = AsyncMock()
         
-        # Mock setup and clear
-        mock_setup.return_value = asyncio.Future()
-        mock_setup.return_value.set_result(None)
-        mock_clear.return_value = asyncio.Future()
-        mock_clear.return_value.set_result(None)
+        # Mock setup and clear as async functions
+        mock_setup.return_value = None
+        mock_clear.return_value = None
         
         # Mock service
         mock_service = AsyncMock()
@@ -382,13 +383,14 @@ class TestSeedDocumentationEmbeddings:
                 "total_chunks": 1
             }
         ]
-        mock_create_chunks.return_value = asyncio.Future()
-        mock_create_chunks.return_value.set_result(mock_chunks)
+        # Make create_chunks async
+        async def mock_create_chunks_func(url):
+            return mock_chunks
+        mock_create_chunks.side_effect = mock_create_chunks_func
         
         # Mock LLM embedding
         mock_embedding = [0.1] * 1024
-        mock_llm_manager.get_embedding.return_value = asyncio.Future()
-        mock_llm_manager.get_embedding.return_value.set_result(mock_embedding)
+        mock_llm_manager.get_embedding = AsyncMock(return_value=mock_embedding)
         
         await seed_documentation_embeddings(mock_session)
         
@@ -411,10 +413,8 @@ class TestSeedDocumentationEmbeddings:
         mock_session = AsyncMock()
         
         # Mock setup and clear
-        mock_setup.return_value = asyncio.Future()
-        mock_setup.return_value.set_result(None)
-        mock_clear.return_value = asyncio.Future()
-        mock_clear.return_value.set_result(None)
+        mock_setup.return_value = None
+        mock_clear.return_value = None
         
         # Mock service
         mock_service = AsyncMock()
@@ -430,16 +430,14 @@ class TestSeedDocumentationEmbeddings:
                 "total_chunks": 1
             }
         ]
-        mock_create_chunks.return_value = asyncio.Future()
-        mock_create_chunks.return_value.set_result(mock_chunks)
+        mock_create_chunks.return_value = mock_chunks
         
         # Mock LLM embedding failure
         mock_llm_manager.get_embedding.side_effect = Exception("LLM error")
         
         # Mock fallback embedding
         mock_embedding = [0.1] * 1024
-        mock_fallback.return_value = asyncio.Future()
-        mock_fallback.return_value.set_result(mock_embedding)
+        mock_fallback.return_value = mock_embedding
         
         await seed_documentation_embeddings(mock_session)
         
@@ -460,16 +458,13 @@ class TestSeedAsync:
         # Mock session
         mock_session = AsyncMock()
         mock_session_factory.return_value.__aenter__.return_value = mock_session
-        mock_session_factory.return_value.__aexit__.return_value = asyncio.Future()
-        mock_session_factory.return_value.__aexit__.return_value.set_result(None)
+        mock_session_factory.return_value.__aexit__.return_value = None
         
         # Mock check - no existing data
-        mock_check.return_value = asyncio.Future()
-        mock_check.return_value.set_result((False, 0))
+        mock_check.return_value = (False, 0)
         
         # Mock seeding
-        mock_seed_embeddings.return_value = asyncio.Future()
-        mock_seed_embeddings.return_value.set_result(None)
+        mock_seed_embeddings.return_value = None
         
         result = await seed_async()
         
@@ -484,12 +479,10 @@ class TestSeedAsync:
         # Mock session
         mock_session = AsyncMock()
         mock_session_factory.return_value.__aenter__.return_value = mock_session
-        mock_session_factory.return_value.__aexit__.return_value = asyncio.Future()
-        mock_session_factory.return_value.__aexit__.return_value.set_result(None)
+        mock_session_factory.return_value.__aexit__.return_value = None
         
         # Mock check - existing data found
-        mock_check.return_value = asyncio.Future()
-        mock_check.return_value.set_result((True, 5))
+        mock_check.return_value = (True, 5)
         
         result = await seed_async()
         
@@ -510,35 +503,37 @@ class TestSeedAsync:
 class TestSeedSync:
     """Test cases for seed_sync function."""
     
-    @patch('src.seeds.documentation.asyncio')
-    def test_seed_sync_success(self, mock_asyncio):
+    @patch('asyncio.get_event_loop')
+    def test_seed_sync_success(self, mock_get_event_loop):
         """Test successful synchronous seeding."""
         # Mock asyncio event loop
         mock_loop = MagicMock()
         mock_loop.run_until_complete.return_value = ("success", 0)
-        mock_asyncio.get_event_loop.return_value = mock_loop
+        mock_get_event_loop.return_value = mock_loop
         
         result = seed_sync()
         
         assert result == ("success", 0)
         mock_loop.run_until_complete.assert_called_once()
     
-    @patch('src.seeds.documentation.asyncio')
-    def test_seed_sync_new_loop(self, mock_asyncio):
+    @patch('asyncio.set_event_loop')
+    @patch('asyncio.new_event_loop')
+    @patch('asyncio.get_event_loop')
+    def test_seed_sync_new_loop(self, mock_get_event_loop, mock_new_event_loop, mock_set_event_loop):
         """Test synchronous seeding with new event loop."""
         # Mock RuntimeError for get_event_loop
-        mock_asyncio.get_event_loop.side_effect = RuntimeError("No event loop")
+        mock_get_event_loop.side_effect = RuntimeError("No event loop")
         
         # Mock new event loop
         mock_new_loop = MagicMock()
         mock_new_loop.run_until_complete.return_value = ("success", 0)
-        mock_asyncio.new_event_loop.return_value = mock_new_loop
+        mock_new_event_loop.return_value = mock_new_loop
         
         result = seed_sync()
         
         assert result == ("success", 0)
-        mock_asyncio.new_event_loop.assert_called_once()
-        mock_asyncio.set_event_loop.assert_called_once_with(mock_new_loop)
+        mock_new_event_loop.assert_called_once()
+        mock_set_event_loop.assert_called_once_with(mock_new_loop)
 
 
 class TestSeedMain:

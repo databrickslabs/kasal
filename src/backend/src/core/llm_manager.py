@@ -41,17 +41,21 @@ if not logger.handlers:
 
 # Create a custom file logger for LiteLLM
 class LiteLLMFileLogger(CustomLogger):
-    def __init__(self):
-        self.file_path = log_file_path
+    def __init__(self, file_path=None):
+        self.file_path = file_path or log_file_path
+        # Ensure the directory exists
+        log_dir_path = os.path.dirname(self.file_path)
+        if log_dir_path and not os.path.exists(log_dir_path):
+            os.makedirs(log_dir_path, exist_ok=True)
         # Set up a file logger
         self.logger = logging.getLogger("litellm_file_logger")
         self.logger.setLevel(logging.DEBUG)
-        # Check if handlers already exist to avoid duplicates
-        if not self.logger.handlers:
-            file_handler = logging.FileHandler(self.file_path)
-            formatter = logging.Formatter('[LiteLLM] %(asctime)s - %(levelname)s - %(message)s', datefmt='%Y-%m-%d %H:%M:%S')
-            file_handler.setFormatter(formatter)
-            self.logger.addHandler(file_handler)
+        # Remove existing handlers to avoid duplicates
+        self.logger.handlers = []
+        file_handler = logging.FileHandler(self.file_path)
+        formatter = logging.Formatter('[LiteLLM] %(asctime)s - %(levelname)s - %(message)s', datefmt='%Y-%m-%d %H:%M:%S')
+        file_handler.setFormatter(formatter)
+        self.logger.addHandler(file_handler)
     
     def log_pre_api_call(self, model, messages, kwargs):
         try:

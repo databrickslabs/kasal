@@ -128,7 +128,7 @@ class TestAllModels:
         
         # Check for some key tables
         expected_tables = [
-            'agents', 'tasks', 'execution_history', 'tools', 'llm_logs',
+            'agents', 'tasks', 'executionhistory', 'tools', 'llmlog',
             'users', 'roles', 'privileges', 'groups'
         ]
         
@@ -140,9 +140,9 @@ class TestAllModels:
         from src.db.all_models import User, Role, Group, UserRole
         
         # Test that relationship attributes exist
-        assert hasattr(User, 'roles')
-        assert hasattr(Role, 'users')
-        assert hasattr(Group, 'users')
+        assert hasattr(User, 'user_roles')
+        assert hasattr(Role, 'user_roles')
+        assert hasattr(Group, 'group_users')
     
     def test_imports_dont_fail(self):
         """Test that importing the module doesn't raise any errors."""

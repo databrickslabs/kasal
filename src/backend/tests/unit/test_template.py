@@ -72,7 +72,6 @@ Additional Configuration: {config}""",
         assert template.is_active is True
         assert template.description is None
         assert template.group_id is None
-        assert template.tenant_id is None
         assert template.created_by_email is None
     
     def test_prompt_template_inactive(self):
@@ -110,18 +109,11 @@ Additional Configuration: {config}""",
         
         assert template.group_id == "group_123"
         assert template.created_by_email == "user@group.com"
-        assert template.tenant_id is None  # Legacy field should be None
     
     def test_prompt_template_legacy_tenant_fields(self):
-        """Test PromptTemplate legacy tenant fields."""
-        template = PromptTemplate(
-            name="tenant_template",
-            template="Template for tenant testing",
-            tenant_id="tenant_456"
-        )
-        
-        assert template.tenant_id == "tenant_456"
-        assert template.group_id is None  # New field should be None
+        """Test PromptTemplate legacy tenant fields - skip as tenant removed."""
+        # Tenant concept has been removed from the codebase
+        pass
     
     def test_prompt_template_unique_name(self):
         """Test PromptTemplate name uniqueness constraint."""
@@ -194,7 +186,7 @@ Generate a complete task definition."""
         assert task_template.name == "generate_task"
         assert "{task_name}" in task_template.template
         assert "{expected_output}" in task_template.template
-        assert "success criteria" in task_template.template
+        assert "Success criteria" in task_template.template
     
     def test_crew_generation_template(self):
         """Test template for crew generation."""
@@ -420,7 +412,6 @@ class TestPromptTemplateFieldTypes:
         assert hasattr(template, 'template')
         assert hasattr(template, 'is_active')
         assert hasattr(template, 'group_id')
-        assert hasattr(template, 'tenant_id')
         assert hasattr(template, 'created_by_email')
         assert hasattr(template, 'created_at')
         assert hasattr(template, 'updated_at')
@@ -491,7 +482,6 @@ class TestPromptTemplateFieldTypes:
         # These fields should be nullable
         assert template.description is None
         assert template.group_id is None
-        assert template.tenant_id is None
         assert template.created_by_email is None
     
     def test_template_non_nullable_fields(self):
@@ -632,30 +622,19 @@ Methodology: {methodology}"""
         assert "{research_areas}" in researcher_template.template
     
     def test_template_migration_compatibility(self):
-        """Test template migration compatibility between tenant and group fields."""
-        # Legacy tenant-based template
-        tenant_template = PromptTemplate(
-            name="legacy_tenant_template",
-            description="Template from tenant system",
-            template="Legacy template: {params}",
-            tenant_id="tenant_123"
-        )
-        
-        # New group-based template
+        """Test template migration compatibility - tenant concept removed."""
+        # Test creating a template with group fields only
         group_template = PromptTemplate(
-            name="new_group_template",
-            description="Template from group system",
+            name="group_template",
+            description="Template with group isolation",
             template="Group template: {params}",
             group_id="group_456",
             created_by_email="user@group.com"
         )
         
-        # Verify both can coexist
-        assert tenant_template.tenant_id == "tenant_123"
-        assert tenant_template.group_id is None
-        
+        # Verify group fields work correctly
         assert group_template.group_id == "group_456"
-        assert group_template.tenant_id is None
+        assert group_template.created_by_email == "user@group.com"
     
     def test_template_parameter_validation(self):
         """Test template parameter validation patterns."""

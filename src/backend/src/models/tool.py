@@ -30,4 +30,10 @@ class Tool(Base):
     def __init__(self, **kwargs):
         super(Tool, self).__init__(**kwargs)
         if self.config is None:
-            self.config = {} 
+            self.config = {}
+        if self.enabled is None:
+            self.enabled = True
+        if self.created_at is None:
+            self.created_at = datetime.utcnow()
+        if self.updated_at is None:
+            self.updated_at = datetime.utcnow() 

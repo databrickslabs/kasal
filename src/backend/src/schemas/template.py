@@ -43,4 +43,9 @@ class TemplateListResponse(BaseModel):
 class ResetResponse(BaseModel):
     """Schema for reset response."""
     message: str
-    reset_count: int 
+    reset_count: int
+
+
+# Backward compatibility aliases
+TemplateCreate = PromptTemplateCreate
+TemplateUpdate = PromptTemplateUpdate

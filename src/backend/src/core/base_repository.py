@@ -202,7 +202,7 @@ class BaseRepository(Generic[ModelType]):
             db_obj = await self.get(id)
             if db_obj:
                 logger.debug(f"Found {self.model.__name__} with ID {id}, deleting")
-                await self.session.delete(db_obj)
+                self.session.delete(db_obj)
                 
                 # Always flush and commit to ensure transaction is completed
                 await self.session.flush()

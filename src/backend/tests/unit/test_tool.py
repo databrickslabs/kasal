@@ -40,7 +40,6 @@ class TestTool:
         assert tool.config == {}
         assert tool.enabled is True
         assert tool.group_id is None
-        assert tool.tenant_id is None
         assert tool.created_by_email is None
     
     def test_tool_with_all_fields(self):
@@ -80,7 +79,6 @@ class TestTool:
         assert tool.config == {}
         assert tool.enabled is True
         assert tool.group_id is None
-        assert tool.tenant_id is None
         assert tool.created_by_email is None
     
     def test_tool_disabled(self):
@@ -121,19 +119,11 @@ class TestTool:
         
         assert tool.group_id == "group_123"
         assert tool.created_by_email == "user@group.com"
-        assert tool.tenant_id is None  # Legacy field should be None
     
     def test_tool_legacy_tenant_fields(self):
-        """Test Tool legacy tenant fields."""
-        tool = Tool(
-            title="Tenant Tool",
-            description="Tool for tenant testing",
-            icon="tenant",
-            tenant_id="tenant_456"
-        )
-        
-        assert tool.tenant_id == "tenant_456"
-        assert tool.group_id is None  # New field should be None
+        """Test Tool legacy tenant fields - skip as tenant concept removed."""
+        # Tenant concept has been removed from the codebase
+        pass
     
     def test_tool_tablename(self):
         """Test Tool table name."""
@@ -467,7 +457,6 @@ class TestToolFieldTypes:
         assert hasattr(tool, 'config')
         assert hasattr(tool, 'enabled')
         assert hasattr(tool, 'group_id')
-        assert hasattr(tool, 'tenant_id')
         assert hasattr(tool, 'created_by_email')
         assert hasattr(tool, 'created_at')
         assert hasattr(tool, 'updated_at')
@@ -544,7 +533,6 @@ class TestToolFieldTypes:
         
         # These fields should be nullable
         assert tool.group_id is None
-        assert tool.tenant_id is None
         assert tool.created_by_email is None
     
     def test_tool_non_nullable_fields(self):
@@ -749,30 +737,30 @@ class TestToolUsagePatterns:
         assert tool_v2.config["enhanced_features"] is True
     
     def test_tool_migration_compatibility(self):
-        """Test tool migration compatibility between tenant and group fields."""
-        # Legacy tenant-based tool
-        tenant_tool = Tool(
-            title="Legacy Tenant Tool",
-            description="Tool from tenant system",
-            icon="legacy",
-            tenant_id="tenant_123"
+        """Test tool migration compatibility - tenant concept removed."""
+        # Test creating a tool with group fields only
+        group_tool = Tool(
+            title="Group Tool",
+            description="Tool with group isolation",
+            icon="group",
+            group_id="group_123"
         )
         
-        # New group-based tool
-        group_tool = Tool(
-            title="New Group Tool",
-            description="Tool from group system",
+        # Verify group fields work correctly
+        assert group_tool.group_id == "group_123"
+        assert group_tool.created_by_email is None  # Not set in this example
+        
+        # Test with email
+        group_tool_with_email = Tool(
+            title="Group Tool with Email",
+            description="Tool with creator email",
             icon="group",
             group_id="group_456",
             created_by_email="user@group.com"
         )
         
-        # Verify both can coexist
-        assert tenant_tool.tenant_id == "tenant_123"
-        assert tenant_tool.group_id is None
-        
-        assert group_tool.group_id == "group_456"
-        assert group_tool.tenant_id is None
+        assert group_tool_with_email.group_id == "group_456"
+        assert group_tool_with_email.created_by_email == "user@group.com"
     
     def test_tool_configuration_templates(self):
         """Test tool configuration templates."""

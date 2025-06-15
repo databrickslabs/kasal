@@ -150,4 +150,8 @@ class IdentityProvider(Base):
     enabled = Column(Boolean, default=True)
     is_default = Column(Boolean, default=False)
     created_at = Column(DateTime(timezone=True), default=datetime.now(timezone.utc))
-    updated_at = Column(DateTime(timezone=True), default=datetime.now(timezone.utc), onupdate=datetime.now(timezone.utc)) 
+    updated_at = Column(DateTime(timezone=True), default=datetime.now(timezone.utc), onupdate=datetime.now(timezone.utc))
+
+
+# Backward compatibility alias
+DatabricksRole = Role

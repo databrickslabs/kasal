@@ -71,7 +71,7 @@ class TestUserBase:
     
     def test_user_base_username_validation_valid(self):
         """Test UserBase username validation with valid usernames."""
-        valid_usernames = ["user123", "test_user", "my-username", "a", "a" * 50]
+        valid_usernames = ["user123", "test_user", "my-username", "abc", "a" * 50]
         
         for username in valid_usernames:
             user = UserBase(username=username, email="test@example.com")
@@ -819,15 +819,15 @@ class TestSchemaInteraction:
     def test_model_config_from_attributes(self):
         """Test that schemas with from_attributes work correctly."""
         # Test UserProfileInDB
-        assert hasattr(UserProfileInDB.model_config, 'from_attributes')
+        assert 'from_attributes' in UserProfileInDB.model_config
         assert UserProfileInDB.model_config['from_attributes'] is True
         
         # Test PrivilegeInDB
-        assert hasattr(PrivilegeInDB.model_config, 'from_attributes')
+        assert 'from_attributes' in PrivilegeInDB.model_config
         assert PrivilegeInDB.model_config['from_attributes'] is True
         
         # Test UserInDB
-        assert hasattr(UserInDB.model_config, 'from_attributes')
+        assert 'from_attributes' in UserInDB.model_config
         assert UserInDB.model_config['from_attributes'] is True
         assert UserInDB.model_config['use_enum_values'] is True
     

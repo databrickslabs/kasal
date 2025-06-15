@@ -10,6 +10,9 @@ from src.db.session import get_db
 from src.services.log_service import LLMLogService
 from src.repositories.log_repository import LLMLogRepository
 from src.utils.user_context import GroupContext
+import logging
+
+logger = logging.getLogger(__name__)
 
 # Type definitions for dependencies
 SessionDep = Annotated[AsyncSession, Depends(get_db)]

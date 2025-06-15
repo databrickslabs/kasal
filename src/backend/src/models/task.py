@@ -49,13 +49,31 @@ class Task(Base):
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
     
     def __init__(self, **kwargs):
+        # Store the explicitly provided kwargs before calling super
+        explicit_kwargs = set(kwargs.keys())
+        
+        # Extract condition if present (it's not a column, but should be in config)
+        condition = kwargs.pop('condition', None)
+        
         super(Task, self).__init__(**kwargs)
+        if self.id is None:
+            self.id = generate_uuid()
         if self.tools is None:
             self.tools = []
         if self.context is None:
             self.context = []
         if self.config is None:
             self.config = {}
+        if self.async_execution is None:
+            self.async_execution = False
+        if self.markdown is None:
+            self.markdown = False
+        if self.human_input is None:
+            self.human_input = False
+        if self.created_at is None:
+            self.created_at = datetime.utcnow()
+        if self.updated_at is None:
+            self.updated_at = datetime.utcnow()
             
         # Ensure synchronization between config and dedicated fields
         # If output_pydantic is in config, update the dedicated field
@@ -84,15 +102,16 @@ class Task(Base):
         # Synchronize markdown field
         if self.config and 'markdown' in self.config and self.config['markdown'] is not None:
             self.markdown = self.config['markdown']
-        elif self.markdown is not None and (self.config.get('markdown') is None):
+        elif 'markdown' in explicit_kwargs and (self.config.get('markdown') is None):
+            # Only add to config if markdown was explicitly provided
             self.config['markdown'] = self.markdown
             
         # Ensure condition is properly structured in config if present
-        if 'condition' in kwargs:
+        if condition is not None:
             if self.config is None:
                 self.config = {}
             self.config['condition'] = {
-                'type': kwargs['condition'].get('type'),
-                'parameters': kwargs['condition'].get('parameters', {}),
-                'dependent_task': kwargs['condition'].get('dependent_task')
+                'type': condition.get('type'),
+                'parameters': condition.get('parameters', {}),
+                'dependent_task': condition.get('dependent_task')
             } 

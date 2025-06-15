@@ -30,4 +30,19 @@ class Schedule(Base):
     __table_args__ = (
         Index('ix_schedule_group_id', 'group_id'),
         Index('ix_schedule_created_by_email', 'created_by_email'),
-    ) 
+    )
+    
+    def __init__(self, **kwargs):
+        super(Schedule, self).__init__(**kwargs)
+        if self.inputs is None:
+            self.inputs = {}
+        if self.is_active is None:
+            self.is_active = True
+        if self.planning is None:
+            self.planning = False
+        if self.model is None:
+            self.model = "gpt-4o-mini"
+        if self.created_at is None:
+            self.created_at = datetime.utcnow()
+        if self.updated_at is None:
+            self.updated_at = datetime.utcnow() 

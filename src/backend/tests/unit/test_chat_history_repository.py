@@ -147,10 +147,11 @@ class TestChatHistoryRepository:
         mock_row.session_id = "session-123"
         mock_row.user_id = "user-789"
         mock_row.latest_timestamp = datetime.utcnow()
+        mock_row.message_count = 5
         
-        mock_result = AsyncMock()
+        mock_result = MagicMock()
         mock_result.fetchall.return_value = [mock_row]
-        mock_session.execute.return_value = mock_result
+        mock_session.execute = AsyncMock(return_value=mock_result)
         
         # Act
         result = await chat_history_repository.get_sessions_by_group(
@@ -161,6 +162,7 @@ class TestChatHistoryRepository:
         assert len(result) == 1
         assert result[0]['session_id'] == "session-123"
         assert result[0]['user_id'] == "user-789"
+        assert result[0]['message_count'] == 5
         assert 'latest_timestamp' in result[0]
 
     @pytest.mark.asyncio
@@ -181,9 +183,9 @@ class TestChatHistoryRepository:
         # Arrange
         group_ids = ["group-123"]
         
-        mock_result = AsyncMock()
+        mock_result = MagicMock()
         mock_result.fetchall.return_value = []
-        mock_session.execute.return_value = mock_result
+        mock_session.execute = AsyncMock(return_value=mock_result)
         
         # Act
         result = await chat_history_repository.get_sessions_by_group(group_ids)
@@ -306,9 +308,9 @@ class TestChatHistoryRepository:
         
         mock_scalars = MagicMock()
         mock_scalars.all.return_value = ["id1", "id2", "id3"]
-        mock_result = AsyncMock()
+        mock_result = MagicMock()
         mock_result.scalars.return_value = mock_scalars
-        mock_session.execute.return_value = mock_result
+        mock_session.execute = AsyncMock(return_value=mock_result)
         
         # Act
         result = await chat_history_repository.count_messages_by_session(
@@ -362,19 +364,23 @@ class TestChatHistoryRepository:
         mock_chat = MagicMock(spec=ChatHistory)
         mock_chat.id = "chat-123"
         
-        # Mock the model creation and database operations
-        with patch('src.repositories.chat_history_repository.ChatHistory', return_value=mock_chat):
-            mock_session.add = MagicMock()
-            mock_session.flush = AsyncMock()
-            mock_session.commit = AsyncMock()
-            mock_session.refresh = AsyncMock()
+        # Mock session methods
+        mock_session.add = MagicMock()
+        mock_session.flush = AsyncMock()
+        mock_session.commit = AsyncMock()
+        mock_session.refresh = AsyncMock()
+        
+        # Mock the model class on the repository instance
+        with patch.object(chat_history_repository, 'model') as mock_model_class:
+            mock_model_class.__name__ = 'ChatHistory'
+            mock_model_class.return_value = mock_chat
             
             # Act
             result = await chat_history_repository.create(message_data)
             
             # Assert
             assert result == mock_chat
-            mock_session.add.assert_called_once()
+            mock_session.add.assert_called_once_with(mock_chat)
             mock_session.flush.assert_called_once()
             mock_session.commit.assert_called_once()
             mock_session.refresh.assert_called_once_with(mock_chat)
@@ -390,11 +396,16 @@ class TestChatHistoryRepository:
             'content': 'Test message'
         }
         
-        mock_session.add.side_effect = SQLAlchemyError("Database error")
-        
-        # Act & Assert
-        with pytest.raises(SQLAlchemyError):
-            await chat_history_repository.create(message_data)
+        # Mock the model class
+        mock_chat = MagicMock(spec=ChatHistory)
+        with patch.object(chat_history_repository, 'model') as mock_model_class:
+            mock_model_class.__name__ = 'ChatHistory'
+            mock_model_class.return_value = mock_chat
+            mock_session.add = MagicMock(side_effect=SQLAlchemyError("Database error"))
+            
+            # Act & Assert
+            with pytest.raises(SQLAlchemyError):
+                await chat_history_repository.create(message_data)
         
         mock_session.rollback.assert_called_once()
 
@@ -407,9 +418,9 @@ class TestChatHistoryRepository:
         
         mock_scalars = MagicMock()
         mock_scalars.all.return_value = []
-        mock_result = AsyncMock()
+        mock_result = MagicMock()
         mock_result.scalars.return_value = mock_scalars
-        mock_session.execute.return_value = mock_result
+        mock_session.execute = AsyncMock(return_value=mock_result)
         
         # Act
         result = await chat_history_repository.get_by_session_and_group(

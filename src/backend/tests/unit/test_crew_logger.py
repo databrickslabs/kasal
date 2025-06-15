@@ -23,12 +23,11 @@ def mock_logger_manager():
 
 
 @pytest.fixture
-def mock_tenant_context():
-    """Create a mock tenant context."""
+def mock_group_context():
+    """Create a mock group context."""
     context = MagicMock()
-    context.primary_tenant_id = "tenant_123"
-    context.tenant_ids = ["tenant_123"]
-    context.tenant_email = "user@example.com"
+    context.group_id = "group_123"
+    context.group_name = "Test Group"
     return context
 
 
@@ -81,7 +80,7 @@ class TestCrewLogger:
             mock_crewai_logger.addHandler.assert_called()
             mock_crewai_logger.setLevel.assert_called_with(logging.DEBUG)
     
-    def test_setup_for_job(self, crew_logger_instance, mock_tenant_context):
+    def test_setup_for_job(self, crew_logger_instance, mock_group_context):
         """Test setting up logging for a specific job."""
         job_id = "test_job_123"
         
@@ -89,7 +88,7 @@ class TestCrewLogger:
              patch.object(crew_logger_instance, "_register_event_listeners"), \
              patch.object(crew_logger_instance, "_patch_printer"):
             
-            crew_logger_instance.setup_for_job(job_id, mock_tenant_context)
+            crew_logger_instance.setup_for_job(job_id, mock_group_context)
             
             # Should store job info
             assert job_id in crew_logger_instance._active_jobs
@@ -104,7 +103,7 @@ class TestCrewLogger:
             crew_logger_instance._register_event_listeners.assert_called_with(job_id)
             crew_logger_instance._patch_printer.assert_called_with(job_id)
     
-    def test_setup_for_job_already_exists(self, crew_logger_instance, mock_tenant_context):
+    def test_setup_for_job_already_exists(self, crew_logger_instance, mock_group_context):
         """Test setting up logging for a job that already exists."""
         job_id = "test_job_123"
         
@@ -112,7 +111,7 @@ class TestCrewLogger:
         crew_logger_instance._active_jobs[job_id] = {"handler": MagicMock()}
         
         with patch("src.engines.crewai.crew_logger.logger") as mock_logger:
-            crew_logger_instance.setup_for_job(job_id, mock_tenant_context)
+            crew_logger_instance.setup_for_job(job_id, mock_group_context)
             
             # Should log warning
             mock_logger.warning.assert_called_with(f"CrewLogger already set up for job {job_id}")
@@ -254,18 +253,18 @@ class TestCrewLogger:
 class TestCrewLoggerHandler:
     """Test cases for CrewLoggerHandler."""
     
-    def test_initialization(self, mock_tenant_context):
+    def test_initialization(self, mock_group_context):
         """Test CrewLoggerHandler initialization."""
         job_id = "test_job_123"
-        handler = CrewLoggerHandler(job_id, mock_tenant_context)
+        handler = CrewLoggerHandler(job_id, mock_group_context)
         
         assert handler.job_id == job_id
-        assert handler.tenant_context == mock_tenant_context
+        assert handler.group_context == mock_group_context
     
-    def test_emit_log_record(self, mock_tenant_context):
+    def test_emit_log_record(self, mock_group_context):
         """Test emitting a log record."""
         job_id = "test_job_123"
-        handler = CrewLoggerHandler(job_id, mock_tenant_context)
+        handler = CrewLoggerHandler(job_id, mock_group_context)
         
         # Mock the format method
         handler.format = MagicMock(return_value="Formatted log message")
@@ -289,13 +288,13 @@ class TestCrewLoggerHandler:
             mock_enqueue.assert_called_once_with(
                 execution_id=job_id,
                 content="Formatted log message",
-                tenant_context=mock_tenant_context
+                group_context=mock_group_context
             )
     
-    def test_emit_with_exception(self, mock_tenant_context, capsys):
+    def test_emit_with_exception(self, mock_group_context, capsys):
         """Test emit method handles exceptions gracefully."""
         job_id = "test_job_123"
-        handler = CrewLoggerHandler(job_id, mock_tenant_context)
+        handler = CrewLoggerHandler(job_id, mock_group_context)
         
         # Mock format to raise an exception
         handler.format = MagicMock(side_effect=Exception("Format error"))
@@ -386,19 +385,19 @@ class TestCrewLoggerModule:
         """Test that module dependencies are properly imported."""
         try:
             from src.engines.crewai.crew_logger import (
-                LoggerManager, enqueue_log, TenantContext
+                LoggerManager, enqueue_log, GroupContext
             )
             
             assert LoggerManager is not None
             assert enqueue_log is not None
-            assert TenantContext is not None
+            assert GroupContext is not None
             
         except ImportError as e:
             pytest.fail(f"Failed to import module dependencies: {e}")
     
     def test_singleton_instance_creation(self):
         """Test that singleton instance is created correctly."""
-        from src.engines.crewai.crew_logger import crew_logger
+        from src.engines.crewai.crew_logger import crew_logger, CrewLogger
         
         # Should be a CrewLogger instance
         assert isinstance(crew_logger, CrewLogger)

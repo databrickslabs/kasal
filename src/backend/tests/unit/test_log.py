@@ -129,25 +129,7 @@ class TestLLMLog:
         
         assert log.group_id == "group_123"
         assert log.group_email == "user@group.com"
-        assert log.tenant_id is None  # Legacy field should be None
-        assert log.tenant_email is None  # Legacy field should be None
     
-    def test_llm_log_legacy_tenant_fields(self):
-        """Test LLMLog with legacy tenant fields."""
-        log = LLMLog(
-            endpoint="generate-crew",
-            prompt="Create crew for tenant",
-            response="Crew created",
-            model="gpt-4",
-            status="success",
-            tenant_id="tenant_456",
-            tenant_email="user@tenant.com"
-        )
-        
-        assert log.tenant_id == "tenant_456"
-        assert log.tenant_email == "user@tenant.com"
-        assert log.group_id is None  # New field should be None
-        assert log.group_email is None  # New field should be None
     
     def test_llm_log_all_fields(self):
         """Test LLMLog with all fields populated."""
@@ -168,9 +150,7 @@ class TestLLMLog:
             duration_ms=3200,
             extra_data=extra_data,
             group_id="group_789",
-            group_email="admin@group.com",
-            tenant_id="tenant_legacy",  # Legacy compatibility
-            tenant_email="admin@tenant.com"  # Legacy compatibility
+            group_email="admin@group.com"
         )
         
         assert log.endpoint == "generate-workflow"
@@ -179,8 +159,6 @@ class TestLLMLog:
         assert log.extra_data["temperature"] == 0.8
         assert log.group_id == "group_789"
         assert log.group_email == "admin@group.com"
-        assert log.tenant_id == "tenant_legacy"
-        assert log.tenant_email == "admin@tenant.com"
 
 
 class TestLLMLogFieldTypes:
@@ -209,9 +187,8 @@ class TestLLMLogFieldTypes:
         assert hasattr(log, 'created_at')
         assert hasattr(log, 'extra_data')
         assert hasattr(log, 'group_id')
-        assert hasattr(log, 'tenant_id')
+        assert hasattr(log, 'group_id')
         assert hasattr(log, 'group_email')
-        assert hasattr(log, 'tenant_email')
     
     def test_llm_log_string_fields(self):
         """Test string field types and values."""
@@ -296,9 +273,7 @@ class TestLLMLogFieldTypes:
         assert log.error_message is None
         assert log.extra_data is None
         assert log.group_id is None
-        assert log.tenant_id is None
         assert log.group_email is None
-        assert log.tenant_email is None
     
     def test_llm_log_non_nullable_fields(self):
         """Test non-nullable field requirements."""
@@ -507,36 +482,22 @@ class TestLLMLogUsagePatterns:
         generation_endpoints = [log.endpoint for log in logs if "generate" in log.endpoint]
         assert len(generation_endpoints) == len(endpoints)
     
-    def test_llm_log_migration_compatibility(self):
-        """Test LLMLog migration compatibility between tenant and group fields."""
-        # Legacy tenant-based log
-        tenant_log = LLMLog(
-            endpoint="generate-agent",
-            prompt="Legacy tenant prompt",
-            response="Legacy response",
-            model="gpt-4",
-            status="success",
-            tenant_id="tenant_123",
-            tenant_email="user@tenant.com"
-        )
-        
-        # New group-based log
+    def test_llm_log_group_functionality(self):
+        """Test LLMLog group functionality."""
+        # Group-based log
         group_log = LLMLog(
             endpoint="generate-crew",
-            prompt="New group prompt",
-            response="New response",
+            prompt="Group prompt",
+            response="Group response",
             model="gpt-4",
             status="success",
             group_id="group_456",
             group_email="user@group.com"
         )
         
-        # Verify both can coexist
-        assert tenant_log.tenant_id == "tenant_123"
-        assert tenant_log.group_id is None
-        
+        # Verify group fields
         assert group_log.group_id == "group_456"
-        assert group_log.tenant_id is None
+        assert group_log.group_email == "user@group.com"
     
     def test_llm_log_extra_data_patterns(self):
         """Test LLMLog extra_data usage patterns."""

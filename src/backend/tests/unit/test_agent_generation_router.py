@@ -78,11 +78,12 @@ async def test_generate_agent_success(client, mock_agent_generation_service):
         assert result == mock_agent_config
         
         # Verify service method was called with correct parameters
-        mock_agent_generation_service.generate_agent.assert_called_once_with(
-            prompt_text="Create a research agent that can search the web",
-            model="gpt-4o-mini",
-            tools=["web_search", "document_analyzer"]
-        )
+        # Note: The actual call includes group_context parameter
+        call_args = mock_agent_generation_service.generate_agent.call_args
+        assert call_args is not None
+        assert call_args.kwargs['prompt_text'] == "Create a research agent that can search the web"
+        assert call_args.kwargs['model'] == "gpt-4o-mini"
+        assert call_args.kwargs['tools'] == ["web_search", "document_analyzer"]
 
 
 @pytest.mark.asyncio
@@ -95,7 +96,7 @@ async def test_generate_agent_with_default_model(client, mock_agent_generation_s
         "backstory": "I'm a helpful assistant",
         "tools": [],
         "advanced_config": {
-            "llm": "gpt-4o-mini"
+            "llm": "databricks-llama-4-maverick"
         }
     }
     mock_agent_generation_service.generate_agent.return_value = mock_agent_config
@@ -117,11 +118,13 @@ async def test_generate_agent_with_default_model(client, mock_agent_generation_s
         assert response.status_code == 200
         
         # Validate service call - should use default model
-        mock_agent_generation_service.generate_agent.assert_called_once_with(
-            prompt_text="Create a simple agent",
-            model="gpt-4o-mini",
-            tools=[]
-        )
+        # Note: The actual call includes group_context parameter
+        assert mock_agent_generation_service.generate_agent.called
+        call_args = mock_agent_generation_service.generate_agent.call_args
+        assert call_args[1]['prompt_text'] == "Create a simple agent"
+        assert call_args[1]['model'] == "databricks-llama-4-maverick"  # Default model
+        assert call_args[1]['tools'] == []
+        assert 'group_context' in call_args[1]
 
 
 @pytest.mark.asyncio

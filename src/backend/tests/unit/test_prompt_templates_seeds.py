@@ -11,7 +11,8 @@ from datetime import datetime
 from src.seeds.prompt_templates import (
     DEFAULT_TEMPLATES, seed_async, seed_sync, seed,
     GENERATE_AGENT_TEMPLATE, GENERATE_CONNECTIONS_TEMPLATE, GENERATE_JOB_NAME_TEMPLATE,
-    GENERATE_TASK_TEMPLATE, GENERATE_TEMPLATES_TEMPLATE, GENERATE_CREW_TEMPLATE
+    GENERATE_TASK_TEMPLATE, GENERATE_TEMPLATES_TEMPLATE, GENERATE_CREW_TEMPLATE,
+    DETECT_INTENT_TEMPLATE
 )
 
 
@@ -82,13 +83,22 @@ class TestTemplateConstants:
         assert "ScrapeWebsiteTool" in GENERATE_CREW_TEMPLATE
 
 
+    def test_detect_intent_template_content(self):
+        """Test DETECT_INTENT_TEMPLATE content."""
+        assert isinstance(DETECT_INTENT_TEMPLATE, str)
+        assert "You are an intelligent intent detection system" in DETECT_INTENT_TEMPLATE
+        assert "generate_agent" in DETECT_INTENT_TEMPLATE
+        assert "generate_crew" in DETECT_INTENT_TEMPLATE
+        assert "generate_task" in DETECT_INTENT_TEMPLATE
+
+
 class TestDefaultTemplates:
     """Test cases for DEFAULT_TEMPLATES."""
     
     def test_default_templates_structure(self):
         """Test DEFAULT_TEMPLATES structure."""
         assert isinstance(DEFAULT_TEMPLATES, list)
-        assert len(DEFAULT_TEMPLATES) == 6
+        assert len(DEFAULT_TEMPLATES) == 7
         
         for template in DEFAULT_TEMPLATES:
             assert isinstance(template, dict)
@@ -105,7 +115,8 @@ class TestDefaultTemplates:
             "generate_job_name",
             "generate_task",
             "generate_templates",
-            "generate_crew"
+            "generate_crew",
+            "detect_intent"
         }
         
         actual_names = {template["name"] for template in DEFAULT_TEMPLATES}
@@ -136,7 +147,8 @@ class TestDefaultTemplates:
             "generate_job_name": GENERATE_JOB_NAME_TEMPLATE,
             "generate_task": GENERATE_TASK_TEMPLATE,
             "generate_templates": GENERATE_TEMPLATES_TEMPLATE,
-            "generate_crew": GENERATE_CREW_TEMPLATE
+            "generate_crew": GENERATE_CREW_TEMPLATE,
+            "detect_intent": DETECT_INTENT_TEMPLATE
         }
         
         for template in DEFAULT_TEMPLATES:
@@ -324,7 +336,7 @@ class TestSeedAsync:
         # Should handle unique constraint gracefully
         await seed_async()
         
-        constraint_session.rollback.assert_called_once()
+        constraint_session.rollback.assert_called()
 
 
 class TestSeedSync:
@@ -388,7 +400,7 @@ class TestSeedSync:
         seed_sync()
         
         # Verify error handling
-        error_session.rollback.assert_called_once()
+        error_session.rollback.assert_called()
 
 
 class TestSeedMain:
@@ -507,8 +519,12 @@ class TestTemplateInstructions:
         for template in DEFAULT_TEMPLATES:
             if template["name"] in json_templates:
                 content = template["template"]
-                assert "CRITICAL OUTPUT INSTRUCTIONS" in content or "OUTPUT INSTRUCTIONS" in content
-                assert "valid" in content.lower()
+                # Check for clear instructions about output format
+                assert ("CRITICAL OUTPUT INSTRUCTIONS" in content or 
+                       "OUTPUT INSTRUCTIONS" in content or
+                       "strict guidelines" in content)
+                # Check for either "valid" or "parsed" which both indicate proper JSON
+                assert "valid" in content.lower() or "parsed" in content.lower()
                 assert "json" in content.lower()
     
     def test_no_markdown_instructions(self):
@@ -586,7 +602,8 @@ class TestTemplateIntegration:
             "generate_crew": "crew creation",
             "generate_connections": "workflow planning",
             "generate_job_name": "naming",
-            "generate_templates": "template creation"
+            "generate_templates": "template creation",
+            "detect_intent": "intent detection"
         }
         
         actual_names = {t["name"] for t in DEFAULT_TEMPLATES}
@@ -602,7 +619,8 @@ class TestTemplateIntegration:
             "generate_crew": ["crew", "agents and tasks"],
             "generate_connections": ["connections", "agents and tasks"],
             "generate_job_name": ["job name", "name"],
-            "generate_templates": ["templates", "system"]
+            "generate_templates": ["templates", "system"],
+            "detect_intent": ["intent", "detection"]
         }
         
         for template in DEFAULT_TEMPLATES:

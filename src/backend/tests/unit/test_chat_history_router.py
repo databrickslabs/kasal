@@ -47,7 +47,8 @@ def mock_chat_history_service():
     ]
     service.delete_session.return_value = True
     service.count_session_messages.return_value = 5
-    service.generate_session_id.return_value = "new-session-123"
+    # generate_session_id is not async, so use regular MagicMock
+    service.generate_session_id = MagicMock(return_value="new-session-123")
     
     return service
 
@@ -275,7 +276,10 @@ class TestChatHistoryRouter:
         # Act
         result = await get_group_chat_sessions(
             service=mock_chat_history_service,
-            group_context=mock_group_context
+            group_context=mock_group_context,
+            page=0,
+            per_page=20,
+            user_id=None
         )
         
         # Assert

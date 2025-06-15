@@ -178,6 +178,13 @@ class TestBaseRepository:
         """Test create operation with database exception."""
         test_data = {"name": "Test Model"}
         
+        # Mock model instantiation to work properly
+        mock_instance = MagicMock()
+        mock_instance.id = str(uuid.uuid4())
+        mock_model_class = MagicMock(return_value=mock_instance)
+        mock_model_class.__name__ = 'MockModel'
+        base_repository.model = mock_model_class
+        
         # Mock session.add to raise exception
         mock_session.add.side_effect = Exception("Database error")
         
@@ -302,7 +309,8 @@ class TestBaseRepository:
         
         # Mock get method to return existing object
         with patch.object(base_repository, "get", return_value=mock_model_instance):
-            mock_session.delete.side_effect = Exception("Database error")
+            # Since session.delete is synchronous, set it to raise immediately
+            mock_session.delete = MagicMock(side_effect=Exception("Database error"))
             
             with pytest.raises(Exception, match="Database error"):
                 await base_repository.delete(test_id)
@@ -353,17 +361,19 @@ class TestBaseRepository:
             test_data = {"name": "Test"}
             
             # Test create operation logging
-            with patch.object(MockModel, "__init__", return_value=None):
-                mock_instance = MockModel(**test_data)
-                mock_instance.id = str(uuid.uuid4())
-                
-                # Mock session methods to avoid actual database operations
-                mock_session.add = MagicMock()
-                mock_session.flush = AsyncMock()
-                mock_session.commit = AsyncMock()
-                mock_session.refresh = AsyncMock()
-                
-                with patch("src.core.base_repository.MockModel", return_value=mock_instance):
+            # Create a proper mock instance
+            mock_instance = MagicMock(spec=MockModel)
+            mock_instance.id = str(uuid.uuid4())
+            
+            # Mock session methods to avoid actual database operations
+            mock_session.add = MagicMock()
+            mock_session.flush = AsyncMock()
+            mock_session.commit = AsyncMock()
+            mock_session.refresh = AsyncMock()
+            
+            # Mock the model class to return our instance
+            with patch.object(base_repository, "model", MockModel):
+                with patch.object(MockModel, "__call__", return_value=mock_instance):
                     try:
                         await base_repository.create(test_data)
                     except:

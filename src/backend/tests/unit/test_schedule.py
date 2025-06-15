@@ -463,7 +463,6 @@ class TestScheduleFieldTypes:
         assert hasattr(schedule, 'created_at')
         assert hasattr(schedule, 'updated_at')
         assert hasattr(schedule, 'group_id')
-        assert hasattr(schedule, 'tenant_id')
         assert hasattr(schedule, 'created_by_email')
     
     def test_schedule_string_fields(self):
@@ -574,7 +573,6 @@ class TestScheduleIndexes:
         # Check that expected indexes exist
         expected_indexes = [
             'ix_schedule_group_id',
-            'ix_schedule_tenant_id',
             'ix_schedule_created_by_email'
         ]
         

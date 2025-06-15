@@ -122,6 +122,7 @@ __all__ = [
     "mcp_router",
     "dispatcher_router",
     "engine_config_router",
+    "databricks_role_router",
     # Add user management routers to __all__
     "auth_router",
     "users_router",

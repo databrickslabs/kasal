@@ -130,17 +130,11 @@ class TestFlow:
         
         assert flow.group_id == "group_123"
         assert flow.created_by_email == "user@group.com"
-        assert flow.tenant_id is None  # Legacy field should be None
     
     def test_flow_legacy_tenant_fields(self):
-        """Test Flow legacy tenant fields."""
-        flow = Flow(
-            name="Tenant Flow",
-            tenant_id="tenant_456"
-        )
-        
-        assert flow.tenant_id == "tenant_456"
-        assert flow.group_id is None  # New field should be None
+        """Test Flow legacy tenant fields - skip as tenant removed."""
+        # Tenant concept has been removed from the codebase
+        pass
     
     def test_flow_timestamps(self):
         """Test Flow timestamp fields."""
@@ -253,7 +247,6 @@ class TestFlowFieldTypes:
         assert hasattr(flow, 'edges')
         assert hasattr(flow, 'flow_config')
         assert hasattr(flow, 'group_id')
-        assert hasattr(flow, 'tenant_id')
         assert hasattr(flow, 'created_by_email')
         assert hasattr(flow, 'created_at')
         assert hasattr(flow, 'updated_at')
@@ -273,13 +266,11 @@ class TestFlowFieldTypes:
         flow = Flow(
             name="String Test Flow",
             group_id="group_123",
-            tenant_id="tenant_456",
             created_by_email="user@test.com"
         )
         
         assert isinstance(flow.name, str)
         assert isinstance(flow.group_id, str)
-        assert isinstance(flow.tenant_id, str)
         assert isinstance(flow.created_by_email, str)
     
     def test_flow_json_fields(self):
@@ -314,7 +305,6 @@ class TestFlowFieldTypes:
         # These fields should be nullable
         assert flow.crew_id is None
         assert flow.group_id is None
-        assert flow.tenant_id is None
         assert flow.created_by_email is None
     
     def test_flow_non_nullable_fields(self):
@@ -512,26 +502,17 @@ class TestFlowUsagePatterns:
         assert len(updated_flow.nodes) == 2
     
     def test_flow_migration_compatibility(self):
-        """Test Flow migration compatibility between tenant and group fields."""
-        # Legacy tenant-based flow
-        tenant_flow = Flow(
-            name="Legacy Tenant Flow",
-            tenant_id="tenant_123"
-        )
-        
-        # New group-based flow
+        """Test Flow migration compatibility - tenant concept removed."""
+        # Test creating a flow with group fields only
         group_flow = Flow(
-            name="New Group Flow",
+            name="Group Flow",
             group_id="group_456",
             created_by_email="user@group.com"
         )
         
-        # Verify both can coexist
-        assert tenant_flow.tenant_id == "tenant_123"
-        assert tenant_flow.group_id is None
-        
+        # Verify group fields work correctly
         assert group_flow.group_id == "group_456"
-        assert group_flow.tenant_id is None
+        assert group_flow.created_by_email == "user@group.com"
     
     def test_flow_crew_association(self):
         """Test Flow association with crew."""

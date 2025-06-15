@@ -303,4 +303,41 @@ class OAuthCallback(BaseModel):
     provider: str
     code: str
     state: Optional[str] = None
-    redirect_uri: Optional[str] = None 
+    redirect_uri: Optional[str] = None
+
+# Response schemas
+class UserResponse(UserInDB):
+    """User response schema for API endpoints."""
+    pass
+
+# Group schemas (for backward compatibility)
+class GroupCreate(BaseModel):
+    name: str
+    description: Optional[str] = None
+
+class GroupUpdate(BaseModel):
+    name: Optional[str] = None
+    description: Optional[str] = None
+
+# Databricks role schemas
+class DatabricksRoleCreate(BaseModel):
+    name: str
+    description: Optional[str] = None
+    privileges: List[str] = []
+
+class DatabricksRoleUpdate(BaseModel):
+    name: Optional[str] = None
+    description: Optional[str] = None
+    privileges: Optional[List[str]] = None
+
+# User role assignment schemas
+class UserRoleAssignment(BaseModel):
+    user_id: str
+    role_id: str
+
+class UserRoleUpdate(BaseModel):
+    role_id: str
+
+
+# Backward compatibility alias for Role schema
+Role = RoleInDB

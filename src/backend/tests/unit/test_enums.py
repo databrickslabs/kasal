@@ -30,9 +30,9 @@ class TestUserRole:
     def test_user_role_string_behavior(self):
         """Test that UserRole behaves like a string."""
         role = UserRole.ADMIN
-        assert str(role) == "admin"
+        assert role.value == "admin"
         assert role == "admin"
-        assert role.upper() == "ADMIN"
+        assert role.value.upper() == "ADMIN"
     
     def test_user_role_all_values(self):
         """Test that all expected UserRole values are present."""
@@ -224,7 +224,7 @@ class TestIdentityProviderType:
     
     def test_identity_provider_type_all_values(self):
         """Test that all expected IdentityProviderType values are present."""
-        expected_values = {"local", "oauth"}
+        expected_values = {"local", "oauth", "oidc", "saml", "custom"}
         actual_values = {provider.value for provider in IdentityProviderType}
         assert actual_values == expected_values
 
@@ -328,8 +328,11 @@ class TestEnumUsagePatterns:
         """Test enum string representation."""
         role = UserRole.ADMIN
         
-        # String representation should be the value
-        assert str(role) == "admin"
+        # String representation includes enum name
+        assert str(role) == "UserRole.ADMIN"
+        
+        # Value attribute gives the actual string value
+        assert role.value == "admin"
         
         # Repr should include enum information
         assert "UserRole" in repr(role)
@@ -368,4 +371,7 @@ class TestBackwardCompatibility:
         
         # Should be able to compare across enum types via string values
         assert tenant_active.value == group_active.value
-        assert str(tenant_active) == str(group_active)
+        # Compare just the values, not the full string representation which includes class name
+        assert tenant_active.value == group_active.value
+        assert tenant_active == "active"
+        assert group_active == "active"

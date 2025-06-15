@@ -8,6 +8,7 @@ import pytest
 from unittest.mock import patch, AsyncMock, MagicMock
 import asyncio
 import argparse
+import logging
 
 from src.seeds.seed_runner import (
     SEEDERS, run_seeders, run_all_seeders, main, debug_log, DEBUG
@@ -347,13 +348,17 @@ class TestArgumentParser:
     def test_argument_parser_setup(self, mock_parser_class):
         """Test that argument parser is set up correctly."""
         mock_parser = MagicMock()
+        mock_parser.parse_args.return_value = MagicMock(all=True, debug=False)
         mock_parser_class.return_value = mock_parser
         
-        # Import to trigger parser setup
+        # Import the module
         import src.seeds.seed_runner
         
+        # Run main to trigger parser setup
+        asyncio.run(src.seeds.seed_runner.main())
+        
         # Verify parser was created
-        mock_parser_class.assert_called()
+        mock_parser_class.assert_called_with(description="Database seeding tool")
     
     def test_argument_parser_integration(self):
         """Test argument parser integration with actual args."""
@@ -512,16 +517,17 @@ class TestSeederExecution:
 class TestLogging:
     """Test cases for logging functionality."""
     
-    @patch('src.seeds.seed_runner.logger')
-    def test_module_import_logging(self, mock_logger):
+    def test_module_import_logging(self, caplog):
         """Test that module import is logged."""
         # Re-import to trigger logging
         import importlib
         import src.seeds.seed_runner
-        importlib.reload(src.seeds.seed_runner)
+        
+        with caplog.at_level(logging.INFO):
+            importlib.reload(src.seeds.seed_runner)
         
         # Should log module import
-        mock_logger.info.assert_called()
+        assert "seed_runner.py module imported" in caplog.text
     
     @pytest.mark.asyncio
     @patch('src.seeds.seed_runner.logger')

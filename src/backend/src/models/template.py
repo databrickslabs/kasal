@@ -22,4 +22,17 @@ class PromptTemplate(Base):
     
     # Metadata
     created_at = Column(DateTime, default=datetime.utcnow)  # Use timezone-naive UTC time
-    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)  # Use timezone-naive UTC time 
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)  # Use timezone-naive UTC time
+    
+    def __init__(self, **kwargs):
+        super(PromptTemplate, self).__init__(**kwargs)
+        if self.is_active is None:
+            self.is_active = True
+        if self.created_at is None:
+            self.created_at = datetime.utcnow()
+        if self.updated_at is None:
+            self.updated_at = datetime.utcnow()
+
+
+# Backward compatibility alias
+Template = PromptTemplate

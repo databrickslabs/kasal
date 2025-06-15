@@ -34,9 +34,7 @@ class TestExecutionLog:
         assert log.execution_id == "exec_456"
         assert log.content == "Another log message"
         assert log.group_id is None
-        assert log.tenant_id is None
         assert log.group_email is None
-        assert log.tenant_email is None
     
     def test_execution_log_timestamp_default(self):
         """Test that timestamp is set by default."""
@@ -73,22 +71,11 @@ class TestExecutionLog:
         
         assert log.group_id == "group_456"
         assert log.group_email == "user@group.com"
-        assert log.tenant_id is None  # Legacy field should be None
-        assert log.tenant_email is None  # Legacy field should be None
     
     def test_execution_log_legacy_tenant_fields(self):
-        """Test ExecutionLog with legacy tenant fields."""
-        log = ExecutionLog(
-            execution_id="exec_123",
-            content="Tenant log message",
-            tenant_id="tenant_789",
-            tenant_email="user@tenant.com"
-        )
-        
-        assert log.tenant_id == "tenant_789"
-        assert log.tenant_email == "user@tenant.com"
-        assert log.group_id is None  # New field should be None
-        assert log.group_email is None  # New field should be None
+        """Test ExecutionLog legacy tenant fields - skip as tenant removed."""
+        # Tenant concept has been removed from the codebase
+        pass
     
     def test_execution_log_all_fields(self):
         """Test ExecutionLog with all fields populated."""
@@ -97,9 +84,7 @@ class TestExecutionLog:
             content="Complete log message",
             timestamp=datetime(2023, 1, 1, 14, 0, 0),
             group_id="group_456",
-            group_email="user@group.com",
-            tenant_id="tenant_789",  # Legacy compatibility
-            tenant_email="user@tenant.com"  # Legacy compatibility
+            group_email="user@group.com"
         )
         
         assert log.execution_id == "exec_123"
@@ -107,8 +92,6 @@ class TestExecutionLog:
         assert log.timestamp == datetime(2023, 1, 1, 14, 0, 0)
         assert log.group_id == "group_456"
         assert log.group_email == "user@group.com"
-        assert log.tenant_id == "tenant_789"
-        assert log.tenant_email == "user@tenant.com"
     
     def test_execution_log_tablename(self):
         """Test ExecutionLog table name."""
@@ -183,9 +166,7 @@ class TestExecutionLogIndexes:
         expected_indexes = [
             'idx_execution_logs_exec_id_timestamp',
             'idx_execution_logs_group_timestamp',
-            'idx_execution_logs_group_exec_id',
-            'idx_execution_logs_tenant_timestamp',
-            'idx_execution_logs_tenant_exec_id'
+            'idx_execution_logs_group_exec_id'
         ]
         
         for expected_index in expected_indexes:
@@ -226,21 +207,18 @@ class TestExecutionLogIndexes:
         assert 'idx_execution_logs_group_exec_id' in index_names
     
     def test_tenant_based_indexes_legacy(self):
-        """Test legacy tenant-based indexes."""
+        """Test legacy tenant-based indexes - skip as tenant removed."""
+        # Tenant concept has been removed from the codebase
+        # There should be no tenant-based indexes
         table_args = ExecutionLog.__table_args__
         
-        # Find tenant-related indexes (legacy)
+        # Verify no tenant-related indexes exist
         tenant_indexes = []
         for arg in table_args:
             if hasattr(arg, 'name') and 'tenant' in arg.name:
                 tenant_indexes.append(arg)
         
-        assert len(tenant_indexes) >= 2  # tenant_timestamp and tenant_exec_id
-        
-        # Check specific indexes
-        index_names = [idx.name for idx in tenant_indexes]
-        assert 'idx_execution_logs_tenant_timestamp' in index_names
-        assert 'idx_execution_logs_tenant_exec_id' in index_names
+        assert len(tenant_indexes) == 0  # No tenant indexes should exist
 
 
 class TestExecutionLogFieldTypes:
@@ -259,9 +237,7 @@ class TestExecutionLogFieldTypes:
         assert hasattr(log, 'content')
         assert hasattr(log, 'timestamp')
         assert hasattr(log, 'group_id')
-        assert hasattr(log, 'tenant_id')
         assert hasattr(log, 'group_email')
-        assert hasattr(log, 'tenant_email')
     
     def test_execution_log_id_field(self):
         """Test ExecutionLog id field properties."""
@@ -302,9 +278,7 @@ class TestExecutionLogFieldTypes:
         
         # These fields should be nullable
         assert log.group_id is None
-        assert log.tenant_id is None
         assert log.group_email is None
-        assert log.tenant_email is None
     
     def test_execution_log_non_nullable_fields(self):
         """Test non-nullable field requirements."""
@@ -426,29 +400,18 @@ class TestExecutionLogUsagePatterns:
         assert "WARNING:" in warning_log.content
     
     def test_execution_log_migration_compatibility(self):
-        """Test migration compatibility between tenant and group fields."""
-        # Legacy tenant-based log
-        tenant_log = ExecutionLog(
-            execution_id="exec_legacy",
-            content="Legacy tenant log",
-            tenant_id="tenant_123",
-            tenant_email="user@tenant.com"
-        )
-        
-        # New group-based log
+        """Test migration compatibility - tenant concept removed."""
+        # Test creating a log with group fields only
         group_log = ExecutionLog(
             execution_id="exec_new",
-            content="New group log",
+            content="Group log",
             group_id="group_456",
             group_email="user@group.com"
         )
         
-        # Verify both can coexist
-        assert tenant_log.tenant_id == "tenant_123"
-        assert tenant_log.group_id is None
-        
+        # Verify group fields work correctly
         assert group_log.group_id == "group_456"
-        assert group_log.tenant_id is None
+        assert group_log.group_email == "user@group.com"
     
     def test_execution_log_batch_logging(self):
         """Test batch logging pattern."""

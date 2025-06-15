@@ -208,7 +208,7 @@ class TestGroupContext:
         assert result.email_domain is None
     
     @pytest.mark.asyncio
-    @patch('src.utils.user_context.async_session_factory')
+    @patch('src.db.session.async_session_factory')
     async def test_get_user_group_memberships_success(self, mock_session_factory):
         """Test _get_user_group_memberships with successful lookup."""
         # Mock session and service
@@ -218,7 +218,7 @@ class TestGroupContext:
         
         mock_groups = [MagicMock(id="group-1"), MagicMock(id="group-2")]
         
-        with patch('src.utils.user_context.GroupService') as mock_service_class:
+        with patch('src.services.group_service.GroupService') as mock_service_class:
             mock_service = AsyncMock()
             mock_service.get_user_group_memberships.return_value = mock_groups
             mock_service_class.return_value = mock_service
@@ -229,7 +229,7 @@ class TestGroupContext:
             mock_service.get_user_group_memberships.assert_called_once_with("user@test.com")
     
     @pytest.mark.asyncio
-    @patch('src.utils.user_context.async_session_factory')
+    @patch('src.db.session.async_session_factory')
     async def test_get_user_group_memberships_error(self, mock_session_factory):
         """Test _get_user_group_memberships with error."""
         mock_session_factory.side_effect = Exception("Connection error")
@@ -618,8 +618,8 @@ class TestIsDatabricksAppsEnabled:
     """Test cases for _is_databricks_apps_enabled function."""
     
     @pytest.mark.asyncio
-    @patch('src.utils.user_context.UnitOfWork')
-    @patch('src.utils.user_context.DatabricksService')
+    @patch('src.core.unit_of_work.UnitOfWork')
+    @patch('src.services.databricks_service.DatabricksService')
     async def test_is_databricks_apps_enabled_true(self, mock_service_class, mock_uow_class):
         """Test _is_databricks_apps_enabled when enabled."""
         mock_uow = AsyncMock()
@@ -627,7 +627,7 @@ class TestIsDatabricksAppsEnabled:
         mock_uow_class.return_value.__aexit__.return_value = None
         
         mock_service = AsyncMock()
-        mock_service_class.from_unit_of_work.return_value = mock_service
+        mock_service_class.from_unit_of_work = AsyncMock(return_value=mock_service)
         
         mock_config = MagicMock()
         mock_config.apps_enabled = True
@@ -638,8 +638,8 @@ class TestIsDatabricksAppsEnabled:
         assert result is True
     
     @pytest.mark.asyncio
-    @patch('src.utils.user_context.UnitOfWork')
-    @patch('src.utils.user_context.DatabricksService')
+    @patch('src.core.unit_of_work.UnitOfWork')
+    @patch('src.services.databricks_service.DatabricksService')
     async def test_is_databricks_apps_enabled_false(self, mock_service_class, mock_uow_class):
         """Test _is_databricks_apps_enabled when disabled."""
         mock_uow = AsyncMock()
@@ -647,7 +647,7 @@ class TestIsDatabricksAppsEnabled:
         mock_uow_class.return_value.__aexit__.return_value = None
         
         mock_service = AsyncMock()
-        mock_service_class.from_unit_of_work.return_value = mock_service
+        mock_service_class.from_unit_of_work = AsyncMock(return_value=mock_service)
         
         mock_config = MagicMock()
         mock_config.apps_enabled = False
@@ -658,8 +658,8 @@ class TestIsDatabricksAppsEnabled:
         assert result is False
     
     @pytest.mark.asyncio
-    @patch('src.utils.user_context.UnitOfWork')
-    @patch('src.utils.user_context.DatabricksService')
+    @patch('src.core.unit_of_work.UnitOfWork')
+    @patch('src.services.databricks_service.DatabricksService')
     async def test_is_databricks_apps_enabled_no_config(self, mock_service_class, mock_uow_class):
         """Test _is_databricks_apps_enabled with no config."""
         mock_uow = AsyncMock()
@@ -667,7 +667,7 @@ class TestIsDatabricksAppsEnabled:
         mock_uow_class.return_value.__aexit__.return_value = None
         
         mock_service = AsyncMock()
-        mock_service_class.from_unit_of_work.return_value = mock_service
+        mock_service_class.from_unit_of_work = AsyncMock(return_value=mock_service)
         mock_service.get_databricks_config.return_value = None
         
         result = await _is_databricks_apps_enabled()
@@ -675,7 +675,7 @@ class TestIsDatabricksAppsEnabled:
         assert result is False
     
     @pytest.mark.asyncio
-    @patch('src.utils.user_context.UnitOfWork')
+    @patch('src.core.unit_of_work.UnitOfWork')
     async def test_is_databricks_apps_enabled_exception(self, mock_uow_class):
         """Test _is_databricks_apps_enabled with exception."""
         mock_uow_class.side_effect = Exception("Service error")
@@ -845,7 +845,7 @@ class TestUserContextEdgeCases:
     
     def test_header_case_insensitivity(self):
         """Test that header extraction handles case variations."""
-        mock_request = MagicMock(spec=Request)
+        from starlette.datastructures import Headers
         
         # Test different case variations
         test_cases = [
@@ -856,7 +856,9 @@ class TestUserContextEdgeCases:
         ]
         
         for headers in test_cases:
-            mock_request.headers = headers
+            mock_request = MagicMock(spec=Request)
+            # Use Starlette Headers which are case-insensitive
+            mock_request.headers = Headers(headers)
             result = extract_user_token_from_request(mock_request)
             assert result is not None
     
@@ -893,12 +895,12 @@ class TestUserContextEdgeCases:
         
         emails = [f"user{i}@company.com" for i in range(10)]
         
-        with patch('src.utils.user_context.async_session_factory') as mock_factory:
+        with patch('src.db.session.async_session_factory') as mock_factory:
             mock_session = AsyncMock()
             mock_factory.return_value.__aenter__.return_value = mock_session
             mock_factory.return_value.__aexit__.return_value = None
             
-            with patch('src.utils.user_context.GroupService') as mock_service_class:
+            with patch('src.services.group_service.GroupService') as mock_service_class:
                 mock_service = AsyncMock()
                 mock_service.get_user_group_memberships.return_value = []
                 mock_service_class.return_value = mock_service
