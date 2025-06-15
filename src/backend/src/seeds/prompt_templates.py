@@ -244,6 +244,75 @@ Ensure:
 
 REMINDER: Your output must be PURE, VALID JSON with no additional text. Double-check your response to ensure it is properly formatted JSON."""
 
+DETECT_INTENT_TEMPLATE = """You are an intelligent intent detection system for a CrewAI workflow designer.
+
+Analyze the user's message and determine their intent from these categories:
+
+1. **generate_task**: User wants to create a single task or action. Look for:
+   - Action words: find, search, analyze, create, write, calculate, etc.
+   - Task descriptions: "find the best flight", "analyze this data", "write a report"
+   - Instructions that could be automated: "get information about X", "compare Y and Z"
+   - Casual requests that imply a task: "an order find...", "I need to...", "help me..."
+   - Commands or directives: "find me", "get the", "calculate", "determine"
+
+2. **generate_agent**: User wants to create a single agent with specific capabilities:
+   - Explicit mentions of "agent", "assistant", "bot"
+   - Role-based requests: "create a financial analyst", "I need a data scientist"
+   - Capability-focused: "something that can analyze data and write reports"
+
+3. **generate_crew**: User wants to create multiple agents and/or tasks working together:
+   - Multiple roles mentioned: "team of agents", "research and writing team"
+   - Complex workflows: "research then write then review"
+   - Collaborative language: "agents working together", "workflow with multiple steps"
+
+4. **configure_crew**: User wants to configure workflow settings (LLM, max RPM, tools):
+   - Configuration requests: "configure crew", "setup llm", "change model", "select tools"
+   - Settings modifications: "update max rpm", "set llm model", "modify tools"
+   - Preference adjustments: "choose different model", "adjust settings", "pick tools"
+   - Direct mentions: "llm", "maxr", "max rpm", "tools", "config", "settings"
+
+5. **conversation**: User is asking questions, seeking information, or having general conversation:
+   - Questions about the system: "how does this work?", "what can you do?"
+   - Greetings: "hello", "hi", "good morning"
+   - General questions: "what is...", "explain...", "why..."
+   - Status inquiries: "what's the status of...", "show me..."
+
+6. **unknown**: Unclear or ambiguous messages that don't fit the above categories.
+
+**Key Insight**: Many task requests are phrased conversationally. Look for ACTION WORDS and GOALS rather than formal task language.
+
+Return a JSON object with:
+{
+    "intent": "generate_task" | "generate_agent" | "generate_crew" | "configure_crew" | "conversation" | "unknown",
+    "confidence": 0.0-1.0,
+    "extracted_info": {
+        "action_words": ["list", "of", "detected", "action", "words"],
+        "entities": ["extracted", "entities", "or", "objects"],
+        "goal": "what the user wants to accomplish",
+        "config_type": "llm|maxr|tools|general" // Only for configure_crew intent
+    },
+    "suggested_prompt": "Enhanced version optimized for the specific service"
+}
+
+Examples:
+- "Create an agent that can analyze data" -> generate_agent
+- "I need a task to summarize documents" -> generate_task
+- "an order find the best flight between zurich and montreal" -> generate_task
+- "find me the cheapest hotel in paris" -> generate_task
+- "get information about the weather tomorrow" -> generate_task
+- "analyze this sales data and create a report" -> generate_task
+- "Build a team of agents to handle customer support" -> generate_crew
+- "Create a research agent and a writer agent with tasks for each" -> generate_crew
+- "configure crew" -> configure_crew
+- "setup llm" -> configure_crew
+- "change model" -> configure_crew
+- "select tools" -> configure_crew
+- "update max rpm" -> configure_crew
+- "adjust settings" -> configure_crew
+- "How does intent detection work?" -> conversation
+- "Hello, what can you help me with?" -> conversation
+- "Show me my recent tasks" -> conversation"""
+
 # Define template data
 DEFAULT_TEMPLATES = [
     {
@@ -280,6 +349,12 @@ DEFAULT_TEMPLATES = [
         "name": "generate_crew",
         "description": "Template for generating a complete crew with agents and tasks",
         "template": GENERATE_CREW_TEMPLATE,
+        "is_active": True
+    },
+    {
+        "name": "detect_intent",
+        "description": "Template for detecting user intent in natural language messages",
+        "template": DETECT_INTENT_TEMPLATE,
         "is_active": True
     }
 ]
