@@ -5,7 +5,7 @@ from pathlib import Path
 from datetime import datetime, timezone
 import sys
 
-from sqlalchemy import create_engine
+from sqlalchemy import create_engine, text
 from sqlalchemy.ext.asyncio import (
     AsyncSession,
     async_sessionmaker,
@@ -162,6 +162,26 @@ async def init_db() -> None:
                     raise
                 finally:
                     await admin_conn.close()
+            
+            # Ensure pgvector extension is installed
+            try:
+                logger.info("Checking pgvector extension...")
+                async with engine.connect() as conn:
+                    # Check if pgvector extension exists
+                    result = await conn.execute(text("SELECT 1 FROM pg_extension WHERE extname = 'vector'"))
+                    extension_exists = result.fetchone() is not None
+                    
+                    if not extension_exists:
+                        logger.info("Installing pgvector extension...")
+                        # Create the extension
+                        await conn.execute(text("CREATE EXTENSION IF NOT EXISTS vector"))
+                        await conn.commit()
+                        logger.info("pgvector extension installed successfully")
+                    else:
+                        logger.info("pgvector extension already installed")
+            except Exception as e:
+                logger.warning(f"Could not install pgvector extension: {e}")
+                logger.warning("The database will work but documentation embeddings table will not be created")
         
         # For SQLite, ensure database file exists
         if str(settings.DATABASE_URI).startswith('sqlite'):

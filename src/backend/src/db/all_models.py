@@ -23,6 +23,7 @@ from src.models.schedule import Schedule
 from src.models.api_key import ApiKey
 from src.models.schema import Schema
 from src.models.execution_logs import ExecutionLog
+from src.models.engine_config import EngineConfig
 from src.models.mcp_server import MCPServer
 from src.models.mcp_settings import MCPSettings
 # Multi-group models (formerly multi-tenant)
@@ -34,6 +35,9 @@ from src.models.user import User, UserProfile, RefreshToken, ExternalIdentity, R
 
 # Billing models
 from src.models.billing import LLMUsageBilling, BillingPeriod, BillingAlert
+
+# Documentation models
+from src.models.documentation_embedding import DocumentationEmbedding
 
 # Add additional models here as your application grows
 # from src.models.order import Order
@@ -62,6 +66,7 @@ __all__ = [
     "ApiKey",
     "Schema",
     "ExecutionLog",
+    "EngineConfig",
     "MCPServer",
     "MCPSettings",
     # Multi-group models
@@ -81,5 +86,7 @@ __all__ = [
     # Billing models
     "LLMUsageBilling",
     "BillingPeriod", 
-    "BillingAlert"
+    "BillingAlert",
+    # Documentation models
+    "DocumentationEmbedding"
 ] 
