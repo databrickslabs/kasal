@@ -32,7 +32,7 @@ class PrivilegeService:
             raise ValueError(f"Privilege with name '{privilege_data.name}' already exists")
         
         # Create privilege
-        privilege_dict = privilege_data.dict()
+        privilege_dict = privilege_data.model_dump()
         privilege = await self.privilege_repo.create(privilege_dict)
         
         return privilege
@@ -46,14 +46,6 @@ class PrivilegeService:
         
         # Prepare update data
         update_data = {}
-        if privilege_data.name is not None:
-            # Check if new name already exists
-            if privilege_data.name != privilege.name:
-                existing_privilege = await self.privilege_repo.get_by_name(privilege_data.name)
-                if existing_privilege:
-                    raise ValueError(f"Privilege with name '{privilege_data.name}' already exists")
-            update_data["name"] = privilege_data.name
-        
         if privilege_data.description is not None:
             update_data["description"] = privilege_data.description
         

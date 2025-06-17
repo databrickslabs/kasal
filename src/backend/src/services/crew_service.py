@@ -106,8 +106,8 @@ class CrewService:
             logger.info(f"Creating crew with name: {obj_in.name}")
             logger.info(f"Agent IDs: {obj_in.agent_ids}")
             logger.info(f"Task IDs: {obj_in.task_ids}")
-            logger.info(f"Number of nodes: {len(obj_in.nodes)}")
-            logger.info(f"Number of edges: {len(obj_in.edges)}")
+            logger.info(f"Number of nodes: {len(obj_in.nodes) if obj_in.nodes else 0}")
+            logger.info(f"Number of edges: {len(obj_in.edges) if obj_in.edges else 0}")
             
             # Properly serialize the complex JSON data
             crew_dict = obj_in.model_dump()
@@ -123,8 +123,8 @@ class CrewService:
                 crew_dict['edges'] = []
                 
             # Ensure agent_ids and task_ids are strings
-            crew_dict['agent_ids'] = [str(agent_id) for agent_id in crew_dict['agent_ids']]
-            crew_dict['task_ids'] = [str(task_id) for task_id in crew_dict['task_ids']]
+            crew_dict['agent_ids'] = [str(agent_id) for agent_id in crew_dict['agent_ids']] if crew_dict['agent_ids'] else []
+            crew_dict['task_ids'] = [str(task_id) for task_id in crew_dict['task_ids']] if crew_dict['task_ids'] else []
                 
             # Create the model using the serialized data
             return await self.repository.create(crew_dict)

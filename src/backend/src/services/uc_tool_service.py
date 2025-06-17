@@ -155,7 +155,7 @@ class UCToolService:
                         name=func.name,
                         full_name=f"{catalog_name}.{schema_name}.{func.name}",
                         catalog=catalog_name,
-                        schema=schema_name,
+                        db_schema=schema_name,
                         comment=getattr(func, 'comment', None),
                         return_type=getattr(func_details, 'return_type', None),
                         input_params=[

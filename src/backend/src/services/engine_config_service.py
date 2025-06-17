@@ -117,7 +117,7 @@ class EngineConfigService:
         if hasattr(config_data, "model_dump"):
             config_dict = config_data.model_dump()
         elif hasattr(config_data, "dict"):
-            config_dict = config_data.dict()
+            config_dict = config_data.model_dump()
         else:
             config_dict = dict(config_data)
         
@@ -144,7 +144,7 @@ class EngineConfigService:
         if hasattr(config_data, "model_dump"):
             config_dict = config_data.model_dump(exclude_unset=True)
         elif hasattr(config_data, "dict"):
-            config_dict = config_data.dict(exclude_unset=True)
+            config_dict = config_data.model_dump(exclude_unset=True)
         else:
             config_dict = dict(config_data)
             

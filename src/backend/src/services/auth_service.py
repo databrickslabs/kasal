@@ -92,7 +92,7 @@ class AuthService:
         
         # Create user
         hashed_password = get_password_hash(user_data.password)
-        user_dict = user_data.dict()
+        user_dict = user_data.model_dump()
         user_dict.pop("password")
         user_dict["hashed_password"] = hashed_password
         user_dict["role"] = UserRole.REGULAR  # Default role for new users

@@ -273,7 +273,5 @@ class SchemaService:
         
         # Schema definition must be a non-empty object if provided
         if 'schema_definition' in data and data['schema_definition'] is not None:
-            if not isinstance(data['schema_definition'], dict):
-                raise ValueError("Schema definition must be a valid JSON object")
-            if not data['schema_definition'] and field == 'schema_definition':
+            if not data['schema_definition']:
                 raise ValueError("Schema definition cannot be empty") 

@@ -37,7 +37,7 @@ class IdentityProviderService:
             raise ValueError(f"Provider with name '{provider_data.name}' already exists")
         
         # Convert config to JSON string if it's a dictionary
-        data_dict = provider_data.dict()
+        data_dict = provider_data.model_dump()
         if isinstance(data_dict.get("config"), dict):
             data_dict["config"] = json.dumps(data_dict["config"])
         
@@ -54,7 +54,7 @@ class IdentityProviderService:
             return None
         
         # Prepare update data
-        update_data = provider_data.dict(exclude_unset=True, exclude_none=True)
+        update_data = provider_data.model_dump(exclude_unset=True, exclude_none=True)
         
         # If name is being updated, check if it's unique
         if "name" in update_data and update_data["name"] != provider.name:

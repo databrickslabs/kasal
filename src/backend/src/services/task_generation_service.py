@@ -368,11 +368,19 @@ class TaskGenerationService:
             cache_ttl=generation_response.advanced_config.cache_ttl
         )
         
+        # Convert tools from List[Dict] to List[str]
+        tool_names = []
+        for tool in generation_response.tools:
+            if isinstance(tool, dict) and 'name' in tool:
+                tool_names.append(tool['name'])
+            elif isinstance(tool, str):
+                tool_names.append(tool)
+        
         return TaskCreate(
             name=generation_response.name,
             description=generation_response.description,
             expected_output=generation_response.expected_output,
-            tools=generation_response.tools,
+            tools=tool_names,
             async_execution=generation_response.advanced_config.async_execution,
             context=generation_response.advanced_config.context,
             config=task_config,

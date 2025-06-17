@@ -253,7 +253,7 @@ class ExecutionTraceService:
             deleted_count = await execution_trace_repository.delete_by_id(trace_id)
             
             return DeleteTraceResponse(
-                deleted_count=deleted_count,
+                deleted_traces=deleted_count,
                 message=f"Successfully deleted trace {trace_id}"
             )
             
@@ -280,7 +280,7 @@ class ExecutionTraceService:
             deleted_count = await execution_trace_repository.delete_by_run_id(run_id)
             
             return DeleteTraceResponse(
-                deleted_count=deleted_count,
+                deleted_traces=deleted_count,
                 message=f"Successfully deleted {deleted_count} traces for execution {run_id}"
             )
             
@@ -307,7 +307,7 @@ class ExecutionTraceService:
             deleted_count = await execution_trace_repository.delete_by_job_id(job_id)
             
             return DeleteTraceResponse(
-                deleted_count=deleted_count,
+                deleted_traces=deleted_count,
                 message=f"Successfully deleted {deleted_count} traces for job {job_id}"
             )
             
@@ -331,7 +331,7 @@ class ExecutionTraceService:
             deleted_count = await execution_trace_repository.delete_all()
             
             return DeleteTraceResponse(
-                deleted_count=deleted_count,
+                deleted_traces=deleted_count,
                 message=f"Successfully deleted all traces ({deleted_count} total)"
             )
             

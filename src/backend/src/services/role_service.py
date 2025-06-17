@@ -50,7 +50,7 @@ class RoleService:
             raise ValueError(f"Role with name '{role_data.name}' already exists")
         
         # Create role
-        role_dict = role_data.dict(exclude={"privileges"})
+        role_dict = role_data.model_dump(exclude={"privileges"})
         role = await self.role_repo.create(role_dict)
         
         # Process privileges

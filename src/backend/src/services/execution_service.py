@@ -260,12 +260,12 @@ class ExecutionService:
                 
                 # Convert config to dictionary
                 execution_config = {}
-                if hasattr(config, 'dict'):
+                if hasattr(config, 'model_dump'):
                     try:
-                        execution_config = config.dict()
-                    except Exception as dict_error:
-                        exec_logger.warning(f"[run_crew_execution] Error calling dict() on config: {dict_error}")
-                        # Create minimal config manually if dict() fails
+                        execution_config = config.model_dump()
+                    except Exception as dump_error:
+                        exec_logger.warning(f"[run_crew_execution] Error calling model_dump() on config: {dump_error}")
+                        # Create minimal config manually if model_dump() fails
                         for attr in ['nodes', 'edges', 'flow_config', 'model', 'planning', 'inputs']:
                             if hasattr(config, attr):
                                 execution_config[attr] = getattr(config, attr)
@@ -302,6 +302,14 @@ class ExecutionService:
             # For crew executions, use the proper method from CrewAIExecutionService
             elif execution_type.lower() == "crew":
                 exec_logger.debug(f"[run_crew_execution] This is a CREW execution - delegating to CrewAIExecutionService")
+                
+                # Set up Databricks configuration if needed for crew executions
+                if config.model and 'databricks' in config.model.lower():
+                    exec_logger.info(f"Setting up Databricks token for crew execution with model {config.model}")
+                    from src.services.databricks_service import DatabricksService
+                    setup_result = DatabricksService.setup_token_sync()
+                    if not setup_result:
+                        exec_logger.warning("Failed to set up Databricks token, crew execution may fail if it requires Databricks")
                 
                 exec_logger.debug(f"[run_crew_execution] Calling crew_execution_service.run_crew_execution for job_id: {execution_id}")
                 # This call should handle PREPARING/RUNNING updates internally
@@ -870,4 +878,17 @@ class ExecutionService:
         except Exception as e:
             # Log other errors but don't block execution creation
             crew_logger.error(f"[ExecutionService._check_for_running_jobs] Error checking for running jobs: {str(e)}")
-            # We don't raise here to avoid blocking execution if the check fails for technical reasons 
+            # We don't raise here to avoid blocking execution if the check fails for technical reasons
+    
+    async def generate_execution_name(self, request: ExecutionNameGenerationRequest) -> Dict[str, str]:
+        """
+        Generate a descriptive name for an execution based on agents and tasks configuration.
+        
+        Args:
+            request: The execution name generation request
+            
+        Returns:
+            Dict containing the generated name
+        """
+        response = await self.execution_name_service.generate_execution_name(request)
+        return {"name": response.name}

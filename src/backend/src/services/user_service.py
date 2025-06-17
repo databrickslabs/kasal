@@ -131,7 +131,7 @@ class UserService:
             return None
         
         # Prepare update data
-        update_data = user_update.dict(exclude_unset=True, exclude_none=True)
+        update_data = user_update.model_dump(exclude_unset=True, exclude_none=True)
         
         # Check if username is being updated and is unique
         if "username" in update_data:
@@ -161,7 +161,7 @@ class UserService:
         # Get existing profile or create if not exists
         profile = await self.profile_repo.get_by_user_id(user_id)
         
-        update_data = profile_update.dict(exclude_unset=True, exclude_none=True)
+        update_data = profile_update.model_dump(exclude_unset=True, exclude_none=True)
         
         if profile:
             # Update existing profile

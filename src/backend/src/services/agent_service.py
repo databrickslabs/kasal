@@ -31,7 +31,7 @@ class AgentService(BaseService[Agent, AgentCreate]):
         super().__init__(session)
         self.repository_class = repository_class
         self.model_class = model_class
-        self.repository = repository_class(model_class, session)
+        self.repository = repository_class(session)
     
     @classmethod
     def create(cls, session: AsyncSession) -> 'AgentService':
