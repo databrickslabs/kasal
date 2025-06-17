@@ -108,8 +108,7 @@ class Task(Base):
             
         # Ensure condition is properly structured in config if present
         if condition is not None:
-            if self.config is None:
-                self.config = {}
+            # Note: self.config is guaranteed to be a dict at this point due to line 66
             self.config['condition'] = {
                 'type': condition.get('type'),
                 'parameters': condition.get('parameters', {}),

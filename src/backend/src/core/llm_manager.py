@@ -292,6 +292,10 @@ class LLMManager:
             model_config_service = await ModelConfigService.from_unit_of_work(uow)
             model_config_dict = await model_config_service.get_model_config(model)
             
+        # Check if model configuration was found
+        if not model_config_dict:
+            raise ValueError(f"Model {model} not found in the database")
+            
         # Extract provider and other configuration details
         provider = model_config_dict["provider"]
         model_name = model_config_dict["name"]
@@ -445,6 +449,10 @@ class LLMManager:
         async with UnitOfWork() as uow:
             model_config_service = await ModelConfigService.from_unit_of_work(uow)
             model_config_dict = await model_config_service.get_model_config(model_name)
+        
+        # Check if model configuration was found
+        if not model_config_dict:
+            raise ValueError(f"Model {model_name} not found in the database")
         
         # Extract provider and model name
         provider = model_config_dict["provider"]
@@ -604,6 +612,7 @@ class LLMManager:
         Returns:
             List[float]: The embedding vector or None if creation fails
         """
+        provider = 'openai'  # Default provider
         try:
             # Determine provider and model from embedder_config or defaults
             if embedder_config:
