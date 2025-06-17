@@ -370,11 +370,11 @@ class TestDatabricksTokenRequest:
         """Test DatabricksTokenRequest with valid data."""
         request_data = {
             "workspace_url": "https://dbc-12345-abcde.cloud.databricks.com",
-            "token": "dapi1234567890abcdef1234567890abcdef"  # gitleaks:allow
+            "token": "fake_dapi_token_for_testing"  # gitleaks:allow
         }
         request = DatabricksTokenRequest(**request_data)
         assert request.workspace_url == "https://dbc-12345-abcde.cloud.databricks.com"
-        assert request.token == "dapi1234567890abcdef1234567890abcdef"  # gitleaks:allow
+        assert request.token == "fake_dapi_token_for_testing"  # gitleaks:allow
     
     def test_databricks_token_request_missing_fields(self):
         """Test DatabricksTokenRequest validation with missing fields."""
@@ -414,7 +414,7 @@ class TestDatabricksTokenRequest:
     def test_databricks_token_request_token_formats(self):
         """Test DatabricksTokenRequest with various token formats."""
         token_formats = [
-            "dapi1234567890abcdef1234567890abcdef",  # gitleaks:allow
+            "fake_dapi_token_for_testing",  # gitleaks:allow
             "dapi-1a2b3c4d-5e6f-7890-abcd-ef1234567890",
             "personal_access_token_xyz",
             "service_principal_token_abc",
@@ -487,7 +487,7 @@ class TestSchemaIntegration:
         # Token request for authentication
         token_request = DatabricksTokenRequest(
             workspace_url="https://company.cloud.databricks.com",
-            token="dapi1234567890abcdef1234567890abcdef"  # gitleaks:allow
+            token="fake_dapi_token_for_testing"  # gitleaks:allow
         )
         
         # Create secret in Databricks
