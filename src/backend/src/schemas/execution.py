@@ -73,7 +73,7 @@ class CrewConfig(BaseModel):
                 agents[key] = value
         return agents
 
-    model_config = ConfigDict(arbitrary_types_allowed=True)
+    model_config = ConfigDict(arbitrary_types_allowed=True, extra="allow")
 
 
 class ExecutionBase(BaseModel):

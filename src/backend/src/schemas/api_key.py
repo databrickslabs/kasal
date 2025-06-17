@@ -1,5 +1,5 @@
 from typing import Optional
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, ConfigDict
 
 
 class ApiKeyBase(BaseModel):
@@ -24,5 +24,4 @@ class ApiKeyResponse(ApiKeyBase):
     id: int
     value: str  # This will be decrypted when sent to the client
     
-    class Config:
-        from_attributes = True 
+    model_config = ConfigDict(from_attributes=True)

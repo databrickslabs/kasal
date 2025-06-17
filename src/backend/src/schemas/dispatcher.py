@@ -5,7 +5,7 @@ This module defines the request and response schemas for the dispatcher service
 that determines user intent from natural language input.
 """
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, ConfigDict
 from typing import Optional, Literal, Dict, Any, List
 from enum import Enum
 
@@ -26,14 +26,13 @@ class DispatcherRequest(BaseModel):
     model: Optional[str] = Field(None, description="LLM model to use for intent detection")
     tools: Optional[List[str]] = Field(default_factory=list, description="Available tools for generation")
     
-    class Config:
-        json_schema_extra = {
-            "example": {
-                "message": "Create an agent that can analyze financial data",
-                "model": "databricks-llama-4-maverick",
-                "tools": ["NL2SQLTool", "FileReadTool"]
-            }
+    model_config = ConfigDict(json_schema_extra={
+        "example": {
+            "message": "Create an agent that can analyze financial data",
+            "model": "gpt-4",
+            "tools": ["web_search", "calculator"]
         }
+    })
 
 
 class DispatcherResponse(BaseModel):
@@ -49,15 +48,14 @@ class DispatcherResponse(BaseModel):
         description="Enhanced prompt for the specific generation service"
     )
     
-    class Config:
-        json_schema_extra = {
-            "example": {
-                "intent": "generate_agent",
-                "confidence": 0.95,
-                "extracted_info": {
-                    "agent_type": "financial analyst",
-                    "capabilities": ["analyze data", "financial analysis"]
-                },
-                "suggested_prompt": "Create a financial analyst agent that can analyze financial data with expertise in data analysis"
-            }
-        } 
+    model_config = ConfigDict(json_schema_extra={
+        "example": {
+            "intent": "generate_agent",
+            "confidence": 0.95,
+            "extracted_info": {
+                "agent_type": "financial_analyst",
+                "capabilities": ["data analysis", "report generation"]
+            },
+            "suggested_prompt": "Create a financial analyst agent that can analyze market data and generate reports"
+        }
+    })

@@ -4,7 +4,7 @@ Schemas for task tracking and status management.
 from enum import Enum
 from typing import List, Optional, Dict, Any
 from datetime import datetime
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, ConfigDict
 
 
 class TaskStatusEnum(str, Enum):
@@ -34,9 +34,7 @@ class TaskStatusResponse(TaskStatusBase):
     started_at: datetime
     completed_at: Optional[datetime] = None
 
-    class Config:
-        from_attributes = True
-
+    model_config = ConfigDict(from_attributes=True)
 class TaskCallbackMetadata(BaseModel):
     """Metadata for task callbacks"""
     callback_name: Optional[str] = None
@@ -61,10 +59,7 @@ class TaskStatusSchema(BaseModel):
     started_at: datetime = Field(..., description="Timestamp when the task started")
     completed_at: Optional[datetime] = Field(None, description="Timestamp when the task completed, if applicable")
 
-    class Config:
-        from_attributes = True
-
-
+    model_config = ConfigDict(from_attributes=True)
 class JobExecutionStatusResponse(BaseModel):
     """Schema for job execution status response including task statuses"""
     job_id: str = Field(..., description="Job identifier")

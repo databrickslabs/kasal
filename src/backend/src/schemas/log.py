@@ -1,6 +1,6 @@
 from typing import Optional, Dict, Any
 from datetime import datetime
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, ConfigDict
 
 
 class LLMLogBase(BaseModel):
@@ -26,10 +26,7 @@ class LLMLogResponse(LLMLogBase):
     id: int
     created_at: datetime
     
-    class Config:
-        from_attributes = True
-
-
+    model_config = ConfigDict(from_attributes=True)
 class LLMLogsQueryParams(BaseModel):
     """Schema for LLM logs query parameters."""
     page: int = Field(0, ge=0, description="Page number, starting from 0")

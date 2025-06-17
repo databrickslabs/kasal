@@ -5,7 +5,7 @@ These schemas define the request and response models for group-related endpoints
 """
 from datetime import datetime
 from typing import Optional, List
-from pydantic import BaseModel, Field, EmailStr
+from pydantic import BaseModel, Field, EmailStr, ConfigDict
 from src.models.enums import GroupStatus, GroupUserRole, GroupUserStatus
 
 
@@ -44,8 +44,7 @@ class GroupResponse(GroupBase):
     updated_at: datetime = Field(..., description="Group last update timestamp")
     user_count: int = Field(..., description="Number of users in the group")
 
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
 
 
 class GroupUserBase(BaseModel):
@@ -77,8 +76,7 @@ class GroupUserResponse(GroupUserBase):
     created_at: datetime = Field(..., description="Association creation timestamp")
     updated_at: datetime = Field(..., description="Association last update timestamp")
 
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
 
 
 class GroupStatsResponse(BaseModel):
@@ -90,5 +88,4 @@ class GroupStatsResponse(BaseModel):
     total_users: int = Field(..., description="Total number of group users")
     active_users: int = Field(..., description="Number of active group users")
 
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)

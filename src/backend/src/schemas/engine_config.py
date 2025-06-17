@@ -1,6 +1,6 @@
 from typing import List, Optional
 from datetime import datetime
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, ConfigDict
 
 
 class EngineConfigBase(BaseModel):
@@ -33,10 +33,7 @@ class EngineConfigResponse(EngineConfigBase):
     created_at: datetime
     updated_at: datetime
     
-    class Config:
-        from_attributes = True
-
-
+    model_config = ConfigDict(from_attributes=True)
 class EngineConfigToggleUpdate(BaseModel):
     """Schema for toggling engine configuration enabled status."""
     enabled: bool = Field(..., description="New enabled status")

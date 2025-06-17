@@ -1,7 +1,7 @@
 from datetime import datetime
 from typing import Optional, Dict, Any, List
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, ConfigDict
 
 
 # Shared properties
@@ -42,10 +42,7 @@ class ChatHistoryInDBBase(ChatHistoryBase):
     group_id: Optional[str] = Field(None, description="Group identifier for isolation")
     group_email: Optional[str] = Field(None, description="Group email for audit")
 
-    class Config:
-        from_attributes = True
-
-
+    model_config = ConfigDict(from_attributes=True)
 # Properties to return to client
 class ChatHistoryResponse(ChatHistoryInDBBase):
     """Schema for ChatHistory API responses."""
@@ -66,10 +63,7 @@ class ChatSessionInfo(BaseModel):
     latest_timestamp: datetime = Field(..., description="Latest message timestamp")
     message_count: Optional[int] = Field(None, description="Total messages in session")
 
-    class Config:
-        from_attributes = True
-
-
+    model_config = ConfigDict(from_attributes=True)
 class ChatSessionListResponse(BaseModel):
     """Schema for listing chat sessions."""
     sessions: List[ChatSessionInfo] = Field(..., description="List of chat sessions")

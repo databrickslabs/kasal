@@ -230,7 +230,7 @@ class IdentityProviderInDB(IdentityProviderBase):
     }
 
 class IdentityProviderResponse(IdentityProviderInDB):
-    pass
+    config: Optional[IdentityProviderConfig] = None  # Allow None for non-admin users
 
 class IdentityProviderListResponse(BaseModel):
     providers: List[IdentityProviderResponse]
