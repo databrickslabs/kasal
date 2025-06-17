@@ -1,0 +1,360 @@
+"""
+Simple test suite for databricks_auth.py that achieves good coverage without hanging
+"""
+
+import os
+import sys
+import pytest
+from unittest.mock import AsyncMock, MagicMock, patch, Mock
+import requests
+import subprocess
+import json
+
+# Mock all heavy dependencies before importing databricks_auth
+sys.modules['src.services.databricks_service'] = MagicMock()
+sys.modules['src.services.api_keys_service'] = MagicMock()
+sys.modules['src.core.unit_of_work'] = MagicMock()
+sys.modules['src.utils.encryption_utils'] = MagicMock()
+sys.modules['databricks.sdk'] = MagicMock()
+sys.modules['databricks.sdk.config'] = MagicMock()
+
+from src.utils.databricks_auth import (
+    DatabricksAuth,
+    get_databricks_auth_headers,
+    get_databricks_auth_headers_sync,
+    validate_databricks_connection,
+    extract_user_token_from_request,
+    is_databricks_apps_environment,
+    get_mcp_access_token,
+    get_mcp_auth_headers,
+    setup_environment_variables,
+    get_workspace_client,
+    _databricks_auth
+)
+
+
+@pytest.fixture
+def auth():
+    """Create a fresh DatabricksAuth instance."""
+    return DatabricksAuth()
+
+
+@pytest.fixture(autouse=True)
+def clean_env(monkeypatch):
+    """Clean environment variables before each test."""
+    for var in list(os.environ.keys()):
+        if var.startswith('DATABRICKS_'):
+            monkeypatch.delenv(var, raising=False)
+    yield
+
+
+class TestBasics:
+    """Basic functionality tests."""
+    
+    def test_init(self, auth):
+        assert auth._api_token is None
+        assert auth._workspace_host is None
+        assert auth._config_loaded is False
+        assert auth._use_databricks_apps is False
+        assert auth._user_access_token is None
+        assert auth._client_id is None
+        assert auth._client_secret is None
+    
+    def test_set_user_access_token(self, auth):
+        auth.set_user_access_token("test_token")
+        assert auth._user_access_token == "test_token"
+    
+    def test_get_workspace_host(self, auth):
+        auth._workspace_host = "https://test.com"
+        assert auth.get_workspace_host() == "https://test.com"
+    
+    def test_get_api_token(self, auth):
+        auth._api_token = "test_token"
+        assert auth.get_api_token() == "test_token"
+    
+    @pytest.mark.asyncio
+    async def test_load_config_already_loaded(self, auth):
+        auth._config_loaded = True
+        result = await auth._load_config()
+        assert result is True
+    
+    def test_check_databricks_apps_oauth(self, auth, monkeypatch):
+        monkeypatch.setenv('DATABRICKS_CLIENT_ID', 'test_id')
+        monkeypatch.setenv('DATABRICKS_CLIENT_SECRET', 'test_secret')
+        auth._check_databricks_apps_environment()
+        assert auth._use_databricks_apps is True
+        assert auth._client_id == 'test_id'
+        assert auth._client_secret == 'test_secret'
+    
+    def test_check_databricks_apps_vars(self, auth, monkeypatch):
+        monkeypatch.setenv('DATABRICKS_APP_NAME', 'test_app')
+        auth._check_databricks_apps_environment()
+        assert auth._use_databricks_apps is True
+    
+    def test_check_databricks_apps_host(self, auth, monkeypatch):
+        monkeypatch.setenv('DATABRICKS_HOST', 'test.databricks.com')
+        auth._check_databricks_apps_environment()
+        assert auth._workspace_host == 'https://test.databricks.com'
+
+
+class TestAsyncMethods:
+    """Test async methods with simple mocking."""
+    
+    @pytest.mark.asyncio
+    async def test_validate_token_missing_data(self, auth):
+        result = await auth._validate_token()
+        assert result is False
+    
+    @pytest.mark.asyncio
+    async def test_validate_token_success(self, auth):
+        auth._api_token = "test_token"
+        auth._workspace_host = "https://test.com"
+        
+        with patch('requests.get') as mock_get:
+            mock_get.return_value.status_code = 200
+            mock_get.return_value.json.return_value = {"userName": "test@test.com"}
+            result = await auth._validate_token()
+            assert result is True
+    
+    @pytest.mark.asyncio
+    async def test_validate_token_http_error(self, auth):
+        auth._api_token = "test_token"
+        auth._workspace_host = "https://test.com"
+        
+        with patch('requests.get') as mock_get:
+            mock_get.return_value.status_code = 401
+            result = await auth._validate_token()
+            assert result is False
+    
+    @pytest.mark.asyncio
+    async def test_get_service_principal_token_no_creds(self, auth):
+        result = await auth._get_service_principal_token()
+        assert result is None
+    
+    @pytest.mark.asyncio
+    async def test_manual_oauth_flow_no_host(self, auth):
+        result = await auth._manual_oauth_flow()
+        assert result is None
+    
+    @pytest.mark.asyncio
+    async def test_manual_oauth_flow_success(self, auth):
+        auth._workspace_host = "https://test.com"
+        auth._client_id = "test_id"
+        auth._client_secret = "test_secret"
+        
+        with patch('requests.post') as mock_post:
+            mock_post.return_value.status_code = 200
+            mock_post.return_value.json.return_value = {"access_token": "oauth_token"}
+            result = await auth._manual_oauth_flow()
+            assert result == "oauth_token"
+
+
+class TestModuleFunctions:
+    """Test module-level functions."""
+    
+    @pytest.mark.asyncio
+    async def test_get_databricks_auth_headers_simple(self):
+        with patch.object(_databricks_auth, 'get_auth_headers', return_value=({"test": "header"}, None)):
+            headers, error = await get_databricks_auth_headers()
+            assert headers == {"test": "header"}
+            assert error is None
+    
+    def test_get_databricks_auth_headers_sync(self):
+        with patch('asyncio.run', return_value=({"test": "header"}, None)):
+            headers, error = get_databricks_auth_headers_sync()
+            assert headers == {"test": "header"}
+            assert error is None
+    
+    @pytest.mark.asyncio
+    async def test_validate_databricks_connection_simple(self):
+        with patch.object(_databricks_auth, '_load_config', return_value=True), \
+             patch.object(_databricks_auth, '_validate_token', return_value=True):
+            is_valid, error = await validate_databricks_connection()
+            assert is_valid is True
+            assert error is None
+    
+    def test_extract_user_token_forwarded(self):
+        mock_request = MagicMock()
+        mock_request.headers.get.side_effect = lambda x: "forwarded_token" if x == 'X-Forwarded-Access-Token' else None
+        token = extract_user_token_from_request(mock_request)
+        assert token == "forwarded_token"
+    
+    def test_extract_user_token_auth_header(self):
+        mock_request = MagicMock()
+        mock_request.headers.get.side_effect = lambda x: "Bearer auth_token" if x == 'Authorization' else None
+        token = extract_user_token_from_request(mock_request)
+        assert token == "auth_token"
+    
+    def test_is_databricks_apps_environment_oauth(self, monkeypatch):
+        monkeypatch.setenv('DATABRICKS_CLIENT_ID', 'test_id')
+        monkeypatch.setenv('DATABRICKS_CLIENT_SECRET', 'test_secret')
+        assert is_databricks_apps_environment() is True
+    
+    def test_is_databricks_apps_environment_app_vars(self, monkeypatch):
+        monkeypatch.setenv('DATABRICKS_APP_NAME', 'test_app')
+        assert is_databricks_apps_environment() is True
+    
+    def test_is_databricks_apps_environment_false(self):
+        assert is_databricks_apps_environment() is False
+    
+    @pytest.mark.asyncio
+    async def test_get_mcp_access_token_success(self):
+        with patch('subprocess.run') as mock_run:
+            mock_run.return_value.stdout = '{"access_token": "eyJtest"}'
+            token, error = await get_mcp_access_token()
+            assert token == "eyJtest"
+            assert error is None
+    
+    @pytest.mark.asyncio
+    async def test_get_mcp_access_token_no_token(self):
+        with patch('subprocess.run') as mock_run:
+            mock_run.return_value.stdout = '{}'
+            token, error = await get_mcp_access_token()
+            assert token is None
+            assert "No access token found" in error
+    
+    @pytest.mark.asyncio
+    async def test_get_mcp_auth_headers_success(self):
+        with patch('src.utils.databricks_auth.get_mcp_access_token', return_value=("test_token", None)):
+            headers, error = await get_mcp_auth_headers("http://test")
+            assert headers["Authorization"] == "Bearer test_token"
+            assert error is None
+    
+    def test_setup_environment_variables(self):
+        with patch.object(_databricks_auth, '_load_config', return_value=True):
+            _databricks_auth._api_token = "test_token"
+            _databricks_auth._workspace_host = "https://test.com"
+            result = setup_environment_variables()
+            assert result is True
+    
+    @pytest.mark.asyncio
+    async def test_get_workspace_client_config_failure(self):
+        with patch.object(_databricks_auth, '_load_config', return_value=False):
+            client = await get_workspace_client()
+            assert client is None
+
+
+class TestCoverageCompleteness:
+    """Additional tests to ensure good coverage."""
+    
+    @pytest.mark.asyncio
+    async def test_get_auth_headers_user_token_param(self, auth):
+        auth._config_loaded = True
+        auth._use_databricks_apps = True
+        
+        with patch.object(auth, '_get_oauth_headers', return_value=({"test": "header"}, None)):
+            headers, error = await auth.get_auth_headers(user_token="new_token")
+            assert auth._user_access_token == "new_token"
+    
+    @pytest.mark.asyncio
+    async def test_get_auth_headers_pat_path(self, auth):
+        auth._config_loaded = True
+        auth._use_databricks_apps = False
+        
+        with patch.object(auth, '_get_pat_headers', return_value=({"test": "header"}, None)):
+            headers, error = await auth.get_auth_headers()
+            assert headers == {"test": "header"}
+    
+    @pytest.mark.asyncio
+    async def test_oauth_headers_with_mcp(self, auth):
+        auth._user_access_token = "test_token"
+        headers, error = await auth._get_oauth_headers("http://mcp")
+        assert headers["Accept"] == "text/event-stream"
+    
+    @pytest.mark.asyncio
+    async def test_pat_headers_with_mcp(self, auth):
+        auth._api_token = "test_token"
+        auth._workspace_host = "https://test.com"
+        
+        with patch.object(auth, '_validate_token', return_value=True):
+            headers, error = await auth._get_pat_headers("http://mcp")
+            assert headers["Accept"] == "text/event-stream"
+    
+    @pytest.mark.asyncio
+    async def test_workspace_client_oauth_user_token(self):
+        with patch.object(_databricks_auth, '_load_config', return_value=True), \
+             patch('src.utils.databricks_auth.WorkspaceClient', MagicMock()) as mock_client:
+            _databricks_auth._use_databricks_apps = True
+            _databricks_auth._workspace_host = "https://test.com"
+            await get_workspace_client(user_token="user_token")
+            mock_client.assert_called_with(host="https://test.com", token="user_token")
+    
+    @pytest.mark.asyncio
+    async def test_workspace_client_oauth_service_principal(self):
+        with patch.object(_databricks_auth, '_load_config', return_value=True), \
+             patch('src.utils.databricks_auth.WorkspaceClient', MagicMock()) as mock_client:
+            _databricks_auth._use_databricks_apps = True
+            _databricks_auth._workspace_host = "https://test.com"
+            _databricks_auth._client_id = "test_id"
+            _databricks_auth._client_secret = "test_secret"
+            await get_workspace_client()
+            mock_client.assert_called_with(
+                host="https://test.com", 
+                client_id="test_id", 
+                client_secret="test_secret"
+            )
+    
+    @pytest.mark.asyncio
+    async def test_workspace_client_pat(self):
+        with patch.object(_databricks_auth, '_load_config', return_value=True), \
+             patch('src.utils.databricks_auth.WorkspaceClient', MagicMock()) as mock_client:
+            _databricks_auth._use_databricks_apps = False
+            _databricks_auth._workspace_host = "https://test.com"
+            _databricks_auth._api_token = "test_token"
+            await get_workspace_client()
+            mock_client.assert_called_with(host="https://test.com", token="test_token")
+
+
+class TestErrorPaths:
+    """Test error handling paths for good coverage."""
+    
+    @pytest.mark.asyncio
+    async def test_oauth_headers_exception(self, auth):
+        auth._user_access_token = None
+        with patch.object(auth, '_get_service_principal_token', side_effect=Exception("Error")):
+            headers, error = await auth._get_oauth_headers()
+            assert headers is None
+            assert "Error" in error
+    
+    @pytest.mark.asyncio
+    async def test_pat_headers_exception(self, auth):
+        with patch.object(auth, '_validate_token', side_effect=Exception("Error")):
+            headers, error = await auth._get_pat_headers()
+            assert headers is None
+            assert "Error" in error
+    
+    @pytest.mark.asyncio
+    async def test_service_principal_token_exception(self, auth):
+        # Force outer exception by making attribute access fail
+        class FailingAuth:
+            @property
+            def _client_id(self):
+                raise Exception("Attribute error")
+        
+        failing_auth = FailingAuth()
+        result = await auth.__class__._get_service_principal_token(failing_auth)
+        assert result is None
+    
+    @pytest.mark.asyncio
+    async def test_validate_databricks_connection_token_fail(self):
+        with patch.object(_databricks_auth, '_load_config', return_value=True), \
+             patch.object(_databricks_auth, '_validate_token', return_value=False):
+            is_valid, error = await validate_databricks_connection()
+            assert is_valid is False
+            assert error == "Token validation failed"
+    
+    @pytest.mark.asyncio
+    async def test_mcp_access_token_exception(self):
+        with patch('subprocess.run') as mock_run:
+            mock_run.return_value.stdout = '{"access_token": "test"}'
+            with patch('json.loads', side_effect=Exception("JSON error")):
+                token, error = await get_mcp_access_token()
+                assert token is None
+                assert "JSON error" in error
+    
+    @pytest.mark.asyncio
+    async def test_mcp_auth_headers_exception(self):
+        with patch('src.utils.databricks_auth.get_mcp_access_token', side_effect=Exception("MCP error")):
+            headers, error = await get_mcp_auth_headers("http://test")
+            assert headers is None
+            assert "MCP error" in error

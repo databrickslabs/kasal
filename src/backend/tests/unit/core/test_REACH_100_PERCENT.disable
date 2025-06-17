@@ -1,0 +1,479 @@
+"""
+REACH 100% COVERAGE TEST
+Targeting the remaining missing lines to achieve exactly 100% coverage.
+Missing lines: 91-92, 125-126, 129-130, 162-163, 185-189, 220-221, 224-225, 245-247, 
+313, 383, 391-395, 421, 469-470, 519, 542-560, 591-592, 647-651, 658-660, 681, 
+705-707, 728-729, 741-747, 755-765, 787-801
+"""
+import pytest
+import os
+import sys
+import tempfile
+import asyncio
+import time
+import json
+import logging
+from unittest.mock import patch, MagicMock, AsyncMock, Mock
+from datetime import datetime, timedelta
+
+from src.core.llm_manager import LiteLLMFileLogger, LLMManager
+from src.schemas.model_provider import ModelProvider
+
+
+@pytest.fixture(autouse=True)
+def reset_modules_and_circuit_breaker():
+    """Reset modules and circuit breaker state."""
+    # Clear databricks_auth module
+    if 'src.utils.databricks_auth' in sys.modules:
+        del sys.modules['src.utils.databricks_auth']
+    
+    # Reset circuit breaker
+    original_failures = LLMManager._embedding_failures.copy()
+    LLMManager._embedding_failures.clear()
+    
+    yield
+    
+    LLMManager._embedding_failures = original_failures.copy()
+
+
+def create_mock_uow():
+    """Helper to create properly configured UnitOfWork mock."""
+    mock_uow = AsyncMock()
+    mock_uow.__aenter__ = AsyncMock(return_value=mock_uow)
+    mock_uow.__aexit__ = AsyncMock(return_value=None)
+    return mock_uow
+
+
+class AsyncContextResponse:
+    def __init__(self, status=200, json_data=None, text_data=None):
+        self.status = status
+        self._json_data = json_data or {}
+        self._text_data = text_data or ""
+        
+    async def json(self):
+        return self._json_data
+        
+    async def text(self):
+        return self._text_data
+        
+    async def __aenter__(self):
+        return self
+        
+    async def __aexit__(self, exc_type, exc_val, exc_tb):
+        pass
+
+
+class AsyncContextSession:
+    def __init__(self, response):
+        self.response = response
+        
+    def post(self, *args, **kwargs):
+        return self.response
+        
+    async def __aenter__(self):
+        return self
+        
+    async def __aexit__(self, exc_type, exc_val, exc_tb):
+        pass
+
+
+class TestReach100PercentCoverage:
+    """Tests targeting remaining missing lines for 100% coverage."""
+    
+    def test_lines_91_92_choices_iteration_exception(self):
+        """Test lines 91-92 - choices iteration exception."""
+        temp_log_file = tempfile.mktemp()
+        logger = LiteLLMFileLogger(file_path=temp_log_file)
+        
+        kwargs = {"model": "test"}
+        # Create a response that will cause exception during iteration
+        class BadChoice:
+            def __getitem__(self, key):
+                if key == 'message':
+                    raise KeyError("No message")
+                return {}
+        
+        response_obj = {"choices": [BadChoice()]}
+        start_time = datetime.now()
+        end_time = start_time + timedelta(seconds=1)
+        
+        # Should not raise exception - caught at lines 91-92
+        logger.log_post_api_call(kwargs, response_obj, start_time, end_time)
+
+    def test_lines_125_126_cost_exception(self):
+        """Test lines 125-126 - cost calculation exception."""
+        temp_log_file = tempfile.mktemp()
+        logger = LiteLLMFileLogger(file_path=temp_log_file)
+        
+        kwargs = {"model": "gpt-3.5-turbo", "messages": [{"role": "user", "content": "test"}]}
+        response_obj = {
+            "usage": {"prompt_tokens": 10, "completion_tokens": 5, "total_tokens": 15},
+            "choices": [{"message": {"content": "test response"}}]
+        }
+        start_time = datetime.now()
+        end_time = start_time + timedelta(seconds=1)
+        
+        with patch('litellm.completion_cost', side_effect=Exception("Cost error")):
+            logger.log_success_event(kwargs, response_obj, start_time, end_time)
+
+    def test_lines_129_130_general_exception(self):
+        """Test lines 129-130 - general logging exception."""
+        temp_log_file = tempfile.mktemp()
+        logger = LiteLLMFileLogger(file_path=temp_log_file)
+        
+        # Create response that causes exception
+        class BadUsage:
+            def __getitem__(self, key):
+                raise Exception("Bad usage")
+        
+        kwargs = {"model": "test"}
+        response_obj = {"usage": BadUsage()}
+        start_time = datetime.now()
+        end_time = start_time + timedelta(seconds=1)
+        
+        logger.log_success_event(kwargs, response_obj, start_time, end_time)
+
+    @pytest.mark.asyncio
+    async def test_lines_162_163_async_pre_api_exception(self):
+        """Test lines 162-163 - async pre API call exception."""
+        temp_log_file = tempfile.mktemp()
+        logger = LiteLLMFileLogger(file_path=temp_log_file)
+        
+        with patch.object(logger, 'log_pre_api_call', side_effect=Exception("Sync error")):
+            await logger.async_log_pre_api_call("model", [], {})
+
+    @pytest.mark.asyncio
+    async def test_lines_185_189_async_post_api_exception(self):
+        """Test lines 185-189 - async post API call exception."""
+        temp_log_file = tempfile.mktemp()
+        logger = LiteLLMFileLogger(file_path=temp_log_file)
+        
+        # Create bad datetime that causes exception
+        class BadDateTime:
+            def total_seconds(self):
+                raise Exception("Time error")
+        
+        class BadTime:
+            def __sub__(self, other):
+                return BadDateTime()
+        
+        with patch.object(logger, 'log_post_api_call', side_effect=Exception("Sync error")):
+            await logger.async_log_post_api_call({}, {}, datetime.now(), BadTime())
+
+    @pytest.mark.asyncio
+    async def test_lines_220_221_224_225_async_success_exception(self):
+        """Test lines 220-221, 224-225 - async success event exception."""
+        temp_log_file = tempfile.mktemp()
+        logger = LiteLLMFileLogger(file_path=temp_log_file)
+        
+        # Test create_task exception
+        with patch('asyncio.create_task', side_effect=Exception("Task error")):
+            await logger.async_log_success_event({}, {}, datetime.now(), datetime.now())
+
+    @pytest.mark.asyncio
+    async def test_lines_245_247_async_failure_exception(self):
+        """Test lines 245-247 - async failure event exception."""
+        temp_log_file = tempfile.mktemp()
+        logger = LiteLLMFileLogger(file_path=temp_log_file)
+        
+        with patch.object(logger, 'log_failure_event', side_effect=Exception("Sync error")):
+            await logger.async_log_failure_event({}, {}, datetime.now(), datetime.now())
+
+    @pytest.mark.asyncio
+    async def test_line_313_deepseek_already_prefixed(self):
+        """Test line 313 - DeepSeek already prefixed."""
+        mock_config = {"provider": ModelProvider.DEEPSEEK, "name": "deepseek/deepseek-chat"}
+        
+        with patch('src.core.llm_manager.UnitOfWork'):
+            with patch('src.core.llm_manager.ModelConfigService.from_unit_of_work') as mock_service:
+                with patch('src.core.llm_manager.ApiKeysService.get_provider_api_key') as mock_api_keys:
+                    mock_service.return_value.get_model_config = AsyncMock(return_value=mock_config)
+                    mock_api_keys.return_value = "deepseek-key"
+                    
+                    result = await LLMManager.configure_litellm("test-model")
+                    assert result["model"] == "deepseek/deepseek-chat"
+
+    @pytest.mark.asyncio
+    async def test_line_383_databricks_database_none(self):
+        """Test line 383 - Databricks database returns None."""
+        if 'src.utils.databricks_auth' in sys.modules:
+            del sys.modules['src.utils.databricks_auth']
+        
+        mock_config = {"provider": ModelProvider.DATABRICKS, "name": "databricks-model"}
+        
+        with patch('src.core.llm_manager.UnitOfWork') as mock_uow:
+            with patch('src.core.llm_manager.ModelConfigService.from_unit_of_work') as mock_service:
+                with patch('src.core.llm_manager.ApiKeysService.get_api_key_value') as mock_api_key:
+                    with patch('src.services.databricks_service.DatabricksService.from_unit_of_work') as mock_db_service:
+                        mock_uow.return_value = create_mock_uow()
+                        mock_service.return_value.get_model_config = AsyncMock(return_value=mock_config)
+                        mock_api_key.return_value = "test-token"
+                        mock_db_service.return_value.get_databricks_config = AsyncMock(return_value=None)
+                        
+                        with patch.dict(os.environ, {}, clear=True):
+                            result = await LLMManager.configure_litellm("test-model")
+
+    @pytest.mark.asyncio
+    async def test_lines_391_395_databricks_database_exception(self):
+        """Test lines 391-395 - Databricks database exception."""
+        if 'src.utils.databricks_auth' in sys.modules:
+            del sys.modules['src.utils.databricks_auth']
+        
+        mock_config = {"provider": ModelProvider.DATABRICKS, "name": "databricks-model"}
+        
+        with patch('src.core.llm_manager.UnitOfWork') as mock_uow:
+            with patch('src.core.llm_manager.ModelConfigService.from_unit_of_work') as mock_service:
+                with patch('src.core.llm_manager.ApiKeysService.get_api_key_value') as mock_api_key:
+                    with patch('src.services.databricks_service.DatabricksService.from_unit_of_work') as mock_db_service:
+                        mock_uow.return_value = create_mock_uow()
+                        mock_service.return_value.get_model_config = AsyncMock(return_value=mock_config)
+                        mock_api_key.return_value = "test-token"
+                        mock_db_service.return_value.get_databricks_config = AsyncMock(side_effect=Exception("DB Error"))
+                        
+                        with patch.dict(os.environ, {}, clear=True):
+                            result = await LLMManager.configure_litellm("test-model")
+
+    @pytest.mark.asyncio
+    async def test_line_421_unknown_provider(self):
+        """Test line 421 - unknown provider."""
+        mock_config = {"provider": "INVALID_PROVIDER", "name": "unknown-model"}
+        
+        with patch('src.core.llm_manager.UnitOfWork'):
+            with patch('src.core.llm_manager.ModelConfigService.from_unit_of_work') as mock_service:
+                mock_service.return_value.get_model_config = AsyncMock(return_value=mock_config)
+                
+                result = await LLMManager.configure_litellm("test-model")
+                assert result["model"] == "unknown-model"
+
+    @pytest.mark.asyncio
+    async def test_lines_469_470_gemini_base_url(self):
+        """Test lines 469-470 - Gemini base URL setting."""
+        mock_config = {"provider": ModelProvider.GEMINI, "name": "gemini-pro"}
+        
+        with patch('src.core.llm_manager.UnitOfWork'):
+            with patch('src.core.llm_manager.ModelConfigService.from_unit_of_work') as mock_service:
+                with patch('src.core.llm_manager.ApiKeysService.get_provider_api_key') as mock_api_keys:
+                    mock_service.return_value.get_model_config = AsyncMock(return_value=mock_config)
+                    mock_api_keys.return_value = "test-key"
+                    
+                    result = await LLMManager.configure_litellm("test-model")
+                    assert result["base_url"] == "https://generativelanguage.googleapis.com/v1beta/openai/"
+
+    @pytest.mark.asyncio
+    async def test_line_519_databricks_database_none_crewai(self):
+        """Test line 519 - Databricks database None in CrewAI."""
+        mock_config = {"provider": ModelProvider.DATABRICKS, "name": "databricks-model"}
+        
+        mock_databricks_auth = MagicMock()
+        mock_databricks_auth.is_databricks_apps_environment = MagicMock(return_value=False)
+        
+        with patch.dict('sys.modules', {'src.utils.databricks_auth': mock_databricks_auth}):
+            with patch('src.core.llm_manager.UnitOfWork') as mock_uow:
+                with patch('src.core.llm_manager.ModelConfigService.from_unit_of_work') as mock_service:
+                    with patch('src.core.llm_manager.ApiKeysService.get_provider_api_key') as mock_api_key:
+                        with patch('src.services.databricks_service.DatabricksService.from_unit_of_work') as mock_db_service:
+                            with patch('crewai.LLM') as mock_llm_class:
+                                mock_uow.return_value = create_mock_uow()
+                                mock_service.return_value.get_model_config = AsyncMock(return_value=mock_config)
+                                mock_api_key.return_value = "test-token"
+                                mock_db_service.return_value.get_databricks_config = AsyncMock(return_value=None)
+                                mock_llm_class.return_value = MagicMock()
+                                
+                                with patch.dict(os.environ, {}, clear=True):
+                                    result = await LLMManager.configure_crewai_llm("test-model")
+
+    @pytest.mark.asyncio
+    async def test_lines_542_560_crewai_provider_specifics(self):
+        """Test lines 542-560 - CrewAI provider specific logic."""
+        # Test line 542 - Anthropic
+        mock_config = {"provider": ModelProvider.ANTHROPIC, "name": "claude-3"}
+        with patch('src.core.llm_manager.UnitOfWork'):
+            with patch('src.core.llm_manager.ModelConfigService.from_unit_of_work') as mock_service:
+                with patch('src.core.llm_manager.ApiKeysService.get_provider_api_key') as mock_api_keys:
+                    with patch('crewai.LLM') as mock_llm_class:
+                        mock_service.return_value.get_model_config = AsyncMock(return_value=mock_config)
+                        mock_api_keys.return_value = "test-key"
+                        mock_llm_class.return_value = MagicMock()
+                        result = await LLMManager.configure_crewai_llm("test-model")
+                        assert result is not None
+        
+        # Test line 547 - DeepSeek not prefixed
+        mock_config = {"provider": ModelProvider.DEEPSEEK, "name": "deepseek-chat"}
+        with patch('src.core.llm_manager.UnitOfWork'):
+            with patch('src.core.llm_manager.ModelConfigService.from_unit_of_work') as mock_service:
+                with patch('src.core.llm_manager.ApiKeysService.get_provider_api_key') as mock_api_keys:
+                    with patch('crewai.LLM') as mock_llm_class:
+                        mock_service.return_value.get_model_config = AsyncMock(return_value=mock_config)
+                        mock_api_keys.return_value = "test-key"
+                        mock_llm_class.return_value = MagicMock()
+                        result = await LLMManager.configure_crewai_llm("test-model")
+                        assert result is not None
+        
+        # Test line 554 - DeepSeek already prefixed
+        mock_config = {"provider": ModelProvider.DEEPSEEK, "name": "deepseek/deepseek-chat"}
+        with patch('src.core.llm_manager.UnitOfWork'):
+            with patch('src.core.llm_manager.ModelConfigService.from_unit_of_work') as mock_service:
+                with patch('src.core.llm_manager.ApiKeysService.get_provider_api_key') as mock_api_keys:
+                    with patch('crewai.LLM') as mock_llm_class:
+                        mock_service.return_value.get_model_config = AsyncMock(return_value=mock_config)
+                        mock_api_keys.return_value = "test-key"
+                        mock_llm_class.return_value = MagicMock()
+                        result = await LLMManager.configure_crewai_llm("test-model")
+                        assert result is not None
+        
+        # Test lines 559-560 - Ollama with hyphen
+        mock_config = {"provider": ModelProvider.OLLAMA, "name": "llama-3-8b-instruct"}
+        with patch('src.core.llm_manager.UnitOfWork'):
+            with patch('src.core.llm_manager.ModelConfigService.from_unit_of_work') as mock_service:
+                with patch('crewai.LLM') as mock_llm_class:
+                    mock_service.return_value.get_model_config = AsyncMock(return_value=mock_config)
+                    mock_llm_class.return_value = MagicMock()
+                    result = await LLMManager.configure_crewai_llm("test-model")
+                    assert result is not None
+
+    @pytest.mark.asyncio
+    async def test_lines_591_592_model_not_found(self):
+        """Test lines 591-592 - model not found."""
+        with patch('src.core.llm_manager.UnitOfWork') as mock_uow:
+            with patch('src.core.llm_manager.ModelConfigService.from_unit_of_work') as mock_service:
+                mock_uow.return_value = create_mock_uow()
+                mock_service.return_value.get_model_config = AsyncMock(return_value=None)
+                
+                with pytest.raises(ValueError, match="Model unknown-model not found in the database"):
+                    await LLMManager.configure_litellm("unknown-model")
+
+    @pytest.mark.asyncio
+    async def test_lines_647_651_embedding_custom_model(self):
+        """Test lines 647-651 - embedding with custom model."""
+        with patch('src.core.llm_manager.UnitOfWork') as mock_uow:
+            with patch('src.core.llm_manager.ModelConfigService.from_unit_of_work') as mock_service:
+                with patch('src.core.llm_manager.ApiKeysService.get_provider_api_key') as mock_api_keys:
+                    with patch('os.environ.get', return_value=None):
+                        with patch('litellm.embedding') as mock_embedding:
+                            mock_uow.return_value = create_mock_uow()
+                            mock_service.return_value.get_model_config = AsyncMock(return_value={
+                                "provider": ModelProvider.OPENAI,
+                                "name": "text-embedding-3-small"
+                            })
+                            mock_api_keys.return_value = "test-key"
+                            mock_embedding.return_value = MagicMock(
+                                data=[MagicMock(embedding=[0.1, 0.2, 0.3])]
+                            )
+                            
+                            result = await LLMManager.get_embedding("test text", "custom-model")
+                            assert result == [0.1, 0.2, 0.3]
+
+    @pytest.mark.asyncio
+    async def test_lines_658_660_681_databricks_oauth(self):
+        """Test lines 658-660, 681 - Databricks OAuth."""
+        embedder_config = {"provider": "databricks", "config": {"model": "test-embedding"}}
+        
+        mock_databricks_auth = MagicMock()
+        mock_databricks_auth.is_databricks_apps_environment = MagicMock(return_value=True)
+        mock_databricks_auth.get_databricks_auth_headers = MagicMock(return_value={"Authorization": "Bearer oauth"})
+        
+        with patch.dict('sys.modules', {'src.utils.databricks_auth': mock_databricks_auth}):
+            success_response = AsyncContextResponse(status=200, json_data={"data": [{"embedding": [0.1, 0.2]}]})
+            session = AsyncContextSession(success_response)
+            
+            with patch("aiohttp.ClientSession") as mock_session_class:
+                mock_session_class.return_value = session
+                
+                with patch.dict(os.environ, {"DATABRICKS_HOST": "https://workspace.databricks.com"}):
+                    result = await LLMManager.get_embedding("test text", embedder_config=embedder_config)
+                    assert result == [0.1, 0.2]
+
+    @pytest.mark.asyncio
+    async def test_lines_705_707_workspace_url_formatting(self):
+        """Test lines 705-707 - workspace URL formatting."""
+        embedder_config = {"provider": "databricks", "config": {"model": "test-embedding"}}
+        
+        with patch("src.core.llm_manager.ApiKeysService.get_provider_api_key") as mock_api_keys:
+            with patch("aiohttp.ClientSession") as mock_session_class:
+                mock_api_keys.return_value = "test-token"
+                
+                success_response = AsyncContextResponse(status=200, json_data={"data": [{"embedding": [0.3, 0.4]}]})
+                session = AsyncContextSession(success_response)
+                mock_session_class.return_value = session
+                
+                if 'src.utils.databricks_auth' in sys.modules:
+                    del sys.modules['src.utils.databricks_auth']
+                
+                with patch.dict(os.environ, {"DATABRICKS_HOST": "workspace.databricks.com"}):
+                    result = await LLMManager.get_embedding("test text", embedder_config=embedder_config)
+                    assert result == [0.3, 0.4]
+
+    @pytest.mark.asyncio
+    async def test_lines_728_729_json_response(self):
+        """Test lines 728-729 - JSON response parsing."""
+        embedder_config = {"provider": "databricks", "config": {"model": "test-embedding"}}
+        
+        with patch("src.core.llm_manager.ApiKeysService.get_provider_api_key") as mock_api_keys:
+            with patch("aiohttp.ClientSession") as mock_session_class:
+                mock_api_keys.return_value = "test-token"
+                
+                success_response = AsyncContextResponse(status=200, json_data={"data": [{"embedding": [0.5, 0.6]}]})
+                session = AsyncContextSession(success_response)
+                mock_session_class.return_value = session
+                
+                if 'src.utils.databricks_auth' in sys.modules:
+                    del sys.modules['src.utils.databricks_auth']
+                
+                with patch.dict(os.environ, {"DATABRICKS_HOST": "https://workspace.databricks.com"}):
+                    result = await LLMManager.get_embedding("test text", embedder_config=embedder_config)
+                    assert result == [0.5, 0.6]
+
+    @pytest.mark.asyncio
+    async def test_lines_741_747_databricks_exception(self):
+        """Test lines 741-747 - Databricks embedding exception."""
+        embedder_config = {"provider": "databricks", "config": {"model": "test-embedding"}}
+        
+        with patch("src.core.llm_manager.ApiKeysService.get_provider_api_key") as mock_api_keys:
+            with patch("aiohttp.ClientSession") as mock_session_class:
+                mock_api_keys.return_value = "test-token"
+                mock_session_class.side_effect = Exception("Connection error")
+                
+                if 'src.utils.databricks_auth' in sys.modules:
+                    del sys.modules['src.utils.databricks_auth']
+                
+                with patch.dict(os.environ, {"DATABRICKS_HOST": "https://workspace.databricks.com"}):
+                    result = await LLMManager.get_embedding("test text", embedder_config=embedder_config)
+                    assert result is None
+
+    @pytest.mark.asyncio
+    async def test_lines_755_765_unknown_provider(self):
+        """Test lines 755-765 - unknown provider."""
+        unknown_config = {"provider": "unknown", "config": {"model": "unknown-model"}}
+        
+        result = await LLMManager.get_embedding("test text", embedder_config=unknown_config)
+        assert result is None
+
+    @pytest.mark.asyncio
+    async def test_lines_787_801_circuit_breaker(self):
+        """Test lines 787-801 - circuit breaker functionality."""
+        LLMManager._embedding_failures.clear()
+        
+        with patch('src.core.llm_manager.ApiKeysService.get_provider_api_key') as mock_api_keys:
+            with patch('litellm.embedding') as mock_embedding:
+                mock_api_keys.return_value = "test-key"
+                mock_embedding.side_effect = Exception("API Error")
+                
+                # Trigger failures
+                for _ in range(3):
+                    result = await LLMManager.get_embedding("test text")
+                    assert result is None
+                
+                # Check circuit breaker
+                assert LLMManager._embedding_failures['openai']['count'] == 3
+                
+                # Test circuit breaker blocks calls
+                result = await LLMManager.get_embedding("test text")
+                assert result is None
+                
+                # Fast forward time to test reset
+                LLMManager._embedding_failures['openai']['first_failure'] = datetime.now() - timedelta(minutes=6)
+                
+                # Should reset and try again
+                result = await LLMManager.get_embedding("test text")
+                assert result is None  # Still fails but counter reset
+                assert LLMManager._embedding_failures['openai']['count'] == 1

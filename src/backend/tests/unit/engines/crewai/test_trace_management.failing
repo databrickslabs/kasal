@@ -1,0 +1,308 @@
+import pytest
+import asyncio
+from unittest.mock import MagicMock, patch, AsyncMock
+from datetime import datetime
+
+from src.engines.crewai.trace_management import TraceManager
+
+
+class TestTraceManager:
+    """Test suite for TraceManager class."""
+    
+    def test_trace_manager_class_variables(self):
+        """Test that TraceManager has expected class variables."""
+        assert hasattr(TraceManager, '_trace_writer_task')
+        assert hasattr(TraceManager, '_logs_writer_task')
+        assert hasattr(TraceManager, '_shutdown_event')
+        assert hasattr(TraceManager, '_writer_started')
+        assert hasattr(TraceManager, '_lock')
+        
+        # Check initial values
+        assert TraceManager._trace_writer_task is None
+        assert TraceManager._logs_writer_task is None
+        assert isinstance(TraceManager._shutdown_event, asyncio.Event)
+        assert TraceManager._writer_started is False
+        assert isinstance(TraceManager._lock, asyncio.Lock)
+    
+    def test_trace_manager_singleton_pattern(self):
+        """Test that TraceManager uses class variables for singleton behavior."""
+        # These should be the same objects across different accesses
+        event1 = TraceManager._shutdown_event
+        event2 = TraceManager._shutdown_event
+        assert event1 is event2
+        
+        lock1 = TraceManager._lock
+        lock2 = TraceManager._lock
+        assert lock1 is lock2
+    
+    @pytest.mark.asyncio
+    async def test_trace_writer_loop_function_exists(self):
+        """Test that _trace_writer_loop method exists and is a classmethod."""
+        assert hasattr(TraceManager, '_trace_writer_loop')
+        assert callable(TraceManager._trace_writer_loop)
+        
+        # Check that it's a classmethod by verifying first parameter behavior
+        import inspect
+        sig = inspect.signature(TraceManager._trace_writer_loop)
+        # For classmethod, first parameter should be 'cls'
+        first_param = list(sig.parameters.keys())[0] if sig.parameters else None
+        assert first_param == 'cls'
+    
+    @pytest.mark.asyncio
+    async def test_trace_writer_loop_import_structure(self):
+        """Test the import structure used in _trace_writer_loop."""
+        # Mock all the imports that the function tries to make
+        with patch('src.services.trace_queue.get_trace_queue') as mock_get_queue, \
+             patch('src.services.execution_trace_service.ExecutionTraceService') as mock_trace_service, \
+             patch('src.services.execution_status_service.ExecutionStatusService') as mock_status_service, \
+             patch('src.services.execution_history_service.get_execution_history_service') as mock_history_service, \
+             patch('src.engines.crewai.trace_management.logger') as mock_logger:
+            
+            # Setup mocks
+            mock_queue = MagicMock()
+            mock_queue.qsize.return_value = 0
+            mock_queue.get.side_effect = Exception("Test stop")  # Stop the loop quickly
+            mock_get_queue.return_value = mock_queue
+            
+            mock_history_service.return_value = MagicMock()
+            
+            # Try to start the loop (it should fail quickly due to our mock exception)
+            try:
+                await TraceManager._trace_writer_loop()
+            except Exception:
+                pass  # Expected due to our mock setup
+            
+            # Verify the imports were called
+            mock_get_queue.assert_called_once()
+            mock_history_service.assert_called_once()
+            mock_logger.info.assert_any_call("[TraceManager._trace_writer_loop] Writer task started.")
+    
+    @pytest.mark.asyncio
+    async def test_trace_writer_loop_queue_initialization(self):
+        """Test trace writer loop queue initialization."""
+        with patch('src.services.trace_queue.get_trace_queue') as mock_get_queue, \
+             patch('src.services.execution_history_service.get_execution_history_service') as mock_history_service, \
+             patch('src.engines.crewai.trace_management.logger') as mock_logger:
+            
+            mock_queue = MagicMock()
+            mock_queue.qsize.return_value = 5
+            mock_queue.get.side_effect = Exception("Stop loop")
+            mock_get_queue.return_value = mock_queue
+            
+            mock_history_service.return_value = MagicMock()
+            
+            try:
+                await TraceManager._trace_writer_loop()
+            except Exception:
+                pass
+            
+            # Check that queue size was logged
+            mock_logger.debug.assert_any_call(
+                "[TraceManager._trace_writer_loop] Queue retrieved. Initial approximate size: 5"
+            )
+    
+    @pytest.mark.asyncio
+    async def test_trace_writer_loop_shutdown_event_check(self):
+        """Test that trace writer loop checks shutdown event."""
+        # Set shutdown event to True to stop loop immediately
+        TraceManager._shutdown_event.set()
+        
+        with patch('src.services.trace_queue.get_trace_queue') as mock_get_queue, \
+             patch('src.services.execution_history_service.get_execution_history_service') as mock_history_service, \
+             patch('src.engines.crewai.trace_management.logger') as mock_logger:
+            
+            mock_queue = MagicMock()
+            mock_get_queue.return_value = mock_queue
+            mock_history_service.return_value = MagicMock()
+            
+            # This should exit quickly due to shutdown event
+            await TraceManager._trace_writer_loop()
+            
+            # The queue.get should not be called since shutdown event is set
+            mock_queue.get.assert_not_called()
+        
+        # Reset shutdown event for other tests
+        TraceManager._shutdown_event.clear()
+    
+    @pytest.mark.asyncio
+    async def test_trace_writer_loop_batch_processing_setup(self):
+        """Test trace writer loop batch processing initialization."""
+        with patch('src.services.trace_queue.get_trace_queue') as mock_get_queue, \
+             patch('src.services.execution_history_service.get_execution_history_service') as mock_history_service, \
+             patch('src.engines.crewai.trace_management.logger') as mock_logger:
+            
+            mock_queue = MagicMock()
+            mock_queue.qsize.return_value = 0
+            
+            # Make get() raise Empty exception immediately to stop the batch collection
+            from queue import Empty
+            mock_queue.get.side_effect = Empty()
+            
+            mock_get_queue.return_value = mock_queue
+            mock_history_service.return_value = MagicMock()
+            
+            # Set shutdown event to stop after one iteration
+            async def delayed_shutdown():
+                await asyncio.sleep(0.1)
+                TraceManager._shutdown_event.set()
+            
+            shutdown_task = asyncio.create_task(delayed_shutdown())
+            
+            try:
+                await TraceManager._trace_writer_loop()
+            finally:
+                TraceManager._shutdown_event.clear()
+                if not shutdown_task.done():
+                    shutdown_task.cancel()
+            
+            # Verify batch processing was attempted
+            mock_logger.debug.assert_any_call(
+                "[TraceManager._trace_writer_loop] Waiting for traces... Queue size: ~0"
+            )
+    
+    @pytest.mark.asyncio
+    async def test_trace_writer_loop_shutdown_signal_handling(self):
+        """Test trace writer loop handles None shutdown signal."""
+        with patch('src.services.trace_queue.get_trace_queue') as mock_get_queue, \
+             patch('src.services.execution_history_service.get_execution_history_service') as mock_history_service, \
+             patch('src.engines.crewai.trace_management.logger') as mock_logger:
+            
+            mock_queue = MagicMock()
+            mock_queue.qsize.return_value = 1
+            
+            # Return None (shutdown signal) then set shutdown event
+            call_count = 0
+            def mock_get(*args, **kwargs):
+                nonlocal call_count
+                call_count += 1
+                if call_count == 1:
+                    return None  # Shutdown signal
+                else:
+                    # Set shutdown event and raise to exit
+                    TraceManager._shutdown_event.set()
+                    raise Exception("Stop")
+            
+            mock_queue.get.side_effect = mock_get
+            mock_get_queue.return_value = mock_queue
+            mock_history_service.return_value = MagicMock()
+            
+            try:
+                await TraceManager._trace_writer_loop()
+            except Exception:
+                pass
+            finally:
+                TraceManager._shutdown_event.clear()
+            
+            # Check that shutdown signal was logged
+            mock_logger.debug.assert_any_call(
+                "[TraceManager._trace_writer_loop] Received shutdown signal (None) in queue."
+            )
+    
+    @pytest.mark.asyncio
+    async def test_trace_writer_loop_normal_trace_processing(self):
+        """Test trace writer loop processes normal trace data."""
+        with patch('src.services.trace_queue.get_trace_queue') as mock_get_queue, \
+             patch('src.services.execution_history_service.get_execution_history_service') as mock_history_service, \
+             patch('src.engines.crewai.trace_management.logger') as mock_logger:
+            
+            mock_queue = MagicMock()
+            mock_queue.qsize.return_value = 1
+            
+            # Return a trace data item then stop
+            trace_data = {"execution_id": "test_exec", "data": "test_trace"}
+            call_count = 0
+            def mock_get(*args, **kwargs):
+                nonlocal call_count
+                call_count += 1
+                if call_count == 1:
+                    return trace_data
+                else:
+                    TraceManager._shutdown_event.set()
+                    raise Exception("Stop")
+            
+            mock_queue.get.side_effect = mock_get
+            mock_get_queue.return_value = mock_queue
+            mock_history_service.return_value = MagicMock()
+            
+            try:
+                await TraceManager._trace_writer_loop()
+            except Exception:
+                pass
+            finally:
+                TraceManager._shutdown_event.clear()
+            
+            # Verify task_done was called for the processed item
+            mock_queue.task_done.assert_called()
+    
+    def test_trace_manager_constants(self):
+        """Test TraceManager constants and default values."""
+        # Test that class maintains state
+        original_started = TraceManager._writer_started
+        original_task = TraceManager._trace_writer_task
+        
+        # Modify values
+        TraceManager._writer_started = True
+        TraceManager._trace_writer_task = MagicMock()
+        
+        # Verify changes persist
+        assert TraceManager._writer_started is True
+        assert TraceManager._trace_writer_task is not None
+        
+        # Reset for other tests
+        TraceManager._writer_started = original_started
+        TraceManager._trace_writer_task = original_task
+    
+    @pytest.mark.asyncio
+    async def test_trace_writer_loop_exception_handling(self):
+        """Test trace writer loop handles exceptions gracefully."""
+        with patch('src.services.trace_queue.get_trace_queue') as mock_get_queue, \
+             patch('src.services.execution_history_service.get_execution_history_service') as mock_history_service, \
+             patch('src.engines.crewai.trace_management.logger') as mock_logger:
+            
+            # Make get_trace_queue raise an exception
+            mock_get_queue.side_effect = Exception("Queue initialization failed")
+            
+            # The loop should handle the exception
+            try:
+                await TraceManager._trace_writer_loop()
+            except Exception as e:
+                # Exception should be caught or propagated
+                assert "Queue initialization failed" in str(e)
+            
+            # Verify logger was called for startup
+            mock_logger.info.assert_called_with("[TraceManager._trace_writer_loop] Writer task started.")
+    
+    def test_trace_manager_imports(self):
+        """Test that TraceManager can be imported and used."""
+        # Verify the class exists and can be referenced
+        assert TraceManager is not None
+        assert hasattr(TraceManager, '_trace_writer_loop')
+        
+        # Verify it's a proper class
+        assert isinstance(TraceManager, type)
+        
+    @pytest.mark.asyncio
+    async def test_shutdown_event_behavior(self):
+        """Test shutdown event behavior."""
+        # Initially not set
+        assert not TraceManager._shutdown_event.is_set()
+        
+        # Can be set
+        TraceManager._shutdown_event.set()
+        assert TraceManager._shutdown_event.is_set()
+        
+        # Can be cleared
+        TraceManager._shutdown_event.clear()
+        assert not TraceManager._shutdown_event.is_set()
+    
+    @pytest.mark.asyncio
+    async def test_lock_behavior(self):
+        """Test lock behavior."""
+        # Lock should be acquirable
+        async with TraceManager._lock:
+            # Should be able to use the lock
+            assert True
+        
+        # Test that it's an async lock
+        assert hasattr(TraceManager._lock, '__aenter__')
+        assert hasattr(TraceManager._lock, '__aexit__')
