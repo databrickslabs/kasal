@@ -130,6 +130,9 @@ async def update_task_full(
                 detail="Task not found",
             )
         return task
+    except HTTPException:
+        # Re-raise HTTP exceptions (like 404) without modification
+        raise
     except Exception as e:
         logger.error(f"Error updating task: {e}")
         raise HTTPException(status_code=500, detail=str(e))
@@ -163,6 +166,9 @@ async def update_task(
                 detail="Task not found",
             )
         return task
+    except HTTPException:
+        # Re-raise HTTP exceptions (like 404) without modification
+        raise
     except Exception as e:
         logger.error(f"Error updating task: {e}")
         raise HTTPException(status_code=500, detail=str(e))
@@ -190,6 +196,9 @@ async def delete_task(
                 status_code=status.HTTP_404_NOT_FOUND,
                 detail="Task not found",
             )
+    except HTTPException:
+        # Re-raise HTTP exceptions (like 404) without modification
+        raise
     except Exception as e:
         logger.error(f"Error deleting task: {e}")
         raise HTTPException(status_code=500, detail=str(e))

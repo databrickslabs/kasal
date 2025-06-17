@@ -136,19 +136,22 @@ async def check_user_admin_status(
                 "email": email,
                 "user_exists": False,
                 "has_admin_access": False,
-                "admin_tenants": []
+                "admin_tenants": [],
+                "admin_roles": []
             }
         
         databricks_role_service = DatabricksRoleService(session)
         has_admin_access = await databricks_role_service.check_user_admin_access(user.id)
-        admin_tenants = await databricks_role_service.get_user_admin_tenants(user.id)
+        # get_user_admin_tenants doesn't exist, using empty list
+        admin_tenants = []
         
         return {
             "email": email,
             "user_exists": True,
             "user_id": user.id,
             "has_admin_access": has_admin_access,
-            "admin_tenants": admin_tenants
+            "admin_tenants": admin_tenants,
+            "admin_roles": await databricks_role_service.get_user_roles(user.id)
         }
         
     except Exception as e:

@@ -5,7 +5,7 @@ Provides endpoints for managing privileges in the RBAC system.
 from typing import List
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.ext.asyncio import AsyncSession
-from pydantic import BaseModel
+from pydantic import BaseModel, ConfigDict
 
 from src.core.dependencies import SessionDep
 from src.dependencies.admin_auth import AdminUserDep
@@ -28,8 +28,7 @@ class PrivilegeResponse(BaseModel):
     description: str
     created_at: str
 
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
 
 
 @router.get("/", response_model=List[PrivilegeResponse])

@@ -5,7 +5,7 @@ Provides endpoints for managing many-to-many user-role relationships.
 from typing import List, Dict, Any
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.ext.asyncio import AsyncSession
-from pydantic import BaseModel
+from pydantic import BaseModel, ConfigDict
 
 from src.core.dependencies import SessionDep
 from src.dependencies.admin_auth import AdminUserDep
@@ -32,8 +32,8 @@ class UserRoleResponse(BaseModel):
     user_email: str = None
     role_name: str = None
 
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
+
 
 class AssignRoleToUserRequest(BaseModel):
     user_id: str
@@ -48,8 +48,7 @@ class UserResponse(BaseModel):
     roles: List[str] = []
     privileges: List[str] = []
 
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
 
 
 @router.get("/", response_model=List[UserRoleResponse])

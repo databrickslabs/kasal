@@ -46,7 +46,8 @@ async def get_secret_service():
         # Create DatabricksSecretsService
         service = DatabricksSecretsService(uow.databricks_config_repository)
         service.set_databricks_service(databricks_service)
-        service.set_api_key_repository(uow.api_key_repository)
+        # Note: set_api_key_repository method does not exist on DatabricksSecretsService
+        # service.set_api_key_repository(uow.api_key_repository)
         
         yield service
 
@@ -409,6 +410,8 @@ async def set_databricks_token(
                 status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
                 detail="Failed to set Databricks token"
             )
+    except HTTPException:
+        raise  # Re-raise HTTPExceptions as-is
     except Exception as e:
         logger.error(f"Error setting Databricks token: {str(e)}")
         raise HTTPException(status_code=500, detail=f"Error setting Databricks token: {str(e)}")

@@ -149,6 +149,10 @@ async def get_execution_status(
     if execution_data.get("result") and isinstance(execution_data["result"], bool):
         execution_data["result"] = {"success": execution_data["result"]}
     
+    # If result is not a dict at this point, set it to an empty dict
+    if execution_data.get("result") is not None and not isinstance(execution_data["result"], dict):
+        execution_data["result"] = {}
+    
     # Return the execution data
     return ExecutionResponse(**execution_data)
 
