@@ -15,15 +15,14 @@ class AgentRepository(BaseRepository[Agent]):
     Inherits base CRUD operations from BaseRepository.
     """
     
-    def __init__(self, model: Type[Agent], session: AsyncSession):
+    def __init__(self, session: AsyncSession):
         """
-        Initialize the repository with model and session.
+        Initialize the repository with session.
         
         Args:
-            model: SQLAlchemy model class
             session: SQLAlchemy async session
         """
-        super().__init__(model, session)
+        super().__init__(Agent, session)
         
     async def get(self, id: str) -> Optional[Agent]:
         """

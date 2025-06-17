@@ -1,7 +1,7 @@
 from typing import List, Optional, Dict, Any
 from datetime import datetime, timedelta
 from sqlalchemy import and_, func, desc, asc
-from sqlalchemy.orm import Session
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.core.base_repository import BaseRepository
 from src.models.billing import LLMUsageBilling, BillingPeriod, BillingAlert
@@ -10,8 +10,8 @@ from src.models.billing import LLMUsageBilling, BillingPeriod, BillingAlert
 class BillingRepository(BaseRepository[LLMUsageBilling]):
     """Repository for billing operations"""
     
-    def __init__(self, session: Session):
-        super().__init__(session, LLMUsageBilling)
+    def __init__(self, session: AsyncSession):
+        super().__init__(LLMUsageBilling, session)
     
     async def create_usage_record(self, usage_data: Dict[str, Any]) -> LLMUsageBilling:
         """Create a new LLM usage billing record"""
@@ -250,8 +250,8 @@ class BillingRepository(BaseRepository[LLMUsageBilling]):
 class BillingPeriodRepository(BaseRepository[BillingPeriod]):
     """Repository for billing period operations"""
     
-    def __init__(self, session: Session):
-        super().__init__(session, BillingPeriod)
+    def __init__(self, session: AsyncSession):
+        super().__init__(BillingPeriod, session)
     
     async def get_current_period(self, group_id: Optional[str] = None) -> Optional[BillingPeriod]:
         """Get the current active billing period"""
@@ -288,8 +288,8 @@ class BillingPeriodRepository(BaseRepository[BillingPeriod]):
 class BillingAlertRepository(BaseRepository[BillingAlert]):
     """Repository for billing alert operations"""
     
-    def __init__(self, session: Session):
-        super().__init__(session, BillingAlert)
+    def __init__(self, session: AsyncSession):
+        super().__init__(BillingAlert, session)
     
     async def get_active_alerts(self, group_id: Optional[str] = None) -> List[BillingAlert]:
         """Get all active billing alerts"""
@@ -304,14 +304,14 @@ class BillingAlertRepository(BaseRepository[BillingAlert]):
     
     async def update_alert_current_value(self, alert_id: str, current_value: float) -> None:
         """Update the current value for an alert"""
-        alert = await self.get_by_id(alert_id)
+        alert = await self.get(alert_id)
         if alert:
             alert.current_value = current_value
             alert.updated_at = datetime.utcnow()
             
     async def trigger_alert(self, alert_id: str) -> None:
         """Mark an alert as triggered"""
-        alert = await self.get_by_id(alert_id)
+        alert = await self.get(alert_id)
         if alert:
             alert.last_triggered = datetime.utcnow()
             alert.updated_at = datetime.utcnow()

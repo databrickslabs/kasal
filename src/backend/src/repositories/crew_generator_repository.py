@@ -28,7 +28,7 @@ class CrewGeneratorRepository:
     """Repository for creating agents and tasks for a generated crew."""
     
     @classmethod
-    def create(cls):
+    def create_instance(cls):
         """
         Factory method to create a properly configured instance of the repository.
         
@@ -98,8 +98,8 @@ class CrewGeneratorRepository:
             try:
                 # Determine if it's a Task update by checking context field
                 if "context" in update_data:
-                    # This is a Task update - need to pass both the model class and session
-                    task_repo = TaskRepository(Task, session)
+                    # This is a Task update - need to pass the session
+                    task_repo = TaskRepository(session)
                     # Get existing task
                     task = await task_repo.get(entity_id)
                     if task:
@@ -406,8 +406,8 @@ class CrewGeneratorRepository:
         logger.info(f"Task name map created with {len(task_name_to_db_task)} entries.")
 
         async with async_session_factory() as session:
-            # Pass both the Task model and the session to the repository
-            task_repo = TaskRepository(Task, session)
+            # Pass the session to the repository
+            task_repo = TaskRepository(session)
             tasks_to_update = []
 
             for task_data in tasks_data:
