@@ -337,16 +337,9 @@ class FlowBuilder:
                 method_name = f"listen_task_{i}_{j}"
                 
                 # Define the listener method using a factory function to properly capture variables
-                def listener_factory(listener_tasks_obj, listen_task_array, condition_type_str):
-                    # Apply the appropriate decorator based on condition type
-                    if condition_type_str == "AND":
-                        decorator = listen(and_(*listen_task_array))
-                    elif condition_type_str == "OR":
-                        decorator = listen(or_(*listen_task_array))
-                    else:
-                        # Must be a specific task
-                        listen_task = all_tasks[listen_task_id]
-                        decorator = listen(listen_task)
+                def listener_factory(listener_tasks_obj, listen_task_array, condition_type_str, method_condition):
+                    # Apply the listen decorator with the appropriate condition
+                    decorator = listen(method_condition)
                     
                     @decorator
                     def create_method(self, *results):
@@ -379,13 +372,25 @@ class FlowBuilder:
                     # For AND/OR conditions, we only need one listener for all tasks
                     if j == 0:  # Only create once
                         listen_tasks = [all_tasks[tid] for tid in listen_to_task_ids if tid in all_tasks]
-                        bound_method = listener_factory(listener_tasks, listen_tasks, condition_type)
+                        # Create method condition for AND/OR
+                        method_names = [f"start_flow_{idx}" for idx, sp in enumerate(starting_points) if sp.get('taskId') in listen_to_task_ids]
+                        if condition_type == "AND":
+                            method_condition = and_(*method_names) if method_names else method_names[0] if method_names else "start_flow_0"
+                        else:  # OR
+                            method_condition = or_(*method_names) if method_names else method_names[0] if method_names else "start_flow_0"
+                        bound_method = listener_factory(listener_tasks, listen_tasks, condition_type, method_condition)
                         setattr(DynamicFlow, method_name, bound_method)
                         logger.info(f"Added {condition_type} listener {method_name} for {len(listen_tasks)} tasks")
                     break  # Skip other iterations
                 else:
                     # For NONE/other conditions, create individual listeners
-                    bound_method = listener_factory(listener_tasks, [all_tasks[listen_task_id]], "NONE")
+                    # Find the corresponding start method name
+                    method_condition = "start_flow_0"  # Default fallback
+                    for idx, sp in enumerate(starting_points):
+                        if sp.get('taskId') == listen_task_id:
+                            method_condition = f"start_flow_{idx}"
+                            break
+                    bound_method = listener_factory(listener_tasks, [all_tasks[listen_task_id]], "NONE", method_condition)
                     setattr(DynamicFlow, method_name, bound_method)
                     logger.info(f"Added simple listener {method_name} for task {listen_task_id}")
         

@@ -171,9 +171,11 @@ class GenieTool(BaseTool):
         if token_required and not self._use_oauth and not self._token:
             logger.warning("DATABRICKS_API_KEY is required but not provided. Tool will attempt OAuth authentication or return an error when used.")
 
-        if not self._host:
-            logger.warning("Databricks host URL not provided. Using default value.")
-            self._host = "your-workspace.cloud.databricks.com"
+        # This code is unreachable since self._host is always set above
+        # Removing dead code
+        # if not self._host:
+        #     logger.warning("Databricks host URL not provided. Using default value.")
+        #     self._host = "your-workspace.cloud.databricks.com"
             
         # Log configuration
         logger.info("GenieTool Configuration:")

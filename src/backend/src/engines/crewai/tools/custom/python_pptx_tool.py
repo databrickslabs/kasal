@@ -449,12 +449,16 @@ def set_font_color(font, color):
         font.color.rgb = RGBColor(*color)
     elif isinstance(color, RGBColor):
         font.color.rgb = color
-    elif isinstance(color, str) and color.startswith('#'):
+    elif isinstance(color, str) and color.startswith('#') and len(color) == 7:
         # Convert hex color to RGB
-        r = int(color[1:3], 16)
-        g = int(color[3:5], 16)
-        b = int(color[5:7], 16)
-        font.color.rgb = RGBColor(r, g, b)
+        try:
+            r = int(color[1:3], 16)
+            g = int(color[3:5], 16)
+            b = int(color[5:7], 16)
+            font.color.rgb = RGBColor(r, g, b)
+        except ValueError:
+            # Invalid hex color, ignore
+            pass
     elif isinstance(color, str) and hasattr(MSO_THEME_COLOR, color.upper()):
         # Use theme color
         font.color.theme_color = getattr(MSO_THEME_COLOR, color.upper())
@@ -564,9 +568,10 @@ def set_line_dash_style(line, dash_style):
         'square_dot': MSO_LINE_DASH_STYLE.SQUARE_DOT,
         'dash': MSO_LINE_DASH_STYLE.DASH,
         'dash_dot': MSO_LINE_DASH_STYLE.DASH_DOT,
+        'dash_dot_dot': MSO_LINE_DASH_STYLE.DASH_DOT_DOT,
         'long_dash': MSO_LINE_DASH_STYLE.LONG_DASH,
         'long_dash_dot': MSO_LINE_DASH_STYLE.LONG_DASH_DOT,
-        'long_dash_dot_dot': MSO_LINE_DASH_STYLE.LONG_DASH_DOT_DOT,
+        'dot': MSO_LINE_DASH_STYLE.ROUND_DOT,
     }
     
     if dash_style.lower() in dash_mapping:
@@ -724,8 +729,9 @@ def create_xy_chart(slide, x, y, width, height, chart_data, title=None,
     # Create chart data object for XY chart
     cd = XyChartData()
     
-    # Add series data
-    for series_dict in chart_data:
+    # Add series data - handle both dict and list formats
+    series_list = chart_data.get('xy_series', chart_data) if isinstance(chart_data, dict) else chart_data
+    for series_dict in series_list:
         series_name = series_dict.get('name', 'Series')
         series = cd.add_series(series_name)
         
@@ -855,12 +861,12 @@ def customize_chart_axis(chart, axis_type, properties):
         axis = chart.value_axis
     
     # Set title if provided
-    if 'title' in properties:
+    if properties and 'title' in properties:
         axis.has_title = True
         axis.axis_title.text_frame.text = properties['title']
     
     # Set axis scale for value axis
-    if axis_type.lower() == 'value':
+    if properties and axis_type.lower() == 'value':
         if 'min_value' in properties:
             axis.minimum_scale = properties['min_value']
         
@@ -874,23 +880,34 @@ def customize_chart_axis(chart, axis_type, properties):
             axis.minor_unit = properties['minor_unit']
     
     # Set gridlines
-    if 'has_major_gridlines' in properties:
+    if properties and 'has_major_gridlines' in properties:
         axis.has_major_gridlines = properties['has_major_gridlines']
     
-    if 'has_minor_gridlines' in properties:
+    if properties and 'has_minor_gridlines' in properties:
         axis.has_minor_gridlines = properties['has_minor_gridlines']
     
     # Set tick label position
-    if 'tick_label_position' in properties:
+    if properties and 'tick_label_position' in properties:
         pos = properties['tick_label_position'].upper()
         if hasattr(XL_TICK_LABEL_POSITION, pos):
             axis.tick_label_position = getattr(XL_TICK_LABEL_POSITION, pos)
     
     # Set number format
-    if 'number_format' in properties and hasattr(axis.tick_labels, 'number_format'):
+    if properties and 'number_format' in properties and hasattr(axis.tick_labels, 'number_format'):
         axis.tick_labels.number_format = properties['number_format']
     
     return axis
+
+
+def _get_property_value(obj, prop_name, default=None):
+    """Helper function to get property from dict or object"""
+    if obj is None:
+        return default
+    if hasattr(obj, prop_name):
+        return getattr(obj, prop_name)
+    elif hasattr(obj, 'get'):
+        return obj.get(prop_name, default)
+    return default
 
 
 def configure_data_labels(chart, data_label_properties):
@@ -908,13 +925,13 @@ def configure_data_labels(chart, data_label_properties):
         return chart
     
     plot = chart.plots[0]
-    plot.has_data_labels = data_label_properties.get('enabled', False)
+    plot.has_data_labels = _get_property_value(data_label_properties, 'enabled', False)
     
     if plot.has_data_labels:
         data_labels = plot.data_labels
         
         # Set position if specified
-        position = data_label_properties.get('position')
+        position = _get_property_value(data_label_properties, 'position')
         if position:
             pos_map = {
                 'center': XL_DATA_LABEL_POSITION.CENTER,
@@ -931,21 +948,26 @@ def configure_data_labels(chart, data_label_properties):
                 data_labels.position = pos_map[position.lower()]
         
         # Configure what to show
-        if 'show_values' in data_label_properties:
-            data_labels.show_value = data_label_properties['show_values']
+        show_values = _get_property_value(data_label_properties, 'show_values')
+        if show_values is not None:
+            data_labels.show_value = show_values
         
-        if 'show_percentage' in data_label_properties:
-            data_labels.show_percentage = data_label_properties['show_percentage']
+        show_percentage = _get_property_value(data_label_properties, 'show_percentage')
+        if show_percentage is not None:
+            data_labels.show_percentage = show_percentage
         
-        if 'show_category_name' in data_label_properties:
-            data_labels.show_category_name = data_label_properties['show_category_name']
+        show_category_name = _get_property_value(data_label_properties, 'show_category_name')
+        if show_category_name is not None:
+            data_labels.show_category_name = show_category_name
         
-        if 'show_series_name' in data_label_properties:
-            data_labels.show_series_name = data_label_properties['show_series_name']
+        show_series_name = _get_property_value(data_label_properties, 'show_series_name')
+        if show_series_name is not None:
+            data_labels.show_series_name = show_series_name
         
         # Set number format if specified
-        if 'number_format' in data_label_properties:
-            data_labels.number_format = data_label_properties['number_format']
+        number_format = _get_property_value(data_label_properties, 'number_format')
+        if number_format is not None:
+            data_labels.number_format = number_format
     
     return chart
 
@@ -962,7 +984,7 @@ def create_title_slide(prs, content):
             # Set title if title placeholder exists
             try:
                 title = slide.shapes.title
-                title.text = content.title
+                title.text = content.title if hasattr(content, 'title') else content.get('title', 'Untitled') if isinstance(content, dict) else 'Untitled'
                 configure_text_frame(title.text_frame)
                 title.text_frame.paragraphs[0].font.size = Pt(44)
                 title.text_frame.paragraphs[0].font.color.rgb = RGBColor(0, 112, 192)  # Blue color
@@ -976,7 +998,7 @@ def create_title_slide(prs, content):
                 title_box = slide.shapes.add_textbox(left, top, width, height)
                 text_frame = title_box.text_frame
                 configure_text_frame(text_frame)
-                text_frame.text = content.title
+                text_frame.text = content.title if hasattr(content, 'title') else content.get('title', 'Untitled') if isinstance(content, dict) else 'Untitled'
                 text_frame.paragraphs[0].font.size = Pt(44)
                 text_frame.paragraphs[0].font.color.rgb = RGBColor(0, 112, 192)
                 text_frame.paragraphs[0].alignment = PP_ALIGN.CENTER
@@ -994,7 +1016,7 @@ def create_title_slide(prs, content):
             title_box = slide.shapes.add_textbox(left, top, width, height)
             text_frame = title_box.text_frame
             configure_text_frame(text_frame)
-            text_frame.text = content.title
+            text_frame.text = content.title if hasattr(content, 'title') else content.get('title', 'Untitled') if isinstance(content, dict) else 'Untitled'
             text_frame.paragraphs[0].font.size = Pt(44)
             text_frame.paragraphs[0].font.color.rgb = RGBColor(0, 112, 192)
             text_frame.paragraphs[0].alignment = PP_ALIGN.CENTER
@@ -1330,8 +1352,9 @@ def create_content_slide(prs, slide_content_dict):
         chart_data = CategoryChartData()
         chart_data.categories = chart_data_obj.categories
         
-        for series_name, values in chart_data_obj.series.items():
-            chart_data.add_series(series_name, values)
+        if chart_data_obj.series:
+            for series_name, values in chart_data_obj.series.items():
+                chart_data.add_series(series_name, values)
         
         # Determine chart type
         chart_type_dict = {
@@ -1432,6 +1455,9 @@ def create_content_slide(prs, slide_content_dict):
 
 def add_footer(slide, text):
     """Add footer to slide"""
+    if text is None:
+        text = ""
+    
     left = Inches(0.5)
     top = Inches(6.9)  # Moved up slightly to stay within slide
     width = Inches(9)
@@ -2674,7 +2700,7 @@ class PPTXGenerator:
             Path(self.output_dir).mkdir(parents=True, exist_ok=True)
             
             # Create unique filename
-            safe_title = title.replace(" ", "_").replace(":", "")
+            safe_title = (title or "Presentation").replace(" ", "_").replace(":", "")
             timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
             unique_id = str(uuid.uuid4())[:8]
             filename = f"{safe_title}_{timestamp}_{unique_id}.pptx"
@@ -2882,6 +2908,6 @@ class PythonPPTXTool(BaseTool):
                 message=error_message,
                 file_path="",
                 relative_path="",
-                content=content,
-                title=title
+                content=str(content) if content is not None else "",
+                title=title or "Presentation"
             ) 

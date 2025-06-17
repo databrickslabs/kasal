@@ -382,8 +382,7 @@ async def create_task(
                 logger.info(f"No enabled MCP servers found for task {task_key}")
     except Exception as e:
         logger.error(f"Error fetching MCP servers: {str(e)}")
-        import traceback
-        logger.error(traceback.format_exc())
+        logger.error(f"Stack trace: {traceback.format_exc()}")
     
     # Continue with normal tool resolution
     if tool_service and 'tools' in task_config and task_config['tools']:
@@ -457,7 +456,8 @@ async def create_task(
         for tool in task_tools:
             tool_name = getattr(tool, "name", str(tool)) if not isinstance(tool, str) else tool
             tool_desc = getattr(tool, "description", "No description") if not isinstance(tool, str) else "String tool name"
-            logger.info(f"  - Task tool: {tool_name} - {tool_desc[:50]}...")
+            desc_str = str(tool_desc)[:50] if tool_desc else "No description"
+            logger.info(f"  - Task tool: {tool_name} - {desc_str}...")
     else:
         logger.info(f"Task {task_key} will use agent's default tools")
     
@@ -642,7 +642,8 @@ async def create_task(
                 # Use the custom converter class
                 task_args['converter_cls'] = converter_cls
                 task_args['output_pydantic'] = pydantic_cls
-                logger.info(f"Using custom converter {converter_cls.__name__} for compatibility")
+                converter_name = getattr(converter_cls, '__name__', str(converter_cls))
+                logger.info(f"Using custom converter {converter_name} for compatibility")
             else:
                 # Standard approach
                 task_args['output_pydantic'] = pydantic_class
@@ -663,10 +664,11 @@ async def create_task(
     # Include optional fields if they exist in the config
     for field in optional_fields:
         if field in task_config:
-            # Special case for output_json that might be a string "false"
+            # Special case for output_json that might be a string
             if field == 'output_json' and isinstance(task_config[field], str):
-                if task_config[field].lower() != 'false':
-                    task_args[field] = task_config[field]
+                # Skip string values for output_json as CrewAI expects a BaseModel class
+                # The string handling was for legacy compatibility but doesn't work with current CrewAI
+                continue
             else:
                 task_args[field] = task_config[field]
     

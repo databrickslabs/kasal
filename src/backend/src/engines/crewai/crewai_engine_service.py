@@ -15,7 +15,7 @@ from src.models.execution_status import ExecutionStatus
 
 # Import helper modules
 from src.engines.crewai.trace_management import TraceManager
-from src.engines.crewai.execution_runner import run_crew
+from src.engines.crewai.execution_runner import run_crew, update_execution_status_with_retry
 from src.engines.crewai.config_adapter import normalize_config, normalize_flow_config
 from src.engines.crewai.crew_preparation import CrewPreparation
 from src.engines.crewai.flow_preparation import FlowPreparation
@@ -412,8 +412,17 @@ class CrewAIEngineService(BaseEngineService):
                     logger.info(f"[CrewAIEngineService] Created ToolFactory for flow {execution_id}")
                     
                     # Use the FlowPreparation class for flow setup
-                    flow_preparation = FlowPreparation(flow_config, tool_service, tool_factory)
-                    if not await flow_preparation.prepare():
+                    from pathlib import Path
+                    output_path = Path(flow_config.get('output_dir', '/tmp'))
+                    flow_preparation = FlowPreparation(flow_config, output_path)
+                    try:
+                        prepared_flow = flow_preparation.prepare()
+                        flow = prepared_flow.get('flow')  # Extract the flow from prepared components
+                    except Exception as prep_error:
+                        logger.error(f"[CrewAIEngineService] Flow preparation failed: {prep_error}")
+                        prepared_flow = None
+                        
+                    if not prepared_flow:
                         logger.error(f"[CrewAIEngineService] Failed to prepare flow for {execution_id}")
                         await self._update_execution_status(
                             execution_id, 
@@ -422,8 +431,7 @@ class CrewAIEngineService(BaseEngineService):
                         )
                         return execution_id
                     
-                    # Get the prepared flow
-                    flow = flow_preparation.flow
+                    # Flow was already extracted from prepared_flow above
                     
                     # Store flow configuration and instance in running jobs
                     self._running_jobs[execution_id] = {

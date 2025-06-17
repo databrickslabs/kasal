@@ -44,6 +44,29 @@ def handle_crew_error(e: Exception, message: str) -> None:
     error_msg = f"{message}: {str(e)}"
     logger.error(error_msg, exc_info=True)
 
+async def process_crew_output(result: Any) -> Dict[str, Any]:
+    """
+    Process crew execution output
+    
+    Args:
+        result: Raw output from crew execution
+        
+    Returns:
+        Processed output dictionary
+    """
+    try:
+        if isinstance(result, dict):
+            return result
+        elif hasattr(result, 'raw'):
+            # CrewAI result object with raw attribute
+            return {"result": result.raw, "type": "crew_result"}
+        else:
+            # Convert any other result to string
+            return {"result": str(result), "type": "processed"}
+    except Exception as e:
+        logger.error(f"Error processing crew output: {e}")
+        return {"error": f"Failed to process output: {str(e)}"}
+
 class CrewPreparation:
     """Handles the preparation of CrewAI agents and tasks"""
     

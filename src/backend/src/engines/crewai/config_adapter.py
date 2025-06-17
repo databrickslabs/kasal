@@ -52,15 +52,15 @@ def adapt_config(config: CrewConfig) -> Dict[str, Any]:
         "tasks": tasks_data,
         "tools": tools,
         "crew": {
-            "process": config.inputs.get("process", "sequential"),
+            "process": config.inputs.get("process", "sequential") if config.inputs else "sequential",
             "verbose": True,
             "memory": True,
             "planning": config.planning,
             "reasoning": config.reasoning
         },
         "model": config.model or "gpt-4o",
-        "max_rpm": config.inputs.get("max_rpm", 10),
-        "output_dir": config.inputs.get("output_dir", None),
+        "max_rpm": config.inputs.get("max_rpm", 10) if config.inputs else 10,
+        "output_dir": config.inputs.get("output_dir", None) if config.inputs else None,
         # Include the original frontend configuration for logging
         "original_config": {
             "model": config.model,

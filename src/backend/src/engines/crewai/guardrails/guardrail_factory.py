@@ -58,31 +58,31 @@ class GuardrailFactory:
             guardrail = None
             
             if guardrail_type == "company_count":
-                guardrail = CompanyCountGuardrail(config)
+                guardrail = CompanyCountGuardrail(config_data)
             elif guardrail_type == "data_processing":
                 # Try to create with detailed logging
                 logger.info("Creating DataProcessingGuardrail...")
-                guardrail = DataProcessingGuardrail(config)
+                guardrail = DataProcessingGuardrail(config_data)
                 logger.info(f"Successfully created DataProcessingGuardrail: {guardrail}")
             elif guardrail_type == "empty_data_processing":
                 # Create the EmptyDataProcessingGuardrail
                 logger.info("Creating EmptyDataProcessingGuardrail...")
-                guardrail = EmptyDataProcessingGuardrail(config)
+                guardrail = EmptyDataProcessingGuardrail(config_data)
                 logger.info(f"Successfully created EmptyDataProcessingGuardrail: {guardrail}")
             elif guardrail_type == "data_processing_count":
                 # Create the DataProcessingCountGuardrail
                 logger.info("Creating DataProcessingCountGuardrail...")
-                guardrail = DataProcessingCountGuardrail(config)
+                guardrail = DataProcessingCountGuardrail(config_data)
                 logger.info(f"Successfully created DataProcessingCountGuardrail: {guardrail}")
             elif guardrail_type == "company_name_not_null":
                 # Create the CompanyNameNotNullGuardrail
                 logger.info("Creating CompanyNameNotNullGuardrail...")
-                guardrail = CompanyNameNotNullGuardrail(config)
+                guardrail = CompanyNameNotNullGuardrail(config_data)
                 logger.info(f"Successfully created CompanyNameNotNullGuardrail: {guardrail}")
             elif guardrail_type == "minimum_number":
                 # Create the MinimumNumberGuardrail
                 logger.info("Creating MinimumNumberGuardrail...")
-                guardrail = MinimumNumberGuardrail(config)
+                guardrail = MinimumNumberGuardrail(config_data)
                 logger.info(f"Successfully created MinimumNumberGuardrail: {guardrail}")
             else:
                 logger.error(f"Unknown guardrail type: {guardrail_type}")

@@ -99,6 +99,7 @@ async def run_crew(execution_id: str, crew: Crew, running_jobs: Dict, group_cont
     last_error = None
     
     # Keep trying until we exceed max retries
+    result = None  # Initialize result variable to avoid UnboundLocalError
     while retry_count <= max_retry_limit:
         try:
             # IMPORTANT: Configure LLM for CrewAI before running the crew
@@ -163,12 +164,10 @@ async def run_crew(execution_id: str, crew: Crew, running_jobs: Dict, group_cont
                         openai_key = await ApiKeysService.get_provider_api_key("openai")
                         if openai_key:
                             # OpenAI key is configured, set it up normally
-                            import os
                             os.environ["OPENAI_API_KEY"] = openai_key
                             logger.info("OpenAI API key configured and set up in Databricks Apps environment")
                         else:
                             # No OpenAI key configured, set dummy key to satisfy CrewAI validation
-                            import os
                             os.environ["OPENAI_API_KEY"] = "sk-dummy-databricks-apps-validation-key"
                             logger.info("No OpenAI API key configured, set dummy key for validation in Databricks Apps environment")
                 except ImportError:
@@ -346,7 +345,7 @@ async def run_crew(execution_id: str, crew: Crew, running_jobs: Dict, group_cont
             # Stop and cleanup any MCP adapters that were created
             # This prevents process leaks for stdio adapters and cleans up network resources
             from src.engines.crewai.tools.mcp_handler import stop_all_adapters
-            stop_all_adapters()
+            await stop_all_adapters()
             logger.info(f"Cleaned up MCP tools for execution {execution_id}")
         except Exception as mcp_cleanup_error:
             logger.error(f"Error cleaning up MCP tools for execution {execution_id}: {str(mcp_cleanup_error)}")

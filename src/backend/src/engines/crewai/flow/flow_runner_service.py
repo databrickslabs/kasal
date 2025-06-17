@@ -654,9 +654,9 @@ class FlowRunnerService:
         # Define the __init__ method
         def __init__(self, flow_id=None, job_id=None, config=None):
             super(dynamic_flow_class, self).__init__()
-            self.flow_id = flow_id
-            self.job_id = job_id
-            self.config = config or {}
+            self._flow_id = flow_id
+            self._job_id = job_id
+            self._config = config or {}
             self.crews = {}
             self._initialize_crews()
         
@@ -667,7 +667,7 @@ class FlowRunnerService:
                 from src.services.agent_service import AgentService
                 from src.services.task_service import TaskService
                 from src.services.crew_service import CrewService
-                from src.tools.tool_factory import ToolFactory
+                from src.engines.crewai.tools.tool_factory import ToolFactory
                 
                 # Create a tool factory instance for tool creation
                 tool_factory = ToolFactory()
@@ -817,11 +817,11 @@ class FlowRunnerService:
         # Define the start_flow method with improved error handling
         @start()
         def start_flow(self):
-            logger.info(f"Starting flow execution for job {self.job_id}")
+            logger.info(f"Starting flow execution for job {self._job_id}")
             
             # Initialize state with flow_id and job_id for tracking
-            self.state["flow_id"] = str(self.flow_id) if self.flow_id else "dynamic-flow"
-            self.state["job_id"] = self.job_id
+            self.state["flow_id"] = str(self._flow_id) if self._flow_id else "dynamic-flow"
+            self.state["job_id"] = self._job_id
             self.state["start_time"] = datetime.now(UTC).isoformat()
             
             # Execute the starting point crew if available
