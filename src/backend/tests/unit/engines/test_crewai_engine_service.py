@@ -382,10 +382,12 @@ class TestCrewAIEngineService:
             mock_setup_dir.return_value = "/test/output/dir"
             mock_trace.return_value = None
             
-            # Mock UOW context
+            # Mock UOW context as AsyncMock
             mock_uow_instance = MagicMock()
-            mock_uow.return_value.__aenter__.return_value = mock_uow_instance
-            mock_uow.return_value.__aexit__.return_value = None
+            mock_uow_context = AsyncMock()
+            mock_uow_context.__aenter__.return_value = mock_uow_instance
+            mock_uow_context.__aexit__.return_value = None
+            mock_uow.return_value = mock_uow_context
             
             # Mock services
             mock_tool_service.return_value = MagicMock()
@@ -532,7 +534,7 @@ class TestCrewAIEngineService:
             mock_tool_factory.return_value = MagicMock()
             
             # Mock flow preparation with proper constructor (config, output_dir)
-            def mock_flow_prep_constructor(config, output_dir):
+            def mock_flow_prep_constructor(config, output_dir):  # noqa: ARG001
                 mock_instance = MagicMock()
                 mock_instance.prepare = MagicMock(return_value={'flow': MagicMock()})
                 return mock_instance
@@ -568,10 +570,12 @@ class TestCrewAIEngineService:
             mock_trace.return_value = None
             mock_update_status.return_value = None
             
-            # Mock UOW context
+            # Mock UOW context as AsyncMock
             mock_uow_instance = MagicMock()
-            mock_uow.return_value.__aenter__.return_value = mock_uow_instance
-            mock_uow.return_value.__aexit__.return_value = None
+            mock_uow_context = AsyncMock()
+            mock_uow_context.__aenter__.return_value = mock_uow_instance
+            mock_uow_context.__aexit__.return_value = None
+            mock_uow.return_value = mock_uow_context
             
             # Mock services
             mock_tool_service.return_value = MagicMock()
@@ -579,7 +583,7 @@ class TestCrewAIEngineService:
             mock_tool_factory.return_value = MagicMock()
             
             # Mock flow preparation failure by raising an exception
-            def mock_flow_prep_constructor(config, output_dir):
+            def mock_flow_prep_constructor(config, output_dir):  # noqa: ARG001
                 mock_instance = MagicMock()
                 mock_instance.prepare = MagicMock(side_effect=Exception("Flow preparation failed"))
                 return mock_instance
@@ -826,7 +830,7 @@ class TestCrewAIEngineService:
             mock_tool_factory.return_value = MagicMock()
             
             # Mock flow preparation success
-            def mock_flow_prep_constructor(config, output_dir):
+            def mock_flow_prep_constructor(config, output_dir):  # noqa: ARG001
                 mock_instance = MagicMock()
                 mock_instance.prepare = MagicMock(return_value={'flow': MagicMock()})
                 return mock_instance
