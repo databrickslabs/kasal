@@ -53,6 +53,28 @@ import TraceService from '../../api/TraceService';
 import { CanvasLayoutManager } from '../../utils/CanvasLayoutManager';
 import { useUILayoutState } from '../../store/uiLayout';
 
+// Strip ANSI escape sequences (including the ESC character)
+const stripAnsiEscapes = (text: string): string => {
+  if (!text) return '';
+
+  // Create the escape character as a string
+  const ESC = String.fromCharCode(27); // ASCII 27 (ESC)
+  const BEL = String.fromCharCode(7);  // ASCII 7 (BEL)
+
+  // Process the text to remove ANSI sequences
+  return text
+    // Standard ANSI colors and styles 
+    .replace(new RegExp(`${ESC}\\[[0-9;]*[ABCDEFGHJKLMSTfminsulh]`, 'g'), '')
+    // Control sequences with BEL terminator
+    .replace(new RegExp(`${ESC}\\][^${BEL}]*${BEL}`, 'g'), '')
+    // Single character controls
+    .replace(new RegExp(`${ESC}[NOPGKabcdfghinqrstuABCDHIJMOPRTl]`, 'g'), '')
+    // Other formats
+    .replace(new RegExp(`${ESC}[\\[\\]\\?\\(\\)#;0-9]*[0-9A-Za-z]`, 'g'), '')
+    // Final cleanup of any remaining ESC characters
+    .replace(new RegExp(ESC, 'g'), '');
+};
+
 interface GeneratedAgent {
   name: string;
   role: string;
@@ -580,50 +602,17 @@ const WorkflowChat: React.FC<WorkflowChatProps> = ({
           !(msg.type === 'execution' && msg.content.includes('⏳ Preparing to execute crew...'))
         );
         
-        // Add execution start message
-        const executionMessage: ChatMessage = {
-          id: `exec-start-${Date.now()}`,
-          type: 'execution',
-          content: `🚀 Started execution: ${jobName}`,
-          timestamp: new Date(),
-          jobId
-        };
-        
-        return [...filtered, executionMessage];
+        // Don't add execution start message
+        return filtered;
       });
-      
-      // Save execution message to backend
-      const executionMessage: ChatMessage = {
-        id: `exec-start-${Date.now()}`,
-        type: 'execution',
-        content: `🚀 Started execution: ${jobName}`,
-        timestamp: new Date(),
-        jobId
-      };
-      saveMessageToBackend(executionMessage);
     };
 
     const handleJobCompleted = (event: CustomEvent) => {
-      const { jobId, result } = event.detail;
+      const { jobId } = event.detail;
       console.log('[WorkflowChat] Job completed event:', { jobId, executingJobId });
       
-      // Always add completion message if we have an executing job
+      // Only clear execution state on successful completion
       if (executingJobId || jobId === lastExecutionJobId) {
-        // Add execution completion message
-        const completionMessage: ChatMessage = {
-          id: `exec-complete-${Date.now()}`,
-          type: 'execution',
-          content: `✅ Execution completed successfully`,
-          timestamp: new Date(),
-          result,
-          jobId
-        };
-        
-        setMessages(prev => [...prev, completionMessage]);
-        
-        // Save execution completion message to backend
-        saveMessageToBackend(completionMessage);
-        
         // Clear execution state immediately to unblock chat
         setExecutingJobId(null);
         setExecutionStartTime(null);
@@ -772,11 +761,11 @@ const WorkflowChat: React.FC<WorkflowChatProps> = ({
           // Extract content from trace output
           let content = '';
           if (typeof trace.output === 'string') {
-            content = trace.output;
+            content = stripAnsiEscapes(trace.output);
           } else if (trace.output?.agent_execution && typeof trace.output.agent_execution === 'string') {
-            content = trace.output.agent_execution;
+            content = stripAnsiEscapes(trace.output.agent_execution);
           } else if (trace.output?.content && typeof trace.output.content === 'string') {
-            content = trace.output.content;
+            content = stripAnsiEscapes(trace.output.content);
           } else if (trace.output) {
             content = JSON.stringify(trace.output, null, 2);
           }
@@ -1986,7 +1975,7 @@ const WorkflowChat: React.FC<WorkflowChatProps> = ({
         />
       )}
 
-      <Box sx={{ flex: 1, overflow: 'auto', p: 2 }}>
+      <Box sx={{ flex: 1, overflow: 'auto', p: 2, width: '100%', maxWidth: '100%' }}>
         {messages.length === 0 ? (
           <Box sx={{ textAlign: 'center', mt: 4 }}>
             <Typography variant="body2" color="text.secondary" paragraph>
@@ -2015,29 +2004,44 @@ const WorkflowChat: React.FC<WorkflowChatProps> = ({
           </Box>
         ) : (
           <List>
-            {messages.map((message, index) => (
+            {messages
+              .filter(message => {
+                // Filter out execution start and completion messages
+                if (message.type === 'execution' && (
+                  message.content.includes('🚀 Started execution:') ||
+                  message.content.includes('✅ Execution completed successfully')
+                )) {
+                  return false;
+                }
+                return true;
+              })
+              .map((message, index) => (
               <Fade in key={message.id}>
                 <Box>
-                  <ListItem alignItems="flex-start" sx={{ px: 0 }}>
-                    <ListItemAvatar>
-                      <Avatar sx={{ 
-                        bgcolor: message.type === 'user' ? 'primary.main' : 
-                                message.type === 'execution' ? 'success.main' :
-                                message.type === 'trace' ? 'grey.500' : 'secondary.main' 
-                      }}>
-                        {message.type === 'user' ? <PersonIcon /> : 
-                         message.type === 'execution' ? <AccountTreeIcon /> :
-                         message.type === 'trace' ? <PersonIcon /> : <SmartToyIcon />}
-                      </Avatar>
-                    </ListItemAvatar>
+                  <ListItem alignItems="flex-start" sx={{ px: 0, width: '100%', maxWidth: '100%' }}>
+                    {message.type !== 'trace' && (
+                      <ListItemAvatar>
+                        <Avatar sx={{ 
+                          bgcolor: message.type === 'user' ? 'primary.main' : 'secondary.main' 
+                        }}>
+                          {message.type === 'user' ? <PersonIcon /> : <SmartToyIcon />}
+                        </Avatar>
+                      </ListItemAvatar>
+                    )}
                     <ListItemText
+                      sx={{ 
+                        width: '100%', 
+                        maxWidth: '100%', 
+                        overflow: 'hidden',
+                        ml: message.type === 'trace' ? 7 : 0  // Add left margin for trace messages
+                      }}
                       primary={
-                        <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
-                          <Typography variant="subtitle2">
-                            {message.type === 'user' ? 'You' : 
-                             message.type === 'execution' ? 'Workflow' :
-                             message.type === 'trace' ? (message.eventType || 'Trace') : 'Assistant'}
-                          </Typography>
+                        message.type !== 'trace' ? (
+                          <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+                            <Typography variant="subtitle2">
+                              {message.type === 'user' ? 'You' : 
+                               message.type === 'execution' ? 'Workflow' : 'Assistant'}
+                            </Typography>
                           {message.intent && (
                             <Chip
                               size="small"
@@ -2055,6 +2059,7 @@ const WorkflowChat: React.FC<WorkflowChatProps> = ({
                             />
                           )}
                         </Box>
+                      ) : null
                       }
                       secondary={
                         <Typography 
@@ -2062,30 +2067,24 @@ const WorkflowChat: React.FC<WorkflowChatProps> = ({
                           sx={{ 
                             mt: 1, 
                             whiteSpace: 'pre-wrap',
-                            color: message.isIntermediate ? 'text.secondary' : 'text.primary',
-                            fontStyle: message.isIntermediate ? 'italic' : 'normal',
-                            opacity: message.isIntermediate ? 0.7 : 1
+                            wordBreak: 'break-all',
+                            overflowWrap: 'anywhere',
+                            // Check if this is a crew-level context (final result)
+                            color: (message.isIntermediate && message.eventContext !== 'crew') ? 'text.secondary' : 'text.primary',
+                            fontStyle: (message.isIntermediate && message.eventContext !== 'crew') ? 'italic' : 'normal',
+                            opacity: (message.isIntermediate && message.eventContext !== 'crew') ? 0.7 : 1,
+                            fontWeight: message.eventContext === 'crew' ? 600 : 'normal'
                           }}
                         >
                           <>
                             {message.eventContext && message.type === 'trace' && (
-                              <Typography variant="caption" display="block" sx={{ mb: 0.5, color: 'primary.main' }}>
+                              <Typography variant="caption" display="block" sx={{ mb: 0.5, color: 'primary.main', wordBreak: 'break-all', overflowWrap: 'anywhere' }}>
                                 Context: {message.eventContext}
                               </Typography>
                             )}
                             {message.content}
                             {message.result && (
-                              <Box sx={{ 
-                                mt: 2, 
-                                p: 2, 
-                                bgcolor: theme => theme.palette.mode === 'light' ? 'grey.50' : 'grey.900',
-                                borderRadius: 1.5,
-                                border: '1px solid',
-                                borderColor: theme => theme.palette.mode === 'light' ? 'grey.200' : 'grey.800',
-                              }}>
-                                <Typography variant="caption" display="block" sx={{ mb: 1, fontWeight: 'bold', color: 'primary.main' }}>
-                                  Final Result:
-                                </Typography>
+                              <Box sx={{ mt: 2 }}>
                                 {(() => {
                                   // Extract the actual result value if it's wrapped in an object with 'value' field
                                   let actualResult: unknown = message.result;
@@ -2181,7 +2180,10 @@ const WorkflowChat: React.FC<WorkflowChatProps> = ({
                                         sx={{ 
                                           whiteSpace: 'pre-wrap',
                                           fontSize: '0.875rem',
-                                          wordBreak: 'break-word',
+                                          wordBreak: 'break-all',
+                                          overflowWrap: 'anywhere',
+                                          color: 'text.primary',
+                                          fontWeight: 500,
                                         }}
                                       >
                                         {renderWithLinks(actualResult)}
@@ -2195,7 +2197,10 @@ const WorkflowChat: React.FC<WorkflowChatProps> = ({
                                           whiteSpace: 'pre-wrap',
                                           fontFamily: 'monospace',
                                           fontSize: '0.875rem',
-                                          wordBreak: 'break-word',
+                                          wordBreak: 'break-all',
+                                          overflowWrap: 'anywhere',
+                                          color: 'text.primary',
+                                          fontWeight: 500,
                                         }}
                                       >
                                         {JSON.stringify(actualResult, null, 2)}

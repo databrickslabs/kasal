@@ -404,6 +404,14 @@ class TestCrewAIEngineService:
             result = await service.run_execution(execution_id, sample_execution_config)
             
             assert result == execution_id
+            
+            # Debug: print all calls to help diagnose the issue
+            if not any(
+                call[0] == (execution_id, ExecutionStatus.FAILED.value, "Failed to prepare crew")
+                for call in mock_update_status.call_args_list
+            ):
+                print(f"Mock update_status calls: {mock_update_status.call_args_list}")
+            
             mock_update_status.assert_any_call(
                 execution_id,
                 ExecutionStatus.FAILED.value,
