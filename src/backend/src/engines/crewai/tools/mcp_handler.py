@@ -7,6 +7,7 @@ import subprocess
 import concurrent.futures
 import traceback
 import aiohttp
+from typing import Optional
 from src.utils.databricks_auth import get_databricks_auth_headers, get_mcp_auth_headers
 
 logger = logging.getLogger(__name__)
@@ -57,7 +58,7 @@ async def stop_all_adapters():
                     pass
                 
     # Reset the dictionary
-    _active_mcp_adapters = {}
+    _active_mcp_adapters.clear()
     logger.info("All MCP adapters stopped")
 
 async def get_databricks_workspace_host():
@@ -142,6 +143,111 @@ async def call_databricks_api(endpoint, method="GET", data=None, params=None):
     except Exception as e:
         logger.error(f"Error calling Databricks API: {e}")
         return {"error": f"API error: {str(e)}"}
+
+def create_crewai_tool_from_mcp(mcp_tool_dict):
+    """
+    Create a CrewAI tool from an MCP tool dictionary.
+    
+    Args:
+        mcp_tool_dict: Dictionary containing MCP tool information
+        
+    Returns:
+        CrewAI tool instance
+    """
+    from crewai.tools import BaseTool
+    from pydantic import BaseModel, Field
+    from typing import Type, Dict, Any
+    from src.engines.common.mcp_adapter import MCPTool
+    
+    # Create MCPTool wrapper
+    mcp_tool_wrapper = MCPTool(mcp_tool_dict)
+    
+    # Create a dynamic input schema based on the MCP tool's input schema
+    input_schema = mcp_tool_wrapper.input_schema or {}
+    
+    # Create fields for the Pydantic model
+    fields = {}
+    annotations = {}
+    properties = input_schema.get('properties', {})
+    required = input_schema.get('required', [])
+    
+    for field_name, field_info in properties.items():
+        field_type = str  # Default to string
+        field_description = field_info.get('description', f'{field_name} parameter')
+        is_required = field_name in required
+        
+        # Add type annotation
+        annotations[field_name] = field_type
+        
+        if is_required:
+            fields[field_name] = Field(..., description=field_description)
+        else:
+            fields[field_name] = Field(default=None, description=field_description)
+    
+    # If no fields, add a dummy field
+    if not fields:
+        annotations['dummy'] = str
+        fields['dummy'] = Field(default='', description='Dummy field')
+    
+    # Create dynamic Pydantic model with annotations
+    DynamicToolInput = type(
+        f"{mcp_tool_wrapper.name}_Input",
+        (BaseModel,),
+        {
+            '__annotations__': annotations,
+            **fields
+        }
+    )
+    
+    # Create the custom tool class
+    class MCPCrewAITool(BaseTool):
+        name: str = mcp_tool_wrapper.name
+        description: str = mcp_tool_wrapper.description
+        args_schema: Type[BaseModel] = DynamicToolInput
+        _mcp_tool_wrapper: MCPTool = None
+        
+        def __init__(self):
+            super().__init__()
+            self._mcp_tool_wrapper = mcp_tool_wrapper
+        
+        def _run(self, **kwargs) -> str:
+            """Execute the MCP tool."""
+            try:
+                # Remove dummy field if it exists
+                kwargs.pop('dummy', None)
+                
+                # Check if there's already an event loop running
+                try:
+                    loop = asyncio.get_running_loop()
+                    # We're in an async context, create a task
+                    future = asyncio.create_task(self._mcp_tool_wrapper.execute(kwargs))
+                    # Use asyncio.run_coroutine_threadsafe to handle it properly
+                    import concurrent.futures
+                    with concurrent.futures.ThreadPoolExecutor() as executor:
+                        result = executor.submit(asyncio.run, self._mcp_tool_wrapper.execute(kwargs)).result()
+                except RuntimeError:
+                    # No event loop running, we can create one
+                    loop = asyncio.new_event_loop()
+                    asyncio.set_event_loop(loop)
+                    try:
+                        result = loop.run_until_complete(self._mcp_tool_wrapper.execute(kwargs))
+                    finally:
+                        loop.close()
+                
+                # Extract text content if it's an MCP result object
+                if hasattr(result, 'content') and result.content:
+                    text_contents = []
+                    for content in result.content:
+                        if hasattr(content, 'text'):
+                            text_contents.append(content.text)
+                    return ' '.join(text_contents) if text_contents else str(result)
+                return str(result)
+            except Exception as e:
+                logger.error(f"Error executing MCP tool {self._mcp_tool_wrapper.name}: {e}")
+                return f"Error: {str(e)}"
+    
+    # Return an instance of the tool
+    return MCPCrewAITool()
 
 def wrap_mcp_tool(tool):
     """
@@ -362,45 +468,6 @@ asyncio.run(run_tool())
             except:
                 pass
 
-async def create_mcp_adapter():
-    """
-    Create a new MCP adapter with proper authentication (fully async version).
-    
-    Returns:
-        AsyncMCPAdapter: A new async MCP adapter instance
-    """
-    try:
-        # Get the MCP server URL
-        mcp_url = "https://mcpgenie-1444828305810485.aws.databricksapps.com/sse"
-        
-        # Get MCP authentication headers (already async)
-        headers, error = await get_mcp_auth_headers(mcp_url)
-        if error:
-            raise ValueError(f"Failed to get MCP auth headers: {error}")
-            
-        # Create the async adapter
-        from src.engines.crewai.tools.mcp_adapter import AsyncMCPAdapter
-        
-        # Prepare server parameters
-        server_params = {"url": mcp_url}
-        if headers:
-            server_params["headers"] = headers
-            
-        adapter = AsyncMCPAdapter(server_params)
-        
-        # Initialize the adapter asynchronously
-        await adapter.initialize()
-        
-        # Register the adapter for tracking
-        adapter_id = id(adapter)
-        register_mcp_adapter(adapter_id, adapter)
-        
-        logger.info(f"Successfully created async MCP adapter with {len(adapter.tools) if adapter.tools else 0} tools")
-        return adapter
-        
-    except Exception as e:
-        logger.error(f"Error creating MCP adapter: {e}")
-        raise
 
 async def stop_mcp_adapter(adapter):
     """
@@ -416,10 +483,13 @@ async def stop_mcp_adapter(adapter):
             logger.warning("Attempted to stop None adapter")
             return
             
-        # Check if this is an async adapter
+        # Check if this is an async adapter (including OAuthMCPAdapter)
         if hasattr(adapter, 'stop') and asyncio.iscoroutinefunction(adapter.stop):
             # Async adapter
             await adapter.stop()
+        elif hasattr(adapter, 'close') and asyncio.iscoroutinefunction(adapter.close):
+            # OAuthMCPAdapter uses close()
+            await adapter.close()
         elif hasattr(adapter, 'stop'):
             # Sync adapter - run in thread pool
             loop = asyncio.get_event_loop()

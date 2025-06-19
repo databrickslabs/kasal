@@ -750,20 +750,24 @@ class TestCreateTask:
         mock_server.server_url = "https://test.com/sse"
         mock_server.api_key = "test-key"
         
-        # Mock MCP tool as a proper BaseTool
-        mock_mcp_tool = Mock(spec=BaseTool)
-        mock_mcp_tool.name = "test_tool"
-        mock_mcp_tool.description = "Test tool description"
+        # Mock MCP tool as a dictionary (as returned by MCPAdapter)
+        mock_mcp_tool = {
+            "name": "test_tool",
+            "description": "Test tool description",
+            "mcp_tool": Mock(),
+            "input_schema": {},
+            "adapter": Mock()  # Will be replaced with actual adapter
+        }
         
-        # Create wrapped tool that will be returned by wrap_mcp_tool
+        # Create wrapped tool that will be returned by create_crewai_tool_from_mcp
         wrapped_tool = Mock(spec=BaseTool)
         wrapped_tool.name = "TestServer_test_tool"  # The name gets prefixed with server name
-        wrapped_tool.description = mock_mcp_tool.description
+        wrapped_tool.description = "Test tool description"
         
         with patch('src.core.unit_of_work.UnitOfWork'), \
              patch('src.services.mcp_service.MCPService') as mock_mcp_service, \
-             patch('src.engines.crewai.tools.mcp_adapter.AsyncMCPAdapter') as mock_adapter_class, \
-             patch('src.engines.crewai.tools.mcp_handler.wrap_mcp_tool') as mock_wrap, \
+             patch('src.engines.common.mcp_adapter.MCPAdapter') as mock_adapter_class, \
+             patch('src.engines.crewai.tools.mcp_handler.create_crewai_tool_from_mcp') as mock_create_tool, \
              patch('src.engines.crewai.tools.mcp_handler.register_mcp_adapter') as mock_register:
             
             # Setup MCP service mocks
@@ -774,12 +778,14 @@ class TestCreateTask:
             
             # Setup adapter mock
             mock_adapter = Mock()
+            # Update the tool dict to have the correct adapter reference
+            mock_mcp_tool["adapter"] = mock_adapter
             mock_adapter.tools = [mock_mcp_tool]
             mock_adapter.initialize = AsyncMock()
             mock_adapter_class.return_value = mock_adapter
             
-            # Setup wrap mock to return the wrapped tool
-            mock_wrap.return_value = wrapped_tool
+            # Setup create_crewai_tool_from_mcp mock to return the wrapped tool
+            mock_create_tool.return_value = wrapped_tool
             
             task = await create_task(task_key, task_config, agent)
         
@@ -817,21 +823,25 @@ class TestCreateTask:
         mock_server.server_url = "https://workspace.databricksapps.com/app"
         mock_server.api_key = None  # No API key for OAuth
         
-        # Mock MCP tool as a proper BaseTool
-        mock_mcp_tool = Mock(spec=BaseTool)
-        mock_mcp_tool.name = "test_tool"
-        mock_mcp_tool.description = "Test tool description"
+        # Mock MCP tool as a dictionary (as returned by MCPAdapter)
+        mock_mcp_tool = {
+            "name": "test_tool",
+            "description": "Test tool description",
+            "mcp_tool": Mock(),
+            "input_schema": {},
+            "adapter": Mock()  # Will be replaced with actual adapter
+        }
         
-        # Create wrapped tool that will be returned by wrap_mcp_tool
+        # Create wrapped tool that will be returned by create_crewai_tool_from_mcp
         wrapped_tool = Mock(spec=BaseTool)
         wrapped_tool.name = "DatabricksServer_test_tool"  # The name gets prefixed with server name
-        wrapped_tool.description = mock_mcp_tool.description
+        wrapped_tool.description = "Test tool description"
         
         with patch('src.core.unit_of_work.UnitOfWork'), \
              patch('src.services.mcp_service.MCPService') as mock_mcp_service, \
-             patch('src.engines.crewai.tools.mcp_adapter.AsyncMCPAdapter') as mock_adapter_class, \
-             patch('src.utils.databricks_auth.get_mcp_auth_headers') as mock_auth, \
-             patch('src.engines.crewai.tools.mcp_handler.wrap_mcp_tool') as mock_wrap, \
+             patch('src.engines.common.mcp_adapter.MCPAdapter') as mock_adapter_class, \
+             patch('src.utils.databricks_auth.get_mcp_auth_headers', new_callable=AsyncMock) as mock_auth, \
+             patch('src.engines.crewai.tools.mcp_handler.create_crewai_tool_from_mcp') as mock_create_tool, \
              patch('src.engines.crewai.tools.mcp_handler.register_mcp_adapter'):
             
             # Setup MCP service mocks
@@ -845,17 +855,23 @@ class TestCreateTask:
             
             # Setup adapter mock
             mock_adapter = Mock()
+            # Update the tool dict to have the correct adapter reference
+            mock_mcp_tool["adapter"] = mock_adapter
             mock_adapter.tools = [mock_mcp_tool]
             mock_adapter.initialize = AsyncMock()
             mock_adapter_class.return_value = mock_adapter
             
-            # Setup wrap mock to return the wrapped tool
-            mock_wrap.return_value = wrapped_tool
+            # Setup create_crewai_tool_from_mcp mock to return the wrapped tool
+            mock_create_tool.return_value = wrapped_tool
             
             task = await create_task(task_key, task_config, agent)
         
-        # Verify OAuth was used
-        mock_auth.assert_called_once_with("https://workspace.databricksapps.com/app/sse")
+        # Verify OAuth was used with proper parameters
+        mock_auth.assert_called_once_with(
+            "https://workspace.databricksapps.com/app/sse",
+            user_token=None,
+            api_key=None
+        )
         
         # Verify adapter was created with OAuth headers
         call_args = mock_adapter_class.call_args[0][0]
@@ -887,24 +903,28 @@ class TestCreateTask:
         mock_server.id = "databricks_server"
         mock_server.name = "DatabricksServer"
         mock_server.server_type = "SSE"
-        mock_server.server_url = "https://workspace.databricks.com"
+        mock_server.server_url = "https://workspace.databricksapps.com/app"
         mock_server.api_key = "fallback-api-key"
         
-        # Mock MCP tool as a proper BaseTool
-        mock_mcp_tool = Mock(spec=BaseTool)
-        mock_mcp_tool.name = "test_tool"
-        mock_mcp_tool.description = "Test tool description"
+        # Mock MCP tool as a dictionary (as returned by MCPAdapter)
+        mock_mcp_tool = {
+            "name": "test_tool",
+            "description": "Test tool description",
+            "mcp_tool": Mock(),
+            "input_schema": {},
+            "adapter": Mock()  # Will be replaced with actual adapter
+        }
         
-        # Create wrapped tool that will be returned by wrap_mcp_tool
+        # Create wrapped tool that will be returned by create_crewai_tool_from_mcp
         wrapped_tool = Mock(spec=BaseTool)
         wrapped_tool.name = "DatabricksServer_test_tool"
-        wrapped_tool.description = mock_mcp_tool.description
+        wrapped_tool.description = "Test tool description"
         
         with patch('src.core.unit_of_work.UnitOfWork'), \
              patch('src.services.mcp_service.MCPService') as mock_mcp_service, \
-             patch('src.engines.crewai.tools.mcp_adapter.AsyncMCPAdapter') as mock_adapter_class, \
+             patch('src.engines.common.mcp_adapter.MCPAdapter') as mock_adapter_class, \
              patch('src.utils.databricks_auth.get_mcp_auth_headers') as mock_auth, \
-             patch('src.engines.crewai.tools.mcp_handler.wrap_mcp_tool') as mock_wrap, \
+             patch('src.engines.crewai.tools.mcp_handler.create_crewai_tool_from_mcp') as mock_create_tool, \
              patch('src.engines.crewai.tools.mcp_handler.register_mcp_adapter'):
             
             # Setup MCP service mocks
@@ -918,22 +938,29 @@ class TestCreateTask:
             
             # Setup adapter mock
             mock_adapter = Mock()
+            # Update the tool dict to have the correct adapter reference
+            mock_mcp_tool["adapter"] = mock_adapter
             mock_adapter.tools = [mock_mcp_tool]
             mock_adapter.initialize = AsyncMock()
             mock_adapter_class.return_value = mock_adapter
             
-            # Setup wrap mock to return the wrapped tool
-            mock_wrap.return_value = wrapped_tool
+            # Setup create_crewai_tool_from_mcp mock to return the wrapped tool
+            mock_create_tool.return_value = wrapped_tool
             
             task = await create_task(task_key, task_config, agent)
         
-        # Verify OAuth was attempted
-        mock_auth.assert_called_once_with("https://workspace.databricks.com")
+        # Verify OAuth was attempted with the modified URL (with /sse added)
+        mock_auth.assert_called_once_with(
+            "https://workspace.databricksapps.com/app/sse",
+            user_token=None,
+            api_key="fallback-api-key"
+        )
         
-        # Verify adapter was created with API key fallback headers
+        # Verify adapter was created with the correct URL
         call_args = mock_adapter_class.call_args[0][0]
-        assert call_args["url"] == "https://workspace.databricks.com"
-        assert call_args["headers"]["Authorization"] == "Bearer fallback-api-key"
+        assert call_args["url"] == "https://workspace.databricksapps.com/app/sse"
+        # When OAuth fails, no headers should be added (no automatic fallback)
+        assert "headers" not in call_args or call_args.get("headers") == {}
         
         # Verify tool was added
         assert len(task.tools) == 1
@@ -964,21 +991,25 @@ class TestCreateTask:
         mock_server.api_key = "test-key"
         mock_server.additional_config = {"setting": "value"}
         
-        # Mock MCP tool as a proper BaseTool
-        mock_mcp_tool = Mock(spec=BaseTool)
-        mock_mcp_tool.name = "test_tool"
-        mock_mcp_tool.description = "Test tool description"
+        # Mock MCP tool as a dictionary (as returned by MCPAdapter)
+        mock_mcp_tool = {
+            "name": "test_tool",
+            "description": "Test tool description",
+            "mcp_tool": Mock(),
+            "input_schema": {},
+            "adapter": Mock()  # Will be replaced with actual adapter
+        }
         
-        # Create wrapped tool that will be returned by wrap_mcp_tool
+        # Create wrapped tool that will be returned by create_crewai_tool_from_mcp
         wrapped_tool = Mock(spec=BaseTool)
         wrapped_tool.name = "StdioServer_test_tool"  # The name gets prefixed with server name
-        wrapped_tool.description = mock_mcp_tool.description
+        wrapped_tool.description = "Test tool description"
         
         with patch('src.core.unit_of_work.UnitOfWork'), \
              patch('src.services.mcp_service.MCPService') as mock_mcp_service, \
-             patch('src.engines.crewai.tools.mcp_adapter.AsyncMCPAdapter') as mock_adapter_class, \
+             patch('src.engines.common.mcp_adapter.MCPAdapter') as mock_adapter_class, \
              patch('mcp.StdioServerParameters') as mock_stdio_params, \
-             patch('src.engines.crewai.tools.mcp_handler.wrap_mcp_tool') as mock_wrap, \
+             patch('src.engines.crewai.tools.mcp_handler.create_crewai_tool_from_mcp') as mock_create_tool, \
              patch('src.engines.crewai.tools.mcp_handler.register_mcp_adapter'), \
              patch.dict('os.environ', {'EXISTING': 'value'}):
             
@@ -994,26 +1025,19 @@ class TestCreateTask:
             mock_adapter.initialize = AsyncMock()
             mock_adapter_class.return_value = mock_adapter
             
-            # Setup wrap mock to return the wrapped tool
-            mock_wrap.return_value = wrapped_tool
+            # Setup create_crewai_tool_from_mcp mock to return the wrapped tool
+            mock_create_tool.return_value = wrapped_tool
             
             task = await create_task(task_key, task_config, agent)
         
-        # Verify STDIO parameters were created correctly
-        mock_stdio_params.assert_called_once()
-        call_args, call_kwargs = mock_stdio_params.call_args
-        assert call_kwargs['command'] == "python"
-        assert call_kwargs['args'] == ["-m", "mcp_server"]
-        # The env should contain our custom vars plus existing environment
-        assert 'MCP_API_KEY' in call_kwargs['env']
-        assert call_kwargs['env']['MCP_API_KEY'] == 'test-key'
-        assert 'MCP_SETTING' in call_kwargs['env']
-        assert call_kwargs['env']['MCP_SETTING'] == 'value'
+        # Verify STDIO is not supported - no tools should be added
+        # The log shows "WARNING - Unsupported MCP server type: STDIO"
+        mock_stdio_params.assert_not_called()
+        mock_adapter_class.assert_not_called()
+        mock_create_tool.assert_not_called()
         
-        # Verify tool was added and wrapped correctly (covers lines 362-374)
-        assert len(task.tools) == 1
-        assert wrapped_tool in task.tools
-        assert wrapped_tool.name == "StdioServer_test_tool"
+        # Verify no tools were added since STDIO is unsupported
+        assert len(task.tools) == 0
     
     @pytest.mark.asyncio
     async def test_create_task_with_optional_fields(self):
@@ -1178,9 +1202,9 @@ class TestCreateTask:
         
         with patch('src.core.unit_of_work.UnitOfWork'), \
              patch('src.services.mcp_service.MCPService') as mock_mcp_service, \
-             patch('src.engines.crewai.tools.mcp_adapter.AsyncMCPAdapter') as mock_adapter_class, \
+             patch('src.engines.common.mcp_adapter.MCPAdapter') as mock_adapter_class, \
              patch('src.utils.databricks_auth.get_mcp_auth_headers') as mock_auth, \
-             patch('src.engines.crewai.tools.mcp_handler.wrap_mcp_tool'), \
+             patch('src.engines.crewai.tools.mcp_handler.create_crewai_tool_from_mcp'), \
              patch('src.engines.crewai.tools.mcp_handler.register_mcp_adapter'):
             
             # Setup MCP service mocks
@@ -1200,9 +1224,10 @@ class TestCreateTask:
             
             task = await create_task(task_key, task_config, agent)
         
-        # Should fallback to API key authentication
+        # When OAuth fails, no headers should be added (no automatic fallback)
         call_args = mock_adapter_class.call_args[0][0]
-        assert call_args["headers"]["Authorization"] == "Bearer fallback-key"
+        # Headers should not be in the params when OAuth fails
+        assert "headers" not in call_args or call_args.get("headers") == {}
     
     @pytest.mark.asyncio
     async def test_create_task_mcp_sse_adapter_creation_error(self):
@@ -1229,7 +1254,7 @@ class TestCreateTask:
         
         with patch('src.core.unit_of_work.UnitOfWork'), \
              patch('src.services.mcp_service.MCPService') as mock_mcp_service, \
-             patch('src.engines.crewai.tools.mcp_adapter.AsyncMCPAdapter') as mock_adapter_class:
+             patch('src.engines.common.mcp_adapter.MCPAdapter') as mock_adapter_class:
             
             # Setup MCP service mocks
             mock_mcp_instance = Mock()
@@ -1274,7 +1299,7 @@ class TestCreateTask:
         
         with patch('src.core.unit_of_work.UnitOfWork'), \
              patch('src.services.mcp_service.MCPService') as mock_mcp_service, \
-             patch('src.engines.crewai.tools.mcp_adapter.AsyncMCPAdapter') as mock_adapter_class, \
+             patch('src.engines.common.mcp_adapter.MCPAdapter') as mock_adapter_class, \
              patch('mcp.StdioServerParameters'):
             
             # Setup MCP service mocks
@@ -1318,7 +1343,7 @@ class TestCreateTask:
         
         with patch('src.core.unit_of_work.UnitOfWork'), \
              patch('src.services.mcp_service.MCPService') as mock_mcp_service, \
-             patch('src.engines.crewai.tools.mcp_adapter.AsyncMCPAdapter') as mock_adapter_class:
+             patch('src.engines.common.mcp_adapter.MCPAdapter') as mock_adapter_class:
             
             # Setup MCP service mocks
             mock_mcp_instance = Mock()
@@ -1969,17 +1994,22 @@ class TestCreateTask:
             "bool_setting": True  # Non-string value
         }
         
-        # Mock MCP tool
-        mock_mcp_tool = Mock(spec=BaseTool)
-        mock_mcp_tool.name = "test_tool"
+        # Mock MCP tool as a dictionary (as returned by MCPAdapter)
+        mock_mcp_tool = {
+            "name": "test_tool",
+            "description": "Test tool description",
+            "mcp_tool": Mock(),
+            "input_schema": {},
+            "adapter": Mock()  # Will be replaced with actual adapter
+        }
         wrapped_tool = Mock(spec=BaseTool)
         wrapped_tool.name = "StdioServer_test_tool"
         
         with patch('src.core.unit_of_work.UnitOfWork'), \
              patch('src.services.mcp_service.MCPService') as mock_mcp_service, \
-             patch('src.engines.crewai.tools.mcp_adapter.AsyncMCPAdapter') as mock_adapter_class, \
+             patch('src.engines.common.mcp_adapter.MCPAdapter') as mock_adapter_class, \
              patch('mcp.StdioServerParameters') as mock_stdio_params, \
-             patch('src.engines.crewai.tools.mcp_handler.wrap_mcp_tool') as mock_wrap, \
+             patch('src.engines.crewai.tools.mcp_handler.create_crewai_tool_from_mcp') as mock_create_tool, \
              patch('src.engines.crewai.tools.mcp_handler.register_mcp_adapter'), \
              patch.dict('os.environ', {'EXISTING': 'value'}):
             
@@ -1991,32 +2021,25 @@ class TestCreateTask:
             
             # Setup adapter mock
             mock_adapter = Mock()
+            # Update the tool dict to have the correct adapter reference
+            mock_mcp_tool["adapter"] = mock_adapter
             mock_adapter.tools = [mock_mcp_tool]
             mock_adapter.initialize = AsyncMock()
             mock_adapter_class.return_value = mock_adapter
             
-            # Setup wrap mock
-            mock_wrap.return_value = wrapped_tool
+            # Setup create_crewai_tool_from_mcp mock
+            mock_create_tool.return_value = wrapped_tool
             
             task = await create_task(task_key, task_config, agent)
         
-        # Verify STDIO parameters were created with the right command and args
-        mock_stdio_params.assert_called_once()
-        call_args, call_kwargs = mock_stdio_params.call_args
-        assert call_kwargs['command'] == "python"
-        assert call_kwargs['args'] == ["-m", "mcp_server"]
-        # Verify that only string values were included in environment
-        env = call_kwargs['env']
-        assert 'MCP_API_KEY' in env
-        assert env['MCP_API_KEY'] == 'test-key'
-        assert 'MCP_STRING_SETTING' in env
-        assert env['MCP_STRING_SETTING'] == 'value'
-        # Verify non-string values were filtered out
-        assert 'MCP_INT_SETTING' not in env
-        assert 'MCP_BOOL_SETTING' not in env
+        # Verify STDIO is not supported - no tools should be added
+        # The log shows "WARNING - Unsupported MCP server type: STDIO"
+        mock_stdio_params.assert_not_called()
+        mock_adapter_class.assert_not_called()
+        mock_create_tool.assert_not_called()
         
-        assert len(task.tools) == 1
-        assert wrapped_tool in task.tools
+        # Verify no tools were added since STDIO is unsupported
+        assert len(task.tools) == 0
     
     @pytest.mark.asyncio
     async def test_create_task_mcp_unsupported_server_type_coverage(self):
@@ -2777,8 +2800,8 @@ class TestCreateTask:
             assert mock_tool_instance in task.tools
     
     @pytest.mark.asyncio
-    async def test_create_task_stdio_with_additional_config(self):
-        """Test STDIO server with additional configuration."""
+    async def test_create_task_stdio_not_supported(self):
+        """Test STDIO server type is not supported."""
         task_key = "stdio_config_task"
         task_config = {
             "description": "Task description",
@@ -2791,7 +2814,7 @@ class TestCreateTask:
             verbose=True
         )
         
-        # Mock MCP server with additional config
+        # Mock MCP server with STDIO type
         mock_server = Mock()
         mock_server.id = "stdio_server"
         mock_server.name = "StdioServer"
@@ -2799,19 +2822,9 @@ class TestCreateTask:
         mock_server.command = "python"
         mock_server.args = ["-m", "test"]
         mock_server.api_key = "test-key"
-        mock_server.additional_config = {
-            "setting1": "value1",
-            "setting2": 123,  # Non-string value should be ignored
-            "setting3": "value3"
-        }
         
         with patch('src.core.unit_of_work.UnitOfWork'), \
-             patch('src.services.mcp_service.MCPService') as mock_mcp_service, \
-             patch('src.engines.crewai.tools.mcp_adapter.AsyncMCPAdapter') as mock_adapter_class, \
-             patch('mcp.StdioServerParameters') as mock_stdio_params, \
-             patch('src.engines.crewai.tools.mcp_handler.wrap_mcp_tool'), \
-             patch('src.engines.crewai.tools.mcp_handler.register_mcp_adapter'), \
-             patch.dict('os.environ', {}):
+             patch('src.services.mcp_service.MCPService') as mock_mcp_service:
             
             # Setup MCP service mocks
             mock_mcp_instance = Mock()
@@ -2819,29 +2832,13 @@ class TestCreateTask:
             mock_mcp_instance.get_server_by_id = AsyncMock(return_value=mock_server)
             mock_mcp_service.from_unit_of_work = AsyncMock(return_value=mock_mcp_instance)
             
-            # Setup adapter mock
-            mock_adapter = Mock()
-            mock_adapter.tools = []
-            mock_adapter.initialize = AsyncMock()
-            mock_adapter_class.return_value = mock_adapter
-            
+            # Create task - STDIO servers should be skipped
             task = await create_task(task_key, task_config, agent)
         
-        # Verify STDIO parameters include additional config
-        mock_stdio_params.assert_called_once()
-        call_args, call_kwargs = mock_stdio_params.call_args
-        assert call_kwargs['command'] == "python"
-        assert call_kwargs['args'] == ["-m", "test"]
-        # Verify that specific MCP environment variables are present
-        env = call_kwargs['env']
-        assert 'MCP_API_KEY' in env
-        assert env['MCP_API_KEY'] == 'test-key'
-        assert 'MCP_SETTING1' in env
-        assert env['MCP_SETTING1'] == 'value1'
-        assert 'MCP_SETTING3' in env
-        assert env['MCP_SETTING3'] == 'value3'
-        # Verify non-string values were filtered out
-        assert 'MCP_SETTING2' not in env
+        # Verify task was created but no tools were added (STDIO not supported)
+        assert task is not None
+        assert task.description == "Task description"
+        assert task.expected_output == "Expected output"
     
     @pytest.mark.asyncio
     async def test_create_task_guardrail_factory_import_error(self):
@@ -2875,7 +2872,7 @@ class TestCreateTask:
     
     @pytest.mark.asyncio
     async def test_create_task_regular_databricks_server_auth(self):
-        """Test regular Databricks server (not Apps) authentication."""
+        """Test regular Databricks server (not Apps) uses API key authentication."""
         task_key = "regular_databricks_task"
         task_config = {
             "description": "Task description",
@@ -2894,13 +2891,13 @@ class TestCreateTask:
         mock_server.name = "DatabricksServer"
         mock_server.server_type = "SSE"
         mock_server.server_url = "https://workspace.databricks.com/sse"
-        mock_server.api_key = "fallback-key"
+        mock_server.api_key = "test-api-key"
         
         with patch('src.core.unit_of_work.UnitOfWork'), \
              patch('src.services.mcp_service.MCPService') as mock_mcp_service, \
-             patch('src.engines.crewai.tools.mcp_adapter.AsyncMCPAdapter') as mock_adapter_class, \
+             patch('src.engines.common.mcp_adapter.MCPAdapter') as mock_adapter_class, \
              patch('src.utils.databricks_auth.get_mcp_auth_headers') as mock_auth, \
-             patch('src.engines.crewai.tools.mcp_handler.wrap_mcp_tool'), \
+             patch('src.engines.crewai.tools.mcp_handler.create_crewai_tool_from_mcp'), \
              patch('src.engines.crewai.tools.mcp_handler.register_mcp_adapter'):
             
             # Setup MCP service mocks
@@ -2909,8 +2906,7 @@ class TestCreateTask:
             mock_mcp_instance.get_server_by_id = AsyncMock(return_value=mock_server)
             mock_mcp_service.from_unit_of_work = AsyncMock(return_value=mock_mcp_instance)
             
-            # Setup OAuth success for regular Databricks
-            mock_auth.return_value = ({"Authorization": "Bearer oauth-token"}, None)
+            # OAuth should not be called for non-databricksapps URLs
             
             # Setup adapter mock
             mock_adapter = Mock()
@@ -2920,12 +2916,12 @@ class TestCreateTask:
             
             task = await create_task(task_key, task_config, agent)
         
-        # Verify OAuth was used for regular Databricks server
-        mock_auth.assert_called_once_with("https://workspace.databricks.com/sse")
+        # Verify OAuth was NOT called for regular Databricks server (only for databricksapps.com)
+        mock_auth.assert_not_called()
         
-        # Verify adapter was created with OAuth headers
+        # Verify adapter was created with API key headers
         call_args = mock_adapter_class.call_args[0][0]
-        assert call_args["headers"]["Authorization"] == "Bearer oauth-token"
+        assert call_args["headers"]["Authorization"] == "Bearer test-api-key"
     
     @pytest.mark.asyncio
     async def test_create_task_non_databricks_server_with_api_key(self):
@@ -2952,8 +2948,8 @@ class TestCreateTask:
         
         with patch('src.core.unit_of_work.UnitOfWork'), \
              patch('src.services.mcp_service.MCPService') as mock_mcp_service, \
-             patch('src.engines.crewai.tools.mcp_adapter.AsyncMCPAdapter') as mock_adapter_class, \
-             patch('src.engines.crewai.tools.mcp_handler.wrap_mcp_tool'), \
+             patch('src.engines.common.mcp_adapter.MCPAdapter') as mock_adapter_class, \
+             patch('src.engines.crewai.tools.mcp_handler.create_crewai_tool_from_mcp'), \
              patch('src.engines.crewai.tools.mcp_handler.register_mcp_adapter'):
             
             # Setup MCP service mocks
@@ -2999,9 +2995,9 @@ class TestCreateTask:
         
         with patch('src.core.unit_of_work.UnitOfWork'), \
              patch('src.services.mcp_service.MCPService') as mock_mcp_service, \
-             patch('src.engines.crewai.tools.mcp_adapter.AsyncMCPAdapter') as mock_adapter_class, \
+             patch('src.engines.common.mcp_adapter.MCPAdapter') as mock_adapter_class, \
              patch('src.utils.databricks_auth.get_mcp_auth_headers') as mock_auth, \
-             patch('src.engines.crewai.tools.mcp_handler.wrap_mcp_tool'), \
+             patch('src.engines.crewai.tools.mcp_handler.create_crewai_tool_from_mcp'), \
              patch('src.engines.crewai.tools.mcp_handler.register_mcp_adapter'):
             
             # Setup MCP service mocks
@@ -3026,8 +3022,8 @@ class TestCreateTask:
         assert "headers" not in call_args or not call_args.get("headers")
     
     @pytest.mark.asyncio
-    async def test_create_task_stdio_no_api_key_no_additional_config(self):
-        """Test STDIO server without API key and additional config."""
+    async def test_create_task_stdio_minimal_not_supported(self):
+        """Test minimal STDIO server is not supported."""
         task_key = "stdio_minimal_task"
         task_config = {
             "description": "Task description",
@@ -3048,15 +3044,9 @@ class TestCreateTask:
         mock_server.command = "python"
         mock_server.args = ["-m", "test"]
         mock_server.api_key = None  # No API key
-        mock_server.additional_config = None  # No additional config
         
         with patch('src.core.unit_of_work.UnitOfWork'), \
-             patch('src.services.mcp_service.MCPService') as mock_mcp_service, \
-             patch('src.engines.crewai.tools.mcp_adapter.AsyncMCPAdapter') as mock_adapter_class, \
-             patch('mcp.StdioServerParameters') as mock_stdio_params, \
-             patch('src.engines.crewai.tools.mcp_handler.wrap_mcp_tool'), \
-             patch('src.engines.crewai.tools.mcp_handler.register_mcp_adapter'), \
-             patch.dict('os.environ', {'EXISTING_VAR': 'value'}):
+             patch('src.services.mcp_service.MCPService') as mock_mcp_service:
             
             # Setup MCP service mocks
             mock_mcp_instance = Mock()
@@ -3064,26 +3054,13 @@ class TestCreateTask:
             mock_mcp_instance.get_server_by_id = AsyncMock(return_value=mock_server)
             mock_mcp_service.from_unit_of_work = AsyncMock(return_value=mock_mcp_instance)
             
-            # Setup adapter mock
-            mock_adapter = Mock()
-            mock_adapter.tools = []
-            mock_adapter.initialize = AsyncMock()
-            mock_adapter_class.return_value = mock_adapter
-            
+            # Create task - STDIO servers should be skipped
             task = await create_task(task_key, task_config, agent)
         
-        # Verify minimal STDIO parameters
-        mock_stdio_params.assert_called_once()
-        call_args, call_kwargs = mock_stdio_params.call_args
-        assert call_kwargs['command'] == "python"
-        assert call_kwargs['args'] == ["-m", "test"]
-        # Verify that existing environment variables are present
-        env = call_kwargs['env']
-        assert 'EXISTING_VAR' in env
-        assert env['EXISTING_VAR'] == 'value'
-        # Verify no MCP-specific variables are added when no API key or config
-        mcp_vars = [k for k in env.keys() if k.startswith('MCP_')]
-        assert len(mcp_vars) == 0
+        # Verify task was created without tools (STDIO not supported)
+        assert task is not None
+        assert task.description == "Task description"
+        assert task.expected_output == "Expected output"
     
     @pytest.mark.asyncio
     async def test_create_task_tool_name_filtering(self):
@@ -3161,7 +3138,7 @@ class TestCreateTask:
         
         with patch('src.core.unit_of_work.UnitOfWork'), \
              patch('src.services.mcp_service.MCPService') as mock_mcp_service, \
-             patch('src.engines.crewai.tools.mcp_adapter.AsyncMCPAdapter') as mock_adapter_class:
+             patch('src.engines.common.mcp_adapter.MCPAdapter') as mock_adapter_class:
             
             # Setup MCP service mocks
             mock_mcp_instance = Mock()
@@ -3574,9 +3551,9 @@ class TestCreateTask:
         
         with patch('src.core.unit_of_work.UnitOfWork'), \
              patch('src.services.mcp_service.MCPService') as mock_mcp_service, \
-             patch('src.engines.crewai.tools.mcp_adapter.AsyncMCPAdapter') as mock_adapter_class, \
+             patch('src.engines.common.mcp_adapter.MCPAdapter') as mock_adapter_class, \
              patch('src.utils.databricks_auth.get_mcp_auth_headers') as mock_auth, \
-             patch('src.engines.crewai.tools.mcp_handler.wrap_mcp_tool'), \
+             patch('src.engines.crewai.tools.mcp_handler.create_crewai_tool_from_mcp'), \
              patch('src.engines.crewai.tools.mcp_handler.register_mcp_adapter'):
             
             # Setup MCP service mocks
@@ -3625,9 +3602,9 @@ class TestCreateTask:
         
         with patch('src.core.unit_of_work.UnitOfWork'), \
              patch('src.services.mcp_service.MCPService') as mock_mcp_service, \
-             patch('src.engines.crewai.tools.mcp_adapter.AsyncMCPAdapter') as mock_adapter_class, \
+             patch('src.engines.common.mcp_adapter.MCPAdapter') as mock_adapter_class, \
              patch('src.utils.databricks_auth.get_mcp_auth_headers') as mock_auth, \
-             patch('src.engines.crewai.tools.mcp_handler.wrap_mcp_tool'), \
+             patch('src.engines.crewai.tools.mcp_handler.create_crewai_tool_from_mcp'), \
              patch('src.engines.crewai.tools.mcp_handler.register_mcp_adapter'):
             
             # Setup MCP service mocks
@@ -3676,9 +3653,9 @@ class TestCreateTask:
         
         with patch('src.core.unit_of_work.UnitOfWork'), \
              patch('src.services.mcp_service.MCPService') as mock_mcp_service, \
-             patch('src.engines.crewai.tools.mcp_adapter.AsyncMCPAdapter') as mock_adapter_class, \
+             patch('src.engines.common.mcp_adapter.MCPAdapter') as mock_adapter_class, \
              patch('src.utils.databricks_auth.get_mcp_auth_headers') as mock_auth, \
-             patch('src.engines.crewai.tools.mcp_handler.wrap_mcp_tool'), \
+             patch('src.engines.crewai.tools.mcp_handler.create_crewai_tool_from_mcp'), \
              patch('src.engines.crewai.tools.mcp_handler.register_mcp_adapter'):
             
             # Setup MCP service mocks
@@ -3698,7 +3675,8 @@ class TestCreateTask:
             
             task = await create_task(task_key, task_config, agent)
             
-            # Verify fallback to API key was used
+            # When OAuth fails, no headers should be added (no automatic fallback)
             call_args = mock_adapter_class.call_args[0][0]
-            assert call_args["headers"]["Authorization"] == "Bearer fallback-api-key"
+            # Headers should not be in the params when OAuth fails
+            assert "headers" not in call_args or call_args.get("headers") == {}
 

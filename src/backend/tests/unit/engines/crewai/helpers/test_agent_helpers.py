@@ -1549,8 +1549,8 @@ class TestCreateAgent:
             
             # Mock MCP service with SSE server
             with patch('src.services.mcp_service.MCPService') as mock_mcp_service, \
-                 patch('src.engines.crewai.tools.mcp_adapter.AsyncMCPAdapter') as mock_adapter, \
-                 patch('src.engines.crewai.tools.mcp_handler.wrap_mcp_tool') as mock_wrap, \
+                 patch('src.engines.common.mcp_adapter.MCPAdapter') as mock_adapter, \
+                 patch('src.engines.crewai.tools.mcp_handler.create_crewai_tool_from_mcp') as mock_create_tool, \
                  patch('src.engines.crewai.tools.mcp_handler.register_mcp_adapter') as mock_register:
                 
                 mock_mcp_instance = AsyncMock()
@@ -1574,14 +1574,19 @@ class TestCreateAgent:
                 
                 # Mock MCP adapter
                 mock_adapter_instance = AsyncMock()
-                mock_tool = MagicMock()
-                mock_tool.name = "mcp_tool"
+                mock_tool = {
+                    "name": "mcp_tool",
+                    "description": "Test MCP tool",
+                    "mcp_tool": MagicMock(),
+                    "input_schema": {},
+                    "adapter": mock_adapter_instance
+                }
                 mock_adapter_instance.tools = [mock_tool]
                 mock_adapter.return_value = mock_adapter_instance
                 
-                # Mock wrap_mcp_tool
+                # Mock create_crewai_tool_from_mcp
                 mock_wrapped_tool = MagicMock()
-                mock_wrap.return_value = mock_wrapped_tool
+                mock_create_tool.return_value = mock_wrapped_tool
                 
                 result = await create_agent(
                     agent_key=agent_key,
@@ -1596,13 +1601,13 @@ class TestCreateAgent:
                 # Verify adapter was initialized
                 mock_adapter_instance.initialize.assert_called_once()
                 
-                # Verify tool was wrapped and registered
-                mock_wrap.assert_called_once_with(mock_tool)
+                # Verify tool was created and registered
+                mock_create_tool.assert_called_once_with(mock_tool)
                 mock_register.assert_called_once()
     
     @pytest.mark.asyncio
-    async def test_create_agent_with_stdio_mcp_server(self, mock_tools, mock_config):
-        """Test agent creation with STDIO MCP server"""
+    async def test_create_agent_with_streamable_mcp_server(self, mock_tools, mock_config):
+        """Test agent creation with Streamable MCP server"""
         agent_key = "test_agent"
         agent_config = {
             "role": "Test Agent",
@@ -1626,12 +1631,11 @@ class TestCreateAgent:
             mock_uow_instance.__aexit__ = AsyncMock(return_value=None)
             mock_uow.return_value = mock_uow_instance
             
-            # Mock MCP service with STDIO server
+            # Mock MCP service with Streamable server
             with patch('src.services.mcp_service.MCPService') as mock_mcp_service, \
-                 patch('src.engines.crewai.tools.mcp_adapter.AsyncMCPAdapter') as mock_adapter, \
-                 patch('src.engines.crewai.tools.mcp_handler.wrap_mcp_tool') as mock_wrap, \
-                 patch('src.engines.crewai.tools.mcp_handler.register_mcp_adapter') as mock_register, \
-                 patch('mcp.StdioServerParameters') as mock_stdio_params:
+                 patch('src.engines.common.mcp_adapter.MCPAdapter') as mock_adapter, \
+                 patch('src.engines.crewai.tools.mcp_handler.create_crewai_tool_from_mcp') as mock_create_tool, \
+                 patch('src.engines.crewai.tools.mcp_handler.register_mcp_adapter') as mock_register:
                 
                 mock_mcp_instance = AsyncMock()
                 
@@ -1642,28 +1646,35 @@ class TestCreateAgent:
                 mock_servers_response.servers = [mock_server]
                 mock_mcp_instance.get_enabled_servers = AsyncMock(return_value=mock_servers_response)
                 
-                # Mock server details for STDIO
+                # Mock server details for Streamable
                 mock_server_detail = MagicMock()
-                mock_server_detail.name = "test_stdio_server"
-                mock_server_detail.server_type = "stdio"
-                mock_server_detail.command = "python"
-                mock_server_detail.args = ["-m", "test_server"]
+                mock_server_detail.name = "test_streamable_server"
+                mock_server_detail.server_type = "streamable"
+                mock_server_detail.server_url = "https://api.streamable.com/video"
                 mock_server_detail.api_key = "test_key"
-                mock_server_detail.additional_config = {"custom_param": "value"}
+                mock_server_detail.timeout_seconds = 30
+                mock_server_detail.max_retries = 3
+                mock_server_detail.rate_limit = 60
+                mock_server_detail.additional_config = {"session_id": "test_session"}
                 mock_mcp_instance.get_server_by_id = AsyncMock(return_value=mock_server_detail)
                 
                 mock_mcp_service.from_unit_of_work = AsyncMock(return_value=mock_mcp_instance)
                 
                 # Mock MCP adapter
                 mock_adapter_instance = AsyncMock()
-                mock_tool = MagicMock()
-                mock_tool.name = "stdio_tool"
+                mock_tool = {
+                    "name": "stdio_tool",
+                    "description": "Test STDIO tool",
+                    "mcp_tool": MagicMock(),
+                    "input_schema": {},
+                    "adapter": mock_adapter_instance
+                }
                 mock_adapter_instance.tools = [mock_tool]
                 mock_adapter.return_value = mock_adapter_instance
                 
-                # Mock wrap_mcp_tool
+                # Mock create_crewai_tool_from_mcp
                 mock_wrapped_tool = MagicMock()
-                mock_wrap.return_value = mock_wrapped_tool
+                mock_create_tool.return_value = mock_wrapped_tool
                 
                 result = await create_agent(
                     agent_key=agent_key,
@@ -1675,11 +1686,17 @@ class TestCreateAgent:
                 # Verify agent was created successfully
                 assert result == mock_agent_instance
                 
-                # Verify STDIO parameters were created
-                mock_stdio_params.assert_called_once()
-                
-                # Verify adapter was initialized
+                # Verify adapter was initialized with correct server params
                 mock_adapter_instance.initialize.assert_called_once()
+                
+                # Verify server params included all settings
+                adapter_call_args = mock_adapter.call_args[0][0]
+                assert adapter_call_args["url"] == "https://api.streamable.com/video"
+                assert adapter_call_args["timeout_seconds"] == 30
+                assert adapter_call_args["max_retries"] == 3
+                assert adapter_call_args["rate_limit"] == 60
+                assert "Authorization" in adapter_call_args["headers"]
+                assert adapter_call_args["headers"]["Authorization"] == "Bearer test_key"
     
     @pytest.mark.asyncio
     async def test_create_agent_with_unsupported_mcp_server_type(self, mock_tools, mock_config):
@@ -1764,7 +1781,7 @@ class TestCreateAgent:
             
             # Mock MCP service with SSE server that fails
             with patch('src.services.mcp_service.MCPService') as mock_mcp_service, \
-                 patch('src.engines.crewai.tools.mcp_adapter.AsyncMCPAdapter') as mock_adapter:
+                 patch('src.engines.common.mcp_adapter.MCPAdapter') as mock_adapter:
                 
                 mock_mcp_instance = AsyncMock()
                 
@@ -1893,3 +1910,311 @@ class TestCreateAgent:
                 assert "system_prompt" not in call_kwargs  # Empty string should not be set
                 assert call_kwargs["task_prompt"] == "Custom task prompt"  # Non-empty should be set
                 assert "format_prompt" not in call_kwargs  # None should not be set
+
+    @pytest.mark.asyncio
+    async def test_create_agent_with_mcp_obo_authentication(self, mock_tools, mock_config):
+        """Test agent creation with MCP server using OBO authentication"""
+        agent_key = "test_agent"
+        agent_config = {
+            "role": "Test Agent",
+            "goal": "Test goal",
+            "backstory": "Test backstory"
+        }
+        
+        with patch('src.engines.crewai.helpers.agent_helpers.Agent') as mock_agent_class, \
+             patch('src.core.llm_manager.LLMManager') as mock_llm_manager, \
+             patch('src.core.unit_of_work.UnitOfWork') as mock_uow:
+            
+            mock_agent_instance = MagicMock()
+            mock_agent_class.return_value = mock_agent_instance
+            
+            mock_llm = MagicMock()
+            mock_llm_manager.configure_crewai_llm = AsyncMock(return_value=mock_llm)
+            
+            # Mock UnitOfWork
+            mock_uow_instance = AsyncMock()
+            mock_uow_instance.__aenter__ = AsyncMock(return_value=mock_uow_instance)
+            mock_uow_instance.__aexit__ = AsyncMock(return_value=None)
+            mock_uow.return_value = mock_uow_instance
+            
+            # Mock tool factory with user token
+            mock_tool_factory = MagicMock()
+            mock_tool_factory.user_token = "test-user-token"
+            
+            # Mock MCP service with SSE server
+            with patch('src.services.mcp_service.MCPService') as mock_mcp_service, \
+                 patch('src.engines.common.mcp_adapter.MCPAdapter') as mock_adapter, \
+                 patch('src.engines.crewai.tools.mcp_handler.create_crewai_tool_from_mcp') as mock_create_tool, \
+                 patch('src.engines.crewai.tools.mcp_handler.register_mcp_adapter') as mock_register, \
+                 patch('src.utils.databricks_auth.get_mcp_auth_headers', new_callable=AsyncMock) as mock_auth:
+                
+                mock_mcp_instance = AsyncMock()
+                
+                # Create mock server
+                mock_server = MagicMock()
+                mock_server.id = "server1"
+                mock_servers_response = MagicMock()
+                mock_servers_response.servers = [mock_server]
+                mock_mcp_instance.get_enabled_servers = AsyncMock(return_value=mock_servers_response)
+                
+                # Mock server details for SSE
+                mock_server_detail = MagicMock()
+                mock_server_detail.name = "test_databricks_server"
+                mock_server_detail.server_type = "sse"
+                mock_server_detail.server_url = "https://test.databricksapps.com"
+                mock_server_detail.api_key = "test-api-key"
+                mock_mcp_instance.get_server_by_id = AsyncMock(return_value=mock_server_detail)
+                
+                mock_mcp_service.from_unit_of_work = AsyncMock(return_value=mock_mcp_instance)
+                
+                # Mock auth headers
+                mock_auth.return_value = ({"Authorization": "Bearer obo-token"}, None)
+                
+                # Mock MCP adapter
+                mock_adapter_instance = AsyncMock()
+                mock_tool = {
+                    "name": "mcp_tool",
+                    "description": "Test MCP tool with OAuth",
+                    "mcp_tool": MagicMock(),
+                    "input_schema": {},
+                    "adapter": mock_adapter_instance
+                }
+                mock_adapter_instance.tools = [mock_tool]
+                mock_adapter.return_value = mock_adapter_instance
+                
+                # Mock create_crewai_tool_from_mcp
+                mock_wrapped_tool = MagicMock()
+                mock_create_tool.return_value = mock_wrapped_tool
+                
+                result = await create_agent(
+                    agent_key=agent_key,
+                    agent_config=agent_config,
+                    tools=mock_tools,
+                    config=mock_config,
+                    tool_factory=mock_tool_factory
+                )
+                
+                # Verify agent was created successfully
+                assert result == mock_agent_instance
+                
+                # Verify auth was called with user token and api key
+                # Note: The implementation appends '/sse' to SSE server URLs
+                mock_auth.assert_called_once_with(
+                    "https://test.databricksapps.com/sse",
+                    user_token="test-user-token",
+                    api_key="test-api-key"
+                )
+
+    @pytest.mark.asyncio
+    async def test_create_agent_mcp_globally_disabled(self, mock_tools, mock_config):
+        """Test agent creation when MCP is globally disabled"""
+        agent_key = "test_agent"
+        agent_config = {
+            "role": "Test Agent",
+            "goal": "Test goal",
+            "backstory": "Test backstory"
+        }
+        
+        with patch('src.engines.crewai.helpers.agent_helpers.Agent') as mock_agent_class, \
+             patch('src.core.llm_manager.LLMManager') as mock_llm_manager, \
+             patch('src.core.unit_of_work.UnitOfWork') as mock_uow:
+            
+            mock_agent_instance = MagicMock()
+            mock_agent_class.return_value = mock_agent_instance
+            
+            mock_llm = MagicMock()
+            mock_llm_manager.configure_crewai_llm = AsyncMock(return_value=mock_llm)
+            
+            # Mock UnitOfWork
+            mock_uow_instance = AsyncMock()
+            mock_uow_instance.__aenter__ = AsyncMock(return_value=mock_uow_instance)
+            mock_uow_instance.__aexit__ = AsyncMock(return_value=None)
+            mock_uow.return_value = mock_uow_instance
+            
+            # Mock MCP service with globally disabled setting
+            with patch('src.services.mcp_service.MCPService') as mock_mcp_service:
+                mock_mcp_instance = AsyncMock()
+                
+                # Mock global settings - MCP is disabled
+                mock_settings = MagicMock()
+                mock_settings.global_enabled = False
+                mock_mcp_instance.get_settings = AsyncMock(return_value=mock_settings)
+                
+                mock_mcp_service.from_unit_of_work = AsyncMock(return_value=mock_mcp_instance)
+                
+                result = await create_agent(
+                    agent_key=agent_key,
+                    agent_config=agent_config,
+                    tools=mock_tools,
+                    config=mock_config
+                )
+                
+                # Verify agent was created successfully
+                assert result == mock_agent_instance
+                
+                # Verify get_settings was called
+                mock_mcp_instance.get_settings.assert_called_once()
+                
+                # Verify get_enabled_servers was NOT called since MCP is disabled
+                mock_mcp_instance.get_enabled_servers.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_create_agent_mcp_globally_enabled_with_servers(self, mock_tools, mock_config):
+        """Test agent creation when MCP is globally enabled with servers"""
+        agent_key = "test_agent"
+        agent_config = {
+            "role": "Test Agent",
+            "goal": "Test goal",
+            "backstory": "Test backstory"
+        }
+        
+        with patch('src.engines.crewai.helpers.agent_helpers.Agent') as mock_agent_class, \
+             patch('src.core.llm_manager.LLMManager') as mock_llm_manager, \
+             patch('src.core.unit_of_work.UnitOfWork') as mock_uow:
+            
+            mock_agent_instance = MagicMock()
+            mock_agent_class.return_value = mock_agent_instance
+            
+            mock_llm = MagicMock()
+            mock_llm_manager.configure_crewai_llm = AsyncMock(return_value=mock_llm)
+            
+            # Mock UnitOfWork
+            mock_uow_instance = AsyncMock()
+            mock_uow_instance.__aenter__ = AsyncMock(return_value=mock_uow_instance)
+            mock_uow_instance.__aexit__ = AsyncMock(return_value=None)
+            mock_uow.return_value = mock_uow_instance
+            
+            # Mock MCP service with globally enabled setting
+            with patch('src.services.mcp_service.MCPService') as mock_mcp_service, \
+                 patch('src.engines.common.mcp_adapter.MCPAdapter') as mock_adapter, \
+                 patch('src.engines.crewai.tools.mcp_handler.create_crewai_tool_from_mcp') as mock_create_tool, \
+                 patch('src.engines.crewai.tools.mcp_handler.register_mcp_adapter') as mock_register:
+                
+                mock_mcp_instance = AsyncMock()
+                
+                # Mock global settings - MCP is enabled
+                mock_settings = MagicMock()
+                mock_settings.global_enabled = True
+                mock_mcp_instance.get_settings = AsyncMock(return_value=mock_settings)
+                
+                # Create mock server
+                mock_server = MagicMock()
+                mock_server.id = "server1"
+                mock_servers_response = MagicMock()
+                mock_servers_response.servers = [mock_server]
+                mock_mcp_instance.get_enabled_servers = AsyncMock(return_value=mock_servers_response)
+                
+                # Mock server details
+                mock_server_detail = MagicMock()
+                mock_server_detail.name = "test_server"
+                mock_server_detail.server_type = "sse"
+                mock_server_detail.server_url = "https://test.example.com"
+                mock_server_detail.api_key = "test_key"
+                mock_server_detail.timeout_seconds = 30
+                mock_server_detail.max_retries = 3
+                mock_server_detail.rate_limit = 60
+                mock_mcp_instance.get_server_by_id = AsyncMock(return_value=mock_server_detail)
+                
+                mock_mcp_service.from_unit_of_work = AsyncMock(return_value=mock_mcp_instance)
+                
+                # Mock MCP adapter
+                mock_adapter_instance = AsyncMock()
+                mock_tool = {
+                    "name": "mcp_tool",
+                    "description": "Test MCP tool with custom settings",
+                    "mcp_tool": MagicMock(),
+                    "input_schema": {},
+                    "adapter": mock_adapter_instance
+                }
+                mock_adapter_instance.tools = [mock_tool]
+                mock_adapter.return_value = mock_adapter_instance
+                
+                # Mock create_crewai_tool_from_mcp
+                mock_wrapped_tool = MagicMock()
+                mock_create_tool.return_value = mock_wrapped_tool
+                
+                result = await create_agent(
+                    agent_key=agent_key,
+                    agent_config=agent_config,
+                    tools=mock_tools,
+                    config=mock_config
+                )
+                
+                # Verify agent was created successfully
+                assert result == mock_agent_instance
+                
+                # Verify get_settings was called
+                mock_mcp_instance.get_settings.assert_called_once()
+                
+                # Verify get_enabled_servers was called since MCP is enabled
+                mock_mcp_instance.get_enabled_servers.assert_called_once()
+                
+                # Verify server details were fetched
+                mock_mcp_instance.get_server_by_id.assert_called_once_with("server1")
+                
+                # Verify adapter was initialized with correct params
+                call_args = mock_adapter.call_args[0][0]
+                assert call_args['timeout_seconds'] == 30
+                assert call_args['max_retries'] == 3
+                assert call_args['rate_limit'] == 60
+
+    @pytest.mark.asyncio
+    async def test_create_agent_mcp_globally_enabled_no_servers(self, mock_tools, mock_config):
+        """Test agent creation when MCP is globally enabled but no servers exist"""
+        agent_key = "test_agent"
+        agent_config = {
+            "role": "Test Agent",
+            "goal": "Test goal",
+            "backstory": "Test backstory"
+        }
+        
+        with patch('src.engines.crewai.helpers.agent_helpers.Agent') as mock_agent_class, \
+             patch('src.core.llm_manager.LLMManager') as mock_llm_manager, \
+             patch('src.core.unit_of_work.UnitOfWork') as mock_uow:
+            
+            mock_agent_instance = MagicMock()
+            mock_agent_class.return_value = mock_agent_instance
+            
+            mock_llm = MagicMock()
+            mock_llm_manager.configure_crewai_llm = AsyncMock(return_value=mock_llm)
+            
+            # Mock UnitOfWork
+            mock_uow_instance = AsyncMock()
+            mock_uow_instance.__aenter__ = AsyncMock(return_value=mock_uow_instance)
+            mock_uow_instance.__aexit__ = AsyncMock(return_value=None)
+            mock_uow.return_value = mock_uow_instance
+            
+            # Mock MCP service
+            with patch('src.services.mcp_service.MCPService') as mock_mcp_service:
+                mock_mcp_instance = AsyncMock()
+                
+                # Mock global settings - MCP is enabled
+                mock_settings = MagicMock()
+                mock_settings.global_enabled = True
+                mock_mcp_instance.get_settings = AsyncMock(return_value=mock_settings)
+                
+                # No enabled servers
+                mock_servers_response = MagicMock()
+                mock_servers_response.servers = []
+                mock_mcp_instance.get_enabled_servers = AsyncMock(return_value=mock_servers_response)
+                
+                mock_mcp_service.from_unit_of_work = AsyncMock(return_value=mock_mcp_instance)
+                
+                result = await create_agent(
+                    agent_key=agent_key,
+                    agent_config=agent_config,
+                    tools=mock_tools,
+                    config=mock_config
+                )
+                
+                # Verify agent was created successfully
+                assert result == mock_agent_instance
+                
+                # Verify get_settings was called
+                mock_mcp_instance.get_settings.assert_called_once()
+                
+                # Verify get_enabled_servers was called
+                mock_mcp_instance.get_enabled_servers.assert_called_once()
+                
+                # Verify get_server_by_id was NOT called since no servers exist
+                mock_mcp_instance.get_server_by_id.assert_not_called()

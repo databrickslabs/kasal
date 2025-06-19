@@ -35,8 +35,6 @@ class TestMCPServerBase:
         assert server.max_retries == 3  # Default
         assert server.model_mapping_enabled is False  # Default
         assert server.rate_limit == 60  # Default
-        assert server.command is None  # Default
-        assert server.args is None  # Default
         assert server.additional_config is None  # Default
 
     def test_valid_mcp_server_base_full(self):
@@ -44,27 +42,23 @@ class TestMCPServerBase:
         data = {
             "name": "full-server",
             "server_url": "https://full.example.com",
-            "server_type": "stdio",
+            "server_type": "streamable",
             "enabled": True,
             "timeout_seconds": 60,
             "max_retries": 5,
             "model_mapping_enabled": True,
             "rate_limit": 120,
-            "command": "/usr/bin/python",
-            "args": ["-m", "server"],
             "additional_config": {"debug": True, "log_level": "INFO"}
         }
         server = MCPServerBase(**data)
         assert server.name == "full-server"
         assert server.server_url == "https://full.example.com"
-        assert server.server_type == "stdio"
+        assert server.server_type == "streamable"
         assert server.enabled is True
         assert server.timeout_seconds == 60
         assert server.max_retries == 5
         assert server.model_mapping_enabled is True
         assert server.rate_limit == 120
-        assert server.command == "/usr/bin/python"
-        assert server.args == ["-m", "server"]
         assert server.additional_config == {"debug": True, "log_level": "INFO"}
 
     def test_mcp_server_base_missing_required_fields(self):
@@ -150,18 +144,16 @@ class TestMCPServerCreate:
             "name": "custom-server",
             "server_url": "https://custom.example.com",
             "api_key": "custom-api-key",
-            "server_type": "stdio",
+            "server_type": "streamable",
             "enabled": True,
-            "timeout_seconds": 90,
-            "command": "/opt/python/bin/python"
+            "timeout_seconds": 90
         }
         create_server = MCPServerCreate(**data)
         assert create_server.name == "custom-server"
         assert create_server.api_key == "custom-api-key"
-        assert create_server.server_type == "stdio"
+        assert create_server.server_type == "streamable"
         assert create_server.enabled is True
         assert create_server.timeout_seconds == 90
-        assert create_server.command == "/opt/python/bin/python"
 
 
 class TestMCPServerUpdate:
@@ -179,8 +171,6 @@ class TestMCPServerUpdate:
         assert update.max_retries is None
         assert update.model_mapping_enabled is None
         assert update.rate_limit is None
-        assert update.command is None
-        assert update.args is None
         assert update.additional_config is None
 
     def test_mcp_server_update_partial(self):
@@ -203,28 +193,24 @@ class TestMCPServerUpdate:
             "name": "fully-updated-server",
             "server_url": "https://updated.example.com",
             "api_key": "updated-api-key",
-            "server_type": "stdio",
+            "server_type": "streamable",
             "enabled": False,
             "timeout_seconds": 180,
             "max_retries": 10,
             "model_mapping_enabled": True,
             "rate_limit": 240,
-            "command": "/updated/python",
-            "args": ["-m", "updated_server"],
             "additional_config": {"updated": True}
         }
         update = MCPServerUpdate(**update_data)
         assert update.name == "fully-updated-server"
         assert update.server_url == "https://updated.example.com"
         assert update.api_key == "updated-api-key"
-        assert update.server_type == "stdio"
+        assert update.server_type == "streamable"
         assert update.enabled is False
         assert update.timeout_seconds == 180
         assert update.max_retries == 10
         assert update.model_mapping_enabled is True
         assert update.rate_limit == 240
-        assert update.command == "/updated/python"
-        assert update.args == ["-m", "updated_server"]
         assert update.additional_config == {"updated": True}
 
 
@@ -369,13 +355,13 @@ class TestMCPTestConnectionRequest:
         data = {
             "server_url": "https://test.example.com",
             "api_key": "test-api-key",
-            "server_type": "stdio",
+            "server_type": "streamable",
             "timeout_seconds": 45
         }
         request = MCPTestConnectionRequest(**data)
         assert request.server_url == "https://test.example.com"
         assert request.api_key == "test-api-key"
-        assert request.server_type == "stdio"
+        assert request.server_type == "streamable"
         assert request.timeout_seconds == 45
 
     def test_mcp_test_connection_request_defaults(self):
@@ -609,23 +595,17 @@ class TestSchemaIntegration:
             rate_limit=60
         )
         assert sse_server.server_type == "sse"
-        assert sse_server.command is None
-        assert sse_server.args is None
         
-        # STDIO server configuration
-        stdio_server = MCPServerCreate(
-            name="stdio-server",
-            server_url="https://stdio.example.com",
-            api_key="stdio-key",
-            server_type="stdio",
-            command="/usr/bin/python3",
-            args=["-m", "mcp_server"],
+        # Streamable server configuration
+        streamable_server = MCPServerCreate(
+            name="streamable-server",
+            server_url="https://streamable.example.com/api/mcp/",
+            api_key="streamable-key",
+            server_type="streamable",
             additional_config={"env": {"PATH": "/usr/bin"}}
         )
-        assert stdio_server.server_type == "stdio"
-        assert stdio_server.command == "/usr/bin/python3"
-        assert stdio_server.args == ["-m", "mcp_server"]
-        assert stdio_server.additional_config == {"env": {"PATH": "/usr/bin"}}
+        assert streamable_server.server_type == "streamable"
+        assert streamable_server.additional_config == {"env": {"PATH": "/usr/bin"}}
         
         # High-performance server configuration
         high_perf_server = MCPServerCreate(

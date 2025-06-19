@@ -18,14 +18,12 @@ class MCPServer(Base):
     name = Column(String, nullable=False)
     server_url = Column(String, nullable=False)
     encrypted_api_key = Column(String, nullable=True)  # Encrypted API key
-    server_type = Column(String, default="sse")  # "sse" or "stdio"
+    server_type = Column(String, default="sse")  # "sse" or "streamable"
     enabled = Column(Boolean, default=False)
     timeout_seconds = Column(Integer, default=30)
     max_retries = Column(Integer, default=3)
     model_mapping_enabled = Column(Boolean, default=False)
     rate_limit = Column(Integer, default=60)  # Requests per minute
-    command = Column(String, nullable=True)  # Command for stdio server type
-    args = Column(JSON, default=list)  # Arguments for stdio server type
     additional_config = Column(JSON, default=dict)  # Additional configuration parameters
     created_at = Column(DateTime, default=datetime.utcnow)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
@@ -34,5 +32,4 @@ class MCPServer(Base):
         super(MCPServer, self).__init__(**kwargs)
         if self.additional_config is None:
             self.additional_config = {}
-        if self.args is None:
-            self.args = [] 
+ 

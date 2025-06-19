@@ -44,7 +44,7 @@ class MockMCPServer:
     def __init__(self, id=1, name="test_server", server_url="http://test.com", 
                  server_type="sse", enabled=True, encrypted_api_key=None,
                  timeout_seconds=30, max_retries=3, model_mapping_enabled=False,
-                 rate_limit=60, command=None, args=None, additional_config=None,
+                 rate_limit=60, additional_config=None,
                  created_at=None, updated_at=None):
         from datetime import datetime
         self.id = id
@@ -57,8 +57,6 @@ class MockMCPServer:
         self.max_retries = max_retries
         self.model_mapping_enabled = model_mapping_enabled
         self.rate_limit = rate_limit
-        self.command = command
-        self.args = args
         self.additional_config = additional_config or {}
         self.created_at = created_at or datetime.now()
         self.updated_at = updated_at or datetime.now()
@@ -180,15 +178,13 @@ class TestGetAllServers:
             id=1, name="server1", server_url="http://test.com", server_type="sse",
             enabled=True, timeout_seconds=30, max_retries=3, model_mapping_enabled=False,
             rate_limit=60, api_key="test_key", created_at=mock_servers[0].created_at,
-            updated_at=mock_servers[0].updated_at, command=None, args=None,
-            additional_config={}
+            updated_at=mock_servers[0].updated_at, additional_config={}
         )
         mock_response2 = MCPServerResponse(
             id=2, name="server2", server_url="http://test.com", server_type="sse",
             enabled=True, timeout_seconds=30, max_retries=3, model_mapping_enabled=False,
             rate_limit=60, api_key="test_key", created_at=mock_servers[1].created_at,
-            updated_at=mock_servers[1].updated_at, command=None, args=None,
-            additional_config={}
+            updated_at=mock_servers[1].updated_at, additional_config={}
         )
         
         with patch.object(MCPServerResponse, 'model_validate') as mock_validate:
@@ -232,15 +228,13 @@ class TestGetEnabledServers:
             id=1, name="server1", server_url="http://test.com", server_type="sse",
             enabled=True, timeout_seconds=30, max_retries=3, model_mapping_enabled=False,
             rate_limit=60, api_key="test_key", created_at=mock_servers[0].created_at,
-            updated_at=mock_servers[0].updated_at, command=None, args=None,
-            additional_config={}
+            updated_at=mock_servers[0].updated_at, additional_config={}
         )
         mock_response2 = MCPServerResponse(
             id=2, name="server2", server_url="http://test.com", server_type="sse",
             enabled=True, timeout_seconds=30, max_retries=3, model_mapping_enabled=False,
             rate_limit=60, api_key="test_key", created_at=mock_servers[1].created_at,
-            updated_at=mock_servers[1].updated_at, command=None, args=None,
-            additional_config={}
+            updated_at=mock_servers[1].updated_at, additional_config={}
         )
         
         with patch.object(MCPServerResponse, 'model_validate') as mock_validate:
@@ -581,21 +575,21 @@ class TestTestConnection:
             assert result == expected_response
     
     @pytest.mark.asyncio
-    async def test_test_connection_stdio(self, mcp_service):
-        """Test connection testing for stdio server."""
+    async def test_test_connection_streamable(self, mcp_service):
+        """Test connection testing for streamable server."""
         test_data = MCPTestConnectionRequest(
-            server_url="python -m mcp_server",
-            server_type="stdio",
+            server_url="http://test.com/api/mcp/",
+            server_type="streamable",
             api_key="test_key",
             timeout_seconds=30
         )
         
         expected_response = MCPTestConnectionResponse(
             success=True,
-            message="Command 'python' appears to be valid"
+            message="Successfully connected to MCP server"
         )
         
-        with patch.object(mcp_service, '_test_stdio_connection', return_value=expected_response):
+        with patch.object(mcp_service, '_test_streamable_connection', return_value=expected_response):
             result = await mcp_service.test_connection(test_data)
             
             assert result == expected_response
@@ -795,99 +789,245 @@ class TestTestSSEConnection:
             assert "no data received" in result.message
 
 
-class TestTestStdioConnection:
-    """Test _test_stdio_connection method."""
+class TestTestStreamableConnection:
+    """Test _test_streamable_connection method."""
     
     @pytest.mark.asyncio
-    async def test_test_stdio_connection_valid_command(self, mcp_service):
-        """Test stdio connection with valid command."""
+    async def test_test_streamable_connection_success(self, mcp_service):
+        """Test successful streamable connection."""
         test_data = MCPTestConnectionRequest(
-            server_url="python -m mcp_server",
-            server_type="stdio",
+            server_url="http://test.com/api/mcp/",
+            server_type="streamable",
             api_key="test_key",
             timeout_seconds=30
         )
         
-        result = await mcp_service._test_stdio_connection(test_data)
+        # Mock successful JSON response
+        mock_response = MagicMock()
+        mock_response.status = 200
+        mock_response.headers = {"Content-Type": "application/json"}
+        mock_response.json = AsyncMock(return_value={"status": "ok"})
         
-        # This will test the actual logic - empty command check will pass
-        # and the HTTP/subprocess check will determine the result
-        assert isinstance(result, MCPTestConnectionResponse)
-    
-    @pytest.mark.asyncio
-    async def test_test_stdio_connection_empty_command(self, mcp_service):
-        """Test stdio connection with empty command."""
-        test_data = MCPTestConnectionRequest(
-            server_url="",
-            server_type="stdio",
-            api_key="test_key",
-            timeout_seconds=30
-        )
-        
-        result = await mcp_service._test_stdio_connection(test_data)
-        
-        assert result.success is False
-        assert "empty command string" in result.message
-    
-    @pytest.mark.asyncio
-    async def test_test_stdio_connection_subprocess_success(self, mcp_service):
-        """Test stdio connection with successful subprocess check."""
-        test_data = MCPTestConnectionRequest(
-            server_url="python --help",
-            server_type="stdio",
-            api_key="test_key",
-            timeout_seconds=30
-        )
-        
-        mock_process = MagicMock()
-        mock_process.communicate = AsyncMock(return_value=(b"help", b""))
-        
-        with patch('aiohttp.ClientSession') as mock_session_class, \
-             patch('asyncio.create_subprocess_exec', return_value=mock_process), \
-             patch('asyncio.wait_for', return_value=(b"help", b"")):
-            
-            # Mock HTTP request to fail so it falls back to subprocess
+        with patch('aiohttp.ClientSession') as mock_session_class:
             mock_session = MagicMock()
-            mock_session.get.side_effect = Exception("HTTP failed")
-            
             mock_session_class.return_value.__aenter__.return_value = mock_session
             mock_session_class.return_value.__aexit__.return_value = None
             
-            result = await mcp_service._test_stdio_connection(test_data)
+            mock_session.get.return_value.__aenter__.return_value = mock_response
+            mock_session.get.return_value.__aexit__.return_value = None
+            
+            result = await mcp_service._test_streamable_connection(test_data)
             
             assert result.success is True
-            assert "appears to be valid" in result.message
+            assert "Successfully connected to Streamable API server" in result.message
     
     @pytest.mark.asyncio
-    async def test_test_stdio_connection_subprocess_timeout(self, mcp_service):
-        """Test stdio connection with subprocess timeout."""
+    async def test_test_streamable_connection_init_error(self, mcp_service):
+        """Test streamable connection with initialization error."""
         test_data = MCPTestConnectionRequest(
-            server_url="invalid_command",
-            server_type="stdio",
+            server_url="http://test.com/api/mcp/",
+            server_type="streamable",
             api_key="test_key",
             timeout_seconds=30
         )
         
-        mock_process = MagicMock()
-        mock_process.communicate = AsyncMock()
-        mock_process.kill = MagicMock()
-        
-        with patch('aiohttp.ClientSession') as mock_session_class, \
-             patch('asyncio.create_subprocess_exec', return_value=mock_process), \
-             patch('asyncio.wait_for', side_effect=asyncio.TimeoutError()):
-            
-            # Mock HTTP request to fail so it falls back to subprocess
+        # Mock connection error
+        with patch('aiohttp.ClientSession') as mock_session_class:
             mock_session = MagicMock()
-            mock_session.get.side_effect = Exception("HTTP failed")
-            
             mock_session_class.return_value.__aenter__.return_value = mock_session
             mock_session_class.return_value.__aexit__.return_value = None
             
-            result = await mcp_service._test_stdio_connection(test_data)
+            # Simulate connection error
+            mock_session.get.side_effect = aiohttp.ClientConnectorError(
+                connection_key=MagicMock(),
+                os_error=OSError("Connection failed")
+            )
+            
+            result = await mcp_service._test_streamable_connection(test_data)
             
             assert result.success is False
-            assert "appears to be invalid" in result.message
-            mock_process.kill.assert_called_once()
+            assert "Failed to connect" in result.message
+    
+    @pytest.mark.asyncio
+    async def test_test_streamable_connection_no_json(self, mcp_service):
+        """Test streamable connection with non-JSON response."""
+        test_data = MCPTestConnectionRequest(
+            server_url="http://test.com/api/mcp/",
+            server_type="streamable",
+            api_key="test_key",
+            timeout_seconds=30
+        )
+        
+        # Mock successful non-JSON response
+        mock_response = MagicMock()
+        mock_response.status = 200
+        mock_response.headers = {"Content-Type": "text/plain"}
+        mock_response.text = AsyncMock(return_value="OK")
+        
+        with patch('aiohttp.ClientSession') as mock_session_class:
+            mock_session = MagicMock()
+            mock_session_class.return_value.__aenter__.return_value = mock_session
+            mock_session_class.return_value.__aexit__.return_value = None
+            
+            mock_session.get.return_value.__aenter__.return_value = mock_response
+            mock_session.get.return_value.__aexit__.return_value = None
+            
+            result = await mcp_service._test_streamable_connection(test_data)
+            
+            assert result.success is True
+            assert "Successfully connected to Streamable server (non-JSON response)" in result.message
+    
+    @pytest.mark.asyncio
+    async def test_test_streamable_connection_auth_error(self, mcp_service):
+        """Test streamable connection with authentication error."""
+        test_data = MCPTestConnectionRequest(
+            server_url="http://test.com/api/mcp/",
+            server_type="streamable",
+            api_key="invalid_key",
+            timeout_seconds=30
+        )
+        
+        # Mock 401 response
+        mock_response = MagicMock()
+        mock_response.status = 401
+        mock_response.text = AsyncMock(return_value="Unauthorized")
+        
+        with patch('aiohttp.ClientSession') as mock_session_class:
+            mock_session = MagicMock()
+            mock_session_class.return_value.__aenter__.return_value = mock_session
+            mock_session_class.return_value.__aexit__.return_value = None
+            
+            mock_session.get.return_value.__aenter__.return_value = mock_response
+            mock_session.get.return_value.__aexit__.return_value = None
+            
+            result = await mcp_service._test_streamable_connection(test_data)
+            
+            assert result.success is False
+            assert "Authentication failed" in result.message
+    
+    @pytest.mark.asyncio
+    async def test_test_streamable_connection_not_found(self, mcp_service):
+        """Test streamable connection with 404 error."""
+        test_data = MCPTestConnectionRequest(
+            server_url="http://test.com/api/mcp/nonexistent",
+            server_type="streamable",
+            api_key="test_key",
+            timeout_seconds=30
+        )
+        
+        # Mock 404 response
+        mock_response = MagicMock()
+        mock_response.status = 404
+        mock_response.text = AsyncMock(return_value="Not found")
+        
+        with patch('aiohttp.ClientSession') as mock_session_class:
+            mock_session = MagicMock()
+            mock_session_class.return_value.__aenter__.return_value = mock_session
+            mock_session_class.return_value.__aexit__.return_value = None
+            
+            mock_session.get.return_value.__aenter__.return_value = mock_response
+            mock_session.get.return_value.__aexit__.return_value = None
+            
+            result = await mcp_service._test_streamable_connection(test_data)
+            
+            assert result.success is False
+            assert "Endpoint not found" in result.message
+    
+    @pytest.mark.asyncio
+    async def test_test_streamable_connection_timeout(self, mcp_service):
+        """Test streamable connection with timeout."""
+        test_data = MCPTestConnectionRequest(
+            server_url="http://test.com/api/mcp/",
+            server_type="streamable",
+            api_key="test_key",
+            timeout_seconds=1
+        )
+        
+        with patch('aiohttp.ClientSession') as mock_session_class:
+            mock_session = MagicMock()
+            mock_session_class.return_value.__aenter__.return_value = mock_session
+            mock_session_class.return_value.__aexit__.return_value = None
+            
+            # Simulate timeout
+            mock_session.get.side_effect = asyncio.TimeoutError()
+            
+            result = await mcp_service._test_streamable_connection(test_data)
+            
+            assert result.success is False
+            assert "Connection timed out after 1 seconds" in result.message
+    
+    @pytest.mark.asyncio
+    async def test_test_streamable_connection_json_parse_error(self, mcp_service):
+        """Test streamable connection with invalid JSON response."""
+        test_data = MCPTestConnectionRequest(
+            server_url="http://test.com/api/mcp/",
+            server_type="streamable",
+            api_key="test_key",
+            timeout_seconds=30
+        )
+        
+        # Mock response with JSON content type but invalid JSON
+        mock_response = MagicMock()
+        mock_response.status = 200
+        mock_response.headers = {"Content-Type": "application/json"}
+        mock_response.json = AsyncMock(side_effect=Exception("Invalid JSON"))
+        
+        with patch('aiohttp.ClientSession') as mock_session_class:
+            mock_session = MagicMock()
+            mock_session_class.return_value.__aenter__.return_value = mock_session
+            mock_session_class.return_value.__aexit__.return_value = None
+            
+            mock_session.get.return_value.__aenter__.return_value = mock_response
+            mock_session.get.return_value.__aexit__.return_value = None
+            
+            result = await mcp_service._test_streamable_connection(test_data)
+            
+            assert result.success is True
+            assert "Connected to server but response is not valid JSON" in result.message
+    
+    @pytest.mark.asyncio
+    async def test_test_streamable_connection_general_error(self, mcp_service):
+        """Test streamable connection with unexpected error."""
+        test_data = MCPTestConnectionRequest(
+            server_url="http://test.com/api/mcp/",
+            server_type="streamable",
+            api_key="test_key",
+            timeout_seconds=30
+        )
+        
+        with patch('aiohttp.ClientSession', side_effect=Exception("Unexpected error")):
+            result = await mcp_service._test_streamable_connection(test_data)
+            
+            assert result.success is False
+            assert "Error testing connection: Unexpected error" in result.message
+    
+    @pytest.mark.asyncio
+    async def test_test_streamable_connection_other_http_error(self, mcp_service):
+        """Test streamable connection with other HTTP error."""
+        test_data = MCPTestConnectionRequest(
+            server_url="http://test.com/api/mcp/",
+            server_type="streamable",
+            api_key="test_key",
+            timeout_seconds=30
+        )
+        
+        # Mock 500 response
+        mock_response = MagicMock()
+        mock_response.status = 500
+        mock_response.text = AsyncMock(return_value="Internal Server Error")
+        
+        with patch('aiohttp.ClientSession') as mock_session_class:
+            mock_session = MagicMock()
+            mock_session_class.return_value.__aenter__.return_value = mock_session
+            mock_session_class.return_value.__aexit__.return_value = None
+            
+            mock_session.get.return_value.__aenter__.return_value = mock_response
+            mock_session.get.return_value.__aexit__.return_value = None
+            
+            result = await mcp_service._test_streamable_connection(test_data)
+            
+            assert result.success is False
+            assert "Failed to connect: HTTP 500" in result.message
 
 
 class TestGetSettings:
@@ -1116,225 +1256,3 @@ class TestSSEConnectionEdgeCases:
             mock_session.get.assert_called_once_with(test_data.server_url, headers={})
 
 
-class TestStdioConnectionEdgeCases:
-    """Test stdio connection edge cases for better coverage."""
-    
-    @pytest.mark.asyncio
-    async def test_test_stdio_connection_general_exception(self, mcp_service):
-        """Test stdio connection with general exception."""
-        test_data = MCPTestConnectionRequest(
-            server_url="python --help",
-            server_type="stdio",
-            api_key="test_key",
-            timeout_seconds=30
-        )
-        
-        # Mock the entire method to simulate an exception in the command check part
-        # This will test the outer exception handler (lines 471-473)
-        with patch.object(test_data, 'server_url', property(lambda self: None)):
-            # This will cause an AttributeError when trying to call .split()
-            result = await mcp_service._test_stdio_connection(test_data)
-            
-            assert result.success is False
-            assert "Error testing connection" in result.message
-    
-    @pytest.mark.asyncio
-    async def test_test_stdio_connection_http_success(self, mcp_service):
-        """Test stdio connection when HTTP request succeeds (line 436)."""
-        test_data = MCPTestConnectionRequest(
-            server_url="http://valid-service.com",
-            server_type="stdio",
-            api_key="test_key",
-            timeout_seconds=30
-        )
-        
-        # Create a successful HTTP response
-        mock_response = MagicMock()
-        mock_response.status = 200
-        
-        # Mock the HTTP session to succeed
-        with patch('aiohttp.ClientSession') as mock_session_class:
-            mock_session = MagicMock()
-            mock_session_class.return_value.__aenter__.return_value = mock_session
-            mock_session_class.return_value.__aexit__.return_value = None
-            
-            mock_session.get.return_value.__aenter__.return_value = mock_response
-            mock_session.get.return_value.__aexit__.return_value = None
-            
-            result = await mcp_service._test_stdio_connection(test_data)
-            
-            assert result.success is True
-            assert "appears to be valid" in result.message
-    
-    @pytest.mark.asyncio
-    async def test_test_stdio_connection_command_check_exception(self, mcp_service):
-        """Test stdio connection when command check raises exception (line 466-470)."""
-        test_data = MCPTestConnectionRequest(
-            server_url="python --help",
-            server_type="stdio",
-            api_key="test_key",
-            timeout_seconds=30
-        )
-        
-        # Create a mock that raises exception during the command validation
-        with patch('aiohttp.ClientSession') as mock_session_class, \
-             patch('asyncio.create_subprocess_exec', side_effect=Exception("Command check failed")):
-            
-            # Mock HTTP to fail first
-            mock_session = MagicMock()
-            mock_session.get.side_effect = Exception("HTTP failed")
-            mock_session_class.return_value.__aenter__.return_value = mock_session
-            mock_session_class.return_value.__aexit__.return_value = None
-            
-            result = await mcp_service._test_stdio_connection(test_data)
-            
-            assert result.success is False
-            assert "appears to be invalid" in result.message
-    
-    @pytest.mark.asyncio
-    async def test_test_stdio_connection_command_exception_inner(self, mcp_service):
-        """Test stdio connection with exception in command checking (lines 466-470)."""
-        test_data = MCPTestConnectionRequest(
-            server_url="python --help",
-            server_type="stdio",
-            api_key="test_key",
-            timeout_seconds=30
-        )
-        
-        # Mock to trigger the exception handler at lines 466-467
-        # The key is to make the actual function call `command_exists = await check_command_async()` fail
-        
-        # I'll patch the parts splitting to work, but then make the await check_command_async() call fail
-        original_method = mcp_service._test_stdio_connection
-        
-        async def patched_method(test_data):
-            # Replicate the method but force the exception at line 454 (command_exists = await check_command_async())
-            try:
-                parts = test_data.server_url.split()
-                if not parts:
-                    return MCPTestConnectionResponse(
-                        success=False,
-                        message="Invalid command: empty command string"
-                    )
-                command = parts[0]
-                
-                try:
-                    # This is where the exception should be raised (line 454)
-                    raise Exception("Simulated command check error")
-                except Exception as e:
-                    # This should hit lines 466-467
-                    return MCPTestConnectionResponse(
-                        success=False,
-                        message=f"Error checking command: {str(e)}"
-                    )
-            except Exception as e:
-                # Outer exception handler
-                return MCPTestConnectionResponse(
-                    success=False,
-                    message=f"Error testing connection: {str(e)}"
-                )
-        
-        with patch.object(mcp_service, '_test_stdio_connection', patched_method):
-            result = await mcp_service._test_stdio_connection(test_data)
-            
-            # Should hit the inner exception handler (lines 466-467)
-            assert result.success is False
-            assert "Error checking command" in result.message
-            assert "Simulated command check error" in result.message
-    
-    @pytest.mark.asyncio
-    async def test_test_stdio_connection_command_error_fallback(self, mcp_service):
-        """Test stdio connection command error fallback."""
-        test_data = MCPTestConnectionRequest(
-            server_url="python --help",
-            server_type="stdio",
-            api_key="test_key",
-            timeout_seconds=30
-        )
-        
-        mock_process_valid = MagicMock()
-        mock_process_valid.communicate = AsyncMock(return_value=(b"help", b""))
-        
-        # Mock check_command_async to simulate HTTP failure then successful subprocess
-        with patch('aiohttp.ClientSession') as mock_session_class, \
-             patch('asyncio.create_subprocess_exec', return_value=mock_process_valid), \
-             patch('asyncio.wait_for', return_value=(b"help", b"")):
-            
-            # Mock HTTP request to fail
-            mock_session = MagicMock()
-            mock_session.get.side_effect = Exception("HTTP failed")
-            
-            mock_session_class.return_value.__aenter__.return_value = mock_session
-            mock_session_class.return_value.__aexit__.return_value = None
-            
-            result = await mcp_service._test_stdio_connection(test_data)
-            
-            assert result.success is True
-            assert "appears to be valid" in result.message
-    
-    @pytest.mark.asyncio
-    async def test_test_stdio_connection_subprocess_error(self, mcp_service):
-        """Test stdio connection with subprocess creation error."""
-        test_data = MCPTestConnectionRequest(
-            server_url="invalid_command --help",
-            server_type="stdio",
-            api_key="test_key",
-            timeout_seconds=30
-        )
-        
-        with patch('aiohttp.ClientSession') as mock_session_class, \
-             patch('asyncio.create_subprocess_exec', side_effect=Exception("Subprocess failed")):
-            
-            # Mock HTTP request to fail so it falls back to subprocess
-            mock_session = MagicMock()
-            mock_session.get.side_effect = Exception("HTTP failed")
-            
-            mock_session_class.return_value.__aenter__.return_value = mock_session
-            mock_session_class.return_value.__aexit__.return_value = None
-            
-            result = await mcp_service._test_stdio_connection(test_data)
-            
-            assert result.success is False
-            assert "appears to be invalid" in result.message
-    
-    @pytest.mark.asyncio
-    async def test_test_stdio_connection_check_command_exception(self, mcp_service):
-        """Test stdio connection with exception triggering lines 466-467."""
-        test_data = MCPTestConnectionRequest(
-            server_url="python --help", 
-            server_type="stdio",
-            api_key="test_key",
-            timeout_seconds=30
-        )
-        
-        # Create a mock where the MCPTestConnectionResponse constructor fails
-        # This will trigger the exception handling at lines 466-467
-        with patch('src.services.mcp_service.MCPTestConnectionResponse') as mock_response, \
-             patch('aiohttp.ClientSession') as mock_session_class, \
-             patch('asyncio.create_subprocess_exec') as mock_subprocess:
-            
-            # Mock HTTP to fail first (so it goes to subprocess check)
-            mock_session = MagicMock()
-            mock_session.get.side_effect = Exception("HTTP failed")
-            mock_session_class.return_value.__aenter__.return_value = mock_session
-            mock_session_class.return_value.__aexit__.return_value = None
-            
-            # Mock subprocess to return True (command exists)
-            mock_process = MagicMock()
-            mock_process.communicate = AsyncMock(return_value=(b"help", b""))
-            mock_subprocess.return_value = mock_process
-            
-            # Mock wait_for to return successfully 
-            with patch('asyncio.wait_for', return_value=(b"help", b"")):
-                # Make the MCPTestConnectionResponse raise an exception when called
-                # This should trigger the exception handler at lines 466-467
-                mock_response.side_effect = [
-                    ValueError("Response construction failed"),  # First call fails
-                    MagicMock()  # Second call (error response) succeeds  
-                ]
-                
-                result = await mcp_service._test_stdio_connection(test_data)
-                
-                # Should hit the exception handler at lines 466-467
-                assert mock_response.call_count == 2  # First call failed, second succeeded
-                assert result is not None  # Should return the error response

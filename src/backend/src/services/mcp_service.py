@@ -319,11 +319,15 @@ class MCPService:
         Returns:
             MCPTestConnectionResponse with success status and message
         """
+        logger.info(f"Testing MCP connection - Type: {test_data.server_type}, URL: {test_data.server_url}")
+        logger.debug(f"Connection test parameters - Timeout: {test_data.timeout_seconds}s, Has API key: {bool(test_data.api_key)}")
+        
         if test_data.server_type.lower() == "sse":
             return await self._test_sse_connection(test_data)
-        elif test_data.server_type.lower() == "stdio":
-            return await self._test_stdio_connection(test_data)
+        elif test_data.server_type.lower() == "streamable":
+            return await self._test_streamable_connection(test_data)
         else:
+            logger.warning(f"Unsupported MCP server type requested: {test_data.server_type}")
             return MCPTestConnectionResponse(
                 success=False,
                 message=f"Unsupported server type: {test_data.server_type}"
@@ -339,70 +343,85 @@ class MCPService:
         Returns:
             MCPTestConnectionResponse with success status and message
         """
+        logger.info(f"Starting SSE connection test to: {test_data.server_url}")
+        
         timeout = aiohttp.ClientTimeout(total=test_data.timeout_seconds)
         headers = {}
         
         if test_data.api_key:
             # Add API key to headers
             headers["Authorization"] = f"Bearer {test_data.api_key}"
+            logger.debug("Added API key authentication to headers")
         
         try:
             async with aiohttp.ClientSession(timeout=timeout) as session:
                 # Attempt to connect to the SSE endpoint
+                logger.debug(f"Initiating HTTP GET request to {test_data.server_url}")
                 try:
                     async with session.get(test_data.server_url, headers=headers) as response:
+                        logger.info(f"Received response - Status: {response.status}, Headers: {dict(response.headers)}")
                         if response.status == 200:
                             # Check for SSE headers or try to read a small amount of data
                             content_type = response.headers.get("Content-Type", "")
+                            logger.debug(f"Response Content-Type: {content_type}")
+                            
                             if "text/event-stream" in content_type:
+                                logger.info("✓ SSE server detected - Content-Type is text/event-stream")
                                 return MCPTestConnectionResponse(
                                     success=True,
                                     message="Successfully connected to MCP SSE server"
                                 )
                             else:
                                 # Try to read some data as a secondary check
+                                logger.debug(f"Content-Type '{content_type}' is not text/event-stream, attempting to read data")
                                 try:
                                     data = await asyncio.wait_for(
                                         response.content.read(1024), 
                                         timeout=5
                                     )
                                     if data:
+                                        logger.info(f"✓ Received {len(data)} bytes of data from server")
+                                        logger.debug(f"First 100 bytes of data: {data[:100]}")
                                         return MCPTestConnectionResponse(
                                             success=True,
                                             message="Successfully connected to server, but Content-Type is not text/event-stream"
                                         )
                                 except asyncio.TimeoutError:
+                                    logger.warning("× No data received within 5 seconds")
                                     return MCPTestConnectionResponse(
                                         success=False,
                                         message="Connection established but no data received"
                                     )
                         else:
                             error_text = await response.text()
+                            logger.error(f"× HTTP error {response.status}: {error_text[:200]}")
                             return MCPTestConnectionResponse(
                                 success=False,
                                 message=f"Failed to connect: HTTP {response.status} - {error_text}"
                             )
                 
                 except aiohttp.ClientConnectorError as e:
+                    logger.error(f"× Connection error: {type(e).__name__}: {str(e)}")
                     return MCPTestConnectionResponse(
                         success=False,
                         message=f"Failed to connect: {str(e)}"
                     )
                 except asyncio.TimeoutError:
+                    logger.error(f"× Connection timeout after {test_data.timeout_seconds} seconds")
                     return MCPTestConnectionResponse(
                         success=False,
                         message=f"Connection timed out after {test_data.timeout_seconds} seconds"
                     )
         except Exception as e:
-            logger.error(f"Error testing MCP SSE connection: {str(e)}")
+            logger.error(f"× Unexpected error testing MCP SSE connection: {type(e).__name__}: {str(e)}", exc_info=True)
             return MCPTestConnectionResponse(
                 success=False,
                 message=f"Error testing connection: {str(e)}"
             )
     
-    async def _test_stdio_connection(self, test_data: MCPTestConnectionRequest) -> MCPTestConnectionResponse:
+    async def _test_streamable_connection(self, test_data: MCPTestConnectionRequest) -> MCPTestConnectionResponse:
         """
-        Test connection to a stdio MCP server.
+        Test connection to a Streamable API server.
         
         Args:
             test_data: Connection test data
@@ -410,66 +429,94 @@ class MCPService:
         Returns:
             MCPTestConnectionResponse with success status and message
         """
-        # For stdio servers, we just check if we can parse the server URL as a valid command
+        logger.info(f"Starting Streamable connection test to: {test_data.server_url}")
+        
+        timeout = aiohttp.ClientTimeout(total=test_data.timeout_seconds)
+        headers = {
+            "Accept": "application/json",
+            "User-Agent": "Kasal-MCP-Client/1.0"
+        }
+        
+        if test_data.api_key:
+            # Add API key to headers - Streamable may use different auth patterns
+            headers["Authorization"] = f"Bearer {test_data.api_key}"
+            logger.debug("Added API key authentication to headers")
+        
         try:
-            # The server_url might be something like "python -m mcp_server"
-            parts = test_data.server_url.split()
-            
-            if not parts:
-                return MCPTestConnectionResponse(
-                    success=False,
-                    message="Invalid command: empty command string"
-                )
+            async with aiohttp.ClientSession(timeout=timeout) as session:
+                logger.debug(f"Testing Streamable API endpoint: {test_data.server_url}")
                 
-            command = parts[0]
-            
-            # Check if the command exists (this is a very basic check)
-            try:
-                # Use async HTTP request instead of blocking requests
-                async def check_command_async():
-                    try:
-                        async with aiohttp.ClientSession() as session:
-                            async with session.get(
-                                test_data.server_url, 
-                                timeout=aiohttp.ClientTimeout(total=test_data.timeout_seconds)
-                            ) as response:
-                                return response.status == 200
-                    except:
-                        # If HTTP fails, try checking if command exists
-                        try:
-                            process = await asyncio.create_subprocess_exec(
-                                command, "--help",
-                                stdout=asyncio.subprocess.PIPE,
-                                stderr=asyncio.subprocess.PIPE
+                # For Streamable, we'll test the API endpoint
+                # Streamable API endpoints include /videos/{shortcode} and /oembed.json
+                try:
+                    # First try a simple GET to the base URL
+                    async with session.get(test_data.server_url, headers=headers) as response:
+                        logger.info(f"Received response - Status: {response.status}, Headers: {dict(response.headers)}")
+                        
+                        if response.status == 200:
+                            content_type = response.headers.get("Content-Type", "")
+                            logger.debug(f"Response Content-Type: {content_type}")
+                            
+                            # Check if it's a JSON API response
+                            if "application/json" in content_type:
+                                try:
+                                    data = await response.json()
+                                    logger.info(f"✓ Streamable API endpoint verified - received JSON response")
+                                    logger.debug(f"API response keys: {list(data.keys()) if isinstance(data, dict) else 'non-dict response'}")
+                                    return MCPTestConnectionResponse(
+                                        success=True,
+                                        message="Successfully connected to Streamable API server"
+                                    )
+                                except Exception as json_error:
+                                    logger.warning(f"Failed to parse JSON response: {json_error}")
+                                    return MCPTestConnectionResponse(
+                                        success=True,
+                                        message="Connected to server but response is not valid JSON"
+                                    )
+                            else:
+                                # Try to read some data
+                                logger.debug(f"Non-JSON response received, attempting to validate endpoint")
+                                data = await response.text()
+                                if data:
+                                    logger.info(f"✓ Received {len(data)} characters from Streamable endpoint")
+                                    return MCPTestConnectionResponse(
+                                        success=True,
+                                        message="Successfully connected to Streamable server (non-JSON response)"
+                                    )
+                        elif response.status == 401:
+                            logger.error("× Authentication failed - check API key")
+                            return MCPTestConnectionResponse(
+                                success=False,
+                                message="Authentication failed - please check your API key"
                             )
-                            try:
-                                await asyncio.wait_for(process.communicate(), timeout=1)
-                                return True
-                            except asyncio.TimeoutError:
-                                process.kill()
-                                return False
-                        except:
-                            return False
+                        elif response.status == 404:
+                            logger.error("× Endpoint not found - check URL")
+                            return MCPTestConnectionResponse(
+                                success=False,
+                                message="Endpoint not found - please check the server URL"
+                            )
+                        else:
+                            error_text = await response.text()
+                            logger.error(f"× HTTP error {response.status}: {error_text[:200]}")
+                            return MCPTestConnectionResponse(
+                                success=False,
+                                message=f"Failed to connect: HTTP {response.status} - {error_text}"
+                            )
                 
-                command_exists = await check_command_async()
-                
-                if command_exists:
-                    return MCPTestConnectionResponse(
-                        success=True,
-                        message=f"Command '{command}' appears to be valid"
-                    )
-                else:
+                except aiohttp.ClientConnectorError as e:
+                    logger.error(f"× Connection error: {type(e).__name__}: {str(e)}")
                     return MCPTestConnectionResponse(
                         success=False,
-                        message=f"Command '{command}' appears to be invalid or not found in the system PATH"
+                        message=f"Failed to connect: {str(e)}"
                     )
-            except Exception as e:
-                return MCPTestConnectionResponse(
-                    success=False,
-                    message=f"Error checking command: {str(e)}"
-                )
+                except asyncio.TimeoutError:
+                    logger.error(f"× Connection timeout after {test_data.timeout_seconds} seconds")
+                    return MCPTestConnectionResponse(
+                        success=False,
+                        message=f"Connection timed out after {test_data.timeout_seconds} seconds"
+                    )
         except Exception as e:
-            logger.error(f"Error testing MCP stdio connection: {str(e)}")
+            logger.error(f"× Unexpected error testing Streamable connection: {type(e).__name__}: {str(e)}", exc_info=True)
             return MCPTestConnectionResponse(
                 success=False,
                 message=f"Error testing connection: {str(e)}"
