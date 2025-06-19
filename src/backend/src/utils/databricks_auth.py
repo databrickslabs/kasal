@@ -629,31 +629,95 @@ async def get_mcp_access_token() -> Tuple[Optional[str], Optional[str]]:
         return None, str(e)
 
 
-async def get_mcp_auth_headers(mcp_server_url: str) -> Tuple[Optional[Dict[str, str]], Optional[str]]:
+async def get_mcp_auth_headers(
+    mcp_server_url: str, 
+    user_token: Optional[str] = None,
+    api_key: Optional[str] = None,
+    include_sse_headers: bool = False
+) -> Tuple[Optional[Dict[str, str]], Optional[str]]:
     """
     Get authentication headers for MCP server calls.
-    This follows the exact same approach as the CLI test.
+    Tries authentication methods in order:
+    1. OBO (On-Behalf-Of) using user token
+    2. API key from service
+    3. Databricks CLI token
     
     Args:
         mcp_server_url: MCP server URL
+        user_token: Optional user access token for OBO
+        api_key: Optional API key from the service
+        include_sse_headers: Whether to include SSE-specific headers (for SSE endpoints only)
         
     Returns:
         Tuple[Optional[Dict[str, str]], Optional[str]]: Headers dict and error message if any
     """
     try:
-        # Get the access token (same as CLI)
+        access_token = None
+        
+        # First try: OBO authentication if user token is provided
+        if user_token:
+            logger.info("Attempting OBO authentication for MCP")
+            try:
+                # Initialize DatabricksAuth instance for OBO
+                auth = DatabricksAuth()
+                auth.set_user_access_token(user_token)
+                headers, auth_error = await auth.get_auth_headers(mcp_server_url=mcp_server_url)
+                
+                # If OBO authentication succeeded, use those headers
+                if headers and not auth_error:
+                    # Only add SSE headers if specifically requested (for SSE endpoints)
+                    if include_sse_headers:
+                        if "Content-Type" not in headers:
+                            headers["Content-Type"] = "application/json"
+                        if "Accept" not in headers:
+                            headers["Accept"] = "text/event-stream"
+                        if "Cache-Control" not in headers:
+                            headers["Cache-Control"] = "no-cache"
+                        if "Connection" not in headers:
+                            headers["Connection"] = "keep-alive"
+                    
+                    logger.info("Successfully using OBO authentication for MCP")
+                    return headers, None
+                else:
+                    logger.warning(f"OBO authentication failed: {auth_error}")
+                    # Continue to next authentication method
+            except Exception as obo_error:
+                logger.warning(f"Error in OBO authentication: {obo_error}")
+                # Continue to next authentication method
+        
+        # Second try: API key from service if provided
+        if api_key:
+            logger.info("Using API key authentication for MCP")
+            headers = {"Authorization": f"Bearer {api_key}"}
+            
+            # Only add SSE headers if specifically requested
+            if include_sse_headers:
+                headers.update({
+                    "Content-Type": "application/json",
+                    "Accept": "text/event-stream",
+                    "Cache-Control": "no-cache",
+                    "Connection": "keep-alive"
+                })
+            
+            return headers, None
+        
+        # Third try: Get token from Databricks CLI
+        logger.info("Falling back to Databricks CLI authentication for MCP")
         access_token, error = await get_mcp_access_token()
         if error:
             return None, error
             
-        # Return headers exactly as the CLI test does
-        headers = {
-            "Authorization": f"Bearer {access_token}",
-            "Content-Type": "application/json",
-            "Accept": "text/event-stream",
-            "Cache-Control": "no-cache",
-            "Connection": "keep-alive"
-        }
+        # Return clean headers by default, add SSE headers only if requested
+        headers = {"Authorization": f"Bearer {access_token}"}
+        
+        # Only add SSE headers if specifically requested (for SSE endpoints)
+        if include_sse_headers:
+            headers.update({
+                "Content-Type": "application/json",
+                "Accept": "text/event-stream",
+                "Cache-Control": "no-cache",
+                "Connection": "keep-alive"
+            })
         
         return headers, None
         

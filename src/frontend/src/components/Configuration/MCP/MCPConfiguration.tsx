@@ -27,11 +27,12 @@ import {
 } from '@mui/material';
 import CloudIcon from '@mui/icons-material/Cloud';
 import InfoIcon from '@mui/icons-material/Info';
-import SaveIcon from '@mui/icons-material/Save';
 import AddIcon from '@mui/icons-material/Add';
 import EditIcon from '@mui/icons-material/Edit';
 import DeleteIcon from '@mui/icons-material/Delete';
 import CloseIcon from '@mui/icons-material/Close';
+import CheckCircleIcon from '@mui/icons-material/CheckCircle';
+import ErrorIcon from '@mui/icons-material/Error';
 import { useTranslation } from 'react-i18next';
 import { MCPService } from '../../../api/MCPService';
 
@@ -42,13 +43,14 @@ export interface MCPServerConfig {
   enabled: boolean;
   server_url: string;
   api_key: string;
-  server_type: string;  // "sse" or "stdio"
+  server_type: string;  // "sse" or "streamable"
+  auth_type?: string;  // "api_key" or "databricks_obo"
   timeout_seconds: number;
   max_retries: number;
-  model_mapping_enabled: boolean;
   rate_limit: number;
   command?: string;  // Command for stdio server type
   args?: string[];   // Arguments for stdio server type
+  session_id?: string;  // Session ID for streamable server type
   additional_config?: Record<string, unknown>;  // Additional configuration parameters
 }
 
@@ -59,9 +61,9 @@ export const DEFAULT_MCP_CONFIG: MCPServerConfig = {
   server_url: '',
   api_key: '',
   server_type: 'sse',  // Default to SSE server type
+  auth_type: 'api_key',  // Default to API key authentication
   timeout_seconds: 30,
   max_retries: 3,
-  model_mapping_enabled: false,
   rate_limit: 60,
   command: '',
   args: [],
@@ -79,9 +81,7 @@ export const DEFAULT_MCP_CONFIGURATION: MCPConfiguration = {
   global_enabled: false
 };
 
-interface MCPConfigurationProps {
-  onSave?: (config: MCPConfiguration) => Promise<void>;
-}
+// MCPConfiguration component doesn't need props currently
 
 interface ServerEditDialogProps {
   open: boolean;
@@ -101,10 +101,17 @@ const ServerEditDialog: React.FC<ServerEditDialogProps> = ({
 }) => {
   const { t } = useTranslation();
   const [editedServer, setEditedServer] = useState<MCPServerConfig | null>(server);
-  const [newArg, setNewArg] = useState('');
+  const [testingConnection, setTestingConnection] = useState(false);
+  const [connectionTestResult, setConnectionTestResult] = useState<{
+    tested: boolean;
+    success: boolean;
+    message: string;
+  }>({ tested: false, success: false, message: '' });
 
   useEffect(() => {
     setEditedServer(server);
+    // Reset connection test result when dialog opens/closes or server changes
+    setConnectionTestResult({ tested: false, success: false, message: '' });
   }, [server]);
 
   if (!editedServer) return null;
@@ -139,15 +146,6 @@ const ServerEditDialog: React.FC<ServerEditDialogProps> = ({
     } : null);
   };
 
-  const handleToggle = (field: keyof MCPServerConfig) => (
-    event: React.ChangeEvent<HTMLInputElement>
-  ) => {
-    setEditedServer(prev => prev ? {
-      ...prev,
-      [field]: event.target.checked
-    } : null);
-  };
-
   const handleSave = () => {
     if (editedServer) {
       onSave(editedServer);
@@ -155,26 +153,32 @@ const ServerEditDialog: React.FC<ServerEditDialogProps> = ({
     }
   };
 
-  const handleAddArg = () => {
-    if (newArg.trim() && editedServer) {
-      setEditedServer({
-        ...editedServer,
-        args: [...(editedServer.args || []), newArg.trim()]
+  const handleTestConnection = async () => {
+    if (!editedServer) return;
+    
+    setTestingConnection(true);
+    setConnectionTestResult({ tested: false, success: false, message: '' });
+    
+    try {
+      const mcpService = MCPService.getInstance();
+      const result = await mcpService.testConnection(editedServer);
+      setConnectionTestResult({
+        tested: true,
+        success: result.success,
+        message: result.message
       });
-      setNewArg('');
+    } catch (error) {
+      setConnectionTestResult({
+        tested: true,
+        success: false,
+        message: error instanceof Error ? error.message : 'Connection test failed'
+      });
+    } finally {
+      setTestingConnection(false);
     }
   };
 
-  const handleDeleteArg = (indexToDelete: number) => {
-    if (editedServer) {
-      setEditedServer({
-        ...editedServer,
-        args: (editedServer.args || []).filter((_, index) => index !== indexToDelete)
-      });
-    }
-  };
 
-  const isStdioServerType = editedServer.server_type === 'stdio';
 
   return (
     <Dialog 
@@ -233,7 +237,7 @@ const ServerEditDialog: React.FC<ServerEditDialogProps> = ({
               onChange={handleTextChange('server_url')}
               fullWidth
               required
-              helperText={t('configuration.mcp.serverUrlHelp', { defaultValue: 'Full URL of the MCP server (e.g., https://mcp-server.example.com)' })}
+              helperText={t('configuration.mcp.serverUrlHelp', { defaultValue: 'Full URL of the MCP server endpoint' })}
               sx={{ 
                 '& .MuiOutlinedInput-root': {
                   borderRadius: 1.5,
@@ -251,76 +255,63 @@ const ServerEditDialog: React.FC<ServerEditDialogProps> = ({
                 label="Server Type"
                 onChange={handleSelectChange('server_type')}
               >
-                <MenuItem value="sse">SSE</MenuItem>
-                <MenuItem value="stdio">STDIO</MenuItem>
+                <MenuItem value="sse">SSE (Server-Sent Events)</MenuItem>
+                <MenuItem value="streamable">Streamable HTTP</MenuItem>
               </Select>
             </FormControl>
           </Grid>
           
-          <Grid item xs={12}>
-            <TextField
-              label={t('configuration.mcp.apiKey', { defaultValue: 'API Key' })}
-              value={editedServer.api_key}
-              onChange={handleTextChange('api_key')}
-              fullWidth
-              type="password"
-              required
-              helperText={t('configuration.mcp.apiKeyHelp', { defaultValue: 'Authentication key for the MCP server' })}
-              sx={{ 
-                '& .MuiOutlinedInput-root': {
-                  borderRadius: 1.5,
-                }
-              }}
-            />
-          </Grid>
+          {(editedServer.server_type === 'sse' || editedServer.server_type === 'streamable') && (
+            <Grid item xs={12} md={6}>
+              <FormControl fullWidth>
+                <InputLabel id="auth-type-label">Authentication Type</InputLabel>
+                <Select
+                  labelId="auth-type-label"
+                  value={editedServer.auth_type || 'api_key'}
+                  label="Authentication Type"
+                  onChange={handleSelectChange('auth_type')}
+                >
+                  <MenuItem value="api_key">API Key</MenuItem>
+                  <MenuItem value="databricks_obo">Databricks OBO</MenuItem>
+                </Select>
+              </FormControl>
+            </Grid>
+          )}
+          
+          {(editedServer.server_type === 'sse' || editedServer.server_type === 'streamable') && editedServer.auth_type !== 'databricks_obo' && (
+            <Grid item xs={12} md={editedServer.auth_type === 'databricks_obo' ? 12 : 6}>
+              <TextField
+                label={t('configuration.mcp.apiKey', { defaultValue: 'API Key' })}
+                value={editedServer.api_key}
+                onChange={handleTextChange('api_key')}
+                fullWidth
+                type="password"
+                required
+                helperText={t('configuration.mcp.apiKeyHelp', { defaultValue: 'Authentication key for the MCP server' })}
+                sx={{ 
+                  '& .MuiOutlinedInput-root': {
+                    borderRadius: 1.5,
+                  }
+                }}
+              />
+            </Grid>
+          )}
 
-          {isStdioServerType && (
-            <>
-              <Grid item xs={12}>
-                <TextField
-                  label="Command"
-                  value={editedServer.command}
-                  onChange={handleTextChange('command')}
-                  fullWidth
-                  helperText="Command to execute for STDIO server (e.g., python -m mcp_server)"
-                />
-              </Grid>
-              
-              <Grid item xs={12}>
-                <Typography variant="subtitle2" gutterBottom>
-                  Command Arguments
-                </Typography>
-                <Box sx={{ display: 'flex', alignItems: 'center', mb: 2 }}>
-                  <TextField 
-                    label="New Argument"
-                    value={newArg}
-                    onChange={(e) => setNewArg(e.target.value)}
-                    sx={{ mr: 1, flexGrow: 1 }}
-                  />
-                  <Button 
-                    variant="outlined" 
-                    onClick={handleAddArg}
-                    startIcon={<AddIcon />}
-                  >
-                    Add
-                  </Button>
-                </Box>
-                <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 1 }}>
-                  {(editedServer.args || []).map((arg, index) => (
-                    <Chip
-                      key={index}
-                      label={arg}
-                      onDelete={() => handleDeleteArg(index)}
-                    />
-                  ))}
-                  {(editedServer.args || []).length === 0 && (
-                    <Typography variant="body2" color="text.secondary">
-                      No arguments added yet.
-                    </Typography>
-                  )}
-                </Box>
-              </Grid>
-            </>
+          {editedServer.server_type === 'streamable' && (
+            <Grid item xs={12}>
+              <TextField
+                label={t('configuration.mcp.sessionId', { defaultValue: 'Session ID (Optional)' })}
+                value={editedServer.session_id || ''}
+                onChange={handleTextChange('session_id')}
+                fullWidth
+                helperText={t('configuration.mcp.sessionIdHelp', { defaultValue: 'Optional session ID for maintaining state across requests. Leave empty for stateless connections.' })}
+                sx={{ 
+                  '& .MuiOutlinedInput-root': {
+                    borderRadius: 1.5,
+                  }
+                }}
+              />
+            </Grid>
           )}
 
           <Grid item xs={12}>
@@ -403,44 +394,57 @@ const ServerEditDialog: React.FC<ServerEditDialogProps> = ({
               valueLabelDisplay="auto"
             />
           </Grid>
-          
-          <Grid item xs={12} md={6}>
-            <FormControlLabel
-              control={
-                <Switch
-                  checked={editedServer.model_mapping_enabled}
-                  onChange={handleToggle('model_mapping_enabled')}
-                  color="primary"
-                />
-              }
-              label={t('configuration.mcp.modelMapping', { defaultValue: 'Enable Model Mapping' })}
-            />
-            <Typography variant="caption" color="text.secondary" display="block">
-              {t('configuration.mcp.modelMappingHelp', { defaultValue: 'Maps local model names to server-specific identifiers' })}
-            </Typography>
-          </Grid>
         </Grid>
+        
+        {/* Connection Test Result */}
+        {connectionTestResult.tested && (
+          <Box sx={{ mt: 2 }}>
+            <Alert 
+              severity={connectionTestResult.success ? 'success' : 'error'}
+              icon={connectionTestResult.success ? <CheckCircleIcon /> : <ErrorIcon />}
+            >
+              {connectionTestResult.message}
+            </Alert>
+          </Box>
+        )}
       </DialogContent>
-      <DialogActions sx={{ p: 3, pt: 1 }}>
-        <Button onClick={onClose} color="inherit">
-          {t('common.cancel', { defaultValue: 'Cancel' })}
-        </Button>
-        <Button 
-          onClick={handleSave} 
-          variant="contained"
-          color="primary"
+      <DialogActions sx={{ p: 3, pt: 1, display: 'flex', justifyContent: 'space-between' }}>
+        <Button
+          onClick={handleTestConnection}
+          disabled={
+            testingConnection || 
+            !editedServer.server_url?.trim() || 
+            ((editedServer.server_type === 'sse' || editedServer.server_type === 'streamable') && 
+             editedServer.auth_type !== 'databricks_obo' && 
+             !editedServer.api_key?.trim())
+          }
+          startIcon={testingConnection ? <CircularProgress size={16} /> : <CloudIcon />}
         >
-          {t('common.save', { defaultValue: 'Save' })}
+          {testingConnection 
+            ? t('configuration.mcp.testingConnection', { defaultValue: 'Testing...' })
+            : t('configuration.mcp.testConnection', { defaultValue: 'Test Connection' })
+          }
         </Button>
+        <Box>
+          <Button onClick={onClose} color="inherit" sx={{ mr: 1 }}>
+            {t('common.cancel', { defaultValue: 'Cancel' })}
+          </Button>
+          <Button 
+            onClick={handleSave} 
+            variant="contained"
+            color="primary"
+          >
+            {t('common.save', { defaultValue: 'Save' })}
+          </Button>
+        </Box>
       </DialogActions>
     </Dialog>
   );
 };
 
-const MCPConfiguration: React.FC<MCPConfigurationProps> = ({ onSave }) => {
+const MCPConfiguration: React.FC = () => {
   const { t } = useTranslation();
   const [mcpConfig, setMcpConfig] = useState<MCPConfiguration>(DEFAULT_MCP_CONFIGURATION);
-  const [savingMcp, setSavingMcp] = useState(false);
   const [editDialogOpen, setEditDialogOpen] = useState(false);
   const [currentServer, setCurrentServer] = useState<MCPServerConfig | null>(null);
   const [isNewServer, setIsNewServer] = useState(false);
@@ -545,7 +549,8 @@ const MCPConfiguration: React.FC<MCPConfigurationProps> = ({ onSave }) => {
     setCurrentServer({
       ...DEFAULT_MCP_CONFIG,
       id: new Date().getTime().toString(),
-      enabled: true
+      enabled: true,
+      auth_type: 'api_key'  // Ensure default auth type is set
     });
     setIsNewServer(true);
     setEditDialogOpen(true);
@@ -606,36 +611,6 @@ const MCPConfiguration: React.FC<MCPConfigurationProps> = ({ onSave }) => {
     }
   };
 
-  const handleSaveMcpConfig = async () => {
-    setSavingMcp(true);
-    try {
-      if (onSave) {
-        await onSave(mcpConfig);
-      } else {
-        // Update all servers
-        const mcpService = MCPService.getInstance();
-        await mcpService.updateGlobalSettings({ global_enabled: mcpConfig.global_enabled });
-        
-        // We don't need to update individual servers here as they're already updated via handleSaveServer
-      }
-      
-      setNotification({
-        open: true,
-        message: t('configuration.mcp.saved', { defaultValue: 'MCP Server configuration saved successfully' }),
-        severity: 'success',
-      });
-      
-    } catch (error) {
-      console.error('Error saving MCP Server configuration:', error);
-      setNotification({
-        open: true,
-        message: error instanceof Error ? error.message : 'Failed to save MCP Server configuration',
-        severity: 'error',
-      });
-    } finally {
-      setSavingMcp(false);
-    }
-  };
 
   return (
     <Box>
@@ -723,9 +698,9 @@ const MCPConfiguration: React.FC<MCPConfigurationProps> = ({ onSave }) => {
                           {server.name}
                         </Typography>
                         <Chip 
-                          label={server.server_type.toUpperCase()} 
+                          label={server.server_type === 'streamable' ? 'STREAMABLE' : 'SSE'} 
                           size="small" 
-                          color="primary" 
+                          color={server.server_type === 'streamable' ? 'secondary' : 'primary'} 
                           variant="outlined"
                           sx={{ ml: 1.5, fontSize: '0.7rem', height: 20 }}
                         />
@@ -774,20 +749,6 @@ const MCPConfiguration: React.FC<MCPConfigurationProps> = ({ onSave }) => {
         </Box>
       </Paper>
       
-      <Box sx={{ display: 'flex', justifyContent: 'flex-end', mt: 3 }}>
-        <Button
-          variant="contained"
-          color="primary"
-          startIcon={<SaveIcon />}
-          onClick={handleSaveMcpConfig}
-          disabled={savingMcp}
-        >
-          {savingMcp ? (
-            <CircularProgress size={20} color="inherit" sx={{ mr: 1 }} />
-          ) : null}
-          {t('common.save', { defaultValue: 'Save All Settings' })}
-        </Button>
-      </Box>
       
       {/* Server Edit Dialog */}
       <ServerEditDialog

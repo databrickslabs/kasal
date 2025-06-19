@@ -19,6 +19,16 @@ import {
 } from '@mui/icons-material';
 import { useFlowConfigStore } from '../../store/flowConfig';
 
+interface SidebarItem {
+  id: string;
+  icon?: React.ReactNode;
+  tooltip?: string;
+  onClick?: () => void;
+  disabled?: boolean;
+  isActive?: boolean;
+  isSeparator?: boolean;
+}
+
 interface RightSidebarProps {
   onOpenLogsDialog: () => void;
   onToggleChat: () => void;
@@ -77,7 +87,7 @@ const RightSidebar: React.FC<RightSidebarProps> = ({
   }, [isChatOpen]);
 
 
-  const sidebarItems = [
+  const sidebarItems: SidebarItem[] = [
     {
       id: 'add-agent',
       icon: <PersonAddIcon />,
@@ -213,8 +223,8 @@ const RightSidebar: React.FC<RightSidebarProps> = ({
                       width: 40,
                       height: 40,
                       mb: 1,
-                      color: (item as any).isActive ? 'primary.main' : 'text.secondary',
-                      backgroundColor: (item as any).isActive ? 'primary.light' : 'transparent',
+                      color: item.isActive ? 'primary.main' : 'text.secondary',
+                      backgroundColor: item.isActive ? 'primary.light' : 'transparent',
                       borderRight: '2px solid transparent',
                       borderRadius: '50%',
                       display: 'flex',
@@ -224,8 +234,8 @@ const RightSidebar: React.FC<RightSidebarProps> = ({
                       opacity: item.disabled ? 0.6 : 1,
                       cursor: item.disabled ? 'not-allowed' : 'pointer',
                       '&:hover': !item.disabled ? {
-                        backgroundColor: (item as any).isActive ? 'primary.dark' : 'action.hover',
-                        color: (item as any).isActive ? 'primary.contrastText' : 'text.primary',
+                        backgroundColor: item.isActive ? 'primary.dark' : 'action.hover',
+                        color: item.isActive ? 'primary.contrastText' : 'text.primary',
                       } : {},
                       animation: 'none',
                     }}

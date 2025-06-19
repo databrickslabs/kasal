@@ -2088,9 +2088,9 @@ const WorkflowChat: React.FC<WorkflowChatProps> = ({
                                 </Typography>
                                 {(() => {
                                   // Extract the actual result value if it's wrapped in an object with 'value' field
-                                  let actualResult = message.result;
+                                  let actualResult: unknown = message.result;
                                   if (typeof actualResult === 'object' && actualResult !== null && 'value' in actualResult) {
-                                    actualResult = (actualResult as any).value;
+                                    actualResult = (actualResult as { value: unknown }).value;
                                   }
                                   
                                   // Now render based on the actual result type

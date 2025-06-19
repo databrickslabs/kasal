@@ -111,6 +111,7 @@ src/
 - Follow clean architecture principles
 - Never commit without running linting tools
 - **CRITICAL: All operations must be async and non-blocking** - Never use sync operations that could block the event loop
+- **CRITICAL: Never include real URLs, endpoints, or addresses in code** - Always use placeholder values like "https://example.com" or environment variables
 
 ## AI Engine Integration
 
