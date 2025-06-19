@@ -1078,7 +1078,7 @@ const WorkflowDesigner: React.FC<WorkflowDesignerProps> = (): JSX.Element => {
           isRunning={!!runningTabId}
           runningTabId={runningTabId}
           onLoadCrew={() => setIsCrewFlowDialogOpen(true)}
-          disabled={isChatProcessing || isGeneratingConnections}
+          disabled={isChatProcessing || isGeneratingConnections || !!runningTabId}
         />
         
         <Box sx={{ 
