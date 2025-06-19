@@ -4,7 +4,7 @@ export interface ChatMessage {
   id: string;
   session_id: string;
   user_id: string;
-  message_type: 'user' | 'assistant' | 'execution' | 'trace';
+  message_type: 'user' | 'assistant' | 'execution' | 'trace' | 'result';
   content: string;
   timestamp: string;
   intent?: string;
@@ -16,7 +16,7 @@ export interface ChatMessage {
 
 export interface SaveMessageRequest {
   session_id: string;
-  message_type: 'user' | 'assistant' | 'execution' | 'trace';
+  message_type: 'user' | 'assistant' | 'execution' | 'trace' | 'result';
   content: string;
   intent?: string;
   confidence?: number;

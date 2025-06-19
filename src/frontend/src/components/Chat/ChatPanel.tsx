@@ -57,6 +57,8 @@ const ChatPanel: React.FC<ChatPanelProps> = ({
           borderRadius: 0,
           boxShadow: 'none',
           backgroundColor: 'background.paper',
+          overflow: 'hidden',
+          contain: 'layout size',
         }}
       >
         <Box sx={{ 
@@ -101,6 +103,7 @@ const ChatPanel: React.FC<ChatPanelProps> = ({
     <Paper 
       sx={{ 
         height: '100%', 
+        width: '100%',
         display: 'flex', 
         flexDirection: 'column',
         borderLeft: 1,
@@ -108,9 +111,26 @@ const ChatPanel: React.FC<ChatPanelProps> = ({
         borderRadius: 0,
         boxShadow: 'none',
         transition: 'all 0.3s ease-in-out', // Smooth animation
+        overflow: 'hidden', // Ensure nothing escapes this container
+        position: 'relative',
+        minWidth: 0, // Critical for preventing flex expansion
+        isolation: 'isolate', // Create a new stacking context
+        contain: 'layout size', // Strict CSS containment
       }}
     >
-      <Box sx={{ flex: 1, overflow: 'hidden' }}>
+      <Box sx={{ 
+        flex: 1, 
+        overflow: 'hidden',
+        display: 'flex',
+        flexDirection: 'column',
+        position: 'relative',
+        width: '100%',
+        minWidth: 0, // Prevent flex item from growing beyond parent
+        '& > *': {
+          minWidth: 0, // Apply to all children to prevent overflow
+          maxWidth: '100%',
+        }
+      }}>
         <WorkflowChat
           onNodesGenerated={onNodesGenerated}
           onLoadingStateChange={onLoadingStateChange}

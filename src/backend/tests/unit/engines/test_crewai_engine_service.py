@@ -375,7 +375,7 @@ class TestCrewAIEngineService:
              patch('src.services.api_keys_service.ApiKeysService.from_unit_of_work') as mock_api_service, \
              patch('src.engines.crewai.tools.tool_factory.ToolFactory.create') as mock_tool_factory, \
              patch('src.engines.crewai.crew_preparation.CrewPreparation') as mock_crew_prep, \
-             patch.object(service, '_update_execution_status', new_callable=AsyncMock) as mock_update_status:
+             patch('src.engines.crewai.crewai_engine_service.update_execution_status_with_retry', new_callable=AsyncMock) as mock_update_status:
             
             # Setup mocks
             mock_normalize.return_value = sample_execution_config
@@ -397,25 +397,22 @@ class TestCrewAIEngineService:
             # Mock crew preparation failure
             mock_crew_prep_instance = MagicMock()
             mock_crew_prep_instance.prepare = AsyncMock(return_value=False)
+            mock_crew_prep_instance.crew = None  # Ensure crew is None when preparation fails
             mock_crew_prep.return_value = mock_crew_prep_instance
             
+            # Configure the update_status mock
             mock_update_status.return_value = None
             
             result = await service.run_execution(execution_id, sample_execution_config)
             
             assert result == execution_id
             
-            # Debug: print all calls to help diagnose the issue
-            if not any(
-                call[0] == (execution_id, ExecutionStatus.FAILED.value, "Failed to prepare crew")
-                for call in mock_update_status.call_args_list
-            ):
-                print(f"Mock update_status calls: {mock_update_status.call_args_list}")
-            
+            # Verify the update_status was called with the expected arguments
             mock_update_status.assert_any_call(
-                execution_id,
-                ExecutionStatus.FAILED.value,
-                "Failed to prepare crew"
+                execution_id=execution_id,
+                status=ExecutionStatus.FAILED.value,
+                message="Failed to prepare crew",
+                result=None
             )
 
     @pytest.mark.asyncio
