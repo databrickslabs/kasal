@@ -28,6 +28,7 @@ import CloseIcon from '@mui/icons-material/Close';
 
 // Component Imports
 import { RightPanelToggle } from './WorkflowToolbarStyle';
+import { InputVariablesDialog } from '../Jobs/InputVariablesDialog';
 import WorkflowPanels from './WorkflowPanels';
 import TabBar from './TabBar';
 import ChatPanel from '../Chat/ChatPanel';
@@ -395,10 +396,12 @@ const WorkflowDesigner: React.FC<WorkflowDesignerProps> = (): JSX.Element => {
     handleRunClick,
     handleGenerateCrew,
     executeTab,
-    executeCrew,
     executeFlow: _executeFlow,
     setNodes: setCrewExecutionNodes,
-    setEdges: setCrewExecutionEdges
+    setEdges: setCrewExecutionEdges,
+    showInputVariablesDialog,
+    setShowInputVariablesDialog,
+    executeWithVariables
   } = useCrewExecutionStore();
 
   // Debug logging for running tab
@@ -1255,7 +1258,19 @@ const WorkflowDesigner: React.FC<WorkflowDesignerProps> = (): JSX.Element => {
                           updateTabExecutionStatus(tabIdToTimeout, 'completed');
                         }, 5 * 60 * 1000); // 5 minutes
                       }
-                      executeCrew(nodes, edges);
+                      console.log('[WorkflowDesigner] Calling handleRunClick from chat with nodes:', nodes);
+                      console.log('[WorkflowDesigner] Node details:', nodes.map(n => ({
+                        id: n.id,
+                        type: n.type,
+                        data: n.data
+                      })));
+                      // Make sure nodes are synced to the execution store
+                      setCrewExecutionNodes(nodes);
+                      setCrewExecutionEdges(edges);
+                      // Small delay to ensure state is updated
+                      setTimeout(() => {
+                        handleRunClick('crew');
+                      }, 100);
                     }}
                     isCollapsed={isChatCollapsed}
                     onToggleCollapse={() => {
@@ -1475,6 +1490,14 @@ const WorkflowDesigner: React.FC<WorkflowDesignerProps> = (): JSX.Element => {
           open={dialogManager.isFlowDialogOpen}
           onClose={() => dialogManager.setIsFlowDialogOpen(false)}
           onAddCrews={handleFlowDialogAction}
+        />
+
+        {/* Input Variables Dialog */}
+        <InputVariablesDialog
+          open={showInputVariablesDialog}
+          onClose={() => setShowInputVariablesDialog(false)}
+          onConfirm={executeWithVariables}
+          nodes={nodes}
         />
 
         {/* Error handling */}

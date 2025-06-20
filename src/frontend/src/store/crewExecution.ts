@@ -31,6 +31,7 @@ interface CrewExecutionState {
   schemaDetectionEnabled: boolean;
   isCrewPlanningOpen: boolean;
   isScheduleDialogOpen: boolean;
+  inputMode: 'dialog' | 'chat';
   tools: Tool[];
   selectedTools: Tool[];
   jobId: string | null;
@@ -40,6 +41,8 @@ interface CrewExecutionState {
   completedTaskIds: string[];
   runHistory: RunHistoryItem[];
   userActive: boolean;
+  inputVariables: Record<string, string>;
+  showInputVariablesDialog: boolean;
   
   // UI state
   errorMessage: string;
@@ -67,6 +70,9 @@ interface CrewExecutionState {
   setIsExecuting: (isExecuting: boolean) => void;
   setTools: (tools: Tool[]) => void;
   setCurrentTaskId: (taskId: string | null) => void;
+  setInputVariables: (variables: Record<string, string>) => void;
+  setShowInputVariablesDialog: (show: boolean) => void;
+  setInputMode: (mode: 'dialog' | 'chat') => void;
   setCompletedTaskIds: (taskIds: string[]) => void;
   setRunHistory: (history: RunHistoryItem[]) => void;
   setUserActive: (active: boolean) => void;
@@ -80,6 +86,7 @@ interface CrewExecutionState {
   handleRunClick: (type: 'crew' | 'flow') => Promise<void>;
   handleGenerateCrew: () => Promise<void>;
   handleCrewSelect: (crew: Crew) => void;
+  executeWithVariables: (variables: Record<string, string>) => Promise<void>;
 }
 
 export const useCrewExecutionStore = create<CrewExecutionState>((set, get) => ({
@@ -93,6 +100,7 @@ export const useCrewExecutionStore = create<CrewExecutionState>((set, get) => ({
   schemaDetectionEnabled: true,
   isCrewPlanningOpen: false,
   isScheduleDialogOpen: false,
+  inputMode: (localStorage.getItem('crewai-input-mode') as 'dialog' | 'chat') || 'dialog',
   tools: [],
   selectedTools: [],
   jobId: null,
@@ -102,6 +110,8 @@ export const useCrewExecutionStore = create<CrewExecutionState>((set, get) => ({
   completedTaskIds: [],
   runHistory: [],
   userActive: false,
+  inputVariables: {},
+  showInputVariablesDialog: false,
   errorMessage: '',
   showError: false,
   successMessage: '',
@@ -131,6 +141,12 @@ export const useCrewExecutionStore = create<CrewExecutionState>((set, get) => ({
   setIsExecuting: (isExecuting) => set({ isExecuting }),
   setTools: (tools) => set({ tools }),
   setCurrentTaskId: (taskId) => set({ currentTaskId: taskId }),
+  setInputVariables: (variables) => set({ inputVariables: variables }),
+  setShowInputVariablesDialog: (show) => set({ showInputVariablesDialog: show }),
+  setInputMode: (mode) => {
+    localStorage.setItem('crewai-input-mode', mode);
+    set({ inputMode: mode });
+  },
   setCompletedTaskIds: (taskIds) => set({ completedTaskIds: taskIds }),
   setRunHistory: (history) => set({ runHistory: history }),
   setUserActive: (active) => set({ userActive: active }),
@@ -149,7 +165,7 @@ export const useCrewExecutionStore = create<CrewExecutionState>((set, get) => ({
 
   // Execution methods
   executeCrew: async (nodes, edges) => {
-    const { selectedModel, planningEnabled, planningLLM, reasoningEnabled, reasoningLLM, schemaDetectionEnabled } = get();
+    const { selectedModel, planningEnabled, planningLLM, reasoningEnabled, reasoningLLM, schemaDetectionEnabled, inputVariables } = get();
     set({ isExecuting: true });
 
     try {
@@ -174,13 +190,15 @@ export const useCrewExecutionStore = create<CrewExecutionState>((set, get) => ({
       );
 
       // Prepare additionalInputs with planning_llm and reasoning_llm if enabled
-      const additionalInputs: Record<string, unknown> = {};
+      const additionalInputs: Record<string, unknown> = { ...inputVariables };
       if (planningEnabled && planningLLM) {
         additionalInputs.planning_llm = planningLLM;
       }
       if (reasoningEnabled && reasoningLLM) {
         additionalInputs.reasoning_llm = reasoningLLM;
       }
+      
+      console.log('[CrewExecution] Executing with inputs:', additionalInputs);
 
       const response = await jobExecutionService.executeJob(
         nodes,
@@ -471,21 +489,97 @@ export const useCrewExecutionStore = create<CrewExecutionState>((set, get) => ({
 
   handleRunClick: async (type) => {
     const state = get();
-    set({ isExecuting: true });
-
-    try {
-      if (type === 'crew') {
-        await state.executeCrew(state.nodes, state.edges);
-      } else {
-        await state.executeFlow(state.nodes, state.edges);
+    
+    console.log('[CrewExecution] handleRunClick called with type:', type);
+    console.log('[CrewExecution] Current nodes:', state.nodes);
+    
+    // Check if we need to show input variables dialog
+    const variablePattern = /\{([^}]+)\}/g;
+    const hasVariables = state.nodes.some(node => {
+      if (node.type === 'agentNode' || node.type === 'taskNode') {
+        const data = node.data as Record<string, unknown>;
+        const fieldsToCheck = [
+          data.role,
+          data.goal,
+          data.backstory,
+          data.description,
+          data.expected_output,
+          data.label
+        ];
+        
+        console.log('[CrewExecution] Checking node:', node.id, 'type:', node.type);
+        console.log('[CrewExecution] Node data:', data);
+        
+        const hasVar = fieldsToCheck.some(field => {
+          if (field && typeof field === 'string') {
+            console.log('[CrewExecution] Checking field:', field);
+            // Reset regex lastIndex to ensure proper matching
+            variablePattern.lastIndex = 0;
+            const matches = variablePattern.test(field);
+            if (matches) {
+              console.log('[CrewExecution] Found variable in field:', field);
+            }
+            return matches;
+          }
+          return false;
+        });
+        
+        if (hasVar) {
+          console.log('[CrewExecution] Node has variables:', node.id);
+        }
+        
+        return hasVar;
       }
-    } catch (error) {
-      set({ 
-        errorMessage: error instanceof Error ? error.message : 'Failed to execute',
-        showError: true 
-      });
-    } finally {
-      set({ isExecuting: false });
+      return false;
+    });
+    
+    console.log('[CrewExecution] Has variables:', hasVariables);
+    console.log('[CrewExecution] Input mode:', state.inputMode);
+
+    if (hasVariables) {
+      if (state.inputMode === 'dialog') {
+        // Show the input variables dialog instead of executing immediately
+        set({ showInputVariablesDialog: true });
+        // Store the execution type for later use
+        (window as Window & { __pendingExecutionType?: string }).__pendingExecutionType = type;
+      } else {
+        // Chat mode: Will be handled by chat interface
+        console.log('[CrewExecution] Chat mode selected - variables will be collected via chat');
+        // For now, execute without variables - chat collection will be implemented next
+        set({ isExecuting: true });
+        try {
+          if (type === 'crew') {
+            await state.executeCrew(state.nodes, state.edges);
+          } else {
+            await state.executeFlow(state.nodes, state.edges);
+          }
+        } catch (error) {
+          set({ 
+            errorMessage: error instanceof Error ? error.message : 'Failed to execute',
+            showError: true 
+          });
+        } finally {
+          set({ isExecuting: false });
+        }
+      }
+    } else {
+      // No variables, execute immediately
+      set({ isExecuting: true });
+
+      try {
+        if (type === 'crew') {
+          await state.executeCrew(state.nodes, state.edges);
+        } else {
+          await state.executeFlow(state.nodes, state.edges);
+        }
+      } catch (error) {
+        set({ 
+          errorMessage: error instanceof Error ? error.message : 'Failed to execute',
+          showError: true 
+        });
+      } finally {
+        set({ isExecuting: false });
+      }
     }
   },
 
@@ -545,5 +639,34 @@ export const useCrewExecutionStore = create<CrewExecutionState>((set, get) => ({
   handleCrewSelect: (crew) => {
     console.log('CrewExecutionStore - Handling crew select:', crew);
     // Add any additional crew selection logic here
+  },
+
+  executeWithVariables: async (variables: Record<string, string>) => {
+    const state = get();
+    set({ 
+      inputVariables: variables,
+      showInputVariablesDialog: false,
+      isExecuting: true 
+    });
+
+    try {
+      // Get the pending execution type
+      const windowWithPending = window as Window & { __pendingExecutionType?: string };
+      const executionType = windowWithPending.__pendingExecutionType || 'crew';
+      delete windowWithPending.__pendingExecutionType;
+
+      if (executionType === 'crew') {
+        await state.executeCrew(state.nodes, state.edges);
+      } else {
+        await state.executeFlow(state.nodes, state.edges);
+      }
+    } catch (error) {
+      set({ 
+        errorMessage: error instanceof Error ? error.message : 'Failed to execute',
+        showError: true 
+      });
+    } finally {
+      set({ isExecuting: false });
+    }
   }
 })); 
