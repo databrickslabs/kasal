@@ -18,7 +18,7 @@ from src.utils.user_context import GroupContext
 
 logger = logging.getLogger(__name__)
 
-async def run_crew(execution_id: str, crew: Crew, running_jobs: Dict, group_context: GroupContext = None, user_token: str = None) -> None:
+async def run_crew(execution_id: str, crew: Crew, running_jobs: Dict, group_context: GroupContext = None, user_token: str = None, config: Dict[str, Any] = None) -> None:
     """
     Run the crew in a separate task, ensuring final status update
     occurs within its own database session scope.
@@ -29,6 +29,7 @@ async def run_crew(execution_id: str, crew: Crew, running_jobs: Dict, group_cont
         running_jobs: Dictionary tracking running jobs
         group_context: Group context for logging isolation
         user_token: User access token for OAuth authentication
+        config: Execution configuration containing inputs
     """
     # Set user context for this execution to enable OAuth authentication in tools
     if user_token or group_context:
@@ -262,9 +263,27 @@ async def run_crew(execution_id: str, crew: Crew, running_jobs: Dict, group_cont
                         message=attempt_msg
                     )
                 
+                # Extract user inputs from config if available
+                user_inputs = {}
+                if config and 'inputs' in config:
+                    # Separate user-provided inputs from system inputs
+                    all_inputs = config.get('inputs', {})
+                    logger.info(f"All inputs received in execution_runner: {all_inputs}")
+                    # System inputs that should not be passed to crew.kickoff
+                    system_inputs = {'tools', 'planning_llm', 'reasoning_llm', 'process', 'max_rpm', 'planning', 'reasoning'}
+                    # Filter out system inputs to get only user-provided inputs
+                    user_inputs = {k: v for k, v in all_inputs.items() if k not in system_inputs}
+                    if user_inputs:
+                        logger.info(f"Passing user inputs to crew.kickoff: {user_inputs}")
+                    else:
+                        logger.info("No user inputs found after filtering system inputs")
+                
                 # Run the potentially blocking crew.kickoff() in a separate thread
                 # to avoid blocking the asyncio event loop
-                result = await asyncio.to_thread(crew.kickoff)
+                if user_inputs:
+                    result = await asyncio.to_thread(crew.kickoff, inputs=user_inputs)
+                else:
+                    result = await asyncio.to_thread(crew.kickoff)
             
             # If kickoff successful, prepare for COMPLETED status
             final_status = ExecutionStatus.COMPLETED.value

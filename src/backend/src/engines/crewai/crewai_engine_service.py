@@ -203,7 +203,8 @@ class CrewAIEngineService(BaseEngineService):
                 crew=crew,
                 running_jobs=self._running_jobs,
                 group_context=group_context,
-                user_token=user_token
+                user_token=user_token,
+                config=execution_config
             ))
             
             # Store job info
