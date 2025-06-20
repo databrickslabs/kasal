@@ -406,15 +406,18 @@ async def create_task(
                                 wrapped_tool = create_crewai_tool_from_mcp(tool)
                             
                                 # Add server name to tool name for identification
-                                if hasattr(tool, 'name'):
-                                    original_name = tool.name
-                                    # Avoid duplicate prefixes
-                                    if not original_name.startswith(f"{server_detail.name}_"):
-                                        tool.name = f"{server_detail.name}_{original_name}"
+                                tool_name = tool.get('name', 'unknown') if isinstance(tool, dict) else getattr(tool, 'name', 'unknown')
+                                # Avoid duplicate prefixes
+                                if not tool_name.startswith(f"{server_detail.name}_"):
+                                    prefixed_name = f"{server_detail.name}_{tool_name}"
+                                    # Update the wrapped tool's name
+                                    if hasattr(wrapped_tool, 'name'):
+                                        wrapped_tool.name = prefixed_name
                             
                                 # Add tool to task tools
                                 task_tools.append(wrapped_tool)
-                                logger.info(f"Added Streamable tool '{tool.name}' from server '{server_detail.name}' to task {task_key}")
+                                final_tool_name = prefixed_name if not tool_name.startswith(f"{server_detail.name}_") else tool_name
+                                logger.info(f"Added Streamable tool '{final_tool_name}' from server '{server_detail.name}' to task {task_key}")
                         except Exception as e:
                             logger.error(f"Error creating Streamable adapter for server '{server_detail.name}': {str(e)}")
                     
