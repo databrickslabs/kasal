@@ -28,6 +28,8 @@ import ChevronLeftIcon from '@mui/icons-material/ChevronLeft';
 import TerminalIcon from '@mui/icons-material/Terminal';
 import DispatcherService, { DispatchResult, ConfigureCrewResult } from '../../api/DispatcherService';
 import { useWorkflowStore } from '../../store/workflow';
+import { useCrewExecutionStore } from '../../store/crewExecution';
+import { Node as FlowNode } from 'reactflow';
 import { ChatHistoryService } from '../../api/ChatHistoryService';
 import { ModelService } from '../../api/ModelService';
 import TraceService from '../../api/TraceService';
@@ -82,9 +84,17 @@ const WorkflowChat: React.FC<WorkflowChatProps> = ({
   const [isLoadingModels, setIsLoadingModels] = useState(false);
   const [modelMenuAnchor, setModelMenuAnchor] = useState<null | HTMLElement>(null);
   
+  // Variable collection state
+  const [isCollectingVariables, setIsCollectingVariables] = useState(false);
+  const [variablesToCollect, setVariablesToCollect] = useState<string[]>([]);
+  const [collectedVariables, setCollectedVariables] = useState<Record<string, string>>({});
+  const [currentVariableIndex, setCurrentVariableIndex] = useState(0);
+  const [pendingExecutionType, setPendingExecutionType] = useState<'crew' | 'flow'>('crew');
+  
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
   const { setNodes, setEdges } = useWorkflowStore();
+  const { setInputMode, inputMode, setInputVariables, executeCrew, executeFlow } = useCrewExecutionStore();
   const uiLayoutState = useUILayoutState();
   
   // Create enhanced layout manager instance
@@ -127,6 +137,38 @@ const WorkflowChat: React.FC<WorkflowChatProps> = ({
   
   const scrollToBottom = () => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+  };
+
+  // Extract variables from nodes
+  const extractVariablesFromNodes = (workflowNodes: FlowNode[]): string[] => {
+    const variablePattern = /\{([^}]+)\}/g;
+    const foundVariables = new Set<string>();
+
+    workflowNodes.forEach(node => {
+      if (node.type === 'agentNode' || node.type === 'taskNode') {
+        const data = node.data as Record<string, unknown>;
+        const fieldsToCheck = [
+          data.role,
+          data.goal,
+          data.backstory,
+          data.description,
+          data.expected_output,
+          data.label
+        ];
+
+        fieldsToCheck.forEach(field => {
+          if (field && typeof field === 'string') {
+            let match;
+            variablePattern.lastIndex = 0;
+            while ((match = variablePattern.exec(field)) !== null) {
+              foundVariables.add(match[1]);
+            }
+          }
+        });
+      }
+    });
+
+    return Array.from(foundVariables);
   };
 
   // Update layout manager when UI state changes
@@ -266,6 +308,78 @@ const WorkflowChat: React.FC<WorkflowChatProps> = ({
   const handleSendMessage = async () => {
     if (!inputValue.trim() || isLoading) return;
 
+    // Check if we're collecting variables
+    if (isCollectingVariables && variablesToCollect.length > 0 && currentVariableIndex < variablesToCollect.length) {
+      const currentVariable = variablesToCollect[currentVariableIndex];
+      const value = inputValue.trim();
+      
+      // Save user's response
+      const userMessage: ChatMessage = {
+        id: `msg-${Date.now()}`,
+        type: 'user',
+        content: inputValue,
+        timestamp: new Date(),
+      };
+      setMessages(prev => [...prev, userMessage]);
+      setInputValue('');
+      saveMessageToBackend(userMessage);
+      
+      // Store the collected variable
+      const updatedVariables = { ...collectedVariables, [currentVariable]: value };
+      setCollectedVariables(updatedVariables);
+      
+      // Check if we have more variables to collect
+      if (currentVariableIndex + 1 < variablesToCollect.length) {
+        // Ask for the next variable
+        setCurrentVariableIndex(currentVariableIndex + 1);
+        const nextVariable = variablesToCollect[currentVariableIndex + 1];
+        
+        const promptMessage: ChatMessage = {
+          id: `msg-${Date.now() + 1}`,
+          type: 'assistant',
+          content: `Please provide a value for **{${nextVariable}}**:`,
+          timestamp: new Date(),
+        };
+        setMessages(prev => [...prev, promptMessage]);
+        saveMessageToBackend(promptMessage);
+      } else {
+        // All variables collected, execute the crew
+        setIsCollectingVariables(false);
+        setInputVariables(updatedVariables);
+        
+        const confirmMessage: ChatMessage = {
+          id: `msg-${Date.now() + 1}`,
+          type: 'assistant',
+          content: `✅ All variables collected! Executing ${pendingExecutionType} with:\n${Object.entries(updatedVariables).map(([k, v]) => `- **{${k}}**: ${v}`).join('\n')}`,
+          timestamp: new Date(),
+        };
+        setMessages(prev => [...prev, confirmMessage]);
+        saveMessageToBackend(confirmMessage);
+        
+        // Execute with the collected variables
+        const pendingMessage: ChatMessage = {
+          id: `exec-pending-${Date.now()}`,
+          type: 'execution',
+          content: `⏳ Preparing to execute ${pendingExecutionType}...`,
+          timestamp: new Date(),
+        };
+        setMessages(prev => [...prev, pendingMessage]);
+        
+        if (pendingExecutionType === 'crew') {
+          await executeCrew(nodes, edges);
+        } else {
+          await executeFlow(nodes, edges);
+        }
+        
+        // Reset collection state
+        setVariablesToCollect([]);
+        setCollectedVariables({});
+        setCurrentVariableIndex(0);
+      }
+      
+      return;
+    }
+
     // Check if user is responding to execution prompt
     const lastMessage = messages[messages.length - 1];
     const isExecutionPromptResponse = lastMessage?.type === 'assistant' && 
@@ -286,15 +400,37 @@ const WorkflowChat: React.FC<WorkflowChatProps> = ({
       saveMessageToBackend(userMessage);
       
       if (response === 'yes' || response === 'y' || response === 'yeah' || response === 'sure' || response === 'ok' || response === 'okay') {
-        if (hasCrewContent(nodes) && onExecuteCrew) {
-          const pendingMessage: ChatMessage = {
-            id: `exec-pending-${Date.now()}`,
-            type: 'execution',
-            content: `⏳ Preparing to execute crew...`,
-            timestamp: new Date(),
-          };
-          setMessages(prev => [...prev, pendingMessage]);
-          onExecuteCrew();
+        if (hasCrewContent(nodes)) {
+          // Check if we need to collect variables
+          const variables = extractVariablesFromNodes(nodes);
+          
+          if (variables.length > 0 && inputMode === 'chat') {
+            // Start variable collection in chat mode
+            setIsCollectingVariables(true);
+            setVariablesToCollect(variables);
+            setCollectedVariables({});
+            setCurrentVariableIndex(0);
+            setPendingExecutionType('crew');
+            
+            const introMessage: ChatMessage = {
+              id: `msg-${Date.now() + 1}`,
+              type: 'assistant',
+              content: `I need to collect values for ${variables.length} variable${variables.length > 1 ? 's' : ''} in your workflow.\n\nPlease provide a value for **{${variables[0]}}**:`,
+              timestamp: new Date(),
+            };
+            setMessages(prev => [...prev, introMessage]);
+            saveMessageToBackend(introMessage);
+          } else if (onExecuteCrew) {
+            // No variables or dialog mode, execute normally
+            const pendingMessage: ChatMessage = {
+              id: `exec-pending-${Date.now()}`,
+              type: 'execution',
+              content: `⏳ Preparing to execute crew...`,
+              timestamp: new Date(),
+            };
+            setMessages(prev => [...prev, pendingMessage]);
+            onExecuteCrew();
+          }
         }
       } else {
         const responseMessage: ChatMessage = {
@@ -306,6 +442,58 @@ const WorkflowChat: React.FC<WorkflowChatProps> = ({
         setMessages(prev => [...prev, responseMessage]);
         saveMessageToBackend(responseMessage);
       }
+      return;
+    }
+
+    // Check if user wants to change input mode
+    const lowerInput = inputValue.trim().toLowerCase();
+    if (lowerInput === 'input mode dialog' || lowerInput === 'input dialog') {
+      const userMessage: ChatMessage = {
+        id: `msg-${Date.now()}`,
+        type: 'user',
+        content: inputValue,
+        timestamp: new Date(),
+      };
+      
+      setMessages(prev => [...prev, userMessage]);
+      setInputValue('');
+      saveMessageToBackend(userMessage);
+      
+      setInputMode('dialog');
+      
+      const responseMessage: ChatMessage = {
+        id: `msg-${Date.now() + 1}`,
+        type: 'assistant',
+        content: '✅ Input mode changed to Dialog. When executing workflows with variables, a popup dialog will appear to collect all values at once.',
+        timestamp: new Date(),
+      };
+      setMessages(prev => [...prev, responseMessage]);
+      saveMessageToBackend(responseMessage);
+      return;
+    }
+    
+    if (lowerInput === 'input mode chat' || lowerInput === 'input chat') {
+      const userMessage: ChatMessage = {
+        id: `msg-${Date.now()}`,
+        type: 'user',
+        content: inputValue,
+        timestamp: new Date(),
+      };
+      
+      setMessages(prev => [...prev, userMessage]);
+      setInputValue('');
+      saveMessageToBackend(userMessage);
+      
+      setInputMode('chat');
+      
+      const responseMessage: ChatMessage = {
+        id: `msg-${Date.now() + 1}`,
+        type: 'assistant',
+        content: '✅ Input mode changed to Chat. When executing workflows with variables, I will guide you through providing values one by one in the chat.',
+        timestamp: new Date(),
+      };
+      setMessages(prev => [...prev, responseMessage]);
+      saveMessageToBackend(responseMessage);
       return;
     }
 
@@ -395,16 +583,38 @@ const WorkflowChat: React.FC<WorkflowChatProps> = ({
         return;
       }
       
-      if (hasCrewContent(nodes) && onExecuteCrew) {
-        const pendingMessage: ChatMessage = {
-          id: `exec-pending-${Date.now()}`,
-          type: 'execution',
-          content: `⏳ Preparing to execute crew...`,
-          timestamp: new Date(),
-        };
-        setMessages(prev => [...prev, pendingMessage]);
+      if (hasCrewContent(nodes)) {
+        // Check if we need to collect variables
+        const variables = extractVariablesFromNodes(nodes);
         
-        onExecuteCrew();
+        if (variables.length > 0 && inputMode === 'chat') {
+          // Start variable collection in chat mode
+          setIsCollectingVariables(true);
+          setVariablesToCollect(variables);
+          setCollectedVariables({});
+          setCurrentVariableIndex(0);
+          setPendingExecutionType('crew');
+          
+          const introMessage: ChatMessage = {
+            id: `msg-${Date.now() + 1}`,
+            type: 'assistant',
+            content: `I need to collect values for ${variables.length} variable${variables.length > 1 ? 's' : ''} in your workflow.\n\nPlease provide a value for **{${variables[0]}}**:`,
+            timestamp: new Date(),
+          };
+          setMessages(prev => [...prev, introMessage]);
+          saveMessageToBackend(introMessage);
+        } else if (onExecuteCrew) {
+          // No variables or dialog mode, execute normally
+          const pendingMessage: ChatMessage = {
+            id: `exec-pending-${Date.now()}`,
+            type: 'execution',
+            content: `⏳ Preparing to execute crew...`,
+            timestamp: new Date(),
+          };
+          setMessages(prev => [...prev, pendingMessage]);
+          
+          onExecuteCrew();
+        }
         return;
       }
       

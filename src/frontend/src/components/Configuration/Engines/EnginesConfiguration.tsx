@@ -8,15 +8,23 @@ import {
   Divider,
   Alert,
   Stack,
-  CircularProgress
+  CircularProgress,
+  RadioGroup,
+  Radio,
+  FormControl,
+  FormLabel
 } from '@mui/material';
 import EngineeringIcon from '@mui/icons-material/Engineering';
 import SmartToyIcon from '@mui/icons-material/SmartToy';
+import InputIcon from '@mui/icons-material/Input';
+import ChatIcon from '@mui/icons-material/Chat';
 import { useFlowConfigStore } from '../../../store/flowConfig';
 import { EngineConfigService } from '../../../api/EngineConfigService';
+import { useCrewExecutionStore } from '../../../store/crewExecution';
 
 const EnginesConfiguration: React.FC = () => {
   const { crewAIFlowEnabled, setCrewAIFlowEnabled } = useFlowConfigStore();
+  const { inputMode, setInputMode } = useCrewExecutionStore();
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [syncing, setSyncing] = useState(false);
@@ -152,6 +160,71 @@ const EnginesConfiguration: React.FC = () => {
               </ul>
             </Alert>
           )}
+        </Stack>
+      </Paper>
+
+      {/* Input Variables Collection Mode */}
+      <Paper elevation={1} sx={{ p: 3, mt: 3 }}>
+        <Stack spacing={2}>
+          <Box sx={{ display: 'flex', alignItems: 'center', mb: 2 }}>
+            <SmartToyIcon sx={{ mr: 1, color: 'primary.main', fontSize: '1.2rem' }} />
+            <Typography variant="subtitle1" fontWeight="medium">
+              Input Variables Collection
+            </Typography>
+          </Box>
+
+          <FormControl component="fieldset">
+            <FormLabel component="legend">
+              <Typography variant="body2" color="text.secondary" sx={{ mb: 1 }}>
+                Choose how to collect input variables when executing workflows with variables
+              </Typography>
+            </FormLabel>
+            <RadioGroup
+              value={inputMode}
+              onChange={(e) => setInputMode(e.target.value as 'dialog' | 'chat')}
+            >
+              <FormControlLabel
+                value="dialog"
+                control={<Radio color="primary" />}
+                label={
+                  <Box sx={{ display: 'flex', alignItems: 'center' }}>
+                    <InputIcon sx={{ mr: 1, fontSize: '1rem' }} />
+                    <Box>
+                      <Typography variant="body2" fontWeight="medium">
+                        Dialog Mode
+                      </Typography>
+                      <Typography variant="caption" color="text.secondary">
+                        Show a popup dialog to collect all variable values before execution
+                      </Typography>
+                    </Box>
+                  </Box>
+                }
+              />
+              <FormControlLabel
+                value="chat"
+                control={<Radio color="primary" />}
+                label={
+                  <Box sx={{ display: 'flex', alignItems: 'center' }}>
+                    <ChatIcon sx={{ mr: 1, fontSize: '1rem' }} />
+                    <Box>
+                      <Typography variant="body2" fontWeight="medium">
+                        Chat Mode
+                      </Typography>
+                      <Typography variant="caption" color="text.secondary">
+                        Collect variable values through conversational prompts in the chat (Coming Soon)
+                      </Typography>
+                    </Box>
+                  </Box>
+                }
+              />
+            </RadioGroup>
+          </FormControl>
+
+          <Alert severity="info" sx={{ mt: 2 }}>
+            {inputMode === 'dialog' 
+              ? 'When variables are detected in your workflow, a dialog will appear to collect all values at once.'
+              : 'When variables are detected, the chat will guide you through providing values one by one.'}
+          </Alert>
         </Stack>
       </Paper>
     </Box>
