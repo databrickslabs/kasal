@@ -856,13 +856,72 @@ class ToolFactory:
                 default_schema = tool_config.get('schema')
                 default_warehouse_id = tool_config.get('warehouse_id')
                 
-                # Create the tool with parameters
+                # Get DATABRICKS_HOST from tool_config or environment
+                databricks_host = tool_config.get('DATABRICKS_HOST')
+                
+                # If DATABRICKS_HOST is not in tool_config, try to get it from environment or DatabricksService
+                if not databricks_host:
+                    # First try environment variable
+                    databricks_host = os.environ.get('DATABRICKS_HOST')
+                    
+                    # If not in environment, try to get from DatabricksService
+                    if not databricks_host:
+                        try:
+                            # Try to get from DatabricksService configuration
+                            from src.services.databricks_service import DatabricksService
+                            from src.core.unit_of_work import UnitOfWork
+                            
+                            async def get_databricks_config():
+                                async with UnitOfWork() as uow:
+                                    service = await DatabricksService.from_unit_of_work(uow)
+                                    config = await service.get_databricks_config()
+                                    if config and config.workspace_url:
+                                        workspace_url = config.workspace_url.rstrip('/')
+                                        if not workspace_url.startswith('https://'):
+                                            workspace_url = f"https://{workspace_url}"
+                                        return workspace_url
+                                return None
+                            
+                            # Execute the async function
+                            try:
+                                # Check if we're in an async context
+                                asyncio.get_running_loop()
+                                # Use ThreadPoolExecutor to call async method from sync context
+                                import concurrent.futures
+                                with concurrent.futures.ThreadPoolExecutor() as pool:
+                                    databricks_host = pool.submit(
+                                        self._run_in_new_loop,
+                                        get_databricks_config
+                                    ).result()
+                            except RuntimeError:
+                                # Not in async context
+                                loop = asyncio.new_event_loop()
+                                try:
+                                    asyncio.set_event_loop(loop)
+                                    databricks_host = loop.run_until_complete(get_databricks_config())
+                                finally:
+                                    loop.close()
+                                    
+                            if databricks_host:
+                                logger.info(f"Retrieved DATABRICKS_HOST from DatabricksService: {databricks_host}")
+                            else:
+                                logger.warning("Could not retrieve DATABRICKS_HOST from DatabricksService")
+                                
+                        except Exception as e:
+                            logger.error(f"Error getting DATABRICKS_HOST from service: {e}")
+                
+                # Create the tool with parameters, including DATABRICKS_HOST if available
                 tool_config_with_defaults = {
                     'default_catalog': default_catalog,
                     'default_schema': default_schema,
                     'default_warehouse_id': default_warehouse_id,
                     'result_as_answer': result_as_answer
                 }
+                
+                # Add DATABRICKS_HOST to tool config if we have it
+                if databricks_host:
+                    tool_config_with_defaults['databricks_host'] = databricks_host
+                    logger.info(f"Added DATABRICKS_HOST to tool config: {databricks_host}")
                 
                 logger.info(f"Creating DatabricksCustomTool with config: {tool_config_with_defaults}")
                 return tool_class(**tool_config_with_defaults)

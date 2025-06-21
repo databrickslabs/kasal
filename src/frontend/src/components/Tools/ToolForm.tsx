@@ -53,7 +53,9 @@ const toolIcons: ToolIcon[] = [
 // Custom tools from tool_factory.py
 const customTools = [
   'GenieTool', 
-  'PerplexityTool'
+  'PerplexityTool',
+  'DatabricksCustomTool',
+  'PythonPPTXTool'
 ];
 
 const convertServiceToolToTool = (serviceTool: ServiceTool): Tool => {

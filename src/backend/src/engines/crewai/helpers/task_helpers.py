@@ -16,7 +16,7 @@ from crewai.tasks.task_output import TaskOutput
 
 from src.core.logger import LoggerManager
 from src.engines.crewai.helpers.tool_helpers import resolve_tool_ids_to_names
-from src.core.unit_of_work import SyncUnitOfWork
+from src.core.unit_of_work import UnitOfWork
 
 
 # Get loggers from the centralized logging system
@@ -49,7 +49,7 @@ def is_data_missing(output: TaskOutput) -> bool:
     logger.info(f"Is data missing? {result}")
     return result
 
-def get_pydantic_class_from_name(schema_name: str) -> Optional[Type[BaseModel]]:
+async def get_pydantic_class_from_name(schema_name: str) -> Optional[Type[BaseModel]]:
     """
     Get a Pydantic model class by its name from the schema database.
     
@@ -62,14 +62,10 @@ def get_pydantic_class_from_name(schema_name: str) -> Optional[Type[BaseModel]]:
     logger.info(f"Looking up schema '{schema_name}' in the database")
     
     try:
-        # Get the unit of work and initialize it if needed
-        uow = SyncUnitOfWork.get_instance()
-        if not getattr(uow, '_initialized', False):
-            uow.initialize()
-            logger.info("Initialized UnitOfWork for schema lookup")
-            
-        # Look up the schema in the database
-        schema = uow.schema_repository.find_by_name_sync(schema_name)
+        # Use async unit of work
+        async with UnitOfWork() as uow:
+            # Look up the schema in the database
+            schema = await uow.schema_repository.find_by_name(schema_name)
         if not schema:
             logger.warning(f"Schema '{schema_name}' not found in database")
             return None
@@ -146,7 +142,6 @@ def get_pydantic_class_from_name(schema_name: str) -> Optional[Type[BaseModel]]:
         logger.error(f"Stack trace: {traceback.format_exc()}")
         return None
     finally:
-        # Don't close the UnitOfWork here as it's a singleton
         pass
 
 async def create_task(
@@ -662,7 +657,7 @@ async def create_task(
         logger.info(f"Task {task_key} has output_pydantic: {output_pydantic_name}")
         
         # Look up the Pydantic model class
-        pydantic_class = get_pydantic_class_from_name(output_pydantic_name)
+        pydantic_class = await get_pydantic_class_from_name(output_pydantic_name)
         if pydantic_class:
             logger.info(f"Using Pydantic model class {pydantic_class.__name__} for output_pydantic")
             

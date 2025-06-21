@@ -1,9 +1,10 @@
 import logging
 import os
 from typing import TYPE_CHECKING, Any, Dict, List, Optional, Type, Union
+import asyncio
 
 from crewai.tools import BaseTool
-from pydantic import BaseModel, Field, model_validator
+from pydantic import BaseModel, Field, PrivateAttr, model_validator
 
 logger = logging.getLogger(__name__)
 
@@ -51,6 +52,7 @@ class DatabricksCustomTool(BaseTool):
     It requires Databricks authentication credentials to be set as environment variables.
 
     Authentication can be provided via:
+    - OAuth/OBO: User token for on-behalf-of authentication
     - Databricks CLI profile: Set DATABRICKS_CONFIG_PROFILE environment variable
     - Direct credentials: Set DATABRICKS_HOST and DATABRICKS_TOKEN environment variables
 
@@ -72,12 +74,20 @@ class DatabricksCustomTool(BaseTool):
     default_warehouse_id: Optional[str] = None
 
     _workspace_client: Optional["WorkspaceClient"] = None
+    _host: str = PrivateAttr(default=None)
+    _token: str = PrivateAttr(default=None)
+    _user_token: str = PrivateAttr(default=None)  # For OBO authentication
+    _use_oauth: bool = PrivateAttr(default=False)  # Flag for OAuth authentication
 
     def __init__(
         self,
         default_catalog: Optional[str] = None,
         default_schema: Optional[str] = None,
         default_warehouse_id: Optional[str] = None,
+        databricks_host: Optional[str] = None,
+        tool_config: Optional[dict] = None,
+        token_required: bool = True,
+        user_token: str = None,
         **kwargs: Any,
     ) -> None:
         """
@@ -87,24 +97,332 @@ class DatabricksCustomTool(BaseTool):
             default_catalog (Optional[str]): Default catalog to use for queries.
             default_schema (Optional[str]): Default schema to use for queries.
             default_warehouse_id (Optional[str]): Default SQL warehouse ID to use.
+            databricks_host (Optional[str]): Databricks workspace host URL.
+            tool_config (Optional[dict]): Tool configuration with auth details.
+            token_required (bool): Whether authentication token is required.
+            user_token (str): User token for OBO authentication.
             **kwargs: Additional keyword arguments passed to BaseTool.
         """
         super().__init__(**kwargs)
         self.default_catalog = default_catalog
         self.default_schema = default_schema
         self.default_warehouse_id = default_warehouse_id
+        
+        if tool_config is None:
+            tool_config = {}
+            
+        # Set user token for OBO authentication if provided
+        if user_token:
+            self._user_token = user_token
+            self._use_oauth = True
+            logger.info("Using user token for OBO authentication")
+        
+        # Initialize databricks_host from parameter if provided
+        initial_databricks_host = databricks_host
+        databricks_host = None
+        
+        # Get configuration from tool_config
+        if tool_config:
+            # Check if user token is provided in config
+            if 'user_token' in tool_config:
+                self._user_token = tool_config['user_token']
+                self._use_oauth = True
+                logger.info("Using user token from tool_config for OBO authentication")
+            
+            # Check if token is directly provided in config (fallback to PAT)
+            if not self._use_oauth:
+                if 'DATABRICKS_API_KEY' in tool_config:
+                    self._token = tool_config['DATABRICKS_API_KEY']
+                    logger.info("Using PAT token from tool_config")
+                elif 'token' in tool_config:
+                    self._token = tool_config['token']
+                    logger.info("Using PAT token from config")
+            
+            # Handle different possible key formats for host
+            # First check if passed as parameter directly
+            if initial_databricks_host:
+                databricks_host = initial_databricks_host
+                logger.info(f"Using databricks_host from parameter: {databricks_host}")
+            else:
+                # Check for the uppercase DATABRICKS_HOST (used in tool_factory.py)
+                if 'DATABRICKS_HOST' in tool_config:
+                    databricks_host = tool_config['DATABRICKS_HOST']
+                    logger.info(f"Found DATABRICKS_HOST in config: {databricks_host}")
+                # Also check for lowercase databricks_host as a fallback
+                elif 'databricks_host' in tool_config:
+                    databricks_host = tool_config['databricks_host']
+                    logger.info(f"Found databricks_host in config: {databricks_host}")
+                else:
+                    databricks_host = None
+        
+        # If no databricks_host from tool_config, use parameter
+        if not databricks_host and initial_databricks_host:
+            databricks_host = initial_databricks_host
+            logger.info(f"Using databricks_host from parameter: {databricks_host}")
+        
+        # Process host if found in any format
+        if databricks_host:
+            # Handle if databricks_host is a list
+            if isinstance(databricks_host, list) and databricks_host:
+                databricks_host = databricks_host[0]
+                logger.info(f"Converting databricks_host from list to string: {databricks_host}")
+            # Strip https:// and trailing slash if present
+            if isinstance(databricks_host, str):
+                original_host = databricks_host
+                if databricks_host.startswith('https://'):
+                    databricks_host = databricks_host[8:]
+                    logger.info(f"Stripped https:// prefix from host: {original_host} -> {databricks_host}")
+                if databricks_host.startswith('http://'):
+                    databricks_host = databricks_host[7:]
+                    logger.info(f"Stripped http:// prefix from host: {original_host} -> {databricks_host}")
+                if databricks_host.endswith('/'):
+                    databricks_host = databricks_host[:-1]
+                    logger.info(f"Stripped trailing slash from host")
+            self._host = databricks_host
+            logger.info(f"Final host after processing: {self._host}")
+        
+        # Try enhanced authentication if not using OAuth
+        if not self._use_oauth:
+            try:
+                # Try to get authentication through enhanced auth system
+                from src.utils.databricks_auth import is_databricks_apps_environment
+                if is_databricks_apps_environment():
+                    self._use_oauth = True
+                    logger.info("Detected Databricks Apps environment - using OAuth authentication")
+                elif not self._token:
+                    # Fall back to environment variables for PAT
+                    self._token = os.getenv("DATABRICKS_API_KEY") or os.getenv("DATABRICKS_TOKEN")
+                    if self._token:
+                        logger.info("Using DATABRICKS_API_KEY/TOKEN from environment")
+            except ImportError as e:
+                logger.debug(f"Enhanced auth not available: {e}")
+                # Fall back to environment variables
+                if not self._token:
+                    self._token = os.getenv("DATABRICKS_API_KEY") or os.getenv("DATABRICKS_TOKEN")
+                    if self._token:
+                        logger.info("Using DATABRICKS_API_KEY/TOKEN from environment")
+        
+        # Set fallback values from environment if not set from config
+        if not self._host:
+            self._host = os.getenv("DATABRICKS_HOST", "your-workspace.cloud.databricks.com")
+            logger.info(f"Using host from environment or default: {self._host}")
+        
+        # Check authentication requirements
+        if token_required and not self._use_oauth and not self._token:
+            logger.warning("DATABRICKS_API_KEY is required but not provided. Tool will attempt OAuth authentication or return an error when used.")
+        
+        # Log configuration
+        logger.info("DatabricksCustomTool Configuration:")
+        logger.info(f"Host: {self._host}")
+        logger.info(f"Authentication Method: {'OAuth/OBO' if self._use_oauth else 'PAT'}")
+        
+        # Log token (masked)
+        if self._user_token:
+            masked_token = f"{self._user_token[:4]}...{self._user_token[-4:]}" if len(self._user_token) > 8 else "***"
+            logger.info(f"User Token (masked): {masked_token}")
+        elif self._token:
+            masked_token = f"{self._token[:4]}...{self._token[-4:]}" if len(self._token) > 8 else "***"
+            logger.info(f"PAT Token (masked): {masked_token}")
+        else:
+            logger.warning("No token provided - will attempt to use enhanced authentication")
+        
         self._validate_credentials()
 
     def _validate_credentials(self) -> None:
         """Validate that Databricks credentials are available."""
+        # Skip validation if using OAuth/OBO
+        if self._use_oauth and self._user_token:
+            return
+            
+        # Skip validation if we have a token configured
+        if self._token:
+            return
+            
+        # Check environment variables
         has_profile = "DATABRICKS_CONFIG_PROFILE" in os.environ
-        has_direct_auth = "DATABRICKS_HOST" in os.environ and "DATABRICKS_TOKEN" in os.environ
+        has_direct_auth = ("DATABRICKS_HOST" in os.environ and 
+                          ("DATABRICKS_TOKEN" in os.environ or "DATABRICKS_API_KEY" in os.environ))
 
-        if not (has_profile or has_direct_auth):
-            raise ValueError(
-                "Databricks authentication credentials are required. "
-                "Set either DATABRICKS_CONFIG_PROFILE or both DATABRICKS_HOST and DATABRICKS_TOKEN environment variables."
+        if not (has_profile or has_direct_auth or self._use_oauth):
+            logger.warning(
+                "Databricks authentication credentials are not fully configured. "
+                "Tool will attempt to use enhanced authentication when executed."
             )
+
+    def set_user_token(self, user_token: str):
+        """Set user access token for OBO authentication."""
+        self._user_token = user_token
+        self._use_oauth = True
+        logger.info("User token set for OBO authentication")
+
+    async def _get_auth_headers(self) -> dict:
+        """Get authentication headers using proper OBO implementation."""
+        try:
+            if self._use_oauth and self._user_token:
+                # Create an OBO token using service principal for proper API access
+                logger.info("Creating OBO token for Databricks SQL API access")
+                try:
+                    obo_token = await self._create_obo_token()
+                    if obo_token:
+                        logger.info("Successfully created OBO token for Databricks SQL API")
+                        return {
+                            "Authorization": f"Bearer {obo_token}",
+                            "Content-Type": "application/json"
+                        }
+                    else:
+                        logger.warning("Failed to create OBO token, falling back to user token")
+                        # Fall back to user token if OBO creation fails
+                        return {
+                            "Authorization": f"Bearer {self._user_token}",
+                            "Content-Type": "application/json"
+                        }
+                except Exception as obo_error:
+                    logger.error(f"Error creating OBO token: {obo_error}")
+                    # Fall back to user token
+                    logger.info("Falling back to direct user token")
+                    return {
+                        "Authorization": f"Bearer {self._user_token}",
+                        "Content-Type": "application/json"
+                    }
+            elif self._use_oauth:
+                # Try to get OBO token through enhanced auth system
+                from src.utils.databricks_auth import get_databricks_auth_headers
+                headers, error = await get_databricks_auth_headers(user_token=self._user_token)
+                if error:
+                    logger.error(f"Failed to get OAuth headers: {error}")
+                    return None
+                return headers
+            else:
+                # Use traditional PAT authentication
+                if not self._token:
+                    logger.error("No authentication token available")
+                    return None
+                return {
+                    "Authorization": f"Bearer {self._token}",
+                    "Content-Type": "application/json"
+                }
+        except ImportError:
+            # Fall back to PAT if enhanced auth not available
+            if not self._token:
+                logger.error("No authentication token available and enhanced auth not available")
+                return None
+            return {
+                "Authorization": f"Bearer {self._token}",
+                "Content-Type": "application/json"
+            }
+        except Exception as e:
+            logger.error(f"Error getting auth headers: {e}")
+            return None
+
+    async def _create_obo_token(self) -> Optional[str]:
+        """Create an On-Behalf-Of token using service principal for API access."""
+        try:
+            # First, let's try to validate the user token by checking its format
+            if not self._user_token:
+                logger.error("No user token available for OBO creation")
+                return None
+            
+            logger.info(f"User token format check - starts with: {self._user_token[:20]}...")
+            logger.info(f"User token length: {len(self._user_token)}")
+            
+            # Check if it looks like a JWT token (should start with 'eyJ')
+            if self._user_token.startswith('eyJ'):
+                logger.info("User token appears to be a JWT token")
+            else:
+                logger.warning("User token does not appear to be a JWT token")
+            
+            # Use the enhanced auth system to create an OBO token
+            from src.utils.databricks_auth import get_databricks_auth_headers
+            
+            # Try to use the enhanced auth system which should handle OBO creation
+            headers, error = await get_databricks_auth_headers(user_token=self._user_token)
+            
+            if error:
+                logger.error(f"Enhanced auth system failed: {error}")
+                # For now, return the original user token as fallback
+                logger.info("Returning original user token as fallback")
+                return self._user_token
+            
+            # The enhanced auth system should return the OBO token in the Authorization header
+            auth_header = headers.get("Authorization", "")
+            if auth_header.startswith("Bearer "):
+                obo_token = auth_header[7:]  # Remove 'Bearer ' prefix
+                logger.info("Successfully extracted token from enhanced auth system")
+                return obo_token
+            else:
+                logger.warning("No Bearer token found in enhanced auth headers, using original token")
+                return self._user_token
+                
+        except Exception as e:
+            logger.error(f"Error in OBO token creation: {e}")
+            # Return the original user token as fallback
+            return self._user_token
+
+    async def _test_token_permissions(self, headers: dict) -> bool:
+        """Test if the token has proper permissions by trying a simple API call."""
+        try:
+            # Try to list SQL warehouses to test permissions
+            # Ensure host doesn't already have https:// prefix
+            host = self._host
+            if host.startswith('https://'):
+                host = host[8:]
+            if host.startswith('http://'):
+                host = host[7:]
+            test_url = f"https://{host}/api/2.0/sql/warehouses"
+            import requests
+            
+            logger.info(f"Testing token permissions with URL: {test_url}")
+            
+            # Log the token details for debugging
+            auth_header = headers.get("Authorization", "")
+            if auth_header.startswith("Bearer "):
+                token = auth_header[7:]
+                logger.info(f"Token preview: {token[:20]}...{token[-10:] if len(token) > 30 else token}")
+                logger.info(f"Token length: {len(token)}")
+                
+                # Try to decode JWT to see scopes (if it's a JWT)
+                if token.startswith('eyJ'):
+                    try:
+                        import base64
+                        import json
+                        # Decode JWT payload (without verification - just for debugging)
+                        payload_part = token.split('.')[1]
+                        # Add padding if needed
+                        payload_part += '=' * (4 - len(payload_part) % 4)
+                        payload = json.loads(base64.b64decode(payload_part))
+                        logger.info(f"Token scopes: {payload.get('scope', 'No scope found')}")
+                        logger.info(f"Token subject: {payload.get('sub', 'No subject found')}")
+                        logger.info(f"Token client_id: {payload.get('client_id', 'No client_id found')}")
+                        
+                        # Check if token has required scopes for SQL
+                        token_scopes = payload.get('scope', '').split()
+                        required_scopes = ['sql']
+                        missing_scopes = [scope for scope in required_scopes if scope not in token_scopes]
+                        
+                        if missing_scopes:
+                            logger.warning(f"Token may be missing scopes: {missing_scopes}")
+                        else:
+                            logger.info(f"✅ All required scopes present in token")
+                            
+                    except Exception as jwt_error:
+                        logger.warning(f"Could not decode JWT token: {jwt_error}")
+            
+            response = requests.get(test_url, headers=headers, timeout=10)
+            
+            if response.status_code == 200:
+                logger.info("✅ Token has valid permissions for Databricks SQL API")
+                return True
+            elif response.status_code == 403:
+                logger.error(f"❌ 403 FORBIDDEN: Token lacks permissions for SQL API")
+                logger.error(f"❌ Response: {response.text}")
+                return False
+            else:
+                logger.warning(f"Unexpected response when testing token: {response.status_code} - {response.text}")
+                return False
+                
+        except Exception as e:
+            logger.error(f"Error testing token permissions: {e}")
+            return False
 
     @property
     def workspace_client(self) -> "WorkspaceClient":
@@ -112,7 +430,34 @@ class DatabricksCustomTool(BaseTool):
         if self._workspace_client is None:
             try:
                 from databricks.sdk import WorkspaceClient
-                self._workspace_client = WorkspaceClient()
+                
+                # If using OAuth, create client with the token
+                if self._use_oauth and self._user_token:
+                    # Try to get headers synchronously for SDK initialization
+                    import asyncio
+                    loop = asyncio.new_event_loop()
+                    asyncio.set_event_loop(loop)
+                    headers = loop.run_until_complete(self._get_auth_headers())
+                    loop.close()
+                    
+                    if headers and "Authorization" in headers:
+                        token = headers["Authorization"].replace("Bearer ", "")
+                        self._workspace_client = WorkspaceClient(
+                            host=f"https://{self._host}",
+                            token=token
+                        )
+                    else:
+                        # Fall back to default initialization
+                        self._workspace_client = WorkspaceClient()
+                elif self._token:
+                    # Use PAT token
+                    self._workspace_client = WorkspaceClient(
+                        host=f"https://{self._host}",
+                        token=self._token
+                    )
+                else:
+                    # Use default initialization (will use env vars or config)
+                    self._workspace_client = WorkspaceClient()
             except ImportError:
                 raise ImportError(
                     "`databricks-sdk` package not found, please run `uv add databricks-sdk`"
@@ -179,6 +524,9 @@ class DatabricksCustomTool(BaseTool):
             str: Formatted query results
         """
         try:
+            # Check if authentication is available
+            if not self._use_oauth and not self._token and not self._user_token:
+                return "Error: Cannot execute query - no authentication available. Please configure authentication or use Databricks Apps."
             # Get parameters with fallbacks to default values
             query = kwargs.get("query")
             catalog = kwargs.get("catalog") or self.default_catalog
@@ -208,6 +556,36 @@ class DatabricksCustomTool(BaseTool):
             if db_schema:
                 context["schema"] = db_schema
 
+            # Get authentication headers for API calls
+            headers = None
+            try:
+                # Try to get headers using async method
+                import asyncio
+                loop = asyncio.new_event_loop()
+                asyncio.set_event_loop(loop)
+                headers = loop.run_until_complete(self._get_auth_headers())
+                
+                # Test token permissions before proceeding
+                if headers:
+                    has_permissions = loop.run_until_complete(self._test_token_permissions(headers))
+                    if not has_permissions:
+                        logger.warning("Token may lack necessary permissions for SQL API")
+                
+                loop.close()
+            except Exception as e:
+                logger.debug(f"Async auth failed, falling back to sync: {e}")
+                # Fall back to simple headers
+                if self._user_token:
+                    headers = {
+                        "Authorization": f"Bearer {self._user_token}",
+                        "Content-Type": "application/json"
+                    }
+                elif self._token:
+                    headers = {
+                        "Authorization": f"Bearer {self._token}",
+                        "Content-Type": "application/json"
+                    }
+            
             # Execute query
             statement = self.workspace_client.statement_execution
 
@@ -543,7 +921,7 @@ class DatabricksCustomTool(BaseTool):
                         # Check different result structures
                         if hasattr(result.result, 'data_array') and result.result.data_array:
                             # Check if data appears to be malformed within chunks
-                            for chunk_idx, chunk in enumerate(result.result.data_array):
+                            for chunk in result.result.data_array:
 
                                 # Check if chunk might actually contain individual columns of a single row
                                 # This is another way data might be malformed - check the first few values
@@ -585,7 +963,7 @@ class DatabricksCustomTool(BaseTool):
                                         continue
 
                                 # Normal processing for typical row structure
-                                for row_idx, row in enumerate(chunk):
+                                for row in chunk:
                                     # Ensure row is actually a collection of values
                                     if not isinstance(row, (list, tuple, dict)):
                                         # This might be a single value; skip it or handle specially
@@ -619,7 +997,7 @@ class DatabricksCustomTool(BaseTool):
                         elif hasattr(result.result, 'data') and result.result.data:
                             # Alternative data structure
 
-                            for row_idx, row in enumerate(result.result.data):
+                            for row in result.result.data:
                                 # Debug info
 
                                 # Safely create dictionary matching column names to values

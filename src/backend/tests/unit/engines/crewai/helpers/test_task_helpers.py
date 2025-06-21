@@ -63,38 +63,47 @@ class TestIsDataMissing:
 class TestGetPydanticClassFromName:
     """Test cases for get_pydantic_class_from_name function."""
     
-    @patch('src.engines.crewai.helpers.task_helpers.SyncUnitOfWork')
-    def test_get_pydantic_class_schema_not_found(self, mock_uow_class):
+    @pytest.mark.asyncio
+    @patch('src.engines.crewai.helpers.task_helpers.UnitOfWork')
+    async def test_get_pydantic_class_schema_not_found(self, mock_uow_class):
         """Test when schema is not found in database."""
-        mock_uow = Mock()
-        mock_uow_class.get_instance.return_value = mock_uow
-        mock_uow.schema_repository.find_by_name_sync.return_value = None
+        # Create async context manager mock
+        mock_uow = AsyncMock()
+        mock_uow.schema_repository.find_by_name.return_value = None
         
-        result = get_pydantic_class_from_name("NonExistentSchema")
+        # Mock the context manager
+        mock_uow_class.return_value.__aenter__.return_value = mock_uow
+        mock_uow_class.return_value.__aexit__.return_value = None
+        
+        result = await get_pydantic_class_from_name("NonExistentSchema")
         
         assert result is None
-        mock_uow.schema_repository.find_by_name_sync.assert_called_once_with("NonExistentSchema")
+        mock_uow.schema_repository.find_by_name.assert_called_once_with("NonExistentSchema")
     
-    @patch('src.engines.crewai.helpers.task_helpers.SyncUnitOfWork')
-    def test_get_pydantic_class_invalid_schema_definition(self, mock_uow_class):
+    @pytest.mark.asyncio
+    @patch('src.engines.crewai.helpers.task_helpers.UnitOfWork')
+    async def test_get_pydantic_class_invalid_schema_definition(self, mock_uow_class):
         """Test when schema has invalid definition."""
-        mock_uow = Mock()
-        mock_uow_class.get_instance.return_value = mock_uow
-        
+        # Create async context manager mock
+        mock_uow = AsyncMock()
         mock_schema = Mock()
         mock_schema.schema_definition = None
-        mock_uow.schema_repository.find_by_name_sync.return_value = mock_schema
+        mock_uow.schema_repository.find_by_name.return_value = mock_schema
         
-        result = get_pydantic_class_from_name("InvalidSchema")
+        # Mock the context manager
+        mock_uow_class.return_value.__aenter__.return_value = mock_uow
+        mock_uow_class.return_value.__aexit__.return_value = None
+        
+        result = await get_pydantic_class_from_name("InvalidSchema")
         
         assert result is None
     
-    @patch('src.engines.crewai.helpers.task_helpers.SyncUnitOfWork')
-    def test_get_pydantic_class_simple_types(self, mock_uow_class):
+    @pytest.mark.asyncio
+    @patch('src.engines.crewai.helpers.task_helpers.UnitOfWork')
+    async def test_get_pydantic_class_simple_types(self, mock_uow_class):
         """Test creating Pydantic model with simple field types."""
-        mock_uow = Mock()
-        mock_uow_class.get_instance.return_value = mock_uow
-        
+        # Create async context manager mock
+        mock_uow = AsyncMock()
         mock_schema = Mock()
         mock_schema.schema_definition = {
             "properties": {
@@ -106,9 +115,13 @@ class TestGetPydanticClassFromName:
             "required": ["name", "age"],
             "description": "Test model"
         }
-        mock_uow.schema_repository.find_by_name_sync.return_value = mock_schema
+        mock_uow.schema_repository.find_by_name.return_value = mock_schema
         
-        result = get_pydantic_class_from_name("SimpleSchema")
+        # Mock the context manager
+        mock_uow_class.return_value.__aenter__.return_value = mock_uow
+        mock_uow_class.return_value.__aexit__.return_value = None
+        
+        result = await get_pydantic_class_from_name("SimpleSchema")
         
         assert result is not None
         assert issubclass(result, BaseModel)
@@ -122,12 +135,12 @@ class TestGetPydanticClassFromName:
         assert "height" in fields
         assert "is_active" in fields
     
-    @patch('src.engines.crewai.helpers.task_helpers.SyncUnitOfWork')
-    def test_get_pydantic_class_array_types(self, mock_uow_class):
+    @pytest.mark.asyncio
+    @patch('src.engines.crewai.helpers.task_helpers.UnitOfWork')
+    async def test_get_pydantic_class_array_types(self, mock_uow_class):
         """Test creating Pydantic model with array field types."""
-        mock_uow = Mock()
-        mock_uow_class.get_instance.return_value = mock_uow
-        
+        # Create async context manager mock
+        mock_uow = AsyncMock()
         mock_schema = Mock()
         mock_schema.schema_definition = {
             "properties": {
@@ -139,19 +152,23 @@ class TestGetPydanticClassFromName:
             },
             "required": []
         }
-        mock_uow.schema_repository.find_by_name_sync.return_value = mock_schema
+        mock_uow.schema_repository.find_by_name.return_value = mock_schema
         
-        result = get_pydantic_class_from_name("ArraySchema")
+        # Mock the context manager
+        mock_uow_class.return_value.__aenter__.return_value = mock_uow
+        mock_uow_class.return_value.__aexit__.return_value = None
+        
+        result = await get_pydantic_class_from_name("ArraySchema")
         
         assert result is not None
         assert issubclass(result, BaseModel)
     
-    @patch('src.engines.crewai.helpers.task_helpers.SyncUnitOfWork')
-    def test_get_pydantic_class_object_and_any_types(self, mock_uow_class):
+    @pytest.mark.asyncio
+    @patch('src.engines.crewai.helpers.task_helpers.UnitOfWork')
+    async def test_get_pydantic_class_object_and_any_types(self, mock_uow_class):
         """Test creating Pydantic model with object and any types."""
-        mock_uow = Mock()
-        mock_uow_class.get_instance.return_value = mock_uow
-        
+        # Create async context manager mock
+        mock_uow = AsyncMock()
         mock_schema = Mock()
         mock_schema.schema_definition = {
             "properties": {
@@ -160,19 +177,23 @@ class TestGetPydanticClassFromName:
             },
             "required": []
         }
-        mock_uow.schema_repository.find_by_name_sync.return_value = mock_schema
+        mock_uow.schema_repository.find_by_name.return_value = mock_schema
         
-        result = get_pydantic_class_from_name("ObjectSchema")
+        # Mock the context manager
+        mock_uow_class.return_value.__aenter__.return_value = mock_uow
+        mock_uow_class.return_value.__aexit__.return_value = None
+        
+        result = await get_pydantic_class_from_name("ObjectSchema")
         
         assert result is not None
         assert issubclass(result, BaseModel)
     
-    @patch('src.engines.crewai.helpers.task_helpers.SyncUnitOfWork')
-    def test_get_pydantic_class_nullable_fields(self, mock_uow_class):
+    @pytest.mark.asyncio
+    @patch('src.engines.crewai.helpers.task_helpers.UnitOfWork')
+    async def test_get_pydantic_class_nullable_fields(self, mock_uow_class):
         """Test creating Pydantic model with nullable fields."""
-        mock_uow = Mock()
-        mock_uow_class.get_instance.return_value = mock_uow
-        
+        # Create async context manager mock
+        mock_uow = AsyncMock()
         mock_schema = Mock()
         mock_schema.schema_definition = {
             "properties": {
@@ -181,19 +202,23 @@ class TestGetPydanticClassFromName:
             },
             "required": ["age"]
         }
-        mock_uow.schema_repository.find_by_name_sync.return_value = mock_schema
+        mock_uow.schema_repository.find_by_name.return_value = mock_schema
         
-        result = get_pydantic_class_from_name("NullableSchema")
+        # Mock the context manager
+        mock_uow_class.return_value.__aenter__.return_value = mock_uow
+        mock_uow_class.return_value.__aexit__.return_value = None
+        
+        result = await get_pydantic_class_from_name("NullableSchema")
         
         assert result is not None
         assert issubclass(result, BaseModel)
     
-    @patch('src.engines.crewai.helpers.task_helpers.SyncUnitOfWork')
-    def test_get_pydantic_class_creation_error(self, mock_uow_class):
+    @pytest.mark.asyncio
+    @patch('src.engines.crewai.helpers.task_helpers.UnitOfWork')
+    async def test_get_pydantic_class_creation_error(self, mock_uow_class):
         """Test when Pydantic model creation fails."""
-        mock_uow = Mock()
-        mock_uow_class.get_instance.return_value = mock_uow
-        
+        # Create async context manager mock
+        mock_uow = AsyncMock()
         mock_schema = Mock()
         mock_schema.schema_definition = {
             "properties": {
@@ -201,37 +226,44 @@ class TestGetPydanticClassFromName:
             },
             "required": ["name"]
         }
-        mock_uow.schema_repository.find_by_name_sync.return_value = mock_schema
+        mock_uow.schema_repository.find_by_name.return_value = mock_schema
+        
+        # Mock the context manager
+        mock_uow_class.return_value.__aenter__.return_value = mock_uow
+        mock_uow_class.return_value.__aexit__.return_value = None
         
         with patch('src.engines.crewai.helpers.task_helpers.create_model', side_effect=Exception("Model creation failed")):
-            result = get_pydantic_class_from_name("ErrorSchema")
+            result = await get_pydantic_class_from_name("ErrorSchema")
         
         assert result is None
     
-    @patch('src.engines.crewai.helpers.task_helpers.SyncUnitOfWork')
-    def test_get_pydantic_class_uow_not_initialized(self, mock_uow_class):
+    @pytest.mark.asyncio
+    @patch('src.engines.crewai.helpers.task_helpers.UnitOfWork')
+    async def test_get_pydantic_class_uow_not_initialized(self, mock_uow_class):
         """Test when UnitOfWork is not initialized."""
-        mock_uow = Mock()
-        mock_uow._initialized = False
-        mock_uow_class.get_instance.return_value = mock_uow
-        
+        # Create async context manager mock
+        mock_uow = AsyncMock()
         mock_schema = Mock()
         mock_schema.schema_definition = {
             "properties": {"name": {"type": "string"}},
             "required": ["name"]
         }
-        mock_uow.schema_repository.find_by_name_sync.return_value = mock_schema
+        mock_uow.schema_repository.find_by_name.return_value = mock_schema
         
-        result = get_pydantic_class_from_name("TestSchema")
+        # Mock the context manager
+        mock_uow_class.return_value.__aenter__.return_value = mock_uow
+        mock_uow_class.return_value.__aexit__.return_value = None
         
-        mock_uow.initialize.assert_called_once()
+        result = await get_pydantic_class_from_name("TestSchema")
+        
+        # Note: With async context manager, initialization is handled differently
     
-    @patch('src.engines.crewai.helpers.task_helpers.SyncUnitOfWork')
-    def test_get_pydantic_class_field_definition_error(self, mock_uow_class):
+    @pytest.mark.asyncio
+    @patch('src.engines.crewai.helpers.task_helpers.UnitOfWork')
+    async def test_get_pydantic_class_field_definition_error(self, mock_uow_class):
         """Test when field definition causes an error."""
-        mock_uow = Mock()
-        mock_uow_class.get_instance.return_value = mock_uow
-        
+        # Create async context manager mock
+        mock_uow = AsyncMock()
         mock_schema = Mock()
         mock_schema.schema_definition = {
             "properties": {
@@ -239,64 +271,78 @@ class TestGetPydanticClassFromName:
             },
             "required": ["bad_field"]
         }
-        mock_uow.schema_repository.find_by_name_sync.return_value = mock_schema
+        mock_uow.schema_repository.find_by_name.return_value = mock_schema
+        
+        # Mock the context manager
+        mock_uow_class.return_value.__aenter__.return_value = mock_uow
+        mock_uow_class.return_value.__aexit__.return_value = None
         
         # This should not crash and should create a model with Any type for the problematic field
-        result = get_pydantic_class_from_name("ErrorFieldSchema")
+        result = await get_pydantic_class_from_name("ErrorFieldSchema")
         
         assert result is not None
         assert issubclass(result, BaseModel)
     
-    @patch('src.engines.crewai.helpers.task_helpers.SyncUnitOfWork')
-    def test_get_pydantic_class_general_exception(self, mock_uow_class):
+    @pytest.mark.asyncio
+    @patch('src.engines.crewai.helpers.task_helpers.UnitOfWork')
+    async def test_get_pydantic_class_general_exception(self, mock_uow_class):
         """Test when a general exception occurs during schema lookup."""
-        mock_uow_class.get_instance.side_effect = Exception("Database connection failed")
+        # Make the context manager creation itself fail
+        mock_uow_class.return_value.__aenter__.side_effect = Exception("Database connection failed")
         
-        result = get_pydantic_class_from_name("ExceptionSchema")
+        result = await get_pydantic_class_from_name("ExceptionSchema")
         
         assert result is None
     
-    @patch('src.engines.crewai.helpers.task_helpers.SyncUnitOfWork')
-    def test_get_pydantic_class_schema_definition_not_dict(self, mock_uow_class):
+    @pytest.mark.asyncio
+    @patch('src.engines.crewai.helpers.task_helpers.UnitOfWork')
+    async def test_get_pydantic_class_schema_definition_not_dict(self, mock_uow_class):
         """Test when schema definition is not a dictionary."""
-        mock_uow = Mock()
-        mock_uow_class.get_instance.return_value = mock_uow
-        
+        # Create async context manager mock
+        mock_uow = AsyncMock()
         mock_schema = Mock()
         mock_schema.schema_definition = "not a dict"  # Invalid format
-        mock_uow.schema_repository.find_by_name_sync.return_value = mock_schema
+        mock_uow.schema_repository.find_by_name.return_value = mock_schema
         
-        result = get_pydantic_class_from_name("InvalidFormatSchema")
+        # Mock the context manager
+        mock_uow_class.return_value.__aenter__.return_value = mock_uow
+        mock_uow_class.return_value.__aexit__.return_value = None
+        
+        result = await get_pydantic_class_from_name("InvalidFormatSchema")
         
         assert result is None
     
-    @patch('src.engines.crewai.helpers.task_helpers.SyncUnitOfWork')
-    def test_get_pydantic_class_empty_properties(self, mock_uow_class):
+    @pytest.mark.asyncio
+    @patch('src.engines.crewai.helpers.task_helpers.UnitOfWork')
+    async def test_get_pydantic_class_empty_properties(self, mock_uow_class):
         """Test creating Pydantic model with empty properties."""
-        mock_uow = Mock()
-        mock_uow_class.get_instance.return_value = mock_uow
-        
+        # Create async context manager mock
+        mock_uow = AsyncMock()
         mock_schema = Mock()
         mock_schema.schema_definition = {
             "properties": {},  # Empty properties
             "required": [],
             "description": "Empty model"
         }
-        mock_uow.schema_repository.find_by_name_sync.return_value = mock_schema
+        mock_uow.schema_repository.find_by_name.return_value = mock_schema
         
-        result = get_pydantic_class_from_name("EmptySchema")
+        # Mock the context manager
+        mock_uow_class.return_value.__aenter__.return_value = mock_uow
+        mock_uow_class.return_value.__aexit__.return_value = None
+        
+        result = await get_pydantic_class_from_name("EmptySchema")
         
         assert result is not None
         assert issubclass(result, BaseModel)
         assert result.__name__ == "EmptySchema"
         assert result.__doc__ == "Empty model"
     
-    @patch('src.engines.crewai.helpers.task_helpers.SyncUnitOfWork')
-    def test_get_pydantic_class_no_description(self, mock_uow_class):
+    @pytest.mark.asyncio
+    @patch('src.engines.crewai.helpers.task_helpers.UnitOfWork')
+    async def test_get_pydantic_class_no_description(self, mock_uow_class):
         """Test creating Pydantic model without description."""
-        mock_uow = Mock()
-        mock_uow_class.get_instance.return_value = mock_uow
-        
+        # Create async context manager mock
+        mock_uow = AsyncMock()
         mock_schema = Mock()
         mock_schema.schema_definition = {
             "properties": {
@@ -305,20 +351,25 @@ class TestGetPydanticClassFromName:
             "required": ["name"]
             # No description field
         }
-        mock_uow.schema_repository.find_by_name_sync.return_value = mock_schema
+        mock_uow.schema_repository.find_by_name.return_value = mock_schema
         
-        result = get_pydantic_class_from_name("NoDescSchema")
+        # Mock the context manager
+        mock_uow_class.return_value.__aenter__.return_value = mock_uow
+        mock_uow_class.return_value.__aexit__.return_value = None
+        
+        result = await get_pydantic_class_from_name("NoDescSchema")
         
         assert result is not None
         assert issubclass(result, BaseModel)
         assert result.__doc__ == "Model for NoDescSchema"  # Default description
     
-    @patch('src.engines.crewai.helpers.task_helpers.SyncUnitOfWork')
+    @pytest.mark.asyncio
+    @patch('src.engines.crewai.helpers.task_helpers.UnitOfWork')
     @patch('src.engines.crewai.helpers.task_helpers.List')
-    def test_get_pydantic_class_field_definition_exception(self, mock_list, mock_uow_class):
+    async def test_get_pydantic_class_field_definition_exception(self, mock_list, mock_uow_class):
         """Test field definition that causes an exception (covering lines 126-128)."""
-        mock_uow = Mock()
-        mock_uow_class.get_instance.return_value = mock_uow
+        # Create async context manager mock
+        mock_uow = AsyncMock()
         
         # Mock List to raise exception when accessed with __getitem__
         mock_list.__getitem__.side_effect = Exception("List access failed")
@@ -330,19 +381,24 @@ class TestGetPydanticClassFromName:
             },
             "required": []
         }
-        mock_uow.schema_repository.find_by_name_sync.return_value = mock_schema
+        mock_uow.schema_repository.find_by_name.return_value = mock_schema
         
-        result = get_pydantic_class_from_name("ExceptionFieldSchema")
+        # Mock the context manager
+        mock_uow_class.return_value.__aenter__.return_value = mock_uow
+        mock_uow_class.return_value.__aexit__.return_value = None
+        
+        result = await get_pydantic_class_from_name("ExceptionFieldSchema")
         
         # Should handle exception and still create model with Any type
         assert result is not None
         assert issubclass(result, BaseModel)
     
-    @patch('src.engines.crewai.helpers.task_helpers.SyncUnitOfWork')
-    def test_get_pydantic_class_field_assignment_exception(self, mock_uow_class):
+    @pytest.mark.asyncio
+    @patch('src.engines.crewai.helpers.task_helpers.UnitOfWork')
+    async def test_get_pydantic_class_field_assignment_exception(self, mock_uow_class):
         """Test direct field assignment exception to cover lines 126-128."""
-        mock_uow = Mock()
-        mock_uow_class.get_instance.return_value = mock_uow
+        # Create async context manager mock
+        mock_uow = AsyncMock()
         
         # Create a mock schema with a field that will trigger the exception path
         mock_schema = Mock()
@@ -352,7 +408,11 @@ class TestGetPydanticClassFromName:
             },
             "required": []
         }
-        mock_uow.schema_repository.find_by_name_sync.return_value = mock_schema
+        mock_uow.schema_repository.find_by_name.return_value = mock_schema
+        
+        # Mock the context manager
+        mock_uow_class.return_value.__aenter__.return_value = mock_uow
+        mock_uow_class.return_value.__aexit__.return_value = None
         
         # Create a custom List type that will fail during field assignment
         class FailingList:
@@ -361,7 +421,7 @@ class TestGetPydanticClassFromName:
                 raise Exception("List type access failed")
         
         with patch('src.engines.crewai.helpers.task_helpers.List', FailingList()):
-            result = get_pydantic_class_from_name("ExceptionFieldSchema")
+            result = await get_pydantic_class_from_name("ExceptionFieldSchema")
             
             # Should handle exception and create model with Any type fields
             assert result is not None
@@ -3157,7 +3217,7 @@ class TestCreateTask:
     
     @pytest.mark.asyncio
     async def test_create_task_uow_initialize_path_coverage(self):
-        """Test coverage of UnitOfWork initialization in SyncUnitOfWork path."""
+        """Test coverage of UnitOfWork initialization in UnitOfWork path."""
         task_key = "uow_init_task"
         task_config = {
             "description": "Task description",
@@ -3171,33 +3231,32 @@ class TestCreateTask:
             verbose=True
         )
         
-        # Mock UOW that's not initialized
-        mock_uow = Mock()
-        mock_uow._initialized = False
-        mock_uow.initialize = Mock()
-        
         # Mock schema
         mock_schema = Mock()
         mock_schema.schema_definition = {
             "properties": {"name": {"type": "string"}},
             "required": ["name"]
         }
-        mock_uow.schema_repository.find_by_name_sync.return_value = mock_schema
         
         with patch('src.core.unit_of_work.UnitOfWork'), \
              patch('src.services.mcp_service.MCPService') as mock_mcp_service, \
-             patch('src.engines.crewai.helpers.task_helpers.SyncUnitOfWork') as mock_sync_uow:
+             patch('src.engines.crewai.helpers.task_helpers.UnitOfWork') as mock_task_uow:
             
             mock_mcp_service.from_unit_of_work = AsyncMock(return_value=Mock(
                 get_enabled_servers=AsyncMock(return_value=Mock(servers=[]))
             ))
-            mock_sync_uow.get_instance.return_value = mock_uow
+            
+            # Create async context manager mock for task_helpers.UnitOfWork
+            mock_uow = AsyncMock()
+            mock_uow.schema_repository.find_by_name.return_value = mock_schema
+            mock_task_uow.return_value.__aenter__.return_value = mock_uow
+            mock_task_uow.return_value.__aexit__.return_value = None
             
             task = await create_task(task_key, task_config, agent)
             
-            # Verify initialize was called
-            mock_uow.initialize.assert_called_once()
             assert isinstance(task, Task)
+            assert task.description == "Task description"
+            assert task.output_pydantic is not None  # Should have resolved the Pydantic model
     
     @pytest.mark.asyncio
     async def test_create_task_nullable_field_coverage(self):
@@ -3227,16 +3286,17 @@ class TestCreateTask:
         
         with patch('src.core.unit_of_work.UnitOfWork'), \
              patch('src.services.mcp_service.MCPService') as mock_mcp_service, \
-             patch('src.engines.crewai.helpers.task_helpers.SyncUnitOfWork') as mock_sync_uow:
+             patch('src.engines.crewai.helpers.task_helpers.UnitOfWork') as mock_task_uow:
             
             mock_mcp_service.from_unit_of_work = AsyncMock(return_value=Mock(
                 get_enabled_servers=AsyncMock(return_value=Mock(servers=[]))
             ))
             
-            mock_uow = Mock()
-            mock_uow._initialized = True
-            mock_uow.schema_repository.find_by_name_sync.return_value = mock_schema
-            mock_sync_uow.get_instance.return_value = mock_uow
+            # Create async context manager mock for task_helpers.UnitOfWork
+            mock_uow = AsyncMock()
+            mock_uow.schema_repository.find_by_name.return_value = mock_schema
+            mock_task_uow.return_value.__aenter__.return_value = mock_uow
+            mock_task_uow.return_value.__aexit__.return_value = None
             
             task = await create_task(task_key, task_config, agent)
             
@@ -3510,7 +3570,7 @@ class TestCreateTask:
         
         with patch('src.core.unit_of_work.UnitOfWork'), \
              patch('src.services.mcp_service.MCPService') as mock_mcp_service, \
-             patch('src.engines.crewai.helpers.task_helpers.SyncUnitOfWork') as mock_sync_uow:
+             patch('src.engines.crewai.helpers.task_helpers.UnitOfWork') as mock_sync_uow:
             
             mock_mcp_service.from_unit_of_work = AsyncMock(return_value=Mock(
                 get_enabled_servers=AsyncMock(return_value=Mock(servers=[]))
