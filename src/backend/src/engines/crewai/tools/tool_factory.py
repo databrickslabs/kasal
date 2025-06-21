@@ -851,10 +851,28 @@ class ToolFactory:
             
             
             elif tool_name == "DatabricksCustomTool":
-                # Get configuration from tool_config or use defaults
+                # Create a copy of the config (same as GenieTool)
+                databricks_tool_config = {**tool_config}
+                
+                # Get configuration from tool_config
                 default_catalog = tool_config.get('catalog')
                 default_schema = tool_config.get('schema')
                 default_warehouse_id = tool_config.get('warehouse_id')
+                
+                # Try to get user token from multiple sources for OAuth/OBO authentication
+                user_token = tool_config.get('user_token') or self.user_token
+                
+                # If no user token in config or factory, try to get from context
+                if not user_token:
+                    try:
+                        from src.utils.user_context import UserContext
+                        user_token = UserContext.get_user_token()
+                        if user_token:
+                            logger.info(f"Extracted user token from context for DatabricksCustomTool OBO authentication: {user_token[:10]}...")
+                        else:
+                            logger.warning("No user token found in context for DatabricksCustomTool")
+                    except Exception as e:
+                        logger.error(f"Could not extract user token from context: {e}")
                 
                 # Get DATABRICKS_HOST from tool_config or environment
                 databricks_host = tool_config.get('DATABRICKS_HOST')
@@ -904,27 +922,25 @@ class ToolFactory:
                                     
                             if databricks_host:
                                 logger.info(f"Retrieved DATABRICKS_HOST from DatabricksService: {databricks_host}")
+                                # Add to the tool config copy
+                                databricks_tool_config['DATABRICKS_HOST'] = databricks_host
                             else:
                                 logger.warning("Could not retrieve DATABRICKS_HOST from DatabricksService")
                                 
                         except Exception as e:
                             logger.error(f"Error getting DATABRICKS_HOST from service: {e}")
                 
-                # Create the tool with parameters, including DATABRICKS_HOST if available
-                tool_config_with_defaults = {
-                    'default_catalog': default_catalog,
-                    'default_schema': default_schema,
-                    'default_warehouse_id': default_warehouse_id,
-                    'result_as_answer': result_as_answer
-                }
-                
-                # Add DATABRICKS_HOST to tool config if we have it
-                if databricks_host:
-                    tool_config_with_defaults['databricks_host'] = databricks_host
-                    logger.info(f"Added DATABRICKS_HOST to tool config: {databricks_host}")
-                
-                logger.info(f"Creating DatabricksCustomTool with config: {tool_config_with_defaults}")
-                return tool_class(**tool_config_with_defaults)
+                # Create the tool with the same pattern as GenieTool
+                logger.info(f"Creating DatabricksCustomTool with tool_config: {databricks_tool_config}")
+                return tool_class(
+                    default_catalog=default_catalog,
+                    default_schema=default_schema,
+                    default_warehouse_id=default_warehouse_id,
+                    databricks_host=databricks_host,
+                    tool_config=databricks_tool_config,
+                    user_token=user_token,
+                    result_as_answer=result_as_answer
+                )
             
             elif tool_name == "GenieTool":
                 # Get tool ID if any

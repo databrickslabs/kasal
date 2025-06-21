@@ -130,8 +130,8 @@ class CrewPreparation:
         """
         try:
             for i, agent_config in enumerate(self.config.get('agents', [])):
-                # Use the agent's 'role' if 'name' is not present, or generate a name if neither exists
-                agent_name = agent_config.get('name', agent_config.get('role', f'agent_{i}'))
+                # Use the agent's 'name' if present, then 'id', then 'role', or generate a name if none exist
+                agent_name = agent_config.get('name', agent_config.get('id', agent_config.get('role', f'agent_{i}')))
                 
                 agent = await create_agent(
                     agent_key=agent_name,

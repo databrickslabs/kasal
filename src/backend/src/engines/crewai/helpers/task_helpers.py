@@ -426,11 +426,13 @@ async def create_task(
         logger.error(f"Stack trace: {traceback.format_exc()}")
     
     # Continue with normal tool resolution
-    if tool_service and 'tools' in task_config and task_config['tools']:
-        logger.info(f"Resolving tool IDs for task {task_key}: {task_config['tools']}")
+    # Check for tools in task_config or in a backup field (for when MCP clears the tools array)
+    tools_to_resolve = task_config.get('tools', []) or task_config.get('_original_tools', [])
+    if tool_service and tools_to_resolve:
+        logger.info(f"Resolving tool IDs for task {task_key}: {tools_to_resolve}")
         try:
             # Resolve tool IDs to names
-            tool_names = await resolve_tool_ids_to_names(task_config['tools'], tool_service)
+            tool_names = await resolve_tool_ids_to_names(tools_to_resolve, tool_service)
             logger.info(f"Resolved tool names for task {task_key}: {tool_names}")
             
             # Create actual tool instances using the tool factory if available
