@@ -26,6 +26,10 @@ logger = logging.getLogger(__name__)
 # Set debug flag for seeders
 os.environ["SEED_DEBUG"] = "True"
 
+# Disable CrewAI telemetry
+os.environ["OTEL_SDK_DISABLED"] = "true"
+os.environ["CREWAI_DISABLE_TELEMETRY"] = "true"
+
 # Set log directory environment variable
 log_path = os.path.join(os.path.abspath(os.path.dirname(os.path.dirname(__file__))), "logs")
 os.environ["LOG_DIR"] = log_path

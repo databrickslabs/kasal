@@ -15,5 +15,9 @@ else
     export DATABASE_TYPE=postgres
 fi
 
+# Disable CrewAI telemetry
+export OTEL_SDK_DISABLED=true
+export CREWAI_DISABLE_TELEMETRY=true
+
 # Run the FastAPI application in development mode
 uvicorn src.main:app --reload --host 0.0.0.0 --port 8000 
