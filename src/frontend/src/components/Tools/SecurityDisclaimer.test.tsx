@@ -2,7 +2,7 @@ import React from 'react';
 import { render, screen, fireEvent } from '@testing-library/react';
 import { ThemeProvider } from '@mui/material/styles';
 import { createTheme } from '@mui/material/styles';
-import SecurityDisclaimer from '../SecurityDisclaimer';
+import SecurityDisclaimer from './SecurityDisclaimer';
 
 const theme = createTheme();
 
@@ -103,7 +103,7 @@ describe('SecurityDisclaimer', () => {
 
   it('should include DatabricksJobsTool in TOOL_SECURITY_INFO', () => {
     // Import TOOL_SECURITY_INFO from the component
-    const { TOOL_SECURITY_INFO } = require('../SecurityDisclaimer');
+    const { TOOL_SECURITY_INFO } = require('./SecurityDisclaimer');
     
     expect(TOOL_SECURITY_INFO).toHaveProperty('DatabricksJobsTool');
     

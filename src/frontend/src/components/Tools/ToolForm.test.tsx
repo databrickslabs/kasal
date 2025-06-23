@@ -2,7 +2,7 @@ import React from 'react';
 import { render, screen } from '@testing-library/react';
 import { ThemeProvider } from '@mui/material/styles';
 import { createTheme } from '@mui/material/styles';
-import ToolForm from '../ToolForm';
+import ToolForm from './ToolForm';
 
 // Mock the translation hook
 jest.mock('react-i18next', () => ({
@@ -15,7 +15,7 @@ jest.mock('react-i18next', () => ({
 }));
 
 // Mock the ToolService
-jest.mock('../../../api/ToolService', () => ({
+jest.mock('../../api/ToolService', () => ({
   ToolService: {
     fetchAllTools: jest.fn().mockResolvedValue([
       {
@@ -77,7 +77,7 @@ describe('ToolForm', () => {
 
   it('should include all custom tools in the customTools array', () => {
     // Import the customTools array from the component
-    const { customTools } = require('../ToolForm');
+    const { customTools } = require('./ToolForm');
     
     expect(customTools).toContain('GenieTool');
     expect(customTools).toContain('PerplexityTool');
@@ -87,7 +87,7 @@ describe('ToolForm', () => {
   });
 
   it('should correctly categorize tools based on customTools array', async () => {
-    const { ToolService } = require('../../../api/ToolService');
+    const { ToolService } = require('../../api/ToolService');
     
     renderComponent();
     
