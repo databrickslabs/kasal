@@ -46,9 +46,11 @@ class TestOutputFormatter:
         """Test execute with JSON format for object with dict() method."""
         formatter = OutputFormatter(format_type="json", indent=2)
         
-        # Create mock object with dict() method
+        # Create mock object with dict() method but no model_dump()
         mock_obj = MagicMock()
         mock_obj.dict.return_value = {"key": "value", "number": 42}
+        # Ensure model_dump doesn't exist so it falls back to dict()
+        del mock_obj.model_dump
         
         result = formatter.execute(mock_obj)
         expected = json.dumps({"key": "value", "number": 42}, indent=2)
@@ -153,6 +155,8 @@ class TestDataExtractor:
         
         mock_obj = MagicMock()
         mock_obj.dict.return_value = {"name": "John", "age": 30, "city": "NYC"}
+        # Ensure model_dump doesn't exist so it falls back to dict()
+        del mock_obj.model_dump
         
         result = extractor.execute(mock_obj)
         
@@ -280,6 +284,8 @@ class TestOutputEnricher:
         
         mock_obj = MagicMock()
         mock_obj.dict.return_value = {"key": "value"}
+        # Ensure model_dump doesn't exist so it falls back to dict()
+        del mock_obj.model_dump
         
         result = enricher.execute(mock_obj)
         

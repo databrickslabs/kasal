@@ -24,7 +24,9 @@ class SchemaValidator(CrewAICallback):
             from jsonschema import validate
             
             # Convert output to dict if needed
-            if hasattr(output, 'dict'):
+            if hasattr(output, 'model_dump'):
+                data = output.model_dump()
+            elif hasattr(output, 'dict'):
                 data = output.dict()
             elif hasattr(output, '__dict__'):
                 data = output.__dict__

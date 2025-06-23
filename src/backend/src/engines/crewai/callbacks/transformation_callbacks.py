@@ -28,7 +28,9 @@ class OutputFormatter(CrewAICallback):
     
     def execute(self, output: Any) -> str:
         if self.format_type == "json":
-            if hasattr(output, 'dict'):
+            if hasattr(output, 'model_dump'):
+                formatted = json.dumps(output.model_dump(), indent=self.indent)
+            elif hasattr(output, 'dict'):
                 formatted = json.dumps(output.dict(), indent=self.indent)
             elif hasattr(output, '__dict__'):
                 formatted = json.dumps(output.__dict__, indent=self.indent)
@@ -58,7 +60,9 @@ class DataExtractor(CrewAICallback):
         
         # Extract specified fields
         if self.fields:
-            if hasattr(output, 'dict'):
+            if hasattr(output, 'model_dump'):
+                data = output.model_dump()
+            elif hasattr(output, 'dict'):
                 data = output.dict()
             elif hasattr(output, '__dict__'):
                 data = output.__dict__
@@ -95,7 +99,9 @@ class OutputEnricher(CrewAICallback):
     
     def execute(self, output: Any) -> Dict[str, Any]:
         # Convert output to dict if needed
-        if hasattr(output, 'dict'):
+        if hasattr(output, 'model_dump'):
+            result = output.model_dump()
+        elif hasattr(output, 'dict'):
             result = output.dict()
         elif hasattr(output, '__dict__'):
             result = output.__dict__

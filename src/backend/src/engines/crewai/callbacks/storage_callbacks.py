@@ -31,7 +31,9 @@ class JsonFileStorage(CrewAICallback):
         filepath = self.output_dir / filename
         
         # Convert output to JSON-serializable format
-        if hasattr(output, 'dict'):
+        if hasattr(output, 'model_dump'):
+            data = output.model_dump()
+        elif hasattr(output, 'dict'):
             data = output.dict()
         elif hasattr(output, '__dict__'):
             data = output.__dict__
@@ -62,7 +64,9 @@ class DatabaseStorage(CrewAICallback):
     
     async def execute(self, output: Any) -> int:
         # Convert output to dict if needed
-        if hasattr(output, 'dict'):
+        if hasattr(output, 'model_dump'):
+            data = output.model_dump()
+        elif hasattr(output, 'dict'):
             data = output.dict()
         elif hasattr(output, '__dict__'):
             data = output.__dict__
