@@ -280,7 +280,7 @@ class TestBaseRepository:
         # Mock get method to return existing object
         with patch.object(base_repository, "get", return_value=mock_model_instance):
             # Mock session methods
-            mock_session.delete = AsyncMock()
+            mock_session.delete = MagicMock()  # delete is sync
             mock_session.flush = AsyncMock()
             mock_session.commit = AsyncMock()
             

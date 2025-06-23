@@ -59,6 +59,7 @@ class AgentRepository(BaseRepository[Agent]):
                 for key, value in obj_in.items():
                     setattr(db_obj, key, value)
                 await self.session.flush()
+                await self.session.commit()
             return db_obj
         except Exception as e:
             await self.session.rollback()
@@ -79,6 +80,7 @@ class AgentRepository(BaseRepository[Agent]):
             if db_obj:
                 await self.session.delete(db_obj)
                 await self.session.flush()
+                await self.session.commit()
                 return True
             return False
         except Exception as e:
@@ -120,6 +122,7 @@ class AgentRepository(BaseRepository[Agent]):
         stmt = delete(self.model)
         await self.session.execute(stmt)
         await self.session.flush()
+        await self.session.commit()
 
 
 class SyncAgentRepository:
