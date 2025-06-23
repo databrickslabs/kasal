@@ -185,6 +185,38 @@ const TOOL_SECURITY_INFO: Record<string, {
     ],
     deploymentContext: 'Single-tenant with Databricks OBO security model'
   },
+  'DatabricksJobsTool': {
+    riskLevel: 'HIGH',
+    description: 'Manages Databricks Jobs with create, run, and monitor capabilities',
+    risks: [
+      'Creation of arbitrary compute jobs',
+      'Resource consumption through job execution',
+      'Access to job configurations and outputs',
+      'Potential for running malicious code via jobs',
+      'Cross-tenant job visibility without proper filtering'
+    ],
+    mitigations: [
+      'Validate job configurations before creation',
+      'Implement job resource limits and quotas',
+      'Add job approval workflows for sensitive operations',
+      'Monitor job execution patterns for anomalies'
+    ],
+    singleTenantRiskLevel: 'MEDIUM',
+    singleTenantRisks: [
+      'Job creation and execution within user\'s workspace',
+      'Compute resource usage based on job configurations',
+      'Access to job outputs and logs',
+      'Potential for expensive compute operations'
+    ],
+    singleTenantMitigations: [
+      'Databricks OBO ensures jobs run with user\'s permissions',
+      'User can only manage jobs they have access to',
+      'Databricks enforces compute resource limits',
+      'Job execution is logged and auditable',
+      'Workspace-level security policies apply'
+    ],
+    deploymentContext: 'Single-tenant with Databricks OBO security model'
+  },
   'GenieTool': {
     riskLevel: 'HIGH',
     description: 'Natural language interface to Databricks Genie AI assistant',
