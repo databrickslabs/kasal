@@ -302,155 +302,173 @@ class TestDatabricksCustomTool(unittest.TestCase):
         tool = DatabricksCustomTool()
         self.assertTrue(tool._use_oauth)
 
-    @pytest.mark.asyncio
-    async def test_get_auth_headers_with_user_token(self):
+    def test_get_auth_headers_with_user_token(self):
         """Test _get_auth_headers with user token"""
-        tool = DatabricksCustomTool(user_token="test-user-token")
+        async def run_test():
+            tool = DatabricksCustomTool(user_token="test-user-token")
+            
+            with patch.object(tool, '_create_obo_token', new_callable=AsyncMock) as mock_create_obo:
+                mock_create_obo.return_value = "obo-token-123"
+                
+                headers = await tool._get_auth_headers()
+                
+                assert headers["Authorization"] == "Bearer obo-token-123"
+                assert headers["Content-Type"] == "application/json"
+                mock_create_obo.assert_called_once()
         
-        with patch.object(tool, '_create_obo_token', new_callable=AsyncMock) as mock_create_obo:
-            mock_create_obo.return_value = "obo-token-123"
-            
-            headers = await tool._get_auth_headers()
-            
-            assert headers["Authorization"] == "Bearer obo-token-123"
-            assert headers["Content-Type"] == "application/json"
-            mock_create_obo.assert_called_once()
+        asyncio.run(run_test())
 
-    @pytest.mark.asyncio
-    async def test_get_auth_headers_fallback_to_user_token(self):
+    def test_get_auth_headers_fallback_to_user_token(self):
         """Test _get_auth_headers fallback when OBO creation fails"""
-        tool = DatabricksCustomTool(user_token="test-user-token")
+        async def run_test():
+            tool = DatabricksCustomTool(user_token="test-user-token")
+            
+            with patch.object(tool, '_create_obo_token', new_callable=AsyncMock) as mock_create_obo:
+                mock_create_obo.return_value = None  # OBO creation fails
+                
+                headers = await tool._get_auth_headers()
+                
+                assert headers["Authorization"] == "Bearer test-user-token"
+                assert headers["Content-Type"] == "application/json"
         
-        with patch.object(tool, '_create_obo_token', new_callable=AsyncMock) as mock_create_obo:
-            mock_create_obo.return_value = None  # OBO creation fails
+        asyncio.run(run_test())
+
+    def test_get_auth_headers_with_pat_token(self):
+        """Test _get_auth_headers with PAT token"""
+        async def run_test():
+            tool = DatabricksCustomTool()
+            tool._token = "pat-token-123"
+            tool._use_oauth = False
             
             headers = await tool._get_auth_headers()
             
-            assert headers["Authorization"] == "Bearer test-user-token"
+            assert headers["Authorization"] == "Bearer pat-token-123"
             assert headers["Content-Type"] == "application/json"
-
-    @pytest.mark.asyncio
-    async def test_get_auth_headers_with_pat_token(self):
-        """Test _get_auth_headers with PAT token"""
-        tool = DatabricksCustomTool()
-        tool._token = "pat-token-123"
-        tool._use_oauth = False
         
-        headers = await tool._get_auth_headers()
-        
-        assert headers["Authorization"] == "Bearer pat-token-123"
-        assert headers["Content-Type"] == "application/json"
+        asyncio.run(run_test())
 
-    @pytest.mark.asyncio
     @patch('src.utils.databricks_auth.get_databricks_auth_headers')
-    async def test_create_obo_token_success(self, mock_get_headers):
+    def test_create_obo_token_success(self, mock_get_headers):
         """Test successful OBO token creation"""
-        tool = DatabricksCustomTool(user_token="eyJ0eXAiOiJKV1QiLCJhbGc...")  # JWT-like token
+        async def run_test():
+            tool = DatabricksCustomTool(user_token="eyJ0eXAiOiJKV1QiLCJhbGc...")  # JWT-like token
+            
+            mock_get_headers.return_value = (
+                {"Authorization": "Bearer new-obo-token-456"},
+                None
+            )
+            
+            obo_token = await tool._create_obo_token()
+            
+            assert obo_token == "new-obo-token-456"
+            mock_get_headers.assert_called_once_with(user_token="eyJ0eXAiOiJKV1QiLCJhbGc...")
         
-        mock_get_headers.return_value = (
-            {"Authorization": "Bearer new-obo-token-456"},
-            None
-        )
-        
-        obo_token = await tool._create_obo_token()
-        
-        assert obo_token == "new-obo-token-456"
-        mock_get_headers.assert_called_once_with(user_token="eyJ0eXAiOiJKV1QiLCJhbGc...")
+        asyncio.run(run_test())
 
-    @pytest.mark.asyncio
     @patch('src.utils.databricks_auth.get_databricks_auth_headers')
-    async def test_create_obo_token_failure(self, mock_get_headers):
+    def test_create_obo_token_failure(self, mock_get_headers):
         """Test OBO token creation failure fallback"""
-        tool = DatabricksCustomTool(user_token="test-user-token")
+        async def run_test():
+            tool = DatabricksCustomTool(user_token="test-user-token")
+            
+            mock_get_headers.return_value = (None, "Authentication failed")
+            
+            obo_token = await tool._create_obo_token()
+            
+            # Should return original token as fallback
+            assert obo_token == "test-user-token"
         
-        mock_get_headers.return_value = (None, "Authentication failed")
-        
-        obo_token = await tool._create_obo_token()
-        
-        # Should return original token as fallback
-        assert obo_token == "test-user-token"
+        asyncio.run(run_test())
 
-    @pytest.mark.asyncio
     @patch('requests.get')
-    async def test_test_token_permissions_success(self, mock_get):
+    def test_test_token_permissions_success(self, mock_get):
         """Test token permission validation success"""
-        tool = DatabricksCustomTool()
-        tool._host = "test.databricks.com"
+        async def run_test():
+            tool = DatabricksCustomTool()
+            tool._host = "test.databricks.com"
+            
+            mock_response = Mock()
+            mock_response.status_code = 200
+            mock_get.return_value = mock_response
+            
+            headers = {"Authorization": "Bearer test-token"}
+            result = await tool._test_token_permissions(headers)
+            
+            assert result is True
+            mock_get.assert_called_once_with(
+                "https://test.databricks.com/api/2.0/sql/warehouses",
+                headers=headers,
+                timeout=10
+            )
         
-        mock_response = Mock()
-        mock_response.status_code = 200
-        mock_get.return_value = mock_response
-        
-        headers = {"Authorization": "Bearer test-token"}
-        result = await tool._test_token_permissions(headers)
-        
-        assert result is True
-        mock_get.assert_called_once_with(
-            "https://test.databricks.com/api/2.0/sql/warehouses",
-            headers=headers,
-            timeout=10
-        )
+        asyncio.run(run_test())
 
-    @pytest.mark.asyncio
     @patch('requests.get')
-    async def test_test_token_permissions_forbidden(self, mock_get):
+    def test_test_token_permissions_forbidden(self, mock_get):
         """Test token permission validation with 403 forbidden"""
-        tool = DatabricksCustomTool()
-        tool._host = "test.databricks.com"
+        async def run_test():
+            tool = DatabricksCustomTool()
+            tool._host = "test.databricks.com"
+            
+            mock_response = Mock()
+            mock_response.status_code = 403
+            mock_response.text = "Forbidden"
+            mock_get.return_value = mock_response
+            
+            headers = {"Authorization": "Bearer test-token"}
+            result = await tool._test_token_permissions(headers)
+            
+            assert result is False
         
-        mock_response = Mock()
-        mock_response.status_code = 403
-        mock_response.text = "Forbidden"
-        mock_get.return_value = mock_response
-        
-        headers = {"Authorization": "Bearer test-token"}
-        result = await tool._test_token_permissions(headers)
-        
-        assert result is False
+        asyncio.run(run_test())
 
-    @pytest.mark.asyncio
     @patch('requests.get')
-    async def test_test_token_permissions_with_https_prefix_host(self, mock_get):
+    def test_test_token_permissions_with_https_prefix_host(self, mock_get):
         """Test token permission validation when host already has https:// prefix"""
-        tool = DatabricksCustomTool()
-        tool._host = "https://test.databricks.com"  # Host with https:// prefix
+        async def run_test():
+            tool = DatabricksCustomTool()
+            tool._host = "https://test.databricks.com"  # Host with https:// prefix
+            
+            mock_response = Mock()
+            mock_response.status_code = 200
+            mock_get.return_value = mock_response
+            
+            headers = {"Authorization": "Bearer test-token"}
+            result = await tool._test_token_permissions(headers)
+            
+            assert result is True
+            # Should strip the https:// prefix before constructing URL
+            mock_get.assert_called_once_with(
+                "https://test.databricks.com/api/2.0/sql/warehouses",
+                headers=headers,
+                timeout=10
+            )
         
-        mock_response = Mock()
-        mock_response.status_code = 200
-        mock_get.return_value = mock_response
-        
-        headers = {"Authorization": "Bearer test-token"}
-        result = await tool._test_token_permissions(headers)
-        
-        assert result is True
-        # Should strip the https:// prefix before constructing URL
-        mock_get.assert_called_once_with(
-            "https://test.databricks.com/api/2.0/sql/warehouses",
-            headers=headers,
-            timeout=10
-        )
+        asyncio.run(run_test())
 
-    @pytest.mark.asyncio
     @patch('requests.get')
-    async def test_test_token_permissions_with_jwt_decoding(self, mock_get):
+    def test_test_token_permissions_with_jwt_decoding(self, mock_get):
         """Test token permission validation with JWT token decoding"""
-        tool = DatabricksCustomTool()
-        tool._host = "test.databricks.com"
+        async def run_test():
+            tool = DatabricksCustomTool()
+            tool._host = "test.databricks.com"
+            
+            # Create a mock JWT token
+            payload = {"scope": "sql dashboards.genie", "sub": "user123", "client_id": "app123"}
+            payload_json = json.dumps(payload)
+            payload_b64 = base64.b64encode(payload_json.encode()).decode().rstrip('=')
+            jwt_token = f"eyJ0eXAiOiJKV1QiLCJhbGc.{payload_b64}.signature"
+            
+            mock_response = Mock()
+            mock_response.status_code = 200
+            mock_get.return_value = mock_response
+            
+            headers = {"Authorization": f"Bearer {jwt_token}"}
+            result = await tool._test_token_permissions(headers)
+            
+            assert result is True
         
-        # Create a mock JWT token
-        payload = {"scope": "sql dashboards.genie", "sub": "user123", "client_id": "app123"}
-        payload_json = json.dumps(payload)
-        payload_b64 = base64.b64encode(payload_json.encode()).decode().rstrip('=')
-        jwt_token = f"eyJ0eXAiOiJKV1QiLCJhbGc.{payload_b64}.signature"
-        
-        mock_response = Mock()
-        mock_response.status_code = 200
-        mock_get.return_value = mock_response
-        
-        headers = {"Authorization": f"Bearer {jwt_token}"}
-        result = await tool._test_token_permissions(headers)
-        
-        assert result is True
+        asyncio.run(run_test())
 
     @patch('databricks.sdk.WorkspaceClient')
     def test_workspace_client_with_oauth(self, mock_workspace_client_class):
@@ -525,96 +543,110 @@ class TestDatabricksCustomTool(unittest.TestCase):
         self.assertEqual(tool._host, "list-host.databricks.com")
 
 
-    @pytest.mark.asyncio
     @patch('src.utils.databricks_auth.get_databricks_auth_headers')
-    async def test_get_auth_headers_with_oauth_error(self, mock_get_headers):
+    def test_get_auth_headers_with_oauth_error(self, mock_get_headers):
         """Test _get_auth_headers when enhanced auth returns error"""
-        tool = DatabricksCustomTool()
-        tool._use_oauth = True
-        
-        mock_get_headers.return_value = (None, "Authentication failed")
-        
-        headers = await tool._get_auth_headers()
-        
-        assert headers is None
-
-    @pytest.mark.asyncio
-    async def test_get_auth_headers_no_pat_token(self):
-        """Test _get_auth_headers when no PAT token available"""
-        tool = DatabricksCustomTool()
-        tool._use_oauth = False
-        tool._token = None
-        
-        headers = await tool._get_auth_headers()
-        
-        assert headers is None
-
-    @pytest.mark.asyncio
-    async def test_get_auth_headers_import_error(self):
-        """Test _get_auth_headers when enhanced auth module not available"""
-        tool = DatabricksCustomTool(user_token="test-token")
-        
-        # Simulate ImportError by mocking the method to raise it
-        with patch.object(tool, '_create_obo_token', side_effect=ImportError("Module not found")):
+        async def run_test():
+            tool = DatabricksCustomTool()
+            tool._use_oauth = True
+            
+            mock_get_headers.return_value = (None, "Authentication failed")
+            
             headers = await tool._get_auth_headers()
             
-            # Should fall back to using user token directly
-            assert headers["Authorization"] == "Bearer test-token"
-            assert headers["Content-Type"] == "application/json"
+            assert headers is None
+        
+        asyncio.run(run_test())
 
-    @pytest.mark.asyncio
-    async def test_create_obo_token_no_user_token(self):
+    def test_get_auth_headers_no_pat_token(self):
+        """Test _get_auth_headers when no PAT token available"""
+        async def run_test():
+            tool = DatabricksCustomTool()
+            tool._use_oauth = False
+            tool._token = None
+            
+            headers = await tool._get_auth_headers()
+            # Should return None when no token is available
+            assert headers is None
+        
+        asyncio.run(run_test())
+
+    def test_get_auth_headers_import_error(self):
+        """Test _get_auth_headers when enhanced auth module not available"""
+        async def run_test():
+            tool = DatabricksCustomTool(user_token="test-token")
+            
+            # Simulate ImportError by mocking the method to raise it
+            with patch.object(tool, '_create_obo_token', side_effect=ImportError("Module not found")):
+                headers = await tool._get_auth_headers()
+                
+                # Should fall back to using user token directly
+                assert headers["Authorization"] == "Bearer test-token"
+                assert headers["Content-Type"] == "application/json"
+        
+        asyncio.run(run_test())
+
+    def test_create_obo_token_no_user_token(self):
         """Test _create_obo_token when no user token is available"""
-        tool = DatabricksCustomTool()
-        tool._user_token = None
+        async def run_test():
+            tool = DatabricksCustomTool()
+            tool._user_token = None
+            
+            obo_token = await tool._create_obo_token()
+            
+            assert obo_token is None
         
-        obo_token = await tool._create_obo_token()
-        
-        assert obo_token is None
+        asyncio.run(run_test())
 
-    @pytest.mark.asyncio
     @patch('src.utils.databricks_auth.get_databricks_auth_headers')
-    async def test_create_obo_token_general_exception(self, mock_get_headers):
+    def test_create_obo_token_general_exception(self, mock_get_headers):
         """Test _create_obo_token with general exception"""
-        tool = DatabricksCustomTool(user_token="test-token")
+        async def run_test():
+            tool = DatabricksCustomTool(user_token="test-token")
+            
+            mock_get_headers.side_effect = Exception("Unexpected error")
+            
+            obo_token = await tool._create_obo_token()
+            
+            # Should return original token as fallback
+            assert obo_token == "test-token"
         
-        mock_get_headers.side_effect = Exception("Unexpected error")
-        
-        obo_token = await tool._create_obo_token()
-        
-        # Should return original token as fallback
-        assert obo_token == "test-token"
+        asyncio.run(run_test())
 
-    @pytest.mark.asyncio
     @patch('requests.get')
-    async def test_test_token_permissions_unexpected_status(self, mock_get):
+    def test_test_token_permissions_unexpected_status(self, mock_get):
         """Test token permission validation with unexpected status code"""
-        tool = DatabricksCustomTool()
-        tool._host = "test.databricks.com"
+        async def run_test():
+            tool = DatabricksCustomTool()
+            tool._host = "test.databricks.com"
+            
+            mock_response = Mock()
+            mock_response.status_code = 500
+            mock_response.text = "Internal Server Error"
+            mock_get.return_value = mock_response
+            
+            headers = {"Authorization": "Bearer test-token"}
+            result = await tool._test_token_permissions(headers)
+            
+            assert result is False
         
-        mock_response = Mock()
-        mock_response.status_code = 500
-        mock_response.text = "Internal Server Error"
-        mock_get.return_value = mock_response
-        
-        headers = {"Authorization": "Bearer test-token"}
-        result = await tool._test_token_permissions(headers)
-        
-        assert result is False
+        asyncio.run(run_test())
 
-    @pytest.mark.asyncio
     @patch('requests.get')
-    async def test_test_token_permissions_exception(self, mock_get):
+    def test_test_token_permissions_exception(self, mock_get):
         """Test token permission validation with exception"""
-        tool = DatabricksCustomTool()
-        tool._host = "test.databricks.com"
+        async def run_test():
+            tool = DatabricksCustomTool()
+            tool._host = "test.databricks.com"
+            
+            mock_get.side_effect = Exception("Network error")
+            
+            headers = {"Authorization": "Bearer test-token"}
+            result = await tool._test_token_permissions(headers)
+            
+            assert result is False
         
-        mock_get.side_effect = Exception("Network error")
-        
-        headers = {"Authorization": "Bearer test-token"}
-        result = await tool._test_token_permissions(headers)
-        
-        assert result is False
+        asyncio.run(run_test())
 
     @patch('databricks.sdk.WorkspaceClient')
     def test_workspace_client_oauth_no_headers(self, mock_workspace_client_class):

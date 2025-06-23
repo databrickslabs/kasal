@@ -1,5 +1,6 @@
 import pytest
 import asyncio
+import os
 from unittest.mock import MagicMock, patch, AsyncMock
 from concurrent.futures import ThreadPoolExecutor, Future
 
@@ -45,6 +46,11 @@ class TestToolFactory:
         assert "SerperDevTool" in tool_factory._tool_implementations
         assert "Dall-E Tool" in tool_factory._tool_implementations
         assert "Vision Tool" in tool_factory._tool_implementations
+        
+        # Test custom tools are mapped
+        assert "DatabricksCustomTool" in tool_factory._tool_implementations
+        assert "DatabricksJobsTool" in tool_factory._tool_implementations
+        assert "GenieTool" in tool_factory._tool_implementations
         
         # Test some common tools
         from crewai_tools import SerperDevTool, DallETool, VisionTool
@@ -613,15 +619,66 @@ class TestToolFactory:
         mock_databricks_class.return_value = mock_instance
         tool_factory._tool_implementations["DatabricksCustomTool"] = mock_databricks_class
         
-        with patch.object(tool_factory, 'get_tool_info', return_value=mock_tool):
+        # Mock environment variable and DatabricksService to prevent real URLs
+        with patch.object(tool_factory, 'get_tool_info', return_value=mock_tool), \
+             patch.dict('os.environ', {'DATABRICKS_HOST': ''}, clear=False), \
+             patch('src.services.databricks_service.DatabricksService.from_unit_of_work', new_callable=AsyncMock) as mock_service_factory, \
+             patch('src.core.unit_of_work.UnitOfWork'):
+            
+            # Mock the DatabricksService to return None for workspace URL
+            mock_service = MagicMock()
+            mock_service.get_databricks_config = AsyncMock(return_value=None)
+            mock_service_factory.return_value = mock_service
             
             result = tool_factory.create_tool("DatabricksCustomTool")
             
             assert result == mock_instance
-            mock_databricks_class.assert_called_once_with(
-                default_catalog="test_catalog",
-                default_schema="test_schema",
-                default_warehouse_id="test_warehouse",
+            # Check that the call was made with the expected arguments
+            call_args = mock_databricks_class.call_args
+            assert call_args is not None
+            
+            # Check the arguments individually
+            kwargs = call_args.kwargs
+            assert kwargs['default_catalog'] == "test_catalog"
+            assert kwargs['default_schema'] == "test_schema"
+            assert kwargs['default_warehouse_id'] == "test_warehouse"
+            assert kwargs['user_token'] is None
+            assert kwargs['result_as_answer'] is False
+            
+            # Check databricks_host - it should be None or empty
+            assert kwargs['databricks_host'] in (None, '')
+            
+            # Check tool_config contains the expected values
+            tool_config = kwargs['tool_config']
+            assert tool_config['catalog'] == "test_catalog"
+            assert tool_config['schema'] == "test_schema"
+            assert tool_config['warehouse_id'] == "test_warehouse"
+    
+    def test_create_tool_databricks_jobs(self, tool_factory):
+        """Test creating DatabricksJobsTool."""
+        mock_tool = MagicMock()
+        mock_tool.title = "DatabricksJobsTool"
+        mock_tool.config = {
+            "DATABRICKS_HOST": "https://test-jobs.databricks.com"
+        }
+        
+        # Mock DatabricksJobsTool
+        mock_jobs_class = MagicMock()
+        mock_instance = MagicMock()
+        mock_jobs_class.return_value = mock_instance
+        tool_factory._tool_implementations["DatabricksJobsTool"] = mock_jobs_class
+        
+        with patch.object(tool_factory, 'get_tool_info', return_value=mock_tool):
+            
+            result = tool_factory.create_tool("DatabricksJobsTool")
+            
+            assert result == mock_instance
+            mock_jobs_class.assert_called_once_with(
+                databricks_host="https://test-jobs.databricks.com",
+                tool_config={
+                    "DATABRICKS_HOST": "https://test-jobs.databricks.com"
+                },
+                user_token=None,
                 result_as_answer=False
             )
     

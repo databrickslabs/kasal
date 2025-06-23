@@ -101,6 +101,15 @@ except ImportError:
         logging.warning("Could not import DatabricksCustomTool")
 
 try:
+    from .custom.databricks_jobs_tool import DatabricksJobsTool
+except ImportError:
+    try:
+        from .custom.databricks_jobs_tool import DatabricksJobsTool
+    except ImportError:
+        DatabricksJobsTool = None
+        logging.warning("Could not import DatabricksJobsTool")
+
+try:
     from .custom.python_pptx_tool import PythonPPTXTool
 except ImportError:
     try:
@@ -178,6 +187,7 @@ class ToolFactory:
             "BraveSearchTool": BraveSearchTool,
             "DatabricksQueryTool": DatabricksQueryTool,
             "DatabricksCustomTool": DatabricksCustomTool,
+            "DatabricksJobsTool": DatabricksJobsTool,
             "HyperbrowserLoadTool": HyperbrowserLoadTool,
             "LinkupSearchTool": LinkupSearchTool,
             "MultiOnTool": MultiOnTool,
@@ -938,6 +948,90 @@ class ToolFactory:
                     default_warehouse_id=default_warehouse_id,
                     databricks_host=databricks_host,
                     tool_config=databricks_tool_config,
+                    user_token=user_token,
+                    result_as_answer=result_as_answer
+                )
+            
+            elif tool_name == "DatabricksJobsTool":
+                # Create a copy of the config (same pattern as other Databricks tools)
+                databricks_jobs_config = {**tool_config}
+                
+                # Try to get user token from multiple sources for OAuth/OBO authentication
+                user_token = tool_config.get('user_token') or self.user_token
+                
+                # If no user token in config or factory, try to get from context
+                if not user_token:
+                    try:
+                        from src.utils.user_context import UserContext
+                        user_token = UserContext.get_user_token()
+                        if user_token:
+                            logger.info(f"Extracted user token from context for DatabricksJobsTool OBO authentication: {user_token[:10]}...")
+                        else:
+                            logger.warning("No user token found in context for DatabricksJobsTool")
+                    except Exception as e:
+                        logger.error(f"Could not extract user token from context: {e}")
+                
+                # Get DATABRICKS_HOST from tool_config or environment
+                databricks_host = tool_config.get('DATABRICKS_HOST')
+                
+                # If DATABRICKS_HOST is not in tool_config, try to get it from environment or DatabricksService
+                if not databricks_host:
+                    # First try environment variable
+                    databricks_host = os.environ.get('DATABRICKS_HOST')
+                    
+                    # If not in environment, try to get from DatabricksService
+                    if not databricks_host:
+                        try:
+                            # Try to get from DatabricksService configuration
+                            from src.services.databricks_service import DatabricksService
+                            from src.core.unit_of_work import UnitOfWork
+                            
+                            async def get_databricks_config():
+                                async with UnitOfWork() as uow:
+                                    service = await DatabricksService.from_unit_of_work(uow)
+                                    config = await service.get_databricks_config()
+                                    if config and config.workspace_url:
+                                        workspace_url = config.workspace_url.rstrip('/')
+                                        if not workspace_url.startswith('https://'):
+                                            workspace_url = f"https://{workspace_url}"
+                                        return workspace_url
+                                return None
+                            
+                            # Execute the async function
+                            try:
+                                # Check if we're in an async context
+                                asyncio.get_running_loop()
+                                # Use ThreadPoolExecutor to call async method from sync context
+                                import concurrent.futures
+                                with concurrent.futures.ThreadPoolExecutor() as pool:
+                                    databricks_host = pool.submit(
+                                        self._run_in_new_loop,
+                                        get_databricks_config
+                                    ).result()
+                            except RuntimeError:
+                                # Not in async context
+                                loop = asyncio.new_event_loop()
+                                try:
+                                    asyncio.set_event_loop(loop)
+                                    databricks_host = loop.run_until_complete(get_databricks_config())
+                                finally:
+                                    loop.close()
+                                    
+                            if databricks_host:
+                                logger.info(f"Retrieved DATABRICKS_HOST from DatabricksService: {databricks_host}")
+                                # Add to the tool config copy
+                                databricks_jobs_config['DATABRICKS_HOST'] = databricks_host
+                            else:
+                                logger.warning("Could not retrieve DATABRICKS_HOST from DatabricksService")
+                                
+                        except Exception as e:
+                            logger.error(f"Error getting DATABRICKS_HOST from service: {e}")
+                
+                # Create the tool with the same pattern as other Databricks tools
+                logger.info(f"Creating DatabricksJobsTool with tool_config: {databricks_jobs_config}")
+                return tool_class(
+                    databricks_host=databricks_host,
+                    tool_config=databricks_jobs_config,
                     user_token=user_token,
                     result_as_answer=result_as_answer
                 )

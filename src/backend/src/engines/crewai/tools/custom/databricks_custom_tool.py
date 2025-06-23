@@ -38,7 +38,25 @@ class DatabricksCustomToolSchema(BaseModel):
             raise ValueError("Query cannot be empty")
 
         # Add a LIMIT clause to the query if row_limit is provided and query doesn't have one
-        if self.row_limit and "limit" not in self.query.lower():
+        # Skip adding LIMIT for SQL commands that don't support it
+        query_upper = self.query.upper().strip()
+        
+        # Commands that don't support LIMIT clause
+        no_limit_commands = [
+            'SHOW TABLES', 'SHOW DATABASES', 'SHOW SCHEMAS', 'DESCRIBE', 'DESC',
+            'INSERT INTO', 'INSERT', 'UPDATE', 'DELETE', 'CREATE', 'DROP', 'ALTER',
+            'GRANT', 'REVOKE', 'USE', 'SET', 'RESET', 'COMMIT', 'ROLLBACK',
+            'TRUNCATE', 'MERGE', 'COPY', 'EXPORT', 'IMPORT'
+        ]
+        
+        # Check if query starts with any command that doesn't support LIMIT
+        should_skip_limit = any(query_upper.startswith(cmd) for cmd in no_limit_commands)
+        
+        # Also check if it's multiple statements (contains semicolons with INSERT/UPDATE/DELETE)
+        if ';' in self.query and any(cmd in query_upper for cmd in ['INSERT', 'UPDATE', 'DELETE']):
+            should_skip_limit = True
+        
+        if (self.row_limit and "limit" not in self.query.lower() and not should_skip_limit):
             self.query = f"{self.query.rstrip(';')} LIMIT {self.row_limit};"
 
         return self
@@ -549,6 +567,33 @@ class DatabricksCustomTool(BaseTool):
             db_schema = validated_input.db_schema
             warehouse_id = validated_input.warehouse_id
 
+            # Handle multiple INSERT statements by splitting them
+            if "INSERT INTO" in query.upper() and query.count(";") > 1:
+                # Split on semicolon but filter out empty statements
+                statements = [stmt.strip() for stmt in query.split(";") if stmt.strip()]
+                if len(statements) > 1:
+                    logger.info(f"Detected {len(statements)} statements, executing separately")
+                    results = []
+                    for i, stmt in enumerate(statements):
+                        if not stmt.strip():
+                            continue
+                        logger.info(f"Executing statement {i+1}/{len(statements)}")
+                        
+                        # Fix common data type issues in INSERT statements
+                        cleaned_stmt = self._clean_insert_statement(stmt)
+                        
+                        try:
+                            # Execute each statement individually
+                            individual_result = self._execute_single_statement(
+                                cleaned_stmt, catalog, db_schema, warehouse_id
+                            )
+                            results.append(f"Statement {i+1}: {individual_result}")
+                        except Exception as e:
+                            error_msg = f"Statement {i+1} failed: {str(e)}"
+                            logger.error(error_msg)
+                            results.append(error_msg)
+                    return "\n".join(results)
+
             # Setup SQL context with catalog/schema if provided
             context = {}
             if catalog:
@@ -1048,4 +1093,145 @@ class DatabricksCustomTool(BaseTool):
             import traceback
             error_details = traceback.format_exc()
             return f"Error executing Databricks query: {str(e)}\n\nDetails:\n{error_details}"
+
+    def _execute_single_statement(self, statement: str, catalog: str, db_schema: str, warehouse_id: str) -> str:
+        """
+        Execute a single SQL statement.
+        
+        Args:
+            statement: The SQL statement to execute
+            catalog: Databricks catalog name
+            db_schema: Databricks schema name
+            warehouse_id: SQL warehouse ID
+            
+        Returns:
+            str: Formatted result of the statement execution
+        """
+        try:
+            # Setup SQL context with catalog/schema if provided
+            context = {}
+            if catalog:
+                context["catalog"] = catalog
+            if db_schema:
+                context["schema"] = db_schema
+
+            # Get workspace client
+            if not self.workspace_client:
+                return "Error: Databricks client not initialized"
+
+            statement_execution = self.workspace_client.statement_execution
+
+            # Execute the statement
+            execution = statement_execution.execute_statement(
+                warehouse_id=warehouse_id,
+                statement=statement,
+                **context
+            )
+
+            statement_id = execution.statement_id
+
+            # Poll for results
+            import time
+            result = None
+            timeout = 300  # 5 minutes timeout
+            start_time = time.time()
+
+            while time.time() - start_time < timeout:
+                try:
+                    result = statement_execution.get_statement(statement_id)
+
+                    if hasattr(result, 'status') and hasattr(result.status, 'state'):
+                        state_value = str(result.status.state)
+
+                        if "SUCCEEDED" in state_value:
+                            break
+                        elif "FAILED" in state_value:
+                            error_info = "No detailed error info"
+                            if hasattr(result.status, 'error') and result.status.error:
+                                if hasattr(result.status.error, 'message'):
+                                    error_info = result.status.error.message
+                                else:
+                                    error_info = str(result.status.error)
+                            return f"Statement execution failed: {error_info}"
+                        elif "CANCELED" in state_value:
+                            return "Statement was canceled"
+
+                except Exception as poll_error:
+                    return f"Error checking statement status: {str(poll_error)}"
+
+                time.sleep(2)
+
+            if result is None:
+                return "Statement timed out"
+
+            state_value = str(result.status.state)
+            if "SUCCEEDED" not in state_value:
+                return f"Statement did not succeed (final state: {state_value})"
+
+            # For INSERT statements, we typically just want to confirm success
+            if "INSERT INTO" in statement.upper():
+                return "INSERT executed successfully"
+            
+            # For other statements, try to return results
+            if hasattr(result, 'result') and result.result and hasattr(result.result, 'data_array'):
+                row_count = 0
+                if result.result.data_array:
+                    row_count = sum(len(chunk) for chunk in result.result.data_array)
+                return f"Query executed successfully, returned {row_count} rows"
+            else:
+                return "Statement executed successfully"
+
+        except Exception as e:
+            return f"Error executing statement: {str(e)}"
+
+    def _clean_insert_statement(self, statement: str) -> str:
+        """
+        Clean INSERT statement to fix common data type and escaping issues.
+        
+        Args:
+            statement: The raw INSERT statement
+            
+        Returns:
+            str: Cleaned INSERT statement
+        """
+        import re
+        
+        # Fix excessive backslash escaping that can cause parsing errors
+        # Remove multiple consecutive backslashes, keeping only necessary escaping
+        statement = re.sub(r'\\{3,}', '\\', statement)  # Replace 3+ backslashes with single
+        statement = re.sub(r'\\{2}', '\\', statement)   # Replace double backslashes with single
+        
+        # Fix Unicode escaping issues (e.g., \\u00fc -> \u00fc)
+        statement = re.sub(r'\\{2,}u([0-9a-fA-F]{4})', r'\\u\1', statement)
+        
+        # Fix quote escaping issues in string literals
+        # Handle cases like Let''s -> Let's (double single quotes to single)
+        # But preserve SQL escaping for single quotes in string values
+        statement = re.sub(r"([^'])''([^'])", r"\1'\2", statement)
+        
+        # Fix boolean values: 'False' -> FALSE, 'True' -> TRUE
+        statement = re.sub(r"'False'", "FALSE", statement)
+        statement = re.sub(r"'True'", "TRUE", statement)
+        
+        # Fix empty arrays: '[]' -> NULL (Databricks doesn't support empty arrays as strings)
+        statement = re.sub(r"'\[\]'", "NULL", statement)
+        
+        # Fix empty objects: '{}' -> NULL (Databricks doesn't support empty objects as strings)
+        statement = re.sub(r"'\{\}'", "NULL", statement)
+        
+        # Fix JSON string escaping issues
+        # Remove excessive escaping in JSON-like strings within SQL values
+        statement = re.sub(r'\\"', '"', statement)
+        
+        # Fix timestamp function calls that might be malformed
+        statement = re.sub(r"timestamp\s*\(\s*'([^']+)'\s*\)", r"timestamp('\1')", statement)
+        
+        # Remove any trailing/leading whitespace from the statement
+        statement = statement.strip()
+        
+        # Ensure statement ends with semicolon if it doesn't already
+        if not statement.endswith(';'):
+            statement += ';'
+            
+        return statement
 
