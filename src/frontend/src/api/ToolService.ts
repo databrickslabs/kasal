@@ -8,7 +8,7 @@ export interface Tool {
   description: string;
   icon: string;
   config?: Record<string, ConfigValue>;
-  category?: 'PreBuilt' | 'Custom' | 'UnityCatalog';
+  category?: 'PreBuilt' | 'Custom';
   enabled?: boolean;
 }
 

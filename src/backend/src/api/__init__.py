@@ -15,10 +15,8 @@ from src.api.templates_router import router as templates_router
 from src.api.schemas_router import router as schemas_router
 from src.api.tools_router import router as tools_router
 from src.api.upload_router import router as upload_router
-from src.api.uc_tools_router import router as uc_tools_router
 from src.api.task_tracking_router import router as task_tracking_router
 from src.api.scheduler_router import router as scheduler_router
-from src.api.uc_functions_router import router as uc_functions_router
 from src.api.agent_generation_router import router as agent_generation_router
 from src.api.connections_router import router as connections_router
 from src.api.crew_generation_router import router as crew_generation_router
@@ -61,10 +59,8 @@ api_router.include_router(templates_router)
 api_router.include_router(schemas_router)
 api_router.include_router(tools_router)
 api_router.include_router(upload_router)
-api_router.include_router(uc_tools_router)
 api_router.include_router(task_tracking_router)
 api_router.include_router(scheduler_router)
-api_router.include_router(uc_functions_router)
 api_router.include_router(agent_generation_router)
 api_router.include_router(connections_router)
 api_router.include_router(crew_generation_router)
@@ -106,10 +102,8 @@ __all__ = [
     "schemas_router",
     "tools_router",
     "upload_router",
-    "uc_tools_router",
     "task_tracking_router",
     "scheduler_router",
-    "uc_functions_router",
     "agent_generation_router",
     "connections_router",
     "crew_generation_router",
