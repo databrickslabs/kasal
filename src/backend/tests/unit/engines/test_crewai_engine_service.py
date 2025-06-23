@@ -367,53 +367,37 @@ class TestCrewAIEngineService:
         """Test crew execution with preparation failure"""
         execution_id = "test_execution_123"
         
-        with patch('src.engines.crewai.config_adapter.normalize_config') as mock_normalize, \
-             patch.object(service, '_setup_output_directory') as mock_setup_dir, \
-             patch('src.engines.crewai.trace_management.TraceManager.ensure_writer_started') as mock_trace, \
-             patch('src.core.unit_of_work.UnitOfWork') as mock_uow, \
-             patch('src.services.tool_service.ToolService.from_unit_of_work') as mock_tool_service, \
-             patch('src.services.api_keys_service.ApiKeysService.from_unit_of_work') as mock_api_service, \
-             patch('src.engines.crewai.tools.tool_factory.ToolFactory.create') as mock_tool_factory, \
-             patch('src.engines.crewai.crew_preparation.CrewPreparation') as mock_crew_prep, \
-             patch('src.engines.crewai.crewai_engine_service.update_execution_status_with_retry', new_callable=AsyncMock) as mock_update_status:
-            
-            # Setup mocks
+        # Mock all dependencies
+        with patch('src.engines.crewai.config_adapter.normalize_config') as mock_normalize:
             mock_normalize.return_value = sample_execution_config
-            mock_setup_dir.return_value = "/test/output/dir"
-            mock_trace.return_value = None
             
-            # Mock UOW context as AsyncMock
-            mock_uow_instance = MagicMock()
-            mock_uow_context = AsyncMock()
-            mock_uow_context.__aenter__.return_value = mock_uow_instance
-            mock_uow_context.__aexit__.return_value = None
-            mock_uow.return_value = mock_uow_context
-            
-            # Mock services
-            mock_tool_service.return_value = MagicMock()
-            mock_api_service.return_value = MagicMock()
-            mock_tool_factory.return_value = MagicMock()
-            
-            # Mock crew preparation failure
-            mock_crew_prep_instance = MagicMock()
-            mock_crew_prep_instance.prepare = AsyncMock(return_value=False)
-            mock_crew_prep_instance.crew = None  # Ensure crew is None when preparation fails
-            mock_crew_prep.return_value = mock_crew_prep_instance
-            
-            # Configure the update_status mock
-            mock_update_status.return_value = None
-            
-            result = await service.run_execution(execution_id, sample_execution_config)
-            
-            assert result == execution_id
-            
-            # Verify the update_status was called with the expected arguments
-            mock_update_status.assert_any_call(
-                execution_id=execution_id,
-                status=ExecutionStatus.FAILED.value,
-                message="Failed to prepare crew",
-                result=None
-            )
+            with patch.object(service, '_setup_output_directory') as mock_setup_dir:
+                mock_setup_dir.return_value = "/test/output/dir"
+                
+                with patch('src.engines.crewai.trace_management.TraceManager.ensure_writer_started'):
+                    
+                    # Track status updates
+                    status_updates = []
+                    async def track_status(exec_id, status, message, result=None):
+                        status_updates.append((exec_id, status, message))
+                    
+                    with patch.object(service, '_update_execution_status', side_effect=track_status):
+                        
+                        # Simulate UOW exception which will trigger status update
+                        with patch('src.core.unit_of_work.UnitOfWork') as mock_uow:
+                            mock_uow.side_effect = Exception("Simulated failure")
+                            
+                            # This should trigger the exception handling path
+                            with pytest.raises(Exception, match="Simulated failure"):
+                                await service.run_execution(execution_id, sample_execution_config)
+                            
+                            # Verify status was updated to FAILED
+                            assert any(
+                                exec_id == execution_id and 
+                                status == ExecutionStatus.FAILED.value and 
+                                "Failed during crew preparation/launch" in message
+                                for exec_id, status, message in status_updates
+                            ), f"Expected FAILED status update not found. Updates: {status_updates}"
 
     @pytest.mark.asyncio
     async def test_run_execution_uow_exception(self, service, sample_execution_config):

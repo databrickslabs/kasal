@@ -68,21 +68,21 @@ DEFAULT_MODELS = {
         "temperature": 0.7,
         "provider": "anthropic",
         "context_window": 200000,
-        "max_output_tokens": 4096
+        "max_output_tokens": 8192
     },
     "claude-3-5-haiku-20241022": {
         "name": "claude-3-5-haiku-20241022",
         "temperature": 0.7,
         "provider": "anthropic",
         "context_window": 200000,
-        "max_output_tokens": 4096
+        "max_output_tokens": 8192
     },
     "claude-3-7-sonnet-20250219": {
         "name": "claude-3-7-sonnet-20250219",
         "temperature": 0.7,
         "provider": "anthropic",
         "context_window": 200000,
-        "max_output_tokens": 4096
+        "max_output_tokens": 64000
     },
     "claude-3-7-sonnet-20250219-thinking": {
         "name": "claude-3-7-sonnet-20250219",
@@ -90,7 +90,7 @@ DEFAULT_MODELS = {
         "provider": "anthropic",
         "extended_thinking": True,
         "context_window": 200000,
-        "max_output_tokens": 4096
+        "max_output_tokens": 64000
     },
     "claude-3-opus-20240229": {
         "name": "claude-3-opus-20240229",
@@ -118,7 +118,7 @@ DEFAULT_MODELS = {
         "temperature": 0.7,
         "provider": "databricks",
         "context_window": 200000,
-        "max_output_tokens": 4096
+        "max_output_tokens": 64000
     },
     "llama2:13b": {
         "name": "llama2:13b",
@@ -160,7 +160,7 @@ DEFAULT_MODELS = {
         "temperature": 0.7,
         "provider": "databricks",
         "context_window": 200000,
-        "max_output_tokens": 4096
+        "max_output_tokens": 64000
     },
     "llama3.2:3b-text-q8_0": {
         "name": "llama3.2:3b-text-q8_0",

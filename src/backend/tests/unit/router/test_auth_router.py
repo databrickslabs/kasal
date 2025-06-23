@@ -166,10 +166,8 @@ class TestAuthRouter:
             "token_type": "bearer"
         }
         
-        response = client.post(
-            "/auth/refresh-token",
-            cookies={"refresh_token": "old_refresh_token"}
-        )
+        client.cookies = {"refresh_token": "old_refresh_token"}
+        response = client.post("/auth/refresh-token")
         
         assert response.status_code == 200
         data = response.json()
@@ -386,10 +384,8 @@ class TestAuthRouter:
         mock_auth_service_class.return_value = mock_service
         mock_service.refresh_access_token.return_value = None
         
-        response = client.post(
-            "/auth/refresh-token",
-            cookies={"refresh_token": "invalid_token"}
-        )
+        client.cookies = {"refresh_token": "invalid_token"}
+        response = client.post("/auth/refresh-token")
         
         assert response.status_code == 401
         assert "Invalid or expired refresh token" in response.json()["detail"]
@@ -433,10 +429,8 @@ class TestAuthRouter:
         mock_auth_service_class.return_value = mock_service
         mock_service.revoke_refresh_token.return_value = True
         
-        response = client.post(
-            "/auth/logout",
-            cookies={"refresh_token": "token_to_revoke"}
-        )
+        client.cookies = {"refresh_token": "token_to_revoke"}
+        response = client.post("/auth/logout")
         
         assert response.status_code == 204
         mock_service.revoke_refresh_token.assert_called_once_with("token_to_revoke")

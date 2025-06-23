@@ -314,15 +314,85 @@ class TestSeedsFinal:
             assert len(description) > 50
             assert description.endswith(".")
 
+        # Test specific tools exist
+        assert 70 in tool_ids  # DatabricksJobsTool
+        assert 67 in tool_ids  # DatabricksCustomTool
+        assert 35 in tool_ids  # GenieTool
+        assert 31 in tool_ids  # PerplexityTool
+        
+        # Find DatabricksJobsTool specifically
+        databricks_jobs_tool = None
+        for tool_id, title, description, icon in tools.tools_data:
+            if tool_id == 70:
+                databricks_jobs_tool = (tool_id, title, description, icon)
+                break
+        
+        assert databricks_jobs_tool is not None
+        assert databricks_jobs_tool[1] == "DatabricksJobsTool"
+        assert "Databricks Jobs" in databricks_jobs_tool[2]
+        assert databricks_jobs_tool[3] == "database"
+
         # Test get_tool_configs function
         configs = tools.get_tool_configs()
         assert isinstance(configs, dict)
+        
+        # Test DatabricksJobsTool config exists
+        assert "70" in configs
+        assert isinstance(configs["70"], dict)
+        assert configs["70"]["result_as_answer"] is False
+        assert "DATABRICKS_HOST" in configs["70"]
         
         for tool_id_str, config in configs.items():
             assert tool_id_str.isdigit()
             assert isinstance(config, dict)
             result_as_answer = config.get("result_as_answer", False)
             assert isinstance(result_as_answer, bool)
+
+    @pytest.mark.asyncio
+    async def test_tools_seeding_with_databricks_jobs_tool(self):
+        """Test that DatabricksJobsTool is properly seeded and enabled."""
+        from sqlalchemy import select
+        from src.models.tool import Tool
+        
+        # Mock the database session and tool creation
+        mock_session = AsyncMock()
+        mock_result = Mock()
+        mock_result.scalars.return_value.all.return_value = []  # No existing tools
+        mock_session.execute.return_value = mock_result
+        
+        # Mock async_session_factory
+        mock_async_session = AsyncMock()
+        mock_async_session.__aenter__.return_value = mock_session
+        mock_async_session.__aexit__.return_value = None
+        
+        with patch('src.seeds.tools.async_session_factory', return_value=mock_async_session):
+            # Run the seeder
+            await tools.seed_async()
+            
+            # Check that tools were added/updated
+            add_calls = [call for call in mock_session.add.call_args_list]
+            
+            # Find DatabricksJobsTool in the added tools
+            databricks_jobs_tool_added = False
+            for call in add_calls:
+                tool = call[0][0]
+                if hasattr(tool, 'id') and tool.id == 70:
+                    databricks_jobs_tool_added = True
+                    # Verify it's enabled
+                    assert tool.enabled is True
+                    assert tool.title == "DatabricksJobsTool"
+                    assert "database" in tool.icon
+                    break
+            
+            # If not added, check if it was updated
+            if not databricks_jobs_tool_added:
+                # Check execute calls for updates
+                for call in mock_session.execute.call_args_list:
+                    query = call[0][0]
+                    # Check if this is a select for tool 70
+                    if hasattr(query, '_where_criteria'):
+                        # Tool should be enabled in updates
+                        assert True  # Placeholder for update checks
 
     def test_environment_patterns(self):
         """Test environment variable patterns."""

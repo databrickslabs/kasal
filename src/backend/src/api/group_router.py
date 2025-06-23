@@ -189,7 +189,7 @@ async def update_group(
     try:
         group = await group_service.update_group(
             group_id=group_id,
-            **group_data.dict(exclude_unset=True)
+            **group_data.model_dump(exclude_unset=True)
         )
         
         user_count = await group_service.get_group_user_count(group.id)
@@ -366,7 +366,7 @@ async def update_group_user(
         group_user = await group_service.update_group_user(
             group_id=group_id,
             user_id=user_id,
-            **user_data.dict(exclude_unset=True)
+            **user_data.model_dump(exclude_unset=True)
         )
         
         # Get email for response

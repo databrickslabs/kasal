@@ -168,7 +168,7 @@ class SchemaService:
                 )
             
             # Prepare update data
-            update_data = schema_data.model_dump(exclude_unset=True)
+            update_data = schema_data.model_dump(exclude_unset=True, by_alias=True)
             
             # Handle legacy schema_json field if provided
             if 'schema_json' in update_data and update_data.get('schema_json') and 'schema_definition' not in update_data:

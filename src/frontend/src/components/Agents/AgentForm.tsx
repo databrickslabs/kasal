@@ -79,7 +79,7 @@ const AgentForm: React.FC<AgentFormProps> = ({ initialData, onCancel, onAgentSav
       memory: initialData?.memory ?? true,
       verbose: initialData?.verbose ?? false,
       allow_delegation: initialData?.allow_delegation || false,
-      cache: initialData?.cache || true,
+      cache: initialData?.cache ?? true,
       system_template: initialData?.system_template || undefined,
       prompt_template: initialData?.prompt_template || undefined,
       response_template: initialData?.response_template || undefined,

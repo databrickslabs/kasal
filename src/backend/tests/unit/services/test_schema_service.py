@@ -11,6 +11,7 @@ from datetime import datetime
 from typing import Dict, Any
 
 from fastapi import HTTPException
+from pydantic import Field
 
 from src.services.schema_service import SchemaService
 from src.repositories.schema_repository import SchemaRepository
@@ -369,7 +370,7 @@ class TestSchemaService:
         
         # Create a custom update class to simulate schema_json field
         class TestSchemaUpdate(SchemaUpdate):
-            schema_json: Dict[str, Any] = None
+            test_schema_json: Dict[str, Any] = Field(None, alias='schema_json')
         
         # Create update data with schema_json but no schema_definition
         update_data = {
