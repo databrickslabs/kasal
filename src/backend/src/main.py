@@ -15,6 +15,7 @@ from src.api import api_router
 from src.core.logger import LoggerManager
 from src.db.session import get_db, async_session_factory
 from src.services.scheduler_service import SchedulerService
+from src.services.execution_cleanup_service import ExecutionCleanupService
 
 # Set up basic logging initially, will be enhanced in lifespan
 logging.basicConfig(
@@ -111,6 +112,17 @@ async def lifespan(app: FastAPI):
     except Exception as e:
         system_logger.error(f"Error checking database: {e}")
     
+    # Clean up stale jobs from previous run
+    if db_initialized:
+        system_logger.info("Cleaning up stale jobs from previous run...")
+        try:
+            cleaned_jobs = await ExecutionCleanupService.cleanup_stale_jobs_on_startup()
+            if cleaned_jobs > 0:
+                system_logger.info(f"Successfully cleaned up {cleaned_jobs} stale jobs")
+        except Exception as e:
+            system_logger.error(f"Error cleaning up stale jobs: {e}")
+            # Don't raise - allow app to start even if cleanup fails
+    
     # Run database seeders after DB initialization
     if db_initialized:
         # Import needed for seeders
@@ -157,9 +169,21 @@ async def lifespan(app: FastAPI):
     else:
         system_logger.warning("Skipping scheduler initialization. Database not ready.")
     
+    system_logger.info("Application startup complete")
+    
     try:
         yield
     finally:
+        # Clean up running jobs during shutdown
+        if db_initialized:
+            system_logger.info("Application shutting down, cleaning up running jobs...")
+            try:
+                cleaned_jobs = await ExecutionCleanupService.cleanup_stale_jobs_on_startup()
+                if cleaned_jobs > 0:
+                    system_logger.info(f"Cleaned up {cleaned_jobs} running jobs during shutdown")
+            except Exception as e:
+                system_logger.error(f"Error cleaning up jobs during shutdown: {e}")
+        
         # Shutdown scheduler if it was started
         if scheduler:
             system_logger.info("Shutting down scheduler...")
