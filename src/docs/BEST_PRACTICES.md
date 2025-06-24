@@ -553,6 +553,52 @@ class KasalSettings(BaseSettings):
 - Store execution results for future reference
 - Implement proper pagination for execution history
 
+## Operations & Service Management
+
+### Service Lifecycle Management
+
+- **Graceful Shutdown**: The FastAPI lifespan manager handles cleanup during shutdown
+- **Automatic Cleanup**: On startup, any orphaned jobs (PENDING, PREPARING, RUNNING) are automatically cancelled
+- **State Persistence**: All execution state is persisted to the database for recovery
+- **Single Job Constraint**: Currently enforces one active job at a time to ensure reliability
+
+### Handling Service Restarts
+
+When the Kasal service needs to be restarted:
+
+1. **Shutdown**: The FastAPI lifespan manager runs cleanup in the finally block
+2. **On Startup**: The `ExecutionCleanupService` automatically marks orphaned jobs as CANCELLED
+3. **User Experience**: Users can immediately start new executions without being blocked by "ghost" jobs
+
+**Note**: When running with `uvicorn --reload` (development mode), press Ctrl+C to stop the service. The reload flag may interfere with graceful shutdown, but the startup cleanup ensures any orphaned jobs are handled on the next start.
+
+```python
+# Example: Execution states are automatically cleaned on startup
+# Any jobs in these states will be marked as CANCELLED:
+active_statuses = [
+    ExecutionStatus.PENDING.value,
+    ExecutionStatus.PREPARING.value,
+    ExecutionStatus.RUNNING.value
+]
+```
+
+### Monitoring & Health Checks
+
+- Implement health check endpoints for service monitoring
+- Monitor execution queue depth and processing times
+- Track job success/failure rates for quality metrics
+- Log service restart events and cleanup actions
+- Set up alerts for stuck or long-running executions
+
+### Best Practices for Production Deployments
+
+- Use process managers (systemd, supervisor) for automatic restart on failure
+- Implement proper logging rotation to prevent disk space issues
+- Monitor database connection pool health
+- Set appropriate timeout values for long-running AI operations
+- Use environment-specific configurations for different deployment stages
+- Document service dependencies and startup order
+
 ## Conclusion
 
 Following these best practices will help create a robust, maintainable, and efficient AI agent workflow orchestration platform. These guidelines are specifically tailored for Kasal's architecture and should be adapted as the platform evolves. Regular review and updates of these practices ensure the codebase remains clean, secure, and performant as new features are added. 

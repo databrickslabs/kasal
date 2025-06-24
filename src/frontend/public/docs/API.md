@@ -293,6 +293,14 @@ GET /api/v1/executions/{execution_id}
 }
 ```
 
+**Status Values:**
+- `PENDING` - Execution queued but not started
+- `PREPARING` - Execution is being prepared
+- `RUNNING` - Execution is actively running
+- `COMPLETED` - Execution finished successfully
+- `FAILED` - Execution failed with errors
+- `CANCELLED` - Execution was cancelled (manually or due to service restart)
+
 #### List Executions
 ```http
 GET /api/v1/executions?limit=10&offset=0
@@ -346,6 +354,26 @@ Detailed execution tracing for debugging and optimization.
 ```http
 GET /api/v1/execution-trace/{execution_id}
 ```
+
+### Execution Lifecycle & Service Restarts
+
+#### Execution State Management
+
+Kasal maintains execution state in the database to ensure consistency. When the service is restarted:
+
+1. **Automatic Cleanup**: Any executions in `PENDING`, `PREPARING`, or `RUNNING` states are automatically marked as `CANCELLED`
+2. **Reason Tracking**: The cancellation includes a message: "Job cancelled - service was restarted while job was running"
+3. **Single Job Constraint**: Kasal currently enforces that only one job can run at a time
+4. **Clean State**: After restart, users can immediately start new executions
+
+#### Graceful Shutdown
+
+The service handles shutdown through FastAPI's lifespan manager:
+- The finally block attempts to clean up running executions
+- State is properly persisted to the database
+- In development mode with `--reload`, shutdown may be less graceful
+
+This design ensures that users are never blocked from starting new executions. Even if shutdown isn't graceful, the startup cleanup will handle any orphaned jobs from the previous service instance.
 
 ## Generation & AI Services
 
