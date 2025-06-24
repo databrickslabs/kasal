@@ -37,7 +37,7 @@ class DatabricksJobsToolSchema(BaseModel):
         None, description="Filter jobs by name or ID substring (case-insensitive). Works with 'list' and 'list_my_jobs' actions"
     )
     job_params: Optional[Union[Dict[str, Any], List[str]]] = Field(
-        None, description="Custom parameters to pass when running a job. Use 'get_notebook' action first to analyze what parameters the job expects. For notebook/SQL tasks use dict: {'param_name': 'value'}. For Python tasks use list: ['--arg1', 'value1'] or dict that will be converted."
+        None, description="Custom parameters to pass when running a job. The tool will automatically wrap dict parameters as {'job_params': '<json_string>'}. Your notebook should read dbutils.widgets.get('job_params') and parse the JSON. Use 'get_notebook' action first to analyze parameters. For Python tasks use list: ['--arg1', 'value1']."
     )
     
     @model_validator(mode='after')
@@ -998,6 +998,13 @@ class DatabricksJobsTool(BaseTool):
     def _analyze_notebook_parameters(self, notebook_path: str, task_config: Dict) -> str:
         """Analyze notebook and provide parameter recommendations."""
         output = "\n    🔍 Parameter Analysis:\n"
+        output += "\n    ⚠️  IMPORTANT: The tool will automatically wrap your parameters with key 'job_params' as a JSON string.\n"
+        output += "    Your notebook should read this parameter and parse it, e.g.:\n"
+        output += "    ```python\n"
+        output += "    import json\n"
+        output += "    job_params_str = dbutils.widgets.get('job_params')\n"
+        output += "    params = json.loads(job_params_str)\n"
+        output += "    ```\n"
         
         # Common patterns for search/pagination jobs
         if any(term in notebook_path.lower() for term in ['search', 'gmaps', 'google_maps', 'pagination']):
@@ -1052,7 +1059,24 @@ class DatabricksJobsTool(BaseTool):
             
             # Add job parameters if provided
             if job_params:
-                payload["job_parameters"] = job_params
+                # For Databricks API, we need to pass job_params as a single JSON string
+                # with key "job_params" to avoid malformed request errors
+                if isinstance(job_params, dict):
+                    # Convert the entire dict to a JSON string and pass with single key
+                    payload["job_parameters"] = {
+                        "job_params": json.dumps(job_params)
+                    }
+                    logger.info(f"[run_job] Formatted parameters with single key 'job_params': {payload['job_parameters']}")
+                elif isinstance(job_params, list):
+                    # For list parameters (Python script args), use python_params
+                    payload["python_params"] = job_params
+                    logger.info(f"[run_job] Using python_params for list: {job_params}")
+                else:
+                    # Fallback: convert to string with single key
+                    payload["job_parameters"] = {
+                        "job_params": str(job_params)
+                    }
+                    logger.info(f"[run_job] Formatted other type as string with key 'job_params': {payload['job_parameters']}")
             
             # Make the API call
             response = await self._make_api_call("POST", "/api/2.1/jobs/run-now", payload)

@@ -167,7 +167,9 @@ class ExecutionService:
         execution_id: str, 
         status: str, 
         run_name: str,
-        created_at: datetime = None
+        created_at: datetime = None,
+        group_id: Optional[int] = None,
+        group_email: Optional[str] = None
     ) -> None:
         """
         Add an execution to in-memory storage.
@@ -177,13 +179,17 @@ class ExecutionService:
             status: Status of the execution
             run_name: Name of the execution run
             created_at: Creation timestamp (defaults to now)
+            group_id: ID of the group that owns this execution
+            group_email: Email of the group that owns this execution
         """
         ExecutionService.executions[execution_id] = {
             "execution_id": execution_id,
             "status": status,
             "created_at": created_at or datetime.now(),  # Use timezone-naive datetime
             "run_name": run_name,
-            "output": ""
+            "output": "",
+            "group_id": group_id,
+            "group_email": group_email
         }
     
     @staticmethod
