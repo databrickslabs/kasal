@@ -544,6 +544,11 @@ class LLMManager:
                 llm_params["api_key"] = api_key
             if api_base:
                 llm_params["api_base"] = api_base
+            
+            # Add max_output_tokens if defined in model config
+            if "max_output_tokens" in model_config_dict and model_config_dict["max_output_tokens"]:
+                llm_params["max_tokens"] = model_config_dict["max_output_tokens"]
+                logger.info(f"Setting max_tokens to {model_config_dict['max_output_tokens']} for model {prefixed_model}")
                 
             logger.info(f"Creating CrewAI LLM with model: {prefixed_model}, has_api_key: {bool(api_key)}, api_base: {api_base}")
             return LLM(**llm_params)
@@ -579,6 +584,11 @@ class LLMManager:
             llm_params["api_key"] = api_key
         if api_base:
             llm_params["api_base"] = api_base
+        
+        # Add max_output_tokens if defined in model config
+        if "max_output_tokens" in model_config_dict and model_config_dict["max_output_tokens"]:
+            llm_params["max_tokens"] = model_config_dict["max_output_tokens"]
+            logger.info(f"Setting max_tokens to {model_config_dict['max_output_tokens']} for model {prefixed_model}")
         
         # Create and return the CrewAI LLM
         logger.info(f"Creating CrewAI LLM with model: {prefixed_model}")

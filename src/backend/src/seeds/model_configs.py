@@ -162,6 +162,20 @@ DEFAULT_MODELS = {
         "context_window": 200000,
         "max_output_tokens": 64000
     },
+    "claude-opus-4-20250514": {
+        "name": "claude-opus-4-20250514",
+        "temperature": 0.7,
+        "provider": "anthropic",
+        "context_window": 200000,
+        "max_output_tokens": 32000
+    },
+    "claude-sonnet-4": {
+        "name": "claude-3-5-sonnet-20241022",
+        "temperature": 0.7,
+        "provider": "anthropic",
+        "context_window": 200000,
+        "max_output_tokens": 8192
+    },
     "llama3.2:3b-text-q8_0": {
         "name": "llama3.2:3b-text-q8_0",
         "temperature": 0.7,
