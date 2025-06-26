@@ -271,6 +271,11 @@ class TestDatabricksJobsTool(unittest.TestCase):
         self.assertEqual(tool._host, "test-workspace.cloud.databricks.com")
         self.assertEqual(tool._token, "test-api-key")
         self.assertFalse(tool._use_oauth)
+        # Test single execution control attributes
+        self.assertEqual(tool.max_usage_count, 1)
+        self.assertEqual(tool.current_usage_count, 0)
+        self.assertEqual(len(tool._run_executions), 0)
+        self.assertEqual(len(tool._create_executions), 0)
 
     def test_tool_initialization_empty_config(self):
         """Test initialization with empty config"""
@@ -1965,6 +1970,155 @@ spark.sql("SELECT * FROM table")
             tool_config={"DATABRICKS_API_KEY": ""}
         )
         self.assertIsNotNone(tool)
+
+    # Single Execution Control Tests
+    def test_single_execution_run_duplicate_prevention(self):
+        """Test that duplicate run actions are prevented"""
+        tool = DatabricksJobsTool(tool_config=self.tool_config)
+        
+        # First run should succeed
+        with patch.object(tool, '_run_job', return_value="✅ Successfully triggered job 123\nRun ID: 456\nStatus: RUNNING"):
+            result1 = tool._run(action="run", job_id=123, job_params={"test": "value"})
+            self.assertIn("Successfully triggered job 123", result1)
+            self.assertIn("📊 Usage Count: 1/1", result1)
+        
+        # Second identical run should be prevented
+        result2 = tool._run(action="run", job_id=123, job_params={"test": "value"})
+        self.assertIn("⚠️ DUPLICATE RUN PREVENTED", result2)
+        self.assertIn("Previous run_id: 456", result2)
+
+    def test_single_execution_run_different_params_blocked(self):
+        """Test that different params for same job are blocked after first run"""
+        tool = DatabricksJobsTool(tool_config=self.tool_config)
+        
+        # First run with params
+        with patch.object(tool, '_run_job', return_value="✅ Successfully triggered job 123\nRun ID: 456\nStatus: RUNNING"):
+            result1 = tool._run(action="run", job_id=123, job_params={"test": "value1"})
+            self.assertIn("Successfully triggered job 123", result1)
+        
+        # Second run with different params should hit usage limit
+        result2 = tool._run(action="run", job_id=123, job_params={"test": "value2"})
+        self.assertIn("⚠️ USAGE LIMIT REACHED", result2)
+        self.assertIn("maximum usage limit of 1", result2)
+
+    def test_single_execution_create_duplicate_prevention(self):
+        """Test that duplicate create actions are prevented"""
+        tool = DatabricksJobsTool(tool_config=self.tool_config)
+        
+        job_config = {"name": "Test Job", "tasks": [{"task_key": "task1"}]}
+        
+        # First create should succeed
+        with patch.object(tool, '_create_job', return_value="✅ Successfully created job 'Test Job'\nJob ID: 789"):
+            result1 = tool._run(action="create", job_config=job_config)
+            self.assertIn("Successfully created job", result1)
+            self.assertIn("📊 Usage Count: 1/1", result1)
+        
+        # Second identical create should be prevented
+        result2 = tool._run(action="create", job_config=job_config)
+        self.assertIn("⚠️ DUPLICATE CREATE PREVENTED", result2)
+        self.assertIn("Previous job_id: 789", result2)
+
+    def test_single_execution_create_different_config_blocked(self):
+        """Test that different job configs are blocked after first create"""
+        tool = DatabricksJobsTool(tool_config=self.tool_config)
+        
+        # First create
+        job_config1 = {"name": "Test Job 1", "tasks": [{"task_key": "task1"}]}
+        with patch.object(tool, '_create_job', return_value="✅ Successfully created job 'Test Job 1'\nJob ID: 789"):
+            result1 = tool._run(action="create", job_config=job_config1)
+            self.assertIn("Successfully created job", result1)
+        
+        # Second create with different config should hit usage limit
+        job_config2 = {"name": "Test Job 2", "tasks": [{"task_key": "task2"}]}
+        result2 = tool._run(action="create", job_config=job_config2)
+        self.assertIn("⚠️ USAGE LIMIT REACHED", result2)
+        self.assertIn("maximum usage limit of 1", result2)
+
+    def test_single_execution_other_actions_unlimited(self):
+        """Test that other actions (list, get, monitor) are not limited"""
+        tool = DatabricksJobsTool(tool_config=self.tool_config)
+        
+        # Simulate using up the single execution limit with a run
+        with patch.object(tool, '_run_job', return_value="✅ Successfully triggered job 123\nRun ID: 456"):
+            tool._run(action="run", job_id=123)
+        
+        # Other actions should still work
+        with patch.object(tool, '_list_jobs', return_value="Jobs listed"):
+            result = tool._run(action="list")
+            self.assertIn("Jobs listed", result)
+        
+        with patch.object(tool, '_get_job', return_value="Job details"):
+            result = tool._run(action="get", job_id=123)
+            self.assertIn("Job details", result)
+        
+        with patch.object(tool, '_monitor_run', return_value="Run status"):
+            result = tool._run(action="monitor", run_id=456)
+            self.assertIn("Run status", result)
+
+    def test_reset_execution_state(self):
+        """Test reset_execution_state method"""
+        tool = DatabricksJobsTool(tool_config=self.tool_config)
+        
+        # Simulate some executions
+        tool._run_executions["test_run"] = "123"
+        tool._create_executions["test_create"] = "456"
+        tool.current_usage_count = 1
+        
+        # Reset state
+        result = tool.reset_execution_state()
+        
+        self.assertIn("🔄 EXECUTION STATE RESET", result)
+        self.assertIn("1 previous job runs", result)
+        self.assertIn("1 previous job creations", result)
+        self.assertIn("Total: 2 executions", result)
+        self.assertEqual(tool.current_usage_count, 0)
+        self.assertEqual(len(tool._run_executions), 0)
+        self.assertEqual(len(tool._create_executions), 0)
+
+    def test_single_execution_run_without_params(self):
+        """Test single execution control with run action without parameters"""
+        tool = DatabricksJobsTool(tool_config=self.tool_config)
+        
+        # First run without params
+        with patch.object(tool, '_run_job', return_value="✅ Successfully triggered job 123\nRun ID: 456"):
+            result1 = tool._run(action="run", job_id=123)
+            self.assertIn("Successfully triggered job 123", result1)
+        
+        # Second run without params should be prevented
+        result2 = tool._run(action="run", job_id=123)
+        self.assertIn("⚠️ DUPLICATE RUN PREVENTED", result2)
+
+    def test_single_execution_failed_run_not_tracked(self):
+        """Test that failed runs are not tracked for duplicate prevention"""
+        tool = DatabricksJobsTool(tool_config=self.tool_config)
+        
+        # First run fails
+        with patch.object(tool, '_run_job', return_value="Error: Job failed to start"):
+            result1 = tool._run(action="run", job_id=123, job_params={"test": "value"})
+            self.assertIn("Error: Job failed to start", result1)
+            self.assertNotIn("📊 Usage Count", result1)
+        
+        # Second run with same params should be allowed (since first failed)
+        with patch.object(tool, '_run_job', return_value="✅ Successfully triggered job 123\nRun ID: 456"):
+            result2 = tool._run(action="run", job_id=123, job_params={"test": "value"})
+            self.assertIn("Successfully triggered job 123", result2)
+
+    def test_single_execution_failed_create_not_tracked(self):
+        """Test that failed creates are not tracked for duplicate prevention"""
+        tool = DatabricksJobsTool(tool_config=self.tool_config)
+        
+        job_config = {"name": "Test Job", "tasks": [{"task_key": "task1"}]}
+        
+        # First create fails
+        with patch.object(tool, '_create_job', return_value="Error: Job creation failed"):
+            result1 = tool._run(action="create", job_config=job_config)
+            self.assertIn("Error: Job creation failed", result1)
+            self.assertNotIn("📊 Usage Count", result1)
+        
+        # Second create with same config should be allowed (since first failed)
+        with patch.object(tool, '_create_job', return_value="✅ Successfully created job 'Test Job'\nJob ID: 789"):
+            result2 = tool._run(action="create", job_config=job_config)
+            self.assertIn("Successfully created job", result2)
 
 
 if __name__ == '__main__':
