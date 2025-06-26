@@ -94,11 +94,15 @@ class DatabricksJobsTool(BaseTool):
         "Provide 'action' parameter with values: 'list', 'list_my_jobs', 'get', 'get_notebook', 'run', 'monitor', or 'create'."
     )
     args_schema: Type[BaseModel] = DatabricksJobsToolSchema
+    max_usage_count: int = 1  # Limit to 1 usage for 'run' and 'create' actions
+    current_usage_count: int = 0
     
     _host: str = PrivateAttr(default=None)
     _token: str = PrivateAttr(default=None)
     _user_token: str = PrivateAttr(default=None)
     _use_oauth: bool = PrivateAttr(default=False)
+    _run_executions: Dict[str, str] = PrivateAttr(default_factory=dict)
+    _create_executions: Dict[str, str] = PrivateAttr(default_factory=dict)
     
     def __init__(
         self,
@@ -304,6 +308,7 @@ class DatabricksJobsTool(BaseTool):
         logger.info("DatabricksJobsTool Configuration:")
         logger.info(f"Host: {self._host}")
         logger.info(f"Authentication Method: {'OAuth/OBO' if self._use_oauth else 'PAT'}")
+        logger.info(f"Single Execution Control: Enabled (max_usage_count={self.max_usage_count})")
         
         # Log token (masked)
         if self._user_token:
@@ -314,6 +319,29 @@ class DatabricksJobsTool(BaseTool):
             logger.info(f"PAT Token (masked): {masked_token}")
         else:
             logger.warning("No token provided - will attempt to use enhanced authentication")
+
+    def reset_execution_state(self) -> str:
+        """
+        Reset the execution state to allow new runs and creates.
+        
+        This method clears the execution tracking and resets the usage count.
+        Use with caution as it removes protection against duplicate runs and job creation.
+        
+        Returns:
+            str: Confirmation message
+        """
+        previous_count = self.current_usage_count
+        previous_run_executions = len(self._run_executions)
+        previous_create_executions = len(self._create_executions)
+        total_executions = previous_run_executions + previous_create_executions
+        
+        self.current_usage_count = 0
+        self._run_executions.clear()
+        self._create_executions.clear()
+        
+        logger.info(f"[RESET_EXECUTION_STATE] Cleared {previous_run_executions} run executions and {previous_create_executions} create executions, reset usage count from {previous_count} to 0")
+        
+        return f"🔄 EXECUTION STATE RESET\n\nCleared tracking for:\n- {previous_run_executions} previous job runs\n- {previous_create_executions} previous job creations\n- Total: {total_executions} executions\n\nUsage count reset from {previous_count} to 0.\n\n⚠️ Single execution protection is now reset - the tool can run and create jobs again."
 
     async def _get_auth_headers(self) -> Dict[str, str]:
         """Get authentication headers for API requests with comprehensive fallback logic."""
@@ -514,6 +542,38 @@ class DatabricksJobsTool(BaseTool):
             name_filter = kwargs.get("name_filter")
             job_params = kwargs.get("job_params")
             
+            # SINGLE EXECUTION CONTROL: Check for duplicate 'run' and 'create' actions
+            if action == "run":
+                # Create a unique execution key based on job_id and parameters
+                execution_key = f"run_{job_id}_{str(hash(str(job_params))) if job_params else 'no_params'}"
+                
+                # Check if this exact run has already been executed
+                if execution_key in self._run_executions:
+                    previous_run_id = self._run_executions[execution_key]
+                    logger.warning(f"[SINGLE_EXECUTION] Preventing duplicate run of job {job_id} - already executed with run_id: {previous_run_id}")
+                    return f"⚠️ DUPLICATE RUN PREVENTED\n\nJob {job_id} with these parameters has already been executed.\nPrevious run_id: {previous_run_id}\n\n🔒 This tool enforces single execution to prevent duplicate job runs.\n💡 Use action='monitor', run_id={previous_run_id} to check the status of the existing run."
+                
+                # Check global usage count for run actions
+                if self.current_usage_count >= self.max_usage_count:
+                    logger.warning(f"[SINGLE_EXECUTION] Max usage count ({self.max_usage_count}) reached for 'run' actions")
+                    return f"⚠️ USAGE LIMIT REACHED\n\nThis tool has reached its maximum usage limit of {self.max_usage_count} for 'run' actions.\n🔒 This prevents accidental multiple job executions.\n💡 Create a new tool instance if you need to run additional jobs."
+            
+            elif action == "create":
+                # Create a unique execution key based on job config
+                job_name = job_config.get("name", "") if job_config else ""
+                execution_key = f"create_{str(hash(str(job_config)))}"
+                
+                # Check if this exact job config has already been created
+                if execution_key in self._create_executions:
+                    previous_job_id = self._create_executions[execution_key]
+                    logger.warning(f"[SINGLE_EXECUTION] Preventing duplicate creation of job '{job_name}' - already created with job_id: {previous_job_id}")
+                    return f"⚠️ DUPLICATE CREATE PREVENTED\n\nA job with this exact configuration has already been created.\nPrevious job_id: {previous_job_id}\nJob name: {job_name}\n\n🔒 This tool enforces single execution to prevent duplicate job creation.\n💡 Use action='get', job_id={previous_job_id} to view the existing job."
+                
+                # Check global usage count for create actions
+                if self.current_usage_count >= self.max_usage_count:
+                    logger.warning(f"[SINGLE_EXECUTION] Max usage count ({self.max_usage_count}) reached for 'create' actions")
+                    return f"⚠️ USAGE LIMIT REACHED\n\nThis tool has reached its maximum usage limit of {self.max_usage_count} for 'create' actions.\n🔒 This prevents accidental multiple job creations.\n💡 Create a new tool instance if you need to create additional jobs."
+            
             # Validate input
             validated_input = DatabricksJobsToolSchema(
                 action=action,
@@ -540,10 +600,43 @@ class DatabricksJobsTool(BaseTool):
                     result = loop.run_until_complete(self._get_notebook_content(job_id))
                 elif action == "run":
                     result = loop.run_until_complete(self._run_job(job_id, job_params))
+                    
+                    # SINGLE EXECUTION TRACKING: Track successful run execution
+                    if result and "Successfully triggered job" in result:
+                        # Extract run_id from the result
+                        import re
+                        run_id_match = re.search(r'Run ID: (\d+)', result)
+                        if run_id_match:
+                            new_run_id = run_id_match.group(1)
+                            execution_key = f"run_{job_id}_{str(hash(str(job_params))) if job_params else 'no_params'}"
+                            self._run_executions[execution_key] = new_run_id
+                            self.current_usage_count += 1
+                            logger.info(f"[SINGLE_EXECUTION] Tracked successful run: job_id={job_id}, run_id={new_run_id}, usage_count={self.current_usage_count}")
+                            
+                            # Add execution tracking info to result
+                            result += f"\n\n🔒 EXECUTION TRACKING: This tool will prevent duplicate runs of this job with these parameters."
+                            result += f"\n📊 Usage Count: {self.current_usage_count}/{self.max_usage_count}"
+                        
                 elif action == "monitor":
                     result = loop.run_until_complete(self._monitor_run(run_id))
                 elif action == "create":
                     result = loop.run_until_complete(self._create_job(job_config))
+                    
+                    # SINGLE EXECUTION TRACKING: Track successful job creation
+                    if result and "Successfully created job" in result:
+                        # Extract job_id from the result
+                        import re
+                        job_id_match = re.search(r'Job ID: (\d+)', result)
+                        if job_id_match:
+                            new_job_id = job_id_match.group(1)
+                            execution_key = f"create_{str(hash(str(job_config)))}"
+                            self._create_executions[execution_key] = new_job_id
+                            self.current_usage_count += 1
+                            logger.info(f"[SINGLE_EXECUTION] Tracked successful creation: job_name={job_config.get('name', 'Unknown')}, job_id={new_job_id}, usage_count={self.current_usage_count}")
+                            
+                            # Add execution tracking info to result
+                            result += f"\n\n🔒 EXECUTION TRACKING: This tool will prevent duplicate creation of jobs with this configuration."
+                            result += f"\n📊 Usage Count: {self.current_usage_count}/{self.max_usage_count}"
                 else:
                     result = f"Error: Unknown action '{action}'"
             finally:
