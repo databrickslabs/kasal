@@ -1,3 +1,4 @@
 // Re-export the refactored WorkflowChat component
-export { default } from './WorkflowChatRefactored';
+import WorkflowChatRefactored from './WorkflowChatRefactored';
+export default WorkflowChatRefactored;
 export type { WorkflowChatProps } from './types';
