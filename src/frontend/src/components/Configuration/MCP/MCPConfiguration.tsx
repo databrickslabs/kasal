@@ -60,7 +60,7 @@ export const DEFAULT_MCP_CONFIG: MCPServerConfig = {
   enabled: false,
   server_url: '',
   api_key: '',
-  server_type: 'sse',  // Default to SSE server type
+  server_type: 'streamable',  // Default to Streamable HTTP server type
   auth_type: 'api_key',  // Default to API key authentication
   timeout_seconds: 30,
   max_retries: 3,

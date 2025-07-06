@@ -331,6 +331,18 @@ const TaskForm: React.FC<TaskFormProps> = ({ initialData, onCancel, onTaskSaved,
               value={formData.name}
               onChange={(e) => handleInputChange('name', e.target.value)}
               required
+              margin="normal"
+              sx={{
+                '& .MuiOutlinedInput-root': {
+                  '& fieldset': {
+                    borderColor: 'rgba(0, 0, 0, 0.23)',
+                  },
+                },
+                '& .MuiInputLabel-root': {
+                  backgroundColor: 'white',
+                  padding: '0 4px',
+                },
+              }}
             />
             <TextField
               fullWidth

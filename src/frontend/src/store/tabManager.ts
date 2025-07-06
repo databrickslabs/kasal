@@ -117,7 +117,7 @@ export const useTabManagerStore = create<TabManagerState>()(
 
       createTab: (name?: string) => {
         const newTabId = uuidv4();
-        const tabName = name || `Workflow ${get().tabs.length + 1}`;
+        const tabName = name || `Canvas ${get().tabs.length + 1}`;
         
         const newTab: TabData = {
           id: newTabId,

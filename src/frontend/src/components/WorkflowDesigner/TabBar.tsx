@@ -301,7 +301,7 @@ const TabBar: React.FC<TabBarProps> = ({
   // Create a default tab if none exist
   React.useEffect(() => {
     if (tabs.length === 0) {
-      createTab('Main Workflow');
+      createTab('Main Canvas');
     }
   }, [tabs.length, createTab]);
 
@@ -535,7 +535,7 @@ const TabBar: React.FC<TabBarProps> = ({
           </ListItemIcon>
           <ListItemText 
             primary="New Empty Canvas"
-            secondary="Start with a blank workflow"
+            secondary="Start with a blank canvas"
           />
         </MenuItem>
         <MenuItem onClick={handleLoadExistingCrew}>
@@ -544,7 +544,7 @@ const TabBar: React.FC<TabBarProps> = ({
           </ListItemIcon>
           <ListItemText 
             primary="Load Existing Crew"
-            secondary="Open a saved workflow"
+            secondary="Open a saved canvas"
           />
         </MenuItem>
       </Menu>
