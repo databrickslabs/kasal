@@ -1,0 +1,179 @@
+{
+  "common": {
+    "save": "Kaydet",
+    "cancel": "İptal",
+    "loading": "Yükleniyor...",
+    "error": "Hata",
+    "success": "Başarılı",
+    "close": "Kapat",
+    "delete": "Sil",
+    "view": "Görüntüle",
+    "confirm": "Onayla"
+  },
+  "navigation": {
+    "nemo": "Nemo",
+    "runs": "Çalıştırma Geçmişi",
+    "logs": "Günlükler",
+    "tools": "Araçlar",
+    "ucTools": "UC Araçları",
+    "apiKeys": "API Anahtarları",
+    "configuration": "Yapılandırma"
+  },
+  "configuration": {
+    "title": "Yapılandırma",
+    "language": {
+      "title": "Dil Ayarları",
+      "select": "Dil Seçin",
+      "saved": "Dil ayarları başarıyla kaydedildi"
+    },
+    "databricks": {
+      "title": "Databricks Ayarları",
+      "workspaceUrl": "Databricks Çalışma Alanı URL'si",
+      "warehouseId": "Depo ID",
+      "catalog": "Katalog",
+      "schema": "Şema",
+      "secretScope": "Gizli Kapsam",
+      "saved": "Databricks yapılandırması başarıyla kaydedildi",
+      "info": "Databricks yapılandırması, Databricks çalışma alanınıza bağlanmak için kullanılır. Databricks belirteci API Anahtarları bölümünden yönetilmelidir."
+    },
+    "tools": {
+      "title": "Araç Yönetimi",
+      "manageTools": "Araçları Yönet",
+      "toolsConfig": "AI araçlarınızı ve uzantılarınızı yapılandırın"
+    },
+    "logs": {
+      "title": "Günlük Yönetimi",
+      "viewLogs": "Günlükleri Görüntüle",
+      "logsConfig": "Günlük tercihlerini yapılandırın ve sistem günlüklerini görüntüleyin"
+    }
+  },
+  "runHistory": {
+    "title": "Çalıştırma Geçmişi",
+    "noRuns": "Çalıştırma bulunamadı",
+    "loadError": "Çalıştırma geçmişi yüklenemedi",
+    "deleteError": "Çalıştırmalar silinemedi",
+    "deleteConfirm": "Tüm çalıştırmaları silmek istediğinizden emin misiniz? Bu işlem geri alınamaz.",
+    "deleteAllRuns": "Tüm Çalıştırmaları Sil",
+    "columns": {
+      "jobId": "Çalıştırma Adı",
+      "status": "Durum",
+      "startTime": "Oluşturma Tarihi",
+      "duration": "Süre",
+      "actions": "İşlemler"
+    },
+    "status": {
+      "pending": "Bekliyor",
+      "running": "Çalışıyor",
+      "completed": "Tamamlandı",
+      "failed": "Başarısız"
+    },
+    "actions": {
+      "viewTrace": "Çalıştırma İzini Görüntüle",
+      "viewResult": "Sonucu Görüntüle",
+      "viewInputs": "Girişleri Görüntüle",
+      "viewLogs": "Günlükleri Görüntüle",
+      "downloadPdf": "PDF İndir"
+    }
+  },
+  "logs": {
+    "title": "LLM API Günlükleri",
+    "filterByEndpoint": "Uç Noktaya Göre Filtrele",
+    "allEndpoints": "Tüm Uç Noktalar",
+    "noLogs": "Günlük bulunamadı",
+    "columns": {
+      "timestamp": "Zaman Damgası",
+      "endpoint": "Uç Nokta",
+      "model": "Model",
+      "tokens": "Belirteçler",
+      "duration": "Süre",
+      "status": "Durum"
+    },
+    "details": {
+      "title": "İstek Detayları",
+      "prompt": "İstem:",
+      "response": "Yanıt:",
+      "additionalData": "Ek Veriler:",
+      "error": "Hata:"
+    },
+    "executionLogs": {
+      "title": "Yürütme Günlükleri",
+      "connecting": "Günlük akışına bağlanılıyor...",
+      "connectionError": "Günlük akışına bağlanılamadı. Lütfen tekrar deneyin.",
+      "autoScrollOn": "Otomatik kaydırma AÇIK",
+      "autoScrollOff": "Otomatik kaydırma KAPALI",
+      "refreshLogs": "Günlükleri Yenile"
+    }
+  },
+  "tools": {
+    "regular": {
+      "title": "Mevcut Araçlar",
+      "addTool": "Yeni Araç Ekle",
+      "editTool": "Aracı Düzenle",
+      "columns": {
+        "title": "Başlık",
+        "description": "Açıklama",
+        "icon": "Simge",
+        "actions": "İşlemler"
+      },
+      "form": {
+        "title": "Başlık",
+        "description": "Açıklama",
+        "icon": "Simge",
+        "configuration": "Yapılandırma",
+        "addParameter": "Parametre Ekle",
+        "parameterName": "Parametre Adı",
+        "value": "Değer"
+      },
+      "messages": {
+        "deleteConfirm": "Bu aracı silmek istediğinizden emin misiniz?",
+        "errorLoading": "Araçlar yüklenirken hata oluştu",
+        "errorFetching": "En son araç verileri alınamadı",
+        "errorDeleting": "Araç silinirken hata oluştu",
+        "updateSuccess": "Araç başarıyla güncellendi!",
+        "createSuccess": "Araç başarıyla oluşturuldu!",
+        "deleteSuccess": "Araç başarıyla silindi!"
+      }
+    },
+    "uc": {
+      "title": "Unity Catalog Araçları",
+      "noTools": "Unity Catalog aracı bulunamadı.",
+      "columns": {
+        "name": "Ad",
+        "catalog": "Katalog",
+        "schema": "Şema",
+        "description": "Açıklama",
+        "actions": "İşlemler"
+      },
+      "details": {
+        "title": "Fonksiyon Detayları",
+        "noDescription": "Açıklama mevcut değil"
+      }
+    }
+  },
+  "nemo": {
+    "model": {
+      "label": "Model Seç",
+      "provider": "Sağlayıcı"
+    },
+    "planning": {
+      "label": "Planlama",
+      "tooltip": "Etkinleştirildiğinde, bir AI planlayıcı yürütmeden önce ekibiniz için görev koordinasyonunu ve performansını iyileştiren adım adım bir plan oluşturacaktır"
+    },
+    "buttons": {
+      "schedule": "Zamanlama",
+      "addAgent": "Ajan Ekle",
+      "addTask": "Görev Ekle",
+      "generatePlan": "Plan Oluştur",
+      "execute": "Çalıştır",
+      "openPlan": "Plan Aç",
+      "savePlan": "Plan Kaydet",
+      "deleteEdge": "Bağlantıyı Sil",
+      "apiKeys": "API Anahtarlarını Yönet"
+    },
+    "errors": {
+      "agentConnection": "Bir ajanı başka bir ajana bağlayamazsınız",
+      "missingNodes": "Bağlantılar oluşturmadan önce lütfen hem ajanları hem de görevleri ekleyin",
+      "jobExecution": "İş yürütme başarısız oldu"
+    }
+  }
+} 

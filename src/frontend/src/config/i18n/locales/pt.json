@@ -1,0 +1,179 @@
+{
+  "common": {
+    "save": "Salvar",
+    "cancel": "Cancelar",
+    "loading": "Carregando...",
+    "error": "Erro",
+    "success": "Sucesso",
+    "close": "Fechar",
+    "delete": "Excluir",
+    "view": "Visualizar",
+    "confirm": "Confirmar"
+  },
+  "navigation": {
+    "nemo": "Nemo",
+    "runs": "Histórico de Execuções",
+    "logs": "Registros",
+    "tools": "Ferramentas",
+    "ucTools": "Ferramentas UC",
+    "apiKeys": "Chaves API",
+    "configuration": "Configuração"
+  },
+  "configuration": {
+    "title": "Configuração",
+    "language": {
+      "title": "Configurações de Idioma",
+      "select": "Selecionar Idioma",
+      "saved": "Configurações de idioma salvas com sucesso"
+    },
+    "databricks": {
+      "title": "Configurações do Databricks",
+      "workspaceUrl": "URL do Workspace Databricks",
+      "warehouseId": "ID do Warehouse",
+      "catalog": "Catálogo",
+      "schema": "Schema",
+      "secretScope": "Escopo Secreto",
+      "saved": "Configuração do Databricks salva com sucesso",
+      "info": "A configuração do Databricks é usada para conectar ao seu workspace Databricks. O token do Databricks deve ser gerenciado através da seção de Chaves API."
+    },
+    "tools": {
+      "title": "Gerenciamento de Ferramentas",
+      "manageTools": "Gerenciar Ferramentas",
+      "toolsConfig": "Configure suas ferramentas e extensões de IA"
+    },
+    "logs": {
+      "title": "Gerenciamento de Registros",
+      "viewLogs": "Visualizar Registros",
+      "logsConfig": "Configure preferências de registro e visualize os registros do sistema"
+    }
+  },
+  "runHistory": {
+    "title": "Histórico de Execuções",
+    "noRuns": "Nenhuma execução disponível",
+    "loadError": "Falha ao carregar histórico de execuções",
+    "deleteError": "Falha ao excluir execuções",
+    "deleteConfirm": "Tem certeza que deseja excluir todas as execuções? Esta ação não pode ser desfeita.",
+    "deleteAllRuns": "Excluir Todas as Execuções",
+    "columns": {
+      "jobId": "Nome da Execução",
+      "status": "Status",
+      "startTime": "Data de Criação",
+      "duration": "Duração",
+      "actions": "Ações"
+    },
+    "status": {
+      "pending": "Pendente",
+      "running": "Em Execução",
+      "completed": "Concluído",
+      "failed": "Falhou"
+    },
+    "actions": {
+      "viewTrace": "Ver Rastreamento de Execução",
+      "viewResult": "Ver Resultado",
+      "viewInputs": "Ver Entradas",
+      "viewLogs": "Ver Registros",
+      "downloadPdf": "Baixar PDF"
+    }
+  },
+  "logs": {
+    "title": "Registros da API LLM",
+    "filterByEndpoint": "Filtrar por Endpoint",
+    "allEndpoints": "Todos os Endpoints",
+    "noLogs": "Nenhum registro disponível",
+    "columns": {
+      "timestamp": "Timestamp",
+      "endpoint": "Endpoint",
+      "model": "Modelo",
+      "tokens": "Tokens",
+      "duration": "Duração",
+      "status": "Status"
+    },
+    "details": {
+      "title": "Detalhes da Requisição",
+      "prompt": "Prompt:",
+      "response": "Resposta:",
+      "additionalData": "Dados Adicionais:",
+      "error": "Erro:"
+    },
+    "executionLogs": {
+      "title": "Registros de Execução",
+      "connecting": "Conectando ao fluxo de registros...",
+      "connectionError": "Falha ao conectar ao fluxo de registros. Por favor, tente novamente.",
+      "autoScrollOn": "Rolagem automática ATIVADA",
+      "autoScrollOff": "Rolagem automática DESATIVADA",
+      "refreshLogs": "Atualizar Registros"
+    }
+  },
+  "tools": {
+    "regular": {
+      "title": "Ferramentas Existentes",
+      "addTool": "Adicionar Nova Ferramenta",
+      "editTool": "Editar Ferramenta",
+      "columns": {
+        "title": "Título",
+        "description": "Descrição",
+        "icon": "Ícone",
+        "actions": "Ações"
+      },
+      "form": {
+        "title": "Título",
+        "description": "Descrição",
+        "icon": "Ícone",
+        "configuration": "Configuração",
+        "addParameter": "Adicionar Parâmetro",
+        "parameterName": "Nome do Parâmetro",
+        "value": "Valor"
+      },
+      "messages": {
+        "deleteConfirm": "Tem certeza que deseja excluir esta ferramenta?",
+        "errorLoading": "Erro ao carregar ferramentas",
+        "errorFetching": "Não foi possível buscar os dados mais recentes da ferramenta",
+        "errorDeleting": "Erro ao excluir ferramenta",
+        "updateSuccess": "Ferramenta atualizada com sucesso!",
+        "createSuccess": "Ferramenta criada com sucesso!",
+        "deleteSuccess": "Ferramenta excluída com sucesso!"
+      }
+    },
+    "uc": {
+      "title": "Ferramentas Unity Catalog",
+      "noTools": "Nenhuma ferramenta Unity Catalog encontrada.",
+      "columns": {
+        "name": "Nome",
+        "catalog": "Catálogo",
+        "schema": "Schema",
+        "description": "Descrição",
+        "actions": "Ações"
+      },
+      "details": {
+        "title": "Detalhes da Função",
+        "noDescription": "Nenhuma descrição disponível"
+      }
+    }
+  },
+  "nemo": {
+    "model": {
+      "label": "Escolher Modelo",
+      "provider": "Provedor"
+    },
+    "planning": {
+      "label": "Planejamento",
+      "tooltip": "Quando ativado, um planejador de IA criará um plano passo a passo para sua equipe antes da execução, melhorando a coordenação e o desempenho das tarefas"
+    },
+    "buttons": {
+      "schedule": "Agendar",
+      "addAgent": "Adicionar Agente",
+      "addTask": "Adicionar Tarefa",
+      "generatePlan": "Gerar Plano",
+      "execute": "Executar",
+      "openPlan": "Abrir Plano",
+      "savePlan": "Salvar Plano",
+      "deleteEdge": "Excluir Conexão",
+      "apiKeys": "Gerenciar Chaves API"
+    },
+    "errors": {
+      "agentConnection": "Não é possível conectar um agente a outro agente",
+      "missingNodes": "Por favor, adicione tanto agentes quanto tarefas antes de gerar conexões",
+      "jobExecution": "Falha na execução do trabalho"
+    }
+  }
+}

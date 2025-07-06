@@ -1,0 +1,179 @@
+{
+  "common": {
+    "save": "保存",
+    "cancel": "キャンセル",
+    "loading": "読み込み中...",
+    "error": "エラー",
+    "success": "成功",
+    "close": "閉じる",
+    "delete": "削除",
+    "view": "表示",
+    "confirm": "確認"
+  },
+  "navigation": {
+    "nemo": "ネモ",
+    "runs": "実行履歴",
+    "logs": "ログ",
+    "tools": "ツール",
+    "ucTools": "UCツール",
+    "apiKeys": "APIキー",
+    "configuration": "設定"
+  },
+  "configuration": {
+    "title": "設定",
+    "language": {
+      "title": "言語設定",
+      "select": "言語を選択",
+      "saved": "言語設定が正常に保存されました"
+    },
+    "databricks": {
+      "title": "Databricks設定",
+      "workspaceUrl": "Databricksワークスペース URL",
+      "warehouseId": "ウェアハウスID",
+      "catalog": "カタログ",
+      "schema": "スキーマ",
+      "secretScope": "シークレットスコープ",
+      "saved": "Databricks設定が正常に保存されました",
+      "info": "Databricks設定は、Databricksワークスペースに接続するために使用されます。DatabricksトークンはAPIキーセクションで管理する必要があります。"
+    },
+    "tools": {
+      "title": "ツール管理",
+      "manageTools": "ツールを管理",
+      "toolsConfig": "AIツールと拡張機能を設定する"
+    },
+    "logs": {
+      "title": "ログ管理",
+      "viewLogs": "ログを表示",
+      "logsConfig": "ログ設定を構成し、システムログを表示する"
+    }
+  },
+  "runHistory": {
+    "title": "実行履歴",
+    "noRuns": "実行履歴がありません",
+    "loadError": "実行履歴の読み込みに失敗しました",
+    "deleteError": "実行の削除に失敗しました",
+    "deleteConfirm": "すべての実行を削除してもよろしいですか？この操作は元に戻せません。",
+    "deleteAllRuns": "すべての実行を削除",
+    "columns": {
+      "jobId": "実行名",
+      "status": "ステータス",
+      "startTime": "作成日",
+      "duration": "所要時間",
+      "actions": "アクション"
+    },
+    "status": {
+      "pending": "保留中",
+      "running": "実行中",
+      "completed": "完了",
+      "failed": "失敗"
+    },
+    "actions": {
+      "viewTrace": "実行トレースを表示",
+      "viewResult": "結果を表示",
+      "viewInputs": "入力を表示",
+      "viewLogs": "ログを表示",
+      "downloadPdf": "PDFをダウンロード"
+    }
+  },
+  "logs": {
+    "title": "LLM APIログ",
+    "filterByEndpoint": "エンドポイントでフィルター",
+    "allEndpoints": "すべてのエンドポイント",
+    "noLogs": "利用可能なログがありません",
+    "columns": {
+      "timestamp": "タイムスタンプ",
+      "endpoint": "エンドポイント",
+      "model": "モデル",
+      "tokens": "トークン",
+      "duration": "所要時間",
+      "status": "ステータス"
+    },
+    "details": {
+      "title": "リクエストの詳細",
+      "prompt": "プロンプト:",
+      "response": "レスポンス:",
+      "additionalData": "追加データ:",
+      "error": "エラー:"
+    },
+    "executionLogs": {
+      "title": "実行ログ",
+      "connecting": "ログストリームに接続中...",
+      "connectionError": "ログストリームへの接続に失敗しました。もう一度お試しください。",
+      "autoScrollOn": "自動スクロール オン",
+      "autoScrollOff": "自動スクロール オフ",
+      "refreshLogs": "ログを更新"
+    }
+  },
+  "tools": {
+    "regular": {
+      "title": "既存のツール",
+      "addTool": "新しいツールを追加",
+      "editTool": "ツールを編集",
+      "columns": {
+        "title": "タイトル",
+        "description": "説明",
+        "icon": "アイコン",
+        "actions": "アクション"
+      },
+      "form": {
+        "title": "タイトル",
+        "description": "説明",
+        "icon": "アイコン",
+        "configuration": "設定",
+        "addParameter": "パラメータを追加",
+        "parameterName": "パラメータ名",
+        "value": "値"
+      },
+      "messages": {
+        "deleteConfirm": "このツールを削除してもよろしいですか？",
+        "errorLoading": "ツールの読み込み中にエラーが発生しました",
+        "errorFetching": "最新のツールデータを取得できませんでした",
+        "errorDeleting": "ツールの削除中にエラーが発生しました",
+        "updateSuccess": "ツールが正常に更新されました！",
+        "createSuccess": "ツールが正常に作成されました！",
+        "deleteSuccess": "ツールが正常に削除されました！"
+      }
+    },
+    "uc": {
+      "title": "Unity Catalogツール",
+      "noTools": "Unity Catalogツールが見つかりません。",
+      "columns": {
+        "name": "名前",
+        "catalog": "カタログ",
+        "schema": "スキーマ",
+        "description": "説明",
+        "actions": "アクション"
+      },
+      "details": {
+        "title": "関数の詳細",
+        "noDescription": "説明がありません"
+      }
+    }
+  },
+  "nemo": {
+    "model": {
+      "label": "モデルを選択",
+      "provider": "プロバイダー"
+    },
+    "planning": {
+      "label": "プランニング",
+      "tooltip": "有効にすると、AIプランナーが実行前にチームのタスク調整とパフォーマンスを向上させるステップバイステップの計画を作成します"
+    },
+    "buttons": {
+      "schedule": "スケジュール",
+      "addAgent": "エージェントを追加",
+      "addTask": "タスクを追加",
+      "generatePlan": "プランを生成",
+      "execute": "実行",
+      "openPlan": "プランを開く",
+      "savePlan": "プランを保存",
+      "deleteEdge": "接続を削除",
+      "apiKeys": "APIキーを管理"
+    },
+    "errors": {
+      "agentConnection": "エージェントを別のエージェントに接続することはできません",
+      "missingNodes": "接続を生成する前にエージェントとタスクの両方を追加してください",
+      "jobExecution": "ジョブの実行に失敗しました"
+    }
+  }
+}

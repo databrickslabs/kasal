@@ -1,0 +1,9 @@
+command: ['python', 'entrypoint.py']
+environment_vars:
+  PYTHONPATH: './backend:${PYTHONPATH}'
+  PYTHONUNBUFFERED: '1'
+  # Frontend static files will be available via import-dir
+  FRONTEND_STATIC_DIR: './frontend_static'
+apt_packages:
+  - libpq-dev
+
