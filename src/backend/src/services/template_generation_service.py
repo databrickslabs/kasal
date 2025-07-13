@@ -13,12 +13,13 @@ from typing import Optional
 
 import litellm
 
-from src.utils.model_config import get_model_config
 from src.services.template_service import TemplateService
 from src.schemas.template_generation import TemplateGenerationRequest, TemplateGenerationResponse
 from src.services.log_service import LLMLogService
 from src.utils.prompt_utils import robust_json_parser
 from src.core.llm_manager import LLMManager
+from src.services.model_config_service import ModelConfigService
+from src.core.unit_of_work import UnitOfWork
 
 # Configure logging
 logger = logging.getLogger(__name__)
@@ -92,8 +93,15 @@ class TemplateGenerationService:
             Exception: For other errors
         """
         try:
-            # Get model config
-            model_config = get_model_config(request.model)
+            # Get model configuration from database using ModelConfigService
+            async with UnitOfWork() as uow:
+                model_config_service = await ModelConfigService.from_unit_of_work(uow)
+                model_config = await model_config_service.get_model_config(request.model)
+            
+            # Check if model configuration was found
+            if not model_config:
+                raise ValueError(f"Model {request.model} not found in the database")
+                
             logger.info(f"Using model for template generation: {model_config['name']}")
             
             # Get prompt template from database

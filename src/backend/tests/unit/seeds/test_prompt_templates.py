@@ -98,6 +98,68 @@ class TestPromptTemplatesSeed:
         assert "CRITICAL OUTPUT INSTRUCTIONS" in template
         assert "parseable JSON object" in template
         assert "name" in template
+
+    def test_generate_templates_template_structure(self):
+        """Test generate templates template has required sections and parameters."""
+        template = GENERATE_TEMPLATES_TEMPLATE
+        
+        # Should contain key instructions for template generation
+        assert "CRITICAL OUTPUT INSTRUCTIONS" in template
+        assert "parseable JSON object" in template
+        assert "system_template" in template
+        assert "prompt_template" in template
+        assert "response_template" in template
+        
+        # Should contain parameter instructions
+        assert "{role}" in template
+        assert "{goal}" in template
+        assert "{backstory}" in template
+        assert "{input}" in template
+        assert "{context}" in template
+        
+        # Should contain template type descriptions
+        assert "System Template" in template
+        assert "Prompt Template" in template
+        assert "Response Template" in template
+        
+        # Should contain structured output examples
+        assert "THOUGHTS" in template
+        assert "ACTION" in template
+        assert "RESULT" in template
+        
+        # Should have JSON formatting requirements
+        assert "Do NOT include ```json" in template
+        assert "double quotes" in template
+        assert "trailing commas" in template
+
+    def test_generate_templates_template_parameter_examples(self):
+        """Test that the template contains proper parameter usage examples."""
+        template = GENERATE_TEMPLATES_TEMPLATE
+        
+        # Should contain example parameter usage
+        assert "You are a {role}" in template
+        assert "{backstory}" in template
+        assert "Your goal is: {goal}" in template
+        assert "Task: {input}" in template
+        assert "Context: {context}" in template
+        
+        # Should show structured response format
+        assert "THOUGHTS: [analysis]" in template
+        assert "ACTION: [what you will do]" in template
+        assert "RESULT: [final output]" in template
+
+    def test_generate_templates_template_requirements(self):
+        """Test that the template contains all necessary requirements."""
+        template = GENERATE_TEMPLATES_TEMPLATE
+        
+        # Template requirements section
+        assert "TEMPLATE REQUIREMENTS" in template
+        assert "System Template MUST incorporate" in template
+        assert "Prompt Template should use" in template
+        assert "Response Template should enforce" in template
+        assert "placeholder syntax with curly braces" in template
+        assert "expertise boundaries and ethical guidelines" in template
+        assert "model-agnostic and production-ready" in template
         assert "role" in template
         assert "goal" in template
         assert "backstory" in template

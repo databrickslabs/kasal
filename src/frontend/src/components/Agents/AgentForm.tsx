@@ -58,6 +58,9 @@ const AgentForm: React.FC<AgentFormProps> = ({ initialData, onCancel, onAgentSav
   const [loadingModels, setLoadingModels] = useState(true);
   const [expandedGoal, setExpandedGoal] = useState<boolean>(false);
   const [expandedBackstory, setExpandedBackstory] = useState<boolean>(false);
+  const [expandedSystemTemplate, setExpandedSystemTemplate] = useState<boolean>(false);
+  const [expandedPromptTemplate, setExpandedPromptTemplate] = useState<boolean>(false);
+  const [expandedResponseTemplate, setExpandedResponseTemplate] = useState<boolean>(false);
   
   // Function calling models are typically a subset - we'll filter for these
   const functionCallingModels = Object.entries(models).filter(([_, model]) => 
@@ -287,6 +290,30 @@ const AgentForm: React.FC<AgentFormProps> = ({ initialData, onCancel, onAgentSav
     setExpandedBackstory(false);
   };
 
+  const handleOpenSystemTemplateDialog = () => {
+    setExpandedSystemTemplate(true);
+  };
+
+  const handleCloseSystemTemplateDialog = () => {
+    setExpandedSystemTemplate(false);
+  };
+
+  const handleOpenPromptTemplateDialog = () => {
+    setExpandedPromptTemplate(true);
+  };
+
+  const handleClosePromptTemplateDialog = () => {
+    setExpandedPromptTemplate(false);
+  };
+
+  const handleOpenResponseTemplateDialog = () => {
+    setExpandedResponseTemplate(true);
+  };
+
+  const handleCloseResponseTemplateDialog = () => {
+    setExpandedResponseTemplate(false);
+  };
+
   return (
     <>
       <Card sx={{ 
@@ -412,7 +439,25 @@ const AgentForm: React.FC<AgentFormProps> = ({ initialData, onCancel, onAgentSav
                     onChange={(e) => handleInputChange('system_template', e.target.value)}
                     multiline
                     rows={4}
+                    InputProps={{
+                      endAdornment: (
+                        <InputAdornment position="end">
+                          <IconButton
+                            edge="end"
+                            onClick={handleOpenSystemTemplateDialog}
+                            size="small"
+                            sx={{ opacity: 0.7 }}
+                            title="Expand system template"
+                          >
+                            <OpenInFullIcon fontSize="small" />
+                          </IconButton>
+                        </InputAdornment>
+                      )
+                    }}
                   />
+                  <Typography variant="caption" color="text.secondary" sx={{ mt: 0.5, mb: 1 }}>
+                    Defines the agent&apos;s core identity and fundamental instructions. Controls how the agent understands its {'{role}'}, {'{goal}'}, and {'{backstory}'}. Use this to establish expertise boundaries, ethical guidelines, and overall behavior patterns.
+                  </Typography>
                   <TextField
                     fullWidth
                     label="Prompt Template"
@@ -420,7 +465,25 @@ const AgentForm: React.FC<AgentFormProps> = ({ initialData, onCancel, onAgentSav
                     onChange={(e) => handleInputChange('prompt_template', e.target.value)}
                     multiline
                     rows={4}
+                    InputProps={{
+                      endAdornment: (
+                        <InputAdornment position="end">
+                          <IconButton
+                            edge="end"
+                            onClick={handleOpenPromptTemplateDialog}
+                            size="small"
+                            sx={{ opacity: 0.7 }}
+                            title="Expand prompt template"
+                          >
+                            <OpenInFullIcon fontSize="small" />
+                          </IconButton>
+                        </InputAdornment>
+                      )
+                    }}
                   />
+                  <Typography variant="caption" color="text.secondary" sx={{ mt: 0.5, mb: 1 }}>
+                    Structures how tasks are presented to the agent. Controls the format and flow of task instructions. Include placeholders for dynamic content like {'{input}'}, {'{context}'}, and task-specific variables to ensure consistent task processing.
+                  </Typography>
                   <TextField
                     fullWidth
                     label="Response Template"
@@ -428,7 +491,25 @@ const AgentForm: React.FC<AgentFormProps> = ({ initialData, onCancel, onAgentSav
                     onChange={(e) => handleInputChange('response_template', e.target.value)}
                     multiline
                     rows={4}
+                    InputProps={{
+                      endAdornment: (
+                        <InputAdornment position="end">
+                          <IconButton
+                            edge="end"
+                            onClick={handleOpenResponseTemplateDialog}
+                            size="small"
+                            sx={{ opacity: 0.7 }}
+                            title="Expand response template"
+                          >
+                            <OpenInFullIcon fontSize="small" />
+                          </IconButton>
+                        </InputAdornment>
+                      )
+                    }}
                   />
+                  <Typography variant="caption" color="text.secondary" sx={{ mt: 0.5, mb: 1 }}>
+                    Guides how the agent formats its responses and output structure. Enforces consistency in deliverables by defining sections like THOUGHTS, ACTION, and RESULT. Use this to ensure structured, actionable, and predictable agent outputs.
+                  </Typography>
                 </Box>
               </AccordionDetails>
             </Accordion>
@@ -1038,6 +1119,108 @@ const AgentForm: React.FC<AgentFormProps> = ({ initialData, onCancel, onAgentSav
         </DialogContent>
         <DialogActions>
           <Button onClick={handleCloseBackstoryDialog} variant="contained">
+            Done
+          </Button>
+        </DialogActions>
+      </Dialog>
+
+      {/* System Template Dialog */}
+      <Dialog 
+        open={expandedSystemTemplate} 
+        onClose={handleCloseSystemTemplateDialog}
+        fullWidth
+        maxWidth="md"
+      >
+        <DialogTitle>
+          <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+            System Template
+            <IconButton onClick={handleCloseSystemTemplateDialog}>
+              <CloseIcon />
+            </IconButton>
+          </Box>
+        </DialogTitle>
+        <DialogContent>
+          <TextField
+            autoFocus
+            fullWidth
+            multiline
+            rows={15}
+            value={formData.system_template || ''}
+            onChange={(e) => handleInputChange('system_template', e.target.value)}
+            variant="outlined"
+            sx={{ mt: 2 }}
+          />
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={handleCloseSystemTemplateDialog} variant="contained">
+            Done
+          </Button>
+        </DialogActions>
+      </Dialog>
+
+      {/* Prompt Template Dialog */}
+      <Dialog 
+        open={expandedPromptTemplate} 
+        onClose={handleClosePromptTemplateDialog}
+        fullWidth
+        maxWidth="md"
+      >
+        <DialogTitle>
+          <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+            Prompt Template
+            <IconButton onClick={handleClosePromptTemplateDialog}>
+              <CloseIcon />
+            </IconButton>
+          </Box>
+        </DialogTitle>
+        <DialogContent>
+          <TextField
+            autoFocus
+            fullWidth
+            multiline
+            rows={15}
+            value={formData.prompt_template || ''}
+            onChange={(e) => handleInputChange('prompt_template', e.target.value)}
+            variant="outlined"
+            sx={{ mt: 2 }}
+          />
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={handleClosePromptTemplateDialog} variant="contained">
+            Done
+          </Button>
+        </DialogActions>
+      </Dialog>
+
+      {/* Response Template Dialog */}
+      <Dialog 
+        open={expandedResponseTemplate} 
+        onClose={handleCloseResponseTemplateDialog}
+        fullWidth
+        maxWidth="md"
+      >
+        <DialogTitle>
+          <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+            Response Template
+            <IconButton onClick={handleCloseResponseTemplateDialog}>
+              <CloseIcon />
+            </IconButton>
+          </Box>
+        </DialogTitle>
+        <DialogContent>
+          <TextField
+            autoFocus
+            fullWidth
+            multiline
+            rows={15}
+            value={formData.response_template || ''}
+            onChange={(e) => handleInputChange('response_template', e.target.value)}
+            variant="outlined"
+            sx={{ mt: 2 }}
+          />
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={handleCloseResponseTemplateDialog} variant="contained">
             Done
           </Button>
         </DialogActions>

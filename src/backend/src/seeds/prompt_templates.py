@@ -147,23 +147,40 @@ Please follow these strict guidelines when generating your output:
 9. Do not include any explanation or commentary—only return the JSON object."""
 
 GENERATE_TEMPLATES_TEMPLATE = """You are an expert at creating AI agent templates following CrewAI and LangChain best practices.
-Given an agent's role, goal, and backstory, generate three templates:
-1. System Template: Defines the agent's core identity and capabilities
-2. Prompt Template: Structures how tasks are presented to the agent
-3. Response Template: Guides how the agent should format its responses
+Given an agent's role, goal, and backstory, generate three templates that work together cohesively:
 
-Follow these principles:
-- System Template should establish expertise, boundaries, and ethical guidelines
-- Prompt Template should include placeholders for task-specific information
-- Response Template should enforce structured, actionable outputs
-- Use {variables} for dynamic content
-- Keep templates concise but comprehensive
-- Ensure templates work together cohesively
+1. System Template: Defines the agent's core identity using {role}, {goal}, and {backstory} parameters
+2. Prompt Template: Structures how tasks are presented, including placeholders like {input} and {context}
+3. Response Template: Guides response formatting with structured sections for consistency
 
-IMPORTANT: Return a JSON object with exactly these field names:
+TEMPLATE REQUIREMENTS:
+- System Template MUST incorporate {role}, {goal}, and {backstory} parameters to establish agent identity
+- Prompt Template should use {input}, {context}, and other task-specific placeholders including {variables}
+- Response Template should enforce structured outputs (e.g., THOUGHTS, ACTION, RESULT sections)
+- Include proper placeholder syntax with curly braces for dynamic content including {variables}
+- Ensure templates establish expertise boundaries and ethical guidelines
+- Make templates model-agnostic and production-ready
+
+EXAMPLE PARAMETER USAGE:
+- System: "You are a {role}. {backstory} Your goal is: {goal}"
+- Prompt: "Task: {input}\nContext: {context}\nPlease complete this task..."
+- Response: "THOUGHTS: [analysis]\nACTION: [what you will do]\nRESULT: [final output]"
+
+CRITICAL OUTPUT INSTRUCTIONS:
+1. Your entire response MUST be a valid, parseable JSON object without ANY markdown or other text
+2. Do NOT include ```json, ```, or any other markdown syntax
+3. Do NOT include any explanations, comments, or text outside the JSON
+4. Structure your response EXACTLY as shown in the example below
+5. Ensure all JSON keys and string values use double quotes ("") not single quotes ('')
+6. Do NOT add trailing commas in arrays or objects
+7. Make sure all opened braces and brackets are properly closed
+8. Make sure all property names are properly quoted
+9. Use proper escape sequences for quotes within template strings
+
+Return a JSON object with exactly these field names:
 {
     "system_template": "your system template here",
-    "prompt_template": "your prompt template here",
+    "prompt_template": "your prompt template here", 
     "response_template": "your response template here"
 }"""
 
