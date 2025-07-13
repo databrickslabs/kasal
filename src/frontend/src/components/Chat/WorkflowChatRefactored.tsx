@@ -753,7 +753,7 @@ const WorkflowChat: React.FC<WorkflowChatProps> = ({
           }
         }
         
-        response += "\nWould you like to execute this crew now?";
+        response += "\nTo execute plan type either **execute crew** or **ec**";
         return response;
       }
       default:
@@ -1022,7 +1022,7 @@ const WorkflowChat: React.FC<WorkflowChatProps> = ({
               <ListItem>
                 <ListItemText 
                   primary="Build a research team with a researcher and writer"
-                  secondary="Creates a complete crew"
+                  secondary="Complete a plan"
                 />
               </ListItem>
             </List>

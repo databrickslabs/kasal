@@ -22,6 +22,7 @@ class TestIntentType:
             "generate_agent",
             "generate_task", 
             "generate_crew",
+            "execute_crew",
             "configure_crew",
             "conversation",
             "unknown"
@@ -34,6 +35,7 @@ class TestIntentType:
         assert IntentType.GENERATE_AGENT == "generate_agent"
         assert IntentType.GENERATE_TASK == "generate_task"
         assert IntentType.GENERATE_CREW == "generate_crew"
+        assert IntentType.EXECUTE_CREW == "execute_crew"
         assert IntentType.CONFIGURE_CREW == "configure_crew"
         assert IntentType.CONVERSATION == "conversation"
         assert IntentType.UNKNOWN == "unknown"
@@ -47,8 +49,9 @@ class TestIntentType:
     def test_intent_type_iteration(self):
         """Test iterating over IntentType enum."""
         intent_list = list(IntentType)
-        assert len(intent_list) == 6
+        assert len(intent_list) == 7
         assert IntentType.GENERATE_AGENT in intent_list
+        assert IntentType.EXECUTE_CREW in intent_list
         assert IntentType.UNKNOWN in intent_list
 
 

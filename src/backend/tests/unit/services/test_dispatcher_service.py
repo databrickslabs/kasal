@@ -227,6 +227,20 @@ class TestDispatcherService:
         assert result["has_configure_structure"] == True
         assert result["suggested_intent"] == "configure_crew"
 
+    def test_analyze_message_semantics_execute_keywords(self, dispatcher_service):
+        """Test semantic analysis for execute keywords."""
+        result = dispatcher_service._analyze_message_semantics("execute crew now")
+        
+        assert "execute" in result["execute_keywords"]
+        assert result["suggested_intent"] == "execute_crew"
+
+    def test_analyze_message_semantics_ec_keyword(self, dispatcher_service):
+        """Test semantic analysis for 'ec' keyword."""
+        result = dispatcher_service._analyze_message_semantics("ec")
+        
+        assert "ec" in result["execute_keywords"]
+        assert result["suggested_intent"] == "execute_crew"
+
     def test_analyze_message_semantics_command_patterns(self, dispatcher_service):
         """Test command pattern detection."""
         test_cases = [
@@ -688,6 +702,49 @@ class TestDispatcherService:
             assert result["generation_result"]["config_type"] == "general"  # Default
 
     @pytest.mark.asyncio
+    async def test_dispatch_execute_crew(self, dispatcher_service):
+        """Test dispatching execute crew intent."""
+        request = DispatcherRequest(message="execute crew", model="test-model")
+        
+        mock_intent_result = {
+            "intent": "execute_crew",
+            "confidence": 0.9,
+            "extracted_info": {},
+            "suggested_prompt": "execute crew"
+        }
+        
+        with patch.object(dispatcher_service, '_detect_intent', new_callable=AsyncMock, return_value=mock_intent_result), \
+             patch.object(dispatcher_service, '_log_llm_interaction', new_callable=AsyncMock):
+            
+            result = await dispatcher_service.dispatch(request)
+            
+            assert result["dispatcher"]["intent"] == "execute_crew"
+            assert result["generation_result"]["type"] == "execute_crew"
+            assert result["generation_result"]["message"] == "Executing crew..."
+            assert result["generation_result"]["action"] == "execute_crew"
+            assert result["service_called"] == "execute_crew"
+
+    @pytest.mark.asyncio
+    async def test_dispatch_execute_crew_ec_command(self, dispatcher_service):
+        """Test dispatching execute crew with 'ec' shorthand."""
+        request = DispatcherRequest(message="ec", model="test-model")
+        
+        mock_intent_result = {
+            "intent": "execute_crew",
+            "confidence": 0.9,
+            "extracted_info": {},
+            "suggested_prompt": "ec"
+        }
+        
+        with patch.object(dispatcher_service, '_detect_intent', new_callable=AsyncMock, return_value=mock_intent_result), \
+             patch.object(dispatcher_service, '_log_llm_interaction', new_callable=AsyncMock):
+            
+            result = await dispatcher_service.dispatch(request)
+            
+            assert result["dispatcher"]["intent"] == "execute_crew"
+            assert result["generation_result"]["action"] == "execute_crew"
+
+    @pytest.mark.asyncio
     async def test_dispatch_conversation(self, dispatcher_service):
         """Test dispatching conversation intent."""
         request = DispatcherRequest(message="hello, how are you?", model="test-model")
@@ -854,6 +911,17 @@ class TestDispatcherService:
         
         assert isinstance(configure_keywords, set)
 
+    def test_execute_keywords_coverage(self, dispatcher_service):
+        """Test coverage of execute keywords."""
+        execute_keywords = dispatcher_service.EXECUTE_KEYWORDS
+        
+        assert 'execute' in execute_keywords
+        assert 'run' in execute_keywords
+        assert 'ec' in execute_keywords
+        assert 'start' in execute_keywords
+        
+        assert isinstance(execute_keywords, set)
+
     def test_analyze_message_semantics_edge_cases(self, dispatcher_service):
         """Test edge cases in semantic analysis."""
         # Test with numbers and special characters
@@ -968,6 +1036,7 @@ class TestDispatcherService:
         assert hasattr(dispatcher_service, 'CONVERSATION_WORDS')
         assert hasattr(dispatcher_service, 'AGENT_KEYWORDS')
         assert hasattr(dispatcher_service, 'CREW_KEYWORDS')
+        assert hasattr(dispatcher_service, 'EXECUTE_KEYWORDS')
         assert hasattr(dispatcher_service, 'CONFIGURE_KEYWORDS')
         
         # Verify they are sets
@@ -975,6 +1044,7 @@ class TestDispatcherService:
         assert isinstance(dispatcher_service.CONVERSATION_WORDS, set)
         assert isinstance(dispatcher_service.AGENT_KEYWORDS, set)
         assert isinstance(dispatcher_service.CREW_KEYWORDS, set)
+        assert isinstance(dispatcher_service.EXECUTE_KEYWORDS, set)
         assert isinstance(dispatcher_service.CONFIGURE_KEYWORDS, set)
         
         # Verify they are not empty
@@ -982,4 +1052,5 @@ class TestDispatcherService:
         assert len(dispatcher_service.CONVERSATION_WORDS) > 0
         assert len(dispatcher_service.AGENT_KEYWORDS) > 0
         assert len(dispatcher_service.CREW_KEYWORDS) > 0
+        assert len(dispatcher_service.EXECUTE_KEYWORDS) > 0
         assert len(dispatcher_service.CONFIGURE_KEYWORDS) > 0

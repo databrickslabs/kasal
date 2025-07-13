@@ -69,7 +69,12 @@ class DispatcherService:
     # Crew-related keywords  
     CREW_KEYWORDS = {
         'team', 'crew', 'group', 'squad', 'multiple', 'several', 'many',
-        'workflow', 'pipeline', 'process', 'collaboration', 'together'
+        'workflow', 'pipeline', 'process', 'collaboration', 'together', 'plan'
+    }
+    
+    # Execution-related keywords
+    EXECUTE_KEYWORDS = {
+        'execute', 'run', 'start', 'launch', 'begin', 'proceed', 'go', 'ec'
     }
     
     # Configuration-related keywords
@@ -151,6 +156,7 @@ class DispatcherService:
         conversation_words = word_set.intersection(self.CONVERSATION_WORDS)
         agent_keywords = word_set.intersection(self.AGENT_KEYWORDS)
         crew_keywords = word_set.intersection(self.CREW_KEYWORDS)
+        execute_keywords = word_set.intersection(self.EXECUTE_KEYWORDS)
         configure_keywords = word_set.intersection(self.CONFIGURE_KEYWORDS)
         
         # Analyze message structure patterns
@@ -181,6 +187,7 @@ class DispatcherService:
             'generate_task': len(task_actions) * 2 + (1 if has_imperative else 0) + (1 if has_command_structure else 0),
             'generate_agent': len(agent_keywords) * 3,
             'generate_crew': len(crew_keywords) * 3,
+            'execute_crew': len(execute_keywords) * 4 + (2 if execute_keywords.intersection({'execute', 'ec'}) else 0),
             'configure_crew': len(configure_keywords) * 3 + (2 if has_configure_structure else 0),
             'conversation': len(conversation_words) * 2 + (1 if has_question else 0) + (1 if has_greeting else 0)
         }
@@ -189,6 +196,8 @@ class DispatcherService:
         semantic_hints = []
         if task_actions:
             semantic_hints.append(f"Action words detected: {', '.join(task_actions)}")
+        if execute_keywords:
+            semantic_hints.append(f"Execution words detected: {', '.join(execute_keywords)}")
         if configure_keywords:
             semantic_hints.append(f"Configuration words detected: {', '.join(configure_keywords)}")
         if has_command_structure:
@@ -207,6 +216,7 @@ class DispatcherService:
             "conversation_words": list(conversation_words),
             "agent_keywords": list(agent_keywords),
             "crew_keywords": list(crew_keywords),
+            "execute_keywords": list(execute_keywords),
             "configure_keywords": list(configure_keywords),
             "has_imperative": has_imperative,
             "has_question": has_question,
@@ -258,25 +268,30 @@ Analyze the user's message and determine their intent from these categories:
    - Complex workflows: "research then write then review"
    - Collaborative language: "agents working together", "workflow with multiple steps"
 
-4. **configure_crew**: User wants to configure workflow settings (LLM, max RPM, tools):
+4. **execute_crew**: User wants to execute/run an existing crew:
+   - Execution commands: "execute crew", "run crew", "start crew", "ec"
+   - Action words with crew context: "execute", "run", "start", "launch", "begin"
+   - Short commands: "ec" (shorthand for execute crew)
+
+5. **configure_crew**: User wants to configure workflow settings (LLM, max RPM, tools):
    - Configuration requests: "configure crew", "setup llm", "change model", "select tools"
    - Settings modifications: "update max rpm", "set llm model", "modify tools"
    - Preference adjustments: "choose different model", "adjust settings", "pick tools"
    - Direct mentions: "llm", "maxr", "max rpm", "tools", "config", "settings"
 
-5. **conversation**: User is asking questions, seeking information, or having general conversation:
+6. **conversation**: User is asking questions, seeking information, or having general conversation:
    - Questions about the system: "how does this work?", "what can you do?"
    - Greetings: "hello", "hi", "good morning"
    - General questions: "what is...", "explain...", "why..."
    - Status inquiries: "what's the status of...", "show me..."
 
-6. **unknown**: Unclear or ambiguous messages that don't fit the above categories.
+7. **unknown**: Unclear or ambiguous messages that don't fit the above categories.
 
 **Key Insight**: Many task requests are phrased conversationally. Look for ACTION WORDS and GOALS rather than formal task language.
 
 Return a JSON object with:
 {
-    "intent": "generate_task" | "generate_agent" | "generate_crew" | "configure_crew" | "conversation" | "unknown",
+    "intent": "generate_task" | "generate_agent" | "generate_crew" | "execute_crew" | "configure_crew" | "conversation" | "unknown",
     "confidence": 0.0-1.0,
     "extracted_info": {
         "action_words": ["list", "of", "detected", "action", "words"],
@@ -296,6 +311,11 @@ Examples:
 - "analyze this sales data and create a report" -> generate_task
 - "Build a team of agents to handle customer support" -> generate_crew
 - "Create a research agent and a writer agent with tasks for each" -> generate_crew
+- "execute crew" -> execute_crew
+- "run crew" -> execute_crew
+- "ec" -> execute_crew
+- "start crew" -> execute_crew
+- "launch crew" -> execute_crew
 - "configure crew" -> configure_crew
 - "setup llm" -> configure_crew
 - "change model" -> configure_crew
@@ -315,6 +335,7 @@ Semantic Analysis:
 - Conversation indicators: {', '.join(semantic_analysis['conversation_words']) if semantic_analysis['conversation_words'] else 'None'}
 - Agent keywords: {', '.join(semantic_analysis['agent_keywords']) if semantic_analysis['agent_keywords'] else 'None'}
 - Crew keywords: {', '.join(semantic_analysis['crew_keywords']) if semantic_analysis['crew_keywords'] else 'None'}
+- Execute keywords: {', '.join(semantic_analysis['execute_keywords']) if semantic_analysis['execute_keywords'] else 'None'}
 - Configure keywords: {', '.join(semantic_analysis['configure_keywords']) if semantic_analysis['configure_keywords'] else 'None'}
 - Has imperative form: {semantic_analysis['has_imperative']}
 - Has question form: {semantic_analysis['has_question']}
@@ -442,6 +463,15 @@ Please analyze this message and provide your intent classification, considering 
                     tools=request.tools
                 )
                 generation_result = await self.crew_service.create_crew_complete(crew_request, group_context)
+                
+            elif dispatcher_response.intent == IntentType.EXECUTE_CREW:
+                # Handle execution intent - signal frontend to execute the crew
+                generation_result = {
+                    "type": "execute_crew",
+                    "message": "Executing crew...",
+                    "action": "execute_crew",
+                    "extracted_info": dispatcher_response.extracted_info
+                }
                 
             elif dispatcher_response.intent == IntentType.CONFIGURE_CREW:
                 # Handle configuration intent - determine what type of configuration is needed
