@@ -404,7 +404,7 @@ class TestCrewPreparation:
     @pytest.mark.asyncio
     async def test_create_tasks_unresolvable_context_references(self, crew_preparation):
         """Test task creation when context references can't be resolved."""
-        crew_preparation.agents = {"researcher": MagicMock()}
+        crew_preparation.agents = {"researcher": MagicMock(), "writer": MagicMock()}
         
         crew_preparation.config["tasks"] = [
             {
@@ -413,20 +413,29 @@ class TestCrewPreparation:
                 "description": "Research AI trends",
                 "agent": "researcher", 
                 "expected_output": "Research report",
+                "context": []  # Empty context (no warning expected)
+            },
+            {
+                "id": "write_task",
+                "name": "write_task",
+                "description": "Write report",
+                "agent": "writer", 
+                "expected_output": "Written report",
                 "context": ["nonexistent1", "nonexistent2"]  # All invalid references
             }
         ]
         
         mock_task1 = MagicMock()
+        mock_task2 = MagicMock()
         
-        with patch('src.engines.crewai.helpers.task_helpers.create_task', return_value=mock_task1), \
+        with patch('src.engines.crewai.helpers.task_helpers.create_task', side_effect=[mock_task1, mock_task2]), \
              patch('src.engines.crewai.crew_preparation.logger') as mock_logger:
             
             result = await crew_preparation._create_tasks()
             
             assert result is True
             # Check that warning was logged for no resolvable context tasks
-            mock_logger.warning.assert_any_call("No context tasks could be resolved for task research_task")
+            mock_logger.warning.assert_any_call("No context tasks could be resolved for task write_task")
     
     @pytest.mark.asyncio
     async def test_create_crew_basic_success(self, crew_preparation):

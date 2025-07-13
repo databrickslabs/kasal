@@ -236,7 +236,6 @@ class CrewPreparation:
                 logger.info(f"Created task: {task_name} for agent: {agent_name}")
                 
             # Second pass: Resolve context references to actual Task objects
-            logger.info(f"Available task_dict keys: {list(task_dict.keys())}")
             for task_config in tasks:
                 task_id = task_config.get('id', task_config.get('name'))
                 task = task_dict.get(task_id)
@@ -248,13 +247,11 @@ class CrewPreparation:
                 # If this task has context references, resolve them
                 if '_context_refs' in task_config:
                     context_refs = task_config['_context_refs']
-                    logger.info(f"Trying to resolve context_refs {context_refs} for task {task_id}")
                     context_tasks = []
                     
                     for ref in context_refs:
                         if ref in task_dict:
                             context_tasks.append(task_dict[ref])
-                            logger.info(f"Successfully resolved context reference '{ref}'")
                         else:
                             logger.warning(f"Could not resolve context reference '{ref}' for task {task_id}")
                     
