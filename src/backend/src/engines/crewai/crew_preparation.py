@@ -526,13 +526,23 @@ class CrewPreparation:
                 crew_kwargs['planning'] = crew_config['planning']
                 
             if 'planning_llm' in crew_config:
-                crew_kwargs['planning_llm'] = crew_config['planning_llm']
+                try:
+                    planning_llm = await LLMManager.get_llm(crew_config['planning_llm'])
+                    crew_kwargs['planning_llm'] = planning_llm
+                    logger.info(f"Set crew planning LLM to: {crew_config['planning_llm']}")
+                except Exception as llm_error:
+                    logger.warning(f"Could not create planning LLM for model {crew_config['planning_llm']}: {llm_error}")
             
             if 'reasoning' in crew_config:
                 crew_kwargs['reasoning'] = crew_config['reasoning']
                 
             if 'reasoning_llm' in crew_config:
-                crew_kwargs['reasoning_llm'] = crew_config['reasoning_llm']
+                try:
+                    reasoning_llm = await LLMManager.get_llm(crew_config['reasoning_llm'])
+                    crew_kwargs['reasoning_llm'] = reasoning_llm
+                    logger.info(f"Set crew reasoning LLM to: {crew_config['reasoning_llm']}")
+                except Exception as llm_error:
+                    logger.warning(f"Could not create reasoning LLM for model {crew_config['reasoning_llm']}: {llm_error}")
             
             # Create the crew instance
             # Handle OpenAI API key properly in Databricks Apps environment

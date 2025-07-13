@@ -473,20 +473,37 @@ class TestCrewPreparation:
         crew_preparation.config["crew"]["reasoning_llm"] = "gpt-4"
         
         mock_crew = MagicMock()
+        mock_planning_llm = MagicMock()
+        mock_reasoning_llm = MagicMock()
         
         with patch('src.engines.crewai.crew_preparation.Crew', return_value=mock_crew) as mock_crew_class, \
-             patch('src.utils.databricks_auth.is_databricks_apps_environment', return_value=False):
+             patch('src.utils.databricks_auth.is_databricks_apps_environment', return_value=False), \
+             patch('src.core.llm_manager.LLMManager.get_llm') as mock_get_llm, \
+             patch('src.services.api_keys_service.ApiKeysService.get_provider_api_key', return_value=None):
+            
+            # Configure LLMManager.get_llm to return different mocks for different models
+            # Note: gpt-4 is used for both reasoning and manager LLM in this test
+            mock_get_llm.side_effect = lambda model: {
+                "gpt-3.5-turbo": mock_planning_llm,
+                "gpt-4": mock_reasoning_llm
+            }[model]
             
             result = await crew_preparation._create_crew()
             
             assert result is True
             
-            # Verify crew was created with planning and reasoning
+            # Verify LLMManager.get_llm was called for planning, reasoning, and manager LLMs
+            # Note: gpt-4 is called twice (manager + reasoning), gpt-3.5-turbo once (planning)
+            assert mock_get_llm.call_count == 3
+            mock_get_llm.assert_any_call("gpt-3.5-turbo")
+            mock_get_llm.assert_any_call("gpt-4")
+            
+            # Verify crew was created with planning and reasoning LLM objects
             call_kwargs = mock_crew_class.call_args[1]
             assert call_kwargs['planning'] is True
             assert call_kwargs['reasoning'] is True
-            assert call_kwargs['planning_llm'] == "gpt-3.5-turbo"
-            assert call_kwargs['reasoning_llm'] == "gpt-4"
+            assert call_kwargs['planning_llm'] is mock_planning_llm
+            assert call_kwargs['reasoning_llm'] is mock_reasoning_llm
     
     @pytest.mark.asyncio
     async def test_create_crew_with_max_rpm(self, crew_preparation):
@@ -750,6 +767,111 @@ class TestCrewPreparation:
             
             assert result == {"error": "Execution error"}
             mock_handle_error.assert_called_once()
+    
+    @pytest.mark.asyncio
+    async def test_create_crew_with_planning_llm_error(self, crew_preparation):
+        """Test crew creation when planning LLM creation fails."""
+        crew_preparation.agents = {"agent1": MagicMock()}
+        crew_preparation.tasks = [MagicMock()]
+        crew_preparation.config["crew"]["planning"] = True
+        crew_preparation.config["crew"]["planning_llm"] = "invalid-model"
+        
+        mock_crew = MagicMock()
+        
+        with patch('src.engines.crewai.crew_preparation.Crew', return_value=mock_crew) as mock_crew_class, \
+             patch('src.utils.databricks_auth.is_databricks_apps_environment', return_value=False), \
+             patch('src.core.llm_manager.LLMManager.get_llm', side_effect=Exception("Model not found")) as mock_get_llm, \
+             patch('src.engines.crewai.crew_preparation.logger') as mock_logger, \
+             patch('src.services.api_keys_service.ApiKeysService.get_provider_api_key', return_value=None):
+            
+            result = await crew_preparation._create_crew()
+            
+            assert result is True
+            
+            # Verify LLMManager.get_llm was called for planning LLM and manager LLM
+            # Note: Manager LLM is also created, so we expect 2 calls (assuming config has a model)
+            assert mock_get_llm.call_count >= 1  # At least one call for planning_llm
+            mock_get_llm.assert_any_call("invalid-model")
+            
+            # Verify error was logged
+            mock_logger.warning.assert_called_with("Could not create planning LLM for model invalid-model: Model not found")
+            
+            # Verify crew was created without planning_llm in kwargs
+            call_kwargs = mock_crew_class.call_args[1]
+            assert call_kwargs['planning'] is True
+            assert 'planning_llm' not in call_kwargs
+    
+    @pytest.mark.asyncio
+    async def test_create_crew_with_reasoning_llm_error(self, crew_preparation):
+        """Test crew creation when reasoning LLM creation fails."""
+        crew_preparation.agents = {"agent1": MagicMock()}
+        crew_preparation.tasks = [MagicMock()]
+        crew_preparation.config["crew"]["reasoning"] = True
+        crew_preparation.config["crew"]["reasoning_llm"] = "invalid-model"
+        
+        mock_crew = MagicMock()
+        
+        with patch('src.engines.crewai.crew_preparation.Crew', return_value=mock_crew) as mock_crew_class, \
+             patch('src.utils.databricks_auth.is_databricks_apps_environment', return_value=False), \
+             patch('src.core.llm_manager.LLMManager.get_llm', side_effect=Exception("Model not found")) as mock_get_llm, \
+             patch('src.engines.crewai.crew_preparation.logger') as mock_logger, \
+             patch('src.services.api_keys_service.ApiKeysService.get_provider_api_key', return_value=None):
+            
+            result = await crew_preparation._create_crew()
+            
+            assert result is True
+            
+            # Verify LLMManager.get_llm was called for reasoning LLM and manager LLM
+            # Note: Manager LLM is also created, so we expect 2 calls (assuming config has a model)
+            assert mock_get_llm.call_count >= 1  # At least one call for reasoning_llm
+            mock_get_llm.assert_any_call("invalid-model")
+            
+            # Verify error was logged
+            mock_logger.warning.assert_called_with("Could not create reasoning LLM for model invalid-model: Model not found")
+            
+            # Verify crew was created without reasoning_llm in kwargs
+            call_kwargs = mock_crew_class.call_args[1]
+            assert call_kwargs['reasoning'] is True
+            assert 'reasoning_llm' not in call_kwargs
+    
+    @pytest.mark.asyncio
+    async def test_create_crew_with_both_planning_and_reasoning_llm_errors(self, crew_preparation):
+        """Test crew creation when both planning and reasoning LLM creation fail."""
+        crew_preparation.agents = {"agent1": MagicMock()}
+        crew_preparation.tasks = [MagicMock()]
+        crew_preparation.config["crew"]["planning"] = True
+        crew_preparation.config["crew"]["reasoning"] = True
+        crew_preparation.config["crew"]["planning_llm"] = "invalid-planning-model"
+        crew_preparation.config["crew"]["reasoning_llm"] = "invalid-reasoning-model"
+        
+        mock_crew = MagicMock()
+        
+        with patch('src.engines.crewai.crew_preparation.Crew', return_value=mock_crew) as mock_crew_class, \
+             patch('src.utils.databricks_auth.is_databricks_apps_environment', return_value=False), \
+             patch('src.core.llm_manager.LLMManager.get_llm', side_effect=Exception("Model not found")) as mock_get_llm, \
+             patch('src.engines.crewai.crew_preparation.logger') as mock_logger, \
+             patch('src.services.api_keys_service.ApiKeysService.get_provider_api_key', return_value=None):
+            
+            result = await crew_preparation._create_crew()
+            
+            assert result is True
+            
+            # Verify LLMManager.get_llm was called for planning, reasoning, and manager LLMs
+            # Note: Manager LLM is also created, so we expect 3 calls total
+            assert mock_get_llm.call_count >= 2  # At least 2 calls for planning and reasoning LLMs
+            mock_get_llm.assert_any_call("invalid-planning-model")
+            mock_get_llm.assert_any_call("invalid-reasoning-model")
+            
+            # Verify both errors were logged
+            mock_logger.warning.assert_any_call("Could not create planning LLM for model invalid-planning-model: Model not found")
+            mock_logger.warning.assert_any_call("Could not create reasoning LLM for model invalid-reasoning-model: Model not found")
+            
+            # Verify crew was created without planning_llm or reasoning_llm in kwargs
+            call_kwargs = mock_crew_class.call_args[1]
+            assert call_kwargs['planning'] is True
+            assert call_kwargs['reasoning'] is True
+            assert 'planning_llm' not in call_kwargs
+            assert 'reasoning_llm' not in call_kwargs
 
 
 class TestCrewPreparationHelperFunctions:
