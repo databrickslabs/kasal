@@ -170,7 +170,7 @@ DEFAULT_MODELS = {
         "max_output_tokens": 32000
     },
     "claude-sonnet-4": {
-        "name": "claude-3-5-sonnet-20241022",
+        "name": "claude-sonnet-4-20250514",
         "temperature": 0.7,
         "provider": "anthropic",
         "context_window": 200000,
