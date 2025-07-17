@@ -48,19 +48,19 @@ class AgentTraceEventListener(BaseEventListener):
     # Static task registry to track tasks by job
     _task_registry: Dict[str, Dict[str, str]] = {}
     
-    def __init__(self, job_id: str, group_context=None):
+    def __init__(self, job_id: str, group_context=None, register_global_events=False):
         """
-        Initialize the event listener.
+        Initialize the trace listener.
         
         Args:
             job_id: Unique identifier for the job
             group_context: Group context for multi-tenant isolation
+            register_global_events: Whether to register global event listeners (deprecated)
         """
         if not job_id or not isinstance(job_id, str):
             raise ValueError("job_id must be a non-empty string")
             
-        # Set job_id BEFORE calling super().__init__() 
-        # since BaseEventListener calls setup_listeners in its __init__
+        # Set job_id and context
         self.job_id = job_id
         self.group_context = group_context
         self._queue = get_trace_queue()
@@ -72,15 +72,19 @@ class AgentTraceEventListener(BaseEventListener):
         
         log_prefix = f"[AgentTraceEventListener][{self.job_id}]"
         if job_id not in AgentTraceEventListener._init_logged:
-            logger.info(f"{log_prefix} Initializing with CrewAI event listeners at {self._init_time.isoformat()}. Using shared trace queue: {id(self._queue)}")
+            logger.info(f"{log_prefix} Initializing trace listener (execution-scoped callbacks) at {self._init_time.isoformat()}. Using shared trace queue: {id(self._queue)}")
             AgentTraceEventListener._init_logged.add(job_id)
         
         try:
-            # Call super().__init__() after setting job_id
-            super().__init__()
-            logger.info(f"{log_prefix} Successfully registered event listeners")
+            if register_global_events:
+                # Legacy mode: Call super().__init__() to register global event listeners
+                super().__init__()
+                logger.info(f"{log_prefix} Registered global event listeners (legacy mode)")
+            else:
+                # New mode: Don't register global event listeners, use execution-scoped callbacks
+                logger.info(f"{log_prefix} Trace listener initialized for execution-scoped callbacks")
         except Exception as e:
-            logger.error(f"{log_prefix} Error initializing event listener: {e}", exc_info=True)
+            logger.error(f"{log_prefix} Error initializing trace listener: {e}", exc_info=True)
             raise
     
     def _get_or_create_task_id(self, task_name: str, task_original_id: str) -> str:

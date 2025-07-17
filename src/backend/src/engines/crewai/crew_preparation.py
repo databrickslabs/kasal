@@ -587,6 +587,7 @@ class CrewPreparation:
             handle_crew_error(e, "Error creating crew")
             return False
     
+
     async def execute(self) -> Dict[str, Any]:
         """
         Execute the prepared crew

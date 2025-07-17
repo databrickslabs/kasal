@@ -842,7 +842,8 @@ class TestAgentTraceEventListener(unittest.TestCase):
         with patch('src.engines.crewai.callbacks.logging_callbacks.BaseEventListener.__init__', 
                   side_effect=Exception("Init error")):
             with self.assertRaises(Exception):
-                AgentTraceEventListener(self.job_id)
+                # Use register_global_events=True to trigger the super().__init__() call
+                AgentTraceEventListener(self.job_id, register_global_events=True)
 
 
 class TestTaskCompletionLogger(unittest.TestCase):

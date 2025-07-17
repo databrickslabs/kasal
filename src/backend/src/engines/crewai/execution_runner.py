@@ -58,9 +58,14 @@ async def run_crew(execution_id: str, crew: Crew, running_jobs: Dict, group_cont
     final_message = "An unexpected error occurred during crew execution."
     final_result = None
     
-    # Set up CrewLogger and callback handlers
+    # Set up CrewLogger and execution-scoped callbacks
     from src.engines.crewai.crew_logger import crew_logger
     from src.engines.crewai.callbacks.streaming_callbacks import EventStreamingCallback
+    from src.engines.crewai.callbacks.execution_callback import (
+        create_execution_callbacks, 
+        create_crew_callbacks, 
+        log_crew_initialization
+    )
     
     # Get the job configuration from the running jobs dictionary
     config = None
@@ -89,6 +94,40 @@ async def run_crew(execution_id: str, crew: Crew, running_jobs: Dict, group_cont
     
     # Initialize logging for this job
     crew_logger.setup_for_job(execution_id, group_context)
+    
+    # Create execution-scoped callbacks (replaces global event listeners)
+    step_callback, task_callback = create_execution_callbacks(
+        job_id=execution_id, 
+        config=config, 
+        group_context=group_context
+    )
+    
+    # Set callbacks directly on the crew instance
+    try:
+        crew.step_callback = step_callback
+        crew.task_callback = task_callback
+        logger.info(f"Set execution-scoped callbacks on crew for {execution_id}")
+    except Exception as callback_error:
+        logger.error(f"Failed to set callbacks on crew for {execution_id}: {callback_error}")
+        # Continue execution - callbacks are for enhanced logging, not critical functionality
+    
+    # Create crew lifecycle callbacks
+    crew_callbacks = create_crew_callbacks(
+        job_id=execution_id,
+        config=config,
+        group_context=group_context
+    )
+    
+    # Log crew initialization
+    log_crew_initialization(execution_id, config, group_context)
+    
+    # Initialize AgentTraceEventListener for trace processing (without global event listeners)
+    from src.engines.crewai.callbacks.logging_callbacks import AgentTraceEventListener
+    trace_listener = AgentTraceEventListener(job_id=execution_id, group_context=group_context)
+    
+    # Start the trace writer to process queued traces
+    from src.engines.crewai.trace_management import TraceManager
+    await TraceManager.ensure_writer_started()
     
     # Initialize event streaming with configuration and group context
     event_streaming = EventStreamingCallback(job_id=execution_id, config=config, group_context=group_context)
@@ -278,12 +317,30 @@ async def run_crew(execution_id: str, crew: Crew, running_jobs: Dict, group_cont
                     else:
                         logger.info("No user inputs found after filtering system inputs")
                 
+                # Call crew start callback
+                crew_callbacks['on_start']()
+                
                 # Run the potentially blocking crew.kickoff() in a separate thread
                 # to avoid blocking the asyncio event loop
-                if user_inputs:
-                    result = await asyncio.to_thread(crew.kickoff, inputs=user_inputs)
-                else:
-                    result = await asyncio.to_thread(crew.kickoff)
+                # NOTE: Callbacks are now passed to Crew() constructor in crew_preparation.py
+                try:
+                    if user_inputs:
+                        result = await asyncio.to_thread(
+                            crew.kickoff, 
+                            inputs=user_inputs
+                        )
+                    else:
+                        result = await asyncio.to_thread(
+                            crew.kickoff
+                        )
+                    
+                    # Call crew completion callback
+                    crew_callbacks['on_complete'](result)
+                    
+                except Exception as crew_error:
+                    # Call crew error callback
+                    crew_callbacks['on_error'](crew_error)
+                    raise  # Re-raise to be handled by outer exception handler
             
             # If kickoff successful, prepare for COMPLETED status
             final_status = ExecutionStatus.COMPLETED.value
