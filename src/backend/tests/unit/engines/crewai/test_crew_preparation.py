@@ -1,4 +1,5 @@
 import pytest
+import unittest.mock
 from unittest.mock import AsyncMock, MagicMock, patch, call
 from typing import Dict, Any, List
 
@@ -881,6 +882,346 @@ class TestCrewPreparation:
             assert call_kwargs['reasoning'] is True
             assert 'planning_llm' not in call_kwargs
             assert 'reasoning_llm' not in call_kwargs
+    
+    @pytest.mark.asyncio
+    async def test_create_crew_with_memory_no_backend_config(self, crew_preparation):
+        """Test crew creation with memory enabled but no backend configuration (uses default ChromaDB)."""
+        crew_preparation.agents = {"agent1": MagicMock()}
+        crew_preparation.tasks = [MagicMock()]
+        crew_preparation.config["crew"]["memory"] = True
+        crew_preparation.config["group_id"] = "test_group"
+        
+        mock_crew = MagicMock()
+        
+        with patch('src.engines.crewai.crew_preparation.Crew', return_value=mock_crew) as mock_crew_class, \
+             patch('src.utils.databricks_auth.is_databricks_apps_environment', return_value=False), \
+             patch('src.services.memory_backend_service.MemoryBackendService') as mock_memory_service, \
+             patch('src.core.unit_of_work.UnitOfWork'), \
+             patch.dict('os.environ', {}, clear=True), \
+             patch('crewai.utilities.paths.db_storage_path', return_value='/mock/path'), \
+             patch('pathlib.Path.exists', return_value=False), \
+             patch('src.engines.crewai.crew_preparation.logger') as mock_logger:
+            
+            # Mock memory backend service to return None (no config in database)
+            mock_service_instance = MagicMock()
+            mock_service_instance.get_active_config = AsyncMock(return_value=None)
+            mock_memory_service.return_value = mock_service_instance
+            
+            result = await crew_preparation._create_crew()
+            
+            assert result is True
+            
+            # Verify crew was created with memory=True for default ChromaDB
+            call_kwargs = mock_crew_class.call_args[1]
+            assert call_kwargs['memory'] is True
+            
+            # Verify logging indicates use of default memory
+            mock_logger.warning.assert_any_call("No active memory backend configuration found in database")
+            mock_logger.info.assert_any_call("Created default memory backend configuration (ChromaDB + SQLite)")
+            
+            # Verify storage directory would be set for default backend
+            # The actual setting happens in crew_preparation, which we're testing
+            # Just verify the crew was created with memory enabled
+    
+    @pytest.mark.asyncio
+    async def test_create_crew_with_default_backend_config(self, crew_preparation):
+        """Test crew creation with DEFAULT backend type configured."""
+        crew_preparation.agents = {"agent1": MagicMock(role="Test Agent")}
+        crew_preparation.tasks = [MagicMock()]
+        crew_preparation.config["crew"]["memory"] = True
+        crew_preparation.config["group_id"] = "test_group"
+        
+        mock_crew = MagicMock()
+        
+        # Mock memory backend config with DEFAULT type
+        from src.schemas.memory_backend import MemoryBackendConfig, MemoryBackendType
+        mock_backend_config = MemoryBackendConfig(
+            backend_type=MemoryBackendType.DEFAULT,
+            enable_short_term=True,
+            enable_long_term=True,
+            enable_entity=True
+        )
+        
+        with patch('src.engines.crewai.crew_preparation.Crew', return_value=mock_crew) as mock_crew_class, \
+             patch('src.utils.databricks_auth.is_databricks_apps_environment', return_value=False), \
+             patch('src.services.memory_backend_service.MemoryBackendService') as mock_memory_service, \
+             patch('src.core.unit_of_work.UnitOfWork'), \
+             patch.dict('os.environ', {}, clear=True), \
+             patch('src.engines.crewai.memory.memory_backend_factory.MemoryBackendFactory.create_memory_backends', return_value={}), \
+             patch('crewai.utilities.paths.db_storage_path', return_value='/mock/path'), \
+             patch('pathlib.Path.exists', return_value=False), \
+             patch('src.engines.crewai.crew_preparation.logger') as mock_logger:
+            
+            # Mock memory backend service to return DEFAULT config
+            mock_service_instance = MagicMock()
+            mock_service_instance.get_active_config = AsyncMock(return_value=mock_backend_config)
+            mock_memory_service.return_value = mock_service_instance
+            
+            result = await crew_preparation._create_crew()
+            
+            assert result is True
+            
+            # Verify crew was created with memory=True for default backend
+            call_kwargs = mock_crew_class.call_args[1]
+            assert call_kwargs['memory'] is True
+            
+            # Verify logging for DEFAULT backend
+            mock_logger.info.assert_any_call("Skipping individual memory configuration for DEFAULT backend")
+            mock_logger.info.assert_any_call("Set memory=True for default backend to use CrewAI's built-in memory")
+            
+            # Verify logging shows the storage directory was set
+            # Look for log messages about storage directory
+            storage_log_calls = [call for call in mock_logger.info.call_args_list 
+                                if 'storage directory' in str(call)]
+            assert len(storage_log_calls) > 0
+    
+    @pytest.mark.asyncio
+    async def test_create_crew_with_memory_databricks_backend_config(self, crew_preparation):
+        """Test crew creation with memory enabled and Databricks backend configuration."""
+        crew_preparation.agents = {"agent1": MagicMock()}
+        crew_preparation.tasks = [MagicMock()]
+        crew_preparation.config["crew"]["memory"] = True
+        
+        mock_crew = MagicMock()
+        mock_memory_backends = {
+            'short_term': MagicMock(),
+            'long_term': MagicMock(),
+            'entity': MagicMock()
+        }
+        
+        # Mock memory backend config
+        from src.schemas.memory_backend import MemoryBackendConfig, MemoryBackendType, DatabricksMemoryConfig
+        mock_backend_config = MemoryBackendConfig(
+            backend_type=MemoryBackendType.DATABRICKS,
+            databricks_config=DatabricksMemoryConfig(
+                endpoint_name="test-endpoint",
+                short_term_index="test-short-term",
+                embedding_dimension=1024
+            ),
+            enable_short_term=True,
+            enable_long_term=True,
+            enable_entity=True
+        )
+        
+        with patch('src.engines.crewai.crew_preparation.Crew', return_value=mock_crew) as mock_crew_class, \
+             patch('src.utils.databricks_auth.is_databricks_apps_environment', return_value=False), \
+             patch('src.services.memory_backend_service.MemoryBackendService') as mock_memory_service, \
+             patch('src.core.unit_of_work.UnitOfWork'), \
+             patch('src.engines.crewai.memory.memory_backend_factory.MemoryBackendFactory.create_memory_backends', return_value=mock_memory_backends), \
+             patch('src.engines.crewai.crew_preparation.logger') as mock_logger:
+            
+            # Mock memory backend service to return Databricks config
+            mock_service_instance = MagicMock()
+            mock_service_instance.get_active_config = AsyncMock(return_value=mock_backend_config)
+            mock_memory_service.return_value = mock_service_instance
+            
+            result = await crew_preparation._create_crew()
+            
+            assert result is True
+            
+            # Verify crew was created with memory=False for Databricks to prevent conflicts
+            call_kwargs = mock_crew_class.call_args[1]
+            assert call_kwargs['memory'] is False
+            
+            # Verify custom memory backends were configured
+            assert 'short_term_memory' in call_kwargs
+            assert 'long_term_memory' in call_kwargs
+            assert 'entity_memory' in call_kwargs
+            
+            # Verify logging indicates Databricks backend
+            mock_logger.info.assert_any_call("Set memory=False for Databricks backend to prevent conflicts")
+    
+    @pytest.mark.asyncio
+    async def test_create_crew_with_memory_disabled_in_config(self, crew_preparation):
+        """Test crew creation when memory is disabled in crew config."""
+        crew_preparation.agents = {"agent1": MagicMock()}
+        crew_preparation.tasks = [MagicMock()]
+        crew_preparation.config["crew"]["memory"] = False
+        
+        mock_crew = MagicMock()
+        
+        with patch('src.engines.crewai.crew_preparation.Crew', return_value=mock_crew) as mock_crew_class, \
+             patch('src.utils.databricks_auth.is_databricks_apps_environment', return_value=False), \
+             patch('src.core.llm_manager.LLMManager.get_llm', return_value=MagicMock()):
+            
+            # Memory backend service should not be imported/called when memory is disabled
+            result = await crew_preparation._create_crew()
+            
+            assert result is True
+            
+            # Verify crew was created with memory=False
+            call_kwargs = mock_crew_class.call_args[1]
+            assert call_kwargs['memory'] is False
+    
+    @pytest.mark.asyncio
+    async def test_create_crew_with_disabled_configuration(self, crew_preparation):
+        """Test crew creation when all memory types are disabled (Disabled Configuration)."""
+        crew_preparation.agents = {"agent1": MagicMock()}
+        crew_preparation.tasks = [MagicMock()]
+        crew_preparation.config["crew"]["memory"] = True
+        crew_preparation.config["group_id"] = "test_group"
+        
+        mock_crew = MagicMock()
+        
+        # Mock memory backend config with all types disabled (Disabled Configuration)
+        from src.schemas.memory_backend import MemoryBackendConfig, MemoryBackendType
+        mock_backend_config = MemoryBackendConfig(
+            backend_type=MemoryBackendType.DEFAULT,
+            enable_short_term=False,
+            enable_long_term=False,
+            enable_entity=False
+        )
+        
+        with patch('src.engines.crewai.crew_preparation.Crew', return_value=mock_crew) as mock_crew_class, \
+             patch('src.utils.databricks_auth.is_databricks_apps_environment', return_value=False), \
+             patch('src.services.memory_backend_service.MemoryBackendService') as mock_memory_service, \
+             patch('src.core.unit_of_work.UnitOfWork'), \
+             patch.dict('os.environ', {}, clear=True), \
+             patch('crewai.utilities.paths.db_storage_path', return_value='/mock/path'), \
+             patch('pathlib.Path.exists', return_value=False), \
+             patch('src.engines.crewai.crew_preparation.logger') as mock_logger:
+            
+            # Mock memory backend service to return config with all disabled
+            mock_service_instance = MagicMock()
+            mock_service_instance.get_active_config = AsyncMock(return_value=mock_backend_config)
+            mock_memory_service.return_value = mock_service_instance
+            
+            result = await crew_preparation._create_crew()
+            
+            assert result is True
+            
+            # Verify crew was created with memory=True (falls back to default)
+            call_kwargs = mock_crew_class.call_args[1]
+            assert call_kwargs['memory'] is True
+            
+            # Verify logging indicates disabled configuration was found
+            mock_logger.info.assert_any_call("Found 'Disabled Configuration' - ignoring database config and using default memory")
+            mock_logger.info.assert_any_call("Created default memory backend configuration (ChromaDB + SQLite)")
+            
+            # Verify storage directory would be set for default backend
+            # The actual setting happens in crew_preparation, which we're testing
+            # Just verify the crew was created with memory enabled
+    
+    @pytest.mark.asyncio
+    async def test_create_crew_memory_backend_service_exception(self, crew_preparation):
+        """Test crew creation when memory backend service throws exception."""
+        crew_preparation.agents = {"agent1": MagicMock()}
+        crew_preparation.tasks = [MagicMock()]
+        crew_preparation.config["crew"]["memory"] = True
+        crew_preparation.config["group_id"] = "test_group"
+        
+        mock_crew = MagicMock()
+        
+        with patch('src.engines.crewai.crew_preparation.Crew', return_value=mock_crew) as mock_crew_class, \
+             patch('src.utils.databricks_auth.is_databricks_apps_environment', return_value=False), \
+             patch('src.services.memory_backend_service.MemoryBackendService') as mock_memory_service, \
+             patch('src.core.unit_of_work.UnitOfWork'), \
+             patch.dict('os.environ', {}, clear=True), \
+             patch('crewai.utilities.paths.db_storage_path', return_value='/mock/path'), \
+             patch('pathlib.Path.exists', return_value=False), \
+             patch('src.engines.crewai.crew_preparation.logger') as mock_logger:
+            
+            # Mock memory backend service to throw exception
+            mock_service_instance = MagicMock()
+            mock_service_instance.get_active_config = AsyncMock(side_effect=Exception("Database error"))
+            mock_memory_service.return_value = mock_service_instance
+            
+            result = await crew_preparation._create_crew()
+            
+            assert result is True
+            
+            # Verify crew was created successfully despite exception
+            call_kwargs = mock_crew_class.call_args[1]
+            # Memory should still be enabled when service fails (falls back to default)
+            assert call_kwargs['memory'] is True
+            
+            # Verify warning was logged
+            mock_logger.warning.assert_any_call("Failed to load memory backend config from database: Database error")
+            
+            # Verify default memory backend was created
+            mock_logger.info.assert_any_call("Created default memory backend configuration (ChromaDB + SQLite)")
+            
+            # Verify storage directory would be set for default backend
+            # The actual setting happens in crew_preparation, which we're testing
+            # Just verify the crew was created with memory enabled
+    
+    @pytest.mark.asyncio
+    async def test_create_crew_storage_directory_creation(self, crew_preparation):
+        """Test that storage directories are created correctly for different backend types."""
+        crew_preparation.agents = {"agent1": MagicMock(role="Test Agent")}
+        crew_preparation.tasks = [MagicMock()]
+        crew_preparation.config["crew"]["memory"] = True
+        crew_preparation.config["group_id"] = "test_group"
+        crew_preparation.config["database_crew_id"] = "db_crew_123"
+        
+        mock_crew = MagicMock()
+        
+        # Test 1: Databricks backend
+        from src.schemas.memory_backend import MemoryBackendConfig, MemoryBackendType, DatabricksMemoryConfig
+        databricks_config = MemoryBackendConfig(
+            backend_type=MemoryBackendType.DATABRICKS,
+            databricks_config=DatabricksMemoryConfig(
+                endpoint_name="test-endpoint",
+                short_term_index="test-short-term",
+                embedding_dimension=1024
+            ),
+            enable_short_term=True,
+            enable_long_term=True,
+            enable_entity=True
+        )
+        
+        with patch('src.engines.crewai.crew_preparation.Crew', return_value=mock_crew), \
+             patch('src.utils.databricks_auth.is_databricks_apps_environment', return_value=False), \
+             patch('src.services.memory_backend_service.MemoryBackendService') as mock_memory_service, \
+             patch('src.core.unit_of_work.UnitOfWork'), \
+             patch.dict('os.environ', {}, clear=True), \
+             patch('src.engines.crewai.memory.memory_backend_factory.MemoryBackendFactory.create_memory_backends', return_value={'short_term': MagicMock()}), \
+             patch('crewai.utilities.paths.db_storage_path', return_value='/mock/path'), \
+             patch('pathlib.Path.exists', return_value=True), \
+             patch('shutil.rmtree') as mock_rmtree:
+            
+            # Mock memory backend service to return Databricks config
+            mock_service_instance = MagicMock()
+            mock_service_instance.get_active_config = AsyncMock(return_value=databricks_config)
+            mock_memory_service.return_value = mock_service_instance
+            
+            await crew_preparation._create_crew()
+            
+            # Verify Databricks storage directory was set
+            import os
+            assert 'CREWAI_STORAGE_DIR' in os.environ
+            assert os.environ['CREWAI_STORAGE_DIR'] == 'kasal_databricks_crew_db_db_crew_123'
+            
+            # Verify cleanup was attempted
+            mock_rmtree.assert_called_once()
+        
+        # Test 2: Default backend
+        default_config = MemoryBackendConfig(
+            backend_type=MemoryBackendType.DEFAULT,
+            enable_short_term=True,
+            enable_long_term=True,
+            enable_entity=True
+        )
+        
+        with patch('src.engines.crewai.crew_preparation.Crew', return_value=mock_crew), \
+             patch('src.utils.databricks_auth.is_databricks_apps_environment', return_value=False), \
+             patch('src.services.memory_backend_service.MemoryBackendService') as mock_memory_service, \
+             patch('src.core.unit_of_work.UnitOfWork'), \
+             patch.dict('os.environ', {}, clear=True), \
+             patch('crewai.utilities.paths.db_storage_path', return_value='/mock/path'), \
+             patch('pathlib.Path.exists', return_value=False):
+            
+            # Mock memory backend service to return Default config
+            mock_service_instance = MagicMock()
+            mock_service_instance.get_active_config = AsyncMock(return_value=default_config)
+            mock_memory_service.return_value = mock_service_instance
+            
+            await crew_preparation._create_crew()
+            
+            # Verify Default storage directory was set
+            import os
+            assert 'CREWAI_STORAGE_DIR' in os.environ
+            assert os.environ['CREWAI_STORAGE_DIR'] == 'kasal_default_crew_db_db_crew_123'
 
 
 class TestCrewPreparationHelperFunctions:
