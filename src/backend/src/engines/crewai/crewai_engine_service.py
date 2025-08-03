@@ -106,6 +106,11 @@ class CrewAIEngineService(BaseEngineService):
             # Normalize config to ensure consistent format
             execution_config = normalize_config(execution_config)
             
+            # Add group_id to config if we have group_context
+            if group_context and group_context.primary_group_id:
+                execution_config["group_id"] = group_context.primary_group_id
+                logger.info(f"[CrewAIEngineService] Added group_id to config: {group_context.primary_group_id}")
+            
             # Extract crew definition sections from config
             crew_config = execution_config.get("crew", {})
             agent_configs = execution_config.get("agents", [])

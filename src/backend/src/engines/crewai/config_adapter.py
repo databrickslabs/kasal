@@ -91,6 +91,11 @@ def adapt_config(config: CrewConfig) -> Dict[str, Any]:
         # Log that we're using the default model for reasoning
         logger.info(f"Using default model for reasoning: {engine_config['model']}")
     
+    # If memory_backend_config is specified in inputs, preserve it
+    if config.inputs and "memory_backend_config" in config.inputs:
+        engine_config["memory_backend_config"] = config.inputs["memory_backend_config"]
+        logger.info(f"Preserving memory backend configuration: {config.inputs['memory_backend_config']}")
+    
     return engine_config
 
 def normalize_config(execution_config: Dict[str, Any]) -> Dict[str, Any]:

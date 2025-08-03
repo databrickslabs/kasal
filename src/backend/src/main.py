@@ -137,14 +137,29 @@ async def lifespan(app: FastAPI):
         if should_seed:
             system_logger.info("Running database seeders...")
             try:
-                system_logger.info("Starting run_all_seeders() from lifespan...")
-                await run_all_seeders()
-                system_logger.info("Database seeding completed successfully!")
+                # Always run seeders in background to avoid blocking startup
+                import asyncio
+                system_logger.info("Starting seeders in background...")
+                
+                async def run_seeders_background():
+                    try:
+                        system_logger.info("Background seeders started...")
+                        await run_all_seeders()
+                        system_logger.info("Background database seeding completed successfully!")
+                    except Exception as e:
+                        system_logger.error(f"Error running background seeders: {str(e)}")
+                        import traceback
+                        error_trace = traceback.format_exc()
+                        system_logger.error(f"Background seeder error trace: {error_trace}")
+                
+                # Create background task
+                asyncio.create_task(run_seeders_background())
+                system_logger.info("Seeders started in background, application startup continues...")
             except Exception as e:
-                system_logger.error(f"Error running seeders: {str(e)}")
+                system_logger.error(f"Error starting seeders: {str(e)}")
                 import traceback
                 error_trace = traceback.format_exc()
-                system_logger.error(f"Seeder error trace: {error_trace}")
+                system_logger.error(f"Seeder startup error trace: {error_trace}")
                 # Don't raise so app can start even if seeding fails
         else:
             system_logger.info("Database seeding skipped (AUTO_SEED_DATABASE is False)")

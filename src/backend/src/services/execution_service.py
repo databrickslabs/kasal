@@ -626,6 +626,12 @@ class ExecutionService:
             response = await self.execution_name_service.generate_execution_name(request)
             run_name = response.name
             crew_logger.debug(f"[ExecutionService.create_execution] Generated run_name: {run_name} for execution_id: {execution_id}")
+            
+            # Add run_name to config inputs for crew consistency
+            if not config.inputs:
+                config.inputs = {}
+            config.inputs["run_name"] = run_name
+            crew_logger.info(f"[ExecutionService.create_execution] Added run_name to config.inputs for consistent crew_id generation")
 
             # Extract execution type and flow_id
             execution_type = config.execution_type if config.execution_type else "crew"

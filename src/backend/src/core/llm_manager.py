@@ -610,7 +610,7 @@ class LLMManager:
         return llm
 
     @staticmethod
-    async def get_embedding(text: str, model: str = "text-embedding-ada-002", embedder_config: Optional[Dict[str, Any]] = None) -> Optional[List[float]]:
+    async def get_embedding(text: str, model: str = "databricks-gte-large-en", embedder_config: Optional[Dict[str, Any]] = None) -> Optional[List[float]]:
         """
         Get an embedding vector for the given text using configurable embedder.
         
@@ -622,15 +622,15 @@ class LLMManager:
         Returns:
             List[float]: The embedding vector or None if creation fails
         """
-        provider = 'openai'  # Default provider
+        provider = 'databricks'  # Default provider
         try:
             # Determine provider and model from embedder_config or defaults
             if embedder_config:
-                provider = embedder_config.get('provider', 'openai')
+                provider = embedder_config.get('provider', 'databricks')
                 config = embedder_config.get('config', {})
                 embedding_model = config.get('model', model)
             else:
-                provider = 'openai'
+                provider = 'databricks'
                 embedding_model = model
             
             # Check circuit breaker for this provider
@@ -654,28 +654,63 @@ class LLMManager:
             
             # Handle different embedding providers
             if provider == 'databricks' or 'databricks' in embedding_model:
-                # Use enhanced Databricks authentication for embeddings
+                # Use enhanced Databricks authentication for embeddings - follow GenieTool pattern
                 try:
                     from src.utils.databricks_auth import is_databricks_apps_environment, get_databricks_auth_headers
                     
-                    # Check if running in Databricks Apps environment
-                    if is_databricks_apps_environment():
-                        logger.info("Using Databricks Apps OAuth authentication for embeddings")
-                        # Get OAuth headers directly from enhanced auth system
-                        headers_result, error = await get_databricks_auth_headers()
-                        if error or not headers_result:
-                            logger.error(f"Failed to get OAuth headers for embeddings: {error}")
-                            return None
+                    # First try: OBO authentication if available
+                    logger.info("Attempting enhanced Databricks authentication for embeddings")
+                    headers_result, error = await get_databricks_auth_headers()
+                    if headers_result and not error:
+                        logger.info("Using enhanced Databricks authentication (OAuth/OBO) for embeddings")
                         headers = headers_result
                         api_key = None  # OAuth handled by headers
                     else:
-                        # Only use API key service when NOT in Databricks Apps context
+                        logger.info(f"Enhanced auth failed ({error}), falling back to API key service")
+                        # Second try: API key from service
                         api_key = await ApiKeysService.get_provider_api_key("DATABRICKS")
-                        headers = None
+                        if api_key:
+                            logger.info("Using API key from service for embeddings")
+                            headers = None
+                        else:
+                            # Third try: Client credentials from environment
+                            client_id = os.getenv("DATABRICKS_CLIENT_ID")
+                            client_secret = os.getenv("DATABRICKS_CLIENT_SECRET")
+                            if client_id and client_secret:
+                                logger.info("Using client credentials for embeddings")
+                                # Let the enhanced auth handle client credentials
+                                headers_result, error = await get_databricks_auth_headers()
+                                if headers_result and not error:
+                                    headers = headers_result
+                                    api_key = None
+                                else:
+                                    # Fourth try: Environment variable DATABRICKS_TOKEN
+                                    api_key = os.getenv("DATABRICKS_TOKEN") or os.getenv("DATABRICKS_API_KEY")
+                                    if api_key:
+                                        logger.info("Using DATABRICKS_TOKEN from environment for embeddings")
+                                        headers = None
+                                    else:
+                                        logger.error("No Databricks authentication method available")
+                                        return None
+                            else:
+                                # Fourth try: Environment variable DATABRICKS_TOKEN
+                                api_key = os.getenv("DATABRICKS_TOKEN") or os.getenv("DATABRICKS_API_KEY")
+                                if api_key:
+                                    logger.info("Using DATABRICKS_TOKEN from environment for embeddings")
+                                    headers = None
+                                else:
+                                    logger.error("No Databricks authentication method available")
+                                    return None
                         
                 except ImportError:
-                    logger.warning("Enhanced Databricks auth not available for embeddings, using legacy PAT")
+                    logger.warning("Enhanced Databricks auth not available for embeddings, using fallback methods")
+                    # Try API key service first
                     api_key = await ApiKeysService.get_provider_api_key("DATABRICKS")
+                    if not api_key:
+                        # Fall back to environment variable
+                        api_key = os.getenv("DATABRICKS_TOKEN") or os.getenv("DATABRICKS_API_KEY")
+                        if api_key:
+                            logger.info("Using DATABRICKS_TOKEN from environment for embeddings (no enhanced auth)")
                     headers = None
                 
                 # Get workspace URL from environment first, then database

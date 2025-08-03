@@ -63,13 +63,33 @@ class SQLAlchemyLogger:
 # Initialize SQLAlchemy logging
 sql_logger = SQLAlchemyLogger()
 
+# Import pool classes
+from sqlalchemy.pool import NullPool, AsyncAdaptedQueuePool
+
+# Determine if we should use NullPool for event loop isolation
+# This is necessary when running in environments with multiple event loops
+# such as with CrewAI memory backends or during testing
+use_nullpool = os.environ.get("USE_NULLPOOL", "false").lower() == "true"
+
 # Create async engine for the database
-engine = create_async_engine(
-    str(settings.DATABASE_URI),
-    echo=False,  # Setting to False to disable SQL echoing to stdout
-    future=True,
-    pool_pre_ping=True,
-)
+if use_nullpool:
+    logger.info("Using NullPool to prevent connection reuse across event loops")
+    engine = create_async_engine(
+        str(settings.DATABASE_URI),
+        echo=False,  # Setting to False to disable SQL echoing to stdout
+        future=True,
+        poolclass=NullPool,  # Disable connection pooling to prevent event loop conflicts
+    )
+else:
+    # Use the default async pool (AsyncAdaptedQueuePool is automatically used)
+    engine = create_async_engine(
+        str(settings.DATABASE_URI),
+        echo=False,  # Setting to False to disable SQL echoing to stdout
+        future=True,
+        pool_pre_ping=True,
+        pool_size=5,
+        max_overflow=10,
+    )
 
 # Create sync engine for backwards compatibility if needed
 # Since asyncpg is async-only and cannot be used for sync operations,

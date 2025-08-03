@@ -365,18 +365,14 @@ class CrewGenerationService:
             # Get the embedding vector
             query_embedding = embedding_response
             
-            # Initialize the documentation embedding service
-            doc_service = DocumentationEmbeddingService()
-            
             # Retrieve similar documentation based on the embedding
             async with UnitOfWork() as uow:
                 logger.info(f"Searching for {limit} most relevant documentation chunks")
-                # Access the session directly from the internal _session attribute
-                session = await uow._session.__aenter__()
+                # Initialize the documentation service with the unit of work
+                doc_service = DocumentationEmbeddingService(uow)
                 similar_docs = await doc_service.search_similar_embeddings(
                     query_embedding=query_embedding,
-                    limit=limit,
-                    db=session
+                    limit=limit
                 )
                 
                 if not similar_docs or len(similar_docs) == 0:

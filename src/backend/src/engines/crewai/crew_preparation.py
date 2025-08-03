@@ -6,10 +6,13 @@ This module handles the preparation and configuration of CrewAI agents and tasks
 
 from typing import Dict, Any, List, Optional
 import logging
+from datetime import datetime
 from crewai import Agent, Crew, Task
 from src.core.logger import LoggerManager
 from src.engines.crewai.helpers.task_helpers import create_task, is_data_missing
 from src.engines.crewai.helpers.agent_helpers import create_agent
+from src.schemas.memory_backend import MemoryBackendConfig, MemoryBackendType
+from src.engines.crewai.memory.memory_backend_factory import MemoryBackendFactory
 
 
 logger = LoggerManager.get_instance().crew
@@ -85,6 +88,12 @@ class CrewPreparation:
         self.crew: Optional[Crew] = None
         self.tool_service = tool_service
         self.tool_factory = tool_factory
+        self._original_storage_dir = None  # To store original CREWAI_STORAGE_DIR
+        
+        # Log the configuration to debug memory backend
+        logger.info(f"[CrewPreparation.__init__] Config keys: {list(config.keys())}")
+        if 'memory_backend_config' in config:
+            logger.info(f"[CrewPreparation.__init__] Memory backend config found: {config['memory_backend_config']}")
         
     async def prepare(self) -> bool:
         """
@@ -283,7 +292,7 @@ class CrewPreparation:
                 'tasks': self.tasks,
                 'process': crew_config.get('process', 'sequential'),
                 'verbose': True,
-                'memory': True
+                'memory': crew_config.get('memory', True)
             }
             
             # Set default LLM for crew manager using the submitted model
@@ -523,6 +532,299 @@ class CrewPreparation:
                     
             logger.info(f"Final embedder configuration: {crew_kwargs.get('embedder', 'None (default)')}")
             
+            # Always fetch memory backend configuration from database
+            # This ensures consistency regardless of whether the crew is executed via frontend or API
+            # The backend is the single source of truth for memory configuration
+            memory_backend_config = None
+            if crew_kwargs.get('memory', False):
+                try:
+                    from src.services.memory_backend_service import MemoryBackendService
+                    from src.core.unit_of_work import UnitOfWork
+                    
+                    # Use async unit of work to get the service
+                    async with UnitOfWork() as uow:
+                        service = MemoryBackendService(uow)
+                        # Get the active memory backend configuration from database
+                        # This configuration is managed through the Memory Backend UI or API
+                        # and stored in the database, not passed from the frontend
+                        group_id = self.config.get('group_id')
+                        logger.info(f"Fetching memory backend config for group_id: {group_id}")
+                        active_config = await service.get_active_config(group_id)
+                        if active_config:
+                            logger.info(f"Found active config: backend_type={active_config.backend_type}, enable_short_term={active_config.enable_short_term}, enable_long_term={active_config.enable_long_term}, enable_entity={active_config.enable_entity}")
+                            
+                            # Check if this is a "Disabled Configuration" (all memory types disabled)
+                            # This is used to disable Databricks memory backend, not the default memory
+                            is_disabled_config = (
+                                not active_config.enable_short_term and
+                                not active_config.enable_long_term and
+                                not active_config.enable_entity
+                            )
+                            
+                            if is_disabled_config:
+                                logger.info("Found 'Disabled Configuration' - ignoring database config and using default memory")
+                                # Treat as if no config exists - use default memory
+                                memory_backend_config = None
+                            else:
+                                # Convert to dict format for processing
+                                # The configuration will be properly converted to MemoryBackendConfig below
+                                memory_backend_config = {
+                                    'backend_type': active_config.backend_type.value,
+                                    'databricks_config': active_config.databricks_config,
+                                    'enable_short_term': active_config.enable_short_term,
+                                    'enable_long_term': active_config.enable_long_term,
+                                    'enable_entity': active_config.enable_entity,
+                                }
+                                logger.info(f"Loaded memory backend config from database: {memory_backend_config['backend_type']}")
+                        else:
+                            logger.warning("No active memory backend configuration found in database")
+                            memory_backend_config = None
+                except Exception as e:
+                    logger.warning(f"Failed to load memory backend config from database: {e}")
+                    memory_backend_config = None
+            
+            # If no memory backend config or disabled config, create default configuration
+            if not memory_backend_config and crew_kwargs.get('memory', False):
+                logger.info("No memory backend config or disabled config found - using default memory")
+                memory_backend_config = {
+                    'backend_type': 'default',
+                    'enable_short_term': True,
+                    'enable_long_term': True,
+                    'enable_entity': True,
+                }
+                logger.info("Created default memory backend configuration (ChromaDB + SQLite)")
+            
+            logger.info(f"Memory backend config present: {bool(memory_backend_config)}, Memory enabled: {crew_kwargs.get('memory', False)}")
+            if memory_backend_config:
+                logger.info(f"Memory backend config details: {memory_backend_config}")
+            
+            # Generate a deterministic crew ID based on the crew configuration
+            # This ensures the same crew configuration always gets the same ID
+            if self.config.get('crew_id'):
+                # Use provided crew_id if available
+                crew_id = self.config.get('crew_id')
+            else:
+                # Check if we have a database crew_id (from execution)
+                db_crew_id = self.config.get('database_crew_id')
+                if db_crew_id:
+                    # Use the database crew ID as the base for consistent memory
+                    crew_id = f"crew_db_{db_crew_id}"
+                    logger.info(f"Using database crew_id: {crew_id} for consistent memory across runs")
+                else:
+                    # Generate a hash-based crew_id from the crew's configuration
+                    import hashlib
+                    import json
+                    
+                    # Extract stable identifiers from agents and tasks
+                    agents = self.config.get('agents', [])
+                    tasks = self.config.get('tasks', [])
+                    
+                    # Create sorted lists of agent roles and task names for stable hashing
+                    agent_roles = sorted([agent.get('role', '') for agent in agents if isinstance(agent, dict)])
+                    task_names = sorted([task.get('name', task.get('description', '')[:50]) for task in tasks if isinstance(task, dict)])
+                    
+                    # Try to get run_name from config for stable identification
+                    run_name = self.config.get('run_name') or self.config.get('inputs', {}).get('run_name')
+                    
+                    # Get group_id for tenant isolation
+                    group_id = self.config.get('group_id')
+                    if not group_id:
+                        logger.warning("No group_id found in config - crew memory may not be properly isolated between tenants")
+                    
+                    # Create a stable identifier based on crew components
+                    crew_identifier = {
+                        'agent_roles': agent_roles,
+                        'task_names': task_names,
+                        'crew_name': self.config.get('name', self.config.get('crew', {}).get('name', 'unnamed_crew')),
+                        # Add the model to make crews with different models have different memories
+                        'model': self.config.get('model', 'default'),
+                        # Include run_name if available for better consistency
+                        'run_name': run_name,
+                        # IMPORTANT: Include group_id for tenant isolation - ensures different groups have separate memories
+                        'group_id': group_id or 'default'
+                    }
+                    
+                    # Create a hash of the crew configuration
+                    crew_hash = hashlib.md5(
+                        json.dumps(crew_identifier, sort_keys=True).encode()
+                    ).hexdigest()[:8]  # Use first 8 characters of hash
+                    
+                    crew_id = f"crew_{crew_hash}"
+                    logger.info(f"Generated deterministic crew_id: {crew_id} based on configuration: {crew_identifier}")
+                    logger.info(f"This crew_id will persist across runs with the same configuration, ensuring memory continuity")
+                    logger.info(f"Group isolation: crew_id includes group_id '{group_id or 'default'}' for tenant memory isolation")
+            
+            # Set a custom storage directory for memory backends to ensure isolation
+            # This is important for both Databricks (dimension conflicts) and default (organization)
+            if memory_backend_config and memory_backend_config.get('backend_type') in ['databricks', 'default']:
+                import os
+                import shutil
+                from pathlib import Path
+                
+                # Save the original value to restore later if needed
+                original_storage_dir = os.environ.get("CREWAI_STORAGE_DIR")
+                
+                # Use a unique directory name based on backend type and crew_id
+                backend_type = memory_backend_config.get('backend_type')
+                if backend_type == 'databricks':
+                    storage_dirname = f"kasal_databricks_{crew_id}"
+                else:  # default
+                    storage_dirname = f"kasal_default_{crew_id}"
+                os.environ["CREWAI_STORAGE_DIR"] = storage_dirname
+                logger.info(f"Using custom storage directory for {backend_type}: {storage_dirname}")
+                
+                # Clean up any existing storage directory to ensure fresh start
+                # This prevents dimension mismatch errors from old ChromaDB collections
+                from crewai.utilities.paths import db_storage_path
+                storage_path = Path(db_storage_path())
+                if storage_path.exists():
+                    logger.info(f"Cleaning up existing storage at: {storage_path}")
+                    try:
+                        shutil.rmtree(storage_path)
+                        logger.info("Successfully cleaned up existing storage")
+                    except Exception as e:
+                        logger.warning(f"Could not clean up storage: {e}")
+                
+                # Store the original value to restore it later if needed
+                self._original_storage_dir = original_storage_dir
+            
+            # Check if all memory types are disabled
+            if memory_backend_config:
+                all_disabled = (
+                    not memory_backend_config.get('enable_short_term', False) and
+                    not memory_backend_config.get('enable_long_term', False) and
+                    not memory_backend_config.get('enable_entity', False)
+                )
+                if all_disabled:
+                    logger.info("All memory types are disabled in backend configuration, disabling crew memory")
+                    crew_kwargs['memory'] = False
+                else:
+                    # If any memory type is enabled, ensure crew memory is enabled
+                    logger.info("Memory types are enabled in backend configuration, enabling crew memory")
+                    crew_kwargs['memory'] = True
+            
+            # Configure memory based on whether we have a backend configuration
+            if crew_kwargs.get('memory', False):
+                # Memory is enabled - check if we have a custom backend configuration
+                if memory_backend_config:
+                    logger.info(f"Found memory backend configuration from database: {memory_backend_config}")
+                    logger.info(f"Backend type: {memory_backend_config.get('backend_type')}")
+                
+                    # The memory_backend_config at this point is always a dict from the database
+                    # Convert databricks_config dict to DatabricksMemoryConfig object if present
+                    if 'databricks_config' in memory_backend_config and isinstance(memory_backend_config['databricks_config'], dict):
+                        from src.schemas.memory_backend import DatabricksMemoryConfig
+                        memory_backend_config['databricks_config'] = DatabricksMemoryConfig(**memory_backend_config['databricks_config'])
+                
+                    # Create the MemoryBackendConfig object
+                    memory_config = MemoryBackendConfig(**memory_backend_config)
+                
+                    # Create memory backends
+                    logger.info(f"Creating memory backends for crew {crew_id} with backend type: {memory_config.backend_type}")
+                    memory_backends = await MemoryBackendFactory.create_memory_backends(
+                        config=memory_config,
+                        crew_id=crew_id,
+                        embedder=crew_kwargs.get('embedder')
+                    )
+                    logger.info(f"Created memory backends: {list(memory_backends.keys())}")
+                
+                    # Configure CrewAI with memory backends
+                    if memory_backends or memory_config.backend_type == MemoryBackendType.DEFAULT:
+                        # Import CrewAI memory classes
+                        try:
+                            from crewai.memory import ShortTermMemory, LongTermMemory, EntityMemory
+                            from crewai.memory.storage.rag_storage import RAGStorage
+                        
+                            # Skip individual memory configuration for DEFAULT backend
+                            if memory_config.backend_type == MemoryBackendType.DEFAULT:
+                                # For default backend, we don't configure individual memory backends
+                                # CrewAI will handle this automatically when memory=True
+                                logger.info("Skipping individual memory configuration for DEFAULT backend")
+                                logger.info("CrewAI will automatically initialize memory with our embedder config")
+                            
+                            # Configure short-term memory for non-default backends
+                            elif 'short_term' in memory_backends and memory_config.enable_short_term:
+                                logger.info(f"Configuring custom short-term memory backend for type: {memory_config.backend_type}")
+                                # For Databricks, use the wrapper directly (it includes embedding functionality)
+                                if memory_config.backend_type == MemoryBackendType.DATABRICKS:
+                                    crew_kwargs['short_term_memory'] = ShortTermMemory(storage=memory_backends['short_term'])
+                                    logger.info(f"Successfully configured Databricks short-term memory with storage: {type(memory_backends['short_term'])}")
+                                else:
+                                    # For other backends, use RAGStorage
+                                    if crew_kwargs.get('embedder'):
+                                        rag_storage = RAGStorage(
+                                            type="short_term",
+                                            embedder_config=crew_kwargs.get('embedder')
+                                        )
+                                        crew_kwargs['short_term_memory'] = ShortTermMemory(storage=rag_storage)
+                                        logger.info("Successfully configured default short-term memory with RAGStorage")
+                                    else:
+                                        logger.warning("No embedder configured for custom short-term memory")
+                        
+                            # Configure long-term memory for non-default backends
+                            if memory_config.backend_type != MemoryBackendType.DEFAULT and 'long_term' in memory_backends and memory_config.enable_long_term:
+                                logger.info("Configuring custom long-term memory backend")
+                                # LongTermMemory uses a different storage pattern
+                                crew_kwargs['long_term_memory'] = LongTermMemory(storage=memory_backends['long_term'])
+                                logger.info("Successfully configured Databricks long-term memory")
+                        
+                            # Configure entity memory for non-default backends
+                            if memory_config.backend_type != MemoryBackendType.DEFAULT and 'entity' in memory_backends and memory_config.enable_entity:
+                                logger.info("Configuring custom entity memory backend")
+                                # For Databricks, use the wrapper directly
+                                if memory_config.backend_type == MemoryBackendType.DATABRICKS:
+                                    # IMPORTANT: Pass the embedder config to prevent CrewAI from creating default RAGStorage
+                                    crew_kwargs['entity_memory'] = EntityMemory(
+                                        storage=memory_backends['entity'],
+                                        embedder_config=crew_kwargs.get('embedder'),
+                                        crew=None  # Don't pass crew to prevent it from creating default memory
+                                    )
+                                    logger.info("Successfully configured Databricks entity memory with custom embedder")
+                                else:
+                                    # For other backends, use RAGStorage
+                                    if crew_kwargs.get('embedder'):
+                                        rag_storage = RAGStorage(
+                                            type="entities",
+                                            embedder_config=crew_kwargs.get('embedder')
+                                        )
+                                        crew_kwargs['entity_memory'] = EntityMemory(storage=rag_storage)
+                                        logger.info("Successfully configured default entity memory with RAGStorage")
+                                    else:
+                                        logger.warning("No embedder configured for custom entity memory")
+                        
+                            logger.info(f"Memory backend configuration completed for crew {crew_id}")
+                            
+                            # Handle DEFAULT backend type
+                            if memory_config.backend_type == MemoryBackendType.DEFAULT:
+                                # For default backend, we let CrewAI handle the memory initialization
+                                # with the embedder we've configured
+                                crew_kwargs['memory'] = True
+                                logger.info("Set memory=True for default backend to use CrewAI's built-in memory")
+                                logger.info("CrewAI will create ChromaDB collections for short-term/entity and SQLite for long-term")
+                            
+                            # IMPORTANT: Set memory=False when using Databricks to prevent any default RAGStorage creation
+                            elif memory_config.backend_type == MemoryBackendType.DATABRICKS:
+                                crew_kwargs['memory'] = False
+                                logger.info("Set memory=False for Databricks backend to prevent conflicts")
+                                
+                        except ImportError as e:
+                            logger.error(f"Failed to import CrewAI memory classes: {e}")
+                            logger.warning("Falling back to default memory implementation")
+                        except Exception as e:
+                            logger.error(f"Error configuring custom memory backends: {e}")
+                            logger.warning("Falling back to default memory implementation")
+                else:
+                    # No memory backend configuration found - use CrewAI default memory (ChromaDB + SQLite)
+                    logger.info("No memory backend configuration found in database")
+                    logger.info("Using CrewAI default memory implementation (ChromaDB + SQLite)")
+                    # Keep memory=True to let CrewAI initialize its default memory
+                    crew_kwargs['memory'] = True
+                    # Log the embedder that will be used by default memory
+                    if crew_kwargs.get('embedder'):
+                        logger.info(f"Default memory will use configured embedder: {crew_kwargs['embedder'].get('provider', 'unknown')}")
+                    else:
+                        logger.info("Default memory will use CrewAI's default embedder")
+            
             # Add optional parameters if they exist in config
             if 'max_rpm' in self.config:
                 crew_kwargs['max_rpm'] = self.config['max_rpm']
@@ -548,6 +850,39 @@ class CrewPreparation:
                     logger.info(f"Set crew reasoning LLM to: {crew_config['reasoning_llm']}")
                 except Exception as llm_error:
                     logger.warning(f"Could not create reasoning LLM for model {crew_config['reasoning_llm']}: {llm_error}")
+            
+            # If we have custom memory backends configured, we should disable the default memory
+            # to prevent CrewAI from creating its own RAGStorage
+            if 'short_term_memory' in crew_kwargs or 'long_term_memory' in crew_kwargs or 'entity_memory' in crew_kwargs:
+                logger.info("Custom memory backends configured, disabling default memory initialization")
+                # IMPORTANT: When using custom memory backends (especially Databricks with different embedding dimensions),
+                # we must set memory=False to prevent CrewAI from creating any default RAGStorage instances
+                # that might conflict with our custom embeddings
+                if memory_backend_config and memory_backend_config.get('backend_type') == 'databricks':
+                    crew_kwargs['memory'] = False
+                    logger.info("Set memory=False to prevent CrewAI default memory initialization for Databricks backend")
+            
+            # Log memory configuration before crew creation
+            logger.info("=== MEMORY CONFIGURATION BEFORE CREW CREATION ===")
+            logger.info(f"Memory enabled: {crew_kwargs.get('memory', False)}")
+            if memory_backend_config:
+                logger.info(f"Memory backend: {memory_backend_config.get('backend_type', 'unknown')}")
+            else:
+                logger.info("Memory backend: Default (ChromaDB + SQLite)")
+            logger.info(f"Short-term memory: {'custom configured' if 'short_term_memory' in crew_kwargs else 'default' if crew_kwargs.get('memory', False) else 'disabled'}")
+            logger.info(f"Long-term memory: {'custom configured' if 'long_term_memory' in crew_kwargs else 'default' if crew_kwargs.get('memory', False) else 'disabled'}")
+            logger.info(f"Entity memory: {'custom configured' if 'entity_memory' in crew_kwargs else 'default' if crew_kwargs.get('memory', False) else 'disabled'}")
+            logger.info(f"Embedder: {'configured' if 'embedder' in crew_kwargs else 'not configured'}")
+            if 'embedder' in crew_kwargs:
+                embedder_info = crew_kwargs['embedder']
+                if isinstance(embedder_info, dict):
+                    logger.info(f"Embedder provider: {embedder_info.get('provider', 'unknown')}")
+                    if embedder_info.get('provider') == 'custom':
+                        custom_embedder = embedder_info.get('config', {}).get('embedder')
+                        if hasattr(custom_embedder, 'model'):
+                            logger.info(f"Custom embedder model: {custom_embedder.model}")
+                            logger.info(f"Expected embedding dimension: 1024")
+            logger.info("================================================")
             
             # Create the crew instance
             # Handle OpenAI API key properly in Databricks Apps environment
@@ -614,4 +949,19 @@ class CrewPreparation:
             
         except Exception as e:
             handle_crew_error(e, "Error during crew execution")
-            return {"error": str(e)} 
+            return {"error": str(e)}
+    
+    def cleanup(self):
+        """
+        Cleanup method to restore original environment settings.
+        This should be called when done with the crew to restore the original storage directory.
+        """
+        if hasattr(self, '_original_storage_dir'):
+            import os
+            if self._original_storage_dir is not None:
+                os.environ["CREWAI_STORAGE_DIR"] = self._original_storage_dir
+                logger.info(f"Restored original CREWAI_STORAGE_DIR: {self._original_storage_dir}")
+            elif "CREWAI_STORAGE_DIR" in os.environ:
+                # If there was no original value, remove the environment variable
+                del os.environ["CREWAI_STORAGE_DIR"]
+                logger.info("Removed CREWAI_STORAGE_DIR environment variable") 

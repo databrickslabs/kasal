@@ -79,6 +79,11 @@ class CrewAIExecutionService:
             # Execution is already created with RUNNING status, just log the progress
             crew_logger.info(f"Starting crew execution {execution_id} (already has RUNNING status)")
             
+            # Log the configuration inputs
+            if config.inputs:
+                crew_logger.info(f"Config inputs keys: {list(config.inputs.keys())}")
+                # Memory backend config is now fetched from database, not passed from frontend
+            
             # Prepare the engine
             engine = await self._prepare_engine(config)
             
