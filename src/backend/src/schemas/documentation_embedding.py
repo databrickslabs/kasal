@@ -24,3 +24,9 @@ class DocumentationEmbedding(DocumentationEmbeddingBase):
     updated_at: datetime
 
     model_config = ConfigDict(from_attributes=True)
+
+
+class DocumentationEmbeddingSearch(BaseModel):
+    """Schema for searching documentation embeddings."""
+    query_embedding: List[float]
+    limit: Optional[int] = 5
