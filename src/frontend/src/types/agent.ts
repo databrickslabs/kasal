@@ -1,4 +1,5 @@
 import { UploadedFileInfo } from '../api/UploadService';
+import { MemoryBackendConfig } from './memoryBackend';
 
 export interface KnowledgeSource {
   type: string;
@@ -84,6 +85,12 @@ export interface Agent {
    * Used for short-term and entity memory with RAG
    */
   embedder_config?: EmbedderConfig;
+  /**
+   * Configuration for memory storage backend (UI display only)
+   * Actual memory configuration is managed by backend database
+   * Used for showing current backend type to users in AgentForm
+   */
+  memory_backend_config?: MemoryBackendConfig;
   knowledge_sources?: KnowledgeSource[];
   created_at?: string;
 }

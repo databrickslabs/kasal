@@ -25,6 +25,7 @@ import {
   DialogActions,
   IconButton,
   InputAdornment,
+  Alert,
 } from '@mui/material';
 import ExpandMoreIcon from '@mui/icons-material/ExpandMore';
 import OpenInFullIcon from '@mui/icons-material/OpenInFull';
@@ -35,6 +36,7 @@ import { ModelService } from '../../api/ModelService';
 import { Models } from '../../types/models';
 
 import { GenerateService } from '../../api/GenerateService';
+import { DefaultMemoryBackendService } from '../../api/DefaultMemoryBackendService';
 // TODO: Re-enable when knowledge sources are restored
 // import { KnowledgeSourcesSection } from './KnowledgeSourcesSection';
 
@@ -68,6 +70,11 @@ const AgentForm: React.FC<AgentFormProps> = ({ initialData, onCancel, onAgentSav
   );
   
   const [formData, setFormData] = useState<AgentFormData>(() => {
+    // Get default memory backend config if not editing an existing agent
+    const defaultMemoryBackend = !initialData?.id 
+      ? DefaultMemoryBackendService.getInstance().getDefaultConfig() 
+      : undefined;
+      
     const data = {
       name: initialData?.name || '',
       role: initialData?.role || '',
@@ -91,8 +98,14 @@ const AgentForm: React.FC<AgentFormProps> = ({ initialData, onCancel, onAgentSav
       max_retry_limit: initialData?.max_retry_limit || 3,
       use_system_prompt: initialData?.use_system_prompt || true,
       respect_context_window: initialData?.respect_context_window || true,
-      embedder_config: initialData?.embedder_config || undefined,
+      embedder_config: initialData?.embedder_config || {
+        provider: 'databricks',
+        config: {
+          model: 'databricks-gte-large-en'
+        }
+      },
       knowledge_sources: initialData?.knowledge_sources || [],
+      memory_backend_config: initialData?.memory_backend_config || defaultMemoryBackend || undefined,
     };
     
     if (initialData?.id) {
@@ -152,6 +165,12 @@ const AgentForm: React.FC<AgentFormProps> = ({ initialData, onCancel, onAgentSav
     
     // Make a deep copy of the formData to avoid modifying the original
     const agentToSave = JSON.parse(JSON.stringify(formData));
+    
+    // If memory is disabled, remove embedder_config and memory_backend_config
+    if (!agentToSave.memory) {
+      delete agentToSave.embedder_config;
+      delete agentToSave.memory_backend_config;
+    }
     
     // Preserve file information in knowledge sources
     if (agentToSave.knowledge_sources && agentToSave.knowledge_sources.length > 0) {
@@ -982,6 +1001,22 @@ const AgentForm: React.FC<AgentFormProps> = ({ initialData, onCancel, onAgentSav
                     />
                   </Grid>
 
+                  {/* Memory Storage Backend Info */}
+                  <Grid item xs={12}>
+                    <Divider sx={{ my: 2 }} />
+                    <Alert severity="info" sx={{ mt: 2 }}>
+                      <Typography variant="body2">
+                        Memory storage backend is configured globally in the Configuration settings.
+                        {formData.memory_backend_config && (
+                          <>
+                            <br />
+                            Current backend: <strong>{formData.memory_backend_config.backend_type === 'databricks' ? 'Databricks Vector Search' : 'Default (ChromaDB + SQLite)'}</strong>
+                          </>
+                        )}
+                      </Typography>
+                    </Alert>
+                  </Grid>
+
                   {/* Customization Help */}
                   <Grid item xs={12}>
                     <Typography variant="body2" color="text.secondary" sx={{ mt: 1 }}>
@@ -992,9 +1027,6 @@ const AgentForm: React.FC<AgentFormProps> = ({ initialData, onCancel, onAgentSav
                       <li>Long-Term Memory: Preserves insights and learnings between executions</li>
                       <li>Entity Memory: Tracks information about important entities</li>
                     </ul>
-                    <Typography variant="body2" color="text.secondary">
-                      Memory is stored in system-specific locations, which can be customized via the CREWAI_STORAGE_DIR environment variable.
-                    </Typography>
                   </Grid>
                 </Grid>
               </AccordionDetails>

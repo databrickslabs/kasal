@@ -27,6 +27,7 @@ import TextFormatIcon from '@mui/icons-material/TextFormat';
 import CloudIcon from '@mui/icons-material/Cloud';
 import EngineeringIcon from '@mui/icons-material/Engineering';
 import CloseIcon from '@mui/icons-material/Close';
+import MemoryIcon from '@mui/icons-material/Memory';
 // import SecurityIcon from '@mui/icons-material/Security';
 import { useTranslation } from 'react-i18next';
 import { LanguageService } from '../../api/LanguageService';
@@ -40,6 +41,7 @@ import PromptConfiguration from './PromptConfiguration';
 import DatabricksConfiguration from './DatabricksConfiguration';
 import MCPConfiguration from './MCP/MCPConfiguration';
 import EnginesConfiguration from './Engines';
+import { DatabricksOneClickSetup } from '../MemoryBackend';
 // import SecurityManagement from './SecurityManagement';
 import { LANGUAGES } from '../../config/i18n/config';
 
@@ -114,34 +116,39 @@ function Configuration({ onClose }: ConfigurationProps): JSX.Element {
       index: 2
     },
     {
+      label: t('configuration.memoryBackend.tab', { defaultValue: 'Memory Backend' }),
+      icon: <MemoryIcon fontSize="small" />,
+      index: 3
+    },
+    {
       label: t('configuration.models.tab', { defaultValue: 'Models' }),
       icon: <ModelIcon fontSize="small" />,
-      index: 3
+      index: 4
     },
     {
       label: t('configuration.databricks.tab', { defaultValue: 'Databricks' }),
       icon: <KeyIcon fontSize="small" />,
-      index: 4
+      index: 5
     },
     {
       label: t('configuration.apiKeys.tab', { defaultValue: 'API Keys' }),
       icon: <KeyIcon fontSize="small" />,
-      index: 5
+      index: 6
     },
     {
       label: t('configuration.tools.tab', { defaultValue: 'Tools' }),
       icon: <BuildIcon fontSize="small" />,
-      index: 6
+      index: 7
     },
     {
       label: t('configuration.objects.tab', { defaultValue: 'Object Management' }),
       icon: <CodeIcon fontSize="small" />,
-      index: 7
+      index: 8
     },
     {
       label: t('configuration.prompts.tab', { defaultValue: 'Prompts' }),
       icon: <TextFormatIcon fontSize="small" />,
-      index: 8
+      index: 9
     },
   ];
 
@@ -361,26 +368,30 @@ function Configuration({ onClose }: ConfigurationProps): JSX.Element {
           </ContentPanel>
           
           <ContentPanel value={activeSection} index={3}>
+            <DatabricksOneClickSetup />
+          </ContentPanel>
+          
+          <ContentPanel value={activeSection} index={4}>
             <ModelConfiguration />
           </ContentPanel>
 
-          <ContentPanel value={activeSection} index={4}>
+          <ContentPanel value={activeSection} index={5}>
             <DatabricksConfiguration onSaved={onClose} />
           </ContentPanel>
 
-          <ContentPanel value={activeSection} index={5}>
+          <ContentPanel value={activeSection} index={6}>
             <APIKeys />
           </ContentPanel>
 
-          <ContentPanel value={activeSection} index={6}>
+          <ContentPanel value={activeSection} index={7}>
             <ToolForm />
           </ContentPanel>
 
-          <ContentPanel value={activeSection} index={7}>
+          <ContentPanel value={activeSection} index={8}>
             <ObjectManagement />
           </ContentPanel>
 
-          <ContentPanel value={activeSection} index={8}>
+          <ContentPanel value={activeSection} index={9}>
             <PromptConfiguration />
           </ContentPanel>
 
