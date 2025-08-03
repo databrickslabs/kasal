@@ -6,6 +6,7 @@ cryptography
 python-multipart
 databricks
 databricks-sdk
+databricks-vectorsearch
 croniter
 crewai
 pydantic[email]
