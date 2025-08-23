@@ -28,6 +28,39 @@ logging.basicConfig(
 
 logger = logging.getLogger("deploy")
 
+def clean_python_cache(root_dir):
+    """Clean Python cache files and directories"""
+    logger.info("Cleaning Python cache files...")
+    
+    # Clean __pycache__ directories
+    cache_dirs = list(root_dir.rglob("__pycache__"))
+    for cache_dir in cache_dirs:
+        try:
+            shutil.rmtree(cache_dir)
+            logger.debug(f"Removed cache directory: {cache_dir}")
+        except Exception as e:
+            logger.warning(f"Failed to remove {cache_dir}: {e}")
+    
+    # Clean .pyc and .pyo files
+    pyc_files = list(root_dir.rglob("*.pyc")) + list(root_dir.rglob("*.pyo"))
+    for pyc_file in pyc_files:
+        try:
+            pyc_file.unlink()
+            logger.debug(f"Removed cache file: {pyc_file}")
+        except Exception as e:
+            logger.warning(f"Failed to remove {pyc_file}: {e}")
+    
+    # Clean .pytest_cache directories
+    pytest_cache_dirs = list(root_dir.rglob(".pytest_cache"))
+    for cache_dir in pytest_cache_dirs:
+        try:
+            shutil.rmtree(cache_dir)
+            logger.debug(f"Removed pytest cache: {cache_dir}")
+        except Exception as e:
+            logger.warning(f"Failed to remove {cache_dir}: {e}")
+    
+    logger.info(f"Cache cleaning completed. Removed {len(cache_dirs)} __pycache__ directories, {len(pyc_files)} .pyc/.pyo files, and {len(pytest_cache_dirs)} .pytest_cache directories")
+
 def deploy_source_to_databricks(
     app_name="kasal",
     user_name=None,
@@ -44,6 +77,9 @@ def deploy_source_to_databricks(
     root_dir = Path(os.path.dirname(os.path.abspath(__file__)))
     
     logger.info(f"Deploying source code from: {root_dir}")
+    
+    # Clean Python cache before deployment
+    clean_python_cache(root_dir)
     
     # Set default workspace directory if not provided
     if user_name is None:
@@ -174,7 +210,7 @@ starlette==0.40.0
             backend_src = root_dir / "backend"
             backend_dst = databricks_dist / "backend"
             if backend_src.exists():
-                shutil.copytree(backend_src, backend_dst, ignore=shutil.ignore_patterns('__pycache__', '*.pyc', '*.pyo', 'logs', '*.log'))
+                shutil.copytree(backend_src, backend_dst, ignore=shutil.ignore_patterns('__pycache__', '*.pyc', '*.pyo', 'logs', '*.log', '.mypy_cache', '.pytest_cache'))
                 logger.info(f"Copied backend folder")
             else:
                 logger.error("Backend folder not found!")
@@ -334,8 +370,8 @@ def main():
     parser = argparse.ArgumentParser(description="Deploy source code to Databricks Apps")
     parser.add_argument("--app-name", default="kasal", required=True,
                         help="Name for the Databricks App (lowercase with hyphens only)")
-    parser.add_argument("--user-name", default="nehme.tohme@databricks.com", required=True,
-                        help="User name for workspace path")
+    parser.add_argument("--user-name", required=True,
+                        help="User name for workspace path (e.g., user@example.com)")
     parser.add_argument("--workspace-dir", 
                         help="Workspace directory to upload files (default: /Workspace/Users/<user-name>/<app-name>)")
     parser.add_argument("--profile", help="Databricks CLI profile to use")
