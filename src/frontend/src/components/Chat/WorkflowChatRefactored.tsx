@@ -676,6 +676,10 @@ const WorkflowChat: React.FC<WorkflowChatProps> = ({
           case 'generate_crew':
             handleCrewGenerated(result.generation_result as GeneratedCrew);
             break;
+          case 'generate_plan':
+            // Plans work exactly like crews - use the same handler
+            handleCrewGenerated(result.generation_result as GeneratedCrew);
+            break;
           case 'configure_crew':
             handleConfigureCrew(result.generation_result as ConfigureCrewResult, inputRef);
             break;
@@ -727,6 +731,38 @@ const WorkflowChat: React.FC<WorkflowChatProps> = ({
       case 'generate_crew': {
         const crew = generation_result as GeneratedCrew;
         let response = "I've created a crew with:\n";
+        
+        if (crew.agents && crew.agents.length > 0) {
+          response += "\n**Agents & Tasks:**\n";
+          crew.agents.forEach((agent, index) => {
+            response += `${index + 1}. **${agent.name}** (${agent.role}) - ${agent.goal}\n`;
+            
+            const agentTasks = crew.tasks?.filter((task) => 
+              task.agent_id === agent.id || task.agent_id?.toString() === agent.id?.toString()
+            ) || [];
+            
+            if (agentTasks.length > 0) {
+              agentTasks.forEach((task) => {
+                response += `   → ${task.name}: ${task.description}\n`;
+              });
+            }
+          });
+          
+          const unassignedTasks = crew.tasks?.filter((task) => !task.agent_id) || [];
+          if (unassignedTasks.length > 0) {
+            response += "\n**Unassigned Tasks:**\n";
+            unassignedTasks.forEach((task, index) => {
+              response += `${index + 1}. **${task.name}** - ${task.description}\n`;
+            });
+          }
+        }
+        
+        response += "\nTo execute plan type either **execute crew** or **ec**";
+        return response;
+      }
+      case 'generate_plan': {
+        const crew = generation_result as GeneratedCrew;
+        let response = "I've created a plan with:\n";
         
         if (crew.agents && crew.agents.length > 0) {
           response += "\n**Agents & Tasks:**\n";
@@ -1169,6 +1205,8 @@ const WorkflowChat: React.FC<WorkflowChatProps> = ({
                       >
                         {(() => {
                           const modelName = models[selectedModel]?.name || selectedModel;
+                          if (modelName.includes('databricks-gpt-oss-120b')) return 'GPT OSS 120B';
+                          if (modelName.includes('databricks-gpt-oss-20b')) return 'GPT OSS 20B';
                           if (modelName.includes('databricks-llama-4-maverick')) return 'Llama 4';
                           if (modelName.includes('databricks-meta-llama-3-1-405b-instruct')) return 'Llama 3';
                           if (modelName.includes('databricks-meta-llama-3-3-70b-instruct')) return 'Llama 3';

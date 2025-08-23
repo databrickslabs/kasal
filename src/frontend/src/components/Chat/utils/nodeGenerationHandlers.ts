@@ -41,9 +41,9 @@ export const createAgentGenerationHandler = (
         respect_context_window: (agentData.advanced_config?.respect_context_window as boolean) ?? true,
         memory: (agentData.advanced_config?.memory as boolean) ?? true,
         embedder_config: agentData.advanced_config?.embedder_config ? {
-          provider: (agentData.advanced_config.embedder_config as { provider?: string }).provider || 'openai',
+          provider: (agentData.advanced_config.embedder_config as { provider?: string }).provider || 'databricks',
           config: {
-            model: ((agentData.advanced_config.embedder_config as { config?: { model?: string } }).config?.model) || 'text-embedding-3-small',
+            model: ((agentData.advanced_config.embedder_config as { config?: { model?: string } }).config?.model) || 'databricks-gte-large-en',
             ...((agentData.advanced_config.embedder_config as { config?: Record<string, unknown> }).config || {})
           }
         } : undefined,
