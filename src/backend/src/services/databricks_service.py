@@ -195,9 +195,10 @@ class DatabricksService:
             if config and hasattr(config, 'workspace_url') and config.workspace_url:
                 workspace_url = config.workspace_url.rstrip('/')
                 
-                # Set the API_BASE to the workspace URL - this is used by LiteLLM
-                os.environ["DATABRICKS_API_BASE"] = workspace_url
-                logger.info(f"Set DATABRICKS_API_BASE to {workspace_url}")
+                # Set the API_BASE to include /serving-endpoints - this is required by LiteLLM
+                # LiteLLM expects DATABRICKS_API_BASE to point to the serving endpoints
+                os.environ["DATABRICKS_API_BASE"] = f"{workspace_url}/serving-endpoints"
+                logger.info(f"Set DATABRICKS_API_BASE to {workspace_url}/serving-endpoints")
                 
                 # Ensure the endpoint URL ends with /serving-endpoints
                 if not workspace_url.endswith('/serving-endpoints'):
@@ -289,11 +290,48 @@ class DatabricksService:
         Returns:
             bool: True if token was set up successfully, False otherwise
         """
+        import asyncio
+        
         try:
-            from src.utils.asyncio_utils import create_and_run_loop
-            
-            # Run async method in a new event loop
-            return create_and_run_loop(cls.setup_token())
+            # Check if there's already a running event loop
+            try:
+                loop = asyncio.get_running_loop()
+                # If we're in an async context, we can't create a new loop
+                # Instead, we should schedule the coroutine on the existing loop
+                import concurrent.futures
+                import threading
+                
+                # Create a future to get the result
+                future = concurrent.futures.Future()
+                
+                def run_in_thread():
+                    # Create a new event loop in this thread
+                    new_loop = asyncio.new_event_loop()
+                    asyncio.set_event_loop(new_loop)
+                    try:
+                        result = new_loop.run_until_complete(cls.setup_token())
+                        future.set_result(result)
+                    except Exception as e:
+                        future.set_exception(e)
+                    finally:
+                        new_loop.close()
+                
+                # Run in a separate thread to avoid event loop conflicts
+                thread = threading.Thread(target=run_in_thread)
+                thread.start()
+                thread.join(timeout=5)  # Wait up to 5 seconds
+                
+                if future.done():
+                    return future.result()
+                else:
+                    logger.warning("setup_token_sync timed out")
+                    return False
+                    
+            except RuntimeError:
+                # No running loop, we can create one
+                from src.utils.asyncio_utils import create_and_run_loop
+                return create_and_run_loop(cls.setup_token())
+                
         except Exception as e:
             logger.error(f"Error in setup_token_sync: {str(e)}")
             return False

@@ -3,6 +3,7 @@ Service for managing Databricks-based role assignments using RBAC.
 Integrates with Databricks app permissions to automatically assign admin roles.
 """
 import os
+import json
 import logging
 from typing import List, Optional, Dict, Any
 from datetime import datetime, timezone
@@ -86,9 +87,12 @@ class DatabricksRoleService(BaseService):
             logger.error(f"Failed to sync admin roles: {e}")
             return {"success": False, "error": str(e)}
     
-    async def get_databricks_app_managers(self) -> List[str]:
+    async def get_databricks_app_managers(self, user_token: Optional[str] = None) -> List[str]:
         """
         Get emails of users with 'Can Manage' permission for the Databricks app.
+        
+        Args:
+            user_token: Optional user access token for OBO authentication
         
         Returns:
             List of email addresses
@@ -97,16 +101,20 @@ class DatabricksRoleService(BaseService):
             logger.info("Running in local development mode - using fallback admin detection")
             return self._get_fallback_admins()
             
-        if not all([self.app_name, self.databricks_host, self.databricks_token]):
+        if not all([self.app_name, self.databricks_host]):
             logger.error("Databricks configuration incomplete in production mode")
-            raise Exception("Databricks configuration incomplete. Required: DATABRICKS_APP_NAME, DATABRICKS_HOST, DATABRICKS_TOKEN")
+            logger.error(f"app_name: {self.app_name}, databricks_host: {self.databricks_host}")
+            # Return empty list instead of raising exception
+            return []
             
         try:
-            return await self._fetch_databricks_permissions()
+            manager_emails = await self._fetch_databricks_permissions(user_token)
+            logger.info(f"get_databricks_app_managers returning: {manager_emails}")
+            return manager_emails
         except Exception as e:
             logger.error(f"Failed to fetch Databricks permissions: {e}")
-            # SECURITY: Never fallback in production - this would be a security risk
-            raise Exception(f"Failed to fetch Databricks permissions in production: {str(e)}")
+            # Return empty list for safety instead of raising exception
+            return []
     
     def _get_fallback_admins(self) -> List[str]:
         """
@@ -151,32 +159,106 @@ class DatabricksRoleService(BaseService):
         logger.info(f"Using default mock admin emails for development: {mock_admin_emails}")
         return mock_admin_emails
     
-    async def _fetch_databricks_permissions(self) -> List[str]:
+    async def _fetch_databricks_permissions(self, user_token: Optional[str] = None) -> List[str]:
         """
-        Fetch permissions from Databricks API.
+        Fetch permissions from Databricks API using service principal authentication.
         
+        Args:
+            user_token: Optional user access token (not used for permissions API)
+            
         Returns:
             List of email addresses with 'Can Manage' permission
         """
-        url = f"{self.databricks_host.rstrip('/')}/api/2.0/workspace/apps/{self.app_name}/permissions"
-        headers = {
-            "Authorization": f"Bearer {self.databricks_token}",
-            "Content-Type": "application/json"
-        }
+        # Ensure the host has https:// protocol
+        databricks_host = self.databricks_host
+        if not databricks_host.startswith(('http://', 'https://')):
+            databricks_host = f"https://{databricks_host}"
+        url = f"{databricks_host.rstrip('/')}/api/2.0/permissions/apps/{self.app_name}"
         
-        logger.info(f"Fetching Databricks app permissions for app: {self.app_name}")
+        # For checking app permissions, we MUST use service principal auth
+        # The user token (X-Forwarded-Access-Token) is scoped and cannot call the permissions API
+        
+        # Check if we have service principal credentials
+        client_id = os.getenv("DATABRICKS_CLIENT_ID")
+        client_secret = os.getenv("DATABRICKS_CLIENT_SECRET")
+        
+        if client_id and client_secret:
+            # Use service principal OAuth authentication
+            logger.info("Using service principal OAuth for permissions check")
+            try:
+                # Get OAuth token using client credentials flow
+                oauth_url = f"{databricks_host.rstrip('/')}/oidc/v1/token"
+                
+                async with aiohttp.ClientSession() as oauth_session:
+                    data = {
+                        "grant_type": "client_credentials",
+                        "client_id": client_id,
+                        "client_secret": client_secret,
+                        "scope": "all-apis"
+                    }
+                    
+                    async with oauth_session.post(oauth_url, data=data) as oauth_response:
+                        if oauth_response.status == 200:
+                            oauth_data = await oauth_response.json()
+                            access_token = oauth_data.get("access_token")
+                            
+                            if access_token:
+                                headers = {
+                                    "Authorization": f"Bearer {access_token}",
+                                    "Content-Type": "application/json"
+                                }
+                                logger.info("Successfully obtained service principal OAuth token")
+                            else:
+                                logger.error("No access token in OAuth response")
+                                return []
+                        else:
+                            error_text = await oauth_response.text()
+                            logger.error(f"OAuth request failed with status {oauth_response.status}: {error_text}")
+                            return []
+                            
+            except Exception as e:
+                logger.error(f"Error getting service principal OAuth token: {e}")
+                return []
+        else:
+            # Try to get auth headers from databricks_auth utility
+            # This will try various authentication methods
+            from src.utils.databricks_auth import get_databricks_auth_headers
+            headers, error = await get_databricks_auth_headers()
+            
+            if error or not headers:
+                # Fallback to environment token if available
+                if self.databricks_token:
+                    headers = {
+                        "Authorization": f"Bearer {self.databricks_token}",
+                        "Content-Type": "application/json"
+                    }
+                    logger.info(f"Using environment token for permissions check")
+                else:
+                    logger.error(f"No authentication available for permissions check - error: {error}")
+                    logger.warning("Cannot verify permissions - no service principal credentials or valid token")
+                    return []
+            else:
+                logger.info(f"Using databricks_auth headers for permissions check")
+        
+        logger.info(f"Fetching Databricks app permissions for app: {self.app_name} from URL: {url}")
         
         async with aiohttp.ClientSession() as session:
             async with session.get(url, headers=headers) as response:
+                logger.info(f"API Response status: {response.status}")
                 if response.status == 200:
                     data = await response.json()
-                    return self._extract_manage_users(data)
+                    logger.info(f"Permissions response: {data}")
+                    users = self._extract_manage_users(data)
+                    logger.info(f"Extracted users with CAN_MANAGE: {users}")
+                    return users
                 elif response.status == 404:
-                    logger.warning(f"Databricks app '{self.app_name}' not found")
+                    logger.warning(f"Databricks app '{self.app_name}' not found (404)")
                     return []
                 else:
                     error_text = await response.text()
-                    raise Exception(f"Databricks API error {response.status}: {error_text}")
+                    logger.error(f"Databricks API error {response.status}: {error_text}")
+                    # Don't raise exception, return empty list for safety
+                    return []
     
     def _extract_manage_users(self, permissions_data: Dict[str, Any]) -> List[str]:
         """
@@ -189,6 +271,9 @@ class DatabricksRoleService(BaseService):
             List of email addresses
         """
         manage_users = []
+        
+        # Log the entire response structure for debugging
+        logger.info(f"Full permissions response structure: {json.dumps(permissions_data, indent=2)}")
         
         # The structure may vary, but typically:
         # permissions_data = {
@@ -205,19 +290,28 @@ class DatabricksRoleService(BaseService):
         # }
         
         access_control_list = permissions_data.get("access_control_list", [])
+        logger.info(f"Access control list has {len(access_control_list)} entries")
         
         for acl_entry in access_control_list:
             user_email = acl_entry.get("user_name")
+            group_name = acl_entry.get("group_name")
+            
+            logger.info(f"Processing ACL entry - user: {user_email}, group: {group_name}")
+            
             if not user_email:
+                logger.info(f"Skipping entry with no user_name (might be group: {group_name})")
                 continue
                 
             permissions = acl_entry.get("all_permissions", [])
+            logger.info(f"User {user_email} has permissions: {permissions}")
+            
             for perm in permissions:
                 if perm.get("permission_level") == "CAN_MANAGE":
                     manage_users.append(user_email)
+                    logger.info(f"Added {user_email} to manage_users list")
                     break
         
-        logger.info(f"Found {len(manage_users)} users with CAN_MANAGE permission: {manage_users}")
+        logger.info(f"Final list - Found {len(manage_users)} users with CAN_MANAGE permission: {manage_users}")
         return manage_users
     
     async def _get_or_create_admin_role(self) -> Role:
@@ -277,7 +371,8 @@ class DatabricksRoleService(BaseService):
                     role_id=admin_role.id,
                     assigned_by="databricks_sync"
                 )
-                await self.session.commit()
+                # Flush changes - commit is handled by UnitOfWork
+                await self.session.flush()
                 result["role_assigned"] = True
                 logger.info(f"Assigned admin role to user {email}")
             

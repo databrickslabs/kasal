@@ -8,8 +8,14 @@ from datetime import datetime
 import random
 import string
 import asyncio
+import os
 
 from src.schemas.memory_backend import DatabricksMemoryConfig, MemoryBackendType, MemoryBackendCreate
+from src.schemas.databricks_index_schemas import DatabricksIndexSchemas
+from src.schemas.databricks_vector_endpoint import EndpointCreate, EndpointType, EndpointState
+from src.schemas.databricks_vector_index import IndexCreate
+from src.repositories.databricks_vector_endpoint_repository import DatabricksVectorEndpointRepository
+from src.repositories.databricks_vector_index_repository import DatabricksVectorIndexRepository
 from src.core.logger import LoggerManager
 from src.core.unit_of_work import UnitOfWork
 from src.services.memory_backend_base_service import MemoryBackendBaseService
@@ -52,33 +58,20 @@ class DatabricksVectorSearchSetupService:
             Setup result with created resources
         """
         try:
-            from databricks.vector_search.client import VectorSearchClient
+            # Debug logging for troubleshooting
+            logger.info(f"[DEBUG] Starting one-click setup with workspace_url: {workspace_url}")
+            logger.info(f"[DEBUG] User token present: {bool(user_token)}")
+            if user_token:
+                logger.info(f"[DEBUG] User token length: {len(user_token)}")
             
             # Generate unique suffix for naming
             timestamp = datetime.utcnow().strftime("%Y%m%d_%H%M%S")
             random_suffix = ''.join(random.choices(string.ascii_lowercase + string.digits, k=4))
             unique_id = f"{timestamp}_{random_suffix}"
             
-            # Get authenticated client
-            client = None
-            if user_token:
-                try:
-                    from src.utils.databricks_auth import get_databricks_auth_headers
-                    headers, error = await get_databricks_auth_headers(user_token=user_token)
-                    if headers and not error:
-                        auth_header = headers.get("Authorization", "")
-                        if auth_header.startswith("Bearer "):
-                            token = auth_header[7:]
-                            client = VectorSearchClient(
-                                workspace_url=workspace_url,
-                                personal_access_token=token
-                            )
-                except Exception:
-                    pass
-            
-            if not client:
-                # Try API key service or default auth
-                client = VectorSearchClient(workspace_url=workspace_url)
+            # Create repositories
+            endpoint_repo = DatabricksVectorEndpointRepository(workspace_url)
+            index_repo = DatabricksVectorIndexRepository(workspace_url)
             
             results = {
                 "success": True,
@@ -90,54 +83,47 @@ class DatabricksVectorSearchSetupService:
             
             # Step 1: Create memory endpoint (Direct Access)
             memory_endpoint_name = f"kasal_memory_{unique_id}"
-            try:
-                client.create_endpoint(
-                    name=memory_endpoint_name,
-                    endpoint_type="STANDARD"  # Direct Access capable
-                )
+            endpoint_request = EndpointCreate(
+                name=memory_endpoint_name,
+                endpoint_type=EndpointType.STANDARD
+            )
+            
+            endpoint_response = await endpoint_repo.create_endpoint(endpoint_request, user_token)
+            
+            if endpoint_response.success:
                 results["endpoints"]["memory"] = {
                     "name": memory_endpoint_name,
                     "type": "Direct Access",
-                    "status": "created"
+                    "status": "created" if "already exists" not in endpoint_response.message else "already_exists"
                 }
-            except Exception as e:
-                if "already exists" in str(e).lower():
-                    results["endpoints"]["memory"] = {
-                        "name": memory_endpoint_name,
-                        "type": "Direct Access",
-                        "status": "already_exists"
-                    }
-                else:
-                    raise
+            else:
+                raise Exception(f"Failed to create memory endpoint: {endpoint_response.message}")
             
             # Step 2: Create document endpoint (Direct Access)
             doc_endpoint_name = f"kasal_docs_{unique_id}"
-            try:
-                client.create_endpoint(
-                    name=doc_endpoint_name,
-                    endpoint_type="STANDARD"  # Direct Access capable
-                )
+            doc_endpoint_request = EndpointCreate(
+                name=doc_endpoint_name,
+                endpoint_type=EndpointType.STANDARD
+            )
+            
+            doc_endpoint_response = await endpoint_repo.create_endpoint(doc_endpoint_request, user_token)
+            
+            if doc_endpoint_response.success:
                 results["endpoints"]["document"] = {
                     "name": doc_endpoint_name,
                     "type": "Direct Access",
-                    "status": "created"
+                    "status": "created" if "already exists" not in doc_endpoint_response.message else "already_exists"
                 }
-            except Exception as e:
-                if "already exists" in str(e).lower():
-                    results["endpoints"]["document"] = {
-                        "name": doc_endpoint_name,
-                        "type": "Direct Access",
-                        "status": "already_exists"
-                    }
-                else:
-                    # Continue without document endpoint
-                    results["endpoints"]["document"] = {
-                        "name": doc_endpoint_name,
-                        "error": str(e)
-                    }
+            else:
+                # Continue without document endpoint
+                results["endpoints"]["document"] = {
+                    "name": doc_endpoint_name,
+                    "error": doc_endpoint_response.error or doc_endpoint_response.message
+                }
             
-            # Wait for endpoints to be ready (simplified - in production, poll status)
-            await asyncio.sleep(5)
+            # Step 3: Create indexes with retry logic
+            # Indexes can be created while endpoints are provisioning, but the backing tables
+            # might take a moment to be created. We'll retry if we get "table does not exist" errors.
             
             # Step 3: Create all memory indexes
             index_configs = [
@@ -154,80 +140,76 @@ class DatabricksVectorSearchSetupService:
                     ("document", f"document_embeddings_{unique_id}", doc_endpoint_name)
                 )
             
-            for index_type, table_name, endpoint_name in index_configs:
+            async def create_index_with_retry(index_type: str, table_name: str, endpoint_name: str, max_retries: int = 3) -> Dict[str, Any]:
+                """Create an index with retry logic for table creation delays."""
                 index_name = f"{catalog}.{schema}.{table_name}"
                 
-                # Define schema based on type
-                if index_type == "short_term":
-                    schema_def = {
-                        "id": "string",
-                        "crew_id": "string",
-                        "agent_id": "string",
-                        "content": "string",
-                        "embedding": "array<float>",
-                        "metadata": "string",
-                        "timestamp": "string",
-                        "score": "float"
-                    }
-                elif index_type == "long_term":
-                    schema_def = {
-                        "id": "string",
-                        "crew_id": "string",
-                        "agent_id": "string",
-                        "content": "string",
-                        "embedding": "array<float>",
-                        "metadata": "string",
-                        "timestamp": "string",
-                        "importance": "float"
-                    }
-                elif index_type == "entity":
-                    schema_def = {
-                        "id": "string",
-                        "crew_id": "string",
-                        "agent_id": "string",
-                        "entity_type": "string",
-                        "entity_name": "string",
-                        "embedding": "array<float>",
-                        "attributes": "string",
-                        "relationships": "string",
-                        "timestamp": "string"
-                    }
-                elif index_type == "document":
-                    schema_def = {
-                        "id": "string",
-                        "source": "string",
-                        "title": "string",
-                        "content": "string",
-                        "embedding": "array<float>",
-                        "doc_metadata": "string",
-                        "created_at": "string",
-                        "updated_at": "string"
-                    }
+                # Get schema from centralized definition
+                schema_def = DatabricksIndexSchemas.get_schema(index_type)
+                if not schema_def:
+                    logger.error(f"Unknown index type: {index_type}")
+                    return {"name": index_name, "error": f"Unknown index type: {index_type}"}
                 
-                try:
-                    client.create_direct_access_index(
-                        endpoint_name=endpoint_name,
-                        index_name=index_name,
-                        primary_key="id",
-                        embedding_dimension=embedding_dimension,
-                        embedding_vector_column="embedding",
-                        schema=schema_def
-                    )
-                    results["indexes"][index_type] = {
-                        "name": index_name,
-                        "status": "created"
-                    }
-                except Exception as e:
-                    if "already exists" in str(e).lower():
-                        results["indexes"][index_type] = {
-                            "name": index_name,
-                            "status": "already_exists"
-                        }
-                    else:
-                        results["indexes"][index_type] = {
-                            "name": index_name,
-                            "error": str(e)
-                        }
+                for attempt in range(max_retries):
+                    try:
+                        index_request = IndexCreate(
+                            name=index_name,
+                            endpoint_name=endpoint_name,
+                            primary_key="id",
+                            embedding_dimension=embedding_dimension,
+                            embedding_vector_column="embedding",
+                            schema=schema_def
+                        )
+                        
+                        index_response = await index_repo.create_index(index_request, user_token)
+                        
+                        if index_response.success:
+                            logger.info(f"Successfully created index {index_name}")
+                            return {
+                                "name": index_name,
+                                "status": "created"
+                            }
+                        else:
+                            # Check if it's a table doesn't exist error
+                            error_msg = str(index_response.message)
+                            if "does not exist" in error_msg.lower() and "table" in error_msg.lower():
+                                if attempt < max_retries - 1:
+                                    wait_time = (attempt + 1) * 10  # 10, 20, 30 seconds
+                                    logger.info(f"Table for {index_name} not ready yet, retrying in {wait_time} seconds (attempt {attempt + 1}/{max_retries})")
+                                    await asyncio.sleep(wait_time)
+                                    continue
+                            raise Exception(f"Failed to create index: {index_response.message}")
+                    except Exception as e:
+                        error_str = str(e)
+                        if "already exists" in error_str.lower():
+                            logger.info(f"Index {index_name} already exists")
+                            return {
+                                "name": index_name,
+                                "status": "already_exists"
+                            }
+                        elif "does not exist" in error_str.lower() and attempt < max_retries - 1:
+                            # Table/catalog doesn't exist yet, retry
+                            wait_time = (attempt + 1) * 10  # 10, 20, 30 seconds
+                            logger.info(f"Resource for {index_name} not ready yet, retrying in {wait_time} seconds (attempt {attempt + 1}/{max_retries})")
+                            await asyncio.sleep(wait_time)
+                            continue
+                        else:
+                            logger.error(f"Failed to create index {index_name}: {e}")
+                            return {
+                                "name": index_name,
+                                "error": str(e)
+                            }
+                
+                # If we get here, we've exhausted retries
+                return {
+                    "name": index_name,
+                    "error": f"Failed after {max_retries} attempts - resources may still be provisioning"
+                }
+            
+            # Create indexes with retry logic
+            for index_type, table_name, endpoint_name in index_configs:
+                result = await create_index_with_retry(index_type, table_name, endpoint_name)
+                results["indexes"][index_type] = result
             
             # Step 4: Create memory backend configuration
             config = DatabricksMemoryConfig(
@@ -250,23 +232,31 @@ class DatabricksVectorSearchSetupService:
             # Save the configuration if group_id is provided
             if group_id and self.uow:
                 try:
-                    # First, delete all existing configurations for this group
-                    logger.info(f"Deleting all existing memory backend configurations for group {group_id}")
-                    try:
-                        # Get all configurations for the group
-                        repo = self.uow.memory_backend_repository
-                        existing_configs = await repo.get_by_group_id(group_id)
-                        delete_count = len(existing_configs)
+                    # First, check if there are existing configurations
+                    repo = self.uow.memory_backend_repository
+                    existing_configs = await repo.get_by_group_id(group_id)
+                    
+                    # If there are existing configs, we need to handle them properly
+                    if existing_configs:
+                        logger.info(f"Found {len(existing_configs)} existing memory backend configurations for group {group_id}")
                         
-                        # Delete each configuration
-                        for config_to_delete in existing_configs:
-                            await repo.delete(config_to_delete.id)
+                        # Check if all existing configs are disabled (DEFAULT type)
+                        all_disabled = all(
+                            existing_config.backend_type == MemoryBackendType.DEFAULT 
+                            for existing_config in existing_configs
+                        )
                         
-                        await self.uow.commit()
-                        logger.info(f"Deleted {delete_count} existing memory backend configurations")
-                    except Exception as delete_error:
-                        logger.error(f"Error deleting existing configurations: {delete_error}")
-                        # Continue anyway - we still want to save the new configuration
+                        if all_disabled:
+                            # If all configs are disabled, we can safely delete them
+                            logger.info("All existing configurations are disabled, deleting them")
+                            for config_to_delete in existing_configs:
+                                await repo.delete(config_to_delete.id)
+                            await self.uow.commit()
+                            logger.info(f"Deleted {len(existing_configs)} disabled configurations")
+                        else:
+                            # If there are non-disabled configs, we should not delete them automatically
+                            # Instead, we'll just add the new configuration
+                            logger.info("Found active configurations, will add new Databricks configuration alongside them")
                     
                     # Save the configuration for the group
                     # Create the memory backend configuration
