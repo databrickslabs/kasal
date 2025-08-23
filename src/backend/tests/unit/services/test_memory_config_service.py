@@ -52,6 +52,7 @@ def databricks_backend():
         enable_short_term=True,
         enable_long_term=True,
         enable_entity=True,
+        enable_relationship_retrieval=False,
         is_active=True,
         is_default=False,
         created_at=datetime.utcnow() - timedelta(days=2),
@@ -72,6 +73,7 @@ def default_backend():
         enable_short_term=True,
         enable_long_term=True,
         enable_entity=False,
+        enable_relationship_retrieval=False,
         is_active=True,
         is_default=False,
         created_at=datetime.utcnow() - timedelta(days=5),
@@ -120,6 +122,7 @@ class TestMemoryConfigService:
             enable_short_term=False,
             enable_long_term=False,
             enable_entity=False,
+            enable_relationship_retrieval=False,
             databricks_config=None,
             custom_config=None
         )
@@ -130,6 +133,7 @@ class TestMemoryConfigService:
             enable_short_term=True,
             enable_long_term=True,
             enable_entity=True,
+            enable_relationship_retrieval=False,
             databricks_config=None,
             custom_config=None
         )
@@ -164,6 +168,7 @@ class TestMemoryConfigService:
             enable_short_term=True,
             enable_long_term=False,
             enable_entity=False,
+            enable_relationship_retrieval=False,
             databricks_config=None,
             custom_config={"test": "value"}
         )
@@ -262,6 +267,7 @@ class TestMemoryConfigService:
             enable_short_term=True,
             enable_long_term=True,
             enable_entity=True,
+            enable_relationship_retrieval=False,
             custom_config=None
         )
         newer_databricks = MagicMock(
@@ -278,6 +284,7 @@ class TestMemoryConfigService:
             enable_short_term=False,
             enable_long_term=True,
             enable_entity=True,
+            enable_relationship_retrieval=False,
             custom_config=None
         )
         
@@ -308,6 +315,7 @@ class TestMemoryConfigService:
             enable_short_term=True,
             enable_long_term=True,
             enable_entity=True,
+            enable_relationship_retrieval=False,
             custom_config={"key1": "value1", "key2": 123}
         )
         

@@ -732,7 +732,7 @@ class TestExecutionService:
             mock_crew_service = MagicMock()
             mock_crew_service.run_crew_execution = AsyncMock(return_value={"status": "completed"})
             mock_crew_service_class.return_value = mock_crew_service
-            mock_databricks_service.setup_token_sync = MagicMock(return_value=True)
+            mock_databricks_service.setup_token = AsyncMock(return_value=True)
             
             result = await ExecutionService.run_crew_execution(
                 execution_id, sample_crew_config, "crew", mock_group_context
@@ -1378,7 +1378,7 @@ class TestExecutionService:
             mock_crew_service = MagicMock()
             mock_crew_service.run_crew_execution = AsyncMock(return_value={"status": "completed"})
             mock_crew_service_class.return_value = mock_crew_service
-            mock_databricks_service.setup_token_sync = MagicMock(return_value=False)  # Setup fails
+            mock_databricks_service.setup_token = AsyncMock(return_value=False)  # Setup fails
             
             result = await ExecutionService.run_crew_execution(
                 execution_id, sample_crew_config, "crew", mock_group_context
@@ -1386,7 +1386,7 @@ class TestExecutionService:
             
             # Should still complete despite setup failure
             assert result["status"] == "completed"
-            mock_databricks_service.setup_token_sync.assert_called_once()
+            mock_databricks_service.setup_token.assert_called_once()
     
     def test_execute_crew_sync_databricks_setup_error(self, sample_crew_config):
         """Test synchronous crew execution with Databricks setup error."""

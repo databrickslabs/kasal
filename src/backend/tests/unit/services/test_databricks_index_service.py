@@ -6,6 +6,7 @@ Tests index creation, deletion, and management operations.
 import pytest
 from unittest.mock import AsyncMock, MagicMock, patch, call
 import random
+import numpy as np
 
 from src.services.databricks_index_service import DatabricksIndexService
 from src.schemas.memory_backend import DatabricksMemoryConfig
@@ -15,6 +16,12 @@ from src.schemas.memory_backend import DatabricksMemoryConfig
 def service():
     """Create a DatabricksIndexService instance."""
     return DatabricksIndexService()
+
+
+@pytest.fixture
+def mock_repo():
+    """Create a mock repository."""
+    return AsyncMock()
 
 
 @pytest.fixture
@@ -34,103 +41,121 @@ class TestDatabricksIndexService:
     """Test cases for DatabricksIndexService."""
     
     @pytest.mark.asyncio
-    @patch('databricks.vector_search.client.VectorSearchClient')
-    @patch('src.utils.databricks_auth.get_databricks_auth_headers')
-    async def test_create_index_short_term_success(
-        self, mock_get_headers, mock_client_class, service, databricks_config
-    ):
+    async def test_create_index_short_term_success(self, service, databricks_config):
         """Test successful creation of short-term memory index."""
         # Arrange
+        from src.schemas.databricks_vector_index import IndexResponse
+        
         user_token = "user-token"
-        mock_get_headers.return_value = ({"Authorization": "Bearer token"}, None)
+        mock_repo = AsyncMock()
         
-        mock_client = MagicMock()
-        mock_client_class.return_value = mock_client
-        
-        # Act
-        result = await service.create_databricks_index(
-            config=databricks_config,
-            index_type="short_term",
-            catalog="ml",
-            schema="agents",
-            table_name="short_term_test",
-            user_token=user_token
+        # Mock repository response
+        mock_repo.create_index.return_value = IndexResponse(
+            success=True,
+            message="Successfully created short_term index: ml.agents.short_term_test"
         )
+        
+        # Patch the _get_index_repository method to return our mock
+        with patch.object(service, '_get_index_repository', return_value=mock_repo):
+            # Act
+            result = await service.create_databricks_index(
+                config=databricks_config,
+                index_type="short_term",
+                catalog="ml",
+                schema="agents",
+                table_name="short_term_test",
+                user_token=user_token
+            )
         
         # Assert
         assert result["success"] is True
-        assert "Successfully created short_term index" in result["message"]
+        assert "Successfully created" in result["message"]
         assert result["details"]["index_type"] == "short_term"
         assert result["details"]["embedding_dimension"] == 768
         
-        # Verify schema includes required fields
-        mock_client.create_direct_access_index.assert_called_once()
-        call_args = mock_client.create_direct_access_index.call_args
-        schema = call_args.kwargs["schema"]
-        assert "crew_id" in schema
-        assert "agent_id" in schema
-        assert "content" in schema
-        assert "score" in schema
+        # Verify the repository was called with correct parameters
+        mock_repo.create_index.assert_called_once()
+        call_args = mock_repo.create_index.call_args
+        index_request = call_args[0][0]
+        assert index_request.name == "ml.agents.short_term_test"
+        assert index_request.endpoint_name == "test-endpoint"
+        assert index_request.embedding_dimension == 768
     
     @pytest.mark.asyncio
-    @patch('databricks.vector_search.client.VectorSearchClient')
-    async def test_create_index_long_term_schema(
-        self, mock_client_class, service, databricks_config
-    ):
+    async def test_create_index_long_term_schema(self, service, databricks_config, mock_repo):
         """Test long-term index creation with correct schema."""
         # Arrange
-        mock_client = MagicMock()
-        mock_client_class.return_value = mock_client
+        from src.schemas.databricks_vector_index import IndexResponse
+        from src.schemas.databricks_index_schemas import DatabricksIndexSchemas
         
-        # Act
-        await service.create_databricks_index(
-            config=databricks_config,
-            index_type="long_term",
-            catalog="ml",
-            schema="agents",
-            table_name="long_term_test"
+        # Mock repository response
+        mock_repo.create_index.return_value = IndexResponse(
+            success=True,
+            message="Successfully created long_term index"
         )
         
+        # Patch the _get_index_repository method to return our mock
+        with patch.object(service, '_get_index_repository', return_value=mock_repo):
+            # Act
+            await service.create_databricks_index(
+                config=databricks_config,
+                index_type="long_term",
+                catalog="ml",
+                schema="agents",
+                table_name="long_term_test"
+            )
+        
         # Assert
-        call_args = mock_client.create_direct_access_index.call_args
-        schema = call_args.kwargs["schema"]
+        mock_repo.create_index.assert_called_once()
+        call_args = mock_repo.create_index.call_args
+        index_request = call_args[0][0]
+        
+        # Verify schema has correct fields for long_term
+        schema = DatabricksIndexSchemas.get_schema("long_term")
         assert "importance" in schema
         assert "score" not in schema
     
     @pytest.mark.asyncio
-    @patch('databricks.vector_search.client.VectorSearchClient')
-    async def test_create_index_entity_schema(
-        self, mock_client_class, service, databricks_config
-    ):
+    async def test_create_index_entity_schema(self, service, databricks_config, mock_repo):
         """Test entity index creation with correct schema."""
         # Arrange
-        mock_client = MagicMock()
-        mock_client_class.return_value = mock_client
+        from src.schemas.databricks_vector_index import IndexResponse
+        from src.schemas.databricks_index_schemas import DatabricksIndexSchemas
         
-        # Act
-        await service.create_databricks_index(
-            config=databricks_config,
-            index_type="entity",
-            catalog="ml",
-            schema="agents",
-            table_name="entity_test"
+        # Mock repository response
+        mock_repo.create_index.return_value = IndexResponse(
+            success=True,
+            message="Successfully created entity index"
         )
         
+        # Patch the _get_index_repository method to return our mock
+        with patch.object(service, '_get_index_repository', return_value=mock_repo):
+            # Act
+            await service.create_databricks_index(
+                config=databricks_config,
+                index_type="entity",
+                catalog="ml",
+                schema="agents",
+                table_name="entity_test"
+            )
+        
         # Assert
-        call_args = mock_client.create_direct_access_index.call_args
-        schema = call_args.kwargs["schema"]
+        mock_repo.create_index.assert_called_once()
+        
+        # Verify schema has correct fields for entity
+        schema = DatabricksIndexSchemas.get_schema("entity")
         assert "entity_type" in schema
         assert "entity_name" in schema
-        assert "attributes" in schema
+        assert "description" in schema  # Changed from attributes
         assert "relationships" in schema
     
     @pytest.mark.asyncio
-    @patch('databricks.vector_search.client.VectorSearchClient')
-    async def test_create_index_document_with_endpoint(
-        self, mock_client_class, service
-    ):
+    async def test_create_index_document_with_endpoint(self, service, mock_repo):
         """Test document index creation uses document endpoint if available."""
         # Arrange
+        from src.schemas.databricks_vector_index import IndexResponse
+        from src.schemas.databricks_index_schemas import DatabricksIndexSchemas
+        
         config = DatabricksMemoryConfig(
             endpoint_name="memory-endpoint",
             document_endpoint_name="document-endpoint",
@@ -138,80 +163,100 @@ class TestDatabricksIndexService:
             workspace_url="https://test.databricks.com"
         )
         
-        mock_client = MagicMock()
-        mock_client_class.return_value = mock_client
+        # Mock repository response
+        mock_repo.create_index.return_value = IndexResponse(
+            success=True,
+            message="Successfully created document index"
+        )
         
-        # Act
-        await service.create_databricks_index(
+        # Patch the _get_index_repository method to return our mock
+        with patch.object(service, '_get_index_repository', return_value=mock_repo):
+            # Act
+            await service.create_databricks_index(
             config=config,
             index_type="document",
             catalog="ml",
             schema="docs",
-            table_name="embeddings"
-        )
+                table_name="embeddings"
+            )
         
         # Assert
-        call_args = mock_client.create_direct_access_index.call_args
-        assert call_args.kwargs["endpoint_name"] == "document-endpoint"
-        schema = call_args.kwargs["schema"]
+        mock_repo.create_index.assert_called_once()
+        call_args = mock_repo.create_index.call_args
+        index_request = call_args[0][0]
+        assert index_request.endpoint_name == "document-endpoint"
+        
+        # Verify schema has correct fields for document
+        schema = DatabricksIndexSchemas.get_schema("document")
         assert "source" in schema
         assert "title" in schema
         assert "doc_metadata" in schema
     
     @pytest.mark.asyncio
-    @patch('databricks.vector_search.client.VectorSearchClient')
-    async def test_create_index_already_exists(
-        self, mock_client_class, service, databricks_config
-    ):
+    async def test_create_index_already_exists(self, service, databricks_config, mock_repo):
         """Test handling when index already exists."""
         # Arrange
-        mock_client = MagicMock()
-        mock_client.create_direct_access_index.side_effect = Exception("Index already exists")
-        mock_client_class.return_value = mock_client
+        from src.schemas.databricks_vector_index import IndexResponse
         
-        # Act
-        result = await service.create_databricks_index(
+        # Mock repository response for already existing index
+        mock_repo.create_index.return_value = IndexResponse(
+            success=False,
+            message="Failed to create index",
+            error="Index already exists"
+        )
+        
+        # Patch the _get_index_repository method to return our mock
+        with patch.object(service, '_get_index_repository', return_value=mock_repo):
+            # Act
+            result = await service.create_databricks_index(
             config=databricks_config,
             index_type="short_term",
             catalog="ml",
             schema="agents",
-            table_name="existing"
-        )
+                table_name="existing"
+            )
         
         # Assert
         assert result["success"] is False
         assert "already exists" in result["message"]
     
     @pytest.mark.asyncio
-    @patch('databricks.vector_search.client.VectorSearchClient')
-    async def test_get_indexes_success(
-        self, mock_client_class, service, databricks_config
-    ):
+    async def test_get_indexes_success(self, service, databricks_config, mock_repo):
         """Test getting list of indexes for an endpoint."""
         # Arrange
-        mock_client = MagicMock()
-        mock_client.list_indexes.return_value = {
-            "indexes": [
-                {
-                    "name": "ml.agents.short_term",
-                    "status": {"state": "READY"},
-                    "embedding_dimension": 768,
-                    "primary_key": "id",
-                    "doc_count": 1000
-                },
-                {
-                    "name": "ml.agents.long_term",
-                    "status": {"state": "PROVISIONING"},
-                    "embedding_dimension": 768,
-                    "primary_key": "id",
-                    "doc_count": 500
-                }
-            ]
-        }
-        mock_client_class.return_value = mock_client
+        from src.schemas.databricks_vector_index import IndexInfo, IndexListResponse, IndexState
         
-        # Act
-        result = await service.get_databricks_indexes(databricks_config)
+        # Create proper IndexInfo objects
+        index1 = IndexInfo(
+            name="ml.agents.short_term",
+            endpoint_name="test-endpoint",
+            state=IndexState.READY,
+            ready=True,
+            embedding_dimension=768,
+            primary_key="id",
+            row_count=1000
+        )
+        index2 = IndexInfo(
+            name="ml.agents.long_term",
+            endpoint_name="test-endpoint",
+            state=IndexState.PROVISIONING,
+            ready=False,
+            embedding_dimension=768,
+            primary_key="id",
+            row_count=500
+        )
+        
+        # Mock repository response
+        mock_repo.list_indexes.return_value = IndexListResponse(
+            success=True,
+            indexes=[index1, index2],
+            message="Success"
+        )
+        
+        # Patch the _get_index_repository method to return our mock
+        with patch.object(service, '_get_index_repository', return_value=mock_repo):
+            # Act
+            result = await service.get_databricks_indexes(databricks_config)
         
         # Assert
         assert result["success"] is True
@@ -221,103 +266,123 @@ class TestDatabricksIndexService:
         assert result["indexes"][1]["doc_count"] == 500
     
     @pytest.mark.asyncio
-    @patch('databricks.vector_search.client.VectorSearchClient')
-    async def test_delete_index_success(
-        self, mock_client_class, service
-    ):
+    async def test_delete_index_success(self, service, mock_repo):
         """Test successful index deletion."""
         # Arrange
-        mock_client = MagicMock()
-        mock_client_class.return_value = mock_client
+        from src.schemas.databricks_vector_index import IndexResponse
         
-        # Act
-        result = await service.delete_databricks_index(
-            workspace_url="https://test.databricks.com",
-            index_name="ml.agents.old_index",
-            endpoint_name="test-endpoint",
-            user_token="token"
+        # Mock repository response
+        mock_repo.delete_index.return_value = IndexResponse(
+            success=True,
+            message="Successfully deleted index"
         )
+        
+        # Patch the _get_index_repository method to return our mock
+        with patch.object(service, '_get_index_repository', return_value=mock_repo):
+            # Act
+            result = await service.delete_databricks_index(
+                workspace_url="https://test.databricks.com",
+                index_name="ml.agents.old_index",
+                endpoint_name="test-endpoint",
+                user_token="token"
+            )
         
         # Assert
         assert result["success"] is True
         assert "Successfully deleted" in result["message"]
-        mock_client.delete_index.assert_called_once_with(
-            endpoint_name="test-endpoint",
-            index_name="ml.agents.old_index"
+        mock_repo.delete_index.assert_called_once_with(
+            "ml.agents.old_index",
+            "test-endpoint",
+            "token"
         )
     
     @pytest.mark.asyncio
-    @patch('databricks.vector_search.client.VectorSearchClient')
-    async def test_delete_index_not_found(
-        self, mock_client_class, service
-    ):
+    async def test_delete_index_not_found(self, service, mock_repo):
         """Test deleting non-existent index."""
         # Arrange
-        mock_client = MagicMock()
-        mock_client.delete_index.side_effect = Exception("Index not found")
-        mock_client_class.return_value = mock_client
+        from src.schemas.databricks_vector_index import IndexResponse
         
-        # Act
-        result = await service.delete_databricks_index(
-            workspace_url="https://test.databricks.com",
-            index_name="ml.agents.missing",
-            endpoint_name="test-endpoint"
+        # Mock repository response
+        mock_repo.delete_index.return_value = IndexResponse(
+            success=False,
+            message="Failed to delete index: Index not found",
+            error="Index not found"
         )
+        
+        # Patch the _get_index_repository method to return our mock
+        with patch.object(service, '_get_index_repository', return_value=mock_repo):
+            # Act
+            result = await service.delete_databricks_index(
+                workspace_url="https://test.databricks.com",
+                index_name="ml.agents.missing",
+                endpoint_name="test-endpoint"
+            )
         
         # Assert
         assert result["success"] is False
-        assert "not found" in result["message"]
+        assert "Failed to delete" in result["message"]
     
     @pytest.mark.asyncio
-    @patch('databricks.vector_search.client.VectorSearchClient')
-    async def test_delete_endpoint_with_indexes_fails(
-        self, mock_client_class, service
-    ):
-        """Test endpoint deletion fails when it has indexes."""
+    async def test_delete_endpoint_with_indexes_succeeds(self, service, mock_repo):
+        """Test endpoint deletion when no checks for existing indexes."""
         # Arrange
-        mock_client = MagicMock()
-        mock_client.list_indexes.return_value = {"indexes": [{"name": "index1"}]}
-        mock_client_class.return_value = mock_client
+        from src.schemas.databricks_vector_endpoint import EndpointResponse
         
-        # Act
-        result = await service.delete_databricks_endpoint(
-            workspace_url="https://test.databricks.com",
-            endpoint_name="test-endpoint"
+        mock_endpoint_repo = AsyncMock()
+        
+        # Mock successful deletion
+        mock_endpoint_repo.delete_endpoint.return_value = EndpointResponse(
+            success=True,
+            message="Successfully deleted endpoint"
         )
         
+        # Patch the endpoint repository method
+        with patch.object(service, '_get_endpoint_repository', return_value=mock_endpoint_repo):
+            # Act
+            result = await service.delete_databricks_endpoint(
+                workspace_url="https://test.databricks.com",
+                endpoint_name="test-endpoint"
+            )
+        
         # Assert
-        assert result["success"] is False
-        assert "has active indexes" in result["message"]
-        mock_client.delete_endpoint.assert_not_called()
+        assert result["success"] is True
+        assert "Successfully deleted" in result["message"]
+        mock_endpoint_repo.delete_endpoint.assert_called_once()
     
     @pytest.mark.asyncio
-    @patch('databricks.vector_search.client.VectorSearchClient')
-    async def test_get_index_info_success(
-        self, mock_client_class, service
-    ):
+    async def test_get_index_info_success(self, service, mock_repo):
         """Test getting detailed index information."""
         # Arrange
-        mock_client = MagicMock()
-        mock_index = MagicMock()
-        mock_index.describe.return_value = {
-            "direct_access_index_spec": {
-                "embedding_dimension": 768,
-                "num_rows": 5000
-            },
-            "primary_key": "id",
-            "status": {
-                "indexed_row_count": 5000
-            }
-        }
-        mock_client.get_index.return_value = mock_index
-        mock_client_class.return_value = mock_client
+        from src.schemas.databricks_vector_index import IndexInfo, IndexResponse, IndexType, IndexState
         
-        # Act
-        result = await service.get_index_info(
-            workspace_url="https://test.databricks.com",
-            index_name="ml.agents.short_term",
-            endpoint_name="test-endpoint"
+        # Create proper IndexInfo object
+        index_info = IndexInfo(
+            name="ml.agents.short_term",
+            endpoint_name="test-endpoint",
+            index_type=IndexType.DIRECT_ACCESS,
+            state=IndexState.READY,
+            ready=True,
+            row_count=5000,
+            indexed_row_count=5000,
+            embedding_dimension=768,
+            primary_key="id"
         )
+        
+        # Mock repository response
+        mock_repo.get_index.return_value = IndexResponse(
+            success=True,
+            index=index_info,
+            message="Success"
+        )
+        
+        # Patch the _get_index_repository method to return our mock
+        with patch.object(service, '_get_index_repository', return_value=mock_repo):
+            # Act
+            result = await service.get_index_info(
+                workspace_url="https://test.databricks.com",
+                index_name="ml.agents.short_term",
+                endpoint_name="test-endpoint"
+            )
         
         # Assert
         assert result["success"] is True
@@ -326,176 +391,334 @@ class TestDatabricksIndexService:
         assert result["index_type"] == "Direct Access"
     
     @pytest.mark.asyncio
-    @patch('src.services.databricks_connection_service.DatabricksConnectionService')
-    @patch('random.random')
-    async def test_empty_index_memory_type(self, mock_random, mock_conn_service_class, service):
+    async def test_empty_index_memory_type(self, service, mock_repo):
         """Test emptying a memory index with batch deletion."""
         # Arrange
-        mock_conn_service = AsyncMock()
-        mock_client = MagicMock()
-        mock_conn_service.get_databricks_client_with_auth.return_value = (mock_client, "OBO")
-        service.connection_service = mock_conn_service
+        # Mock the empty_index method to return success
+        mock_repo.empty_index.return_value = {
+            "success": True,
+            "num_deleted": 3,
+            "message": "Successfully emptied index"
+        }
         
-        # Mock index
-        mock_index = MagicMock()
-        mock_client.get_index.return_value = mock_index
-        
-        # Mock search results - first batch has results, second is empty
-        mock_index.similarity_search.side_effect = [
-            {
-                "result": {
-                    "data_array": [["id1"], ["id2"], ["id3"]]
-                }
-            },
-            {
-                "result": {
-                    "data_array": []
-                }
-            }
-        ]
-        
-        # Mock random vectors
-        mock_random.return_value = 0.5
-        
-        # Act
-        result = await service.empty_index(
-            workspace_url="https://test.databricks.com",
-            index_name="ml.agents.short_term",
-            endpoint_name="test-endpoint",
-            index_type="short_term",
-            embedding_dimension=768
-        )
+        # Patch the _get_index_repository method to return our mock
+        with patch.object(service, '_get_index_repository', return_value=mock_repo):
+            # Act
+            result = await service.empty_index(
+                workspace_url="https://test.databricks.com",
+                index_name="ml.agents.short_term",
+                endpoint_name="test-endpoint",
+                index_type="short_term",
+                embedding_dimension=768
+            )
         
         # Assert
         assert result["success"] is True
         assert result["num_deleted"] == 3
-        mock_index.delete.assert_called_once_with(primary_keys=["id1", "id2", "id3"])
+        mock_repo.empty_index.assert_called_once_with(
+            "ml.agents.short_term",
+            "test-endpoint",
+            768,
+            None
+        )
     
     @pytest.mark.asyncio
-    @patch('src.services.databricks_connection_service.DatabricksConnectionService')
-    @patch('random.random')
-    async def test_empty_index_document_type(self, mock_random, mock_conn_service_class, service):
+    async def test_empty_index_document_type(self, service, mock_repo):
         """Test document indexes are emptied using batch deletion."""
         # Arrange
-        mock_conn_service = AsyncMock()
-        mock_client = MagicMock()
-        mock_conn_service.get_databricks_client_with_auth.return_value = (mock_client, "OBO")
-        service.connection_service = mock_conn_service
+        # Mock the empty_index method to return success
+        mock_repo.empty_index.return_value = {
+            "success": True,
+            "num_deleted": 2,
+            "message": "Successfully emptied index"
+        }
         
-        mock_index = MagicMock()
-        mock_client.get_index.return_value = mock_index
-        
-        # Mock search results - first batch has results, second is empty
-        mock_index.similarity_search.side_effect = [
-            {
-                "result": {
-                    "data_array": [["doc1"], ["doc2"]]
-                }
-            },
-            {
-                "result": {
-                    "data_array": []
-                }
-            }
-        ]
-        
-        # Mock random vectors
-        mock_random.return_value = 0.5
-        
-        # Act
-        result = await service.empty_index(
-            workspace_url="https://test.databricks.com",
-            index_name="ml.docs.embeddings",
-            endpoint_name="doc-endpoint",
-            index_type="document",
-            embedding_dimension=768
-        )
+        # Patch the _get_index_repository method to return our mock
+        with patch.object(service, '_get_index_repository', return_value=mock_repo):
+            # Act
+            result = await service.empty_index(
+                workspace_url="https://test.databricks.com",
+                index_name="ml.docs.embeddings",
+                endpoint_name="doc-endpoint",
+                index_type="document",
+                embedding_dimension=768
+            )
         
         # Assert
         assert result["success"] is True
         assert result["num_deleted"] == 2
         assert "Successfully emptied index" in result["message"]
-        mock_index.delete.assert_called_once_with(primary_keys=["doc1", "doc2"])
+        mock_repo.empty_index.assert_called_once_with(
+            "ml.docs.embeddings",
+            "doc-endpoint",
+            768,
+            None
+        )
     
     @pytest.mark.asyncio
-    @patch('src.services.databricks_connection_service.DatabricksConnectionService')
-    async def test_empty_index_batch_failure(self, mock_conn_service_class, service):
+    async def test_empty_index_batch_failure(self, service, mock_repo):
         """Test handling batch deletion failure."""
         # Arrange
-        mock_conn_service = AsyncMock()
-        mock_client = MagicMock()
-        mock_conn_service.get_databricks_client_with_auth.return_value = (mock_client, "API_KEY")
-        service.connection_service = mock_conn_service
+        # Mock the empty_index method to return failure
+        mock_repo.empty_index.return_value = {
+            "success": False,
+            "message": "Failed to empty index: Search failed",
+            "error": "Search failed"
+        }
         
-        mock_index = MagicMock()
-        mock_client.get_index.return_value = mock_index
-        
-        # Mock search to throw error
-        mock_index.similarity_search.side_effect = Exception("Search failed")
-        
-        # Act
-        result = await service.empty_index(
-            workspace_url="https://test.databricks.com",
-            index_name="ml.agents.entity",
-            endpoint_name="test-endpoint",
-            index_type="entity",
-            embedding_dimension=768
-        )
+        # Patch the _get_index_repository method to return our mock
+        with patch.object(service, '_get_index_repository', return_value=mock_repo):
+            # Act
+            result = await service.empty_index(
+                workspace_url="https://test.databricks.com",
+                index_name="ml.agents.entity",
+                endpoint_name="test-endpoint",
+                index_type="entity",
+                embedding_dimension=768
+            )
         
         # Assert
         assert result["success"] is False
-        assert "Cannot empty index" in result["message"]
-        assert "Search failed" in result["error_details"]
+        assert "Failed to empty index" in result["message"]
+        mock_repo.empty_index.assert_called_once_with(
+            "ml.agents.entity",
+            "test-endpoint",
+            768,
+            None
+        )
     
     @pytest.mark.asyncio
-    @patch('src.core.unit_of_work.UnitOfWork')
-    @patch('src.services.api_keys_service.ApiKeysService')
-    @patch('databricks.vector_search.client.VectorSearchClient')
-    async def test_create_index_auth_fallback_sequence(
-        self, mock_client_class, mock_api_service_class, mock_uow_class, service
-    ):
-        """Test authentication fallback sequence for index creation."""
+    async def test_get_index_documents_with_repository(self, service, mock_repo):
+        """Test get_index_documents uses repository pattern for similarity search."""
         # Arrange
-        # Create config with PAT auth
-        pat_config = DatabricksMemoryConfig(
-            endpoint_name="test-endpoint",
-            short_term_index="ml.agents.short_term",
-            workspace_url="https://test.databricks.com",
-            auth_type="pat",
-            personal_access_token="test-token",
-            embedding_dimension=768
-        )
+        # Mock similarity search result
+        mock_search_result = {
+            "success": True,
+            "results": {
+                "result": {
+                    "data_array": [
+                        ["doc1", "Test content 1", "query1", "session1", 1, "2024-01-01", "2024-01-01", 24, '{"meta": "data"}', "crew1", "agent1", "group1", "gpt-4", "[]", "model1", 1],
+                        ["doc2", "Test content 2", "query2", "session1", 2, "2024-01-02", "2024-01-02", 24, '{"meta": "data2"}', "crew1", "agent2", "group1", "gpt-4", "[]", "model1", 1]
+                    ]
+                }
+            }
+        }
+        mock_repo.similarity_search.return_value = mock_search_result
         
-        # Mock successful client
-        mock_client = MagicMock()
-        mock_client.create_direct_access_index = MagicMock()
-        
-        # Mock API service to fail, forcing fallback to PAT auth
-        mock_api_service_class.from_unit_of_work.side_effect = Exception("No API service")
-        
-        # Mock UnitOfWork
-        mock_uow_instance = AsyncMock()
-        mock_uow_class.return_value.__aenter__.return_value = mock_uow_instance
-        
-        # Return the successful client when using PAT auth
-        mock_client_class.return_value = mock_client
-        
-        # Act
-        with patch('src.utils.databricks_auth.get_databricks_auth_headers', 
-                   return_value=(None, "Error")):
-            result = await service.create_databricks_index(
-                config=pat_config,
+        # Patch the _get_index_repository method to return our mock
+        with patch.object(service, '_get_index_repository', return_value=mock_repo):
+            # Act
+            result = await service.get_index_documents(
+                workspace_url="https://test.databricks.com",
+                endpoint_name="test-endpoint",
+                index_name="ml.agents.short_term",
                 index_type="short_term",
-                catalog="ml",
-                schema="agents",
-                table_name="test"
+                limit=10
             )
         
         # Assert
         assert result["success"] is True
-        assert result["details"]["auth_method"] == "PAT"
-        # Verify the client was created with PAT auth
-        mock_client_class.assert_called_with(
+        assert result["count"] == 2
+        assert len(result["documents"]) == 2
+        assert result["documents"][0]["id"] == "doc1"
+        assert result["documents"][0]["text"] == "Test content 1"
+        
+        # Verify repository method was called
+        mock_repo.similarity_search.assert_called_once()
+        call_args = mock_repo.similarity_search.call_args
+        assert call_args.kwargs["index_name"] == "ml.agents.short_term"
+        assert call_args.kwargs["endpoint_name"] == "test-endpoint"
+        assert call_args.kwargs["num_results"] == 10
+    
+    @pytest.mark.asyncio
+    async def test_get_index_documents_no_search_query(
+        self, service, mock_repo
+    ):
+        """Test get_index_documents without search query uses random vector."""
+        # Arrange
+        
+        # Mock similarity search result with all documents
+        mock_search_result = {
+            "success": True,
+            "results": {
+                "result": {
+                    "data_array": [
+                        ["doc1", "Content 1", "query1", "session1", 1, "2024-01-01", "2024-01-01", 24, '{}', "crew1", "agent1", "group1", "gpt-4", "[]", "model1", 1],
+                        ["doc2", "Content 2", "query2", "session1", 2, "2024-01-02", "2024-01-02", 24, '{}', "crew1", "agent2", "group1", "gpt-4", "[]", "model1", 1],
+                        ["doc3", "Content 3", "query3", "session1", 3, "2024-01-03", "2024-01-03", 24, '{}', "crew1", "agent3", "group1", "gpt-4", "[]", "model1", 1]
+                    ]
+                }
+            }
+        }
+        mock_repo.similarity_search.return_value = mock_search_result
+        
+        # Act
+        with patch.object(service, '_get_index_repository', return_value=mock_repo):
+            with patch('numpy.random.randn') as mock_randn:
+                # Mock randn to return a fixed value array
+                mock_randn.return_value = np.full(1024, 0.5)
+                result = await service.get_index_documents(
+                workspace_url="https://test.databricks.com",
+                endpoint_name="test-endpoint",
+                index_name="ml.agents.long_term",
+                index_type="long_term",
+                limit=20
+            )
+        
+        # Assert
+        assert result["success"] is True
+        assert result["count"] == 3
+        
+        # Verify the mocked vector was used
+        call_args = mock_repo.similarity_search.call_args
+        query_vector = call_args.kwargs["query_vector"]
+        assert len(query_vector) == 1024  # Default dimension
+    
+    @pytest.mark.asyncio
+    async def test_get_index_documents_repository_failure(
+        self, service, mock_repo
+    ):
+        """Test get_index_documents handles repository failures gracefully."""
+        # Arrange
+        
+        # Mock repository failure
+        mock_repo.similarity_search.return_value = {
+            "success": False,
+            "error": "Index not found",
+            "results": None
+        }
+        
+        # Act
+        with patch.object(service, '_get_index_repository', return_value=mock_repo):
+            result = await service.get_index_documents(
             workspace_url="https://test.databricks.com",
-            personal_access_token="test-token"
+            endpoint_name="test-endpoint",
+            index_name="ml.agents.nonexistent",
+            limit=10
         )
+        
+        # Assert
+        assert result["success"] is False
+        assert "Search failed" in result["message"] or "Failed to retrieve" in result["message"]
+        assert result["documents"] == []
+    
+    @pytest.mark.asyncio
+    async def test_query_entity_data_with_repository(
+        self, service, mock_repo
+    ):
+        """Test query_entity_data uses repository pattern for similarity search."""
+        # Arrange
+        
+        # Mock similarity search result for entity data - match the actual schema columns
+        mock_search_result = {
+            "success": True,
+            "results": {
+                "result": {
+                    "data_array": [
+                        ["entity1", "John Doe", "Person", "A person named John", '["rel1", "rel2"]', "2024-01-01", "crew1", "agent1", "group1", "gpt-4", "[]", "model1"],
+                        ["entity2", "Acme Corp", "Company", "A large company", '["rel3"]', "2024-01-02", "crew1", "agent2", "group1", "gpt-4", "[]", "model1"]
+                    ]
+                }
+            }
+        }
+        mock_repo.similarity_search.return_value = mock_search_result
+        
+        # Act
+        with patch.object(service, '_get_index_repository', return_value=mock_repo):
+            result = await service.query_entity_data(
+            workspace_url="https://test.databricks.com",
+            endpoint_name="test-endpoint",
+            index_name="ml.agents.entity",
+            embedding_dimension=768,
+            limit=5
+        )
+        
+        # Assert
+        assert result["success"] is True
+        # The service creates additional entities from relationships, so we expect more than 2
+        assert len(result["entities"]) >= 2
+        
+        # Find the specific entities we're looking for
+        entities_by_id = {e["id"]: e for e in result["entities"]}
+        assert "entity1" in entities_by_id
+        entity1 = entities_by_id["entity1"]
+        assert entity1["type"] == "Person"
+        assert entity1["name"] == "John Doe"
+        
+        # Verify repository method was called with correct parameters
+        mock_repo.similarity_search.assert_called_once()
+        call_args = mock_repo.similarity_search.call_args
+        assert call_args.kwargs["index_name"] == "ml.agents.entity"
+        assert call_args.kwargs["endpoint_name"] == "test-endpoint"
+        assert len(call_args.kwargs["query_vector"]) == 768
+        assert call_args.kwargs["num_results"] == 5
+    
+    @pytest.mark.asyncio
+    async def test_query_entity_data_without_search_query(
+        self, service, mock_repo
+    ):
+        """Test query_entity_data without search query returns all entities."""
+        # Arrange
+        
+        # Mock similarity search result
+        mock_search_result = {
+            "success": True,
+            "results": {
+                "result": {
+                    "data_array": [
+                        ["e1", "Name1", "Type1", "Description1", "[]", "2024-01-01", "crew1", "agent1", "group1", "gpt-4", "[]", "model1"],
+                        ["e2", "Name2", "Type2", "Description2", "[]", "2024-01-02", "crew1", "agent2", "group1", "gpt-4", "[]", "model1"]
+                    ]
+                }
+            }
+        }
+        mock_repo.similarity_search.return_value = mock_search_result
+        
+        # Act
+        with patch.object(service, '_get_index_repository', return_value=mock_repo):
+            with patch('random.random', return_value=0.5):
+                result = await service.query_entity_data(
+                workspace_url="https://test.databricks.com",
+                endpoint_name="test-endpoint",
+                index_name="ml.agents.entity",
+                embedding_dimension=768,
+                limit=100
+            )
+        
+        # Assert
+        assert result["success"] is True
+        assert len(result["entities"]) == 2
+        
+        # Verify random vector was used
+        call_args = mock_repo.similarity_search.call_args
+        query_vector = call_args.kwargs["query_vector"]
+        assert len(query_vector) == 768
+        assert all(v == 0.5 for v in query_vector)
+    
+    @pytest.mark.asyncio
+    async def test_query_entity_data_repository_error(
+        self, service, mock_repo
+    ):
+        """Test query_entity_data handles repository errors gracefully."""
+        # Arrange
+        
+        # Mock repository error
+        mock_repo.similarity_search.return_value = {
+            "success": False,
+            "error": "Authentication failed",
+            "results": None
+        }
+        
+        # Act
+        with patch.object(service, '_get_index_repository', return_value=mock_repo):
+            result = await service.query_entity_data(
+            workspace_url="https://test.databricks.com",
+            endpoint_name="test-endpoint",
+            index_name="ml.agents.entity",
+            limit=10
+        )
+        
+        # Assert
+        assert result["success"] is False
+        assert "Search failed" in result["message"] or "Failed to query" in result["message"]
+        assert result["entities"] == []

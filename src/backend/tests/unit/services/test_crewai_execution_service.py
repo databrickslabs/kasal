@@ -85,7 +85,18 @@ class TestCrewAIExecutionService:
             
             assert result["execution_id"] == execution_id
             assert result["status"] == ExecutionStatus.RUNNING.value
-            mock_engine.run_execution.assert_called_once_with(execution_id, crew_config, group_context)
+            # The service transforms the CrewConfig into a dictionary before passing to engine
+            # Check that run_execution was called once with the expected parameters
+            mock_engine.run_execution.assert_called_once()
+            call_args = mock_engine.run_execution.call_args
+            assert call_args[0][0] == execution_id  # execution_id
+            assert call_args[0][2] == group_context  # group_context
+            # Check that the config was transformed to a dict with expected fields
+            execution_config = call_args[0][1]
+            assert isinstance(execution_config, dict)
+            assert execution_config["execution_id"] == execution_id
+            assert "agents" in execution_config
+            assert "tasks" in execution_config
     
     @pytest.mark.asyncio
     async def test_prepare_and_run_crew_with_init_task_waiting(self, execution_service, crew_config):
@@ -128,7 +139,15 @@ class TestCrewAIExecutionService:
             
             assert result["execution_id"] == execution_id
             assert result["status"] == ExecutionStatus.RUNNING.value
-            mock_engine.run_execution.assert_called_once_with(execution_id, crew_config, None)
+            # The service transforms the CrewConfig into a dictionary before passing to engine
+            mock_engine.run_execution.assert_called_once()
+            call_args = mock_engine.run_execution.call_args
+            assert call_args[0][0] == execution_id  # execution_id
+            assert call_args[0][2] is None  # group_context is None
+            # Check that the config was transformed to a dict
+            execution_config = call_args[0][1]
+            assert isinstance(execution_config, dict)
+            assert execution_config["execution_id"] == execution_id
     
     @pytest.mark.asyncio
     async def test_prepare_and_run_crew_failure(self, execution_service, crew_config):

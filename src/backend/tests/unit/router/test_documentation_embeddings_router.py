@@ -86,8 +86,48 @@ class TestCreateDocumentationEmbedding:
         assert result["id"] == 1
         assert result["source"] == "test_source"
         assert result["title"] == "Test Documentation"
-        mock_documentation_service.create_documentation_embedding.assert_called_once()
-        mock_uow.commit.assert_called_once()
+        # Verify that create_documentation_embedding was called with the right arguments
+        args, kwargs = mock_documentation_service.create_documentation_embedding.call_args
+        assert args[0].source == "test_source"
+        assert kwargs.get("user_token") is None  # No auth headers provided
+        # Commit is not called here because it's handled by the UnitOfWork context manager
+    
+    def test_create_documentation_embedding_with_auth_headers(self, sample_embedding_data, sample_documentation_embedding, mock_uow, mock_documentation_service):
+        """Test creation with authentication headers."""
+        mock_documentation_service.create_documentation_embedding.return_value = sample_documentation_embedding
+        
+        with patch('src.api.documentation_embeddings_router.UnitOfWork') as mock_uow_class:
+            mock_uow_class.return_value.__aenter__.return_value = mock_uow
+            mock_uow_class.return_value.__aexit__.return_value = None
+            with patch('src.api.documentation_embeddings_router.DocumentationEmbeddingService') as mock_service_class:
+                mock_service_class.return_value = mock_documentation_service
+                headers = {
+                    "X-Forwarded-Access-Token": "test-token-123",
+                    "X-Auth-Request-Access-Token": "oauth-token-456"
+                }
+                response = client.post("/api/v1/documentation-embeddings/", json=sample_embedding_data.model_dump(), headers=headers)
+        
+        assert response.status_code == 200
+        # Verify OAuth2-Proxy token takes priority
+        args, kwargs = mock_documentation_service.create_documentation_embedding.call_args
+        assert kwargs.get("user_token") == "oauth-token-456"
+    
+    def test_create_documentation_embedding_with_databricks_token_only(self, sample_embedding_data, sample_documentation_embedding, mock_uow, mock_documentation_service):
+        """Test creation with only Databricks Apps token."""
+        mock_documentation_service.create_documentation_embedding.return_value = sample_documentation_embedding
+        
+        with patch('src.api.documentation_embeddings_router.UnitOfWork') as mock_uow_class:
+            mock_uow_class.return_value.__aenter__.return_value = mock_uow
+            mock_uow_class.return_value.__aexit__.return_value = None
+            with patch('src.api.documentation_embeddings_router.DocumentationEmbeddingService') as mock_service_class:
+                mock_service_class.return_value = mock_documentation_service
+                headers = {"X-Forwarded-Access-Token": "databricks-token-789"}
+                response = client.post("/api/v1/documentation-embeddings/", json=sample_embedding_data.model_dump(), headers=headers)
+        
+        assert response.status_code == 200
+        # Verify Databricks token is used when OAuth2-Proxy token is absent
+        args, kwargs = mock_documentation_service.create_documentation_embedding.call_args
+        assert kwargs.get("user_token") == "databricks-token-789"
     
     def test_create_documentation_embedding_error(self, sample_embedding_data, mock_uow, mock_documentation_service):
         """Test error handling during creation."""
@@ -479,3 +519,61 @@ class TestGetRecentDocumentationEmbeddings:
         
         assert response.status_code == 500
         assert "Database error" in response.json()["detail"]
+
+
+class TestSeedAllDocumentationEmbeddings:
+    """Test cases for seed_all_documentation_embeddings endpoint."""
+    
+    def test_seed_all_success(self):
+        """Test successful re-seeding of documentation."""
+        with patch('src.seeds.documentation.seed_documentation_embeddings') as mock_seed:
+            mock_seed.return_value = None
+            response = client.post("/api/v1/documentation-embeddings/seed-all")
+        
+        assert response.status_code == 200
+        result = response.json()
+        assert result["success"] is True
+        assert "successfully" in result["message"]
+        # Verify seed function was called with user_token=None (no headers)
+        mock_seed.assert_called_once_with(user_token=None)
+    
+    def test_seed_all_with_auth_headers(self):
+        """Test re-seeding with authentication headers."""
+        with patch('src.seeds.documentation.seed_documentation_embeddings') as mock_seed:
+            mock_seed.return_value = None
+            headers = {
+                "X-Forwarded-Access-Token": "test-token",
+                "X-Auth-Request-Access-Token": "oauth-token"
+            }
+            response = client.post("/api/v1/documentation-embeddings/seed-all", headers=headers)
+        
+        assert response.status_code == 200
+        result = response.json()
+        assert result["success"] is True
+        # Verify OAuth2-Proxy token takes priority
+        mock_seed.assert_called_once_with(user_token="oauth-token")
+    
+    def test_seed_all_with_databricks_token_only(self):
+        """Test re-seeding with only Databricks Apps token."""
+        with patch('src.seeds.documentation.seed_documentation_embeddings') as mock_seed:
+            mock_seed.return_value = None
+            headers = {"X-Forwarded-Access-Token": "databricks-token"}
+            response = client.post("/api/v1/documentation-embeddings/seed-all", headers=headers)
+        
+        assert response.status_code == 200
+        result = response.json()
+        assert result["success"] is True
+        # Verify Databricks token is used
+        mock_seed.assert_called_once_with(user_token="databricks-token")
+    
+    def test_seed_all_error(self):
+        """Test error handling during re-seeding."""
+        with patch('src.seeds.documentation.seed_documentation_embeddings') as mock_seed:
+            mock_seed.side_effect = Exception("Seeding error")
+            response = client.post("/api/v1/documentation-embeddings/seed-all")
+        
+        assert response.status_code == 200  # Note: endpoint returns 200 even on error
+        result = response.json()
+        assert result["success"] is False
+        assert "Failed" in result["message"]
+        assert "Seeding error" in result["message"]

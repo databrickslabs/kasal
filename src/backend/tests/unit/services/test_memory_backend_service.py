@@ -239,13 +239,13 @@ class TestMemoryBackendServiceFacade:
         await service.get_databricks_endpoint_status("url", "endpoint", "token")
         mock_sub_services['connection'].get_databricks_endpoint_status.assert_called_once()
         
-        # Test get client with auth
-        mock_sub_services['connection'].get_databricks_client_with_auth.return_value = (
-            MagicMock(), "OBO"
+        # Test get auth token
+        mock_sub_services['connection'].get_databricks_auth_token.return_value = (
+            "token", "OBO"
         )
-        result = await service._get_databricks_client_with_auth("url", "token")
+        result = await service._get_databricks_auth_token("url", "token")
         assert isinstance(result, tuple)
-        mock_sub_services['connection'].get_databricks_client_with_auth.assert_called_once()
+        mock_sub_services['connection'].get_databricks_auth_token.assert_called_once()
     
     @pytest.mark.asyncio
     async def test_all_index_methods_delegate(self, service, mock_sub_services):
@@ -270,6 +270,14 @@ class TestMemoryBackendServiceFacade:
         # Test empty index
         await service.empty_index("url", "index", "endpoint", "short_term", 768, "token")
         mock_sub_services['index'].empty_index.assert_called_once()
+        
+        # Test get index documents
+        await service.get_index_documents("url", "endpoint", "index", "short_term", 1024, 30, "token")
+        mock_sub_services['index'].get_index_documents.assert_called_once()
+        
+        # Test search vectors
+        await service.search_vectors("url", "index", "endpoint", [0.1, 0.2], "short_term", 5, None, "token")
+        mock_sub_services['index'].search_vectors.assert_called_once()
     
     @pytest.mark.asyncio
     async def test_facade_initialization(self, mock_uow):
@@ -285,6 +293,30 @@ class TestMemoryBackendServiceFacade:
         assert hasattr(service, '_index_service')
         assert hasattr(service, '_setup_service')
         assert hasattr(service, '_verification_service')
+    
+    @pytest.mark.asyncio
+    async def test_get_workspace_url(self, service):
+        """Test get_workspace_url method."""
+        with patch.dict('os.environ', {}, clear=True):
+            # Test when no environment variables are set
+            result = await service.get_workspace_url()
+            assert result['workspace_url'] is None
+            assert result['source'] is None
+            assert result['detected'] is False
+        
+        with patch.dict('os.environ', {'DATABRICKS_HOST': 'test.databricks.com'}, clear=True):
+            # Test with DATABRICKS_HOST
+            result = await service.get_workspace_url()
+            assert result['workspace_url'] == 'https://test.databricks.com'
+            assert result['source'] == 'DATABRICKS_HOST'
+            assert result['detected'] is True
+        
+        with patch.dict('os.environ', {'DATABRICKS_WORKSPACE_URL': 'workspace.databricks.com'}, clear=True):
+            # Test with DATABRICKS_WORKSPACE_URL
+            result = await service.get_workspace_url()
+            assert result['workspace_url'] == 'https://workspace.databricks.com'
+            assert result['source'] == 'DATABRICKS_WORKSPACE_URL'
+            assert result['detected'] is True
     
     def test_facade_preserves_api_compatibility(self):
         """Test that facade has all the expected public methods."""
@@ -308,7 +340,7 @@ class TestMemoryBackendServiceFacade:
             # Connection
             'test_databricks_connection',
             'get_databricks_endpoint_status',
-            '_get_databricks_client_with_auth',
+            '_get_databricks_auth_token',
             
             # Index
             'create_databricks_index',
@@ -317,12 +349,17 @@ class TestMemoryBackendServiceFacade:
             'delete_databricks_endpoint',
             'get_index_info',
             'empty_index',
+            'get_index_documents',
+            'search_vectors',
             
             # Setup
             'one_click_databricks_setup',
             
             # Verification
-            'verify_databricks_resources'
+            'verify_databricks_resources',
+            
+            # Environment
+            'get_workspace_url'
         ]
         
         # Check all methods exist

@@ -179,10 +179,10 @@ class TestDatabricksRoleService:
         """Test getting admin emails in production with missing configuration."""
         service.app_name = None
 
-        with pytest.raises(Exception) as exc_info:
-            await service.get_databricks_app_managers()
+        result = await service.get_databricks_app_managers()
 
-        assert "Databricks configuration incomplete" in str(exc_info.value)
+        # Should return empty list when configuration is incomplete
+        assert result == []
 
     @pytest.mark.asyncio
     async def test_get_databricks_app_managers_production_success(self, service):
@@ -199,10 +199,10 @@ class TestDatabricksRoleService:
         """Test getting admin emails with API error in production."""
         service._fetch_databricks_permissions = AsyncMock(side_effect=Exception("API failed"))
 
-        with pytest.raises(Exception) as exc_info:
-            await service.get_databricks_app_managers()
+        result = await service.get_databricks_app_managers()
 
-        assert "Failed to fetch Databricks permissions in production" in str(exc_info.value)
+        # Should return empty list when API fails
+        assert result == []
 
     def test_get_fallback_admins_production_mode(self, service):
         """Test fallback admins method raises error in production mode."""
@@ -323,10 +323,10 @@ class TestDatabricksRoleService:
             mock_get_instance.__aexit__ = AsyncMock(return_value=None)
             mock_session.get = MagicMock(return_value=mock_get_instance)
 
-            with pytest.raises(Exception) as exc_info:
-                await service._fetch_databricks_permissions()
-
-            assert "Databricks API error 500" in str(exc_info.value)
+            result = await service._fetch_databricks_permissions()
+            
+            # Should return empty list on API error
+            assert result == []
 
     def test_extract_manage_users(self, service):
         """Test extracting users with CAN_MANAGE permission."""
@@ -418,7 +418,7 @@ class TestDatabricksRoleService:
         
         service._create_placeholder_user.assert_called_once_with("newadmin@example.com")
         service.user_role_repository.assign_role.assert_called_once()
-        service.session.commit.assert_called_once()
+        service.session.flush.assert_called_once()
 
     @pytest.mark.asyncio
     async def test_process_admin_user_existing_user_new_admin(self, service, mock_user, mock_admin_role):

@@ -665,7 +665,7 @@ class TestCrewPreparation:
             result = await crew_preparation._create_crew()
             
             assert result is True
-            mock_logger.info.assert_any_call("Found embedder configuration: {'provider': 'openai', 'config': {'model': 'text-embedding-ada-002'}}")
+            mock_logger.info.assert_any_call("Found valid embedder configuration: {'provider': 'openai', 'config': {'model': 'text-embedding-ada-002'}}")
     
     @pytest.mark.asyncio
     async def test_create_crew_openai_api_key_in_databricks(self, crew_preparation):

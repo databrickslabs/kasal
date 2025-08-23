@@ -219,7 +219,7 @@ class TestDatabricksService:
             result = DatabricksService.setup_endpoint(mock_config)
             
             assert result is True
-            assert os.environ.get("DATABRICKS_API_BASE") == "https://test.databricks.com"
+            assert os.environ.get("DATABRICKS_API_BASE") == "https://test.databricks.com/serving-endpoints"
             assert os.environ.get("DATABRICKS_ENDPOINT") == "https://test.databricks.com/serving-endpoints"
     
     def test_setup_endpoint_missing_config(self):
@@ -450,7 +450,7 @@ class TestDatabricksService:
             result = DatabricksService.setup_endpoint(mock_config)
             
             assert result is True
-            assert os.environ.get("DATABRICKS_API_BASE") == "https://test.databricks.com"
+            assert os.environ.get("DATABRICKS_API_BASE") == "https://test.databricks.com/serving-endpoints"
             assert os.environ.get("DATABRICKS_ENDPOINT") == "https://test.databricks.com/serving-endpoints"
     
     def test_setup_endpoint_already_with_serving_endpoints(self):

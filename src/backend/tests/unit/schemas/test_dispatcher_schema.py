@@ -22,6 +22,7 @@ class TestIntentType:
             "generate_agent",
             "generate_task", 
             "generate_crew",
+            "generate_plan",  # Added to match the actual enum
             "execute_crew",
             "configure_crew",
             "conversation",
@@ -35,6 +36,7 @@ class TestIntentType:
         assert IntentType.GENERATE_AGENT == "generate_agent"
         assert IntentType.GENERATE_TASK == "generate_task"
         assert IntentType.GENERATE_CREW == "generate_crew"
+        assert IntentType.GENERATE_PLAN == "generate_plan"  # Added to match the actual enum
         assert IntentType.EXECUTE_CREW == "execute_crew"
         assert IntentType.CONFIGURE_CREW == "configure_crew"
         assert IntentType.CONVERSATION == "conversation"
@@ -49,7 +51,7 @@ class TestIntentType:
     def test_intent_type_iteration(self):
         """Test iterating over IntentType enum."""
         intent_list = list(IntentType)
-        assert len(intent_list) == 7
+        assert len(intent_list) == 8  # Updated count to include GENERATE_PLAN
         assert IntentType.GENERATE_AGENT in intent_list
         assert IntentType.EXECUTE_CREW in intent_list
         assert IntentType.UNKNOWN in intent_list

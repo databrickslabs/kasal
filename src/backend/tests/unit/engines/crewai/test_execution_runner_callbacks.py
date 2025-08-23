@@ -95,7 +95,8 @@ class TestExecutionRunnerCallbackIntegration:
             mock_create_callbacks.assert_called_once_with(
                 job_id=execution_id,
                 config=sample_config,
-                group_context=mock_group_context
+                group_context=mock_group_context,
+                crew=mock_crew
             )
             
             # Verify callbacks were set on crew instance
