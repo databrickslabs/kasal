@@ -28,6 +28,7 @@ import CloudIcon from '@mui/icons-material/Cloud';
 import EngineeringIcon from '@mui/icons-material/Engineering';
 import CloseIcon from '@mui/icons-material/Close';
 import MemoryIcon from '@mui/icons-material/Memory';
+import StorageIcon from '@mui/icons-material/Storage';
 // import SecurityIcon from '@mui/icons-material/Security';
 import { useTranslation } from 'react-i18next';
 import { LanguageService } from '../../api/LanguageService';
@@ -42,8 +43,12 @@ import DatabricksConfiguration from './DatabricksConfiguration';
 import MCPConfiguration from './MCP/MCPConfiguration';
 import EnginesConfiguration from './Engines';
 import { DatabricksOneClickSetup } from '../MemoryBackend';
+import DatabaseManagement from './DatabaseManagement';
 // import SecurityManagement from './SecurityManagement';
 import { LANGUAGES } from '../../config/i18n/config';
+import DatabaseManagementService from '../../api/DatabaseManagementService';
+import DatabricksEnvironmentService from '../../api/DatabricksEnvironmentService';
+import { getDatabaseManagementPermission } from '../../app/__tests__/App';
 
 interface ConfigurationProps {
   onClose?: () => void;
@@ -92,9 +97,15 @@ function Configuration({ onClose }: ConfigurationProps): JSX.Element {
     severity: 'success' as 'success' | 'error',
   });
   const [activeSection, setActiveSection] = useState(0);
+  // Initialize with cached permission if available, otherwise default to false
+  const cachedPermission = getDatabaseManagementPermission();
+  const [showDatabaseManagement, setShowDatabaseManagement] = useState(
+    cachedPermission.checked ? cachedPermission.hasPermission : false
+  );
+  const [isDatabricksApps, setIsDatabricksApps] = useState(false);
 
-  // Navigation items
-  const navItems: NavItem[] = [
+  // Build navigation items dynamically based on permissions
+  const baseNavItems: NavItem[] = [
     {
       label: t('configuration.general.title', { defaultValue: 'General' }),
       icon: <TranslateIcon fontSize="small" />,
@@ -125,39 +136,86 @@ function Configuration({ onClose }: ConfigurationProps): JSX.Element {
       icon: <ModelIcon fontSize="small" />,
       index: 4
     },
-    {
+    // Only show Databricks tab if NOT in Databricks Apps environment
+    ...(isDatabricksApps ? [] : [{
       label: t('configuration.databricks.tab', { defaultValue: 'Databricks' }),
       icon: <KeyIcon fontSize="small" />,
       index: 5
-    },
+    }]),
     {
       label: t('configuration.apiKeys.tab', { defaultValue: 'API Keys' }),
       icon: <KeyIcon fontSize="small" />,
-      index: 6
+      index: isDatabricksApps ? 5 : 6
     },
     {
       label: t('configuration.tools.tab', { defaultValue: 'Tools' }),
       icon: <BuildIcon fontSize="small" />,
-      index: 7
+      index: isDatabricksApps ? 6 : 7
     },
     {
       label: t('configuration.objects.tab', { defaultValue: 'Object Management' }),
       icon: <CodeIcon fontSize="small" />,
-      index: 8
+      index: isDatabricksApps ? 7 : 8
     },
     {
       label: t('configuration.prompts.tab', { defaultValue: 'Prompts' }),
       icon: <TextFormatIcon fontSize="small" />,
-      index: 9
+      index: isDatabricksApps ? 8 : 9
     },
   ];
+
+  // Conditionally add Database Management based on permission
+  // This needs to be reactive - recalculate when showDatabaseManagement or isDatabricksApps changes
+  const navItems: NavItem[] = React.useMemo(() => {
+    const items = [...baseNavItems];
+    if (showDatabaseManagement) {
+      items.push({
+        label: t('configuration.database.tab', { defaultValue: 'Database Management' }),
+        icon: <StorageIcon fontSize="small" />,
+        index: isDatabricksApps ? 9 : 10
+      });
+    }
+    return items;
+  }, [showDatabaseManagement, isDatabricksApps, t]); // Recalculate when permission or environment changes
 
   useEffect(() => {
     const loadConfig = async () => {
       try {
+        // Load language configuration
         const languageService = LanguageService.getInstance();
         const currentLang = await languageService.getCurrentLanguage();
         setCurrentLanguage(currentLang);
+        
+        // Check if we're in Databricks Apps environment
+        const envInfo = await DatabricksEnvironmentService.getEnvironmentInfo();
+        setIsDatabricksApps(envInfo.is_databricks_apps);
+        if (envInfo.is_databricks_apps) {
+          console.log('Running in Databricks Apps environment - Databricks configuration tab hidden');
+        }
+        
+        // Check Database Management permission (only if not already cached)
+        const cached = getDatabaseManagementPermission();
+        if (cached.checked) {
+          // Use cached value - no need to call API again
+          setShowDatabaseManagement(cached.hasPermission);
+          if (!cached.hasPermission) {
+            console.log('Database Management hidden (cached):', cached.hasPermission);
+          }
+        } else {
+          // Not cached yet, make the API call
+          try {
+            const permissionResult = await DatabaseManagementService.checkPermission();
+            setShowDatabaseManagement(permissionResult.has_permission);
+            
+            if (!permissionResult.has_permission) {
+              console.log('Database Management hidden:', permissionResult.reason);
+            }
+          } catch (permError) {
+            // If permission check fails, default to true for backward compatibility
+            console.error('Failed to check database management permission:', permError);
+            setShowDatabaseManagement(true);
+          }
+        }
       } catch (error) {
         console.error('Error loading configuration:', error);
       }
@@ -375,26 +433,34 @@ function Configuration({ onClose }: ConfigurationProps): JSX.Element {
             <ModelConfiguration />
           </ContentPanel>
 
-          <ContentPanel value={activeSection} index={5}>
-            <DatabricksConfiguration onSaved={onClose} />
-          </ContentPanel>
+          {/* Only show Databricks Configuration if NOT in Databricks Apps */}
+          {!isDatabricksApps && (
+            <ContentPanel value={activeSection} index={5}>
+              <DatabricksConfiguration onSaved={onClose} />
+            </ContentPanel>
+          )}
 
-          <ContentPanel value={activeSection} index={6}>
+          <ContentPanel value={activeSection} index={isDatabricksApps ? 5 : 6}>
             <APIKeys />
           </ContentPanel>
 
-          <ContentPanel value={activeSection} index={7}>
+          <ContentPanel value={activeSection} index={isDatabricksApps ? 6 : 7}>
             <ToolForm />
           </ContentPanel>
 
-          <ContentPanel value={activeSection} index={8}>
+          <ContentPanel value={activeSection} index={isDatabricksApps ? 7 : 8}>
             <ObjectManagement />
           </ContentPanel>
 
-          <ContentPanel value={activeSection} index={9}>
+          <ContentPanel value={activeSection} index={isDatabricksApps ? 8 : 9}>
             <PromptConfiguration />
           </ContentPanel>
 
+          {showDatabaseManagement && (
+            <ContentPanel value={activeSection} index={isDatabricksApps ? 9 : 10}>
+              <DatabaseManagement />
+            </ContentPanel>
+          )}
 
         </Box>
       </Box>

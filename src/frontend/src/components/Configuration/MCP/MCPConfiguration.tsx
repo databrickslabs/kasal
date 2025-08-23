@@ -101,6 +101,7 @@ const ServerEditDialog: React.FC<ServerEditDialogProps> = ({
 }) => {
   const { t } = useTranslation();
   const [editedServer, setEditedServer] = useState<MCPServerConfig | null>(server);
+  const [originalApiKey, setOriginalApiKey] = useState<string>('');
   const [testingConnection, setTestingConnection] = useState(false);
   const [connectionTestResult, setConnectionTestResult] = useState<{
     tested: boolean;
@@ -110,6 +111,17 @@ const ServerEditDialog: React.FC<ServerEditDialogProps> = ({
 
   useEffect(() => {
     setEditedServer(server);
+    // Store the original API key for comparison
+    if (server) {
+      console.log('Edit Dialog Debug - Loading server:', {
+        serverId: server.id,
+        serverName: server.name,
+        apiKey: server.api_key,
+        apiKeyLength: server.api_key?.length || 0,
+        isNew
+      });
+      setOriginalApiKey(server.api_key || '');
+    }
     // Reset connection test result when dialog opens/closes or server changes
     setConnectionTestResult({ tested: false, success: false, message: '' });
   }, [server]);
@@ -148,7 +160,26 @@ const ServerEditDialog: React.FC<ServerEditDialogProps> = ({
 
   const handleSave = () => {
     if (editedServer) {
-      onSave(editedServer);
+      // For existing servers, only include API key if it has been changed
+      const serverToSave = { ...editedServer };
+      
+      console.log('Save Debug:', {
+        isNew,
+        currentApiKey: editedServer.api_key,
+        originalApiKey,
+        areEqual: editedServer.api_key === originalApiKey,
+        apiKeyChanged: !isNew && editedServer.api_key !== originalApiKey
+      });
+      
+      if (!isNew && editedServer.api_key === originalApiKey) {
+        // API key hasn't changed, remove it from the update payload
+        console.log('Removing API key from update payload - unchanged');
+        delete (serverToSave as any).api_key;
+      } else if (!isNew) {
+        console.log('Including API key in update payload - changed');
+      }
+      
+      onSave(serverToSave);
       onClose();
     }
   };
@@ -251,17 +282,16 @@ const ServerEditDialog: React.FC<ServerEditDialogProps> = ({
               <InputLabel id="server-type-label">Server Type</InputLabel>
               <Select
                 labelId="server-type-label"
-                value={editedServer.server_type}
+                value={editedServer.server_type || 'streamable'}
                 label="Server Type"
                 onChange={handleSelectChange('server_type')}
               >
-                <MenuItem value="sse">SSE (Server-Sent Events)</MenuItem>
                 <MenuItem value="streamable">Streamable HTTP</MenuItem>
               </Select>
             </FormControl>
           </Grid>
           
-          {(editedServer.server_type === 'sse' || editedServer.server_type === 'streamable') && (
+          {editedServer.server_type === 'streamable' && (
             <Grid item xs={12} md={6}>
               <FormControl fullWidth>
                 <InputLabel id="auth-type-label">Authentication Type</InputLabel>
@@ -278,7 +308,7 @@ const ServerEditDialog: React.FC<ServerEditDialogProps> = ({
             </Grid>
           )}
           
-          {(editedServer.server_type === 'sse' || editedServer.server_type === 'streamable') && editedServer.auth_type !== 'databricks_obo' && (
+          {editedServer.server_type === 'streamable' && editedServer.auth_type !== 'databricks_obo' && (
             <Grid item xs={12} md={editedServer.auth_type === 'databricks_obo' ? 12 : 6}>
               <TextField
                 label={t('configuration.mcp.apiKey', { defaultValue: 'API Key' })}
@@ -414,7 +444,7 @@ const ServerEditDialog: React.FC<ServerEditDialogProps> = ({
           disabled={
             testingConnection || 
             !editedServer.server_url?.trim() || 
-            ((editedServer.server_type === 'sse' || editedServer.server_type === 'streamable') && 
+            (editedServer.server_type === 'streamable' && 
              editedServer.auth_type !== 'databricks_obo' && 
              !editedServer.api_key?.trim())
           }
@@ -520,7 +550,7 @@ const MCPConfiguration: React.FC = () => {
   };
 
   const handleServerToggle = (serverId: string) => async (
-    event: React.ChangeEvent<HTMLInputElement>
+    _event: React.ChangeEvent<HTMLInputElement>
   ) => {
     try {
       const mcpService = MCPService.getInstance();
@@ -539,10 +569,32 @@ const MCPConfiguration: React.FC = () => {
     }
   };
 
-  const handleEditServer = (server: MCPServerConfig) => {
-    setCurrentServer(server);
-    setIsNewServer(false);
-    setEditDialogOpen(true);
+  const handleEditServer = async (server: MCPServerConfig) => {
+    try {
+      // Fetch full server details with decrypted API key
+      const mcpService = MCPService.getInstance();
+      const fullServer = await mcpService.getMcpServer(server.id);
+      
+      console.log('Edit server - fetched full details:', {
+        serverId: server.id,
+        listApiKey: server.api_key,
+        fullApiKey: fullServer?.api_key,
+        fullApiKeyLength: fullServer?.api_key?.length || 0
+      });
+      
+      if (fullServer) {
+        setCurrentServer(fullServer);
+        setIsNewServer(false);
+        setEditDialogOpen(true);
+      }
+    } catch (error) {
+      console.error('Error fetching server details for edit:', error);
+      setNotification({
+        open: true,
+        message: error instanceof Error ? error.message : 'Failed to load server details',
+        severity: 'error',
+      });
+    }
   };
 
   const handleAddServer = () => {
@@ -698,9 +750,9 @@ const MCPConfiguration: React.FC = () => {
                           {server.name}
                         </Typography>
                         <Chip 
-                          label={server.server_type === 'streamable' ? 'STREAMABLE' : 'SSE'} 
+                          label="STREAMABLE" 
                           size="small" 
-                          color={server.server_type === 'streamable' ? 'secondary' : 'primary'} 
+                          color="secondary" 
                           variant="outlined"
                           sx={{ ml: 1.5, fontSize: '0.7rem', height: 20 }}
                         />
