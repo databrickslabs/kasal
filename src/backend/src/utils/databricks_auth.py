@@ -50,10 +50,14 @@ class DatabricksAuth:
             if not self._use_databricks_apps or not self._workspace_host:
                 try:
                     # Get databricks configuration from database
+                    # Use a fresh UnitOfWork to avoid event loop issues
                     from src.services.databricks_service import DatabricksService
                     from src.core.unit_of_work import UnitOfWork
                     
-                    async with UnitOfWork() as uow:
+                    # Create a new UnitOfWork with proper async context
+                    uow = UnitOfWork()
+                    try:
+                        await uow.__aenter__()
                         service = await DatabricksService.from_unit_of_work(uow)
                         
                         # Get workspace config
@@ -73,6 +77,9 @@ class DatabricksAuth:
                             
                         except Exception as e:
                             logger.warning(f"Failed to get databricks config from database: {e}")
+                    finally:
+                        # Make sure to properly close the UnitOfWork
+                        await uow.__aexit__(None, None, None)
                             
                 except Exception as e:
                     logger.warning(f"Could not load database configuration: {e}")
@@ -84,7 +91,7 @@ class DatabricksAuth:
                 return True
             
             # Try SDK auto-detection as fallback if not using apps
-            if not self._workspace_host and not self._use_databricks_apps:
+            if not self._workspace_host:
                 try:
                     sdk_config = Config()
                     if sdk_config.host:
@@ -93,12 +100,18 @@ class DatabricksAuth:
                 except Exception as e:
                     logger.debug(f"SDK auto-detection failed: {e}")
                 
-                # Get API token (only if not using Databricks Apps)
-                if not self._use_databricks_apps:
+            # Get API token (only if not using Databricks Apps)
+            if not self._use_databricks_apps and not self._api_token:
+                try:
+                    from src.services.api_keys_service import ApiKeysService
+                    from src.core.unit_of_work import UnitOfWork
+                    
+                    # Create a new UnitOfWork for API key retrieval
+                    api_uow = UnitOfWork()
                     try:
-                        from src.services.api_keys_service import ApiKeysService
-                        api_service = await ApiKeysService.from_unit_of_work(uow)
-                        
+                        await api_uow.__aenter__()
+                        api_service = await ApiKeysService.from_unit_of_work(api_uow)
+                    
                         # Try to get DATABRICKS_TOKEN or DATABRICKS_API_KEY
                         for key_name in ["DATABRICKS_TOKEN", "DATABRICKS_API_KEY"]:
                             api_key = await api_service.find_by_name(key_name)
@@ -107,19 +120,21 @@ class DatabricksAuth:
                                 self._api_token = EncryptionUtils.decrypt_value(api_key.encrypted_value)
                                 logger.info(f"Loaded API token from {key_name}")
                                 break
-                        
+                    
                         if not self._api_token:
                             # Try environment variables as fallback
                             self._api_token = os.environ.get("DATABRICKS_TOKEN") or os.environ.get("DATABRICKS_API_KEY")
                             if self._api_token:
                                 logger.info("Using API token from environment variables")
                             else:
-                                logger.error("No Databricks API token found")
-                                return False
-                                
-                    except Exception as e:
-                        logger.error(f"Failed to get API token: {e}")
-                        return False
+                                logger.warning("No Databricks API token found - authentication may fail")
+                    finally:
+                        # Make sure to properly close the UnitOfWork
+                        await api_uow.__aexit__(None, None, None)
+                            
+                except Exception as e:
+                    logger.error(f"Failed to get API token: {e}")
+                    # Don't return False here - let it continue and fail later if token is actually needed
             
             self._config_loaded = True
             return True
@@ -243,6 +258,11 @@ class DatabricksAuth:
     async def _get_pat_headers(self, mcp_server_url: str = None) -> Tuple[Optional[Dict[str, str]], Optional[str]]:
         """Get PAT-based authentication headers (legacy)."""
         try:
+            # Make sure we have a token first
+            if not self._api_token:
+                logger.error("No API token available")
+                return None, "No Databricks API token configured"
+            
             # Validate token with a simple API call
             if not await self._validate_token():
                 return None, "Invalid or expired Databricks token"
@@ -379,6 +399,12 @@ class DatabricksAuth:
     def get_workspace_host(self) -> Optional[str]:
         """Get the workspace host."""
         return self._workspace_host
+    
+    async def get_workspace_url(self) -> Optional[str]:
+        """Get the workspace URL (async version of get_workspace_host)."""
+        if not self._config_loaded:
+            await self._load_config()
+        return self._workspace_host
 
     def get_api_token(self) -> Optional[str]:
         """Get the API token."""
@@ -418,7 +444,18 @@ def get_databricks_auth_headers_sync(host: str = None, mcp_server_url: str = Non
     """
     try:
         import asyncio
-        return asyncio.run(get_databricks_auth_headers(host, mcp_server_url, user_token))
+        
+        # Check if there's already a running event loop
+        try:
+            loop = asyncio.get_running_loop()
+            # If we're already in an async context, we can't use asyncio.run()
+            # This shouldn't happen in a sync function, but let's handle it gracefully
+            logger.warning("Sync function called from async context - returning error")
+            return None, "Cannot call sync version from async context"
+        except RuntimeError:
+            # No running loop, safe to create one
+            return asyncio.run(get_databricks_auth_headers(host, mcp_server_url, user_token))
+            
     except Exception as e:
         logger.error(f"Error in sync auth headers: {e}")
         return None, str(e)
@@ -467,8 +504,8 @@ def setup_environment_variables() -> bool:
                 
             if _databricks_auth._workspace_host:
                 os.environ["DATABRICKS_HOST"] = _databricks_auth._workspace_host
-                # Also set API_BASE for LiteLLM compatibility
-                os.environ["DATABRICKS_API_BASE"] = _databricks_auth._workspace_host
+                # Also set API_BASE for LiteLLM compatibility - must include /serving-endpoints
+                os.environ["DATABRICKS_API_BASE"] = f"{_databricks_auth._workspace_host}/serving-endpoints"
                 
             return True
         
