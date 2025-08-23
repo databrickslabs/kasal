@@ -6,6 +6,10 @@ from datetime import datetime
 from contextlib import asynccontextmanager
 from sqlalchemy import text
 
+# CRITICAL: Set USE_NULLPOOL BEFORE any database imports to prevent asyncpg connection pool issues
+# This must be done before importing any modules that might create database connections
+os.environ["USE_NULLPOOL"] = "true"
+
 from fastapi import FastAPI, HTTPException, Request, Depends
 from fastapi.middleware.cors import CORSMiddleware
 from starlette.middleware.base import BaseHTTPMiddleware
@@ -16,6 +20,7 @@ from src.core.logger import LoggerManager
 from src.db.session import get_db, async_session_factory
 from src.services.scheduler_service import SchedulerService
 from src.services.execution_cleanup_service import ExecutionCleanupService
+from src.utils.databricks_url_utils import DatabricksURLUtils
 
 # Set up basic logging initially, will be enhanced in lifespan
 logging.basicConfig(
@@ -52,6 +57,13 @@ async def lifespan(app: FastAPI):
     
     system_logger = logger_manager.system
     system_logger.info(f"Starting application... Logs will be stored in: {log_dir}")
+    
+    # Validate and fix Databricks environment variables early in startup
+    try:
+        system_logger.info("Validating Databricks environment configuration...")
+        DatabricksURLUtils.validate_and_fix_environment()
+    except Exception as e:
+        system_logger.warning(f"Error validating Databricks environment: {e}")
     
     # Import needed for DB init
     # pylint: disable=unused-import,import-outside-toplevel
