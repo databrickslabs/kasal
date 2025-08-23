@@ -10,7 +10,20 @@ import ShortcutsCircle from '../../components/ShortcutsCircle';
 import { LanguageService } from '../../api/LanguageService';
 import { WorkflowTest } from '../../components/WorkflowTest';
 import { Documentation } from '../../components/Documentation';
+import DatabaseManagementService from '../../api/DatabaseManagementService';
 import '../../config/i18n/config';
+
+// Cache for Database Management permission to avoid repeated API calls
+let databaseManagementPermissionCache: {
+  hasPermission: boolean;
+  checked: boolean;
+} = {
+  hasPermission: false,
+  checked: false
+};
+
+// Export getter for the cache
+export const getDatabaseManagementPermission = () => databaseManagementPermissionCache;
 
 function App() {
   useEffect(() => {
@@ -18,6 +31,25 @@ function App() {
       // Initialize language
       const languageService = LanguageService.getInstance();
       await languageService.initializeLanguage();
+      
+      // Check Database Management permission early and cache it
+      if (!databaseManagementPermissionCache.checked) {
+        try {
+          const permissionResult = await DatabaseManagementService.checkPermission();
+          databaseManagementPermissionCache = {
+            hasPermission: permissionResult.has_permission,
+            checked: true
+          };
+          console.log('Database Management permission cached:', permissionResult.has_permission);
+        } catch (error) {
+          console.error('Failed to check database management permission:', error);
+          // Default to true on error for backward compatibility
+          databaseManagementPermissionCache = {
+            hasPermission: true,
+            checked: true
+          };
+        }
+      }
     };
 
     initialize();
