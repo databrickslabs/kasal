@@ -248,6 +248,13 @@ For agents include:
     ]
 }
 
+TASK LIMIT RULES:
+1. CRITICAL: Generate a MAXIMUM of 6 total tasks for the entire crew
+2. Each agent should be assigned 1-3 tasks (never more than 3 tasks per agent)
+3. If the user's request seems to need more than 6 tasks, focus on the most important core tasks
+4. Combine related sub-tasks into single comprehensive tasks when necessary
+5. For simple requests, use fewer tasks (2-4 tasks is often sufficient)
+
 Ensure:
 1. Each agent has a clear role and purpose
 2. Each task is well-defined with clear outputs
@@ -257,20 +264,21 @@ Ensure:
 6. CRITICAL: ONLY use tools that are explicitly listed in the provided tools array. Do not suggest or use any additional tools that are not in the provided list
 7. Return the name of the tool exactly as it is in the tools array
 8. If you assign SerperDevTool to an agent, you MUST also assign ScrapeWebsiteTool to that same agent
-9. IMPORTANT: Each agent should be assigned a MAXIMUM of 3 tasks. If more tasks are needed, distribute them among multiple agents with appropriate roles
+9. The total number of tasks MUST NOT exceed 6 tasks
 
-REMINDER: Your output must be PURE, VALID JSON with no additional text. Double-check your response to ensure it is properly formatted JSON."""
+REMINDER: Your output must be PURE, VALID JSON with no additional text. Double-check your response to ensure it is properly formatted JSON and contains NO MORE THAN 6 TASKS."""
 
 DETECT_INTENT_TEMPLATE = """You are an intelligent intent detection system for a CrewAI workflow designer.
 
 Analyze the user's message and determine their intent from these categories:
 
-1. **generate_task**: User wants to create a single task or action. Look for:
-   - Action words: find, search, analyze, create, write, calculate, etc.
-   - Task descriptions: "find the best flight", "analyze this data", "write a report"
-   - Instructions that could be automated: "get information about X", "compare Y and Z"
-   - Casual requests that imply a task: "an order find...", "I need to...", "help me..."
-   - Commands or directives: "find me", "get the", "calculate", "determine"
+1. **generate_task**: User wants to create a SINGLE task or action. Look for:
+   - Single action words: find, search, analyze, create, write, calculate, etc.
+   - Simple task descriptions: "find the best flight", "analyze this data", "write a report"
+   - Instructions for one specific action: "get information about X", "compare Y and Z"
+   - Casual requests that imply a single task: "an order find...", "I need to...", "help me..."
+   - Commands or directives for one action: "find me", "get the", "calculate", "determine"
+   - IMPORTANT: If the message contains "create a plan" or "plan that", it is NOT generate_task
 
 2. **generate_agent**: User wants to create a single agent with specific capabilities:
    - Explicit mentions of "agent", "assistant", "bot"
@@ -281,26 +289,42 @@ Analyze the user's message and determine their intent from these categories:
    - Multiple roles mentioned: "team of agents", "research and writing team"
    - Complex workflows: "research then write then review"
    - Collaborative language: "agents working together", "workflow with multiple steps"
+   - Multiple related tasks that need coordination
 
-4. **configure_crew**: User wants to configure workflow settings (LLM, max RPM, tools):
+4. **generate_plan**: User wants to create a plan (similar to crew - with agents and tasks):
+   - CRITICAL: Any message containing "create a plan", "build a plan", "design a plan", "plan that", "plan to"
+   - Strategic language: "strategy", "roadmap", "blueprint", "framework", "architecture"
+   - Complex multi-step operations: "get all", "collect everything", "comprehensive", "complete analysis"
+   - Planning for future actions: "plan for analyzing", "strategy to collect", "approach to gather"
+   - NOTE: Plans are functionally identical to crews - they create multiple agents with tasks
+
+5. **execute_crew**: User wants to execute/run an existing crew:
+   - Execution commands: "execute crew", "run crew", "start crew", "ec"
+   - Action words with crew context: "execute", "run", "start", "launch", "begin"
+   - Short commands: "ec" (shorthand for execute crew)
+
+6. **configure_crew**: User wants to configure workflow settings (LLM, max RPM, tools):
    - Configuration requests: "configure crew", "setup llm", "change model", "select tools"
    - Settings modifications: "update max rpm", "set llm model", "modify tools"
    - Preference adjustments: "choose different model", "adjust settings", "pick tools"
    - Direct mentions: "llm", "maxr", "max rpm", "tools", "config", "settings"
 
-5. **conversation**: User is asking questions, seeking information, or having general conversation:
+7. **conversation**: User is asking questions, seeking information, or having general conversation:
    - Questions about the system: "how does this work?", "what can you do?"
    - Greetings: "hello", "hi", "good morning"
    - General questions: "what is...", "explain...", "why..."
    - Status inquiries: "what's the status of...", "show me..."
 
-6. **unknown**: Unclear or ambiguous messages that don't fit the above categories.
+8. **unknown**: Unclear or ambiguous messages that don't fit the above categories.
 
-**Key Insight**: Many task requests are phrased conversationally. Look for ACTION WORDS and GOALS rather than formal task language.
+**CRITICAL RULES**:
+1. If the message contains "create a plan", "plan that", "plan to", or "build a plan", it is ALWAYS generate_plan, NOT generate_task
+2. If the message describes getting "all" of something or multiple complex steps, prefer generate_plan over generate_task
+3. Plans and crews are functionally equivalent - both create agent/task workflows
 
 Return a JSON object with:
 {
-    "intent": "generate_task" | "generate_agent" | "generate_crew" | "configure_crew" | "conversation" | "unknown",
+    "intent": "generate_task" | "generate_agent" | "generate_crew" | "generate_plan" | "execute_crew" | "configure_crew" | "conversation" | "unknown",
     "confidence": 0.0-1.0,
     "extracted_info": {
         "action_words": ["list", "of", "detected", "action", "words"],
@@ -320,6 +344,13 @@ Examples:
 - "analyze this sales data and create a report" -> generate_task
 - "Build a team of agents to handle customer support" -> generate_crew
 - "Create a research agent and a writer agent with tasks for each" -> generate_crew
+- "Create a plan that will get all the news from switzerland" -> generate_plan
+- "Plan to collect and analyze customer feedback" -> generate_plan
+- "Build a plan for market analysis" -> generate_plan
+- "Create a plan with multiple agents" -> generate_plan
+- "execute crew" -> execute_crew
+- "run crew" -> execute_crew
+- "ec" -> execute_crew
 - "configure crew" -> configure_crew
 - "setup llm" -> configure_crew
 - "change model" -> configure_crew

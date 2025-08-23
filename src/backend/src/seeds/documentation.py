@@ -20,8 +20,10 @@ from src.core.unit_of_work import UnitOfWork
 # Import OpenAI SDK at module level for mock_create_embedding
 from openai import AsyncOpenAI, OpenAI
 
-# Configure logging - use a consistent logger name
-logger = logging.getLogger("documentation")
+# Configure logging - use memory logger for documentation embeddings
+from src.core.logger import LoggerManager
+logger_manager = LoggerManager()
+logger = logger_manager.databricks_vector_search
 
 # Documentation URLs
 DOCS_URLS = [
@@ -141,7 +143,7 @@ async def check_existing_documentation() -> tuple[bool, int]:
     Returns:
         tuple: (exists: bool, count: int) - Whether records exist and how many
     """
-    logger.info("Checking for existing documentation embeddings...")
+    logger.info("📋 CHECKING FOR EXISTING DOCUMENTATION EMBEDDINGS...")
     
     try:
         from src.services.memory_backend_service import MemoryBackendService
@@ -175,133 +177,101 @@ async def check_existing_documentation() -> tuple[bool, int]:
                     index_name = getattr(db_config, 'document_index', None)
                 
                 if index_name:
-                    # Check if documents already exist in Databricks directly
+                    # Check if documents already exist in Databricks using the service layer
                     logger.info(f"Checking for existing documents in Databricks index: {index_name}")
                     
                     try:
-                        # Create a temporary DatabricksVectorStorage instance to check stats
-                        from src.engines.crewai.memory.databricks_vector_storage import DatabricksVectorStorage
+                        # Use the DatabricksIndexService to check index status (proper architecture pattern)
+                        from src.services.databricks_index_service import DatabricksIndexService
                         
                         # Get endpoint name
                         endpoint_name = (db_config.get('document_endpoint_name') or db_config.get('endpoint_name') 
                                        if isinstance(db_config, dict) 
                                        else getattr(db_config, 'document_endpoint_name', None) or getattr(db_config, 'endpoint_name', None))
                         
-                        # Create storage instance
-                        try:
-                            # First, check if the index exists and is ready without blocking
-                            from databricks.vector_search.client import VectorSearchClient
-                            
-                            # Create client
-                            client_kwargs = {}
-                            if isinstance(db_config, dict):
-                                client_kwargs['workspace_url'] = db_config.get('workspace_url')
-                                if db_config.get('personal_access_token'):
-                                    client_kwargs['personal_access_token'] = db_config.get('personal_access_token')
-                            else:
-                                client_kwargs['workspace_url'] = getattr(db_config, 'workspace_url', None)
-                                if getattr(db_config, 'personal_access_token', None):
-                                    client_kwargs['personal_access_token'] = getattr(db_config, 'personal_access_token', None)
-                            
-                            client = VectorSearchClient(**{k: v for k, v in client_kwargs.items() if v is not None})
-                            
-                            # Check index status without waiting
-                            try:
-                                index = client.get_index(endpoint_name=endpoint_name, index_name=index_name)
-                                index_info = index.describe()
-                                
-                                # Check if index is ready
-                                is_ready = False
-                                if isinstance(index_info, dict):
-                                    status = index_info.get('status', {})
-                                    if isinstance(status, dict):
-                                        is_ready = status.get('ready', False)
-                                        detailed_state = status.get('detailed_state', '')
-                                        if not is_ready and 'PROVISIONING' in detailed_state:
-                                            logger.info(f"Index {index_name} is still provisioning (state: {detailed_state})")
-                                            logger.info("Skipping documentation seeding until index is ready")
-                                            return False, 0
-                                    
-                                if not is_ready:
-                                    logger.info(f"Index {index_name} is not ready yet")
-                                    return False, 0
-                                    
-                            except Exception as e:
-                                error_str = str(e)
-                                if "does not exist" in error_str or "not found" in error_str:
-                                    logger.info(f"Index {index_name} does not exist yet")
-                                    return False, 0
-                                elif "not ready" in error_str:
-                                    logger.info(f"Index {index_name} is not ready yet")
-                                    return False, 0
-                                else:
-                                    logger.warning(f"Error checking index status: {e}")
-                                    return False, 0
-                            
-                            # Only create DatabricksVectorStorage if index is ready
-                            temp_storage = DatabricksVectorStorage(
-                                endpoint_name=endpoint_name,
-                                index_name=index_name,
-                                crew_id="documentation",
-                                memory_type="document",
-                                embedding_dimension=1024,
-                                workspace_url=(db_config.get('workspace_url') if isinstance(db_config, dict) 
-                                             else getattr(db_config, 'workspace_url', None)),
-                                personal_access_token=(db_config.get('personal_access_token') if isinstance(db_config, dict) 
-                                                     else getattr(db_config, 'personal_access_token', None)),
-                                service_principal_client_id=(db_config.get('service_principal_client_id') if isinstance(db_config, dict) 
-                                                           else getattr(db_config, 'service_principal_client_id', None)),
-                                service_principal_client_secret=(db_config.get('service_principal_client_secret') if isinstance(db_config, dict) 
-                                                               else getattr(db_config, 'service_principal_client_secret', None))
-                            )
-                        except Exception as e:
-                            logger.warning(f"Could not create Databricks storage: {e}")
-                            logger.info("Will skip seeding for now")
+                        # Get workspace URL
+                        workspace_url = (db_config.get('workspace_url') if isinstance(db_config, dict) 
+                                       else getattr(db_config, 'workspace_url', None))
+                        
+                        if not workspace_url:
+                            logger.error("No workspace URL configured for Databricks")
                             return False, 0
+                        
+                        # Create service instance
+                        databricks_index_service = DatabricksIndexService(uow)
+                        
+                        # Check index status using the service layer
+                        try:
+                            # Use the service's get_index_info method
+                            # Pass None for user_token since we're in a seeder context
+                            if not endpoint_name:
+                                # For direct access indexes, endpoint_name might be in the index data
+                                endpoint_name = ""
+                            
+                            index_info = await databricks_index_service.get_index_info(
+                                workspace_url=workspace_url,
+                                index_name=index_name,
+                                endpoint_name=endpoint_name,
+                                user_token=None
+                            )
+                            
+                            # Check if request was successful
+                            if not index_info or not index_info.get('success', False):
+                                error_msg = index_info.get('message', 'Failed to get index info') if index_info else 'Failed to get index info'
+                                logger.error(f"Failed to get index info for {index_name}: {error_msg}")
+                                return False, 0
+                            
+                            # Check if index exists 
+                            state = index_info.get('state', 'UNKNOWN')
+                            if state == 'NOT_FOUND':
+                                logger.info(f"Index {index_name} does not exist yet")
+                                return False, 0
+                            
+                            # Check if index is ready
+                            is_ready = index_info.get('ready', False)
+                            
+                            if not is_ready and state == "PROVISIONING":
+                                logger.info(f"Index {index_name} is still provisioning (state: {state})")
+                                logger.info("Skipping documentation seeding until index is ready")
+                                return False, 0
+                            
+                            if not is_ready:
+                                logger.info(f"Index {index_name} is not ready yet (state: {state})")
+                                return False, 0
+                            
+                        except Exception as e:
+                            error_str = str(e)
+                            if "does not exist" in error_str or "not found" in error_str:
+                                logger.info(f"Index {index_name} does not exist yet")
+                                return False, 0
+                            elif "not ready" in error_str:
+                                logger.info(f"Index {index_name} is not ready yet")
+                                return False, 0
+                            else:
+                                logger.warning(f"Error checking index status: {e}")
+                                return False, 0
                         
                         # Check if we have enough documents to skip seeding
                         logger.info(f"Checking for existing documents in Databricks index: {index_name}")
                         
-                        # First, let's do a direct similarity search to see what we get
+                        # Use the service to check document count (following proper architecture)
                         try:
-                            test_vector = [1.0 / (1024 ** 0.5)] * 1024
-                            direct_results = temp_storage.index.similarity_search(
-                                query_vector=test_vector,
-                                columns=["id"],
-                                num_results=10
-                            )
-                            logger.info(f"Direct similarity search result keys: {list(direct_results.keys()) if direct_results else 'None'}")
-                            if direct_results and 'result' in direct_results:
-                                row_count = direct_results['result'].get('row_count', 0)
-                                logger.info(f"Direct search found row_count: {row_count}")
-                                if row_count > 100:
-                                    logger.info(f"✅ Found {row_count} documents via direct search (threshold: 100)")
-                                    logger.info(f"Skipping seeding - documentation already exists in Databricks")
-                                    return True, row_count
-                        except Exception as e:
-                            error_str = str(e)
-                            if "does not exist" in error_str:
-                                logger.warning(f"Index does not exist: {e}")
-                                logger.info("Index does not exist, cannot seed yet")
-                                return False, 0
-                            elif "not ready" in error_str:
-                                logger.warning(f"Index is not ready: {e}")
-                                logger.info("Index is not ready, will skip seeding for now")
-                                return False, 0
+                            # The index info contains the document count in 'doc_count' field
+                            total_docs = index_info.get('doc_count', 0) or index_info.get('indexed_row_count', 0) or index_info.get('row_count', 0)
+                            
+                            logger.info(f"Index has {total_docs} total documents")
+                            
+                            if total_docs > 100:
+                                logger.info(f"✅ Found {total_docs} documents in index (threshold: 100)")
+                                logger.info(f"Skipping seeding - documentation already exists in Databricks")
+                                return True, total_docs
                             else:
-                                logger.warning(f"Direct search failed: {e}")
-                        
-                        # Fall back to count_documents method
-                        doc_count = temp_storage.count_documents()
-                        logger.info(f"count_documents returned: {doc_count}")
-                        
-                        # If we have more than 100 documents, assume seeding was already done
-                        if doc_count > 100:
-                            logger.info(f"Found {doc_count} existing documents in index (threshold: 100)")
-                            logger.info(f"Skipping seeding - documentation already exists in Databricks")
-                            return True, doc_count
-                        else:
-                            logger.info(f"Only {doc_count} documents found (threshold: 100), will proceed with seeding")
+                                logger.info(f"Only {total_docs} documents found (threshold: 100), will proceed with seeding")
+                                return False, 0
+                                
+                        except Exception as e:
+                            logger.warning(f"Failed to check document count: {e}")
+                            logger.info("Will proceed with seeding")
                             return False, 0
                             
                     except Exception as e:
@@ -334,8 +304,12 @@ async def check_existing_documentation() -> tuple[bool, int]:
         logger.error(f"Error checking existing documentation: {e}")
         raise
 
-async def seed_documentation_embeddings() -> None:
-    """Seed documentation embeddings using services only."""
+async def seed_documentation_embeddings(user_token: Optional[str] = None) -> None:
+    """Seed documentation embeddings using services only.
+    
+    Args:
+        user_token: Optional user access token for OBO authentication with Databricks
+    """
     logger.info("Starting documentation embeddings seeding...")
     
     # Check which backend is configured
@@ -411,6 +385,60 @@ async def seed_documentation_embeddings() -> None:
         doc_embedding_service = DocumentationEmbeddingService(uow)
         logger.info("Created DocumentationEmbeddingService with UnitOfWork")
         
+        # If using Databricks, validate index readiness before processing any embeddings
+        if using_databricks and databricks_backend:
+            logger.info("Pre-validating Databricks index readiness before creating embeddings...")
+            
+            try:
+                # Get the index configuration
+                db_config = databricks_backend.databricks_config
+                if isinstance(db_config, dict):
+                    document_index = db_config.get('document_index')
+                    workspace_url = db_config.get('workspace_url')
+                    document_endpoint_name = db_config.get('document_endpoint_name')
+                    endpoint_name = document_endpoint_name or db_config.get('endpoint_name')
+                else:
+                    document_index = getattr(db_config, 'document_index', None)
+                    workspace_url = getattr(db_config, 'workspace_url', None)
+                    document_endpoint_name = getattr(db_config, 'document_endpoint_name', None)
+                    endpoint_name = document_endpoint_name or getattr(db_config, 'endpoint_name', None)
+                
+                if document_index and workspace_url and endpoint_name:
+                    # Use DatabricksIndexService to check readiness with retries
+                    from src.services.databricks_index_service import DatabricksIndexService
+                    index_service = DatabricksIndexService(workspace_url)
+                    
+                    logger.info(f"Checking if Databricks index {document_index} is ready before embedding creation...")
+                    
+                    # Wait for index to be ready (longer timeout for seeding process)
+                    readiness_result = await index_service.wait_for_index_ready(
+                        workspace_url=workspace_url,
+                        index_name=document_index,
+                        endpoint_name=endpoint_name,
+                        max_wait_seconds=120,  # Wait up to 2 minutes for seeding
+                        check_interval_seconds=10,  # Check every 10 seconds
+                        user_token=None
+                    )
+                    
+                    if not readiness_result.get("ready"):
+                        message = readiness_result.get("message", "Index not ready")
+                        attempts = readiness_result.get("attempts", 0)
+                        elapsed_time = readiness_result.get("elapsed_time", 0)
+                        
+                        logger.warning(f"❌ Databricks index {document_index} not ready after {attempts} attempts ({elapsed_time:.1f}s): {message}")
+                        logger.warning("Skipping documentation seeding - index must be ready before creating embeddings")
+                        logger.info("💡 Please wait for the index to be ready and run the seeding again")
+                        return  # Exit early without processing
+                    
+                    logger.info(f"✅ Databricks index {document_index} is ready after {readiness_result.get('attempts', 0)} attempts ({readiness_result.get('elapsed_time', 0):.1f}s)")
+                    logger.info("Proceeding with embedding creation and seeding...")
+                else:
+                    logger.warning("Missing required Databricks configuration for index validation")
+                    
+            except Exception as e:
+                logger.error(f"Error validating Databricks index readiness: {e}")
+                logger.warning("Proceeding with seeding, but embeddings may fail if index is not ready")
+        
         for url in DOCS_URLS:
             try:
                 # Create documentation chunks
@@ -452,8 +480,8 @@ async def seed_documentation_embeddings() -> None:
                             }
                         )
                         
-                        # Use service to create the record
-                        await doc_embedding_service.create_documentation_embedding(doc_embedding_create)
+                        # Use service to create the record, pass user_token for authentication
+                        await doc_embedding_service.create_documentation_embedding(doc_embedding_create, user_token=user_token)
                         total_chunks_processed += 1
                         
                     except Exception as e:
@@ -471,28 +499,17 @@ async def seed_documentation_embeddings() -> None:
             logger.info("Future runs will detect these documents and skip re-seeding")
 
 async def seed_async():
-    """Seed the documentation_embeddings table asynchronously."""
-    logger.info("Starting documentation embeddings seeding...")
-    
-    try:
-        # Check if documentation already exists using service
+    """Seed the documentation_embeddings table asynchronously - DEPRECATED, use seed() instead."""
+    logger.info("⚠️ DEPRECATED: seed_async() called, redirecting to seed()")
+    # Redirect to the new seed() function which has proper checks
+    result = await seed()
+    # Convert boolean result to tuple for backward compatibility
+    if result:
+        # Check if documents exist after seeding
         exists, count = await check_existing_documentation()
-        
         if exists:
-            logger.info(f"Skipping documentation embeddings seeding: existing records found")
-            return ("skipped", count)
-        
-        # Seed documentation embeddings using service
-        await seed_documentation_embeddings()
-        
-        logger.info("Documentation embeddings seeding completed successfully!")
-        return ("success", 0)
-    except Exception as e:
-        logger.error(f"Error seeding documentation embeddings: {str(e)}")
-        logger.error(f"Full error details: {type(e).__name__}: {str(e)}")
-        import traceback
-        logger.error(f"Traceback: {traceback.format_exc()}")
-        return ("error", 0)
+            return ("skipped" if count > 100 else "success", count)
+    return ("error", 0)
 
 def seed_sync():
     """Seed the documentation_embeddings table synchronously."""
@@ -510,32 +527,28 @@ def seed_sync():
 
 async def seed():
     """Main seeding function that will be called by the seeder runner."""
-    print("DEBUG: Documentation seed() function called")  # Direct print to ensure visibility
-    logger.info("🌱 Running documentation embeddings seeder...")
-    logger.warning("DOCUMENTATION SEEDER STARTING - This message should be visible")  # Use warning to ensure visibility
+    logger.info("🌱 Starting documentation embeddings seeder...")
     
-    # Add immediate logging to see what happens next
-    logger.warning("ABOUT TO CHECK EXISTING DOCUMENTATION")
-    
-    # First check if we should skip seeding
+    # EARLY EXIT: Check if we should skip seeding before doing any heavy work
     try:
-        logger.warning("CALLING check_existing_documentation()")
+        logger.info("Checking if documentation embeddings already exist...")
         exists, count = await check_existing_documentation()
-        logger.warning(f"CHECK RESULT: exists={exists}, count={count}")
+        logger.info(f"Documentation check result: exists={exists}, count={count}")
         
         if exists:
             logger.info(f"⏭️ Documentation embeddings seeding skipped ({count} records already exist)")
+            logger.info(f"Documentation seeder completed in < 1 second (skipped - already seeded)")
             return True
     except Exception as e:
-        logger.error(f"Error checking existing documentation: {e}")
-        import traceback
-        logger.error(f"Traceback: {traceback.format_exc()}")
-        # Continue with seeding if check fails
+        logger.warning(f"Could not check existing documentation: {e}")
+        # If we can't check, assume we need to seed
+        logger.info("Will proceed with seeding since check failed")
     
-    logger.warning("PROCEEDING TO SEED DOCUMENTATION")
+    # Only proceed with heavy seeding if necessary
+    logger.info("Documentation needs seeding, proceeding...")
     
-    # Proceed with seeding
     try:
+        # This is the slow part - only run if actually needed
         await seed_documentation_embeddings()
         logger.info("✅ Documentation embeddings seeded successfully")
         return True
@@ -543,8 +556,8 @@ async def seed():
         logger.error(f"❌ Error in documentation seeder: {e}")
         import traceback
         logger.error(f"Traceback: {traceback.format_exc()}")
-        # Re-raise to make the error visible
-        raise
+        # Don't re-raise in production to avoid crashing the app
+        return False
 
 if __name__ == "__main__":
     # This allows running this seeder directly
