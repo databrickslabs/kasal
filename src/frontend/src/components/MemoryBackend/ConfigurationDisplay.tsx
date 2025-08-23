@@ -41,7 +41,7 @@ export const ConfigurationDisplay: React.FC<ConfigurationDisplayProps> = ({
   children,
 }) => {
   return (
-    <Box sx={{ mt: 2, p: 2, bgcolor: (theme) => theme.palette.mode === 'light' ? 'rgba(76, 175, 80, 0.08)' : 'rgba(102, 187, 106, 0.16)', borderRadius: 2, border: '1px solid', borderColor: 'success.main' }}>
+    <Box sx={{ mt: 2, p: 2, bgcolor: '#ffffff', borderRadius: 2, border: '1px solid', borderColor: '#e0e0e0' }}>
       <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', mb: 1 }}>
         <Box sx={{ display: 'flex', alignItems: 'center' }}>
           <CheckCircleIcon sx={{ mr: 0.5, color: 'success.main', fontSize: 18 }} />

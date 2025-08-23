@@ -20,13 +20,12 @@ import { CloudSync as CloudSyncIcon } from '@mui/icons-material';
 import { EMBEDDING_MODELS } from './constants';
 
 interface AutomaticSetupFormProps {
-  workspaceUrl: string;
+  detectedWorkspaceUrl?: string | null;
   catalog: string;
   schema: string;
   embeddingModel: string;
   isSettingUp: boolean;
   error: string;
-  onWorkspaceUrlChange: (url: string) => void;
   onCatalogChange: (catalog: string) => void;
   onSchemaChange: (schema: string) => void;
   onEmbeddingModelChange: (model: string) => void;
@@ -34,13 +33,12 @@ interface AutomaticSetupFormProps {
 }
 
 export const AutomaticSetupForm: React.FC<AutomaticSetupFormProps> = ({
-  workspaceUrl,
+  detectedWorkspaceUrl,
   catalog,
   schema,
   embeddingModel,
   isSettingUp,
   error,
-  onWorkspaceUrlChange,
   onCatalogChange,
   onSchemaChange,
   onEmbeddingModelChange,
@@ -60,6 +58,18 @@ export const AutomaticSetupForm: React.FC<AutomaticSetupFormProps> = ({
         </Typography>
       </Alert>
 
+      {detectedWorkspaceUrl && (
+        <Alert severity="success" sx={{ mb: 2 }}>
+          Workspace detected: {detectedWorkspaceUrl}
+        </Alert>
+      )}
+
+      {!detectedWorkspaceUrl && (
+        <Alert severity="warning" sx={{ mb: 2 }}>
+          No Databricks workspace detected. Please set DATABRICKS_HOST environment variable.
+        </Alert>
+      )}
+
       {error && (
         <Alert severity="error" sx={{ mb: 2 }}>
           {error}
@@ -67,16 +77,6 @@ export const AutomaticSetupForm: React.FC<AutomaticSetupFormProps> = ({
       )}
 
       <Box sx={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
-        <TextField
-          fullWidth
-          label="Databricks Workspace URL"
-          value={workspaceUrl}
-          onChange={(e) => onWorkspaceUrlChange(e.target.value)}
-          placeholder="https://your-workspace.databricks.com"
-          required
-          disabled={isSettingUp}
-          helperText="Enter your Databricks workspace URL"
-        />
 
         <Grid container spacing={2}>
           <Grid item xs={6}>
@@ -137,7 +137,7 @@ export const AutomaticSetupForm: React.FC<AutomaticSetupFormProps> = ({
           size="large"
           startIcon={isSettingUp ? <CircularProgress size={20} /> : <CloudSyncIcon />}
           onClick={onSetup}
-          disabled={!workspaceUrl || !catalog || !schema || isSettingUp}
+          disabled={!detectedWorkspaceUrl || !catalog || !schema || isSettingUp}
           fullWidth
           sx={{ mt: 3, py: 1.5 }}
         >

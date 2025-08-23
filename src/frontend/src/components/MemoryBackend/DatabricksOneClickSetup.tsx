@@ -16,11 +16,16 @@ import {
   FormControlLabel,
   Radio,
   Collapse,
+  IconButton,
+  Switch,
+  Divider,
 } from '@mui/material';
 import {
   CloudSync as CloudSyncIcon,
   Memory as MemoryIcon,
   PowerSettingsNew as PowerOffIcon,
+  ExpandMore as ExpandMoreIcon,
+  ExpandLess as ExpandLessIcon,
 } from '@mui/icons-material';
 import { AxiosError } from 'axios';
 import { apiClient } from '../../config/api/ApiConfig';
@@ -47,11 +52,13 @@ import { ManualConfigurationForm } from './ManualConfigurationForm';
 import { AutomaticSetupForm } from './AutomaticSetupForm';
 import { EditConfigurationForm } from './EditConfigurationForm';
 import { EndpointsDisplay } from './EndpointsDisplay';
+import EntityGraphVisualization from './EntityGraphVisualization';
+import { IndexDocumentsDialog } from './IndexDocumentsDialog';
 
 export const DatabricksOneClickSetup: React.FC = () => {
-  const [mode, setMode] = useState<'disabled' | 'databricks'>('databricks');
+  const [mode, setMode] = useState<'disabled' | 'databricks'>('disabled');
   const [setupMode, setSetupMode] = useState<'auto' | 'manual'>('auto');
-  const [workspaceUrl, setWorkspaceUrl] = useState('');
+  const [detectedWorkspaceUrl, setDetectedWorkspaceUrl] = useState<string | null>(null);
   const [catalog, setCatalog] = useState('ml');
   const [schema, setSchema] = useState('agents');
   const [embeddingModel, setEmbeddingModel] = useState('databricks-bge-large-en');
@@ -66,6 +73,34 @@ export const DatabricksOneClickSetup: React.FC = () => {
   const [editedConfig, setEditedConfig] = useState<SavedConfigInfo | null>(null);
   const [indexInfoMap, setIndexInfoMap] = useState<Record<string, IndexInfoState>>({});
   const [hasCheckedInitialConfig, setHasCheckedInitialConfig] = useState(false);
+  const [advancedSettingsExpanded, setAdvancedSettingsExpanded] = useState(false);
+  const [enableRelationshipRetrieval, setEnableRelationshipRetrieval] = useState(false);
+  
+  // Save relationship retrieval setting when it changes
+  const handleRelationshipRetrievalChange = async (enabled: boolean) => {
+    console.log('handleRelationshipRetrievalChange called with:', enabled);
+    console.log('savedConfig:', savedConfig);
+    console.log('savedConfig?.backend_id:', savedConfig?.backend_id);
+    
+    setEnableRelationshipRetrieval(enabled);
+    
+    // Save to backend if we have a valid config
+    if (savedConfig?.backend_id) {
+      try {
+        console.log('Attempting to save to backend...');
+        const response = await apiClient.put(`/memory-backend/configs/${savedConfig.backend_id}`, {
+          enable_relationship_retrieval: enabled
+        });
+        console.log('Relationship retrieval setting saved:', enabled);
+        console.log('API response:', response.data);
+      } catch (error) {
+        console.error('Failed to save relationship retrieval setting:', error);
+        setError('Failed to save advanced settings');
+      }
+    } else {
+      console.log('No valid backend_id found, not saving to backend');
+    }
+  };
   const [manualConfig, setManualConfig] = useState<ManualConfig>({
     workspace_url: '',
     endpoint_name: '',
@@ -76,13 +111,26 @@ export const DatabricksOneClickSetup: React.FC = () => {
     document_index: '',
     embedding_model: 'databricks-bge-large-en', // Default to BGE Large
   });
+  const [documentsDialogOpen, setDocumentsDialogOpen] = useState(false);
+  const [selectedIndexForDocs, setSelectedIndexForDocs] = useState<{
+    name: string;
+    type: 'short_term' | 'long_term' | 'entity' | 'document';
+    endpointName: string;
+  } | null>(null);
   
-  const { updateConfig } = useMemoryBackendStore();
+  const { 
+    updateConfig,
+    visualizationOpen,
+    visualizationIndex,
+    openVisualization,
+    closeVisualization
+  } = useMemoryBackendStore();
   
   
-  // Load existing configuration on mount
+  // Load existing configuration and detect workspace URL on mount
   useEffect(() => {
     loadExistingConfig();
+    detectWorkspaceUrl();
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
   
   // Verify resources after config is loaded
@@ -166,6 +214,18 @@ export const DatabricksOneClickSetup: React.FC = () => {
     }
   }, [verifiedResources, savedConfig]);
   
+  const detectWorkspaceUrl = async () => {
+    try {
+      const response = await apiClient.get('/memory-backend/databricks/workspace-url');
+      if (response.data?.detected && response.data?.workspace_url) {
+        setDetectedWorkspaceUrl(response.data.workspace_url);
+        console.log(`Detected workspace URL from ${response.data.source}: ${response.data.workspace_url}`);
+      }
+    } catch (error) {
+      console.log('Could not detect workspace URL from environment:', error);
+    }
+  };
+  
   const loadExistingConfig = async () => {
     try {
       // First try to get the default memory backend configuration
@@ -194,6 +254,7 @@ export const DatabricksOneClickSetup: React.FC = () => {
         }
         
         console.log('No memory backend configuration found - this is normal for new users');
+        setMode('disabled');  // Default to disabled when no config exists
         setHasCheckedInitialConfig(true);
         return;
       }
@@ -214,15 +275,17 @@ export const DatabricksOneClickSetup: React.FC = () => {
           }
         } catch (allConfigsError) {
           console.log('No memory backend configurations found');
+          setMode('disabled');  // Default to disabled when no config exists
         }
       }
       // Only log actual errors
       console.error('Failed to load existing configuration:', error);
+      setMode('disabled');  // Default to disabled on error
       setHasCheckedInitialConfig(true);
     }
   };
   
-  const processConfigResponse = (configData: { backend_type?: string; databricks_config?: DatabricksConfig; id?: string }) => {
+  const processConfigResponse = (configData: { backend_type?: string; databricks_config?: DatabricksConfig; id?: string; enable_relationship_retrieval?: boolean }) => {
     console.log('processConfigResponse - Full configData:', configData);
     console.log('processConfigResponse - backend_type:', configData?.backend_type);
     console.log('processConfigResponse - databricks_config:', configData?.databricks_config);
@@ -257,6 +320,9 @@ export const DatabricksOneClickSetup: React.FC = () => {
       console.log('Endpoints document:', savedInfo.endpoints?.document);
       setSavedConfig(savedInfo);
       setMode('databricks');
+      
+      // Load relationship retrieval setting from the top-level config
+      setEnableRelationshipRetrieval(configData.enable_relationship_retrieval || false);
     } else if (configData && configData.backend_type === MemoryBackendType.DEFAULT) {
       // When in disabled mode, clear the saved databricks config but keep the backend_id
       setSavedConfig({
@@ -298,8 +364,11 @@ export const DatabricksOneClickSetup: React.FC = () => {
   };
 
   const handleSetup = async () => {
-    if (!workspaceUrl) {
-      setError('Please enter your Databricks workspace URL');
+    // Use detected workspace URL
+    const finalWorkspaceUrl = detectedWorkspaceUrl;
+    
+    if (!finalWorkspaceUrl) {
+      setError('No Databricks workspace detected. Please set DATABRICKS_HOST environment variable and reload.');
       return;
     }
 
@@ -322,7 +391,7 @@ export const DatabricksOneClickSetup: React.FC = () => {
       
       // Perform one-click setup
       const result = await DatabricksVectorSearchService.performOneClickSetup({
-        workspace_url: workspaceUrl,
+        workspace_url: finalWorkspaceUrl,
         catalog: catalog,
         schema: schema,
         embedding_dimension: EMBEDDING_MODELS.find(m => m.value === embeddingModel)?.dimension || 768
@@ -334,15 +403,12 @@ export const DatabricksOneClickSetup: React.FC = () => {
       if (result.success) {
         // Save the configuration details
         setSavedConfig({
-          workspace_url: workspaceUrl,
+          workspace_url: finalWorkspaceUrl,
           catalog: result.catalog || catalog,
           schema: result.schema || schema,
           endpoints: result.endpoints,
           indexes: result.indexes
         });
-        
-        // Clear workspace URL on success
-        setWorkspaceUrl('');
         
         // Update store with Databricks configuration
         updateConfig({
@@ -884,13 +950,24 @@ export const DatabricksOneClickSetup: React.FC = () => {
       });
       
       if (response.data.success) {
-        // Refresh index info
-        fetchIndexInfo(indexName, endpointName);
+        // Refresh index info after a short delay since recreation may take a moment
+        setTimeout(() => {
+          fetchIndexInfo(indexName, endpointName);
+        }, 3000);
         
         // Show success message
+        const deletedCount = response.data.deleted_count || 0;
         setError(''); // Clear any errors
+        // Show success notification
+        alert(`Successfully emptied ${indexType.replace('_', ' ')} index. ${deletedCount} documents removed.\n\nNote: The index was deleted and recreated to clear all documents.`);
       } else {
-        setError(response.data.message || 'Failed to empty index');
+        // For Direct Access indexes, show the detailed message
+        const errorMessage = response.data.message || 'Failed to empty index';
+        setError(errorMessage);
+        // Also show in alert for better visibility of multi-line messages
+        if (response.data.error?.includes('not supported')) {
+          alert(errorMessage);
+        }
       }
     } catch (error) {
       console.error('Failed to empty index:', error);
@@ -967,6 +1044,25 @@ export const DatabricksOneClickSetup: React.FC = () => {
     } finally {
       setIsSettingUp(false);
     }
+  };
+
+  const handleViewDocuments = (indexType: string, indexName: string) => {
+    // Determine the endpoint based on index type
+    const endpointName = indexType === 'document' 
+      ? savedConfig?.endpoints?.document?.name 
+      : savedConfig?.endpoints?.memory?.name;
+    
+    if (!endpointName) {
+      setError('Cannot view documents: endpoint not configured');
+      return;
+    }
+    
+    setSelectedIndexForDocs({
+      name: indexName,
+      type: indexType as 'short_term' | 'long_term' | 'entity' | 'document',
+      endpointName: endpointName
+    });
+    setDocumentsDialogOpen(true);
   };
 
   const handleDeleteEndpoint = async (endpointType: 'memory' | 'document') => {
@@ -1201,13 +1297,12 @@ export const DatabricksOneClickSetup: React.FC = () => {
           {/* Auto-create setup */}
           {setupMode === 'auto' && (!savedConfig || !savedConfig.workspace_url) && (
             <AutomaticSetupForm
-              workspaceUrl={workspaceUrl}
+              detectedWorkspaceUrl={detectedWorkspaceUrl}
               catalog={catalog}
               schema={schema}
               embeddingModel={embeddingModel}
               isSettingUp={isSettingUp}
               error={error}
-              onWorkspaceUrlChange={setWorkspaceUrl}
               onCatalogChange={setCatalog}
               onSchemaChange={setSchema}
               onEmbeddingModelChange={setEmbeddingModel}
@@ -1266,6 +1361,53 @@ export const DatabricksOneClickSetup: React.FC = () => {
                         onDeleteEndpoint={handleDeleteEndpoint}
                       />
                       
+                      {/* Advanced Settings */}
+                      <Box sx={{ mt: 2, mb: 2 }}>
+                        <Divider sx={{ mb: 1 }} />
+                        <Box
+                          sx={{
+                            display: 'flex',
+                            alignItems: 'center',
+                            justifyContent: 'space-between',
+                            cursor: 'pointer',
+                            py: 0.5,
+                          }}
+                          onClick={() => setAdvancedSettingsExpanded(!advancedSettingsExpanded)}
+                        >
+                          <Typography variant="subtitle2" color="text.secondary">
+                            Advanced Settings
+                          </Typography>
+                          <IconButton size="small">
+                            {advancedSettingsExpanded ? <ExpandLessIcon /> : <ExpandMoreIcon />}
+                          </IconButton>
+                        </Box>
+                        
+                        <Collapse in={advancedSettingsExpanded}>
+                          <Box sx={{ mt: 1, pl: 1 }}>
+                            <FormControlLabel
+                              control={
+                                <Switch
+                                  checked={enableRelationshipRetrieval}
+                                  onChange={(e) => handleRelationshipRetrievalChange(e.target.checked)}
+                                  color="primary"
+                                />
+                              }
+                              label={
+                                <Box>
+                                  <Typography variant="body2">
+                                    Enable Relationship-Based Entity Retrieval
+                                  </Typography>
+                                  <Typography variant="caption" color="text.secondary">
+                                    Experimental: Use graph-based relationships for smarter entity search instead of just semantic similarity.
+                                  </Typography>
+                                </Box>
+                              }
+                            />
+                          </Box>
+                        </Collapse>
+                        <Divider sx={{ mt: 1 }} />
+                      </Box>
+                      
                       {/* Indexes Table */}
                       <Box>
                         <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mb: 0.5 }}>
@@ -1289,6 +1431,7 @@ export const DatabricksOneClickSetup: React.FC = () => {
                             onRefresh={handleReseedDocumentation}
                             onEmpty={(indexType) => handleEmptyIndex(indexType as 'short_term' | 'long_term' | 'entity' | 'document')}
                             onDelete={(indexType) => handleDeleteIndex(indexType as 'short_term' | 'long_term' | 'entity' | 'document')}
+                            onViewDocuments={handleViewDocuments}
                           />
                         )}
 
@@ -1310,6 +1453,8 @@ export const DatabricksOneClickSetup: React.FC = () => {
                             isSettingUp={isSettingUp}
                             onEmpty={(indexType) => handleEmptyIndex(indexType as 'short_term' | 'long_term' | 'entity' | 'document')}
                             onDelete={(indexType) => handleDeleteIndex(indexType as 'short_term' | 'long_term' | 'entity' | 'document')}
+                            onVisualize={(indexType, indexName) => openVisualization(indexName, indexType)}
+                            onViewDocuments={handleViewDocuments}
                           />
                         )}
                         </Box>
@@ -1334,9 +1479,34 @@ export const DatabricksOneClickSetup: React.FC = () => {
         open={showResultDialog}
         onClose={() => setShowResultDialog(false)}
         setupResult={setupResult}
-        workspaceUrl={workspaceUrl}
+        workspaceUrl={detectedWorkspaceUrl || ''}
         savedConfigWorkspaceUrl={savedConfig?.workspace_url}
       />
+      
+      {/* Entity Visualization Dialog */}
+      <EntityGraphVisualization
+        open={visualizationOpen}
+        onClose={closeVisualization}
+        indexName={visualizationIndex?.name}
+        workspaceUrl={savedConfig?.workspace_url}
+        endpointName={savedConfig?.endpoints?.memory?.name}
+      />
+      
+      {/* Index Documents Dialog */}
+      {selectedIndexForDocs && (
+        <IndexDocumentsDialog
+          open={documentsDialogOpen}
+          onClose={() => {
+            setDocumentsDialogOpen(false);
+            setSelectedIndexForDocs(null);
+          }}
+          indexName={selectedIndexForDocs.name}
+          indexType={selectedIndexForDocs.type}
+          workspaceUrl={savedConfig?.workspace_url || ''}
+          endpointName={selectedIndexForDocs.endpointName}
+          backendId={savedConfig?.backend_id}
+        />
+      )}
       </Paper>
     </Box>
   );

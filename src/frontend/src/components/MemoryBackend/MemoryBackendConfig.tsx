@@ -522,7 +522,7 @@ export const MemoryBackendConfig: React.FC<MemoryBackendConfigProps> = ({
               </Box>
 
               <Collapse in={expandedSections.advanced}>
-                <Box sx={{ mt: 2 }}>
+                <Box sx={{ mt: 2, display: 'flex', flexDirection: 'column', gap: 2 }}>
                   <TextField
                     fullWidth
                     type="number"
@@ -532,6 +532,28 @@ export const MemoryBackendConfig: React.FC<MemoryBackendConfigProps> = ({
                       embedding_dimension: parseInt(e.target.value) || 768 
                     })}
                     helperText="The dimension of your embedding vectors"
+                  />
+                  
+                  <FormControlLabel
+                    control={
+                      <Switch
+                        checked={config.enable_relationship_retrieval || false}
+                        onChange={(e) => updateConfig({ 
+                          enable_relationship_retrieval: e.target.checked 
+                        })}
+                        color="primary"
+                      />
+                    }
+                    label={
+                      <Box>
+                        <Typography variant="body2">
+                          Enable Relationship-Based Entity Retrieval
+                        </Typography>
+                        <Typography variant="caption" color="text.secondary">
+                          Experimental: Use graph-based relationships for smarter entity search instead of just semantic similarity.
+                        </Typography>
+                      </Box>
+                    }
                   />
                 </Box>
               </Collapse>

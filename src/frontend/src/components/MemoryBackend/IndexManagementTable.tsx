@@ -20,9 +20,11 @@ import {
 } from '@mui/material';
 import {
   Refresh as RefreshIcon,
-  ClearAll as ClearAllIcon,
+  RestartAlt as RestartAltIcon,
   Delete as DeleteIcon,
   Info as InfoIcon,
+  AccountTree as GraphIcon,
+  Description as DocumentsIcon,
 } from '@mui/icons-material';
 import { SavedConfigInfo, IndexInfoState } from '../../types/memoryBackend';
 import { buildVectorSearchIndexUrl, buildVectorSearchEndpointUrl } from './databricksVectorSearchUtils';
@@ -44,6 +46,8 @@ interface IndexManagementTableProps {
   onRefresh?: () => void;
   onEmpty: (indexType: string) => void | Promise<void>;
   onDelete: (indexType: string) => void | Promise<void>;
+  onVisualize?: (indexType: string, indexName: string) => void;
+  onViewDocuments?: (indexType: string, indexName: string) => void;
   showEndpointLink?: boolean;
 }
 
@@ -60,6 +64,8 @@ export const IndexManagementTable: React.FC<IndexManagementTableProps> = ({
   onRefresh,
   onEmpty,
   onDelete,
+  onVisualize,
+  onViewDocuments,
   showEndpointLink = true,
 }) => {
   const renderIndexStatus = (indexName: string) => {
@@ -101,7 +107,7 @@ export const IndexManagementTable: React.FC<IndexManagementTableProps> = ({
   };
 
   return (
-    <Box sx={{ mb: 4 }}>
+    <Box sx={{ mb: 4, backgroundColor: 'transparent' }}>
       <Box sx={{ display: 'flex', alignItems: 'center', mb: 2 }}>
         <Typography variant="subtitle1" sx={{ fontWeight: 'medium' }}>
           {title}
@@ -133,15 +139,15 @@ export const IndexManagementTable: React.FC<IndexManagementTableProps> = ({
         </Typography>
       )}
       
-      <TableContainer component={Paper} variant="outlined">
-        <Table size="small" sx={{ minWidth: 650 }}>
-          <TableHead>
+      <TableContainer component={Paper} variant="outlined" sx={{ backgroundColor: '#fff' }}>
+        <Table size="small" sx={{ minWidth: 650, backgroundColor: '#fff' }}>
+          <TableHead sx={{ backgroundColor: '#f5f5f5' }}>
             <TableRow>
-              <TableCell>Name</TableCell>
-              <TableCell align="center">Type</TableCell>
-              <TableCell align="center">Documents</TableCell>
-              <TableCell>Description</TableCell>
-              <TableCell align="center">Actions</TableCell>
+              <TableCell sx={{ width: '25%' }}>Name</TableCell>
+              <TableCell align="center" sx={{ width: '10%' }}>Type</TableCell>
+              <TableCell align="center" sx={{ width: '10%' }}>Documents</TableCell>
+              <TableCell sx={{ width: '35%' }}>Description</TableCell>
+              <TableCell align="center" sx={{ width: '20%' }}>Actions</TableCell>
             </TableRow>
           </TableHead>
           <TableBody>
@@ -150,7 +156,13 @@ export const IndexManagementTable: React.FC<IndexManagementTableProps> = ({
               const description = INDEX_DESCRIPTIONS[type] || { brief: '', detailed: '' };
               
               return (
-                <TableRow key={type}>
+                <TableRow 
+                  key={type}
+                  sx={{ 
+                    backgroundColor: '#fff',
+                    '&:hover': { backgroundColor: '#fafafa' }
+                  }}
+                >
                   <TableCell>
                     <Link
                       href={buildVectorSearchIndexUrl(savedConfig.workspace_url || '', name)}
@@ -168,50 +180,86 @@ export const IndexManagementTable: React.FC<IndexManagementTableProps> = ({
                     {renderDocumentCount(name)}
                   </TableCell>
                   <TableCell>
-                    <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5 }}>
-                      {description.brief}
+                    <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                      <Typography variant="body2" sx={{ fontSize: '0.875rem', flex: 1 }}>
+                        {description.brief}
+                      </Typography>
                       <Tooltip 
                         title={description.detailed}
                         placement="top"
                         arrow
                         sx={{ maxWidth: 400 }}
                       >
-                        <IconButton size="small" sx={{ p: 0.5 }}>
+                        <IconButton size="small" sx={{ p: 0.5, ml: 1 }}>
                           <InfoIcon fontSize="small" sx={{ fontSize: 16 }} />
                         </IconButton>
                       </Tooltip>
                     </Box>
                   </TableCell>
                   <TableCell align="center">
-                    {type === 'document' && onRefresh && (
-                      <Tooltip title="Re-seed Documentation">
+                    <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 0.5 }}>
+                      {/* View Documents button - shown for all */}
+                      {onViewDocuments ? (
+                        <Tooltip title="View Documents">
+                          <IconButton
+                            size="small"
+                            onClick={() => onViewDocuments(type, name)}
+                            disabled={isSettingUp}
+                          >
+                            <DocumentsIcon fontSize="small" />
+                          </IconButton>
+                        </Tooltip>
+                      ) : (
+                        <Box sx={{ width: 32 }} />
+                      )}
+                      
+                      {/* Type-specific button */}
+                      {type === 'entity' && onVisualize ? (
+                        <Tooltip title="Visualize Entity Graph">
+                          <IconButton
+                            size="small"
+                            onClick={() => onVisualize(type, name)}
+                            disabled={isSettingUp}
+                          >
+                            <GraphIcon fontSize="small" />
+                          </IconButton>
+                        </Tooltip>
+                      ) : type === 'document' && onRefresh ? (
+                        <Tooltip title="Re-seed Documentation">
+                          <IconButton
+                            size="small"
+                            onClick={onRefresh}
+                            disabled={isSettingUp}
+                          >
+                            <RefreshIcon fontSize="small" />
+                          </IconButton>
+                        </Tooltip>
+                      ) : (
+                        <Box sx={{ width: 32 }} />
+                      )}
+                      
+                      {/* Empty Index button - shown for all */}
+                      <Tooltip title="Reset Index (Delete & Recreate)">
                         <IconButton
                           size="small"
-                          onClick={onRefresh}
+                          onClick={() => onEmpty(type)}
                           disabled={isSettingUp}
                         >
-                          <RefreshIcon fontSize="small" />
+                          <RestartAltIcon fontSize="small" />
                         </IconButton>
                       </Tooltip>
-                    )}
-                    <Tooltip title="Empty Index">
-                      <IconButton
-                        size="small"
-                        onClick={() => onEmpty(type)}
-                        disabled={isSettingUp}
-                      >
-                        <ClearAllIcon fontSize="small" />
-                      </IconButton>
-                    </Tooltip>
-                    <Tooltip title="Delete Index">
-                      <IconButton
-                        size="small"
-                        onClick={() => onDelete(type)}
-                        disabled={isDeleteDisabled(name)}
-                      >
-                        <DeleteIcon fontSize="small" />
-                      </IconButton>
-                    </Tooltip>
+                      
+                      {/* Delete Index button - shown for all */}
+                      <Tooltip title="Delete Index">
+                        <IconButton
+                          size="small"
+                          onClick={() => onDelete(type)}
+                          disabled={isDeleteDisabled(name)}
+                        >
+                          <DeleteIcon fontSize="small" />
+                        </IconButton>
+                      </Tooltip>
+                    </Box>
                   </TableCell>
                 </TableRow>
               );
