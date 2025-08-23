@@ -213,8 +213,9 @@ class MCPService:
             # Prepare update data
             update_data = server_data.model_dump(exclude_unset=True, exclude={"api_key"})
             
-            # If API key is provided, encrypt it
-            if server_data.api_key:
+            # If API key is provided and not empty, encrypt it
+            # Only update encrypted_api_key if a new API key is actually provided
+            if server_data.api_key and server_data.api_key.strip():
                 update_data["encrypted_api_key"] = EncryptionUtils.encrypt_value(server_data.api_key)
             
             # Update server

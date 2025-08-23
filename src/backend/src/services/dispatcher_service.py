@@ -69,7 +69,13 @@ class DispatcherService:
     # Crew-related keywords  
     CREW_KEYWORDS = {
         'team', 'crew', 'group', 'squad', 'multiple', 'several', 'many',
-        'workflow', 'pipeline', 'process', 'collaboration', 'together', 'plan'
+        'workflow', 'pipeline', 'process', 'collaboration', 'together'
+    }
+    
+    # Plan-related keywords (plans work like crews with agents and tasks)
+    PLAN_KEYWORDS = {
+        'plan', 'planning', 'strategy', 'roadmap', 'blueprint', 'scheme',
+        'approach', 'design', 'outline', 'proposal', 'framework', 'architecture'
     }
     
     # Execution-related keywords
@@ -156,6 +162,7 @@ class DispatcherService:
         conversation_words = word_set.intersection(self.CONVERSATION_WORDS)
         agent_keywords = word_set.intersection(self.AGENT_KEYWORDS)
         crew_keywords = word_set.intersection(self.CREW_KEYWORDS)
+        plan_keywords = word_set.intersection(self.PLAN_KEYWORDS)
         execute_keywords = word_set.intersection(self.EXECUTE_KEYWORDS)
         configure_keywords = word_set.intersection(self.CONFIGURE_KEYWORDS)
         
@@ -183,10 +190,15 @@ class DispatcherService:
         has_configure_structure = any(re.search(pattern, message.lower()) for pattern in configure_patterns)
         
         # Calculate intent suggestions based on semantic analysis
+        # Give extra weight to plan when "create a plan" or "plan that" is detected
+        has_create_plan = bool(re.search(r'create\s+a\s+plan|build\s+a\s+plan|design\s+a\s+plan|plan\s+that|plan\s+to', message.lower()))
+        has_complex_task = len(task_actions) > 1 or bool(re.search(r'multiple|several|all|various|different', message.lower()))
+        
         intent_scores = {
-            'generate_task': len(task_actions) * 2 + (1 if has_imperative else 0) + (1 if has_command_structure else 0),
+            'generate_task': len(task_actions) * 2 + (1 if has_imperative else 0) + (1 if has_command_structure else 0) - (3 if has_create_plan else 0),
             'generate_agent': len(agent_keywords) * 3,
             'generate_crew': len(crew_keywords) * 3,
+            'generate_plan': len(plan_keywords) * 3 + (5 if has_create_plan else 0) + (2 if has_complex_task and plan_keywords else 0),  # Boost plan score for explicit plan requests
             'execute_crew': len(execute_keywords) * 4 + (2 if execute_keywords.intersection({'execute', 'ec'}) else 0),
             'configure_crew': len(configure_keywords) * 3 + (2 if has_configure_structure else 0),
             'conversation': len(conversation_words) * 2 + (1 if has_question else 0) + (1 if has_greeting else 0)
@@ -200,6 +212,12 @@ class DispatcherService:
             semantic_hints.append(f"Execution words detected: {', '.join(execute_keywords)}")
         if configure_keywords:
             semantic_hints.append(f"Configuration words detected: {', '.join(configure_keywords)}")
+        if plan_keywords:
+            semantic_hints.append(f"Plan words detected: {', '.join(plan_keywords)}")
+        if has_create_plan:
+            semantic_hints.append("Explicit plan creation request detected")
+        if has_complex_task:
+            semantic_hints.append("Complex multi-step task detected")
         if has_command_structure:
             semantic_hints.append("Command-like structure detected")
         if has_configure_structure:
@@ -216,6 +234,7 @@ class DispatcherService:
             "conversation_words": list(conversation_words),
             "agent_keywords": list(agent_keywords),
             "crew_keywords": list(crew_keywords),
+            "plan_keywords": list(plan_keywords),
             "execute_keywords": list(execute_keywords),
             "configure_keywords": list(configure_keywords),
             "has_imperative": has_imperative,
@@ -223,6 +242,8 @@ class DispatcherService:
             "has_greeting": has_greeting,
             "has_command_structure": has_command_structure,
             "has_configure_structure": has_configure_structure,
+            "has_create_plan": has_create_plan,
+            "has_complex_task": has_complex_task,
             "intent_scores": intent_scores,
             "semantic_hints": semantic_hints,
             "suggested_intent": max(intent_scores, key=intent_scores.get) if max(intent_scores.values()) > 0 else "unknown"
@@ -268,30 +289,40 @@ Analyze the user's message and determine their intent from these categories:
    - Complex workflows: "research then write then review"
    - Collaborative language: "agents working together", "workflow with multiple steps"
 
-4. **execute_crew**: User wants to execute/run an existing crew:
+4. **generate_plan**: User wants to create a plan (similar to crew - with agents and tasks):
+   - Planning language: "create a plan", "build a plan", "design a plan", "plan that", "plan to"
+   - Strategic terms: "roadmap", "blueprint", "framework", "architecture", "strategy"
+   - Complex multi-step operations: "get all news", "analyze multiple sources", "comprehensive collection"
+   - Can have single or multiple agents with tasks, just like crews
+   - Plans and crews are functionally equivalent - both create agent/task workflows
+
+5. **execute_crew**: User wants to execute/run an existing crew:
    - Execution commands: "execute crew", "run crew", "start crew", "ec"
    - Action words with crew context: "execute", "run", "start", "launch", "begin"
    - Short commands: "ec" (shorthand for execute crew)
 
-5. **configure_crew**: User wants to configure workflow settings (LLM, max RPM, tools):
+6. **configure_crew**: User wants to configure workflow settings (LLM, max RPM, tools):
    - Configuration requests: "configure crew", "setup llm", "change model", "select tools"
    - Settings modifications: "update max rpm", "set llm model", "modify tools"
    - Preference adjustments: "choose different model", "adjust settings", "pick tools"
    - Direct mentions: "llm", "maxr", "max rpm", "tools", "config", "settings"
 
-6. **conversation**: User is asking questions, seeking information, or having general conversation:
+7. **conversation**: User is asking questions, seeking information, or having general conversation:
    - Questions about the system: "how does this work?", "what can you do?"
    - Greetings: "hello", "hi", "good morning"
    - General questions: "what is...", "explain...", "why..."
    - Status inquiries: "what's the status of...", "show me..."
 
-7. **unknown**: Unclear or ambiguous messages that don't fit the above categories.
+8. **unknown**: Unclear or ambiguous messages that don't fit the above categories.
 
-**Key Insight**: Many task requests are phrased conversationally. Look for ACTION WORDS and GOALS rather than formal task language.
+**CRITICAL RULES**:
+1. If the message contains "create a plan" or "plan that" or "plan to", it's ALWAYS generate_plan, not generate_task
+2. If the message describes getting "all" of something or multiple complex steps, prefer generate_plan over generate_task
+3. Many task requests are phrased conversationally. Look for ACTION WORDS and GOALS rather than formal task language.
 
 Return a JSON object with:
 {
-    "intent": "generate_task" | "generate_agent" | "generate_crew" | "execute_crew" | "configure_crew" | "conversation" | "unknown",
+    "intent": "generate_task" | "generate_agent" | "generate_crew" | "generate_plan" | "execute_crew" | "configure_crew" | "conversation" | "unknown",
     "confidence": 0.0-1.0,
     "extracted_info": {
         "action_words": ["list", "of", "detected", "action", "words"],
@@ -311,6 +342,11 @@ Examples:
 - "analyze this sales data and create a report" -> generate_task
 - "Build a team of agents to handle customer support" -> generate_crew
 - "Create a research agent and a writer agent with tasks for each" -> generate_crew
+- "Create a plan for analyzing market data" -> generate_plan
+- "Build a strategy with multiple agents" -> generate_plan
+- "Design an approach using agents and tasks" -> generate_plan
+- "Create a plan that will get all the news from switzerland" -> generate_plan
+- "Plan to collect and analyze customer feedback" -> generate_plan
 - "execute crew" -> execute_crew
 - "run crew" -> execute_crew
 - "ec" -> execute_crew
@@ -335,14 +371,20 @@ Semantic Analysis:
 - Conversation indicators: {', '.join(semantic_analysis['conversation_words']) if semantic_analysis['conversation_words'] else 'None'}
 - Agent keywords: {', '.join(semantic_analysis['agent_keywords']) if semantic_analysis['agent_keywords'] else 'None'}
 - Crew keywords: {', '.join(semantic_analysis['crew_keywords']) if semantic_analysis['crew_keywords'] else 'None'}
+- Plan keywords: {', '.join(semantic_analysis.get('plan_keywords', [])) if semantic_analysis.get('plan_keywords') else 'None'}
 - Execute keywords: {', '.join(semantic_analysis['execute_keywords']) if semantic_analysis['execute_keywords'] else 'None'}
 - Configure keywords: {', '.join(semantic_analysis['configure_keywords']) if semantic_analysis['configure_keywords'] else 'None'}
 - Has imperative form: {semantic_analysis['has_imperative']}
 - Has question form: {semantic_analysis['has_question']}
 - Has command structure: {semantic_analysis['has_command_structure']}
 - Has configure structure: {semantic_analysis['has_configure_structure']}
+- Has explicit plan request: {semantic_analysis.get('has_create_plan', False)}
+- Has complex multi-step task: {semantic_analysis.get('has_complex_task', False)}
 - Semantic hints: {'; '.join(semantic_analysis['semantic_hints']) if semantic_analysis['semantic_hints'] else 'None'}
+- Intent scores: {semantic_analysis.get('intent_scores', {})}
 - Suggested intent from analysis: {semantic_analysis['suggested_intent']}
+
+**IMPORTANT**: If 'Has explicit plan request' is True, you MUST return 'generate_plan' as the intent, NOT 'generate_task'.
 
 Please analyze this message and provide your intent classification, considering both the semantic analysis and the natural language content."""
 
@@ -355,15 +397,57 @@ Please analyze this message and provide your intent classification, considering 
             # Configure litellm using the LLMManager
             model_params = await LLMManager.configure_litellm(model)
             
-            # Generate completion
-            response = await litellm.acompletion(
+            # Prepare completion parameters
+            completion_params = {
                 **model_params,
-                messages=messages,
-                temperature=0.3,  # Lower temperature for more consistent intent detection
-                max_tokens=1000
-            )
+                "messages": messages,
+                "temperature": 0.3,  # Lower temperature for more consistent intent detection
+                "max_tokens": 1000
+            }
             
-            content = response["choices"][0]["message"]["content"]
+            # With litellm 1.75.8+, GPT-5 is natively supported
+            # No need for custom handlers - litellm handles max_completion_tokens automatically
+            
+            # Generate completion - litellm 1.75.8 handles GPT-5 natively
+            response = await litellm.acompletion(**completion_params)
+            
+            # Handle both dict and ModelResponse objects from litellm 1.75.8
+            # litellm 1.75.8 returns ModelResponse (Pydantic) objects, not plain dicts
+            if hasattr(response, 'choices'):
+                # It's a ModelResponse object
+                choices = response.choices
+            else:
+                # It's a dict (older litellm behavior)
+                choices = response.get("choices", [])
+            
+            if choices and len(choices) > 0:
+                choice = choices[0]
+                # Get message from choice (could be object or dict)
+                if hasattr(choice, 'message'):
+                    message = choice.message
+                else:
+                    message = choice.get("message", {})
+                
+                # Get content from message (could be object or dict)
+                if hasattr(message, 'content'):
+                    content = message.content
+                else:
+                    content = message.get("content", "")
+            else:
+                content = ""
+            
+            
+            # Check if content is empty
+            if not content or not content.strip():
+                logger.warning(f"LLM returned empty response for intent detection with model {model}")
+                # Fall back to semantic analysis
+                semantic_confidence = max(semantic_analysis["intent_scores"].values()) / 5.0
+                return {
+                    "intent": semantic_analysis["suggested_intent"] if semantic_confidence > 0.3 else "unknown",
+                    "confidence": max(0.3, semantic_confidence),
+                    "extracted_info": {},
+                    "source": "semantic_fallback_empty_response"
+                }
             
             # Parse the response
             result = robust_json_parser(content)
@@ -383,7 +467,15 @@ Please analyze this message and provide your intent classification, considering 
             
             # If LLM result seems wrong and semantic analysis is confident, use semantic analysis
             semantic_confidence = max(semantic_analysis["intent_scores"].values()) / 5.0  # Normalize to 0-1
-            if semantic_confidence > 0.6 and result["confidence"] < 0.7:
+            
+            # Special case: Strong plan signal should override LLM
+            plan_score = semantic_analysis["intent_scores"].get("generate_plan", 0)
+            if plan_score >= 8 and semantic_analysis.get("has_create_plan", False):
+                # Very strong plan signal - override LLM decision
+                logger.info(f"Strong plan signal detected (score: {plan_score}). Overriding LLM intent '{result['intent']}' with 'generate_plan'")
+                result["intent"] = "generate_plan"
+                result["confidence"] = max(result["confidence"], 0.95)
+            elif semantic_confidence > 0.6 and result["confidence"] < 0.7:
                 logger.info(f"Using semantic analysis suggestion: {semantic_analysis['suggested_intent']} (confidence: {semantic_confidence:.2f}) over LLM result: {result['intent']} (confidence: {result['confidence']:.2f})")
                 result["intent"] = semantic_analysis["suggested_intent"]
                 result["confidence"] = max(result["confidence"], semantic_confidence)
@@ -464,6 +556,20 @@ Please analyze this message and provide your intent classification, considering 
                 )
                 generation_result = await self.crew_service.create_crew_complete(crew_request, group_context)
                 
+            elif dispatcher_response.intent == IntentType.GENERATE_PLAN:
+                # Plans work exactly like crews - they create agents and tasks
+                # Use the crew generation service since plans and crews are functionally identical
+                crew_request = CrewGenerationRequest(
+                    prompt=dispatcher_response.suggested_prompt or request.message,
+                    model=request.model,
+                    tools=request.tools
+                )
+                # Call the same crew service - plans are just crews with different naming
+                generation_result = await self.crew_service.create_crew_complete(crew_request, group_context)
+                # Optionally mark it as a plan in the result
+                if generation_result and isinstance(generation_result, dict):
+                    generation_result["workflow_type"] = "plan"
+                
             elif dispatcher_response.intent == IntentType.EXECUTE_CREW:
                 # Handle execution intent - signal frontend to execute the crew
                 generation_result = {
@@ -493,11 +599,12 @@ Please analyze this message and provide your intent classification, considering 
                 # Handle conversation intent - provide helpful response
                 generation_result = {
                     "type": "conversation",
-                    "message": "I understand you're having a conversation. If you'd like me to create a task, agent, or crew for you, please describe what you'd like me to build. For example: 'Create a task to find flights' or 'Build an agent that can analyze data'.",
+                    "message": "I understand you're having a conversation. If you'd like me to create a task, agent, crew, or plan for you, please describe what you'd like me to build. For example: 'Create a task to find flights' or 'Build an agent that can analyze data'.",
                     "suggestions": [
                         "Create a task to accomplish a specific goal",
                         "Generate an agent with particular capabilities", 
-                        "Build a crew of agents working together"
+                        "Build a crew of agents working together",
+                        "Create a plan with multiple agents and tasks"
                     ]
                 }
                 
@@ -506,11 +613,12 @@ Please analyze this message and provide your intent classification, considering 
                 logger.warning(f"Unknown intent detected: {dispatcher_response.intent}")
                 generation_result = {
                     "type": "unknown",
-                    "message": "I'm not sure what you'd like me to create. Could you please clarify if you want me to generate a task, agent, or crew?",
+                    "message": "I'm not sure what you'd like me to create. Could you please clarify if you want me to generate a task, agent, crew, or plan?",
                     "suggestions": [
                         "Create a task: 'I need a task to...'",
                         "Generate an agent: 'Create an agent that can...'",
-                        "Build a crew: 'Build a team that can...'"
+                        "Build a crew: 'Build a team that can...'",
+                        "Create a plan: 'Create a plan for...'"
                     ]
                 }
                 

@@ -66,16 +66,28 @@ class ExecutionHistoryService:
             )
                 
             # Convert each run to a pydantic model, handling string results properly
+            import json
             execution_items = []
             for run in runs:
+                run_dict = run.__dict__.copy() if hasattr(run, '__dict__') else {}
+                
+                # Handle string results
                 if hasattr(run, 'result') and isinstance(run.result, str):
-                    # Convert string result to a dictionary with the content field
-                    run_dict = run.__dict__.copy()
                     run_dict['result'] = {"content": run.result}
-                    # Create a model-compatible dictionary for validation
-                    execution_items.append(ExecutionHistoryItem.model_validate(run_dict))
-                else:
-                    execution_items.append(ExecutionHistoryItem.model_validate(run))
+                
+                # Extract agents_yaml and tasks_yaml from inputs if available
+                if hasattr(run, 'inputs') and run.inputs:
+                    # Convert agents_yaml and tasks_yaml to JSON strings for the schema
+                    if 'agents_yaml' in run.inputs:
+                        run_dict['agents_yaml'] = json.dumps(run.inputs['agents_yaml']) if isinstance(run.inputs['agents_yaml'], dict) else run.inputs.get('agents_yaml', '')
+                    if 'tasks_yaml' in run.inputs:
+                        run_dict['tasks_yaml'] = json.dumps(run.inputs['tasks_yaml']) if isinstance(run.inputs['tasks_yaml'], dict) else run.inputs.get('tasks_yaml', '')
+                    
+                    # Keep the full inputs for the input field
+                    run_dict['input'] = run.inputs
+                
+                # Create a model-compatible dictionary for validation
+                execution_items.append(ExecutionHistoryItem.model_validate(run_dict))
             
             return ExecutionHistoryList(
                 executions=execution_items,
@@ -109,15 +121,27 @@ class ExecutionHistoryService:
             if not run:
                 return None
             
+            # Build the dictionary from the run object
+            import json
+            run_dict = run.__dict__.copy() if hasattr(run, '__dict__') else {}
+            
             # Check if result field is a string but should be a dictionary
             if hasattr(run, 'result') and isinstance(run.result, str):
-                # Convert string result to a dictionary with the content field
-                run_dict = run.__dict__.copy()
                 run_dict['result'] = {"content": run.result}
-                # Create a model-compatible dictionary for validation
-                return ExecutionHistoryItem.model_validate(run_dict)
-            else:
-                return ExecutionHistoryItem.model_validate(run)
+            
+            # Extract agents_yaml and tasks_yaml from inputs if available
+            if hasattr(run, 'inputs') and run.inputs:
+                # Convert agents_yaml and tasks_yaml to JSON strings for the schema
+                if 'agents_yaml' in run.inputs:
+                    run_dict['agents_yaml'] = json.dumps(run.inputs['agents_yaml']) if isinstance(run.inputs['agents_yaml'], dict) else run.inputs.get('agents_yaml', '')
+                if 'tasks_yaml' in run.inputs:
+                    run_dict['tasks_yaml'] = json.dumps(run.inputs['tasks_yaml']) if isinstance(run.inputs['tasks_yaml'], dict) else run.inputs.get('tasks_yaml', '')
+                
+                # Keep the full inputs for the input field
+                run_dict['input'] = run.inputs
+            
+            # Create a model-compatible dictionary for validation
+            return ExecutionHistoryItem.model_validate(run_dict)
             
         except SQLAlchemyError as e:
             logger.error(f"Database error retrieving execution {execution_id}: {str(e)}")
@@ -445,15 +469,27 @@ class ExecutionHistoryService:
             if not run:
                 return None
             
+            # Build the dictionary from the run object
+            import json
+            run_dict = run.__dict__.copy() if hasattr(run, '__dict__') else {}
+            
             # Check if result field is a string but should be a dictionary
             if hasattr(run, 'result') and isinstance(run.result, str):
-                # Convert string result to a dictionary with the content field
-                run_dict = run.__dict__.copy()
                 run_dict['result'] = {"content": run.result}
-                # Create a model-compatible dictionary for validation
-                return ExecutionHistoryItem.model_validate(run_dict)
-            else:
-                return ExecutionHistoryItem.model_validate(run)
+            
+            # Extract agents_yaml and tasks_yaml from inputs if available
+            if hasattr(run, 'inputs') and run.inputs:
+                # Convert agents_yaml and tasks_yaml to JSON strings for the schema
+                if 'agents_yaml' in run.inputs:
+                    run_dict['agents_yaml'] = json.dumps(run.inputs['agents_yaml']) if isinstance(run.inputs['agents_yaml'], dict) else run.inputs.get('agents_yaml', '')
+                if 'tasks_yaml' in run.inputs:
+                    run_dict['tasks_yaml'] = json.dumps(run.inputs['tasks_yaml']) if isinstance(run.inputs['tasks_yaml'], dict) else run.inputs.get('tasks_yaml', '')
+                
+                # Keep the full inputs for the input field
+                run_dict['input'] = run.inputs
+            
+            # Create a model-compatible dictionary for validation
+            return ExecutionHistoryItem.model_validate(run_dict)
             
         except SQLAlchemyError as e:
             logger.error(f"Database error retrieving execution with job_id {job_id}: {str(e)}")

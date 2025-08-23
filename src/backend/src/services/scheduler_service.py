@@ -330,6 +330,13 @@ class SchedulerService:
             
             # Setup async session
             async with async_session_factory() as session:
+                # Get the schedule to retrieve group information
+                repo = ScheduleRepository(session)
+                schedule = await repo.find_by_id(schedule_id)
+                if not schedule:
+                    logger_manager.scheduler.error(f"Schedule {schedule_id} not found")
+                    return
+                
                 execution_service = ExecutionService()
                 request = ExecutionNameGenerationRequest(
                     agents_yaml=config.agents_yaml,
@@ -337,7 +344,8 @@ class SchedulerService:
                     model=model
                 )
                 response = await execution_service.generate_execution_name(request)
-                run_name = response.name
+                # Response is a dictionary, not an object with .name attribute
+                run_name = response.get("name", f"Scheduled Run {job_id[:8]}")
                 
                 # Prepare job configuration
                 config_dict = {
@@ -347,35 +355,51 @@ class SchedulerService:
                     "model": config.model
                 }
                 
-                # Create run record
+                # Convert timezone-aware datetime to timezone-naive for database
+                if hasattr(execution_time, 'tzinfo') and execution_time.tzinfo is not None:
+                    execution_time_naive = execution_time.replace(tzinfo=None)
+                else:
+                    execution_time_naive = execution_time
+                
+                # Create run record with group information from schedule
                 db_run = Run(
                     job_id=job_id,
                     status="pending",
                     inputs=config_dict,
-                    created_at=execution_time,
+                    created_at=execution_time_naive,
                     trigger_type="scheduled",
                     planning=config.planning,
-                    run_name=run_name
+                    run_name=run_name,
+                    group_id=schedule.group_id,  # Add group_id from schedule
+                    group_email=schedule.created_by_email  # Add email from schedule
                 )
                 session.add(db_run)
                 await session.commit()
                 await session.refresh(db_run)
                 
                 # Create an instance of CrewExecutionService
-                crew_execution_service = CrewAIExecutionService(session)
+                crew_execution_service = CrewAIExecutionService()
                 
                 # Add execution to memory
                 CrewAIExecutionService.add_execution_to_memory(
                     execution_id=job_id,
                     status=JobStatus.PENDING.value,
                     run_name=run_name,
-                    created_at=execution_time
+                    created_at=execution_time_naive
+                )
+                
+                # Create group context from schedule information
+                from src.utils.user_context import GroupContext
+                group_context = GroupContext(
+                    group_ids=[schedule.group_id] if schedule.group_id else [],
+                    group_email=schedule.created_by_email
                 )
                 
                 # Run the job
                 await crew_execution_service.run_crew_execution(
                     execution_id=job_id,
-                    config=config
+                    config=config,
+                    group_context=group_context
                 )
                 
                 # Update schedule after execution

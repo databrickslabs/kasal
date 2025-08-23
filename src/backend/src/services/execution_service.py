@@ -313,7 +313,7 @@ class ExecutionService:
                 if config.model and 'databricks' in config.model.lower():
                     exec_logger.info(f"Setting up Databricks token for crew execution with model {config.model}")
                     from src.services.databricks_service import DatabricksService
-                    setup_result = DatabricksService.setup_token_sync()
+                    setup_result = await DatabricksService.setup_token()
                     if not setup_result:
                         exec_logger.warning("Failed to set up Databricks token, crew execution may fail if it requires Databricks")
                 
@@ -387,19 +387,29 @@ class ExecutionService:
                 
                 logger.info(f"Successfully retrieved {len(db_executions_list)} executions from database")
                 
-                # Convert to list of dicts
-                db_executions = [
-                    {
+                # Convert to list of dicts, including inputs with agents_yaml and tasks_yaml
+                import json
+                db_executions = []
+                for e in db_executions_list:
+                    exec_dict = {
                         "execution_id": e.job_id,
                         "status": e.status,
                         "created_at": e.created_at,
                         "run_name": e.run_name,
                         "result": e.result,
                         "error": e.error,
-                        "group_email": e.group_email
+                        "group_email": e.group_email,
+                        "inputs": e.inputs  # Include the inputs field
                     }
-                    for e in db_executions_list
-                ]
+                    
+                    # Also extract agents_yaml and tasks_yaml from inputs for direct access
+                    if e.inputs and isinstance(e.inputs, dict):
+                        if 'agents_yaml' in e.inputs:
+                            exec_dict['agents_yaml'] = json.dumps(e.inputs['agents_yaml']) if isinstance(e.inputs['agents_yaml'], dict) else e.inputs.get('agents_yaml', '')
+                        if 'tasks_yaml' in e.inputs:
+                            exec_dict['tasks_yaml'] = json.dumps(e.inputs['tasks_yaml']) if isinstance(e.inputs['tasks_yaml'], dict) else e.inputs.get('tasks_yaml', '')
+                    
+                    db_executions.append(exec_dict)
             
             # Get in-memory executions that might not be in the database yet
             memory_executions = {}

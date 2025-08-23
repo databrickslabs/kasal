@@ -135,13 +135,13 @@ class MemoryBackendService:
             workspace_url, endpoint_name, user_token
         )
     
-    async def _get_databricks_client_with_auth(
+    async def _get_databricks_auth_token(
         self,
         workspace_url: str,
         user_token: Optional[str] = None
-    ) -> Tuple[Optional[Any], str]:
-        """Get Databricks VectorSearchClient with proper authentication fallback."""
-        return await self._connection_service.get_databricks_client_with_auth(
+    ) -> Tuple[str, str]:
+        """Get Databricks authentication token with proper fallback."""
+        return await self._connection_service.get_databricks_auth_token(
             workspace_url, user_token
         )
     
@@ -220,6 +220,58 @@ class MemoryBackendService:
             embedding_dimension, user_token
         )
     
+    async def get_index_documents(
+        self,
+        workspace_url: str,
+        endpoint_name: str,
+        index_name: str,
+        index_type: Optional[str] = None,
+        embedding_dimension: int = 1024,
+        limit: int = 30,
+        user_token: Optional[str] = None
+    ) -> Dict[str, Any]:
+        """Get documents from a Databricks Vector Search index."""
+        return await self._index_service.get_index_documents(
+            workspace_url, endpoint_name, index_name, index_type, embedding_dimension, limit, user_token
+        )
+    
+    async def search_vectors(
+        self,
+        workspace_url: str,
+        index_name: str,
+        endpoint_name: str,
+        query_embedding: List[float],
+        memory_type: str,
+        k: int = 5,
+        filters: Optional[Dict[str, Any]] = None,
+        user_token: Optional[str] = None
+    ) -> List[Dict[str, Any]]:
+        """
+        Search for similar vectors in a Databricks Vector Search index.
+        
+        Args:
+            workspace_url: Databricks workspace URL
+            index_name: Full index name (catalog.schema.table)
+            endpoint_name: Endpoint hosting the index
+            query_embedding: Query vector for similarity search
+            memory_type: Type of memory ("short_term", "long_term", "entity", "document")
+            k: Number of results to return
+            filters: Optional filters to apply
+            user_token: Optional user access token for OBO authentication
+            
+        Returns:
+            List of search results
+        """
+        try:
+            # Delegate to the index service for vector search operations
+            return await self._index_service.search_vectors(
+                workspace_url, index_name, endpoint_name, query_embedding, 
+                memory_type, k, filters, user_token
+            )
+        except Exception as e:
+            logger.error(f"Failed to search vectors in {index_name}: {e}")
+            return []
+    
     # ===== Databricks Setup Operations (delegated to DatabricksVectorSearchSetupService) =====
     
     async def one_click_databricks_setup(
@@ -254,3 +306,47 @@ class MemoryBackendService:
         return await self._verification_service.verify_databricks_resources(
             workspace_url, user_token, config_dict
         )
+    
+    async def get_workspace_url(self) -> Dict[str, Any]:
+        """
+        Get the Databricks workspace URL from environment variables.
+        Checks in order: DATABRICKS_HOST (for Databricks Apps), DATABRICKS_WORKSPACE_URL.
+        
+        Returns:
+            Dict with workspace_url and source, or None values if not found
+        """
+        import os
+        
+        # Check for DATABRICKS_HOST first (Databricks Apps environment)
+        databricks_host = os.getenv("DATABRICKS_HOST")
+        if databricks_host:
+            # Ensure it has https:// prefix
+            if not databricks_host.startswith("http"):
+                databricks_host = f"https://{databricks_host}"
+            logger.info(f"Detected workspace URL from DATABRICKS_HOST: {databricks_host}")
+            return {
+                "workspace_url": databricks_host,
+                "source": "DATABRICKS_HOST",
+                "detected": True
+            }
+        
+        # Check for DATABRICKS_WORKSPACE_URL (alternative env var for local dev)
+        workspace_url = os.getenv("DATABRICKS_WORKSPACE_URL")
+        if workspace_url:
+            # Ensure it has https:// prefix
+            if not workspace_url.startswith("http"):
+                workspace_url = f"https://{workspace_url}"
+            logger.info(f"Detected workspace URL from DATABRICKS_WORKSPACE_URL: {workspace_url}")
+            return {
+                "workspace_url": workspace_url,
+                "source": "DATABRICKS_WORKSPACE_URL",
+                "detected": True
+            }
+        
+        # No workspace URL found in environment
+        logger.info("No workspace URL detected in environment variables")
+        return {
+            "workspace_url": None,
+            "source": None,
+            "detected": False
+        }

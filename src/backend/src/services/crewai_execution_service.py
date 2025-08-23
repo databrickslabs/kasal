@@ -94,9 +94,59 @@ class CrewAIExecutionService:
             # No need to update status to RUNNING since it's already set during creation
             crew_logger.info(f"Engine prepared for execution {execution_id}, starting actual execution")
             
+            # Convert CrewConfig to the dictionary format expected by the engine
+            # Convert agents from dict to list format
+            agents_list = []
+            if config.agents_yaml and isinstance(config.agents_yaml, dict):
+                for agent_id, agent_config in config.agents_yaml.items():
+                    # Add the ID to the config if not present
+                    if 'id' not in agent_config:
+                        agent_config['id'] = agent_id
+                    agents_list.append(agent_config)
+            
+            # Convert tasks from dict to list format
+            tasks_list = []
+            if config.tasks_yaml and isinstance(config.tasks_yaml, dict):
+                for task_id, task_config in config.tasks_yaml.items():
+                    # Add the ID to the config if not present
+                    if 'id' not in task_config:
+                        task_config['id'] = task_id
+                    tasks_list.append(task_config)
+            
+            # Get run_name from the execution record if available
+            run_name = None
+            if execution_id in executions:
+                run_name = executions[execution_id].get("run_name")
+                crew_logger.info(f"Found execution {execution_id} in memory with run_name: {run_name}")
+            else:
+                crew_logger.warning(f"Execution {execution_id} not found in memory, executions keys: {list(executions.keys())}")
+            
+            # Include run_name in inputs so it's accessible throughout the execution
+            inputs_with_run_name = config.inputs or {}
+            if run_name:
+                inputs_with_run_name["run_name"] = run_name
+            
+            execution_config = {
+                "agents": agents_list,
+                "tasks": tasks_list,
+                "inputs": inputs_with_run_name,
+                "planning": config.planning,
+                "model": config.model,
+                "run_name": run_name,
+                "execution_id": execution_id,
+                "crew": {
+                    "name": run_name or f"Scheduled Crew {execution_id[:8]}",
+                    "model": config.model
+                }
+            }
+            
+            # Add group_id to config if group_context is provided
+            if group_context and group_context.group_ids and len(group_context.group_ids) > 0:
+                execution_config["group_id"] = group_context.group_ids[0]
+            
             # Run the crew via the engine - this starts the execution but doesn't wait for it to complete
             # The engine will update the status to COMPLETED or FAILED when done
-            result = await engine.run_execution(execution_id, config, group_context)
+            result = await engine.run_execution(execution_id, execution_config, group_context)
             
             # Return the execution ID - do NOT update status to COMPLETED here
             # as the execution is running asynchronously and will be updated by the engine

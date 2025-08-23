@@ -64,6 +64,7 @@ class MemoryBackendBaseService:
                 "enable_short_term": config.enable_short_term,
                 "enable_long_term": config.enable_long_term,
                 "enable_entity": config.enable_entity,
+                "enable_relationship_retrieval": config.enable_relationship_retrieval,
                 "is_active": True,
                 "is_default": False
             }

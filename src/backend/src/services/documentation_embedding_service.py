@@ -72,33 +72,50 @@ class DocumentationEmbeddingService:
             self._memory_config = None
             return False
     
-    async def _get_databricks_storage(self):
-        """Get or create Databricks storage instance."""
+    async def _get_databricks_storage(self, user_token: Optional[str] = None):
+        """Get or create Databricks storage instance.
+        
+        Args:
+            user_token: Optional user access token for OBO authentication
+        """
         if self._databricks_storage:
+            # Update the user token on the cached instance for OBO authentication
+            # This ensures each request uses the correct user token
+            if user_token:
+                self._databricks_storage.user_token = user_token
             return self._databricks_storage
             
         if not await self._check_databricks_config():
             return None
             
         try:
-            from databricks.vector_search.client import VectorSearchClient
+            from src.repositories.databricks_vector_index_repository import DatabricksVectorIndexRepository
             from src.engines.crewai.memory.databricks_vector_storage import DatabricksVectorStorage
             
             # Get databricks config first to handle both dict and object forms
             db_config = self._memory_config.databricks_config
             
+            # Check if databricks_config is None
+            if not db_config:
+                logger.warning("Databricks configuration is None, cannot initialize storage")
+                return None
+            
             # Use document index if configured, otherwise use a dedicated documentation index
             if hasattr(db_config, 'document_index'):
                 index_name = db_config.document_index
-            else:
+            elif isinstance(db_config, dict):
                 index_name = db_config.get('document_index')
+            else:
+                index_name = None
             
             if not index_name:
                 # Create a default documentation index name
                 if hasattr(db_config, 'short_term_index'):
                     short_term_index = db_config.short_term_index
-                else:
+                elif isinstance(db_config, dict):
                     short_term_index = db_config.get('short_term_index', '')
+                else:
+                    short_term_index = ''
                 
                 if short_term_index:
                     index_name = short_term_index.rsplit('.', 1)[0] + '.documentation_embeddings'
@@ -106,8 +123,7 @@ class DocumentationEmbeddingService:
                     index_name = 'documentation_embeddings'
                 logger.info(f"No document index configured, using: {index_name}")
             
-            # Get databricks config - handle both dict and object forms
-            db_config = self._memory_config.databricks_config
+            # Extract configuration values - handle both dict and object forms
             if hasattr(db_config, 'endpoint_name'):
                 # It's an object
                 # Use document_endpoint_name if available, otherwise fall back to endpoint_name
@@ -117,61 +133,46 @@ class DocumentationEmbeddingService:
                 personal_access_token = db_config.personal_access_token
                 service_principal_client_id = db_config.service_principal_client_id
                 service_principal_client_secret = db_config.service_principal_client_secret
-            else:
+            elif isinstance(db_config, dict):
                 # It's a dictionary
                 # Use document_endpoint_name if available, otherwise fall back to endpoint_name
-                endpoint_name = db_config.get('document_endpoint_name') or db_config['endpoint_name']
+                endpoint_name = db_config.get('document_endpoint_name') or db_config.get('endpoint_name')
                 workspace_url = db_config.get('workspace_url')
                 embedding_dimension = db_config.get('embedding_dimension', 1024)
                 personal_access_token = db_config.get('personal_access_token')
                 service_principal_client_id = db_config.get('service_principal_client_id')
                 service_principal_client_secret = db_config.get('service_principal_client_secret')
+            else:
+                logger.error(f"Unexpected databricks_config type: {type(db_config)}")
+                return None
             
             logger.info(f"Checking if index is ready before initializing Databricks storage - endpoint: {endpoint_name}, index: {index_name}")
             
-            # First check if the index is ready without blocking
-            client_kwargs = {}
-            if workspace_url:
-                client_kwargs['workspace_url'] = workspace_url
-            if personal_access_token:
-                client_kwargs['personal_access_token'] = personal_access_token
-            elif service_principal_client_id and service_principal_client_secret:
-                client_kwargs['service_principal_client_id'] = service_principal_client_id
-                client_kwargs['service_principal_client_secret'] = service_principal_client_secret
+            # Use DatabricksIndexService to wait for index readiness with retries
+            from src.services.databricks_index_service import DatabricksIndexService
+            index_service = DatabricksIndexService(workspace_url)
             
-            client = VectorSearchClient(**{k: v for k, v in client_kwargs.items() if v is not None})
+            # Wait for index to be ready (with shorter timeout for documentation embedding)
+            # 60 seconds should be enough for most cases, but allows for some waiting
+            readiness_result = await index_service.wait_for_index_ready(
+                workspace_url=workspace_url,
+                index_name=index_name,
+                endpoint_name=endpoint_name,
+                max_wait_seconds=60,  # Wait up to 1 minute
+                check_interval_seconds=5,  # Check every 5 seconds
+                user_token=user_token  # Pass the user token for authentication
+            )
             
-            # Check index status
-            try:
-                index = client.get_index(endpoint_name=endpoint_name, index_name=index_name)
-                index_info = index.describe()
+            if not readiness_result.get("ready"):
+                message = readiness_result.get("message", "Index not ready")
+                attempts = readiness_result.get("attempts", 0)
+                elapsed_time = readiness_result.get("elapsed_time", 0)
                 
-                # Check if index is ready
-                is_ready = False
-                if isinstance(index_info, dict):
-                    status = index_info.get('status', {})
-                    if isinstance(status, dict):
-                        is_ready = status.get('ready', False)
-                        detailed_state = status.get('detailed_state', '')
-                        if not is_ready:
-                            logger.info(f"Index {index_name} is not ready (state: {detailed_state}), skipping Databricks storage initialization")
-                            return None
-                    
-                if not is_ready:
-                    logger.info(f"Index {index_name} is not ready, skipping Databricks storage initialization")
-                    return None
-                    
-            except Exception as e:
-                error_str = str(e)
-                if "does not exist" in error_str or "not found" in error_str:
-                    logger.info(f"Index {index_name} does not exist, skipping Databricks storage initialization")
-                    return None
-                elif "not ready" in error_str:
-                    logger.info(f"Index {index_name} is not ready, skipping Databricks storage initialization")
-                    return None
-                else:
-                    logger.warning(f"Error checking index status: {e}, skipping Databricks storage initialization")
-                    return None
+                logger.info(f"Index {index_name} not ready after {attempts} attempts ({elapsed_time:.1f}s): {message}")
+                logger.info("Skipping Databricks storage initialization - will retry on next embedding attempt")
+                return None
+            
+            logger.info(f"Index {index_name} is ready after {readiness_result.get('attempts', 0)} attempts ({readiness_result.get('elapsed_time', 0):.1f}s)")
             
             # Only create DatabricksVectorStorage if index is ready
             logger.info(f"Index is ready, initializing Databricks storage with endpoint: {endpoint_name}, index: {index_name}")
@@ -185,7 +186,8 @@ class DocumentationEmbeddingService:
                 workspace_url=workspace_url,
                 personal_access_token=personal_access_token,
                 service_principal_client_id=service_principal_client_id,
-                service_principal_client_secret=service_principal_client_secret
+                service_principal_client_secret=service_principal_client_secret,
+                user_token=user_token  # Pass OBO token for Databricks Apps authentication
             )
             
             logger.info(f"Successfully initialized Databricks storage for documentation with endpoint: {endpoint_name}, index: {index_name}")
@@ -197,11 +199,17 @@ class DocumentationEmbeddingService:
     
     async def create_documentation_embedding(
         self, 
-        doc_embedding: DocumentationEmbeddingCreate
+        doc_embedding: DocumentationEmbeddingCreate,
+        user_token: Optional[str] = None
     ) -> DocumentationEmbedding:
-        """Create a new documentation embedding."""
+        """Create a new documentation embedding.
+        
+        Args:
+            doc_embedding: The documentation embedding to create
+            user_token: Optional user access token for OBO authentication
+        """
         # Check if we should use Databricks
-        databricks_storage = await self._get_databricks_storage()
+        databricks_storage = await self._get_databricks_storage(user_token=user_token)
         if databricks_storage:
             try:
                 # Create a unique ID for the document
@@ -219,24 +227,27 @@ class DocumentationEmbeddingService:
                 logger.info(f"Attempting to save to Databricks index: {databricks_storage.index_name}")
                 logger.info(f"Document ID: {doc_id}, Content length: {len(doc_embedding.content)}, Embedding dimensions: {len(doc_embedding.embedding)}")
                 
-                # DatabricksVectorStorage expects value to be a dict with 'data' and 'embedding'
-                value = {
-                    'data': doc_embedding.content,
-                    'embedding': doc_embedding.embedding
+                # DatabricksVectorStorage.save() expects a single 'data' dict parameter
+                # that includes content, embedding, and metadata
+                data = {
+                    'content': doc_embedding.content,
+                    'embedding': doc_embedding.embedding,
+                    'metadata': metadata,
+                    'context': {
+                        'query_text': doc_embedding.title or '',
+                        'session_id': str(doc_id),
+                        'interaction_sequence': 0
+                    }
                 }
                 
                 # Save using the correct method signature
-                databricks_storage.save(
-                    value=value,
-                    metadata=metadata,
-                    agent="documentation"  # Use a static agent name for documentation
-                )
+                await databricks_storage.save(data)
                 
                 logger.info(f"Successfully saved documentation embedding to Databricks with ID: {doc_id} in index: {databricks_storage.index_name}")
                 
                 # Verify the document was saved by getting stats
                 try:
-                    stats = databricks_storage.get_stats()
+                    stats = await databricks_storage.get_stats()
                     logger.info(f"Current index stats after save: {stats}")
                 except Exception as e:
                     logger.error(f"Error getting stats after save: {e}")
