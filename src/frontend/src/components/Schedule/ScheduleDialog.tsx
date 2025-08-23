@@ -270,7 +270,6 @@ const ScheduleDialog: React.FC<ScheduleDialogProps> = ({
         };
         
         await ScheduleService.updateSchedule(editingScheduleId, scheduleData);
-        toast.success('Schedule updated successfully');
       }
 
       resetForm();
@@ -297,7 +296,6 @@ const ScheduleDialog: React.FC<ScheduleDialogProps> = ({
   const handleToggleSchedule = async (id: number) => {
     try {
       await ScheduleService.toggleSchedule(id);
-      toast.success('Schedule toggled successfully');
       loadSchedules();
     } catch (error) {
       console.error('Error toggling schedule:', error);
@@ -550,7 +548,11 @@ const ScheduleDialog: React.FC<ScheduleDialogProps> = ({
                       </Typography>
                       {schedule.next_run_at && (
                         <Typography component="span" variant="body2" color="text.secondary" sx={{ ml: 2 }}>
-                          • Next run: {new Date(schedule.next_run_at).toLocaleString()}
+                          • Next run: {(() => {
+                            // Backend stores in UTC without timezone info, treat as UTC
+                            const utcDate = new Date(schedule.next_run_at + 'Z');
+                            return utcDate.toLocaleString();
+                          })()}
                         </Typography>
                       )}
                     </Box>

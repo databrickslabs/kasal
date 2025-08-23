@@ -17,6 +17,7 @@ import {
   InputAdornment,
   Pagination,
   Popover,
+  CircularProgress,
 } from '@mui/material';
 import { Theme } from '@mui/material/styles';
 import DeleteIcon from '@mui/icons-material/Delete';
@@ -24,9 +25,9 @@ import SearchIcon from '@mui/icons-material/Search';
 import FilterListIcon from '@mui/icons-material/FilterList';
 import ArrowUpwardIcon from '@mui/icons-material/ArrowUpward';
 import ArrowDownwardIcon from '@mui/icons-material/ArrowDownward';
-import { Run } from '../../api/ExecutionHistoryService';
+import { Run, calculateDurationFromTraces } from '../../api/ExecutionHistoryService';
 import { ScheduleService } from '../../api/ScheduleService';
-import ShowTrace from './ShowTrace';
+import ShowTraceTimeline from './ShowTraceTimeline';
 import ShowResult from './ShowResult';
 import { ResultValue } from '../../types/result';
 import ShowLogs from './ShowLogs';
@@ -44,6 +45,75 @@ import { AgentYaml, TaskYaml } from '../../types/crew';
 export interface RunHistoryRef {
   refreshRuns: () => Promise<void>;
 }
+
+// Component to handle async duration loading
+const DurationCell: React.FC<{ run: Run }> = ({ run }) => {
+  const [duration, setDuration] = useState<string>('-');
+  const [loading, setLoading] = useState<boolean>(true);
+
+  useEffect(() => {
+    let mounted = true;
+    
+    const loadDuration = async () => {
+      try {
+        const calculatedDuration = await calculateDurationFromTraces(run);
+        if (mounted) {
+          setDuration(calculatedDuration);
+          setLoading(false);
+        }
+      } catch (error) {
+        if (mounted) {
+          setDuration('-');
+          setLoading(false);
+        }
+      }
+    };
+
+    // Only calculate for completed jobs
+    const status = (run.status || '').toUpperCase();
+    if (status === 'COMPLETED' || status === 'FAILED' || status === 'CANCELLED') {
+      loadDuration();
+    } else {
+      setDuration('-');
+      setLoading(false);
+    }
+
+    return () => {
+      mounted = false;
+    };
+  }, [run]);
+
+  if (loading) {
+    return (
+      <Chip
+        label={<CircularProgress size={10} thickness={4} />}
+        size="small"
+        variant="outlined"
+        sx={{
+          height: '18px',
+          '& .MuiChip-label': { px: 0.75 },
+          borderColor: (theme: Theme) => theme.palette.grey[400]
+        }}
+      />
+    );
+  }
+
+  return (
+    <Chip
+      label={duration}
+      size="small"
+      variant="outlined"
+      sx={{
+        height: '18px',
+        '& .MuiChip-label': { px: 0.75, fontSize: '0.7rem' },
+        borderColor: (theme: Theme) => 
+          run.status === 'completed' ? theme.palette.success.main :
+          run.status === 'failed' ? theme.palette.error.main :
+          theme.palette.grey[400]
+      }}
+    />
+  );
+};
 
 interface ScheduleCreateData {
   name: string;
@@ -380,7 +450,7 @@ const RunHistory = forwardRef<RunHistoryRef, RunHistoryProps>(({ executionHistor
       return;
     }
 
-    // Extract complete YAML configuration data from execution inputs
+    // Extract complete YAML configuration data from execution
     let agents_yaml = null;
     let tasks_yaml = null;
     
@@ -392,7 +462,7 @@ const RunHistory = forwardRef<RunHistoryRef, RunHistoryProps>(({ executionHistor
       tasks_yaml = selectedRunForSchedule.inputs.tasks_yaml;
     }
     
-    // Fallback to direct properties (though these are usually strings or empty)
+    // Fallback to direct properties (now properly populated from backend)
     if (!agents_yaml && selectedRunForSchedule.agents_yaml) {
       try {
         agents_yaml = typeof selectedRunForSchedule.agents_yaml === 'string' 
@@ -419,36 +489,26 @@ const RunHistory = forwardRef<RunHistoryRef, RunHistoryProps>(({ executionHistor
       // We have complete configuration from the execution
       finalAgentsYaml = JSON.stringify(agents_yaml);
       finalTasksYaml = JSON.stringify(tasks_yaml);
-      toast.success('Using complete agent and task configuration from execution');
     } else {
-      // Create a minimal dummy configuration as fallback
-      const executionName = selectedRunForSchedule.run_name || 'Scheduled Task';
-      
-      finalAgentsYaml = JSON.stringify({
-        "research_agent": {
-          "role": "Research Specialist",
-          "goal": `Execute ${executionName}`,
-          "backstory": `You are a specialist responsible for executing the scheduled task: ${executionName}`,
-          "tools": [],
-          "llm": "gpt-4o-mini"
-        }
+      // This should NEVER happen in production - it means the execution is missing configuration
+      console.error('CRITICAL: Execution missing configuration', {
+        executionId: selectedRunForSchedule.id,
+        jobId: selectedRunForSchedule.job_id,
+        runName: selectedRunForSchedule.run_name,
+        hasInputs: !!selectedRunForSchedule.inputs,
+        hasAgentsYaml: !!agents_yaml,
+        hasTasksYaml: !!tasks_yaml,
+        agentsYamlKeys: agents_yaml ? Object.keys(agents_yaml) : [],
+        tasksYamlKeys: tasks_yaml ? Object.keys(tasks_yaml) : []
       });
       
-      finalTasksYaml = JSON.stringify({
-        "main_task": {
-          "description": `Execute the scheduled task: ${executionName}`,
-          "agent": "research_agent",
-          "expected_output": "Task execution completed successfully"
-        }
+      // Prevent scheduling without proper configuration
+      toast.error('❌ Cannot schedule: This execution is missing its agent and task configuration. Please create a new execution with proper configuration instead.', {
+        duration: 10000,
       });
       
-      toast('⚠️ Using dummy configuration. The selected execution does not contain complete agent/task configuration.', {
-        duration: 5000,
-        style: {
-          background: '#f59e0b',
-          color: 'white',
-        },
-      });
+      // Return early to prevent scheduling with invalid config
+      return;
     }
 
     try {
@@ -463,7 +523,6 @@ const RunHistory = forwardRef<RunHistoryRef, RunHistoryProps>(({ executionHistor
       };
 
       await ScheduleService.createSchedule(scheduleData);
-      toast.success('Job scheduled successfully');
       setScheduleDialogOpen(false);
       setSelectedRunForSchedule(null);
       setScheduleName('');
@@ -616,6 +675,22 @@ const RunHistory = forwardRef<RunHistoryRef, RunHistoryProps>(({ executionHistor
                         }} 
                       />
                     </TableCell>
+                    <TableCell sx={{ py: 0.25, fontSize: '0.75rem' }}>
+                      <Box 
+                        sx={{ 
+                          height: '1rem', 
+                          width: '50px',
+                          backgroundColor: theme => theme.palette.action.hover,
+                          borderRadius: '4px',
+                          animation: 'pulse 1.5s ease-in-out infinite',
+                          '@keyframes pulse': {
+                            '0%': { opacity: 1 },
+                            '50%': { opacity: 0.4 },
+                            '100%': { opacity: 1 }
+                          }
+                        }} 
+                      />
+                    </TableCell>
                     <TableCell sx={{ py: 0.25, fontSize: '0.75rem', textAlign: 'center' }}>
                       <Box 
                         sx={{ 
@@ -727,6 +802,9 @@ const RunHistory = forwardRef<RunHistoryRef, RunHistoryProps>(({ executionHistor
                       {renderSortIcon('created_at')}
                     </Box>
                   </TableCell>
+                  <TableCell sx={{ py: 0.25, fontSize: '0.8125rem', backgroundColor: theme => theme.palette.background.paper }}>
+                    Duration
+                  </TableCell>
                   <TableCell sx={{ py: 0.25, fontSize: '0.8125rem', width: '240px', backgroundColor: theme => theme.palette.background.paper }}>
                     <Box sx={{ 
                       display: 'flex', 
@@ -769,7 +847,7 @@ const RunHistory = forwardRef<RunHistoryRef, RunHistoryProps>(({ executionHistor
               <TableBody>
                 {displayedRuns.length === 0 ? (
                   <TableRow>
-                    <TableCell colSpan={5} align="center" sx={{ py: 1, fontSize: '0.8125rem' }}>
+                    <TableCell colSpan={6} align="center" sx={{ py: 1, fontSize: '0.8125rem' }}>
                       {searchQuery ? t('runHistory.noSearchResults') : t('runHistory.noRuns')}
                     </TableCell>
                   </TableRow>
@@ -823,6 +901,9 @@ const RunHistory = forwardRef<RunHistoryRef, RunHistoryProps>(({ executionHistor
                       <TableCell>{run.group_email || '-'}</TableCell>
                       <TableCell>{new Date(run.created_at).toLocaleString()}</TableCell>
                       <TableCell>
+                        <DurationCell run={run} />
+                      </TableCell>
+                      <TableCell>
                         <RunActions
                           run={run}
                           onViewResult={handleShowResult}
@@ -860,7 +941,7 @@ const RunHistory = forwardRef<RunHistoryRef, RunHistoryProps>(({ executionHistor
           )}
 
           {selectedRunId && (
-            <ShowTrace
+            <ShowTraceTimeline
               open={showTraceOpen}
               onClose={handleCloseTrace}
               runId={selectedRunId}
