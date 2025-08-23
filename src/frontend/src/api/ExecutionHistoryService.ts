@@ -1,63 +1,135 @@
 import apiClient from '../config/api/ApiConfig';
 import { Run, RunsResponse, JobStatus } from '../types/run';
+import { Trace } from '../types/trace';
 
 export type { Run, RunsResponse, JobStatus };
 
 // Add cache control constants
 const CACHE_TTL = 5000; // 5 seconds cache time-to-live
 
-export function calculateDuration(run: Run): string {
+// Cache for trace-based durations to avoid refetching
+const durationCache = new Map<string, { duration: string; timestamp: number }>();
+const DURATION_CACHE_TTL = 60000; // 1 minute cache for durations
+
+export async function calculateDurationFromTraces(run: Run): Promise<string> {
   // Convert status to uppercase for case-insensitive comparison
   const status = (run.status || '').toUpperCase();
   
-  // Only show duration for completed jobs (case-insensitive)
+  // Only show duration for completed jobs
   if (status !== 'COMPLETED' && status !== 'FAILED' && status !== 'CANCELLED') {
     return '-';
   }
   
-  // For terminal statuses, require created_at timestamp
-  if (!run?.created_at) {
+  const cacheKey = run.job_id || run.id;
+  
+  // Check cache first
+  const cached = durationCache.get(cacheKey);
+  if (cached && (Date.now() - cached.timestamp < DURATION_CACHE_TTL)) {
+    return cached.duration;
+  }
+  
+  try {
+    // Fetch traces for this run
+    const endpoint = run.job_id.includes('-') 
+      ? `/traces/job/${run.job_id}`
+      : `/traces/execution/${run.id}`;
+    
+    const response = await apiClient.get<{ traces: Trace[] }>(endpoint);
+    
+    if (!response.data?.traces || response.data.traces.length === 0) {
+      // Fallback to using run timestamps if no traces
+      return calculateDurationFromRunTimestamps(run);
+    }
+    
+    // Sort traces by timestamp
+    const traces = response.data.traces.sort((a, b) => 
+      new Date(a.created_at || '').getTime() - 
+      new Date(b.created_at || '').getTime()
+    );
+    
+    // Calculate duration from first to last trace
+    const firstTrace = traces[0];
+    const lastTrace = traces[traces.length - 1];
+    
+    const startTime = new Date(firstTrace.created_at);
+    const endTime = new Date(lastTrace.created_at);
+    
+    const durationMs = Math.max(0, endTime.getTime() - startTime.getTime());
+    
+    // Format duration
+    const formattedDuration = formatDuration(durationMs);
+    
+    // Cache the result
+    durationCache.set(cacheKey, { 
+      duration: formattedDuration, 
+      timestamp: Date.now() 
+    });
+    
+    return formattedDuration;
+  } catch (error) {
+    // On error, fallback to run timestamps
+    return calculateDurationFromRunTimestamps(run);
+  }
+}
+
+// Synchronous fallback using run timestamps
+export function calculateDuration(run: Run): string {
+  return calculateDurationFromRunTimestamps(run);
+}
+
+// Helper function for fallback duration calculation
+function calculateDurationFromRunTimestamps(run: Run): string {
+  const status = (run.status || '').toUpperCase();
+  
+  if (status !== 'COMPLETED' && status !== 'FAILED' && status !== 'CANCELLED') {
     return '-';
   }
   
-  // For terminal statuses, use completed_at OR updated_at as fallback
-  let endTimeStr: string;
-  
-  if (run.completed_at) {
-    // Use completed_at if available
-    endTimeStr = run.completed_at;
-  } else if (run.updated_at) {
-    // Use updated_at as fallback
-    endTimeStr = run.updated_at;
-  } else {
-    // No valid end time available
+  if (!run?.created_at || !run?.completed_at) {
     return '-';
   }
   
   try {
-    // Parse timestamps as UTC dates
     const startTime = new Date(run.created_at);
-    const endTime = new Date(endTimeStr);
-    
-    // Calculate duration in milliseconds
+    const endTime = new Date(run.completed_at);
     const durationMs = Math.max(0, endTime.getTime() - startTime.getTime());
-    
-    // Format duration
-    if (durationMs < 1000) {
-      return '0s';
-    } else if (durationMs < 60000) {
-      return `${Math.floor(durationMs / 1000)}s`;
-    } else if (durationMs < 3600000) {
-      const minutes = Math.floor(durationMs / 60000);
-      const seconds = Math.floor((durationMs % 60000) / 1000);
-      return `${minutes}m ${seconds}s`;
-    } else {
-      const hours = Math.floor(durationMs / 3600000);
-      const minutes = Math.floor((durationMs % 3600000) / 60000);
-      return `${hours}h ${minutes}m`;
-    }
+    return formatDuration(durationMs);
   } catch (error) {
     return '-';
+  }
+}
+
+// Helper function to format duration consistently
+function formatDuration(durationMs: number): string {
+  if (durationMs < 1000) {
+    return '0s';
+  } else if (durationMs < 60000) {
+    // Less than 1 minute - show seconds
+    const seconds = Math.floor(durationMs / 1000);
+    return `${seconds}s`;
+  } else if (durationMs < 3600000) {
+    // Less than 1 hour - show minutes (with decimal for precision)
+    const minutes = durationMs / 60000;
+    if (minutes < 10) {
+      // For short durations, show decimal precision
+      return `${minutes.toFixed(1)}m`;
+    } else {
+      // For longer durations, show minutes and seconds
+      const wholeMinutes = Math.floor(minutes);
+      const seconds = Math.floor((durationMs % 60000) / 1000);
+      if (seconds === 0) {
+        return `${wholeMinutes}m`;
+      }
+      return `${wholeMinutes}m ${seconds}s`;
+    }
+  } else {
+    // 1 hour or more - show hours and minutes
+    const hours = Math.floor(durationMs / 3600000);
+    const minutes = Math.floor((durationMs % 3600000) / 60000);
+    if (minutes === 0) {
+      return `${hours}h`;
+    }
+    return `${hours}h ${minutes}m`;
   }
 }
 
