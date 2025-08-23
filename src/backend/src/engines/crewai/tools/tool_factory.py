@@ -1132,10 +1132,12 @@ class ToolFactory:
                     if final_api_key:
                         genie_tool_config['DATABRICKS_API_KEY'] = final_api_key
                 
-                # Ensure DATABRICKS_HOST and spaceId are in config
+                # DATABRICKS_HOST is now optional - GenieTool will auto-detect in Databricks Apps
                 if 'DATABRICKS_HOST' in tool_config:
                     genie_tool_config['DATABRICKS_HOST'] = tool_config['DATABRICKS_HOST']
                     logger.info(f"Using DATABRICKS_HOST from config: {tool_config['DATABRICKS_HOST']}")
+                else:
+                    logger.info("DATABRICKS_HOST not in config - GenieTool will auto-detect if in Databricks Apps")
                 
                 if 'spaceId' in tool_config:
                     genie_tool_config['spaceId'] = tool_config['spaceId']

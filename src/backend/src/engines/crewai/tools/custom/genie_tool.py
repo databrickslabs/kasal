@@ -159,8 +159,45 @@ class GenieTool(BaseTool):
             
         # Set fallback values from environment if not set from config
         if not self._host:
-            self._host = os.getenv("DATABRICKS_HOST", "your-workspace.cloud.databricks.com")
-            logger.info(f"Using host from environment or default: {self._host}")
+            # First check if we're in Databricks Apps environment and can auto-detect
+            try:
+                from src.utils.databricks_auth import is_databricks_apps_environment
+                in_databricks_apps = is_databricks_apps_environment()
+            except ImportError:
+                in_databricks_apps = False
+            
+            if in_databricks_apps:
+                # Try environment variable first
+                databricks_host = os.getenv("DATABRICKS_HOST")
+                
+                # If not in environment, try SDK Config auto-detection
+                if not databricks_host:
+                    try:
+                        from databricks.sdk.config import Config
+                        sdk_config = Config()
+                        if sdk_config.host:
+                            databricks_host = sdk_config.host
+                            logger.info(f"Auto-detected host from SDK Config in Databricks Apps: {databricks_host}")
+                    except Exception as e:
+                        logger.debug(f"Could not auto-detect host from SDK: {e}")
+                
+                # Process the detected host
+                if databricks_host:
+                    # Strip https:// and trailing slash if present
+                    if databricks_host.startswith('https://'):
+                        databricks_host = databricks_host[8:]
+                    if databricks_host.endswith('/'):
+                        databricks_host = databricks_host[:-1]
+                    self._host = databricks_host
+                    logger.info(f"Using auto-detected host in Databricks Apps: {self._host}")
+                else:
+                    # Last resort fallback
+                    self._host = "your-workspace.cloud.databricks.com"
+                    logger.warning("Could not auto-detect host in Databricks Apps, using default")
+            else:
+                # Not in Databricks Apps, use environment or default
+                self._host = os.getenv("DATABRICKS_HOST", "your-workspace.cloud.databricks.com")
+                logger.info(f"Using host from environment or default: {self._host}")
             
         if not self._space_id:
             self._space_id = os.getenv("DATABRICKS_SPACE_ID", "01efdd2cd03211d0ab74f620f0023b77")
