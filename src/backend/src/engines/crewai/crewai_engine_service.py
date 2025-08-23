@@ -148,7 +148,8 @@ class CrewAIEngineService(BaseEngineService):
                     logger.info(f"[CrewAIEngineService] Created ToolFactory for {execution_id} with user token: {bool(user_token)}")
                     
                     # Use the CrewPreparation class for crew setup with tool_service and tool_factory
-                    crew_preparation = CrewPreparation(execution_config, tool_service, tool_factory)
+                    # Pass user_token for OBO authentication in Databricks Apps
+                    crew_preparation = CrewPreparation(execution_config, tool_service, tool_factory, user_token)
                     if not await crew_preparation.prepare():
                         logger.error(f"[CrewAIEngineService] Failed to prepare crew for {execution_id}")
                         await self._update_execution_status(

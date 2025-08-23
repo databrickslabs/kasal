@@ -276,15 +276,10 @@ async def create_task(
                         try:
                             logger.info(f"Creating MCP adapter for server {server_detail.name} at {server_url}")
                             
-                            # Use MCP adapter for SSE servers
-                            from src.engines.common.mcp_adapter import MCPAdapter
-                            mcp_adapter = MCPAdapter(server_params)
-                            await mcp_adapter.initialize()
-                            
-                            # Register adapter for cleanup
-                            from src.engines.crewai.tools.mcp_handler import register_mcp_adapter
+                            # Use connection pooling for MCP adapters
+                            from src.engines.crewai.tools.mcp_handler import get_or_create_mcp_adapter
                             adapter_id = f"task_{task_key}_server_{server_detail.id}"
-                            register_mcp_adapter(adapter_id, mcp_adapter)
+                            mcp_adapter = await get_or_create_mcp_adapter(server_params, adapter_id)
                             
                             # Get tools from the adapter
                             tools = mcp_adapter.tools
@@ -382,14 +377,10 @@ async def create_task(
                             logger.debug(f"Streamable server params: timeout={server_detail.timeout_seconds}s, max_retries={server_detail.max_retries}, rate_limit={server_detail.rate_limit}/min, auth_type={auth_type}")
                         
                             # For streamable servers, use the MCP adapter
-                            from src.engines.common.mcp_adapter import MCPAdapter
-                            mcp_adapter = MCPAdapter(server_params)
-                            await mcp_adapter.initialize()
-                        
-                            # Register adapter for cleanup
-                            from src.engines.crewai.tools.mcp_handler import register_mcp_adapter
+                            # Use connection pooling for MCP adapters
+                            from src.engines.crewai.tools.mcp_handler import get_or_create_mcp_adapter
                             adapter_id = f"task_{task_key}_server_{server_detail.id}"
-                            register_mcp_adapter(adapter_id, mcp_adapter)
+                            mcp_adapter = await get_or_create_mcp_adapter(server_params, adapter_id)
                         
                             # Get tools from the adapter
                             tools = mcp_adapter.tools

@@ -90,8 +90,10 @@ async def create_agent(
     # Handle LLM configuration
     llm = None
     try:
-        # Import LLMManager
+        # Import LLMManager and handlers
         from src.core.llm_manager import LLMManager
+        from src.core.llm_handlers.gpt5_handler import GPT5Handler
+        from src.core.llm_handlers.gpt5_llm_wrapper import GPT5CompatibleLLM
         
         if 'llm' in agent_config:
             # Check if LLM is a string (model name) or a dictionary (LLM config)
@@ -116,7 +118,13 @@ async def create_agent(
                     # Extract the configured parameters
                     if hasattr(configured_llm, 'model'):
                         # Apply the configured parameters but allow overrides from llm_config
-                        llm_kwargs = vars(configured_llm)
+                        llm_kwargs = {}
+                        # Copy relevant parameters from configured_llm
+                        for attr in ['model', 'api_key', 'api_base', 'temperature', 'max_completion_tokens', 'max_tokens']:
+                            if hasattr(configured_llm, attr):
+                                value = getattr(configured_llm, attr)
+                                if value is not None:
+                                    llm_kwargs[attr] = value
                     else:
                         # Fallback if we can't extract params
                         llm_kwargs = {'model': model_name}
@@ -125,9 +133,17 @@ async def create_agent(
                     for key, value in llm_config.items():
                         if value is not None:
                             llm_kwargs[key] = value
-                            
-                    # Create the LLM with the merged parameters
-                    llm = LLM(**llm_kwargs)
+                    
+                    # Use GPT5Handler to transform parameters if needed
+                    model_name = llm_kwargs.get('model', '')
+                    if GPT5Handler.is_gpt5_model(model_name):
+                        llm_kwargs = GPT5Handler.transform_params(llm_kwargs)
+                        logger.info(f"Applied GPT-5 parameter transformations for model: {model_name}")
+                        # Use GPT5CompatibleLLM for GPT-5 models
+                        llm = GPT5CompatibleLLM(**llm_kwargs)
+                    else:
+                        # Create the standard LLM for non-GPT-5 models
+                        llm = LLM(**llm_kwargs)
                     logger.info(f"Created LLM instance for agent {agent_key} with model {llm_kwargs.get('model')}")
                 else:
                     # No model specified, use default with additional parameters
@@ -135,12 +151,28 @@ async def create_agent(
                     default_llm = await LLMManager.configure_crewai_llm("gpt-4o")
                     
                     # Extract and merge parameters
-                    llm_kwargs = vars(default_llm)
+                    llm_kwargs = {}
+                    # Copy relevant parameters from default_llm
+                    for attr in ['model', 'api_key', 'api_base', 'temperature', 'max_completion_tokens', 'max_tokens']:
+                        if hasattr(default_llm, attr):
+                            value = getattr(default_llm, attr)
+                            if value is not None:
+                                llm_kwargs[attr] = value
+                    
                     for key, value in llm_config.items():
                         if value is not None:
                             llm_kwargs[key] = value
                     
-                    llm = LLM(**llm_kwargs)
+                    # Use GPT5Handler to transform parameters if needed
+                    model_name = llm_kwargs.get('model', '')
+                    if GPT5Handler.is_gpt5_model(model_name):
+                        llm_kwargs = GPT5Handler.transform_params(llm_kwargs)
+                        logger.info(f"Applied GPT-5 parameter transformations for model: {model_name}")
+                        # Use GPT5CompatibleLLM for GPT-5 models
+                        llm = GPT5CompatibleLLM(**llm_kwargs)
+                    else:
+                        # Create the standard LLM for non-GPT-5 models
+                        llm = LLM(**llm_kwargs)
         else:
             # Use default model
             logger.info(f"No LLM specified for agent {agent_key}, using default")
@@ -265,17 +297,12 @@ async def create_agent(
                         
                             # Initialize the appropriate adapter based on auth type
                             try:
-                                logger.info(f"Creating MCP adapter for server {server_detail.name} at {server_url}")
+                                logger.info(f"Getting MCP adapter for server {server_detail.name} at {server_url}")
                             
-                                # Use MCP adapter for SSE servers
-                                from src.engines.common.mcp_adapter import MCPAdapter
-                                mcp_adapter = MCPAdapter(server_params)
-                                await mcp_adapter.initialize()
-                            
-                                # Register adapter for cleanup
-                                from src.engines.crewai.tools.mcp_handler import register_mcp_adapter
+                                # Use connection pooling for MCP adapters
+                                from src.engines.crewai.tools.mcp_handler import get_or_create_mcp_adapter
                                 adapter_id = f"agent_{agent_key}_server_{server_detail.id}"
-                                register_mcp_adapter(adapter_id, mcp_adapter)
+                                mcp_adapter = await get_or_create_mcp_adapter(server_params, adapter_id)
                             
                                 # Get tools from the adapter
                                 tools = mcp_adapter.tools
@@ -373,15 +400,10 @@ async def create_agent(
                                 logger.info(f"Creating Streamable adapter for server {server_detail.name} at {server_url}")
                                 logger.debug(f"Streamable server params: timeout={server_detail.timeout_seconds}s, max_retries={server_detail.max_retries}, rate_limit={server_detail.rate_limit}/min, auth_type={auth_type}")
                             
-                                # For streamable servers, use the MCP client implementation
-                                from src.engines.common.mcp_adapter import MCPAdapter
-                                mcp_adapter = MCPAdapter(server_params)
-                                await mcp_adapter.initialize()
-                            
-                                # Register adapter for cleanup
-                                from src.engines.crewai.tools.mcp_handler import register_mcp_adapter
+                                # For streamable servers, use connection pooling
+                                from src.engines.crewai.tools.mcp_handler import get_or_create_mcp_adapter
                                 adapter_id = f"agent_{agent_key}_server_{server_detail.id}"
-                                register_mcp_adapter(adapter_id, mcp_adapter)
+                                mcp_adapter = await get_or_create_mcp_adapter(server_params, adapter_id)
                             
                                 # Get tools from the adapter
                                 tools = mcp_adapter.tools

@@ -83,9 +83,16 @@ async def run_crew(execution_id: str, crew: Crew, running_jobs: Dict, group_cont
             model = config.get("model")
             
         # Extract max_retry_limit from agent configs if available
-        if config.get("agents"):
+        agents = config.get("agents", [])
+        if agents:
+            # Handle both list and dict formats
+            if isinstance(agents, dict):
+                agent_configs = agents.values()
+            else:
+                agent_configs = agents
+            
             # Get highest retry limit from all agents
-            for agent_config in config.get("agents", {}).values():
+            for agent_config in agent_configs:
                 if isinstance(agent_config, dict) and "max_retry_limit" in agent_config:
                     agent_retry_limit = int(agent_config.get("max_retry_limit", 2))
                     max_retry_limit = max(max_retry_limit, agent_retry_limit)
@@ -96,10 +103,12 @@ async def run_crew(execution_id: str, crew: Crew, running_jobs: Dict, group_cont
     crew_logger.setup_for_job(execution_id, group_context)
     
     # Create execution-scoped callbacks (replaces global event listeners)
+    # Pass the crew for enhanced context tracking
     step_callback, task_callback = create_execution_callbacks(
         job_id=execution_id, 
         config=config, 
-        group_context=group_context
+        group_context=group_context,
+        crew=crew
     )
     
     # Set callbacks directly on the crew instance
@@ -124,6 +133,11 @@ async def run_crew(execution_id: str, crew: Crew, running_jobs: Dict, group_cont
     # Initialize AgentTraceEventListener for trace processing (without global event listeners)
     from src.engines.crewai.callbacks.logging_callbacks import AgentTraceEventListener
     trace_listener = AgentTraceEventListener(job_id=execution_id, group_context=group_context)
+    
+    # Register this execution for LLM event routing
+    from src.engines.crewai.callbacks.llm_event_router import register_execution_for_llm_events
+    register_execution_for_llm_events(execution_id, crew, group_context)
+    logger.info(f"Registered execution {execution_id} for LLM event routing")
     
     # Start the trace writer to process queued traces
     from src.engines.crewai.trace_management import TraceManager
@@ -415,6 +429,11 @@ async def run_crew(execution_id: str, crew: Crew, running_jobs: Dict, group_cont
         
         # Clean up the CrewLogger
         crew_logger.cleanup_for_job(execution_id)
+        
+        # Unregister from LLM event routing
+        from src.engines.crewai.callbacks.llm_event_router import unregister_execution_from_llm_events
+        unregister_execution_from_llm_events(execution_id)
+        logger.info(f"Unregistered execution {execution_id} from LLM event routing")
         
         # Clean up MCP tools
         try:
