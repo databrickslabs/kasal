@@ -51,8 +51,7 @@ Create your first agent workflow in under 2 minutes:
 | Topic | Description |
 |-------|-------------|
 | **[Getting Started](src/docs/GETTING_STARTED.md)** | Complete setup guide for development and deployment |
-| **[Build & Deploy](src/docs/BUILD.md)** | Building frontend and deployment instructions |
-| **[Deployment Guide](src/docs/DEPLOYMENT_GUIDE.md)** | Databricks Apps deployment with OAuth configuration |
+| **[Deployment Guide](src/docs/DEPLOYMENT_GUIDE.md)** | Build, deployment, and OAuth configuration |
 | **[Architecture](src/docs/ARCHITECTURE.md)** | System architecture and design patterns |
 | **[CrewAI Engine](src/docs/CREWAI_ENGINE.md)** | AI agent orchestration engine documentation |
 | **[Database Migrations](src/docs/DATABASE_MIGRATIONS.md)** | Database schema management with Alembic |
@@ -76,6 +75,15 @@ Kasal uses a modern, layered architecture designed for scalability and maintaina
 **Frontend (React)** → **API (FastAPI)** → **Services** → **Repositories** → **Database**
 
 The CrewAI Engine integrates at the service layer for intelligent agent orchestration.
+
+## Known Limitations
+
+### Entity Memory with Specific Models
+Entity extraction in memory backends has compatibility issues with:
+- **Databricks Claude** (`databricks-claude-*`) - JSON schema validation errors
+- **Databricks GPT-OSS** (`databricks-gpt-oss-*`) - Empty response errors
+
+**Automatic Fallback**: The system automatically uses `databricks-llama-4-maverick` for entity extraction when these models are detected, while keeping the original model for all other agent tasks.
 
 ## License
 
