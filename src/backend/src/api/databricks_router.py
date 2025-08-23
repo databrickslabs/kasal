@@ -1,5 +1,6 @@
 from typing import Dict, Annotated
 import logging
+import os
 
 from fastapi import APIRouter, Depends, HTTPException
 
@@ -7,6 +8,7 @@ from src.schemas.databricks_config import DatabricksConfigCreate, DatabricksConf
 from src.services.databricks_service import DatabricksService
 from src.services.api_keys_service import ApiKeysService
 from src.core.dependencies import SessionDep
+from src.utils.databricks_auth import is_databricks_apps_environment
 
 router = APIRouter(
     prefix="/databricks",
@@ -120,4 +122,27 @@ async def check_databricks_connection(
         return await service.check_databricks_connection()
     except Exception as e:
         logger.error(f"Error checking Databricks connection: {str(e)}")
-        raise HTTPException(status_code=500, detail=f"Error checking Databricks connection: {str(e)}") 
+        raise HTTPException(status_code=500, detail=f"Error checking Databricks connection: {str(e)}")
+
+
+@router.get("/environment", response_model=Dict)
+async def get_databricks_environment():
+    """
+    Get information about the Databricks environment.
+    
+    Returns:
+        Dictionary containing environment information including whether we're in Databricks Apps
+    """
+    try:
+        is_apps = is_databricks_apps_environment()
+        return {
+            "is_databricks_apps": is_apps,
+            "databricks_app_name": os.getenv("DATABRICKS_APP_NAME"),
+            "databricks_host": os.getenv("DATABRICKS_HOST"),
+            "workspace_id": os.getenv("DATABRICKS_WORKSPACE_ID"),
+            "has_oauth_credentials": bool(os.getenv("DATABRICKS_CLIENT_ID") and os.getenv("DATABRICKS_CLIENT_SECRET")),
+            "message": "Running in Databricks Apps environment" if is_apps else "Not running in Databricks Apps"
+        }
+    except Exception as e:
+        logger.error(f"Error getting Databricks environment info: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Error getting Databricks environment info: {str(e)}") 

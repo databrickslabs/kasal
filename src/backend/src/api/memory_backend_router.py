@@ -4,12 +4,13 @@ Memory backend configuration API endpoints.
 This module provides API endpoints for managing memory backend configurations,
 including validation, testing connections, and retrieving available indexes.
 """
+import os
 from typing import Dict, List, Any, Optional, Annotated
-from fastapi import APIRouter, Depends, HTTPException, status, Request
+from fastapi import APIRouter, Depends, HTTPException, status, Request, Query
 from sqlalchemy.ext.asyncio import AsyncSession
 from datetime import datetime
 
-from src.core.dependencies import GroupContextDep, SessionDep
+from src.core.dependencies import GroupContextDep
 from src.core.logger import LoggerManager
 from src.schemas.memory_backend import (
     MemoryBackendConfig, 
@@ -39,6 +40,20 @@ async def get_uow():
 def get_memory_backend_service(uow: UnitOfWork = Depends(get_uow)) -> MemoryBackendService:
     """Get MemoryBackendService instance with UnitOfWork."""
     return MemoryBackendService(uow)
+
+
+@router.get("/databricks/workspace-url")
+async def get_workspace_url(
+    service: Annotated[MemoryBackendService, Depends(get_memory_backend_service)],
+) -> Dict[str, Any]:
+    """
+    Get the Databricks workspace URL from environment or configuration.
+    
+    Returns:
+        Dict with workspace URL if available, or None
+    """
+    result = await service.get_workspace_url()
+    return result
 
 
 @router.post("/validate")
@@ -558,11 +573,22 @@ async def one_click_databricks_setup(
         Setup result with created resources
     """
     try:
+        # In Databricks Apps, prefer DATABRICKS_HOST over user-provided URL
         workspace_url = request.get("workspace_url")
-        if not workspace_url:
+        
+        # Check if we're in Databricks Apps environment
+        databricks_host = os.environ.get("DATABRICKS_HOST")
+        if databricks_host:
+            # Override with the correct workspace URL from environment
+            if not databricks_host.startswith("http"):
+                workspace_url = f"https://{databricks_host}"
+            else:
+                workspace_url = databricks_host
+            logger.info(f"Using DATABRICKS_HOST from environment: {workspace_url}")
+        elif not workspace_url:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
-                detail="workspace_url is required"
+                detail="workspace_url is required (DATABRICKS_HOST not found in environment)"
             )
         
         catalog = request.get("catalog", "ml")
@@ -1065,4 +1091,150 @@ async def empty_index(
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=str(e)
+        )
+
+
+@router.get("/databricks/index-documents")
+async def get_index_documents(
+    index_name: str = Query(..., description="Full name of the index (catalog.schema.index)"),
+    workspace_url: str = Query(..., description="Databricks workspace URL"),
+    endpoint_name: str = Query(..., description="Vector Search endpoint name"),
+    index_type: Optional[str] = Query(None, description="Type of index (short_term, long_term, entity, document)"),
+    backend_id: Optional[str] = Query(None, description="Backend configuration ID"),
+    limit: int = Query(30, description="Maximum number of documents to return"),
+    request: Request = None,
+    group_context: GroupContextDep = None,
+    service: Annotated[MemoryBackendService, Depends(get_memory_backend_service)] = None,
+) -> Dict[str, Any]:
+    """
+    Retrieve documents from any Databricks Vector Search index.
+    
+    This endpoint fetches the most recent documents from a specified index
+    for viewing and inspection purposes.
+    
+    Args:
+        index_name: Full name of the index (catalog.schema.index)
+        workspace_url: Databricks workspace URL
+        endpoint_name: Name of the Vector Search endpoint
+        index_type: Type of index (short_term, long_term, entity, document)
+        backend_id: Backend configuration ID to retrieve embedding dimension
+        limit: Maximum number of documents to return (default: 30)
+        request: FastAPI request for extracting user token
+        group_context: Current group context
+        service: Memory backend service
+        
+    Returns:
+        Dictionary containing documents and metadata
+    """
+    try:
+        # Extract user token for OBO authentication
+        user_token = extract_user_token_from_request(request) if request else None
+        
+        # Get embedding dimension from backend config if backend_id is provided
+        embedding_dimension = 1024  # Default
+        if backend_id and group_context:
+            try:
+                backend = await service.get_memory_backend(group_context.primary_group_id, backend_id)
+                if backend and backend.databricks_config:
+                    db_config = backend.databricks_config
+                    if hasattr(db_config, 'embedding_dimension'):
+                        embedding_dimension = db_config.embedding_dimension or 1024
+                    elif isinstance(db_config, dict):
+                        embedding_dimension = db_config.get('embedding_dimension', 1024)
+                    else:
+                        embedding_dimension = 1024
+                    logger.info(f"Retrieved embedding dimension {embedding_dimension} from backend config {backend_id}")
+            except Exception as e:
+                logger.warning(f"Could not retrieve embedding dimension from backend config: {e}")
+        
+        # Get documents from the service
+        result = await service.get_index_documents(
+            workspace_url=workspace_url,
+            endpoint_name=endpoint_name,
+            index_name=index_name,
+            index_type=index_type,
+            embedding_dimension=embedding_dimension,
+            limit=limit,
+            user_token=user_token
+        )
+        
+        return result
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error fetching index documents: {e}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=str(e)
+        )
+
+
+@router.get("/databricks/entity-data")
+async def get_entity_data(
+    index_name: str = Query(..., description="Name of the entity memory index"),
+    workspace_url: str = Query(..., description="Databricks workspace URL"),
+    endpoint_name: str = Query(..., description="Vector Search endpoint name"),
+    embedding_dimension: int = Query(1024, description="Dimension of embedding vectors"),
+    limit: int = Query(100, description="Maximum number of entities to return"),
+    request: Request = None,
+    group_context: GroupContextDep = None,
+    service: Annotated[MemoryBackendService, Depends(get_memory_backend_service)] = None,
+) -> Dict[str, Any]:
+    """
+    Retrieve entity data from the entity memory index for visualization.
+    
+    This endpoint fetches entities and their relationships from the Databricks
+    Vector Search entity memory index and formats them for graph visualization.
+    
+    Args:
+        index_name: Full name of the entity memory index (catalog.schema.index)
+        workspace_url: Databricks workspace URL
+        endpoint_name: Name of the Vector Search endpoint
+        embedding_dimension: Dimension of embedding vectors (default: 1024)
+        limit: Maximum number of entities to return (default: 100)
+        request: FastAPI request for extracting user token
+        group_context: Current group context
+        service: Memory backend service
+        
+    Returns:
+        Dictionary containing entities and relationships for visualization
+    """
+    # Import the databricks logger
+    from src.core.logger import LoggerManager
+    databricks_logger = LoggerManager.get_instance().databricks_vector_search
+    
+    databricks_logger.info(f"[ENTITY] API endpoint called: /databricks/entity-data")
+    databricks_logger.info(f"[ENTITY] Parameters: index_name={index_name}, workspace_url={workspace_url}, endpoint_name={endpoint_name}, limit={limit}")
+    
+    try:
+        # Extract user token for OBO authentication
+        user_token = extract_user_token_from_request(request) if request else None
+        databricks_logger.info(f"[ENTITY] User token extracted: {'Yes' if user_token else 'No'}")
+        
+        # Get the index service
+        from src.services.databricks_index_service import DatabricksIndexService
+        index_service = DatabricksIndexService()
+        
+        # Query the actual entity data from Databricks Vector Search
+        result = await index_service.query_entity_data(
+            workspace_url=workspace_url,
+            endpoint_name=endpoint_name,
+            index_name=index_name,
+            embedding_dimension=embedding_dimension,
+            limit=limit,
+            user_token=user_token
+        )
+        
+        databricks_logger.info(f"[ENTITY] Query result: success={result.get('success')}, entities={len(result.get('entities', []))}, relationships={len(result.get('relationships', []))}")
+        
+        # Return the actual data from the index
+        return result
+        
+    except Exception as e:
+        databricks_logger.error(f"[ENTITY] Error retrieving entity data: {e}")
+        logger.error(f"Error retrieving entity data: {e}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to retrieve entity data: {str(e)}"
         )

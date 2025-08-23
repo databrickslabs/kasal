@@ -42,6 +42,7 @@ from src.api.group_router import router as group_router
 from src.api.chat_history_router import router as chat_history_router
 from src.api.memory_backend_router import router as memory_backend_router
 from src.api.documentation_embeddings_router import router as documentation_embeddings_router
+from src.api.database_management_router import router as database_management_router
 
 # Create the main API router
 api_router = APIRouter()
@@ -89,6 +90,7 @@ api_router.include_router(group_router)
 api_router.include_router(chat_history_router)
 api_router.include_router(memory_backend_router)
 api_router.include_router(documentation_embeddings_router)
+api_router.include_router(database_management_router)
 
 __all__ = [
     "api_router",
@@ -132,5 +134,6 @@ __all__ = [
     "group_router",
     "chat_history_router",
     "memory_backend_router",
-    "documentation_embeddings_router"
+    "documentation_embeddings_router",
+    "database_management_router"
 ]

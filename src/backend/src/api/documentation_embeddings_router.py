@@ -3,9 +3,10 @@ API endpoints for documentation embeddings.
 
 This module provides endpoints for managing and searching documentation embeddings.
 """
-from fastapi import APIRouter, HTTPException, Query
-from typing import List, Optional
+from fastapi import APIRouter, HTTPException, Query, Depends, Header
+from typing import List, Optional, Annotated
 
+from src.core.dependencies import SessionDep
 from src.core.unit_of_work import UnitOfWork
 from src.services.documentation_embedding_service import DocumentationEmbeddingService
 from src.schemas.documentation_embedding import (
@@ -23,20 +24,26 @@ router = APIRouter(
     responses={404: {"description": "Not found"}},
 )
 
-
+# Dependency to get DocumentationEmbeddingService using UnitOfWork with injected session
+async def get_documentation_embedding_service(session: SessionDep) -> DocumentationEmbeddingService:
+    """Get DocumentationEmbeddingService instance with proper session management."""
+    async with UnitOfWork(session=session) as uow:
+        return DocumentationEmbeddingService(uow)
 
 
 @router.post("/", response_model=DocumentationEmbeddingSchema)
 async def create_documentation_embedding(
-    embedding: DocumentationEmbeddingCreate
+    embedding: DocumentationEmbeddingCreate,
+    service: Annotated[DocumentationEmbeddingService, Depends(get_documentation_embedding_service)],
+    x_forwarded_access_token: Optional[str] = Header(None, alias="X-Forwarded-Access-Token"),
+    x_auth_request_access_token: Optional[str] = Header(None, alias="X-Auth-Request-Access-Token")
 ):
     """Create a new documentation embedding."""
     try:
-        async with UnitOfWork() as uow:
-            service = DocumentationEmbeddingService(uow)
-            result = await service.create_documentation_embedding(embedding)
-            await uow.commit()
-            return result
+        # Extract user token from headers (OAuth2-Proxy takes priority)
+        user_token = x_auth_request_access_token or x_forwarded_access_token
+        result = await service.create_documentation_embedding(embedding, user_token=user_token)
+        return result
     except Exception as e:
         logger.error(f"Error creating documentation embedding: {e}")
         raise HTTPException(status_code=500, detail=str(e))
@@ -163,7 +170,10 @@ async def delete_documentation_embedding(
 
 
 @router.post("/seed-all")
-async def seed_all_documentation_embeddings():
+async def seed_all_documentation_embeddings(
+    x_forwarded_access_token: Optional[str] = Header(None, alias="X-Forwarded-Access-Token"),
+    x_auth_request_access_token: Optional[str] = Header(None, alias="X-Auth-Request-Access-Token")
+):
     """Re-seed all documentation embeddings from the docs directory."""
     try:
         # Import the seeding function
@@ -171,8 +181,11 @@ async def seed_all_documentation_embeddings():
         
         logger.info("Starting documentation embeddings re-seeding...")
         
-        # Run the seeding process
-        await seed_documentation_embeddings()
+        # Extract user token from headers (OAuth2-Proxy takes priority)
+        user_token = x_auth_request_access_token or x_forwarded_access_token
+        
+        # Run the seeding process with user token
+        await seed_documentation_embeddings(user_token=user_token)
         
         logger.info("Documentation embeddings re-seeding completed successfully")
         
