@@ -56,6 +56,9 @@ export interface MemoryBackendConfig {
   enable_long_term?: boolean;
   enable_entity?: boolean;
   
+  // Advanced configuration
+  enable_relationship_retrieval?: boolean;
+  
   // Advanced options
   custom_config?: Record<string, unknown>;
 }
@@ -66,6 +69,7 @@ export const DEFAULT_MEMORY_BACKEND_CONFIG: MemoryBackendConfig = {
   enable_short_term: true,
   enable_long_term: true,
   enable_entity: true,
+  enable_relationship_retrieval: false,
 };
 
 export const DEFAULT_DATABRICKS_CONFIG: DatabricksMemoryConfig = {

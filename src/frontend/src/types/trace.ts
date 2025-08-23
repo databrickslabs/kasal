@@ -12,6 +12,7 @@ export interface Trace {
   task_id?: string;
   created_at: string;
   output: string | Record<string, unknown>;
+  extra_data?: Record<string, unknown>;
 }
 
 export interface TaskDetails {

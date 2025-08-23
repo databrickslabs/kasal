@@ -111,8 +111,6 @@ export const useRunHistory = () => {
       
       // Then fetch from scratch to ensure we have the latest data
       await fetchRunHistory();
-      
-      toast.success(t('runHistory.deleteRunSuccess'));
     } catch (err) {
       historyLogger.error('Error deleting run:', err);
       toast.error(t('runHistory.deleteRunError'));

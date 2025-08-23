@@ -129,7 +129,7 @@ describe('memoryBackendStore', () => {
       
       const { result } = renderHook(() => useMemoryBackendStore());
       
-      let isValid: boolean = false;
+      let isValid = false;
       await act(async () => {
         isValid = await result.current.validateConfig();
       });
@@ -148,7 +148,7 @@ describe('memoryBackendStore', () => {
       
       const { result } = renderHook(() => useMemoryBackendStore());
       
-      let isValid: boolean = true;
+      let isValid = true;
       await act(async () => {
         isValid = await result.current.validateConfig();
       });
@@ -164,7 +164,7 @@ describe('memoryBackendStore', () => {
       
       const { result } = renderHook(() => useMemoryBackendStore());
       
-      let isValid: boolean = true;
+      let isValid = true;
       await act(async () => {
         isValid = await result.current.validateConfig();
       });
@@ -348,7 +348,7 @@ describe('memoryBackendStore', () => {
       
       const { result } = renderHook(() => useMemoryBackendStore());
       
-      let success: boolean = false;
+      let success = false;
       await act(async () => {
         success = await result.current.saveConfig();
       });
@@ -366,7 +366,7 @@ describe('memoryBackendStore', () => {
       
       const { result } = renderHook(() => useMemoryBackendStore());
       
-      let success: boolean = true;
+      let success = true;
       await act(async () => {
         success = await result.current.saveConfig();
       });
@@ -383,7 +383,7 @@ describe('memoryBackendStore', () => {
       
       const { result } = renderHook(() => useMemoryBackendStore());
       
-      let success: boolean = true;
+      let success = true;
       await act(async () => {
         success = await result.current.saveConfig();
       });

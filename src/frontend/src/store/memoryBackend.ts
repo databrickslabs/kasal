@@ -33,6 +33,10 @@ interface MemoryBackendState {
   // Validation
   validationErrors: string[];
   
+  // Entity Visualization
+  visualizationOpen: boolean;
+  visualizationIndex: { name: string; type: string } | null;
+  
   // Actions
   setConfig: (config: MemoryBackendConfig) => void;
   updateConfig: (updates: Partial<MemoryBackendConfig>) => void;
@@ -44,6 +48,10 @@ interface MemoryBackendState {
   loadAvailableIndexes: () => Promise<void>;
   saveConfig: () => Promise<boolean>;
   loadConfig: () => Promise<void>;
+  
+  // Visualization actions
+  openVisualization: (indexName: string, indexType: string) => void;
+  closeVisualization: () => void;
   
   // Utility actions
   resetConfig: () => void;
@@ -61,6 +69,8 @@ export const useMemoryBackendStore = create<MemoryBackendState>((set, get) => ({
   availableIndexes: [],
   isLoadingIndexes: false,
   validationErrors: [],
+  visualizationOpen: false,
+  visualizationIndex: null,
 
   // Basic setters
   setConfig: (config) => set({ config, error: null }),
@@ -93,8 +103,8 @@ export const useMemoryBackendStore = create<MemoryBackendState>((set, get) => ({
         isLoading: false,
       });
       return result.valid;
-    } catch (error: any) {
-      const errorMsg = error.message || 'Failed to validate configuration';
+    } catch (error: unknown) {
+      const errorMsg = (error instanceof Error ? error.message : String(error)) || 'Failed to validate configuration';
       set({ 
         error: errorMsg,
         validationErrors: [errorMsg],
@@ -126,10 +136,10 @@ export const useMemoryBackendStore = create<MemoryBackendState>((set, get) => ({
         isTestingConnection: false,
       });
       return result;
-    } catch (error: any) {
+    } catch (error: unknown) {
       const result: TestConnectionResult = {
         success: false,
-        message: error.message || 'Connection test failed',
+        message: (error instanceof Error ? error.message : String(error)) || 'Connection test failed',
       };
       set({ 
         connectionTestResult: result,
@@ -159,9 +169,9 @@ export const useMemoryBackendStore = create<MemoryBackendState>((set, get) => ({
         availableIndexes: response.indexes,
         isLoadingIndexes: false,
       });
-    } catch (error: any) {
+    } catch (error: unknown) {
       set({ 
-        error: error.message || 'Failed to load indexes',
+        error: (error instanceof Error ? error.message : String(error)) || 'Failed to load indexes',
         availableIndexes: [],
         isLoadingIndexes: false,
       });
@@ -184,9 +194,9 @@ export const useMemoryBackendStore = create<MemoryBackendState>((set, get) => ({
       const result = await MemoryBackendService.saveConfig(config);
       set({ isLoading: false });
       return result.success;
-    } catch (error: any) {
+    } catch (error: unknown) {
       set({ 
-        error: error.message || 'Failed to save configuration',
+        error: (error instanceof Error ? error.message : String(error)) || 'Failed to save configuration',
         isLoading: false,
       });
       return false;
@@ -204,13 +214,24 @@ export const useMemoryBackendStore = create<MemoryBackendState>((set, get) => ({
       } else {
         set({ isLoading: false });
       }
-    } catch (error: any) {
+    } catch (error: unknown) {
       set({ 
-        error: error.message || 'Failed to load configuration',
+        error: (error instanceof Error ? error.message : String(error)) || 'Failed to load configuration',
         isLoading: false,
       });
     }
   },
+
+  // Visualization actions
+  openVisualization: (indexName: string, indexType: string) => set({
+    visualizationOpen: true,
+    visualizationIndex: { name: indexName, type: indexType },
+  }),
+  
+  closeVisualization: () => set({
+    visualizationOpen: false,
+    visualizationIndex: null,
+  }),
 
   // Reset to defaults
   resetConfig: () => set({
@@ -219,6 +240,8 @@ export const useMemoryBackendStore = create<MemoryBackendState>((set, get) => ({
     connectionTestResult: null,
     validationErrors: [],
     availableIndexes: [],
+    visualizationOpen: false,
+    visualizationIndex: null,
   }),
 
   // Error handling
