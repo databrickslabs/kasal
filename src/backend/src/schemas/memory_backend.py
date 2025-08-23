@@ -52,10 +52,10 @@ class DatabricksMemoryConfig(BaseModel):
     
     # Catalog and schema information
     catalog: Optional[str] = Field(None, description="Unity Catalog name where indexes are created")
-    schema: Optional[str] = Field(None, description="Schema name within catalog where indexes are created")
+    schema_name: Optional[str] = Field(None, description="Schema name within catalog where indexes are created", alias="schema")
     
-    class Config:
-        schema_extra = {
+    model_config = {
+        "json_schema_extra": {
             "example": {
                 "endpoint_name": "vector_search_endpoint",
                 "short_term_index": "ml.agents.short_term_memory",
@@ -64,6 +64,7 @@ class DatabricksMemoryConfig(BaseModel):
                 "embedding_dimension": 1024
             }
         }
+    }
 
 
 class MemoryBackendCreate(BaseModel):
@@ -80,6 +81,9 @@ class MemoryBackendCreate(BaseModel):
     enable_short_term: bool = Field(True, description="Enable short-term memory")
     enable_long_term: bool = Field(True, description="Enable long-term memory")
     enable_entity: bool = Field(True, description="Enable entity memory")
+    
+    # Advanced configuration
+    enable_relationship_retrieval: bool = Field(False, description="Enable relationship-based entity retrieval (experimental)")
     
     # Advanced options
     custom_config: Optional[Dict[str, Any]] = Field(None)
@@ -100,6 +104,9 @@ class MemoryBackendUpdate(BaseModel):
     enable_long_term: Optional[bool] = Field(None)
     enable_entity: Optional[bool] = Field(None)
     
+    # Advanced configuration
+    enable_relationship_retrieval: Optional[bool] = Field(None)
+    
     # Advanced options
     custom_config: Optional[Dict[str, Any]] = Field(None)
     is_active: Optional[bool] = Field(None)
@@ -119,6 +126,7 @@ class MemoryBackendResponse(BaseModel):
     enable_short_term: bool
     enable_long_term: bool
     enable_entity: bool
+    enable_relationship_retrieval: bool
     custom_config: Optional[Dict[str, Any]]
     
     # Metadata
@@ -127,9 +135,10 @@ class MemoryBackendResponse(BaseModel):
     created_at: datetime
     updated_at: datetime
     
-    class Config:
-        from_attributes = True
-        arbitrary_types_allowed = True
+    model_config = {
+        "from_attributes": True,
+        "arbitrary_types_allowed": True
+    }
 
 
 class MemoryBackendConfig(BaseModel):
@@ -151,14 +160,17 @@ class MemoryBackendConfig(BaseModel):
     enable_long_term: bool = Field(True, description="Enable long-term memory")
     enable_entity: bool = Field(True, description="Enable entity memory")
     
+    # Advanced configuration
+    enable_relationship_retrieval: bool = Field(False, description="Enable relationship-based entity retrieval (experimental)")
+    
     # Advanced options
     custom_config: Optional[Dict[str, Any]] = Field(
         None,
         description="Additional backend-specific configuration"
     )
     
-    class Config:
-        schema_extra = {
+    model_config = {
+        "json_schema_extra": {
             "example": {
                 "backend_type": "databricks",
                 "databricks_config": {
@@ -168,6 +180,8 @@ class MemoryBackendConfig(BaseModel):
                 },
                 "enable_short_term": True,
                 "enable_long_term": True,
-                "enable_entity": True
+                "enable_entity": True,
+                "enable_relationship_retrieval": False
             }
         }
+    }

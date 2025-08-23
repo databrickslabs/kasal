@@ -19,6 +19,7 @@ class MCPServer(Base):
     server_url = Column(String, nullable=False)
     encrypted_api_key = Column(String, nullable=True)  # Encrypted API key
     server_type = Column(String, default="sse")  # "sse" or "streamable"
+    auth_type = Column(String, default="api_key")  # "api_key" or "databricks_obo"
     enabled = Column(Boolean, default=False)
     timeout_seconds = Column(Integer, default=30)
     max_retries = Column(Integer, default=3)

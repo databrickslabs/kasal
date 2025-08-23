@@ -57,6 +57,9 @@ class MemoryBackend(Base):
     enable_long_term = Column(Boolean, default=True)
     enable_entity = Column(Boolean, default=True)
     
+    # Advanced settings
+    enable_relationship_retrieval = Column(Boolean, default=False)
+    
     # Additional configuration
     custom_config = Column(JSON, nullable=True)
     
@@ -78,6 +81,7 @@ class MemoryBackend(Base):
             "enable_short_term": self.enable_short_term,
             "enable_long_term": self.enable_long_term,
             "enable_entity": self.enable_entity,
+            "enable_relationship_retrieval": self.enable_relationship_retrieval,
             "custom_config": self.custom_config,
             "is_active": self.is_active,
             "is_default": self.is_default,
@@ -92,6 +96,7 @@ class MemoryBackend(Base):
             "enable_short_term": self.enable_short_term,
             "enable_long_term": self.enable_long_term,
             "enable_entity": self.enable_entity,
+            "enable_relationship_retrieval": self.enable_relationship_retrieval,
         }
         
         if self.backend_type == MemoryBackendTypeEnum.DATABRICKS and self.databricks_config:
