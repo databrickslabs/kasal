@@ -21,6 +21,7 @@ class MCPServer(Base):
     server_type = Column(String, default="sse")  # "sse" or "streamable"
     auth_type = Column(String, default="api_key")  # "api_key" or "databricks_obo"
     enabled = Column(Boolean, default=False)
+    global_enabled = Column(Boolean, default=False)  # Enable across all agents/tasks
     timeout_seconds = Column(Integer, default=30)
     max_retries = Column(Integer, default=3)
     model_mapping_enabled = Column(Boolean, default=False)

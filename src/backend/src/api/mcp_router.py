@@ -66,6 +66,20 @@ async def get_enabled_mcp_servers(
     return servers_response
 
 
+@router.get("/servers/global", response_model=MCPServerListResponse)
+async def get_global_mcp_servers(
+    db: AsyncSession = Depends(get_db)
+) -> MCPServerListResponse:
+    """
+    Get all globally enabled MCP servers.
+    """
+    logger.info("Getting globally enabled MCP servers")
+    service = MCPService(db)
+    servers_response = await service.get_global_servers()
+    logger.info(f"Found {servers_response.count} globally enabled MCP servers")
+    return servers_response
+
+
 @router.get("/servers/{server_id}", response_model=MCPServerResponse)
 async def get_mcp_server(
     server_id: int,
@@ -151,6 +165,25 @@ async def toggle_mcp_server_enabled(
         service = MCPService(db)
         response = await service.toggle_server_enabled(server_id)
         status_text = "enabled" if response.enabled else "disabled"
+        logger.info(f"MCP server with ID {server_id} {status_text}")
+        return response
+    except HTTPException:
+        raise
+
+
+@router.patch("/servers/{server_id}/toggle-global-enabled", response_model=MCPToggleResponse)
+async def toggle_mcp_server_global_enabled(
+    server_id: int,
+    db: AsyncSession = Depends(get_db)
+) -> MCPToggleResponse:
+    """
+    Toggle the global enabled status of an MCP server.
+    """
+    logger.info(f"Toggling global enabled status for MCP server with ID {server_id}")
+    try:
+        service = MCPService(db)
+        response = await service.toggle_server_global_enabled(server_id)
+        status_text = "globally enabled" if response.enabled else "globally disabled"
         logger.info(f"MCP server with ID {server_id} {status_text}")
         return response
     except HTTPException:

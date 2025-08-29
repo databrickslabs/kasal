@@ -104,6 +104,78 @@ class MCPService:
             count=len(servers)
         )
     
+    async def get_global_servers(self) -> MCPServerListResponse:
+        """
+        Get all globally enabled MCP servers.
+        
+        Returns:
+            MCPServerListResponse with list of globally enabled servers and count
+        """
+        servers = await self.server_repository.find_global_enabled()
+        server_responses = []
+        
+        for server in servers:
+            server_response = MCPServerResponse.model_validate(server)
+            # Don't include API key in list response
+            server_response.api_key = ""
+            server_responses.append(server_response)
+            
+        return MCPServerListResponse(
+            servers=server_responses,
+            count=len(servers)
+        )
+    
+    async def get_servers_by_names(self, names: List[str]) -> List[MCPServerResponse]:
+        """
+        Get MCP servers by a list of names.
+        
+        Args:
+            names: List of server names to retrieve
+            
+        Returns:
+            List of MCPServerResponse objects
+        """
+        if not names:
+            return []
+            
+        servers = await self.server_repository.find_by_names(names)
+        server_responses = []
+        
+        for server in servers:
+            server_response = MCPServerResponse.model_validate(server)
+            
+            # Decrypt the API key for the response
+            try:
+                if server.encrypted_api_key:
+                    server_response.api_key = EncryptionUtils.decrypt_value(server.encrypted_api_key)
+            except Exception as e:
+                logger.error(f"Error decrypting API key for server {server.id}: {str(e)}")
+                server_response.api_key = ""
+                
+            server_responses.append(server_response)
+            
+        return server_responses
+    
+    async def get_effective_servers(self, explicit_servers: List[str]) -> List[MCPServerResponse]:
+        """
+        Get effective MCP servers combining global and explicit selections.
+        
+        Args:
+            explicit_servers: List of explicitly selected server names
+            
+        Returns:
+            List of effective MCPServerResponse objects (global + explicit, deduplicated)
+        """
+        # Get global servers
+        global_response = await self.get_global_servers()
+        global_names = {server.name for server in global_response.servers}
+        
+        # Combine global and explicit server names (deduplicated)
+        all_server_names = list(global_names.union(set(explicit_servers)))
+        
+        # Get all servers by names
+        return await self.get_servers_by_names(all_server_names)
+    
     async def get_server_by_id(self, server_id: int) -> MCPServerResponse:
         """
         Get a MCP server by ID.
@@ -308,6 +380,43 @@ class MCPService:
             raise HTTPException(
                 status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
                 detail=f"Failed to toggle MCP server: {str(e)}"
+            )
+    
+    async def toggle_server_global_enabled(self, server_id: int) -> MCPToggleResponse:
+        """
+        Toggle the global enabled status of a MCP server.
+        
+        Args:
+            server_id: ID of server to toggle global enablement
+            
+        Returns:
+            MCPToggleResponse with message and current global enabled state
+            
+        Raises:
+            HTTPException: If server not found or toggle fails
+        """
+        try:
+            # Toggle server global enabled status using repository
+            server = await self.server_repository.toggle_global_enabled(server_id)
+            if not server:
+                logger.warning(f"MCP server with ID {server_id} not found for global toggle")
+                raise HTTPException(
+                    status_code=status.HTTP_404_NOT_FOUND,
+                    detail=f"MCP server with ID {server_id} not found"
+                )
+            
+            status_text = "globally enabled" if server.global_enabled else "globally disabled"
+            return MCPToggleResponse(
+                message=f"MCP server {status_text} successfully",
+                enabled=server.global_enabled
+            )
+        except HTTPException:
+            raise
+        except Exception as e:
+            logger.error(f"Failed to toggle MCP server global status: {str(e)}")
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail=f"Failed to toggle MCP server global status: {str(e)}"
             )
     
     async def test_connection(self, test_data: MCPTestConnectionRequest) -> MCPTestConnectionResponse:
