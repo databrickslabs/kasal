@@ -148,7 +148,7 @@ class TestGenieTool:
 
     def test_make_url(self):
         """Test URL construction."""
-        tool = GenieTool(tool_config={"DATABRICKS_HOST": "test.databricks.com"})
+        tool = GenieTool(tool_config={"DATABRICKS_HOST": "test.databricks.com", "spaceId": "test-space-id"})
         
         # Test basic path
         url = tool._make_url("/api/test")
@@ -166,7 +166,7 @@ class TestGenieTool:
     @pytest.mark.asyncio
     async def test_get_auth_headers_with_pat(self):
         """Test getting auth headers with PAT token."""
-        tool = GenieTool(tool_config={"DATABRICKS_API_KEY": "test-pat-token"})
+        tool = GenieTool(tool_config={"DATABRICKS_HOST": "test.databricks.com", "DATABRICKS_API_KEY": "test-pat-token", "spaceId": "test-space-id"})
         
         headers = await tool._get_auth_headers()
         
@@ -224,7 +224,7 @@ class TestGenieTool:
     @pytest.mark.asyncio
     async def test_test_token_permissions_success(self):
         """Test token permission validation success."""
-        tool = GenieTool(tool_config={"DATABRICKS_HOST": "test.databricks.com"})
+        tool = GenieTool(tool_config={"DATABRICKS_HOST": "test.databricks.com", "spaceId": "test-space-id"})
         headers = {"Authorization": "Bearer test-token"}
         
         mock_response = Mock()
@@ -238,7 +238,7 @@ class TestGenieTool:
     @pytest.mark.asyncio
     async def test_test_token_permissions_forbidden(self):
         """Test token permission validation with 403 forbidden."""
-        tool = GenieTool(tool_config={"DATABRICKS_HOST": "test.databricks.com"})
+        tool = GenieTool(tool_config={"DATABRICKS_HOST": "test.databricks.com", "spaceId": "test-space-id"})
         headers = {"Authorization": "Bearer test-token"}
         
         mock_response = Mock()
@@ -253,7 +253,7 @@ class TestGenieTool:
     @pytest.mark.asyncio
     async def test_test_token_permissions_jwt_decode(self):
         """Test token permission validation with JWT decoding."""
-        tool = GenieTool(tool_config={"DATABRICKS_HOST": "test.databricks.com"})
+        tool = GenieTool(tool_config={"DATABRICKS_HOST": "test.databricks.com", "spaceId": "test-space-id"})
         
         # Create a mock JWT token with proper base64 encoding
         jwt_payload = {
@@ -325,7 +325,8 @@ class TestGenieTool:
         """Test getting message status."""
         tool = GenieTool(tool_config={
             "DATABRICKS_HOST": "test.databricks.com",
-            "DATABRICKS_API_KEY": "test-key"
+            "DATABRICKS_API_KEY": "test-key",
+            "spaceId": "test-space-id"
         })
         
         mock_response = Mock()
@@ -348,7 +349,8 @@ class TestGenieTool:
         """Test getting query results."""
         tool = GenieTool(tool_config={
             "DATABRICKS_HOST": "test.databricks.com",
-            "DATABRICKS_API_KEY": "test-key"
+            "DATABRICKS_API_KEY": "test-key",
+            "spaceId": "test-space-id"
         })
         
         mock_response = Mock()
@@ -416,7 +418,10 @@ class TestGenieTool:
 
     def test_run_with_empty_question(self):
         """Test run method with empty question."""
-        tool = GenieTool()
+        tool = GenieTool(tool_config={
+            "DATABRICKS_HOST": "test.databricks.com",
+            "spaceId": "test-space-id"
+        })
         
         response = tool._run("")
         assert "To use the GenieTool" in response
@@ -424,14 +429,20 @@ class TestGenieTool:
 
     def test_run_with_none_question(self):
         """Test run method with 'None' as question."""
-        tool = GenieTool()
+        tool = GenieTool(tool_config={
+            "DATABRICKS_HOST": "test.databricks.com",
+            "spaceId": "test-space-id"
+        })
         
         response = tool._run("None")
         assert "To use the GenieTool" in response
 
     def test_run_no_authentication(self):
         """Test run method without authentication."""
-        tool = GenieTool(token_required=True)
+        tool = GenieTool(tool_config={
+            "DATABRICKS_HOST": "test.databricks.com",
+            "spaceId": "test-space-id"
+        }, token_required=True)
         tool._token = None
         tool._user_token = None
         tool._use_oauth = False
@@ -477,7 +488,8 @@ class TestGenieTool:
         """Test run method with timeout."""
         tool = GenieTool(tool_config={
             "DATABRICKS_HOST": "test.databricks.com",
-            "DATABRICKS_API_KEY": "test-key"
+            "DATABRICKS_API_KEY": "test-key",
+            "spaceId": "test-space-id"
         })
         tool._max_retries = 2
         tool._retry_delay = 0.1
@@ -497,7 +509,8 @@ class TestGenieTool:
         """Test run method with connection error."""
         tool = GenieTool(tool_config={
             "DATABRICKS_HOST": "test.databricks.com",
-            "DATABRICKS_API_KEY": "test-key"
+            "DATABRICKS_API_KEY": "test-key",
+            "spaceId": "test-space-id"
         })
         
         with patch.object(tool, '_start_or_continue_conversation',
@@ -510,7 +523,8 @@ class TestGenieTool:
         """Test run method with HTTP error."""
         tool = GenieTool(tool_config={
             "DATABRICKS_HOST": "test.databricks.com",
-            "DATABRICKS_API_KEY": "test-key"
+            "DATABRICKS_API_KEY": "test-key",
+            "spaceId": "test-space-id"
         })
         
         mock_response = Mock()
@@ -528,7 +542,8 @@ class TestGenieTool:
         """Test run method with failed query status."""
         tool = GenieTool(tool_config={
             "DATABRICKS_HOST": "test.databricks.com",
-            "DATABRICKS_API_KEY": "test-key"
+            "DATABRICKS_API_KEY": "test-key",
+            "spaceId": "test-space-id"
         })
         
         with patch.object(tool, '_start_or_continue_conversation', return_value={
@@ -733,7 +748,7 @@ class TestGenieTool:
     @pytest.mark.asyncio  
     async def test_test_token_permissions_unexpected_status(self):
         """Test token permission validation with unexpected status code."""
-        tool = GenieTool(tool_config={"DATABRICKS_HOST": "test.databricks.com"})
+        tool = GenieTool(tool_config={"DATABRICKS_HOST": "test.databricks.com", "spaceId": "test-space-id"})
         headers = {"Authorization": "Bearer test-token"}
         
         mock_response = Mock()
@@ -748,7 +763,7 @@ class TestGenieTool:
     @pytest.mark.asyncio
     async def test_test_token_permissions_jwt_decode_error(self):
         """Test token permission validation with JWT decode error."""
-        tool = GenieTool(tool_config={"DATABRICKS_HOST": "test.databricks.com"})
+        tool = GenieTool(tool_config={"DATABRICKS_HOST": "test.databricks.com", "spaceId": "test-space-id"})
         
         # Create invalid JWT token
         headers = {"Authorization": "Bearer eyJ.invalid_base64.signature"}
@@ -764,7 +779,7 @@ class TestGenieTool:
     @pytest.mark.asyncio
     async def test_test_token_permissions_exception(self):
         """Test token permission validation with exception."""
-        tool = GenieTool(tool_config={"DATABRICKS_HOST": "test.databricks.com"})
+        tool = GenieTool(tool_config={"DATABRICKS_HOST": "test.databricks.com", "spaceId": "test-space-id"})
         headers = {"Authorization": "Bearer test-token"}
         
         with patch('requests.get', side_effect=Exception("Connection error")):
@@ -838,7 +853,8 @@ class TestGenieTool:
         """Test conversation start with detailed HTTP error."""
         tool = GenieTool(tool_config={
             "DATABRICKS_HOST": "test.databricks.com",
-            "DATABRICKS_API_KEY": "test-key"
+            "DATABRICKS_API_KEY": "test-key",
+            "spaceId": "test-space-id"
         })
         
         mock_response = Mock()
@@ -929,7 +945,8 @@ class TestGenieTool:
         """Test run method with cancelled query status."""
         tool = GenieTool(tool_config={
             "DATABRICKS_HOST": "test.databricks.com",
-            "DATABRICKS_API_KEY": "test-key"
+            "DATABRICKS_API_KEY": "test-key",
+            "spaceId": "test-space-id"
         })
         
         with patch.object(tool, '_start_or_continue_conversation', return_value={
@@ -947,7 +964,8 @@ class TestGenieTool:
         """Test run method with expired query status."""
         tool = GenieTool(tool_config={
             "DATABRICKS_HOST": "test.databricks.com",
-            "DATABRICKS_API_KEY": "test-key"
+            "DATABRICKS_API_KEY": "test-key",
+            "spaceId": "test-space-id"
         })
         
         with patch.object(tool, '_start_or_continue_conversation', return_value={
@@ -965,7 +983,8 @@ class TestGenieTool:
         """Test run method with no meaningful response and no query results."""
         tool = GenieTool(tool_config={
             "DATABRICKS_HOST": "test.databricks.com",
-            "DATABRICKS_API_KEY": "test-key"
+            "DATABRICKS_API_KEY": "test-key",
+            "spaceId": "test-space-id"
         })
         tool._max_retries = 2
         tool._retry_delay = 0.1
@@ -989,7 +1008,8 @@ class TestGenieTool:
         """Test run method when query result request fails."""
         tool = GenieTool(tool_config={
             "DATABRICKS_HOST": "test.databricks.com",
-            "DATABRICKS_API_KEY": "test-key"
+            "DATABRICKS_API_KEY": "test-key",
+            "spaceId": "test-space-id"
         })
         
         with patch.object(tool, '_start_or_continue_conversation', return_value={
@@ -1050,7 +1070,8 @@ class TestGenieTool:
         """Test run method with general exception."""
         tool = GenieTool(tool_config={
             "DATABRICKS_HOST": "test.databricks.com",
-            "DATABRICKS_API_KEY": "test-key"
+            "DATABRICKS_API_KEY": "test-key",
+            "spaceId": "test-space-id"
         })
         
         with patch.object(tool, '_start_or_continue_conversation',
@@ -1114,7 +1135,7 @@ class TestGenieTool:
 
     def test_make_url_space_id_replacement(self):
         """Test URL construction replaces space ID placeholder."""
-        tool = GenieTool(tool_config={"spaceId": "my-space"})
+        tool = GenieTool(tool_config={"DATABRICKS_HOST": "test.databricks.com", "spaceId": "my-space"})
         url = tool._make_url("/api/spaces/{self._space_id}/test")
         assert "my-space" in url
 
@@ -1165,7 +1186,7 @@ class TestGenieTool:
 
     def test_continue_conversation_message_nested_format(self):
         """Test continuing conversation with nested message format."""
-        tool = GenieTool(tool_config={"DATABRICKS_API_KEY": "test"})
+        tool = GenieTool(tool_config={"DATABRICKS_HOST": "test.databricks.com", "DATABRICKS_API_KEY": "test", "spaceId": "test-space-id"})
         tool._current_conversation_id = "conv-123"
         
         mock_response = Mock()
@@ -1181,7 +1202,7 @@ class TestGenieTool:
 
     def test_get_message_status_async_auth_fallback(self):
         """Test message status retrieval with async auth fallback."""
-        tool = GenieTool(tool_config={"user_token": "test-token"})
+        tool = GenieTool(tool_config={"DATABRICKS_HOST": "test.databricks.com", "user_token": "test-token", "spaceId": "test-space-id"})
         
         mock_response = Mock()
         mock_response.status_code = 200
@@ -1196,7 +1217,7 @@ class TestGenieTool:
 
     def test_get_query_result_async_auth_fallback(self):
         """Test query result retrieval with async auth fallback."""
-        tool = GenieTool(tool_config={"user_token": "test-token"})
+        tool = GenieTool(tool_config={"DATABRICKS_HOST": "test.databricks.com", "user_token": "test-token", "spaceId": "test-space-id"})
         
         mock_response = Mock()
         mock_response.status_code = 200
@@ -1232,7 +1253,7 @@ class TestGenieTool:
 
     def test_run_missing_conversation_id(self):
         """Test run when conversation ID is missing."""
-        tool = GenieTool(tool_config={"DATABRICKS_API_KEY": "test"})
+        tool = GenieTool(tool_config={"DATABRICKS_HOST": "test.databricks.com", "DATABRICKS_API_KEY": "test", "spaceId": "test-space-id"})
         
         with patch.object(tool, '_start_or_continue_conversation', return_value={
             "conversation_id": None,
@@ -1244,7 +1265,7 @@ class TestGenieTool:
 
     def test_run_missing_message_id(self):
         """Test run when message ID is missing."""
-        tool = GenieTool(tool_config={"DATABRICKS_API_KEY": "test"})
+        tool = GenieTool(tool_config={"DATABRICKS_HOST": "test.databricks.com", "DATABRICKS_API_KEY": "test", "spaceId": "test-space-id"})
         
         with patch.object(tool, '_start_or_continue_conversation', return_value={
             "conversation_id": "conv-123", 
@@ -1256,7 +1277,7 @@ class TestGenieTool:
 
     def test_run_http_error_without_response(self):
         """Test run method with HTTP error that has no response attribute."""
-        tool = GenieTool(tool_config={"DATABRICKS_API_KEY": "test"})
+        tool = GenieTool(tool_config={"DATABRICKS_HOST": "test.databricks.com", "DATABRICKS_API_KEY": "test", "spaceId": "test-space-id"})
         
         http_error = requests.exceptions.HTTPError("Generic HTTP Error")
         # Don't set response attribute
@@ -1420,7 +1441,7 @@ class TestGenieTool:
     @pytest.mark.asyncio
     async def test_test_token_permissions_request_timeout(self):
         """Test token permission validation with request timeout."""
-        tool = GenieTool(tool_config={"DATABRICKS_HOST": "test.databricks.com"})
+        tool = GenieTool(tool_config={"DATABRICKS_HOST": "test.databricks.com", "spaceId": "test-space-id"})
         headers = {"Authorization": "Bearer test-token"}
         
         with patch('requests.get', side_effect=requests.exceptions.Timeout("Request timeout")):
@@ -1432,7 +1453,8 @@ class TestGenieTool:
         """Test run method with completed status but meaningful response and query results."""
         tool = GenieTool(tool_config={
             "DATABRICKS_HOST": "test.databricks.com",
-            "DATABRICKS_API_KEY": "test-key"
+            "DATABRICKS_API_KEY": "test-key",
+            "spaceId": "test-space-id"
         })
         
         with patch.object(tool, '_start_or_continue_conversation', return_value={
@@ -1461,7 +1483,8 @@ class TestGenieTool:
         """Test run method with completed status but no query results available."""
         tool = GenieTool(tool_config={
             "DATABRICKS_HOST": "test.databricks.com",
-            "DATABRICKS_API_KEY": "test-key"
+            "DATABRICKS_API_KEY": "test-key",
+            "spaceId": "test-space-id"
         })
         
         with patch.object(tool, '_start_or_continue_conversation', return_value={
@@ -1498,18 +1521,18 @@ class TestGenieTool:
         assert tool._host == "uppercase-host.com"  # Uppercase takes priority
 
     def test_init_without_host_uses_fallback(self):
-        """Test initialization without host config uses environment/default."""
+        """Test initialization without host config sets host to None."""
         with patch.dict('os.environ', {}, clear=True):  # Clear env vars
             tool = GenieTool(tool_config={}, token_required=False)
-            # Should use default fallback
-            assert tool._host is not None
+            # Without host config, should be None (test updated to match actual behavior)
+            assert tool._host is None
 
     def test_init_without_space_id_uses_default(self):
-        """Test initialization without space_id config uses default."""
+        """Test initialization without space_id config sets space_id to None."""
         with patch.dict('os.environ', {}, clear=True):  # Clear env vars
             tool = GenieTool(tool_config={}, token_required=False)
-            # Should use default space_id
-            assert tool._space_id is not None
+            # Without space_id config, should be None (test updated to match actual behavior)
+            assert tool._space_id is None
 
     @pytest.mark.asyncio
     async def test_get_auth_headers_oauth_with_enhanced_auth_success(self):
@@ -1638,14 +1661,14 @@ class TestGenieTool:
         tool._token = None
         tool._user_token = None
         
-        # Should raise exception due to missing auth
-        with pytest.raises(Exception, match="No authentication headers available"):
+        # Should raise exception due to missing DATABRICKS_HOST
+        with pytest.raises(ValueError, match="DATABRICKS_HOST is not configured"):
             tool._get_query_result("conv-123", "msg-456")
 
     @pytest.mark.asyncio
     async def test_test_token_permissions_non_bearer_token(self):
         """Test token permission testing with non-Bearer authorization."""
-        tool = GenieTool(tool_config={"DATABRICKS_HOST": "test.databricks.com"})
+        tool = GenieTool(tool_config={"DATABRICKS_HOST": "test.databricks.com", "spaceId": "test-space-id"})
         headers = {"Authorization": "Basic dGVzdDp0ZXN0"}  # Basic auth
         
         mock_response = Mock()
@@ -1659,7 +1682,7 @@ class TestGenieTool:
     @pytest.mark.asyncio
     async def test_test_token_permissions_jwt_decoding_edge_cases(self):
         """Test JWT token decoding with various edge cases."""
-        tool = GenieTool(tool_config={"DATABRICKS_HOST": "test.databricks.com"})
+        tool = GenieTool(tool_config={"DATABRICKS_HOST": "test.databricks.com", "spaceId": "test-space-id"})
         
         # Test JWT with all required scopes
         jwt_payload = {
@@ -1682,7 +1705,7 @@ class TestGenieTool:
     @pytest.mark.asyncio
     async def test_test_token_permissions_jwt_decode_exception(self):
         """Test JWT token permission testing with decode exception."""
-        tool = GenieTool(tool_config={"DATABRICKS_HOST": "test.databricks.com"})
+        tool = GenieTool(tool_config={"DATABRICKS_HOST": "test.databricks.com", "spaceId": "test-space-id"})
         
         # Invalid base64 that will cause decode error
         headers = {"Authorization": "Bearer eyJ.invalid_base64_content.signature"}
@@ -1745,7 +1768,8 @@ class TestGenieTool:
         """Test run method times out with processing status."""
         tool = GenieTool(tool_config={
             "DATABRICKS_HOST": "test.databricks.com",
-            "DATABRICKS_API_KEY": "test-key"
+            "DATABRICKS_API_KEY": "test-key",
+            "spaceId": "test-space-id"
         })
         tool._max_retries = 2
         tool._retry_delay = 0.01  # Very short delay for test
@@ -1765,7 +1789,8 @@ class TestGenieTool:
         """Test run method with completed status but keeps looping due to no meaningful content."""
         tool = GenieTool(tool_config={
             "DATABRICKS_HOST": "test.databricks.com",
-            "DATABRICKS_API_KEY": "test-key"
+            "DATABRICKS_API_KEY": "test-key",
+            "spaceId": "test-space-id"
         })
         tool._max_retries = 2
         tool._retry_delay = 0.01
@@ -1790,7 +1815,7 @@ class TestGenieTool:
 
     def test_make_url_path_without_leading_slash(self):
         """Test make_url adds leading slash to path when missing."""
-        tool = GenieTool(tool_config={"DATABRICKS_HOST": "test.databricks.com"})
+        tool = GenieTool(tool_config={"DATABRICKS_HOST": "test.databricks.com", "spaceId": "test-space-id"})
         
         url = tool._make_url("api/test")  # No leading slash
         assert url == "https://test.databricks.com/api/test"
@@ -1829,7 +1854,7 @@ class TestGenieTool:
 
     def test_set_user_token_after_init_changes_auth_mode(self):
         """Test that set_user_token properly changes authentication mode."""
-        tool = GenieTool(tool_config={"DATABRICKS_API_KEY": "pat-token"})
+        tool = GenieTool(tool_config={"DATABRICKS_HOST": "test.databricks.com", "DATABRICKS_API_KEY": "pat-token", "spaceId": "test-space-id"})
         assert not tool._use_oauth
         assert tool._user_token is None
         
@@ -1855,17 +1880,18 @@ class TestGenieTool:
         assert tool._use_oauth is False
 
     def test_init_default_space_id_warning_logged(self):
-        """Test that default space ID usage logs a warning."""
+        """Test that missing space ID logs a warning."""
         with patch('logging.Logger.warning'):
             tool = GenieTool(tool_config={}, token_required=False)
-        # Should use default space_id and log warning
-        assert tool._space_id is not None
+        # Without space_id config, should be None
+        assert tool._space_id is None
 
     def test_start_conversation_permission_test_failure(self):
         """Test conversation start when permission test fails."""
         tool = GenieTool(tool_config={
             "DATABRICKS_HOST": "test.databricks.com",
-            "DATABRICKS_API_KEY": "test-key"
+            "DATABRICKS_API_KEY": "test-key",
+            "spaceId": "test-space-id"
         })
         
         # Mock permission test to fail but continue anyway
@@ -1886,7 +1912,8 @@ class TestGenieTool:
         """Test conversation start when permission test raises exception."""
         tool = GenieTool(tool_config={
             "DATABRICKS_HOST": "test.databricks.com",
-            "DATABRICKS_API_KEY": "test-key"
+            "DATABRICKS_API_KEY": "test-key",
+            "spaceId": "test-space-id"
         })
         
         # Mock permission test to raise exception but continue anyway
@@ -1980,7 +2007,8 @@ class TestGenieTool:
         """Test run method transitions from processing to completed status."""
         tool = GenieTool(tool_config={
             "DATABRICKS_HOST": "test.databricks.com", 
-            "DATABRICKS_API_KEY": "test-key"
+            "DATABRICKS_API_KEY": "test-key",
+            "spaceId": "test-space-id"
         })
         
         call_count = 0
@@ -2009,7 +2037,8 @@ class TestGenieTool:
         """Test run method detects meaningful response in attachments."""
         tool = GenieTool(tool_config={
             "DATABRICKS_HOST": "test.databricks.com",
-            "DATABRICKS_API_KEY": "test-key"
+            "DATABRICKS_API_KEY": "test-key",
+            "spaceId": "test-space-id"
         })
         
         with patch.object(tool, '_start_or_continue_conversation', return_value={
@@ -2033,7 +2062,8 @@ class TestGenieTool:
         """Test run method detects meaningful response in query data only."""
         tool = GenieTool(tool_config={
             "DATABRICKS_HOST": "test.databricks.com",
-            "DATABRICKS_API_KEY": "test-key"
+            "DATABRICKS_API_KEY": "test-key",
+            "spaceId": "test-space-id"
         })
         
         with patch.object(tool, '_start_or_continue_conversation', return_value={
@@ -2110,7 +2140,10 @@ class TestGenieTool:
 
     def test_run_empty_question_variations(self):
         """Test run method with various empty question formats.""" 
-        tool = GenieTool(token_required=False)
+        tool = GenieTool(tool_config={
+            "DATABRICKS_HOST": "test.databricks.com",
+            "spaceId": "test-space-id"
+        }, token_required=False)
         
         # Test empty string
         response = tool._run("")
@@ -2128,7 +2161,10 @@ class TestGenieTool:
     def test_run_authentication_check_comprehensive(self):
         """Test run method authentication check covers all scenarios."""
         # Test with no OAuth, no token, no user_token
-        tool = GenieTool(token_required=True)
+        tool = GenieTool(tool_config={
+            "DATABRICKS_HOST": "test.databricks.com",
+            "spaceId": "test-space-id"
+        }, token_required=True)
         tool._use_oauth = False
         tool._token = None
         tool._user_token = None
@@ -2158,11 +2194,11 @@ class TestGenieTool:
     # Additional tests for 100% coverage
     
     def test_init_without_host_sets_default(self):
-        """Test initialization without any host config sets default host."""
+        """Test initialization without any host config sets host to None."""
         with patch.dict('os.environ', {}, clear=True):  # Clear all env vars
             tool = GenieTool(tool_config={}, token_required=False)
-            # First attempt to set host from env will fail, then default should be set
-            assert tool._host == "your-workspace.cloud.databricks.com"
+            # Without any host config, should be None (test updated to match actual behavior)
+            assert tool._host is None
     
     @pytest.mark.asyncio
     async def test_get_auth_headers_oauth_no_user_token(self):
@@ -2212,7 +2248,7 @@ class TestGenieTool:
     
     def test_continue_conversation_id_only_response(self):
         """Test continuing conversation with id-only response format."""
-        tool = GenieTool(tool_config={"DATABRICKS_API_KEY": "test-key"})
+        tool = GenieTool(tool_config={"DATABRICKS_HOST": "test.databricks.com", "DATABRICKS_API_KEY": "test-key", "spaceId": "test-space-id"})
         tool._current_conversation_id = "existing-conv"
         
         mock_response = Mock()
@@ -2229,17 +2265,23 @@ class TestGenieTool:
     
     def test_get_message_status_no_headers_exception(self):
         """Test get message status when no headers available."""
-        tool = GenieTool(token_required=False)
+        # Create tool with proper host but no auth to test auth failure specifically
+        tool = GenieTool(tool_config={
+            "DATABRICKS_HOST": "test.databricks.com",
+            "spaceId": "test-space-id"
+        })
         tool._token = None
         tool._user_token = None
         tool._use_oauth = False
         
-        with pytest.raises(Exception, match="No authentication headers available"):
-            tool._get_message_status("conv-123", "msg-456")
+        # Mock the _get_auth_headers method to return None to simulate no auth
+        with patch.object(tool, '_get_auth_headers', return_value=None):
+            with pytest.raises(Exception, match="No authentication headers available"):
+                tool._get_message_status("conv-123", "msg-456")
     
     def test_get_query_result_with_only_token(self):
         """Test get query result with only PAT token in fallback."""
-        tool = GenieTool(tool_config={"DATABRICKS_API_KEY": "test-pat"})
+        tool = GenieTool(tool_config={"DATABRICKS_HOST": "test.databricks.com", "DATABRICKS_API_KEY": "test-pat", "spaceId": "test-space-id"})
         tool._user_token = None
         
         mock_response = Mock()
@@ -2283,7 +2325,7 @@ class TestGenieTool:
     @pytest.mark.asyncio
     async def test_get_auth_headers_import_error_with_pat_token(self):
         """Test auth headers fallback to PAT when ImportError occurs."""
-        tool = GenieTool(tool_config={"DATABRICKS_API_KEY": "pat-token"})
+        tool = GenieTool(tool_config={"DATABRICKS_HOST": "test.databricks.com", "DATABRICKS_API_KEY": "pat-token", "spaceId": "test-space-id"})
         tool._use_oauth = False
         
         # Mock the ImportError by patching the __import__ builtin
@@ -2316,14 +2358,14 @@ class TestGenieTool:
         assert headers["Content-Type"] == "application/json"
     
     def test_init_without_host_from_config_or_env(self):
-        """Test initialization without host in config or env sets default and logs warning."""
+        """Test initialization without host in config or env logs error and sets None."""
         with patch.dict('os.environ', {}, clear=True):  # Clear env vars
-            with patch('logging.Logger.warning') as mock_warning:
+            with patch('logging.Logger.error') as mock_error:
                 tool = GenieTool(tool_config={}, token_required=False)
             
-            # Should have logged warning about missing host
-            mock_warning.assert_called()
-            assert tool._host == "your-workspace.cloud.databricks.com"
+            # Should have logged error about missing host
+            mock_error.assert_called()
+            assert tool._host is None
     
     @pytest.mark.asyncio
     async def test_get_auth_headers_catches_import_error_no_token(self):
@@ -2482,7 +2524,7 @@ class TestGenieTool:
     @pytest.mark.asyncio
     async def test_get_auth_headers_import_error_with_pat_token(self):
         """Test ImportError handling when importing databricks_auth with PAT token fallback."""
-        tool = GenieTool(tool_config={"DATABRICKS_API_KEY": "pat-fallback-token"})
+        tool = GenieTool(tool_config={"DATABRICKS_HOST": "test.databricks.com", "DATABRICKS_API_KEY": "pat-fallback-token", "spaceId": "test-space-id"})
         tool._use_oauth = True
         tool._user_token = None
         
@@ -2507,14 +2549,20 @@ class TestGenieTool:
     @pytest.mark.asyncio
     async def test_get_auth_headers_general_exception_in_method(self):
         """Test general exception handling in _get_auth_headers method."""
-        tool = GenieTool(token_required=False)
-        tool._use_oauth = True
-        tool._user_token = None
-        
-        # Force an unexpected exception by making the method attribute invalid
-        # This will cause an exception when trying to check self._use_oauth
-        with patch.object(tool, '_use_oauth', property(lambda self: 1/0)):
-            headers = await tool._get_auth_headers()
+        # Create tool with proper configuration to avoid host errors but no auth
+        with patch.dict('os.environ', {}, clear=True):
+            tool = GenieTool(tool_config={
+                "DATABRICKS_HOST": "test.databricks.com",
+                "spaceId": "test-space-id"
+            })
+            tool._use_oauth = True
+            tool._user_token = None
+            tool._token = None  # Explicitly clear any token
+            
+            # Force an unexpected exception by making the method attribute invalid
+            # This will cause an exception when trying to check self._use_oauth
+            with patch.object(tool, '_use_oauth', property(lambda self: 1/0)):
+                headers = await tool._get_auth_headers()
         
         assert headers is None
     
