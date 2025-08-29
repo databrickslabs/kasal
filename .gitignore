@@ -30,6 +30,7 @@ yarn-error.log*
 *.swp
 *.swo
 .cursorrules
+.serena/
 
 # OS generated files
 .DS_Store
