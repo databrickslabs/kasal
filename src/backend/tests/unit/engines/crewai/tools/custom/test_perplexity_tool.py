@@ -10,7 +10,7 @@ class TestPerplexitySearchTool:
 
     def test_initialization_default_values(self):
         """Test that the tool initializes with correct default values."""
-        tool = PerplexitySearchTool()
+        tool = PerplexitySearchTool(api_key="test-key")
         
         assert tool.name == "PerplexityTool"
         assert "performs web searches using Perplexity AI" in tool.description
@@ -48,9 +48,9 @@ class TestPerplexitySearchTool:
 
     @patch.dict('os.environ', {}, clear=True)
     def test_api_key_fallback(self):
-        """Test that the tool uses default API key when none provided."""
-        tool = PerplexitySearchTool()
-        assert tool._api_key == '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'
+        """Test that the tool raises error when no API key is provided."""
+        with pytest.raises(ValueError, match="Perplexity API key is required"):
+            tool = PerplexitySearchTool()
 
     @patch('requests.post')
     def test_run_successful_query(self, mock_post):

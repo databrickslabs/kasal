@@ -23,6 +23,7 @@ class Task(Base):
     agent_id = Column(String, ForeignKey("agents.id"), nullable=True)
     expected_output = Column(String, nullable=False)
     tools = Column(JSON, default=list, nullable=False)
+    tool_configs = Column(JSON, default=dict, nullable=True)  # User-specific tool configuration overrides
     async_execution = Column(Boolean, default=False)
     context = Column(JSON, default=list)
     config = Column(JSON, default=dict)

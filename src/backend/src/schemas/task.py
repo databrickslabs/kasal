@@ -38,6 +38,7 @@ class TaskBase(BaseModel):
     agent_id: Optional[str] = None
     expected_output: str
     tools: List[str] = Field(default_factory=list)
+    tool_configs: Optional[Dict[str, Dict[str, Any]]] = Field(default_factory=dict)  # Tool-specific config overrides
     async_execution: bool = False
     context: List[Union[str, str]] = Field(default_factory=list)
     config: TaskConfig = Field(default_factory=TaskConfig)
@@ -66,6 +67,7 @@ class TaskUpdate(BaseModel):
     agent_id: Optional[str] = None
     expected_output: Optional[str] = None
     tools: Optional[List[str]] = None
+    tool_configs: Optional[Dict[str, Dict[str, Any]]] = None  # Tool-specific config overrides
     async_execution: Optional[bool] = None
     context: Optional[List[Union[str, str]]] = None
     config: Optional[TaskConfig] = None

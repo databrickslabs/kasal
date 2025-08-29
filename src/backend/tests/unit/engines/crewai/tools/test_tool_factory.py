@@ -1396,8 +1396,8 @@ class TestToolFactoryAdditionalCoverage:
         """Test LinkupSearchTool output_type parameter validation."""
         pass
     
-    def test_create_tool_genie_default_space_id(self, tool_factory):
-        """Test creating GenieTool with default space ID when not provided."""
+    def test_create_tool_genie_without_space_id(self, tool_factory):
+        """Test creating GenieTool without space ID logs warning but still creates tool."""
         mock_tool = MagicMock()
         mock_tool.title = "GenieTool"
         mock_tool.config = {"DATABRICKS_HOST": "https://test.databricks.com"}  # No spaceId
@@ -1413,5 +1413,5 @@ class TestToolFactoryAdditionalCoverage:
             
             assert result == mock_instance
             call_kwargs = mock_genie_class.call_args[1]
-            # Should use default test space ID
-            assert call_kwargs["tool_config"]["spaceId"] == "01f04453107910c39e800ec7e0825cf5"
+            # Should not have spaceId in config since none was provided
+            assert "spaceId" not in call_kwargs["tool_config"]

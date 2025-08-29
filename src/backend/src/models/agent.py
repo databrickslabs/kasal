@@ -29,6 +29,7 @@ class Agent(Base):
     # Core configuration
     llm = Column(String, default="databricks-llama-4-maverick")
     tools = Column(JSON, default=list, nullable=False)
+    tool_configs = Column(JSON, default=dict, nullable=True)  # User-specific tool configuration overrides
     function_calling_llm = Column(String)
     
     # Execution settings

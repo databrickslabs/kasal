@@ -67,8 +67,8 @@ class PerplexitySearchTool(BaseTool):
         if not api_key:
             api_key = os.environ.get("PERPLEXITY_API_KEY")
             if not api_key:
-                logger.warning("No Perplexity API key provided. Using default API key.")
-                api_key = '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'
+                logger.error("No Perplexity API key provided. Please configure PERPLEXITY_API_KEY in the API Keys settings.")
+                raise ValueError("Perplexity API key is required. Please configure it in the API Keys settings.")
                 
         self._api_key = api_key
         

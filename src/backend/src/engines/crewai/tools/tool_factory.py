@@ -1,4 +1,4 @@
-from typing import Dict, Optional, Union
+from typing import Dict, Optional, Union, Any, List
 from crewai.tools import BaseTool
 import logging
 import os
@@ -544,13 +544,19 @@ class ToolFactory:
                 await self._load_available_tools_async()
                 return True
     
-    def create_tool(self, tool_identifier: Union[str, int], result_as_answer: bool = False) -> Optional[Union[BaseTool, list]]:
+    def create_tool(
+        self, 
+        tool_identifier: Union[str, int], 
+        result_as_answer: bool = False,
+        tool_config_override: Optional[Dict[str, Any]] = None
+    ) -> Optional[Union[BaseTool, list]]:
         """
         Create a tool instance based on its identifier.
         
         Args:
             tool_identifier: Either the tool's ID (int or str) or title (str)
             result_as_answer: Whether the tool's result should be treated as the final answer
+            tool_config_override: Optional configuration overrides for this specific tool instance
             
         Returns:
             Tool instance if successfully created, None otherwise
@@ -579,9 +585,17 @@ class ToolFactory:
             return None
             
         try:
-            # Get tool config from tool info
-            tool_config = tool_info.config if hasattr(tool_info, 'config') else {}
-            logger.info(f"{tool_name} config: {tool_config}")
+            # Get base tool config from tool info
+            base_config = tool_info.config if hasattr(tool_info, 'config') and tool_info.config is not None else {}
+            
+            # Log what we're merging
+            logger.info(f"{tool_name} - base_config from tool_info: {base_config}")
+            logger.info(f"{tool_name} - tool_config_override received: {tool_config_override}")
+            
+            # Merge with override config if provided
+            tool_config = {**base_config, **(tool_config_override or {})}
+            
+            logger.info(f"{tool_name} config (after merge): {tool_config}")
             
             # Handle specific tool types
             if tool_name == "PerplexityTool":
@@ -1040,6 +1054,10 @@ class ToolFactory:
                 # Get tool ID if any
                 tool_id = tool_config.get('tool_id', None)
                 
+                # Log the raw tool_config to debug spaceId issue
+                logger.info(f"GenieTool raw tool_config: {tool_config}")
+                logger.info(f"GenieTool tool_config_override: {tool_config_override}")
+                
                 # Create a copy of the config
                 genie_tool_config = {**tool_config}
                 
@@ -1132,24 +1150,44 @@ class ToolFactory:
                     if final_api_key:
                         genie_tool_config['DATABRICKS_API_KEY'] = final_api_key
                 
-                # DATABRICKS_HOST is now optional - GenieTool will auto-detect in Databricks Apps
+                # DATABRICKS_HOST - check config first, then environment variable
                 if 'DATABRICKS_HOST' in tool_config:
                     genie_tool_config['DATABRICKS_HOST'] = tool_config['DATABRICKS_HOST']
                     logger.info(f"Using DATABRICKS_HOST from config: {tool_config['DATABRICKS_HOST']}")
                 else:
-                    logger.info("DATABRICKS_HOST not in config - GenieTool will auto-detect if in Databricks Apps")
+                    # Try to get from environment variable
+                    databricks_host = os.environ.get("DATABRICKS_HOST")
+                    if databricks_host:
+                        genie_tool_config['DATABRICKS_HOST'] = databricks_host
+                        logger.info(f"Using DATABRICKS_HOST from environment variable: {databricks_host}")
+                    else:
+                        logger.info("DATABRICKS_HOST not in config or environment - GenieTool will auto-detect if in Databricks Apps")
                 
-                if 'spaceId' in tool_config:
+                # Check for spaceId in tool_config_override first (task/agent specific), then in base tool_config
+                if tool_config_override and 'spaceId' in tool_config_override:
+                    genie_tool_config['spaceId'] = tool_config_override['spaceId']
+                    logger.info(f"Using spaceId from tool_config_override: {tool_config_override['spaceId']}")
+                elif tool_config_override and 'space_id' in tool_config_override:
+                    # Also check for space_id with underscore
+                    genie_tool_config['spaceId'] = tool_config_override['space_id']
+                    logger.info(f"Using space_id (underscore) from tool_config_override: {tool_config_override['space_id']}")
+                elif 'spaceId' in tool_config:
                     genie_tool_config['spaceId'] = tool_config['spaceId']
-                    logger.info(f"Using spaceId from config: {tool_config['spaceId']}")
+                    logger.info(f"Using spaceId from base tool_config: {tool_config['spaceId']}")
+                elif 'space_id' in tool_config:
+                    # Also check for space_id with underscore in base config
+                    genie_tool_config['spaceId'] = tool_config['space_id']
+                    logger.info(f"Using space_id (underscore) from base tool_config: {tool_config['space_id']}")
                 else:
-                    # Use the test space ID for debugging
-                    genie_tool_config['spaceId'] = "01f04453107910c39e800ec7e0825cf5"
-                    logger.info(f"Using default test spaceId: 01f04453107910c39e800ec7e0825cf5")
+                    logger.warning("No spaceId or space_id found in tool_config_override or base tool_config")
+                    logger.warning(f"tool_config keys: {list(tool_config.keys())}")
+                    logger.warning(f"tool_config_override keys: {list(tool_config_override.keys()) if tool_config_override else 'None'}")
+                # No default spaceId - must be configured in agent/task
                 
                 # Create the GenieTool instance
                 try:
                     logger.info(f"Creating GenieTool with config, OBO: {bool(user_token)}, token preview: {user_token[:10] + '...' if user_token else 'None'}")
+                    logger.info(f"GenieTool config being passed: {genie_tool_config}")
                     return tool_class(
                         tool_config=genie_tool_config, 
                         tool_id=tool_id, 
