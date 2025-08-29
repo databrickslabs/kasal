@@ -1,4 +1,4 @@
-import React, { useMemo, useState, useRef, useEffect } from 'react';
+import React, { useMemo, useState, useRef, useEffect, memo } from 'react';
 import {
   Dialog,
   DialogTitle,
@@ -28,19 +28,32 @@ import remarkGfm from 'remark-gfm';
 import { ShowResultProps } from '../../types/common';
 import { ResultValue } from '../../types/result';
 
-const ShowResult: React.FC<ShowResultProps> = ({ open, onClose, result }) => {
+// eslint-disable-next-line react/prop-types
+const ShowResult = memo<ShowResultProps>(({ open, onClose, result }) => {
   const theme = useTheme();
   const [copied, setCopied] = useState(false);
   const [viewMode, setViewMode] = useState<'code' | 'html'>('code');
   const [isFullscreen, setIsFullscreen] = useState(false);
   const dialogRef = useRef<HTMLDivElement>(null);
+  // Track if the dialog has been opened at least once
+  const hasOpenedRef = useRef(false);
+  
+  // Update the hasOpened ref when dialog opens
+  useEffect(() => {
+    if (open) {
+      hasOpenedRef.current = true;
+    }
+  }, [open]);
   // URL detection regex pattern
   const urlPattern = /(https?:\/\/[^\s]+)/g;
 
   // Memoize the formatted result to prevent unnecessary re-processing
-  const memoizedResult = useMemo(() => 
-    result ? result : {}
-  , [result]);
+  const memoizedResult = useMemo(() => {
+    if (!result) return {};
+    // Return the result directly if it's already an object
+    // Only clone if necessary for stability
+    return result;
+  }, [result]);
 
   // Fullscreen handlers
   const handleFullscreen = async () => {
@@ -164,9 +177,26 @@ const ShowResult: React.FC<ShowResultProps> = ({ open, onClose, result }) => {
     return htmlPatterns.some(pattern => pattern.test(text));
   };
 
-  // Sandboxed iframe component for HTML+JS rendering
-  const SandboxedHTMLRenderer: React.FC<{ html: string; isFullscreen?: boolean }> = ({ html, isFullscreen = false }) => {
-    const iframeRef = useRef<HTMLIFrameElement>(null);
+  // Create a stable key for the iframe based on the HTML content
+  const getHtmlKey = (html: string) => {
+    // Create a simple hash of the first 100 chars to identify unique content
+    const sample = html.substring(0, 100);
+    let hash = 0;
+    for (let i = 0; i < sample.length; i++) {
+      const char = sample.charCodeAt(i);
+      hash = ((hash << 5) - hash) + char;
+      hash = hash & hash; // Convert to 32bit integer
+    }
+    return hash.toString();
+  };
+
+  // Sandboxed iframe component for HTML+JS rendering - with proper memoization
+  const SandboxedHTMLRenderer = memo(
+    function SandboxedHTMLRenderer({ html, isFullscreen = false }: { html: string; isFullscreen?: boolean }) {
+      const iframeRef = useRef<HTMLIFrameElement>(null);
+      const isInitializedRef = useRef<boolean>(false);
+      const contentKeyRef = useRef<string>('');
+      const lastWrittenContentRef = useRef<string>('');
     
     // Clean up the HTML string - remove markdown code block syntax if present
     const cleanupHtml = (htmlContent: string) => {
@@ -181,164 +211,169 @@ const ShowResult: React.FC<ShowResultProps> = ({ open, onClose, result }) => {
       return cleanedHtml;
     };
     
+    const cleanedHtml = cleanupHtml(html);
+    const currentKey = getHtmlKey(cleanedHtml);
+    
+    // Check if this is actually new content
+    const isNewContent = contentKeyRef.current !== currentKey;
+    if (isNewContent) {
+      contentKeyRef.current = currentKey;
+      isInitializedRef.current = false;
+
+    }
+    
+    // Initialize iframe when content changes
     useEffect(() => {
-      if (iframeRef.current) {
-        const iframe = iframeRef.current;
-        const iframeWindow = iframe.contentWindow;
-        const iframeDoc = iframe.contentDocument || iframeWindow?.document;
-        
-        if (iframeDoc && iframeWindow) {
-          let cleanedHtml = cleanupHtml(html);
-          
-          // Remove fallback messages for presentations when in iframe
-          // Remove the fallback-message div that shows "browser not supported"
-          cleanedHtml = cleanedHtml.replace(
-            /<div[^>]*class="fallback-message"[^>]*>[\s\S]*?<\/div>/gi,
-            ''
-          );
-          
-          // Force impress-supported class on body to hide fallback messages
-          cleanedHtml = cleanedHtml.replace(
-            /class="impress-not-supported"/g,
-            'class="impress-supported"'
-          );
-          
-          // Add responsive scaling styles and initialization
-          const initScript = `
-            <style>
-              /* Responsive scaling for iframe content */
-              html, body {
-                margin: 0 !important;
-                padding: 0 !important;
-                width: 100% !important;
-                height: 100% !important;
-                overflow: auto !important;
-              }
+
+      
+      if (!iframeRef.current) return;
+      
+      const iframe = iframeRef.current;
+      
+      // Only write if we have new content
+      if (!isNewContent && isInitializedRef.current) {
+        return;
+      }
+      
+      // Double-check we haven't already written this exact content
+      if (lastWrittenContentRef.current === cleanedHtml && isInitializedRef.current) {
+        return;
+      }
+      
+      isInitializedRef.current = true;
+      lastWrittenContentRef.current = cleanedHtml;
+      
+      let processedHtml = cleanedHtml;
+      
+      // Add scripts to handle sandboxed environment limitations
+      const initScript = `
+        <script>
+          // Polyfill for History API in sandboxed iframe
+          (function() {
+            // Store the original methods if they exist
+            const originalPushState = window.history.pushState;
+            const originalReplaceState = window.history.replaceState;
+            
+            // Override history methods to prevent errors in sandboxed context
+            try {
+              window.history.pushState = function(state, title, url) {
+                try {
+                  // Try to call the original method
+                  return originalPushState.apply(window.history, arguments);
+                } catch (e) {
+                  // Silently fail if not allowed in sandbox
+                  console.debug('pushState blocked in sandbox:', e.message);
+                }
+              };
               
-              /* Scale impress.js presentations */
-              #impress {
-                transform-origin: top left !important;
-              }
+              window.history.replaceState = function(state, title, url) {
+                try {
+                  // Try to call the original method
+                  return originalReplaceState.apply(window.history, arguments);
+                } catch (e) {
+                  // Silently fail if not allowed in sandbox
+                  console.debug('replaceState blocked in sandbox:', e.message);
+                }
+              };
               
-              /* Scale reveal.js presentations */
-              .reveal {
-                width: 100% !important;
-                height: 100% !important;
+              // Also handle popstate events that might cause issues
+              window.addEventListener('error', function(e) {
+                if (e.message && e.message.includes('history')) {
+                  e.preventDefault();
+                  console.debug('History-related error prevented:', e.message);
+                }
+              }, true);
+            } catch (e) {
+              // Even the override might fail in some strict contexts
+              console.debug('Could not override history methods:', e.message);
+            }
+            
+            // For libraries that check for history API support
+            if (!window.history.state) {
+              try {
+                Object.defineProperty(window.history, 'state', {
+                  get: function() { return null; },
+                  configurable: true
+                });
+              } catch (e) {
+                // Ignore if we can't define the property
               }
-              
-              /* Ensure content fits viewport */
-              body > *:first-child:not(script):not(style) {
-                max-width: 100% !important;
-                max-height: 100vh !important;
-              }
-            </style>
-            <script>
-              // Mark as supported environment
-              document.body.classList.remove('impress-not-supported');
-              document.body.classList.add('impress-supported');
-              
-              // Hide any fallback messages
-              document.querySelectorAll('.fallback-message').forEach(function(el) {
-                el.style.display = 'none';
+            }
+            
+            // Handle location.hash for navigation-based libraries
+            let virtualHash = '';
+            try {
+              Object.defineProperty(window.location, 'hash', {
+                get: function() { return virtualHash; },
+                set: function(value) { 
+                  virtualHash = value;
+                  // Trigger hashchange event for libraries that listen to it
+                  window.dispatchEvent(new HashChangeEvent('hashchange'));
+                },
+                configurable: true
               });
-              
-              // Ensure feature APIs are available
-              if (!window.requestAnimationFrame) {
-                window.requestAnimationFrame = function(callback) {
-                  return setTimeout(callback, 1000/60);
-                };
-              }
-              if (!window.cancelAnimationFrame) {
-                window.cancelAnimationFrame = function(id) {
-                  clearTimeout(id);
-                };
-              }
-              
-              // Auto-scale content to fit
-              function scaleContent() {
-                var container = document.body;
-                var content = document.getElementById('impress') || 
-                             document.querySelector('.reveal') || 
-                             document.querySelector('main') || 
-                             document.body.firstElementChild;
-                
-                if (content && content.offsetWidth > 0) {
-                  var containerWidth = window.innerWidth;
-                  var containerHeight = window.innerHeight;
-                  var contentWidth = content.scrollWidth || content.offsetWidth || 1920;
-                  var contentHeight = content.scrollHeight || content.offsetHeight || 1080;
-                  
-                  // Calculate scale to fit
-                  var scaleX = containerWidth / contentWidth;
-                  var scaleY = containerHeight / contentHeight;
-                  var scale = Math.min(scaleX, scaleY, 1);
-                  
-                  // Apply scale for impress.js
-                  if (content.id === 'impress') {
-                    content.style.transform = 'scale(' + scale + ')';
-                    content.style.transformOrigin = 'top left';
-                  }
-                }
-              }
-              
-              // Initialize on load
-              window.addEventListener('load', function() {
-                // Scale content
-                scaleContent();
-                
-                // For impress.js
-                if (typeof impress !== 'undefined') {
-                  try {
-                    var api = impress();
-                    api.init();
-                    console.log('Impress.js initialized');
-                    // Rescale after init
-                    setTimeout(scaleContent, 100);
-                  } catch(e) {
-                    console.log('Impress.js init:', e);
-                  }
-                }
-                
-                // For reveal.js
-                if (typeof Reveal !== 'undefined') {
-                  try {
-                    Reveal.initialize({
-                      width: '100%',
-                      height: '100%',
-                      margin: 0,
-                      minScale: 0.2,
-                      maxScale: 2.0,
-                      center: true,
-                      embedded: true
-                    });
-                    console.log('Reveal.js initialized');
-                  } catch(e) {
-                    console.log('Reveal.js init:', e);
-                  }
-                }
-              });
-              
-              // Rescale on resize
-              window.addEventListener('resize', scaleContent);
-            </script>
-          `;
-          
-          // Insert initialization script before closing head or body tag
-          if (cleanedHtml.includes('</head>')) {
-            cleanedHtml = cleanedHtml.replace('</head>', initScript + '\n</head>');
-          } else if (cleanedHtml.includes('</body>')) {
-            cleanedHtml = cleanedHtml.replace('</body>', initScript + '\n</body>');
-          } else {
-            cleanedHtml += initScript;
+            } catch (e) {
+              // If we can't override location.hash, that's okay
+            }
+          })();
+        </script>
+        <style>
+          /* Responsive scaling for iframe content */
+          html, body {
+            margin: 0 !important;
+            padding: 0 !important;
+            width: 100% !important;
+            height: 100% !important;
+            overflow: auto !important;
           }
           
-          // Write content to iframe
-          iframeDoc.open();
-          iframeDoc.write(cleanedHtml);
-          iframeDoc.close();
-        }
+          /* Ensure content fits viewport */
+          body > *:first-child:not(script):not(style) {
+            max-width: 100% !important;
+            max-height: 100vh !important;
+          }
+        </style>
+        <script>
+          // Basic iframe initialization - no library-specific code
+          (function() {
+            // Ensure iframe content is properly sized
+            if (document.readyState === 'complete' || document.readyState === 'interactive') {
+              // Content already loaded
+              if (document.body) {
+                document.body.style.margin = '0';
+                document.body.style.padding = '0';
+              }
+            } else {
+              // Wait for content to load
+              window.addEventListener('DOMContentLoaded', function() {
+                if (document.body) {
+                  document.body.style.margin = '0';
+                  document.body.style.padding = '0';
+                }
+              });
+            }
+          })();
+        </script>
+      `;
+      
+      // Insert initialization script at the very beginning of the document
+      // This ensures it runs before any library scripts
+      if (processedHtml.includes('<head>')) {
+        processedHtml = processedHtml.replace('<head>', '<head>' + initScript);
+      } else if (processedHtml.includes('<html>')) {
+        processedHtml = processedHtml.replace('<html>', '<html><head>' + initScript + '</head>');
+      } else {
+        // If no head or html tag, prepend the script
+        processedHtml = initScript + processedHtml;
       }
-    }, [html]);
+      
+      // Use srcdoc for better security and compatibility
+      // This avoids the need for allow-same-origin while still allowing scripts
+      // srcdoc content is treated as having a unique origin
+      iframe.srcdoc = processedHtml;
+    }, [isNewContent, cleanedHtml]); // Re-run when content actually changes
+    
+
     
     return (
       <Box
@@ -356,7 +391,7 @@ const ShowResult: React.FC<ShowResultProps> = ({ open, onClose, result }) => {
       >
         <iframe
           ref={iframeRef}
-          sandbox="allow-scripts allow-same-origin allow-forms allow-modals allow-popups allow-presentation allow-pointer-lock allow-top-navigation-by-user-activation"
+          sandbox="allow-scripts allow-forms allow-modals allow-popups allow-presentation allow-pointer-lock allow-downloads"
           allow="accelerometer; camera; encrypted-media; fullscreen; gyroscope; magnetometer; microphone; midi; payment; usb; xr-spatial-tracking"
           style={{
             width: '100%',
@@ -368,7 +403,21 @@ const ShowResult: React.FC<ShowResultProps> = ({ open, onClose, result }) => {
         />
       </Box>
     );
-  };
+    },
+    // Custom comparison function - only re-render if html content actually changes
+    (prevProps, nextProps) => {
+      // Clean both HTML strings for comparison
+      const cleanPrev = prevProps.html.replace(/^```(html|HTML)\s*\n/, '').replace(/\n```\s*$/, '').trim();
+      const cleanNext = nextProps.html.replace(/^```(html|HTML)\s*\n/, '').replace(/\n```\s*$/, '').trim();
+      
+      // Return true if props are equal (skip re-render), false if different (re-render)
+      const isEqual = cleanPrev === cleanNext && prevProps.isFullscreen === nextProps.isFullscreen;
+      
+
+      
+      return isEqual;
+    }
+  );
 
   const renderContent = (content: Record<string, ResultValue>) => {
     if (typeof content === 'object' && content !== null) {
@@ -760,7 +809,8 @@ const ShowResult: React.FC<ShowResultProps> = ({ open, onClose, result }) => {
     <Dialog 
       ref={dialogRef}
       open={open} 
-      onClose={onClose} 
+      onClose={onClose}
+      keepMounted={hasOpenedRef.current} // Keep the dialog mounted after first open
       maxWidth={viewMode === 'html' && Object.values(memoizedResult || {}).some(value => 
         typeof value === 'string' && isHTML(value)
       ) ? "xl" : "lg"} 
@@ -880,6 +930,16 @@ const ShowResult: React.FC<ShowResultProps> = ({ open, onClose, result }) => {
       {/* Snackbar removed - clipboard notifications disabled */}
     </Dialog>
   );
-};
+}, (prevProps, nextProps) => {
+  // Custom comparison to prevent re-renders
+  // Only re-render if these specific props change
+  return (
+    prevProps.open === nextProps.open &&
+    prevProps.onClose === nextProps.onClose &&
+    JSON.stringify(prevProps.result) === JSON.stringify(nextProps.result)
+  );
+});
 
-export default ShowResult; 
+ShowResult.displayName = 'ShowResult';
+
+export default ShowResult;

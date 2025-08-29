@@ -154,12 +154,11 @@ const RunHistory = forwardRef<RunHistoryRef, RunHistoryProps>(({ executionHistor
     handleSort,
   } = useRunHistory();
 
-  const {
-    startPolling,
-    stopPolling,
-    setUserActive,
-    cleanup: cleanupStore
-  } = useRunStatusStore();
+  // Use selector pattern to only subscribe to specific functions
+  const startPolling = useRunStatusStore(state => state.startPolling);
+  const stopPolling = useRunStatusStore(state => state.stopPolling);
+  const setUserActive = useRunStatusStore(state => state.setUserActive);
+  const cleanupStore = useRunStatusStore(state => state.cleanup);
 
   const [selectedRunId, setSelectedRunId] = useState<string | null>(null);
   const [showTraceOpen, setShowTraceOpen] = useState<boolean>(false);
@@ -197,6 +196,11 @@ const RunHistory = forwardRef<RunHistoryRef, RunHistoryProps>(({ executionHistor
   const endIndex = startIndex + itemsPerPage;
   const displayedRuns = runs.slice(startIndex, endIndex);
   const totalLocalPages = Math.ceil(runs.length / itemsPerPage);
+  
+  // Memoize the result for ShowResult to prevent unnecessary re-renders
+  const memoizedResult = React.useMemo(() => {
+    return (selectedRun?.result as Record<string, ResultValue>) || {};
+  }, [selectedRun?.result]);
 
   // Effect for initializing ref values
   useEffect(() => {
@@ -983,13 +987,11 @@ const RunHistory = forwardRef<RunHistoryRef, RunHistoryProps>(({ executionHistor
             onCronExpressionChange={(e) => setCronExpression(e.target.value)}
           />
 
-          {isOpen && selectedRun && (
-            <ShowResult
-              open={isOpen}
-              onClose={closeRunResult}
-              result={selectedRun.result as Record<string, ResultValue>}
-            />
-          )}
+          <ShowResult
+            open={isOpen && !!selectedRun}
+            onClose={closeRunResult}
+            result={memoizedResult}
+          />
         </CardContent>
       </Card>
     </>
