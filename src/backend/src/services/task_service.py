@@ -119,8 +119,19 @@ class TaskService(BaseService[Task, TaskCreate]):
         Returns:
             Updated task if found, else None
         """
+        # Debug logging for tool_configs
+        import logging
+        logger = logging.getLogger(__name__)
+        if hasattr(obj_in, 'tool_configs') and obj_in.tool_configs is not None:
+            logger.info(f"TaskService: Updating task {id} with tool_configs: {obj_in.tool_configs}")
+        
         # Exclude unset fields (None) from update
         update_data = obj_in.model_dump(exclude_none=True)
+        
+        # Log if tool_configs is in update_data
+        if 'tool_configs' in update_data:
+            logger.info(f"TaskService: update_data contains tool_configs: {update_data.get('tool_configs')}")
+        
         if not update_data:
             # No fields to update
             return await self.get(id)

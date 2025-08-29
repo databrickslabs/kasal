@@ -100,7 +100,9 @@ class AgentGenerationService:
         """
         # Default values
         model = model or os.getenv("AGENT_MODEL", "databricks-llama-4-maverick")
-        tools = tools or []
+        # IMPORTANT: Do not assign any tools during generation
+        # Tools should be added manually after generation if needed
+        tools = []  # Always empty, ignoring the tools parameter
         
         logger.info(f"Generating agent with model: {model} and tools: {tools}")
         
@@ -150,17 +152,11 @@ class AgentGenerationService:
         if not system_message:
             raise ValueError("Required prompt template 'generate_agent' not found in database")
         
-        # Build tools context for the prompt
-        tools_context = ""
-        if tools:
-            tools_context = "\n\nAvailable tools for the agent:\n"
-            for tool in tools:
-                tools_context += f"- {tool}\n"
-            
-            tools_context += "\n\nEnsure that the agent has these tools assigned in the response."
+        # IMPORTANT: Do not include tools context in the prompt
+        # Tools should be added manually after generation if needed
+        # Remove any tools context that was previously added
         
-        # Add tools context to the system message
-        return system_message + tools_context
+        return system_message
     
     async def _generate_agent_config(self, prompt_text: str, system_message: str, model: str) -> Dict[str, Any]:
         """
@@ -277,23 +273,9 @@ class AgentGenerationService:
                 if key not in setup["advanced_config"]:
                     setup["advanced_config"][key] = value
         
-        # Handle tools strictly - only use tools that were provided in the request
-        # First ensure tools exists
-        if "tools" not in setup:
-            setup["tools"] = tools.copy() if tools else []
-        elif tools:
-            # Only include tools that were specified in the request
-            # This ensures no unauthorized tools are added
-            filtered_tools = []
-            for tool in setup["tools"]:
-                if tool in tools:
-                    filtered_tools.append(tool)
-            
-            # Add any missing tools from the request
-            for tool in tools:
-                if tool not in filtered_tools:
-                    filtered_tools.append(tool)
-                    
-            setup["tools"] = filtered_tools
+        # IMPORTANT: Do not assign any tools during generation
+        # Tools should be added manually after generation if needed
+        # Always set tools to empty array regardless of what was requested or generated
+        setup["tools"] = []
         
         return setup 

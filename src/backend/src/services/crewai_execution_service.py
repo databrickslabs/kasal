@@ -24,6 +24,9 @@ from src.engines.crewai.crewai_engine_service import CrewAIEngineService
 from src.services.execution_status_service import ExecutionStatusService
 from src.engines.crewai.crewai_flow_service import CrewAIFlowService
 from src.utils.user_context import GroupContext
+from src.db.session import async_session_factory
+from src.services.agent_service import AgentService
+from src.services.task_service import TaskService
 
 
 # Initialize logger
@@ -95,23 +98,166 @@ class CrewAIExecutionService:
             crew_logger.info(f"Engine prepared for execution {execution_id}, starting actual execution")
             
             # Convert CrewConfig to the dictionary format expected by the engine
-            # Convert agents from dict to list format
-            agents_list = []
-            if config.agents_yaml and isinstance(config.agents_yaml, dict):
-                for agent_id, agent_config in config.agents_yaml.items():
-                    # Add the ID to the config if not present
-                    if 'id' not in agent_config:
-                        agent_config['id'] = agent_id
-                    agents_list.append(agent_config)
+            # Log what we have in the config
+            crew_logger.info(f"Config has agents: {config.agents is not None}")
+            crew_logger.info(f"Config has agents_yaml: {config.agents_yaml is not None}")
+            crew_logger.info(f"Config has tasks: {config.tasks is not None}")
+            crew_logger.info(f"Config has tasks_yaml: {config.tasks_yaml is not None}")
             
-            # Convert tasks from dict to list format
+            # Convert agents from dict to list format and enhance with database data
+            agents_list = []
+            # First check for agents_yaml (YAML-based config)
+            if config.agents_yaml and isinstance(config.agents_yaml, dict):
+                # Get agent service to fetch tool_configs
+                try:
+                    async with async_session_factory() as session:
+                        agent_service = AgentService(session)
+                        
+                        for agent_id, agent_config in config.agents_yaml.items():
+                            # Log what we're working with
+                            crew_logger.info(f"Processing agent from YAML - key: {agent_id}")
+                            crew_logger.info(f"Agent config keys: {list(agent_config.keys()) if isinstance(agent_config, dict) else 'not a dict'}")
+                            
+                            # Add the ID to the config if not present
+                            if 'id' not in agent_config:
+                                agent_config['id'] = agent_id
+                            
+                            # Try to fetch the agent from database to get tool_configs
+                            # First try by name/role since YAML keys might not match database IDs
+                            db_agent = None
+                            agent_name = agent_config.get('name', agent_config.get('role', ''))
+                            
+                            if agent_name:
+                                crew_logger.info(f"Attempting to fetch agent by name: {agent_name}")
+                                try:
+                                    db_agent = await agent_service.find_by_name(agent_name)
+                                except Exception as e:
+                                    crew_logger.debug(f"Could not fetch agent by name {agent_name}: {e}")
+                            
+                            # If not found by name, try by ID
+                            if not db_agent:
+                                db_agent_id = agent_config.get('id', agent_config.get('db_id', agent_id))
+                                # Strip the 'agent_' prefix if it exists (common in YAML keys)
+                                if db_agent_id.startswith('agent_'):
+                                    db_agent_id = db_agent_id[6:]  # Remove 'agent_' prefix
+                                # Also strip 'agent-' prefix if it still exists
+                                if db_agent_id.startswith('agent-'):
+                                    db_agent_id = db_agent_id[6:]  # Remove 'agent-' prefix
+                                crew_logger.info(f"Attempting to fetch agent by ID: {db_agent_id}")
+                                try:
+                                    db_agent = await agent_service.get(db_agent_id)
+                                except Exception as e:
+                                    crew_logger.debug(f"Could not fetch agent by ID {db_agent_id}: {e}")
+                            
+                            try:
+                                if db_agent:
+                                    # Log what we found
+                                    crew_logger.info(f"Found agent {agent_id} in database")
+                                    crew_logger.info(f"Agent has tool_configs attribute: {hasattr(db_agent, 'tool_configs')}")
+                                    if hasattr(db_agent, 'tool_configs'):
+                                        crew_logger.info(f"Agent tool_configs value: {db_agent.tool_configs}")
+                                        # Add tool_configs from database to the agent config
+                                        agent_config['tool_configs'] = db_agent.tool_configs or {}
+                                        crew_logger.info(f"Added tool_configs from database for agent {agent_id}: {agent_config['tool_configs']}")
+                                    else:
+                                        crew_logger.warning(f"Agent {agent_id} does not have tool_configs attribute")
+                                        agent_config['tool_configs'] = {}
+                                else:
+                                    crew_logger.warning(f"Agent {agent_id} not found in database")
+                            except Exception as e:
+                                crew_logger.debug(f"Could not fetch agent {agent_id} from database: {e}")
+                            
+                            agents_list.append(agent_config)
+                except Exception as e:
+                    crew_logger.error(f"Error fetching agent data from database: {e}")
+                    # Continue with just YAML data if database fetch fails
+                    for agent_id, agent_config in config.agents_yaml.items():
+                        if 'id' not in agent_config:
+                            agent_config['id'] = agent_id
+                        agents_list.append(agent_config)
+            # If not YAML, check for agents array (node-based config)
+            elif config.agents and isinstance(config.agents, list):
+                crew_logger.info(f"Using agents array with {len(config.agents)} agents")
+                agents_list = config.agents
+            else:
+                crew_logger.warning("No agents found in config")
+            
+            # Convert tasks from dict to list format and enhance with database data
             tasks_list = []
             if config.tasks_yaml and isinstance(config.tasks_yaml, dict):
-                for task_id, task_config in config.tasks_yaml.items():
-                    # Add the ID to the config if not present
-                    if 'id' not in task_config:
-                        task_config['id'] = task_id
-                    tasks_list.append(task_config)
+                # Get task service to fetch tool_configs
+                try:
+                    async with async_session_factory() as session:
+                        task_service = TaskService(session)
+                        
+                        for task_id, task_config in config.tasks_yaml.items():
+                            # Log what we're working with
+                            crew_logger.info(f"Processing task from YAML - key: {task_id}")
+                            crew_logger.info(f"Task config keys: {list(task_config.keys()) if isinstance(task_config, dict) else 'not a dict'}")
+                            
+                            # Add the ID to the config if not present
+                            if 'id' not in task_config:
+                                task_config['id'] = task_id
+                            
+                            # Try to fetch the task from database to get tool_configs
+                            # First try by name since YAML keys might not match database IDs
+                            db_task = None
+                            task_name = task_config.get('name', task_config.get('description', ''))
+                            
+                            if task_name:
+                                crew_logger.info(f"Attempting to fetch task by name: {task_name}")
+                                try:
+                                    db_task = await task_service.find_by_name(task_name)
+                                except Exception as e:
+                                    crew_logger.debug(f"Could not fetch task by name {task_name}: {e}")
+                            
+                            # If not found by name, try by ID
+                            if not db_task:
+                                db_task_id = task_config.get('id', task_config.get('db_id', task_id))
+                                # Strip the 'task_' prefix if it exists (common in YAML keys)
+                                if db_task_id.startswith('task_'):
+                                    db_task_id = db_task_id[5:]  # Remove 'task_' prefix
+                                # Also strip 'task-' prefix if it still exists
+                                if db_task_id.startswith('task-'):
+                                    db_task_id = db_task_id[5:]  # Remove 'task-' prefix
+                                crew_logger.info(f"Attempting to fetch task by ID: {db_task_id}")
+                                try:
+                                    db_task = await task_service.get(db_task_id)
+                                except Exception as e:
+                                    crew_logger.debug(f"Could not fetch task by ID {db_task_id}: {e}")
+                            
+                            try:
+                                if db_task:
+                                    # Log what we found
+                                    crew_logger.info(f"Found task {task_id} in database")
+                                    crew_logger.info(f"Task has tool_configs attribute: {hasattr(db_task, 'tool_configs')}")
+                                    if hasattr(db_task, 'tool_configs'):
+                                        crew_logger.info(f"Task tool_configs value: {db_task.tool_configs}")
+                                        # Add tool_configs from database to the task config
+                                        task_config['tool_configs'] = db_task.tool_configs or {}
+                                        crew_logger.info(f"Added tool_configs from database for task {task_id}: {task_config['tool_configs']}")
+                                    else:
+                                        crew_logger.warning(f"Task {task_id} does not have tool_configs attribute")
+                                        task_config['tool_configs'] = {}
+                                else:
+                                    crew_logger.warning(f"Task {task_id} not found in database")
+                            except Exception as e:
+                                crew_logger.debug(f"Could not fetch task {task_id} from database: {e}")
+                            
+                            tasks_list.append(task_config)
+                except Exception as e:
+                    crew_logger.error(f"Error fetching task data from database: {e}")
+                    # Continue with just YAML data if database fetch fails
+                    for task_id, task_config in config.tasks_yaml.items():
+                        if 'id' not in task_config:
+                            task_config['id'] = task_id
+                        tasks_list.append(task_config)
+            # If not YAML, check for tasks array (node-based config)
+            elif config.tasks and isinstance(config.tasks, list):
+                crew_logger.info(f"Using tasks array with {len(config.tasks)} tasks")
+                tasks_list = config.tasks
+            else:
+                crew_logger.warning("No tasks found in config")
             
             # Get run_name from the execution record if available
             run_name = None

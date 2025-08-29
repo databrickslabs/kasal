@@ -408,33 +408,12 @@ Please analyze this message and provide your intent classification, considering 
             # With litellm 1.75.8+, GPT-5 is natively supported
             # No need for custom handlers - litellm handles max_completion_tokens automatically
             
-            # Generate completion - litellm 1.75.8 handles GPT-5 natively
+            # Generate completion
             response = await litellm.acompletion(**completion_params)
             
-            # Handle both dict and ModelResponse objects from litellm 1.75.8
-            # litellm 1.75.8 returns ModelResponse (Pydantic) objects, not plain dicts
-            if hasattr(response, 'choices'):
-                # It's a ModelResponse object
-                choices = response.choices
-            else:
-                # It's a dict (older litellm behavior)
-                choices = response.get("choices", [])
-            
-            if choices and len(choices) > 0:
-                choice = choices[0]
-                # Get message from choice (could be object or dict)
-                if hasattr(choice, 'message'):
-                    message = choice.message
-                else:
-                    message = choice.get("message", {})
-                
-                # Get content from message (could be object or dict)
-                if hasattr(message, 'content'):
-                    content = message.content
-                else:
-                    content = message.get("content", "")
-            else:
-                content = ""
+            # Extract content - handle both dict and ModelResponse objects
+            # litellm 1.75.8 returns ModelResponse (Pydantic) objects
+            content = response["choices"][0]["message"]["content"]
             
             
             # Check if content is empty

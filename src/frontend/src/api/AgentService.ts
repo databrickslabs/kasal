@@ -12,6 +12,11 @@ export class AgentService {
   static async getAgent(id: number | string): Promise<Agent | null> {
     try {
       const response = await apiClient.get<Agent>(`/agents/${id}`);
+      console.log('Fetched agent:', response.data);
+      console.log('Agent tool_configs:', response.data?.tool_configs);
+      if (response.data?.tool_configs?.GenieTool) {
+        console.log('GenieTool config in fetched agent:', response.data.tool_configs.GenieTool);
+      }
       // Check knowledge sources and verify files still exist
       if (response.data && response.data.knowledge_sources && response.data.knowledge_sources.length > 0) {
         await this.verifyKnowledgeSources(response.data.knowledge_sources);
@@ -154,6 +159,11 @@ export class AgentService {
       // Create a copy to ensure fileInfo is sent to the server
       const agentToSend = JSON.parse(JSON.stringify(agentToCreate));
       
+      // Log tool_configs if present
+      if (agentToSend.tool_configs) {
+        console.log('AgentService - Creating agent with tool_configs:', agentToSend.tool_configs);
+      }
+      
       // Ensure fileInfo is sent with each knowledge source
       const response = await apiClient.post<Agent>(`/agents`, agentToSend);
       return response.data;
@@ -276,6 +286,11 @@ export class AgentService {
       // Explicitly ensure knowledge_sources array is included with fileInfo preserved
       if (agentToUpdate.knowledge_sources) {
         console.log('Updating with knowledge sources:', agentToUpdate.knowledge_sources);
+      }
+      
+      // Log tool_configs if present
+      if (agentToUpdate.tool_configs) {
+        console.log('AgentService - Updating agent with tool_configs:', agentToUpdate.tool_configs);
       }
       
       const response = await apiClient.put<Agent>(`/agents/${id}/full`, agentToUpdate);

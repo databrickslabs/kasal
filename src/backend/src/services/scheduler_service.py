@@ -11,7 +11,8 @@ from sqlalchemy import create_engine
 
 from src.repositories.schedule_repository import ScheduleRepository
 from src.repositories.execution_history_repository import ExecutionHistoryRepository
-from src.schemas.schedule import ScheduleCreate, ScheduleCreateFromExecution, ScheduleUpdate, ScheduleResponse, ScheduleListResponse, ToggleResponse, CrewConfig
+from src.schemas.schedule import ScheduleCreate, ScheduleCreateFromExecution, ScheduleUpdate, ScheduleResponse, ScheduleListResponse, ToggleResponse
+from src.schemas.execution import CrewConfig
 from src.schemas.scheduler import SchedulerJobCreate, SchedulerJobUpdate, SchedulerJobResponse
 from src.utils.cron_utils import ensure_utc, calculate_next_run_from_last
 from src.services.crewai_execution_service import CrewAIExecutionService, JobStatus
@@ -119,7 +120,17 @@ class SchedulerService:
             tasks_yaml = inputs.get("tasks_yaml", {})
             execution_inputs = inputs.get("inputs", {})
             planning = inputs.get("planning", False)
-            model = inputs.get("model", "gpt-4o-mini")
+            # Try to get model from inputs first, then from agent configs
+            model = inputs.get("model")
+            if not model and agents_yaml:
+                # Extract model from first agent's llm configuration
+                for agent_key, agent_config in agents_yaml.items():
+                    if isinstance(agent_config, dict) and agent_config.get("llm"):
+                        model = agent_config["llm"]
+                        break
+            # Fallback to default if no model found
+            if not model:
+                model = "gpt-4o-mini"
             
             if not agents_yaml or not tasks_yaml:
                 raise HTTPException(
@@ -355,9 +366,10 @@ class SchedulerService:
                     "model": config.model
                 }
                 
-                # Convert timezone-aware datetime to timezone-naive for database
+                # Convert to local time for database consistency with regular jobs
                 if hasattr(execution_time, 'tzinfo') and execution_time.tzinfo is not None:
-                    execution_time_naive = execution_time.replace(tzinfo=None)
+                    # Convert UTC to local time, then make naive
+                    execution_time_naive = execution_time.astimezone().replace(tzinfo=None)
                 else:
                     execution_time_naive = execution_time
                 
@@ -376,6 +388,42 @@ class SchedulerService:
                 session.add(db_run)
                 await session.commit()
                 await session.refresh(db_run)
+                
+                # Ensure Databricks API key and host are loaded from service for scheduled jobs
+                import os
+                if not os.getenv("DATABRICKS_API_KEY") and not os.getenv("DATABRICKS_TOKEN"):
+                    try:
+                        from src.services.api_keys_service import ApiKeysService
+                        from src.core.unit_of_work import UnitOfWork
+                        async with UnitOfWork() as uow:
+                            api_service = await ApiKeysService.from_unit_of_work(uow)
+                            
+                            # Try both common Databricks token names
+                            for key_name in ["DATABRICKS_API_KEY", "DATABRICKS_TOKEN"]:
+                                api_key = await api_service.find_by_name(key_name)
+                                if api_key and api_key.encrypted_value:
+                                    from src.utils.encryption_utils import EncryptionUtils
+                                    decrypted_token = EncryptionUtils.decrypt_value(api_key.encrypted_value)
+                                    if decrypted_token:
+                                        os.environ[key_name] = decrypted_token
+                                        logger_manager.scheduler.info(f"Loaded {key_name} from API key service for scheduled job")
+                                        break
+                    except Exception as e:
+                        logger_manager.scheduler.warning(f"Could not load Databricks API key from service: {e}")
+                
+                # Also ensure DATABRICKS_HOST is set from Databricks config
+                if not os.getenv("DATABRICKS_HOST"):
+                    try:
+                        from src.services.databricks_service import DatabricksService
+                        from src.core.unit_of_work import UnitOfWork
+                        async with UnitOfWork() as uow:
+                            databricks_service = await DatabricksService.from_unit_of_work(uow)
+                            databricks_config = await databricks_service.get_databricks_config()
+                            if databricks_config and databricks_config.workspace_url:
+                                os.environ["DATABRICKS_HOST"] = databricks_config.workspace_url
+                                logger_manager.scheduler.info(f"Loaded DATABRICKS_HOST from config: {databricks_config.workspace_url}")
+                    except Exception as e:
+                        logger_manager.scheduler.warning(f"Could not load DATABRICKS_HOST from config: {e}")
                 
                 # Create an instance of CrewExecutionService
                 crew_execution_service = CrewAIExecutionService()
@@ -488,7 +536,10 @@ class SchedulerService:
                             tasks_yaml=schedule.tasks_yaml,
                             inputs=schedule.inputs,
                             planning=schedule.planning,
-                            model=schedule.model
+                            model=schedule.model,
+                            reasoning=False,  # Default value for scheduled jobs
+                            execution_type="crew",  # Scheduled jobs are crew executions
+                            schema_detection_enabled=True  # Default value
                         )
                         
                         # Create task for the job
@@ -600,15 +651,29 @@ class SchedulerService:
             Created job
         """
         # Convert job to schedule
+        agents_yaml = job_create.job_data.get("agents", {})
+        
+        # Extract model from job data or agent configurations
+        model = job_create.job_data.get("model")
+        if not model and agents_yaml:
+            # Extract model from first agent's llm configuration
+            for agent_key, agent_config in agents_yaml.items():
+                if isinstance(agent_config, dict) and agent_config.get("llm"):
+                    model = agent_config["llm"]
+                    break
+        # Fallback to default if no model found
+        if not model:
+            model = "gpt-4o-mini"
+            
         schedule_data = ScheduleCreate(
             name=job_create.name,
             cron_expression=job_create.schedule,
-            agents_yaml=job_create.job_data.get("agents", {}),
+            agents_yaml=agents_yaml,
             tasks_yaml=job_create.job_data.get("tasks", {}),
             inputs=job_create.job_data.get("inputs", {}),
             is_active=job_create.enabled,
             planning=job_create.job_data.get("planning", False),
-            model=job_create.job_data.get("model", "gpt-4o-mini")
+            model=model
         )
         
         # Create schedule
