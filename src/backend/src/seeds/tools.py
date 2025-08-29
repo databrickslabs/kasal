@@ -281,8 +281,6 @@ def get_tool_configs():
             "result_as_answer": False
         },  # SpiderTool
         "35": {
-            "spaceId": ["01efdd2cd03211d0ab74f620f0023b77"],
-            "DATABRICKS_HOST": ["https://your-workspace.cloud.databricks.com/"],
             "result_as_answer": False
         },  # GenieTool
         "39": {

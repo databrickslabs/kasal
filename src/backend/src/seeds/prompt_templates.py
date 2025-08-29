@@ -30,7 +30,6 @@ Format your response as a JSON object with the following structure:
     "role": "specific role title",
     "goal": "clear objective",
     "backstory": "relevant experience and expertise",
-    "tools": [],
     "advanced_config": {
         "llm": "databricks-llama-4-maverick",
         "function_calling_llm": null,
@@ -52,8 +51,9 @@ Keep your response concise and make sure to:
 2. Define a clear and specific role
 3. Set a concrete goal aligned with the role
 4. Write a backstory that explains their expertise (1-2 sentences)
-5. Only include tools specifically listed below
-6. Keep the advanced configuration with default values
+5. Keep the advanced configuration with default values
+
+IMPORTANT: Do NOT include a "tools" field in your response. Tools should be configured manually after agent creation.
 
 REMINDER: Your output must be PURE, VALID JSON with no additional text. Double-check your response to ensure it is properly formatted JSON."""
 

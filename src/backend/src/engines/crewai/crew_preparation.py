@@ -258,17 +258,80 @@ class CrewPreparation:
             handle_crew_error(e, "Error during crew preparation")
             return False
     
+    def _find_agent_by_reference(self, agent_reference: str) -> Optional[Agent]:
+        """
+        Find an agent by various reference formats.
+        
+        Args:
+            agent_reference: Agent reference (name, ID, role, or prefixed ID)
+            
+        Returns:
+            Agent instance or None if not found
+        """
+        logger.info(f"[_find_agent_by_reference] Looking for agent: '{agent_reference}'")
+        logger.info(f"[_find_agent_by_reference] Available agents: {list(self.agents.keys())}")
+        
+        if not agent_reference or agent_reference == 'unknown':
+            logger.info(f"[_find_agent_by_reference] Returning None for unknown/empty reference")
+            return None
+            
+        # Try direct lookup first
+        agent = self.agents.get(agent_reference)
+        if agent:
+            logger.info(f"[_find_agent_by_reference] Found by direct lookup: {agent_reference}")
+            return agent
+        
+        # If reference starts with 'agent_agent-', extract the UUID part and try lookup
+        if agent_reference.startswith('agent_agent-'):
+            # Extract UUID: 'agent_agent-47b50da8-bfa2-41c9-8d0f-19c063f5c9c0' -> '47b50da8-bfa2-41c9-8d0f-19c063f5c9c0'
+            uuid_part = agent_reference[12:]  # Remove 'agent_agent-' prefix
+            
+            # Try to find agent by matching the UUID in the stored agent keys
+            for agent_key, stored_agent in self.agents.items():
+                # Check if the stored agent key contains this UUID
+                if uuid_part in agent_key:
+                    logger.info(f"Found agent by UUID match: {agent_reference} -> {agent_key}")
+                    return stored_agent
+        
+        # If still not found, try to match by agent role in the original config
+        # This handles cases where the task references an agent ID but we stored by role
+        for agent_config in self.config.get('agents', []):
+            agent_id = agent_config.get('id', '')
+            if agent_id == agent_reference:
+                # Found the config, now find the corresponding stored agent
+                agent_name = agent_config.get('name', agent_config.get('id', agent_config.get('role', '')))
+                stored_agent = self.agents.get(agent_name)
+                if stored_agent:
+                    logger.info(f"Found agent by config ID match: {agent_reference} -> {agent_name}")
+                    return stored_agent
+        
+        logger.warning(f"Could not find agent for reference: {agent_reference}")
+        return None
+    
     async def _create_agents(self) -> bool:
         """
-        Create all agents defined in the configuration
+        Create all agents defined in the configuration, with MCP tools based on their assigned tasks
         
         Returns:
             bool: True if all agents were created successfully
         """
         try:
+            # Use MCP integration to collect agent MCP requirements
+            from src.engines.crewai.tools.mcp_integration import MCPIntegration
+            agent_mcp_requirements = await MCPIntegration.collect_agent_mcp_requirements(self.config)
+            
             for i, agent_config in enumerate(self.config.get('agents', [])):
                 # Use the agent's 'name' if present, then 'id', then 'role', or generate a name if none exist
                 agent_name = agent_config.get('name', agent_config.get('id', agent_config.get('role', f'agent_{i}')))
+                agent_id = agent_config.get('id', agent_name)
+                
+                # Add MCP requirements from assigned tasks to agent config
+                agent_mcp_servers = agent_mcp_requirements.get(agent_id, [])
+                if agent_mcp_servers:
+                    logger.info(f"Agent {agent_name} will have MCP servers from tasks: {agent_mcp_servers}")
+                    if 'tool_configs' not in agent_config:
+                        agent_config['tool_configs'] = {}
+                    agent_config['tool_configs']['MCP_SERVERS'] = {'servers': agent_mcp_servers}
                 
                 agent = await create_agent(
                     agent_key=agent_name,
@@ -287,6 +350,7 @@ class CrewPreparation:
         except Exception as e:
             handle_crew_error(e, "Error creating agents")
             return False
+    
     
     async def _create_tasks(self) -> bool:
         """
@@ -308,7 +372,7 @@ class CrewPreparation:
             for i, task_config in enumerate(tasks):
                 # Get the agent for this task, default to first agent if not specified
                 agent_name = task_config.get('agent', 'unknown')
-                agent = self.agents.get(agent_name)
+                agent = self._find_agent_by_reference(agent_name)
                 
                 # Handle missing agent
                 if not agent:

@@ -142,6 +142,7 @@ def normalize_flow_config(config: Dict[str, Any]) -> Dict[str, Any]:
             'goal': agent.get('goal'),
             'backstory': agent.get('backstory'),
             'tools': agent.get('tools', []),
+            'tool_configs': agent.get('tool_configs', {}),  # Include tool_configs
             'allow_delegation': agent.get('allow_delegation', True),
             'verbose': agent.get('verbose', True),
             'memory': agent.get('memory', {}),
@@ -158,6 +159,7 @@ def normalize_flow_config(config: Dict[str, Any]) -> Dict[str, Any]:
             'agent': task.get('agent'),
             'expected_output': task.get('expected_output'),
             'tools': task.get('tools', []),
+            'tool_configs': task.get('tool_configs', {}),  # Include tool_configs
             'context': task.get('context', {}),
             'async_execution': task.get('async_execution', False),
             'markdown': task.get('markdown', False)
