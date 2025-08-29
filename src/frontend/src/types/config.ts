@@ -44,4 +44,32 @@ export interface AdvancedConfigField {
     icon?: string;
   }>;
   defaultValue: string | number | boolean | string[] | Record<string, unknown>;
+}
+
+export interface PerplexityConfig {
+  perplexity_api_key?: string;
+  model?: string;
+  max_tokens?: number;
+  temperature?: number;
+  top_p?: number;
+  top_k?: number;
+  presence_penalty?: number;
+  frequency_penalty?: number;
+  search_recency_filter?: string;
+  search_domain_filter?: string[];
+  return_images?: boolean;
+  return_related_questions?: boolean;
+  web_search_options?: {
+    search_context_size?: string;
+  };
+}
+
+export interface SerperConfig {
+  serper_api_key?: string;
+  n_results?: number;
+  search_url?: string;
+  endpoint_type?: string;
+  country?: string;
+  locale?: string;
+  location?: string;
 } 

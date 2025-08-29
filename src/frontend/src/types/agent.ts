@@ -55,6 +55,7 @@ export interface Agent {
   backstory: string;
   llm: string;
   tools: string[];
+  tool_configs?: Record<string, unknown>;  // User-specific tool configuration overrides
   function_calling_llm?: string;
   max_iter: number;
   max_rpm?: number;

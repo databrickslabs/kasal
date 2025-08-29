@@ -4,6 +4,7 @@ export interface Task {
   description: string;
   expected_output: string;
   tools: string[];
+  tool_configs?: Record<string, unknown>;  // User-specific tool configuration overrides
   agent_id: string | null;
   async_execution: boolean;
   markdown: boolean;

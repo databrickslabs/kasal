@@ -24,6 +24,8 @@ interface AgentNodeData {
   isActive?: boolean;
   isCompleted?: boolean;
   llm?: string;
+  tools?: string[];
+  tool_configs?: Record<string, unknown>;  // User-specific tool configuration overrides
   function_calling_llm?: string;
   max_iter?: number;
   max_rpm?: number;
@@ -174,6 +176,7 @@ const AgentNode: React.FC<{ data: AgentNodeData; id: string }> = ({ data, id }) 
               goal: updatedAgent.goal,
               backstory: updatedAgent.backstory,
               tools: updatedAgent.tools,
+              tool_configs: updatedAgent.tool_configs || {},  // Include tool_configs
               llm: updatedAgent.llm,
               function_calling_llm: updatedAgent.function_calling_llm,
               max_iter: updatedAgent.max_iter,

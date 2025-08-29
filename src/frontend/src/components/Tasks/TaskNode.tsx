@@ -17,6 +17,7 @@ export interface TaskNodeData {
   name?: string;
   taskId?: string;
   tools?: string[];
+  tool_configs?: Record<string, unknown>;  // User-specific tool configuration overrides
   context?: string[];
   async_execution?: boolean;
   config?: {
@@ -46,6 +47,7 @@ interface TaskNodeProps {
     description?: string;
     expected_output?: string;
     tools?: string[];
+    tool_configs?: Record<string, unknown>;  // User-specific tool configuration overrides
     icon?: string;
     taskId: string;
     onEdit?: (task: Task) => void;
@@ -315,6 +317,7 @@ const TaskNode: React.FC<TaskNodeProps> = ({ data, id }) => {
       description: data.description || '',
       expected_output: data.expected_output || '',
       tools: data.tools || [],
+      tool_configs: data.tool_configs || {},  // Include tool_configs
       agent_id: '',  // This will be set by TaskForm
       async_execution: data.async_execution || false,
       context: data.context || [],
@@ -491,6 +494,7 @@ const TaskNode: React.FC<TaskNodeProps> = ({ data, id }) => {
                         description: savedTask.description,
                         expected_output: savedTask.expected_output,
                         tools: savedTask.tools,
+                        tool_configs: savedTask.tool_configs || {},  // Include tool_configs from saved task
                         async_execution: savedTask.async_execution,
                         context: savedTask.context,
                         // Synchronize both markdown fields with the saved task - prioritize the saved task's top-level markdown
