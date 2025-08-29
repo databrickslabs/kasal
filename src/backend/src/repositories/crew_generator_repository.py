@@ -240,7 +240,8 @@ class CrewGeneratorRepository:
                 max_iter=self._safe_get_attr(agent_data, 'max_iter', 25),
                 max_rpm=self._safe_get_attr(agent_data, 'max_rpm', 10),
                 cache=self._safe_get_attr(agent_data, 'cache', True),
-                allow_code_execution=self._safe_get_attr(agent_data, 'allow_code_execution', False),
+                # SECURITY: Always force allow_code_execution to False
+                allow_code_execution=False,  # Hardcoded to False, ignoring agent_data
                 code_execution_mode=self._safe_get_attr(agent_data, 'code_execution_mode', 'safe'),
                 max_retry_limit=self._safe_get_attr(agent_data, 'max_retry_limit', 2),
                 use_system_prompt=self._safe_get_attr(agent_data, 'use_system_prompt', True),

@@ -98,7 +98,7 @@ class TestAgentBase:
         assert agent.system_template == "You are a data analyst"
         assert agent.prompt_template == "Analyze: {data}"
         assert agent.response_template == "Result: {result}"
-        assert agent.allow_code_execution is True
+        assert agent.allow_code_execution is False  # Security: Always forced to False
         assert agent.code_execution_mode == "unsafe"
         assert agent.max_retry_limit == 5
         assert agent.use_system_prompt is False
@@ -310,7 +310,7 @@ class TestAgentUpdate:
         assert update.system_template == "Updated system template"
         assert update.prompt_template == "Updated prompt template"
         assert update.response_template == "Updated response template"
-        assert update.allow_code_execution is True
+        assert update.allow_code_execution is False  # Security: Always forced to False
         assert update.code_execution_mode == "restricted"
         assert update.max_retry_limit == 7
         assert update.use_system_prompt is False
@@ -580,7 +580,7 @@ class TestAgent:
         assert agent.system_template == "System: {prompt}"
         assert agent.prompt_template == "User: {input}"
         assert agent.response_template == "Assistant: {output}"
-        assert agent.allow_code_execution is True
+        assert agent.allow_code_execution is False  # Security: Always forced to False
         assert agent.code_execution_mode == "sandbox"
         assert agent.max_retry_limit == 10
         assert agent.use_system_prompt is False
@@ -686,7 +686,7 @@ class TestSchemaIntegration:
         assert advanced_agent.tools == ["research", "analysis", "visualization"]
         assert advanced_agent.max_iter == 200
         assert advanced_agent.verbose is True
-        assert advanced_agent.allow_code_execution is True
+        assert advanced_agent.allow_code_execution is False  # Security: Always forced to False
         assert advanced_agent.memory is True
         
         # Specialized agent with templates

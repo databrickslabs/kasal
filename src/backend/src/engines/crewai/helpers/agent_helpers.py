@@ -48,6 +48,7 @@ def process_knowledge_sources(knowledge_sources: List[Any]) -> List[str]:
     logger.info(f"Processed paths: {paths}")
     return paths
 
+
 async def create_agent(
     agent_key: str, 
     agent_config: Dict, 
@@ -190,257 +191,24 @@ async def create_agent(
     # Handle tool resolution if tool_service is provided and agent has tool_ids
     agent_tools = tools if tools else []
     
-    # New code: Always check for enabled MCP servers regardless of tool configuration
+    # Add MCP tools using the centralized integration module
     try:
-        import os
         from src.core.unit_of_work import UnitOfWork
         from src.services.mcp_service import MCPService
+        from src.engines.crewai.tools.mcp_integration import MCPIntegration
         
-        logger.info(f"Checking MCP global settings for agent {agent_key}")
         async with UnitOfWork() as uow:
             mcp_service = await MCPService.from_unit_of_work(uow)
-            
-            # First check if MCP is globally enabled
-            mcp_settings = await mcp_service.get_settings()
-            if not mcp_settings.global_enabled:
-                logger.info(f"MCP is globally disabled, skipping MCP server setup for agent {agent_key}")
-            else:
-                logger.info(f"MCP is globally enabled, checking for enabled MCP servers for agent {agent_key}")
-                enabled_servers_response = await mcp_service.get_enabled_servers()
-                
-                if enabled_servers_response and enabled_servers_response.servers and len(enabled_servers_response.servers) > 0:
-                    logger.info(f"Found {len(enabled_servers_response.servers)} enabled MCP server(s) for agent {agent_key}")
-                    
-                    # Create MCP tools for each enabled server
-                    for server in enabled_servers_response.servers:
-                        # Get the full server details with API key
-                        server_detail = await mcp_service.get_server_by_id(server.id)
-                    
-                        if not server_detail:
-                            logger.warning(f"Could not fetch details for MCP server ID {server.id}")
-                            continue
-                    
-                        logger.info(f"Adding MCP server '{server_detail.name}' (type: {server_detail.server_type}) to agent {agent_key}")
-                    
-                        # Use the MCP handler to create tools for this server
-                        if server_detail.server_type.lower() == 'sse':
-                        
-                            # Get the server URL
-                            server_url = server_detail.server_url
-                            if not server_url:
-                                logger.error(f"Server URL not provided for MCP server {server_detail.name}")
-                                continue
-                        
-                            # Fix the URL for Databricks Apps - ensure it has /sse endpoint
-                            if "databricksapps.com" in server_url and not server_url.endswith("/sse"):
-                                server_url = server_url.rstrip("/") + "/sse"
-                                logger.info(f"Added /sse endpoint to Databricks Apps URL: {server_url}")
-                        
-                            # Get authentication headers based on server configuration
-                            headers = {}
-                            
-                            # Auto-detect Databricks Apps URLs regardless of configured auth_type
-                            if 'databricksapps.com' in server_url:
-                                auth_type = 'databricks_obo'
-                                logger.info(f"Auto-detected Databricks Apps URL for {server_detail.name}, using OAuth authentication")
-                                
-                                # For Databricks Apps, check if we have authentication configured
-                                if server_detail.api_key:
-                                    logger.info(f"Using configured API key for OAuth authentication with {server_detail.name}")
-                                else:
-                                    logger.info(f"No API key configured for {server_detail.name}, will attempt to use environment credentials")
-                            else:
-                                auth_type = getattr(server_detail, 'auth_type', 'api_key')  # Default to api_key for backward compatibility
-                            
-                            # For any server with authentication, get appropriate headers
-                            if auth_type == 'databricks_obo':
-                                # Get OAuth headers for Databricks OBO
-                                try:
-                                    from src.utils.databricks_auth import get_mcp_auth_headers
-                                    
-                                    # Get user token from tool_factory if available
-                                    user_token = tool_factory.user_token if tool_factory else None
-                                    
-                                    logger.info(f"Getting Databricks OBO authentication for {server_detail.name}")
-                                    oauth_headers, error = await get_mcp_auth_headers(
-                                        server_url, 
-                                        user_token=user_token,
-                                        api_key=server_detail.api_key
-                                    )
-                                    
-                                    if oauth_headers:
-                                        headers = oauth_headers
-                                        logger.info(f"Successfully obtained authentication headers for {server_detail.name}")
-                                    else:
-                                        logger.error(f"Failed to get authentication headers for {server_detail.name}: {error}")
-                                        
-                                except Exception as e:
-                                    logger.error(f"Error getting OBO authentication for {server_detail.name}: {e}")
-                            else:
-                                # For API key authentication
-                                if server_detail.api_key:
-                                    headers["Authorization"] = f"Bearer {server_detail.api_key}"
-                                    logger.info(f"Using API key authentication for {server_detail.name}")
-                        
-                            # Create server parameters with all configuration
-                            server_params = {
-                                "url": server_url,
-                                "timeout_seconds": server_detail.timeout_seconds,
-                                "max_retries": server_detail.max_retries,
-                                "rate_limit": server_detail.rate_limit,
-                                "auth_type": auth_type  # Pass auth_type to adapter
-                            }
-                            if headers:
-                                server_params["headers"] = headers
-                        
-                            logger.debug(f"MCP server params for {server_detail.name}: timeout={server_detail.timeout_seconds}s, max_retries={server_detail.max_retries}, rate_limit={server_detail.rate_limit}/min, auth_type={auth_type}")
-                        
-                            # Initialize the appropriate adapter based on auth type
-                            try:
-                                logger.info(f"Getting MCP adapter for server {server_detail.name} at {server_url}")
-                            
-                                # Use connection pooling for MCP adapters
-                                from src.engines.crewai.tools.mcp_handler import get_or_create_mcp_adapter
-                                adapter_id = f"agent_{agent_key}_server_{server_detail.id}"
-                                mcp_adapter = await get_or_create_mcp_adapter(server_params, adapter_id)
-                            
-                                # Get tools from the adapter
-                                tools = mcp_adapter.tools
-                                logger.info(f"Got {len(tools)} tools from MCP server '{server_detail.name}'")
-                            
-                                # Create CrewAI tools from MCP tool dictionaries
-                                for tool in tools:
-                                    from src.engines.crewai.tools.mcp_handler import create_crewai_tool_from_mcp
-                                    wrapped_tool = create_crewai_tool_from_mcp(tool)
-                                
-                                    # Add server name to tool name for identification
-                                    tool_name = tool.get('name', 'unknown') if isinstance(tool, dict) else getattr(tool, 'name', 'unknown')
-                                    # Avoid duplicate prefixes
-                                    if not tool_name.startswith(f"{server_detail.name}_"):
-                                        prefixed_name = f"{server_detail.name}_{tool_name}"
-                                        # Update the wrapped tool's name
-                                        if hasattr(wrapped_tool, 'name'):
-                                            wrapped_tool.name = prefixed_name
-                                
-                                    # Add tool to agent tools
-                                    agent_tools.append(wrapped_tool)
-                                    final_tool_name = prefixed_name if not tool_name.startswith(f"{server_detail.name}_") else tool_name
-                                    logger.info(f"Added MCP tool '{final_tool_name}' from server '{server_detail.name}' to agent {agent_key}")
-                            except Exception as e:
-                                import traceback
-                                logger.error(f"Error creating MCP adapter for server '{server_detail.name}': {str(e)}")
-                                logger.error(f"Traceback: {traceback.format_exc()}")
-                    
-                        elif server_detail.server_type.lower() == 'streamable':
-                        
-                            try:
-                                # Get the server URL
-                                server_url = server_detail.server_url
-                                if not server_url:
-                                    logger.error(f"Server URL not provided for Streamable server {server_detail.name}")
-                                    continue
-                            
-                                # Prepare headers for Streamable API
-                                headers = {
-                                    "Accept": "application/json",
-                                    "User-Agent": "Kasal-MCP-Client/1.0"
-                                }
-                                
-                                # Auto-detect Databricks Apps URLs regardless of configured auth_type
-                                if 'databricksapps.com' in server_url:
-                                    auth_type = 'databricks_obo'
-                                    logger.info(f"Auto-detected Databricks Apps URL for Streamable server {server_detail.name}, using OAuth authentication")
-                                else:
-                                    auth_type = getattr(server_detail, 'auth_type', 'api_key')  # Default to api_key for backward compatibility
-                                
-                                # For any server with authentication, get appropriate headers
-                                if auth_type == 'databricks_obo':
-                                    # Get OAuth headers for Databricks OBO
-                                    try:
-                                        from src.utils.databricks_auth import get_mcp_auth_headers
-                                        
-                                        # Get user token from tool_factory if available
-                                        user_token = tool_factory.user_token if tool_factory else None
-                                        
-                                        logger.info(f"Getting Databricks OBO authentication for Streamable server {server_detail.name}")
-                                        oauth_headers, error = await get_mcp_auth_headers(
-                                            server_url, 
-                                            user_token=user_token,
-                                            api_key=server_detail.api_key
-                                        )
-                                        
-                                        if oauth_headers:
-                                            headers.update(oauth_headers)
-                                            logger.info(f"Successfully obtained authentication headers for Streamable server {server_detail.name}")
-                                        else:
-                                            logger.error(f"Failed to get authentication headers for Streamable server {server_detail.name}: {error}")
-                                            
-                                    except Exception as e:
-                                        logger.error(f"Error getting OBO authentication for Streamable server {server_detail.name}: {e}")
-                                else:
-                                    # For API key authentication
-                                    if server_detail.api_key:
-                                        headers["Authorization"] = f"Bearer {server_detail.api_key}"
-                                        logger.info(f"Using API key authentication for Streamable server {server_detail.name}")
-                            
-                                # Create server parameters with all configuration
-                                server_params = {
-                                    "url": server_url,
-                                    "timeout_seconds": server_detail.timeout_seconds,
-                                    "max_retries": server_detail.max_retries,
-                                    "rate_limit": server_detail.rate_limit,
-                                    "auth_type": auth_type,  # Pass auth_type to adapter
-                                    "headers": headers
-                                }
-                            
-                                # Add any additional configuration
-                                if server_detail.additional_config:
-                                    server_params["additional_config"] = server_detail.additional_config
-                            
-                                logger.info(f"Creating Streamable adapter for server {server_detail.name} at {server_url}")
-                                logger.debug(f"Streamable server params: timeout={server_detail.timeout_seconds}s, max_retries={server_detail.max_retries}, rate_limit={server_detail.rate_limit}/min, auth_type={auth_type}")
-                            
-                                # For streamable servers, use connection pooling
-                                from src.engines.crewai.tools.mcp_handler import get_or_create_mcp_adapter
-                                adapter_id = f"agent_{agent_key}_server_{server_detail.id}"
-                                mcp_adapter = await get_or_create_mcp_adapter(server_params, adapter_id)
-                            
-                                # Get tools from the adapter
-                                tools = mcp_adapter.tools
-                                logger.info(f"Got {len(tools)} tools from Streamable server '{server_detail.name}'")
-                            
-                                # Create CrewAI tools from MCP tool dictionaries
-                                for tool in tools:
-                                    from src.engines.crewai.tools.mcp_handler import create_crewai_tool_from_mcp
-                                    wrapped_tool = create_crewai_tool_from_mcp(tool)
-                                
-                                    # Add server name to tool name for identification
-                                    tool_name = tool.get('name', 'unknown') if isinstance(tool, dict) else getattr(tool, 'name', 'unknown')
-                                    # Avoid duplicate prefixes
-                                    if not tool_name.startswith(f"{server_detail.name}_"):
-                                        prefixed_name = f"{server_detail.name}_{tool_name}"
-                                        # Update the wrapped tool's name
-                                        if hasattr(wrapped_tool, 'name'):
-                                            wrapped_tool.name = prefixed_name
-                                
-                                    # Add tool to agent tools
-                                    agent_tools.append(wrapped_tool)
-                                    final_tool_name = prefixed_name if not tool_name.startswith(f"{server_detail.name}_") else tool_name
-                                    logger.info(f"Added Streamable tool '{final_tool_name}' from server '{server_detail.name}' to agent {agent_key}")
-                            except Exception as e:
-                                import traceback
-                                logger.error(f"Error creating Streamable adapter for server '{server_detail.name}': {str(e)}")
-                                logger.error(f"Traceback: {traceback.format_exc()}")
-                    
-                        else:
-                            logger.warning(f"Unsupported MCP server type: {server_detail.server_type}")
-                
-                else:
-                    logger.info(f"No enabled MCP servers found for agent {agent_key}")
+            mcp_tools = await MCPIntegration.create_mcp_tools_for_agent(
+                agent_config, agent_key, mcp_service
+            )
+            agent_tools.extend(mcp_tools)
+            logger.info(f"Added {len(mcp_tools)} MCP tools to agent {agent_key}")
     except Exception as e:
-        logger.error(f"Error fetching MCP servers: {str(e)}")
+        logger.error(f"Error adding MCP tools to agent {agent_key}: {str(e)}")
         import traceback
-        logger.error(traceback.format_exc())
+        logger.error(f"Traceback: {traceback.format_exc()}")
+    
     
     # Continue with normal tool resolution
     if tool_service and 'tools' in agent_config and agent_config['tools']:
@@ -461,10 +229,20 @@ async def create_agent(
                     if hasattr(tool_service, 'get_tool_config_by_name'):
                         tool_config = await tool_service.get_tool_config_by_name(tool_name) or {}
                     
-                    # Create the tool instance with result_as_answer from config
+                    # Get agent-specific tool config overrides
+                    agent_tool_configs = agent_config.get('tool_configs', {})
+                    tool_override = agent_tool_configs.get(tool_name, {})
+                    
+                    # Debug logging for GenieTool spaceId
+                    if tool_name == "GenieTool":
+                        logger.info(f"Agent {agent_key} - GenieTool agent_tool_configs: {agent_tool_configs}")
+                        logger.info(f"Agent {agent_key} - GenieTool tool_override: {tool_override}")
+                    
+                    # Create the tool instance with result_as_answer from config and overrides
                     tool_instance = tool_factory.create_tool(
                         tool_name, 
-                        result_as_answer=tool_config.get('result_as_answer', False)
+                        result_as_answer=tool_config.get('result_as_answer', False),
+                        tool_config_override=tool_override
                     )
                     
                     if tool_instance:
@@ -530,7 +308,8 @@ async def create_agent(
         'verbose': agent_config.get('verbose', True),
         'allow_delegation': agent_config.get('allow_delegation', True),
         'cache': agent_config.get('cache', False),
-        'allow_code_execution': agent_config.get('allow_code_execution', False),
+        # SECURITY: Always force allow_code_execution to False for safety
+        'allow_code_execution': False,  # Hardcoded to False - ignoring agent_config
         'max_retry_limit': agent_config.get('max_retry_limit', 3),
         'use_system_prompt': True,
         'respect_context_window': True,
@@ -561,6 +340,10 @@ async def create_agent(
     
     # Create and return the agent
     agent = Agent(**agent_kwargs)
+    
+    # Store the agent key as a custom attribute using object.__setattr__ to bypass Pydantic validation
+    # This allows task_helpers.py to access the agent name properly
+    object.__setattr__(agent, '_agent_key', agent_key)
     
     # Explicitly check if the llm attribute was set correctly
     if hasattr(agent, 'llm'):

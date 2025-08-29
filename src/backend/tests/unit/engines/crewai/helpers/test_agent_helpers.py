@@ -648,7 +648,7 @@ class TestCreateAgent:
                 assert call_kwargs["max_iter"] == 5
                 assert call_kwargs["max_rpm"] == 10
                 assert call_kwargs["cache"] == True
-                assert call_kwargs["allow_code_execution"] == True
+                assert call_kwargs["allow_code_execution"] == False  # Security: Always forced to False
                 assert call_kwargs["max_retry_limit"] == 5
                 assert call_kwargs["reasoning"] == True
                 assert call_kwargs["max_reasoning_attempts"] == 3
@@ -1018,8 +1018,8 @@ class TestCreateAgent:
                 assert result == mock_agent_instance
     
     @pytest.mark.asyncio
-    async def test_create_agent_with_mcp_servers_enabled(self, mock_tools, mock_config):
-        """Test agent creation with enabled MCP servers"""
+    async def test_create_agent_with_mcp_integration(self, mock_tools, mock_config):
+        """Test agent creation with MCP integration module"""
         agent_key = "test_agent"
         agent_config = {
             "role": "Test Agent",
@@ -1029,7 +1029,8 @@ class TestCreateAgent:
         
         with patch('src.engines.crewai.helpers.agent_helpers.Agent') as mock_agent_class, \
              patch('src.core.llm_manager.LLMManager') as mock_llm_manager, \
-             patch('src.core.unit_of_work.UnitOfWork') as mock_uow:
+             patch('src.core.unit_of_work.UnitOfWork') as mock_uow, \
+             patch('src.engines.crewai.tools.mcp_integration.MCPIntegration') as mock_mcp_integration:
             
             mock_agent_instance = MagicMock()
             mock_agent_class.return_value = mock_agent_instance
@@ -1043,21 +1044,12 @@ class TestCreateAgent:
             mock_uow_instance.__aexit__ = AsyncMock(return_value=None)
             mock_uow.return_value = mock_uow_instance
             
-            # Mock MCP service with enabled servers
+            # Mock MCP Integration
+            mock_mcp_tools = [MagicMock(name="mcp_tool1"), MagicMock(name="mcp_tool2")]
+            mock_mcp_integration.create_mcp_tools_for_agent = AsyncMock(return_value=mock_mcp_tools)
+            
             with patch('src.services.mcp_service.MCPService') as mock_mcp_service:
-                mock_mcp_instance = AsyncMock()
-                
-                # Create mock server response
-                mock_server = MagicMock()
-                mock_server.id = "server1"
-                mock_servers_response = MagicMock()
-                mock_servers_response.servers = [mock_server]
-                mock_mcp_instance.get_enabled_servers = AsyncMock(return_value=mock_servers_response)
-                
-                # Mock get_server_by_id to return None (server not found)
-                mock_mcp_instance.get_server_by_id = AsyncMock(return_value=None)
-                
-                mock_mcp_service.from_unit_of_work = AsyncMock(return_value=mock_mcp_instance)
+                mock_mcp_service.from_unit_of_work = AsyncMock(return_value=MagicMock())
                 
                 result = await create_agent(
                     agent_key=agent_key,
@@ -1066,9 +1058,9 @@ class TestCreateAgent:
                     config=mock_config
                 )
                 
-                # Verify agent was created successfully even with MCP server not found
+                # Verify agent was created successfully with MCP tools
                 assert result == mock_agent_instance
-                mock_mcp_instance.get_server_by_id.assert_called_once_with("server1")
+                mock_mcp_integration.create_mcp_tools_for_agent.assert_called_once()
     
     @pytest.mark.asyncio
     async def test_create_agent_with_tool_config_result_as_answer(self, mock_config):
@@ -1130,7 +1122,7 @@ class TestCreateAgent:
                 )
                 
                 # Verify tool was created with result_as_answer=True
-                mock_tool_factory.create_tool.assert_called_once_with("tool1", result_as_answer=True)
+                mock_tool_factory.create_tool.assert_called_once_with("tool1", result_as_answer=True, tool_config_override={})
                 call_kwargs = mock_agent_class.call_args[1]
                 assert len(call_kwargs["tools"]) == 1
     
@@ -1521,7 +1513,9 @@ class TestCreateAgent:
                 call_kwargs = mock_agent_class.call_args[1]
                 assert call_kwargs["tools"] == string_tools
     
-    @pytest.mark.asyncio
+    # MCP SSE/Streamable tests removed - now handled by MCPIntegration module
+    
+    @pytest.mark.skip(reason="MCP servers now handled by MCPIntegration module")
     async def test_create_agent_with_sse_mcp_server(self, mock_tools, mock_config):
         """Test agent creation with SSE MCP server"""
         agent_key = "test_agent"
@@ -1605,7 +1599,7 @@ class TestCreateAgent:
                 mock_create_tool.assert_called_once_with(mock_tool)
                 mock_register.assert_called_once()
     
-    @pytest.mark.asyncio
+    @pytest.mark.skip(reason="MCP servers now handled by MCPIntegration module")
     async def test_create_agent_with_streamable_mcp_server(self, mock_tools, mock_config):
         """Test agent creation with Streamable MCP server"""
         agent_key = "test_agent"
@@ -1911,7 +1905,7 @@ class TestCreateAgent:
                 assert call_kwargs["task_prompt"] == "Custom task prompt"  # Non-empty should be set
                 assert "format_prompt" not in call_kwargs  # None should not be set
 
-    @pytest.mark.asyncio
+    @pytest.mark.skip(reason="MCP OBO auth now handled by MCPIntegration module")
     async def test_create_agent_with_mcp_obo_authentication(self, mock_tools, mock_config):
         """Test agent creation with MCP server using OBO authentication"""
         agent_key = "test_agent"
@@ -2005,7 +1999,7 @@ class TestCreateAgent:
                     api_key="test-api-key"
                 )
 
-    @pytest.mark.asyncio
+    @pytest.mark.skip(reason="Global MCP settings now handled by MCPIntegration module")
     async def test_create_agent_mcp_globally_disabled(self, mock_tools, mock_config):
         """Test agent creation when MCP is globally disabled"""
         agent_key = "test_agent"
@@ -2058,7 +2052,7 @@ class TestCreateAgent:
                 # Verify get_enabled_servers was NOT called since MCP is disabled
                 mock_mcp_instance.get_enabled_servers.assert_not_called()
 
-    @pytest.mark.asyncio
+    @pytest.mark.skip(reason="Global MCP settings now handled by MCPIntegration module")
     async def test_create_agent_mcp_globally_enabled_with_servers(self, mock_tools, mock_config):
         """Test agent creation when MCP is globally enabled with servers"""
         agent_key = "test_agent"
@@ -2158,7 +2152,7 @@ class TestCreateAgent:
                 assert call_args['max_retries'] == 3
                 assert call_args['rate_limit'] == 60
 
-    @pytest.mark.asyncio
+    @pytest.mark.skip(reason="Global MCP settings now handled by MCPIntegration module")
     async def test_create_agent_mcp_globally_enabled_no_servers(self, mock_tools, mock_config):
         """Test agent creation when MCP is globally enabled but no servers exist"""
         agent_key = "test_agent"
