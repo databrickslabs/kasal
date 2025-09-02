@@ -1,6 +1,6 @@
 import React, { useCallback, useState, useEffect } from 'react';
 import { Handle, Position, useReactFlow } from 'reactflow';
-import { Box, Typography, Dialog, DialogTitle, DialogContent, Tooltip, Chip, CircularProgress } from '@mui/material';
+import { Box, Typography, Dialog, DialogTitle, DialogContent, Tooltip, CircularProgress } from '@mui/material';
 import AddTaskIcon from '@mui/icons-material/AddTask';
 import DeleteIcon from '@mui/icons-material/Delete';
 import IconButton from '@mui/material/IconButton';
@@ -411,28 +411,18 @@ const TaskNode: React.FC<TaskNodeProps> = ({ data, id }) => {
         data-selected={isSelected ? 'true' : 'false'}
       >
         {taskStatus && (
-          <Chip
-            icon={getStatusIcon() || undefined}
-            label={taskStatus.status === 'running' ? 'Running' : 
-                   taskStatus.status === 'completed' ? 'Completed' : 'Failed'}
-            size="small"
-            color={
-              taskStatus.status === 'running' ? 'info' :
-              taskStatus.status === 'completed' ? 'success' : 
-              'error'
-            }
+          <Box
             sx={{ 
               position: 'absolute', 
               top: 8, 
-              left: 8,
-              fontSize: '0.7rem',
-              height: 20,
-              '& .MuiChip-icon': {
-                marginLeft: '4px',
-                marginRight: '-2px'
-              }
+              right: 8,
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center'
             }}
-          />
+          >
+            {getStatusIcon()}
+          </Box>
         )}
         <div className="action-buttons">
           <Tooltip title="Edit Task" open={editTooltipOpen} onOpen={() => setEditTooltipOpen(true)} onClose={() => setEditTooltipOpen(false)}>

@@ -141,31 +141,50 @@ async def get_current_task_states(job_id: str):
             )
         
         task_states = {}
+        task_name_to_id = {}  # Track the proper task ID for each task name
         
-        # Process traces to determine current task states
+        # First pass: collect all task IDs with proper UUIDs (those that have task_id in metadata)
         for trace in result.traces:
+            event_type_upper = trace.event_type.upper() if trace.event_type else ""
+            if event_type_upper in ["TASK_STARTED", "TASK_COMPLETED", "TASK_FAILED"]:
+                if trace.trace_metadata and isinstance(trace.trace_metadata, dict):
+                    task_id = trace.trace_metadata.get("task_id")
+                    if task_id and trace.event_context:
+                        # Map task name to its proper ID (prefer UUIDs over generated IDs)
+                        if trace.event_context not in task_name_to_id or not task_name_to_id[trace.event_context].startswith("task_"):
+                            task_name_to_id[trace.event_context] = task_id
+        
+        # Second pass: process traces to determine current task states
+        for trace in result.traces:
+            # Normalize event type to uppercase for consistency
+            event_type_upper = trace.event_type.upper() if trace.event_type else ""
+            
             # Check if this is a task-related event
-            if trace.event_type in ["TASK_STARTED", "TASK_COMPLETED", "TASK_FAILED"]:
-                # Extract task_id from trace metadata if available
+            if event_type_upper in ["TASK_STARTED", "TASK_COMPLETED", "TASK_FAILED"]:
+                # Extract task_id from trace_metadata (where it's stored in the database)
                 task_id = None
                 if trace.trace_metadata and isinstance(trace.trace_metadata, dict):
                     task_id = trace.trace_metadata.get("task_id")
                 
-                # If no task_id in metadata, try to generate one from event_context
-                if not task_id and trace.event_context:
+                # Try to use the proper task ID for this task name
+                if trace.event_context and trace.event_context in task_name_to_id:
+                    task_id = task_name_to_id[trace.event_context]
+                elif not task_id and trace.event_context:
                     # Use event_context (task name) as a fallback identifier
                     task_id = f"task_{hash(trace.event_context) % 1000000}"
                 
                 if task_id:
-                    # Update task state based on event type
-                    if trace.event_type == "TASK_STARTED":
-                        task_states[task_id] = {
-                            "status": "running",
-                            "started_at": trace.created_at.isoformat() if trace.created_at else None,
-                            "task_name": trace.event_context
-                        }
-                    elif trace.event_type == "TASK_COMPLETED":
-                        # Update existing state or create new one
+                    # Update task state based on event type (using normalized uppercase)
+                    if event_type_upper == "TASK_STARTED":
+                        # Only create running state if task doesn't exist or isn't completed/failed
+                        if task_id not in task_states or task_states[task_id]["status"] == "running":
+                            task_states[task_id] = {
+                                "status": "running",
+                                "started_at": trace.created_at.isoformat() if trace.created_at else None,
+                                "task_name": trace.event_context
+                            }
+                    elif event_type_upper == "TASK_COMPLETED":
+                        # Always update to completed (overrides running)
                         if task_id in task_states:
                             task_states[task_id]["status"] = "completed"
                             task_states[task_id]["completed_at"] = trace.created_at.isoformat() if trace.created_at else None
@@ -175,8 +194,8 @@ async def get_current_task_states(job_id: str):
                                 "completed_at": trace.created_at.isoformat() if trace.created_at else None,
                                 "task_name": trace.event_context
                             }
-                    elif trace.event_type == "TASK_FAILED":
-                        # Update existing state or create new one
+                    elif event_type_upper == "TASK_FAILED":
+                        # Always update to failed (overrides running or completed)
                         if task_id in task_states:
                             task_states[task_id]["status"] = "failed"
                             task_states[task_id]["failed_at"] = trace.created_at.isoformat() if trace.created_at else None

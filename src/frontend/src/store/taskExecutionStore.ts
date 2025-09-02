@@ -33,10 +33,25 @@ export const useTaskExecutionStore = create<TaskExecutionState>((set, get) => ({
   loadTaskStates: async (jobId: string) => {
     try {
       const response = await apiClient.get(`/traces/job/${jobId}/task-states`);
+      
       const states = new Map<string, TaskState>();
       
       Object.entries(response.data).forEach(([taskId, state]) => {
-        states.set(taskId, state as TaskState);
+        // Handle different task ID formats
+        // Backend might return: task_task-UUID, task_UUID, or just UUID
+        let normalizedTaskId = taskId;
+        
+        // Remove "task_" prefix if present
+        if (normalizedTaskId.startsWith('task_')) {
+          normalizedTaskId = normalizedTaskId.substring(5);
+        }
+        
+        // Remove "task-" prefix if present
+        if (normalizedTaskId.startsWith('task-')) {
+          normalizedTaskId = normalizedTaskId.substring(5);
+        }
+        
+        states.set(normalizedTaskId, state as TaskState);
       });
       
       set({ taskStates: states });

@@ -25,6 +25,8 @@ class ExecutionTraceItem(BaseModel):
     input_data: Optional[Dict[str, Any]] = None
     output_data: Optional[Dict[str, Any]] = None
     output: Optional[Any] = None  # Accept any type of output (dict or string)
+    trace_metadata: Optional[Dict[str, Any]] = None  # Metadata including task_id
+    extra_data: Optional[Dict[str, Any]] = None  # Alias for trace_metadata for compatibility
     
 class ExecutionTraceList(BaseModel):
     """Schema for a paginated list of execution traces."""
