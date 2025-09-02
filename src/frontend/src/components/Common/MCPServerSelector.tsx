@@ -56,7 +56,7 @@ export const MCPServerSelector: React.FC<MCPServerSelectorProps> = ({
     if (open && options.length === 0) {
       fetchMCPServers();
     }
-  }, [open]);
+  }, [open, options.length]);
 
   // Update selected options when value prop changes
   useEffect(() => {
@@ -104,7 +104,7 @@ export const MCPServerSelector: React.FC<MCPServerSelectorProps> = ({
     }
   };
 
-  const handleSelectionChange = (_: any, newValue: MCPServerConfig | MCPServerConfig[] | null) => {
+  const handleSelectionChange = (_: React.SyntheticEvent, newValue: MCPServerConfig | MCPServerConfig[] | null) => {
     setSelectedOptions(newValue);
 
     // Convert back to names for the parent component (consistent with backend expectation)
@@ -124,7 +124,7 @@ export const MCPServerSelector: React.FC<MCPServerSelectorProps> = ({
     return `${option.name} (${option.server_type})`;
   };
 
-  const renderOption = (props: any, option: MCPServerConfig) => (
+  const renderOption = (props: React.HTMLAttributes<HTMLLIElement>, option: MCPServerConfig) => (
     <Box component="li" {...props}>
       <StorageIcon sx={{ mr: 2, color: 'primary.main' }} />
       <Box>
@@ -138,7 +138,7 @@ export const MCPServerSelector: React.FC<MCPServerSelectorProps> = ({
     </Box>
   );
 
-  const renderTags = (tagValue: readonly MCPServerConfig[], getTagProps: any) =>
+  const renderTags = (tagValue: readonly MCPServerConfig[], getTagProps: (params: { index: number }) => object) =>
     tagValue.map((option, index) => (
       <Chip
         {...getTagProps({ index })}

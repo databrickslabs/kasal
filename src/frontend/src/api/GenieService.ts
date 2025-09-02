@@ -90,7 +90,7 @@ export class GenieService {
    * @param spaceId The ID of the space to fetch
    * @returns Promise containing the space details
    */
-  static async getSpaceDetails(spaceId: string): Promise<any> {
+  static async getSpaceDetails(spaceId: string): Promise<GenieSpace> {
     try {
       const response = await apiClient.get(`/api/genie/spaces/${spaceId}`);
       return response.data;

@@ -33,6 +33,36 @@ import {
 import { apiClient } from '../../config/api/ApiConfig';
 import useEntityGraphStore from '../../store/entityGraphStore';
 
+interface Entity {
+  id?: string;
+  name?: string;
+  type?: string;
+  attributes?: Record<string, unknown>;
+}
+
+interface Relationship {
+  source: string;
+  target: string;
+  type?: string;
+  label?: string;
+  direction?: 'incoming' | 'outgoing';
+}
+
+interface GraphNode {
+  id: string;
+  name: string;
+  type: string;
+  attributes: Record<string, unknown>;
+  color?: string;
+  size?: number;
+}
+
+interface GraphLink {
+  source: string | GraphNode;
+  target: string | GraphNode;
+  relationship?: string;
+}
+
 interface EntityGraphVisualizationProps {
   open: boolean;
   onClose: () => void;
@@ -130,7 +160,7 @@ const EntityGraphVisualization: React.FC<EntityGraphVisualizationProps> = ({
 
       // Transform entities to graph nodes
       const nodeMap = new Map();
-      const nodes = entities.map((entity: any) => {
+      const nodes = entities.map((entity: Entity) => {
         const node = {
           id: entity.id || entity.name,
           name: entity.name || entity.id,
@@ -145,8 +175,8 @@ const EntityGraphVisualization: React.FC<EntityGraphVisualizationProps> = ({
 
       // Transform relationships to graph links
       const links = relationships
-        .filter((rel: any) => nodeMap.has(rel.source) && nodeMap.has(rel.target))
-        .map((rel: any) => ({
+        .filter((rel: Relationship) => nodeMap.has(rel.source) && nodeMap.has(rel.target))
+        .map((rel: Relationship) => ({
           source: rel.source,
           target: rel.target,
           relationship: rel.type || rel.label || 'related_to',
@@ -160,9 +190,11 @@ const EntityGraphVisualization: React.FC<EntityGraphVisualizationProps> = ({
 
       setGraphData(graphData);
       setFilteredGraphData(graphData);
-    } catch (err: any) {
+    } catch (err: unknown) {
       console.error('[EntityGraph] Error fetching entity data:', err);
-      setError(err.response?.data?.detail || 'Failed to fetch entity data');
+      const errorMessage = err instanceof Error ? err.message : 
+        (err as any)?.response?.data?.detail || 'Failed to fetch entity data';
+      setError(errorMessage);
     } finally {
       setLoading(false);
     }
@@ -214,8 +246,8 @@ const EntityGraphVisualization: React.FC<EntityGraphVisualizationProps> = ({
     // First, filter out orphaned nodes (nodes with no connections)
     const connectedNodeIds = new Set();
     links.forEach(link => {
-      const sourceId = typeof link.source === 'object' ? (link.source as any).id : link.source;
-      const targetId = typeof link.target === 'object' ? (link.target as any).id : link.target;
+      const sourceId = typeof link.source === 'object' ? (link.source as GraphNode).id : link.source;
+      const targetId = typeof link.target === 'object' ? (link.target as GraphNode).id : link.target;
       connectedNodeIds.add(sourceId);
       connectedNodeIds.add(targetId);
     });
@@ -235,16 +267,16 @@ const EntityGraphVisualization: React.FC<EntityGraphVisualizationProps> = ({
       if (focusedNode) {
         const connectedNodeIds = new Set([focusedNodeId]);
         links.forEach(link => {
-          const sourceId = typeof link.source === 'object' ? (link.source as any).id : link.source;
-          const targetId = typeof link.target === 'object' ? (link.target as any).id : link.target;
+          const sourceId = typeof link.source === 'object' ? (link.source as GraphNode).id : link.source;
+          const targetId = typeof link.target === 'object' ? (link.target as GraphNode).id : link.target;
           
           if (sourceId === focusedNodeId) connectedNodeIds.add(targetId);
           if (targetId === focusedNodeId) connectedNodeIds.add(sourceId);
         });
         nodes = nodes.filter(n => connectedNodeIds.has(n.id));
         links = links.filter(l => {
-          const sourceId = typeof l.source === 'object' ? (l.source as any).id : l.source;
-          const targetId = typeof l.target === 'object' ? (l.target as any).id : l.target;
+          const sourceId = typeof l.source === 'object' ? (l.source as GraphNode).id : l.source;
+          const targetId = typeof l.target === 'object' ? (l.target as GraphNode).id : l.target;
           return connectedNodeIds.has(sourceId) && connectedNodeIds.has(targetId);
         });
       }
@@ -282,8 +314,8 @@ const EntityGraphVisualization: React.FC<EntityGraphVisualizationProps> = ({
       // Update links to use canonical IDs
       const mappedLinks = links.map(link => {
         // Handle both string IDs and object references
-        const originalSource = typeof link.source === 'object' ? (link.source as any).id : link.source;
-        const originalTarget = typeof link.target === 'object' ? (link.target as any).id : link.target;
+        const originalSource = typeof link.source === 'object' ? (link.source as GraphNode).id : link.source;
+        const originalTarget = typeof link.target === 'object' ? (link.target as GraphNode).id : link.target;
         
         const sourceId = idMapping.get(originalSource) || originalSource;
         const targetId = idMapping.get(originalTarget) || originalTarget;
@@ -334,10 +366,14 @@ const EntityGraphVisualization: React.FC<EntityGraphVisualizationProps> = ({
   }, [graphData, focusedNodeId, deduplicateNodes, showOrphanedNodes, setFilteredGraphData]);
 
   // Handle search selection
-  const handleSearchSelect = (value: any) => {
+  const handleSearchSelect = (value: { id: string } | null) => {
     if (value) {
       setFocusedNode(value.id);
-      setSelectedNode(value);
+      // Find the actual node from graphData
+      const node = graphData.nodes.find(n => n.id === value.id);
+      if (node) {
+        setSelectedNode(node);
+      }
     }
   };
 
@@ -700,9 +736,9 @@ const EntityGraphVisualization: React.FC<EntityGraphVisualizationProps> = ({
                       Connections
                     </Typography>
                     <Typography variant="body2">
-                      {graphData.links.filter((l: any) => {
-                        const sourceId = typeof l.source === 'object' ? (l.source as any).id : l.source;
-                        const targetId = typeof l.target === 'object' ? (l.target as any).id : l.target;
+                      {graphData.links.filter((l: GraphLink) => {
+                        const sourceId = typeof l.source === 'object' ? (l.source as GraphNode).id : l.source;
+                        const targetId = typeof l.target === 'object' ? (l.target as GraphNode).id : l.target;
                         return sourceId === selectedNode.id || targetId === selectedNode.id;
                       }).length} relationships
                     </Typography>
@@ -739,12 +775,12 @@ const EntityGraphVisualization: React.FC<EntityGraphVisualizationProps> = ({
                       const connectedNodes = new Map();
                       
                       // Find all connected nodes
-                      graphData.links.forEach((link: any) => {
-                        const sourceId = typeof link.source === 'object' ? (link.source as any).id : link.source;
-                        const targetId = typeof link.target === 'object' ? (link.target as any).id : link.target;
+                      graphData.links.forEach((link: GraphLink) => {
+                        const sourceId = typeof link.source === 'object' ? (link.source as GraphNode).id : link.source;
+                        const targetId = typeof link.target === 'object' ? (link.target as GraphNode).id : link.target;
                         
                         if (sourceId === selectedNode.id) {
-                          const targetNode = graphData.nodes.find((n: any) => n.id === targetId);
+                          const targetNode = graphData.nodes.find((n: GraphNode) => n.id === targetId);
                           if (targetNode) {
                             if (!connectedNodes.has(targetNode.id)) {
                               connectedNodes.set(targetNode.id, {
@@ -759,7 +795,7 @@ const EntityGraphVisualization: React.FC<EntityGraphVisualizationProps> = ({
                           }
                         }
                         if (targetId === selectedNode.id) {
-                          const sourceNode = graphData.nodes.find((n: any) => n.id === sourceId);
+                          const sourceNode = graphData.nodes.find((n: GraphNode) => n.id === sourceId);
                           if (sourceNode) {
                             if (!connectedNodes.has(sourceNode.id)) {
                               connectedNodes.set(sourceNode.id, {
@@ -816,7 +852,7 @@ const EntityGraphVisualization: React.FC<EntityGraphVisualizationProps> = ({
                                 <Typography variant="caption" color="textSecondary">
                                   {node.type}
                                 </Typography>
-                                {relationships.map((rel: any, idx: number) => (
+                                {relationships.map((rel: Relationship, idx: number) => (
                                   <Chip
                                     key={idx}
                                     label={`${rel.direction === 'incoming' ? '←' : '→'} ${rel.type}`}

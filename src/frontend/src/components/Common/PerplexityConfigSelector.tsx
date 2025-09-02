@@ -125,13 +125,13 @@ export const PerplexityConfigSelector: React.FC<PerplexityConfigSelectorProps> =
     setConfig({ ...DEFAULT_CONFIG, ...value });
   }, [value]);
 
-  const handleChange = (field: keyof PerplexityConfig, newValue: any) => {
+  const handleChange = (field: keyof PerplexityConfig, newValue: string | number | boolean | string[] | undefined) => {
     const updatedConfig = { ...config, [field]: newValue };
     setConfig(updatedConfig);
     onChange(updatedConfig);
   };
 
-  const handleWebSearchOptionsChange = (field: string, newValue: any) => {
+  const handleWebSearchOptionsChange = (field: string, newValue: string | number | undefined) => {
     const updatedWebSearchOptions = {
       ...config.web_search_options,
       [field]: newValue

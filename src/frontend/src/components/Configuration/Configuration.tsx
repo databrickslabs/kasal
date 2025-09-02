@@ -176,7 +176,7 @@ function Configuration({ onClose }: ConfigurationProps): JSX.Element {
       });
     }
     return items;
-  }, [showDatabaseManagement, isDatabricksApps, t]); // Recalculate when permission or environment changes
+  }, [showDatabaseManagement, isDatabricksApps, t, baseNavItems]); // Recalculate when permission or environment changes
 
   useEffect(() => {
     const loadConfig = async () => {

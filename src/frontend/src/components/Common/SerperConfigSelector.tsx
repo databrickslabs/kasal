@@ -175,7 +175,7 @@ export const SerperConfigSelector: React.FC<SerperConfigSelectorProps> = ({
     setConfig({ ...DEFAULT_CONFIG, ...value });
   }, [value]);
 
-  const handleChange = (field: keyof SerperConfig, newValue: any) => {
+  const handleChange = (field: keyof SerperConfig, newValue: string | number | undefined) => {
     const updatedConfig = { ...config, [field]: newValue };
     
     // Update search_url when endpoint_type changes

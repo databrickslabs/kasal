@@ -6,7 +6,7 @@ interface EntityNode {
   id: string;
   name: string;
   type: string;
-  attributes: Record<string, any>;
+  attributes: Record<string, unknown>;
   color?: string;
   size?: number;
   x?: number;
@@ -26,7 +26,7 @@ interface GraphData {
 
 interface EntityGraphState {
   // Graph instance
-  graphInstance: any | null;
+  graphInstance: any | null; // ForceGraph2D doesn't export proper types
   
   // Data states
   graphData: GraphData;
@@ -95,11 +95,10 @@ const useEntityGraphStore = create<EntityGraphState>((set, get) => ({
     
     try {
       // Create force graph instance
-      const ForceGraphFactory = ForceGraph2D as any;
-      const graph = ForceGraphFactory()(container)
+      const graph = (ForceGraph2D as any)()(container)
         .backgroundColor('#fafafa')
         .nodeId('id')
-        .nodeLabel((node: any) => `
+        .nodeLabel((node: EntityNode) => `
           <div style="background: rgba(0,0,0,0.8); color: white; padding: 8px; border-radius: 4px; max-width: 200px;">
             <div style="font-weight: bold; margin-bottom: 4px;">${node.name}</div>
             <div style="font-size: 12px; color: #ccc; margin-bottom: 4px;">Type: ${node.type}</div>
@@ -111,13 +110,15 @@ const useEntityGraphStore = create<EntityGraphState>((set, get) => ({
               '</div>' : ''}
           </div>
         `)
-        .nodeCanvasObject((node: any, ctx: any, globalScale: number) => {
+        .nodeCanvasObject((node: EntityNode, ctx: CanvasRenderingContext2D, _globalScale: number) => {
           const nodeSize = node.size || 5;
           
           // Draw node circle
+          const x = node.x ?? 0;
+          const y = node.y ?? 0;
           ctx.beginPath();
-          ctx.arc(node.x, node.y, nodeSize, 0, 2 * Math.PI, false);
-          ctx.fillStyle = node.color;
+          ctx.arc(x, y, nodeSize, 0, 2 * Math.PI, false);
+          ctx.fillStyle = node.color || '#999';
           ctx.fill();
           ctx.strokeStyle = 'rgba(0,0,0,0.3)';
           ctx.lineWidth = 2;
@@ -137,10 +138,10 @@ const useEntityGraphStore = create<EntityGraphState>((set, get) => ({
           
           // Draw text background
           const padding = 4;
-          const bgY = node.y + nodeSize + 3;
+          const bgY = y + nodeSize + 3;
           ctx.fillStyle = 'rgba(255, 255, 255, 0.95)';
           ctx.fillRect(
-            node.x - (textWidth + padding) / 2,
+            x - (textWidth + padding) / 2,
             bgY,
             textWidth + padding,
             textHeight
@@ -150,7 +151,7 @@ const useEntityGraphStore = create<EntityGraphState>((set, get) => ({
           ctx.strokeStyle = 'rgba(0,0,0,0.1)';
           ctx.lineWidth = 1;
           ctx.strokeRect(
-            node.x - (textWidth + padding) / 2,
+            x - (textWidth + padding) / 2,
             bgY,
             textWidth + padding,
             textHeight
@@ -158,14 +159,14 @@ const useEntityGraphStore = create<EntityGraphState>((set, get) => ({
           
           // Draw text
           ctx.fillStyle = '#333';
-          ctx.fillText(label, node.x, bgY + padding / 2);
+          ctx.fillText(label, x, bgY + padding / 2);
         })
         .linkWidth(2)
         .linkColor(() => 'rgba(100, 100, 100, 0.4)')
         .linkDirectionalArrowLength(6)
         .linkDirectionalArrowRelPos(1)
         .linkCurvature(state.linkCurvature)
-        .onNodeClick((node: any) => {
+        .onNodeClick((node: EntityNode) => {
           console.log('[EntityGraphStore] Node clicked:', node);
           set({ selectedNode: node });
           // Don't automatically focus, let user decide via button
