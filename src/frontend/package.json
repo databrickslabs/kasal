@@ -119,6 +119,11 @@
     "postcss": "^8.4.35",
     "webpack": "^5.90.3",
     "dompurify": "^3.2.4",
-    "pdfjs-dist": "^4.1.393"
+    "pdfjs-dist": "^4.1.393",
+    "got": "^11.8.6",
+    "on-headers": "^1.1.0",
+    "terser": "^5.39.0",
+    "webpack-dev-server": "^5.2.1",
+    "compression": "^1.8.0"
   }
 }
