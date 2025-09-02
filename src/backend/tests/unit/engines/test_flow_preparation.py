@@ -8,8 +8,11 @@ from unittest.mock import Mock, patch
 from typing import Dict, Any
 
 # Import directly to avoid dependency issues
-sys.path.insert(0, '/Users/nehme.tohme/workspace/kasal/src/backend/src')
-from engines.crewai.flow_preparation import FlowPreparation
+# Use relative path from test file location
+current_dir = Path(__file__).parent
+backend_src = current_dir.parent.parent.parent / 'src'
+sys.path.insert(0, str(backend_src))
+from src.engines.crewai.flow_preparation import FlowPreparation
 
 
 class TestFlowPreparation:

@@ -99,15 +99,31 @@ const CrewDialog: React.FC<CrewDialogProps> = ({ open, onClose, onCrewSelect }):
       }
 
       console.log('Selected crew:', selectedCrew);
+      console.log('Selected crew nodes:', selectedCrew.nodes);
+      
+      // Debug: Check if any nodes have tool_configs
+      if (selectedCrew.nodes) {
+        selectedCrew.nodes.forEach((node: any) => {
+          if (node.data?.tool_configs && Object.keys(node.data.tool_configs).length > 0) {
+            console.log(`Crew node ${node.id} (${node.type}) has tool_configs:`, node.data.tool_configs);
+          }
+        });
+      }
 
-      // Create a mapping of old IDs to new IDs
+      // Create a mapping of old IDs to new IDs and store created entities
       const idMapping: { [key: string]: string } = {};
+      const createdAgents: { [nodeId: string]: any } = {};
+      const createdTasks: { [nodeId: string]: any } = {};
 
       // Create agents first
       for (const node of selectedCrew.nodes || []) {
         if (node.type === 'agentNode') {
           try {
             const agentData = node.data;
+            console.log('CrewDialog: Loading agent node with data:', agentData);
+            if (agentData.tool_configs) {
+              console.log('CrewDialog: Agent has tool_configs:', agentData.tool_configs);
+            }
             // Format agent data following AgentForm pattern
             const formattedAgentData = {
               name: agentData.name || agentData.label || '',
@@ -116,6 +132,7 @@ const CrewDialog: React.FC<CrewDialogProps> = ({ open, onClose, onCrewSelect }):
               backstory: agentData.backstory || '',
               llm: agentData.llm || 'databricks-llama-4-maverick',
               tools: agentData.tools || [],
+              tool_configs: agentData.tool_configs || {},  // Include tool_configs
               function_calling_llm: agentData.function_calling_llm,
               max_iter: agentData.max_iter || 25,
               max_rpm: agentData.max_rpm,
@@ -137,8 +154,20 @@ const CrewDialog: React.FC<CrewDialogProps> = ({ open, onClose, onCrewSelect }):
             };
 
             const newAgent = await AgentService.createAgent(formattedAgentData);
+            console.log('CrewDialog: Created agent:', newAgent);
+            if (newAgent?.tool_configs) {
+              console.log('CrewDialog: Created agent has tool_configs:', newAgent.tool_configs);
+            }
             if (newAgent && newAgent.id) {
               idMapping[node.id] = newAgent.id.toString();
+              // Fetch the created agent to get full data including tool_configs
+              const fetchedAgent = await AgentService.getAgent(newAgent.id);
+              if (fetchedAgent) {
+                console.log('CrewDialog: Fetched created agent with full data:', fetchedAgent);
+                createdAgents[node.id] = fetchedAgent;  // Store the fetched agent with full data
+              } else {
+                createdAgents[node.id] = newAgent;  // Fallback to created agent
+              }
             } else {
               throw new Error(`Failed to create agent: ${formattedAgentData.name}`);
             }
@@ -155,6 +184,10 @@ const CrewDialog: React.FC<CrewDialogProps> = ({ open, onClose, onCrewSelect }):
         if (node.type === 'taskNode') {
           try {
             const taskData = node.data;
+            console.log('CrewDialog: Loading task node with data:', taskData);
+            if (taskData.tool_configs) {
+              console.log('CrewDialog: Task has tool_configs:', taskData.tool_configs);
+            }
             // Update agent_id in task data if it exists in our mapping
             const updatedAgentId = taskData.agent_id && idMapping[taskData.agent_id] 
               ? parseInt(idMapping[taskData.agent_id]) 
@@ -166,6 +199,7 @@ const CrewDialog: React.FC<CrewDialogProps> = ({ open, onClose, onCrewSelect }):
               description: String(taskData.description || ''),
               expected_output: String(taskData.expected_output || ''),
               tools: (taskData.tools || []).map((tool: unknown) => String(tool)),
+              tool_configs: taskData.tool_configs || {},  // Include tool_configs
               agent_id: updatedAgentId ? String(updatedAgentId) : null,
               async_execution: Boolean(taskData.async_execution),
               context: (taskData.context || []).map((item: unknown) => String(item)),
@@ -189,8 +223,20 @@ const CrewDialog: React.FC<CrewDialogProps> = ({ open, onClose, onCrewSelect }):
             };
 
             const newTask = await TaskService.createTask(formattedTaskData);
+            console.log('CrewDialog: Created task:', newTask);
+            if (newTask?.tool_configs) {
+              console.log('CrewDialog: Created task has tool_configs:', newTask.tool_configs);
+            }
             if (newTask && newTask.id) {
               idMapping[node.id] = newTask.id.toString();
+              // Fetch the created task to get full data including tool_configs
+              const fetchedTask = await TaskService.getTask(newTask.id);
+              if (fetchedTask) {
+                console.log('CrewDialog: Fetched created task with full data:', fetchedTask);
+                createdTasks[node.id] = fetchedTask;  // Store the fetched task with full data
+              } else {
+                createdTasks[node.id] = newTask;  // Fallback to created task
+              }
             } else {
               throw new Error(`Failed to create task: ${formattedTaskData.name}`);
             }
@@ -225,14 +271,28 @@ const CrewDialog: React.FC<CrewDialogProps> = ({ open, onClose, onCrewSelect }):
           },
           data: {
             ...node.data,
+            // Merge data from the fetched entity if available
+            ...(node.type === 'agentNode' && createdAgents[node.id] ? {
+              ...createdAgents[node.id],
+              label: createdAgents[node.id].name || node.data.label,
+              agentId: idMapping[node.id] || node.data.agentId,
+              tool_configs: createdAgents[node.id].tool_configs || node.data.tool_configs || {}
+            } : {}),
+            ...(node.type === 'taskNode' && createdTasks[node.id] ? {
+              ...createdTasks[node.id],
+              label: createdTasks[node.id].name || node.data.label,
+              taskId: idMapping[node.id] || node.data.taskId,
+              tool_configs: createdTasks[node.id].tool_configs || node.data.tool_configs || {}
+            } : {}),
             id: idMapping[node.id] || node.data.id,
             agent_id: node.data.agent_id ? idMapping[node.data.agent_id] || node.data.agent_id : node.data.agent_id,
-            agentId: node.type === 'agentNode' ? idMapping[node.id] || node.data.agentId : node.data.agentId,
-            taskId: node.type === 'taskNode' ? idMapping[node.id] || node.data.taskId : node.data.taskId,
             type: node.type === 'agentNode' ? 'agent' : 'task' // Set the internal type field
           }
         };
         console.log('Updated node:', updatedNode);
+        if (updatedNode.data.tool_configs && Object.keys(updatedNode.data.tool_configs).length > 0) {
+          console.log(`CrewDialog: Node ${updatedNode.id} has tool_configs:`, updatedNode.data.tool_configs);
+        }
         return updatedNode;
       });
 

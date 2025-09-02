@@ -215,11 +215,18 @@ class ScheduleRepository:
         if not schedule:
             return None
         
+        # Convert timezone-aware datetime to timezone-naive for database
+        from datetime import timezone
+        if hasattr(execution_time, 'tzinfo') and execution_time.tzinfo is not None:
+            execution_time_naive = execution_time.replace(tzinfo=None)
+        else:
+            execution_time_naive = execution_time
+        
         # Update last run time and calculate next run time
-        schedule.last_run_at = execution_time
+        schedule.last_run_at = execution_time_naive
         schedule.next_run_at = calculate_next_run_from_last(
             schedule.cron_expression,
-            execution_time
+            execution_time_naive
         )
         
         await self.session.commit()

@@ -1,7 +1,7 @@
 from datetime import datetime
 from typing import List, Optional, Dict, Any
 
-from pydantic import BaseModel, Field, ConfigDict
+from pydantic import BaseModel, Field, ConfigDict, field_validator
 
 
 # Shared properties
@@ -15,6 +15,7 @@ class AgentBase(BaseModel):
     # Core configuration
     llm: str = Field(default="databricks-llama-4-maverick")
     tools: List[Any] = Field(default_factory=list)
+    tool_configs: Optional[Dict[str, Dict[str, Any]]] = Field(default_factory=dict)  # Tool-specific config overrides
     function_calling_llm: Optional[str] = None
     
     # Execution settings
@@ -35,6 +36,7 @@ class AgentBase(BaseModel):
     response_template: Optional[str] = None
     
     # Code execution settings
+    # SECURITY: Always force to False for safety
     allow_code_execution: bool = Field(default=False)
     code_execution_mode: str = Field(default="safe")
     
@@ -45,6 +47,15 @@ class AgentBase(BaseModel):
     
     # Knowledge sources
     knowledge_sources: List[Any] = Field(default_factory=list)
+    
+    @field_validator('allow_code_execution', mode='before')
+    @classmethod
+    def force_code_execution_false(cls, v):
+        """SECURITY: Always force allow_code_execution to False for safety."""
+        if v is True:
+            # Log or notify that we're overriding this for security
+            print(f"WARNING: Attempted to set allow_code_execution=True, forcing to False for security")
+        return False
 
 
 # Properties to receive on agent creation
@@ -64,6 +75,7 @@ class AgentUpdate(BaseModel):
     # Core configuration
     llm: Optional[str] = None
     tools: Optional[List[Any]] = None
+    tool_configs: Optional[Dict[str, Dict[str, Any]]] = None  # Tool-specific config overrides
     function_calling_llm: Optional[str] = None
     
     # Execution settings
@@ -94,6 +106,15 @@ class AgentUpdate(BaseModel):
     
     # Knowledge sources
     knowledge_sources: Optional[List[Any]] = None
+    
+    @field_validator('allow_code_execution', mode='before')
+    @classmethod
+    def force_code_execution_false(cls, v):
+        """SECURITY: Always force allow_code_execution to False for safety."""
+        if v is not None and v is True:
+            print(f"WARNING: Attempted to set allow_code_execution=True in update, forcing to False for security")
+            return False
+        return v  # Return None if None, False if False
 
 
 # Properties to receive on agent limited update

@@ -385,7 +385,7 @@ export const ChatMessageItem: React.FC<ChatMessageItemProps> = ({ message, onOpe
         return (
           <Box>
             <Typography variant="body1" sx={{ mb: 1 }}>
-              I&apos;ve created a complete crew for you:
+              I&apos;ve created a complete plan for you:
             </Typography>
             <Box sx={{ bgcolor: 'background.paper', p: 2, borderRadius: 1 }}>
               {crew.agents && crew.agents.length > 0 && (

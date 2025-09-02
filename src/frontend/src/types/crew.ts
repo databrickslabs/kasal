@@ -170,6 +170,7 @@ export interface TaskNodeData {
   name?: string;
   taskId?: string;
   tools?: string[];
+  tool_configs?: Record<string, unknown>;  // User-specific tool configuration overrides
   context?: string[];
   async_execution?: boolean;
   config?: {
@@ -222,6 +223,7 @@ export interface AgentNodeData {
   embedder_config?: Record<string, unknown>;
   knowledge_sources?: KnowledgeSource[];
   tools?: string[];
+  tool_configs?: Record<string, unknown>;  // User-specific tool configuration overrides
   onEdit?: (agent: FormAgent) => void;
 }
 

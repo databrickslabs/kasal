@@ -113,19 +113,50 @@ async def run_all_seeders() -> None:
         logger.warning("No seeders are registered! Check if seeder modules were imported correctly.")
         return
     
-    for seeder_name, seeder_func in SEEDERS.items():
-        logger.info(f"Running {seeder_name} seeder...")
-        try:
-            # Run each seeder independently
-            debug_log(f"About to execute {seeder_name} seeder function")
-            await seeder_func()
-            logger.info(f"Completed {seeder_name} seeder successfully.")
-        except Exception as e:
-            logger.error(f"Error in {seeder_name} seeder: {str(e)}")
-            logger.error(f"Traceback: {traceback.format_exc()}")
-            # Continue to next seeder even if current one fails
+    # Separate fast seeders from slow ones
+    fast_seeders = ['tools', 'schemas', 'prompt_templates', 'model_configs', 'roles']
+    slow_seeders = ['documentation']  # Documentation seeder is slow due to embeddings
     
-    logger.info("✅ All seeder operations completed.")
+    # Run fast seeders first (sequentially as they're quick)
+    for seeder_name, seeder_func in SEEDERS.items():
+        if seeder_name in fast_seeders:
+            logger.info(f"Running {seeder_name} seeder...")
+            try:
+                debug_log(f"About to execute {seeder_name} seeder function")
+                await seeder_func()
+                logger.info(f"Completed {seeder_name} seeder successfully.")
+            except Exception as e:
+                logger.error(f"Error in {seeder_name} seeder: {str(e)}")
+                logger.error(f"Traceback: {traceback.format_exc()}")
+                # Continue to next seeder even if current one fails
+    
+    # Run slow seeders in the background (non-blocking)
+    background_tasks = []
+    for seeder_name, seeder_func in SEEDERS.items():
+        if seeder_name in slow_seeders:
+            logger.info(f"Starting {seeder_name} seeder in background (non-blocking)...")
+            
+            async def run_seeder_background(name, func):
+                """Run a seeder in the background with error handling."""
+                try:
+                    debug_log(f"Background execution of {name} seeder starting")
+                    await func()
+                    logger.info(f"✅ Background {name} seeder completed successfully.")
+                except Exception as e:
+                    logger.error(f"❌ Error in background {name} seeder: {str(e)}")
+                    logger.error(f"Traceback: {traceback.format_exc()}")
+            
+            # Create task but don't await it (non-blocking)
+            task = asyncio.create_task(run_seeder_background(seeder_name, seeder_func))
+            background_tasks.append(task)
+            logger.info(f"✓ {seeder_name} seeder started in background, continuing...")
+    
+    logger.info("✅ All fast seeders completed, slow seeders running in background.")
+    
+    # Optionally, you can store the tasks if you need to track them later
+    # But we don't await them here to keep it non-blocking
+    if background_tasks:
+        logger.info(f"Running {len(background_tasks)} seeder(s) in background (non-blocking)")
 
 # Command-line entry point
 async def main() -> None:

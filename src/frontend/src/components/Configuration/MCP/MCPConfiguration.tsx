@@ -41,6 +41,7 @@ export interface MCPServerConfig {
   id: string;
   name: string;
   enabled: boolean;
+  global_enabled: boolean;  // NEW: Enable across all agents/tasks
   server_url: string;
   api_key: string;
   server_type: string;  // "sse" or "streamable"
@@ -58,9 +59,10 @@ export const DEFAULT_MCP_CONFIG: MCPServerConfig = {
   id: '',
   name: 'Default MCP Server',
   enabled: false,
+  global_enabled: false,  // Default to not globally enabled
   server_url: '',
   api_key: '',
-  server_type: 'sse',  // Default to SSE server type
+  server_type: 'streamable',  // Default to Streamable HTTP server type
   auth_type: 'api_key',  // Default to API key authentication
   timeout_seconds: 30,
   max_retries: 3,
@@ -101,6 +103,7 @@ const ServerEditDialog: React.FC<ServerEditDialogProps> = ({
 }) => {
   const { t } = useTranslation();
   const [editedServer, setEditedServer] = useState<MCPServerConfig | null>(server);
+  const [originalApiKey, setOriginalApiKey] = useState<string>('');
   const [testingConnection, setTestingConnection] = useState(false);
   const [connectionTestResult, setConnectionTestResult] = useState<{
     tested: boolean;
@@ -110,9 +113,20 @@ const ServerEditDialog: React.FC<ServerEditDialogProps> = ({
 
   useEffect(() => {
     setEditedServer(server);
+    // Store the original API key for comparison
+    if (server) {
+      console.log('Edit Dialog Debug - Loading server:', {
+        serverId: server.id,
+        serverName: server.name,
+        apiKey: server.api_key,
+        apiKeyLength: server.api_key?.length || 0,
+        isNew
+      });
+      setOriginalApiKey(server.api_key || '');
+    }
     // Reset connection test result when dialog opens/closes or server changes
     setConnectionTestResult({ tested: false, success: false, message: '' });
-  }, [server]);
+  }, [server, isNew]);
 
   if (!editedServer) return null;
 
@@ -148,7 +162,27 @@ const ServerEditDialog: React.FC<ServerEditDialogProps> = ({
 
   const handleSave = () => {
     if (editedServer) {
-      onSave(editedServer);
+      // For existing servers, only include API key if it has been changed
+      const serverToSave = { ...editedServer };
+      
+      console.log('Save Debug:', {
+        isNew,
+        currentApiKey: editedServer.api_key,
+        originalApiKey,
+        areEqual: editedServer.api_key === originalApiKey,
+        apiKeyChanged: !isNew && editedServer.api_key !== originalApiKey
+      });
+      
+      if (!isNew && editedServer.api_key === originalApiKey) {
+        // API key hasn't changed, remove it from the update payload
+        console.log('Removing API key from update payload - unchanged');
+        const { api_key, ...serverWithoutApiKey } = serverToSave;
+        Object.assign(serverToSave, serverWithoutApiKey);
+      } else if (!isNew) {
+        console.log('Including API key in update payload - changed');
+      }
+      
+      onSave(serverToSave);
       onClose();
     }
   };
@@ -251,17 +285,16 @@ const ServerEditDialog: React.FC<ServerEditDialogProps> = ({
               <InputLabel id="server-type-label">Server Type</InputLabel>
               <Select
                 labelId="server-type-label"
-                value={editedServer.server_type}
+                value={editedServer.server_type || 'streamable'}
                 label="Server Type"
                 onChange={handleSelectChange('server_type')}
               >
-                <MenuItem value="sse">SSE (Server-Sent Events)</MenuItem>
                 <MenuItem value="streamable">Streamable HTTP</MenuItem>
               </Select>
             </FormControl>
           </Grid>
           
-          {(editedServer.server_type === 'sse' || editedServer.server_type === 'streamable') && (
+          {editedServer.server_type === 'streamable' && (
             <Grid item xs={12} md={6}>
               <FormControl fullWidth>
                 <InputLabel id="auth-type-label">Authentication Type</InputLabel>
@@ -278,7 +311,7 @@ const ServerEditDialog: React.FC<ServerEditDialogProps> = ({
             </Grid>
           )}
           
-          {(editedServer.server_type === 'sse' || editedServer.server_type === 'streamable') && editedServer.auth_type !== 'databricks_obo' && (
+          {editedServer.server_type === 'streamable' && editedServer.auth_type !== 'databricks_obo' && (
             <Grid item xs={12} md={editedServer.auth_type === 'databricks_obo' ? 12 : 6}>
               <TextField
                 label={t('configuration.mcp.apiKey', { defaultValue: 'API Key' })}
@@ -414,7 +447,7 @@ const ServerEditDialog: React.FC<ServerEditDialogProps> = ({
           disabled={
             testingConnection || 
             !editedServer.server_url?.trim() || 
-            ((editedServer.server_type === 'sse' || editedServer.server_type === 'streamable') && 
+            (editedServer.server_type === 'streamable' && 
              editedServer.auth_type !== 'databricks_obo' && 
              !editedServer.api_key?.trim())
           }
@@ -520,7 +553,7 @@ const MCPConfiguration: React.FC = () => {
   };
 
   const handleServerToggle = (serverId: string) => async (
-    event: React.ChangeEvent<HTMLInputElement>
+    _event: React.ChangeEvent<HTMLInputElement>
   ) => {
     try {
       const mcpService = MCPService.getInstance();
@@ -539,10 +572,58 @@ const MCPConfiguration: React.FC = () => {
     }
   };
 
-  const handleEditServer = (server: MCPServerConfig) => {
-    setCurrentServer(server);
-    setIsNewServer(false);
-    setEditDialogOpen(true);
+  const handleServerGlobalToggle = (serverId: string) => async (
+    _event: React.ChangeEvent<HTMLInputElement>
+  ) => {
+    try {
+      const mcpService = MCPService.getInstance();
+      await mcpService.toggleMcpServerGlobalEnabled(serverId);
+      
+      // Reload servers to get updated state
+      await loadMcpServers();
+      
+      setNotification({
+        open: true,
+        message: 'MCP server global setting updated successfully',
+        severity: 'success',
+      });
+      
+    } catch (error) {
+      console.error(`Error toggling MCP server global setting ${serverId}:`, error);
+      setNotification({
+        open: true,
+        message: error instanceof Error ? error.message : 'Failed to toggle server global setting',
+        severity: 'error',
+      });
+    }
+  };
+
+  const handleEditServer = async (server: MCPServerConfig) => {
+    try {
+      // Fetch full server details with decrypted API key
+      const mcpService = MCPService.getInstance();
+      const fullServer = await mcpService.getMcpServer(server.id);
+      
+      console.log('Edit server - fetched full details:', {
+        serverId: server.id,
+        listApiKey: server.api_key,
+        fullApiKey: fullServer?.api_key,
+        fullApiKeyLength: fullServer?.api_key?.length || 0
+      });
+      
+      if (fullServer) {
+        setCurrentServer(fullServer);
+        setIsNewServer(false);
+        setEditDialogOpen(true);
+      }
+    } catch (error) {
+      console.error('Error fetching server details for edit:', error);
+      setNotification({
+        open: true,
+        message: error instanceof Error ? error.message : 'Failed to load server details',
+        severity: 'error',
+      });
+    }
   };
 
   const handleAddServer = () => {
@@ -639,6 +720,17 @@ const MCPConfiguration: React.FC = () => {
         />
       </Box>
       
+      {mcpConfig.global_enabled && (
+        <Alert severity="info" sx={{ mb: 3 }}>
+          <Typography variant="body2">
+            <strong>Three-Tier MCP Configuration:</strong><br />
+            • <strong>Global servers</strong> (marked with GLOBAL chip) are available to all agents and tasks<br />
+            • <strong>Agent-level servers</strong> can be selected in Agent Forms for specific agents<br />
+            • <strong>Task-level servers</strong> can be selected in Task Forms for specific tasks (highest priority)
+          </Typography>
+        </Alert>
+      )}
+      
       <Paper 
         variant="outlined" 
         sx={{ 
@@ -698,48 +790,74 @@ const MCPConfiguration: React.FC = () => {
                           {server.name}
                         </Typography>
                         <Chip 
-                          label={server.server_type === 'streamable' ? 'STREAMABLE' : 'SSE'} 
+                          label="STREAMABLE" 
                           size="small" 
-                          color={server.server_type === 'streamable' ? 'secondary' : 'primary'} 
+                          color="secondary" 
                           variant="outlined"
                           sx={{ ml: 1.5, fontSize: '0.7rem', height: 20 }}
                         />
+                        {server.global_enabled && (
+                          <Chip 
+                            label="GLOBAL" 
+                            size="small" 
+                            color="primary" 
+                            sx={{ ml: 1, fontSize: '0.7rem', height: 20 }}
+                          />
+                        )}
                       </Box>
                       <Typography variant="body2" color="text.secondary">
                         {server.server_url}
                       </Typography>
                     </Box>
                     
-                    <Box sx={{ display: 'flex', alignItems: 'center' }}>
-                      <FormControlLabel
-                        control={
-                          <Switch
-                            size="small"
-                            checked={server.enabled}
-                            onChange={handleServerToggle(server.id)}
-                            disabled={!mcpConfig.global_enabled}
-                          />
-                        }
-                        label={
-                          <Typography variant="body2">
-                            {server.enabled ? t('common.enabled', { defaultValue: 'Enabled' }) : t('common.disabled', { defaultValue: 'Disabled' })}
-                          </Typography>
-                        }
-                      />
-                      <IconButton
-                        size="small"
-                        onClick={() => handleEditServer(server)}
-                        sx={{ ml: 1 }}
-                      >
-                        <EditIcon fontSize="small" />
-                      </IconButton>
-                      <IconButton
-                        size="small"
-                        onClick={() => handleDeleteServer(server.id)}
-                        sx={{ ml: 0.5 }}
-                      >
-                        <DeleteIcon fontSize="small" />
-                      </IconButton>
+                    <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+                      <Box sx={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', mr: 1 }}>
+                        <FormControlLabel
+                          control={
+                            <Switch
+                              size="small"
+                              checked={server.enabled}
+                              onChange={handleServerToggle(server.id)}
+                              disabled={!mcpConfig.global_enabled}
+                            />
+                          }
+                          label={
+                            <Typography variant="caption" sx={{ fontSize: '0.75rem' }}>
+                              {server.enabled ? t('common.enabled', { defaultValue: 'Enabled' }) : t('common.disabled', { defaultValue: 'Disabled' })}
+                            </Typography>
+                          }
+                        />
+                        <FormControlLabel
+                          control={
+                            <Switch
+                              size="small"
+                              checked={server.global_enabled || false}
+                              onChange={handleServerGlobalToggle(server.id)}
+                              disabled={!mcpConfig.global_enabled || !server.enabled}
+                              color="primary"
+                            />
+                          }
+                          label={
+                            <Typography variant="caption" sx={{ fontSize: '0.75rem' }}>
+                              {server.global_enabled ? t('configuration.mcp.globalEnabled', { defaultValue: 'Global' }) : t('configuration.mcp.globalDisabled', { defaultValue: 'Not Global' })}
+                            </Typography>
+                          }
+                        />
+                      </Box>
+                      <Box sx={{ display: 'flex', flexDirection: 'column' }}>
+                        <IconButton
+                          size="small"
+                          onClick={() => handleEditServer(server)}
+                        >
+                          <EditIcon fontSize="small" />
+                        </IconButton>
+                        <IconButton
+                          size="small"
+                          onClick={() => handleDeleteServer(server.id)}
+                        >
+                          <DeleteIcon fontSize="small" />
+                        </IconButton>
+                      </Box>
                     </Box>
                   </Box>
                 </Paper>

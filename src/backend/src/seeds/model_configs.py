@@ -56,6 +56,13 @@ DEFAULT_MODELS = {
         "context_window": 16385,
         "max_output_tokens": 4096
     },
+    "gpt-5": {
+        "name": "gpt-5",
+        "temperature": 0.7,
+        "provider": "openai",
+        "context_window": 400000,
+        "max_output_tokens": 128000
+    },
     "gemini-2.0-flash": {
         "name": "gemini-2.0-flash",
         "temperature": 0.7,
@@ -170,7 +177,7 @@ DEFAULT_MODELS = {
         "max_output_tokens": 32000
     },
     "claude-sonnet-4": {
-        "name": "claude-3-5-sonnet-20241022",
+        "name": "claude-sonnet-4-20250514",
         "temperature": 0.7,
         "provider": "anthropic",
         "context_window": 200000,
@@ -209,14 +216,28 @@ DEFAULT_MODELS = {
         "temperature": 0.7,
         "provider": "deepseek",
         "context_window": 128000,
-        "max_output_tokens": 4096
+        "max_output_tokens": 8000
     },
     "deepseek-reasoner": {
         "name": "deepseek-reasoner",
         "temperature": 0.7,
         "provider": "deepseek",
         "context_window": 128000,
-        "max_output_tokens": 4096
+        "max_output_tokens": 64000
+    },
+    "deepseek-v3.1-non-thinking": {
+        "name": "deepseek-chat",
+        "temperature": 0.7,
+        "provider": "deepseek",
+        "context_window": 128000,
+        "max_output_tokens": 8000
+    },
+    "deepseek-v3.1-thinking": {
+        "name": "deepseek-reasoner",
+        "temperature": 0.7,
+        "provider": "deepseek",
+        "context_window": 128000,
+        "max_output_tokens": 64000
     },
     "deepseek-coder-v2": {
         "name": "deepseek-coder-v2",
@@ -231,6 +252,20 @@ DEFAULT_MODELS = {
         "provider": "deepseek",
         "context_window": 128000,
         "max_output_tokens": 4096
+    },
+    "databricks-gpt-oss-120b": {
+        "name": "databricks-gpt-oss-120b",
+        "temperature": 0.7,
+        "provider": "databricks",
+        "context_window": 128000,
+        "max_output_tokens": 25000  # Maximum supported by Databricks endpoint
+    },
+    "databricks-gpt-oss-20b": {
+        "name": "databricks-gpt-oss-20b",
+        "temperature": 0.7,
+        "provider": "databricks",
+        "context_window": 128000,
+        "max_output_tokens": 16384
     }
 }
 

@@ -23,7 +23,7 @@ class PerplexitySearchTool(BaseTool):
     )
     args_schema: Type[BaseModel] = PerplexitySearchInput
     _api_key: Optional[str] = PrivateAttr(default=None)
-    _model: str = PrivateAttr(default="llama-3.1-sonar-small-128k-online")
+    _model: str = PrivateAttr(default="sonar")
     _temperature: float = PrivateAttr(default=0.1)
     _top_p: float = PrivateAttr(default=0.9)
     _max_tokens: int = PrivateAttr(default=2000)
@@ -67,8 +67,8 @@ class PerplexitySearchTool(BaseTool):
         if not api_key:
             api_key = os.environ.get("PERPLEXITY_API_KEY")
             if not api_key:
-                logger.warning("No Perplexity API key provided. Using default API key.")
-                api_key = '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'
+                logger.error("No Perplexity API key provided. Please configure PERPLEXITY_API_KEY in the API Keys settings.")
+                raise ValueError("Perplexity API key is required. Please configure it in the API Keys settings.")
                 
         self._api_key = api_key
         
@@ -171,15 +171,37 @@ class PerplexitySearchTool(BaseTool):
             response.raise_for_status()  # Raise exception for bad status codes
             
             result = response.json()
+            logger.debug(f"Full API response: {json.dumps(result, indent=2)}")
+            
             answer = result.get('choices', [{}])[0].get('message', {}).get('content', '')
             
+            # Extract citations/search_results from the response
+            # Check for both 'search_results' (new format) and 'citations' (old format)
+            search_results = result.get('search_results', [])
+            if not search_results:
+                # Check if citations are in the old format
+                search_results = result.get('citations', [])
+            
+            # Format the answer with citations if available
+            if search_results:
+                formatted_answer = f"{answer}\n\n**Sources:**\n"
+                for idx, citation in enumerate(search_results, 1):
+                    if isinstance(citation, dict):
+                        title = citation.get('title', 'Unknown')
+                        url = citation.get('url', '')
+                        formatted_answer += f"[{idx}] {title}: {url}\n"
+                    elif isinstance(citation, str):
+                        # Handle case where citations are just URLs
+                        formatted_answer += f"[{idx}] {citation}\n"
+                answer = formatted_answer
+            
             # Log a preview of the answer
-            logger.info(f"Perplexity answer: {answer[:100]}...")
+            logger.info(f"Perplexity answer with citations: {answer[:200]}...")
             
             # Create a structured response that matches our PerplexityToolOutput schema
             output = {
                 "answer": answer,
-                "references": [],  # API doesn't currently return references
+                "references": search_results,
                 "model": self._model,
                 "search_context": {
                     "query": query,
@@ -187,8 +209,7 @@ class PerplexitySearchTool(BaseTool):
                 }
             }
             
-            # Return the answer directly, as CrewAI expects a string response
-            # The structured output is still available in logs for debugging
+            # Return the formatted answer with citations
             logger.debug(f"Structured output: {json.dumps(output, indent=2)}")
             return answer
 

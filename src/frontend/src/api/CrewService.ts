@@ -23,6 +23,7 @@ interface TaskNode {
 interface NodeData {
   label: string;
   tools: string[];
+  tool_configs?: Record<string, unknown>;  // User-specific tool configuration overrides
   context: string[];
   async_execution: boolean;
   description?: string;
@@ -163,6 +164,11 @@ export class CrewService {
             });
             console.log('Processed knowledge_sources:', result[key]);
           }
+          // Special handling for tool_configs to preserve tool configuration overrides
+          else if (key === 'tool_configs' && value !== null && typeof value === 'object') {
+            console.log(`Processing tool_configs for node:`, value);
+            result[key] = value; // Preserve tool_configs as-is since it contains tool-specific config
+          }
           // Convert IDs to strings
           else if ((key === 'taskId' || key === 'agentId') && value !== null) {
             result[key] = String(value);
@@ -280,9 +286,19 @@ export class CrewService {
           node.data.async_execution = String(node.data.async_execution);
         }
 
-        // For agent nodes, ensure we preserve knowledge_sources
-        if (node.type === 'agentNode' && node.data.knowledge_sources) {
-          console.log(`Preserving knowledge_sources for agent node ${node.id}:`, node.data.knowledge_sources);
+        // For agent nodes, ensure we preserve knowledge_sources and tool_configs
+        if (node.type === 'agentNode') {
+          if (node.data.knowledge_sources) {
+            console.log(`Preserving knowledge_sources for agent node ${node.id}:`, node.data.knowledge_sources);
+          }
+          if (node.data.tool_configs) {
+            console.log(`Preserving tool_configs for agent node ${node.id}:`, node.data.tool_configs);
+          }
+        }
+        
+        // For task nodes, ensure we preserve tool_configs
+        if (node.type === 'taskNode' && node.data.tool_configs) {
+          console.log(`Preserving tool_configs for task node ${node.id}:`, node.data.tool_configs);
         }
 
         // Create a minimal node structure with original data
@@ -296,11 +312,24 @@ export class CrewService {
           data: convertBooleansToStrings(node.data as NodeData) as Record<string, unknown>
         };
 
-        // Verify knowledge_sources are preserved after conversion
-        if (node.type === 'agentNode' && node.data.knowledge_sources) {
+        // Verify knowledge_sources and tool_configs are preserved after conversion
+        if (node.type === 'agentNode') {
           const processedData = cleanedNode.data as Record<string, unknown>;
-          console.log(`After conversion, knowledge_sources for ${node.id}:`, 
-            processedData.knowledge_sources || 'missing');
+          if (node.data.knowledge_sources) {
+            console.log(`After conversion, knowledge_sources for ${node.id}:`, 
+              processedData.knowledge_sources || 'missing');
+          }
+          if (node.data.tool_configs) {
+            console.log(`After conversion, tool_configs for agent ${node.id}:`, 
+              processedData.tool_configs || 'missing');
+          }
+        }
+        
+        // Verify tool_configs are preserved for task nodes
+        if (node.type === 'taskNode' && node.data.tool_configs) {
+          const processedData = cleanedNode.data as Record<string, unknown>;
+          console.log(`After conversion, tool_configs for task ${node.id}:`, 
+            processedData.tool_configs || 'missing');
         }
 
         return cleanedNode;
@@ -387,6 +416,11 @@ export class CrewService {
               return source;
             });
             console.log('Processed knowledge_sources:', result[key]);
+          }
+          // Special handling for tool_configs to preserve tool configuration overrides
+          else if (key === 'tool_configs' && value !== null && typeof value === 'object') {
+            console.log(`Processing tool_configs for node:`, value);
+            result[key] = value; // Preserve tool_configs as-is since it contains tool-specific config
           }
           // Convert IDs to strings
           else if ((key === 'taskId' || key === 'agentId') && value !== null) {
@@ -476,6 +510,21 @@ export class CrewService {
           node.data.async_execution = String(node.data.async_execution);
         }
 
+        // For agent nodes, ensure we preserve knowledge_sources and tool_configs
+        if (node.type === 'agentNode') {
+          if (node.data.knowledge_sources) {
+            console.log(`Preserving knowledge_sources for agent node ${node.id}:`, node.data.knowledge_sources);
+          }
+          if (node.data.tool_configs) {
+            console.log(`Preserving tool_configs for agent node ${node.id}:`, node.data.tool_configs);
+          }
+        }
+        
+        // For task nodes, ensure we preserve tool_configs
+        if (node.type === 'taskNode' && node.data.tool_configs) {
+          console.log(`Preserving tool_configs for task node ${node.id}:`, node.data.tool_configs);
+        }
+
         // Create a minimal node structure with original data
         const cleanedNode = {
           id: node.id,
@@ -486,6 +535,26 @@ export class CrewService {
           },
           data: convertBooleansToStrings(node.data as NodeData) as Record<string, unknown>
         };
+
+        // Verify knowledge_sources and tool_configs are preserved after conversion
+        if (node.type === 'agentNode') {
+          const processedData = cleanedNode.data as Record<string, unknown>;
+          if (node.data.knowledge_sources) {
+            console.log(`After conversion, knowledge_sources for ${node.id}:`, 
+              processedData.knowledge_sources || 'missing');
+          }
+          if (node.data.tool_configs) {
+            console.log(`After conversion, tool_configs for agent ${node.id}:`, 
+              processedData.tool_configs || 'missing');
+          }
+        }
+        
+        // Verify tool_configs are preserved for task nodes
+        if (node.type === 'taskNode' && node.data.tool_configs) {
+          const processedData = cleanedNode.data as Record<string, unknown>;
+          console.log(`After conversion, tool_configs for task ${node.id}:`, 
+            processedData.tool_configs || 'missing');
+        }
 
         return cleanedNode;
       });

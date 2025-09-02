@@ -31,6 +31,11 @@ import CloseIcon from '@mui/icons-material/Close';
 import { TaskAdvancedConfig } from './TaskAdvancedConfig';
 import { TaskService } from '../../api/TaskService';
 import useStableResize from '../../hooks/global/useStableResize';
+import { GenieSpaceSelector } from '../Common/GenieSpaceSelector';
+import { PerplexityConfigSelector } from '../Common/PerplexityConfigSelector';
+import { SerperConfigSelector } from '../Common/SerperConfigSelector';
+import { MCPServerSelector } from '../Common/MCPServerSelector';
+import { PerplexityConfig, SerperConfig } from '../../types/config';
 
 interface TaskFormProps {
   initialData?: Task;
@@ -100,15 +105,60 @@ const TaskForm: React.FC<TaskFormProps> = ({ initialData, onCancel, onTaskSaved,
   });
   const [error, setError] = useState<string | null>(null);
   const [availableTasks, setAvailableTasks] = useState<Task[]>([]);
+  const [selectedGenieSpace, setSelectedGenieSpace] = useState<string>('');
+  const [perplexityConfig, setPerplexityConfig] = useState<PerplexityConfig>({});
+  const [serperConfig, setSerperConfig] = useState<SerperConfig>({});
+  const [selectedMcpServers, setSelectedMcpServers] = useState<string[]>([]);
+  const [toolConfigs, setToolConfigs] = useState<Record<string, unknown>>(initialData?.tool_configs || {});
 
   useEffect(() => {
     if (initialData?.tools) {
+      console.log('Setting tools from initialData:', initialData.tools);
+      console.log('Available tools:', tools);
       setFormData(prev => ({
         ...prev,
         tools: initialData.tools
       }));
     }
-  }, [initialData?.tools]);
+    // Load tool_configs and set Genie space and Perplexity config if they exist
+    if (initialData?.tool_configs) {
+      console.log('TaskForm: Loading tool_configs from initialData:', initialData.tool_configs);
+      setToolConfigs(initialData.tool_configs);
+      
+      // Check for GenieTool config - try both spaceId and space_id for compatibility
+      const genieConfig = initialData.tool_configs.GenieTool as Record<string, unknown>;
+      if (genieConfig) {
+        console.log('TaskForm: Found GenieTool config:', genieConfig);
+        const spaceId = genieConfig.spaceId || genieConfig.space_id;
+        if (spaceId && typeof spaceId === 'string') {
+          console.log('TaskForm: Setting selectedGenieSpace to:', spaceId);
+          setSelectedGenieSpace(spaceId);
+        }
+      }
+      
+      if (initialData.tool_configs.PerplexityTool) {
+        console.log('TaskForm: Found PerplexityTool config:', initialData.tool_configs.PerplexityTool);
+        setPerplexityConfig(initialData.tool_configs.PerplexityTool as PerplexityConfig);
+      }
+      
+      if (initialData.tool_configs.SerperDevTool) {
+        console.log('TaskForm: Found SerperDevTool config:', initialData.tool_configs.SerperDevTool);
+        setSerperConfig(initialData.tool_configs.SerperDevTool as SerperConfig);
+      }
+      
+      // Check for MCP_SERVERS config
+      if (initialData.tool_configs.MCP_SERVERS) {
+        console.log('TaskForm: Found MCP_SERVERS config:', initialData.tool_configs.MCP_SERVERS);
+        const mcpConfig = initialData.tool_configs.MCP_SERVERS as Record<string, unknown>;
+        const mcpServers = Array.isArray(mcpConfig.servers) 
+          ? mcpConfig.servers 
+          : Array.isArray(initialData.tool_configs.MCP_SERVERS)
+          ? initialData.tool_configs.MCP_SERVERS  // Fallback for old format
+          : [];
+        setSelectedMcpServers(mcpServers);
+      }
+    }
+  }, [initialData?.tools, initialData?.tool_configs, tools]);
 
   useEffect(() => {
     // Fetch available tasks when component mounts
@@ -124,6 +174,7 @@ const TaskForm: React.FC<TaskFormProps> = ({ initialData, onCancel, onTaskSaved,
 
     void fetchTasks();
   }, []);
+
 
   const handleInputChange = (field: keyof Task, value: string) => {
     setFormData((prev: Task) => ({
@@ -173,6 +224,7 @@ const TaskForm: React.FC<TaskFormProps> = ({ initialData, onCancel, onTaskSaved,
     }));
   };
 
+
   const handleSave = async () => {
     try {
       // Clear any existing error
@@ -191,10 +243,97 @@ const TaskForm: React.FC<TaskFormProps> = ({ initialData, onCancel, onTaskSaved,
           callback: formData.config.callback
         });
 
+        // Build tool_configs for tools that need configuration
+        let updatedToolConfigs = { ...toolConfigs };
+        
+        // Handle GenieTool config
+        if (selectedGenieSpace && formData.tools.some(toolId => {
+          const tool = tools.find(t => 
+            String(t.id) === String(toolId) || 
+            t.id === Number(toolId) ||
+            t.title === toolId
+          );
+          return tool?.title === 'GenieTool';
+        })) {
+          updatedToolConfigs = {
+            ...updatedToolConfigs,
+            GenieTool: {
+              spaceId: selectedGenieSpace
+            }
+          };
+        } else if (!selectedGenieSpace) {
+          // Remove GenieTool config if no space selected
+          delete updatedToolConfigs.GenieTool;
+        }
+        
+        // Handle PerplexityTool config
+        if (perplexityConfig && Object.keys(perplexityConfig).length > 0 && formData.tools.some(toolId => {
+          const tool = tools.find(t => 
+            String(t.id) === String(toolId) || 
+            t.id === Number(toolId) ||
+            t.title === toolId
+          );
+          return tool?.title === 'PerplexityTool';
+        })) {
+          updatedToolConfigs = {
+            ...updatedToolConfigs,
+            PerplexityTool: perplexityConfig
+          };
+        } else if (!formData.tools.some(toolId => {
+          const tool = tools.find(t => 
+            String(t.id) === String(toolId) || 
+            t.id === Number(toolId) ||
+            t.title === toolId
+          );
+          return tool?.title === 'PerplexityTool';
+        })) {
+          // Remove PerplexityTool config if tool not selected
+          delete updatedToolConfigs.PerplexityTool;
+        }
+        
+        // Handle SerperDevTool config
+        if (serperConfig && Object.keys(serperConfig).length > 0 && formData.tools.some(toolId => {
+          const tool = tools.find(t => 
+            String(t.id) === String(toolId) || 
+            t.id === Number(toolId) ||
+            t.title === toolId
+          );
+          return tool?.title === 'SerperDevTool';
+        })) {
+          updatedToolConfigs = {
+            ...updatedToolConfigs,
+            SerperDevTool: serperConfig
+          };
+        } else if (!formData.tools.some(toolId => {
+          const tool = tools.find(t => 
+            String(t.id) === String(toolId) || 
+            t.id === Number(toolId) ||
+            t.title === toolId
+          );
+          return tool?.title === 'SerperDevTool';
+        })) {
+          // Remove SerperDevTool config if tool not selected
+          delete updatedToolConfigs.SerperDevTool;
+        }
+        
+        // Handle MCP_SERVERS config - use dict format to match schema
+        if (selectedMcpServers && selectedMcpServers.length > 0) {
+          updatedToolConfigs = {
+            ...updatedToolConfigs,
+            MCP_SERVERS: {
+              servers: selectedMcpServers
+            }
+          };
+        } else {
+          // Remove MCP_SERVERS config if none selected
+          delete updatedToolConfigs.MCP_SERVERS;
+        }
+        
         // Create a cleaned version of the form data
         const cleanedFormData: Task = {
           ...formData,
           context: Array.from(formData.context),
+          tool_configs: Object.keys(updatedToolConfigs).length > 0 ? updatedToolConfigs : undefined,
           // Ensure top-level markdown is synchronized with config.markdown
           markdown: formData.config.markdown ?? formData.markdown,
           config: {
@@ -207,6 +346,7 @@ const TaskForm: React.FC<TaskFormProps> = ({ initialData, onCancel, onTaskSaved,
             markdown: formData.config.markdown ?? formData.markdown
           }
         };
+        
         
         console.log('Cleaned formData to save:', cleanedFormData);
         console.log('Final config values to save:', {
@@ -331,6 +471,18 @@ const TaskForm: React.FC<TaskFormProps> = ({ initialData, onCancel, onTaskSaved,
               value={formData.name}
               onChange={(e) => handleInputChange('name', e.target.value)}
               required
+              margin="normal"
+              sx={{
+                '& .MuiOutlinedInput-root': {
+                  '& fieldset': {
+                    borderColor: 'rgba(0, 0, 0, 0.23)',
+                  },
+                },
+                '& .MuiInputLabel-root': {
+                  backgroundColor: 'white',
+                  padding: '0 4px',
+                },
+              }}
             />
             <TextField
               fullWidth
@@ -391,11 +543,16 @@ const TaskForm: React.FC<TaskFormProps> = ({ initialData, onCancel, onTaskSaved,
                 renderValue={(selected) => (
                   <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 0.5 }}>
                     {(selected as string[]).map((toolId) => {
-                      const tool = tools.find(t => t.id === Number(toolId));
+                      // Try to find tool by comparing both string and number forms
+                      const tool = tools.find(t => 
+                        String(t.id) === String(toolId) || 
+                        t.id === Number(toolId) ||
+                        t.title === toolId  // Also check by title for backward compatibility
+                      );
                       return (
                         <Chip 
                           key={toolId}
-                          label={tool ? tool.title : toolId}
+                          label={tool ? tool.title : `Tool ${toolId}`}
                           size="small"
                         />
                       );
@@ -403,20 +560,199 @@ const TaskForm: React.FC<TaskFormProps> = ({ initialData, onCancel, onTaskSaved,
                   </Box>
                 )}
               >
-                {tools
-                  .filter(tool => tool.enabled !== false)
-                  .map((tool) => (
-                  <MenuItem key={tool.id} value={tool.id.toString()}>
-                    <Box sx={{ display: 'flex', flexDirection: 'column' }}>
-                      <Typography>{tool.title}</Typography>
-                      <Typography variant="caption" color="text.secondary">
-                        {tool.description}
-                      </Typography>
-                    </Box>
+                {tools && tools.length > 0 ? (
+                  tools
+                    .filter(tool => tool.enabled !== false)
+                    .map((tool) => (
+                    <MenuItem key={tool.id} value={tool.id.toString()}>
+                      <Box sx={{ display: 'flex', flexDirection: 'column' }}>
+                        <Typography>{tool.title}</Typography>
+                        <Typography variant="caption" color="text.secondary">
+                          {tool.description}
+                        </Typography>
+                      </Box>
+                    </MenuItem>
+                  ))
+                ) : (
+                  <MenuItem disabled>
+                    <Typography variant="body2" color="text.secondary">
+                      No tools available
+                    </Typography>
                   </MenuItem>
-                ))}
+                )}
               </Select>
             </FormControl>
+
+            {/* Genie Space Selector - Show only when GenieTool is selected */}
+            {formData.tools.some(toolId => {
+              const tool = tools.find(t => 
+                String(t.id) === String(toolId) || 
+                t.id === Number(toolId) ||
+                t.title === toolId
+              );
+              return tool?.title === 'GenieTool';
+            }) && (
+              <Box sx={{ mt: 2 }}>
+                <GenieSpaceSelector
+                  value={selectedGenieSpace}
+                  onChange={(value) => {
+                    setSelectedGenieSpace(value as string || '');
+                    // Update tool configs when space changes
+                    if (value) {
+                      setToolConfigs(prev => ({
+                        ...prev,
+                        GenieTool: {
+                          spaceId: value as string
+                        }
+                      }));
+                    } else {
+                      // Remove GenieTool config if no space selected
+                      setToolConfigs(prev => {
+                        const newConfigs = { ...prev };
+                        delete newConfigs.GenieTool;
+                        return newConfigs;
+                      });
+                    }
+                  }}
+                  label="Genie Space"
+                  placeholder="Search for Genie spaces..."
+                  helperText="Select the Genie space to use with this task"
+                  required
+                  fullWidth
+                />
+              </Box>
+            )}
+
+            {/* Perplexity Configuration - Show only when PerplexityTool is selected */}
+            {formData.tools.some(toolId => {
+              const tool = tools.find(t => 
+                String(t.id) === String(toolId) || 
+                t.id === Number(toolId) ||
+                t.title === toolId
+              );
+              return tool?.title === 'PerplexityTool';
+            }) && (
+              <Box sx={{ mt: 2 }}>
+                <PerplexityConfigSelector
+                  value={perplexityConfig}
+                  onChange={(config) => {
+                    setPerplexityConfig(config);
+                    // Update tool configs when configuration changes
+                    setToolConfigs(prev => ({
+                      ...prev,
+                      PerplexityTool: config
+                    }));
+                  }}
+                  label="Perplexity Configuration"
+                  helperText="Configure Perplexity AI search parameters for this task"
+                  fullWidth
+                />
+              </Box>
+            )}
+
+            {/* Serper Configuration - Show only when SerperDevTool is selected */}
+            {formData.tools.some(toolId => {
+              const tool = tools.find(t => 
+                String(t.id) === String(toolId) || 
+                t.id === Number(toolId) ||
+                t.title === toolId
+              );
+              return tool?.title === 'SerperDevTool';
+            }) && (
+              <Box sx={{ mt: 2 }}>
+                <SerperConfigSelector
+                  value={serperConfig}
+                  onChange={(config) => {
+                    setSerperConfig(config);
+                    // Update tool configs when configuration changes
+                    setToolConfigs(prev => ({
+                      ...prev,
+                      SerperDevTool: config
+                    }));
+                  }}
+                  label="Serper Configuration"
+                  helperText="Configure Serper.dev search parameters for this task"
+                  fullWidth
+                />
+              </Box>
+            )}
+
+            {/* MCP Server Configuration - Always show as it's independent of regular tools */}
+            <Box sx={{ mt: 2 }}>
+              {/* Show selected MCP servers visually */}
+              {selectedMcpServers.length > 0 && (
+                <Box sx={{ 
+                  mb: 2, 
+                  p: 2, 
+                  backgroundColor: 'rgba(25, 118, 210, 0.04)', 
+                  borderRadius: 1,
+                  border: '1px solid rgba(25, 118, 210, 0.12)'
+                }}>
+                  <Typography 
+                    variant="subtitle2" 
+                    color="primary" 
+                    sx={{ 
+                      mb: 1, 
+                      fontWeight: 600,
+                      fontSize: '0.875rem'
+                    }}
+                  >
+                    Selected MCP Servers ({selectedMcpServers.length})
+                  </Typography>
+                  <Box sx={{ 
+                    display: 'flex', 
+                    flexWrap: 'wrap', 
+                    gap: 1
+                  }}>
+                    {selectedMcpServers.map((server) => (
+                      <Chip
+                        key={server}
+                        label={server}
+                        size="medium"
+                        color="primary"
+                        variant="filled"
+                        onDelete={() => {
+                          const newServers = selectedMcpServers.filter(s => s !== server);
+                          setSelectedMcpServers(newServers);
+                          setToolConfigs(prev => ({
+                            ...prev,
+                            MCP_SERVERS: newServers
+                          }));
+                        }}
+                        sx={{ 
+                          '& .MuiChip-deleteIcon': { 
+                            fontSize: '18px',
+                            '&:hover': {
+                              color: 'error.main'
+                            }
+                          },
+                          fontWeight: 500
+                        }}
+                      />
+                    ))}
+                  </Box>
+                </Box>
+              )}
+              
+              <MCPServerSelector
+                value={selectedMcpServers}
+                onChange={(servers) => {
+                  const serverArray = Array.isArray(servers) ? servers : (servers ? [servers] : []);
+                  setSelectedMcpServers(serverArray);
+                  // Update tool configs when MCP servers change
+                  setToolConfigs(prev => ({
+                    ...prev,
+                    MCP_SERVERS: serverArray
+                  }));
+                }}
+                label="MCP Servers"
+                placeholder="Select MCP servers for this task..."
+                helperText="Choose which MCP (Model Context Protocol) servers this task should have access to"
+                multiple={true}
+                fullWidth
+              />
+            </Box>
+
             <Accordion 
               expanded={expandedAccordion}
               onChange={handleAccordionChange}

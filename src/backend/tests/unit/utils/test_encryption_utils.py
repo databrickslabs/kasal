@@ -183,7 +183,8 @@ class TestEncryptionUtils:
                 mock_load_private.return_value = mock_private_key_obj
                 
                 # Mock RSA decryption
-                mock_symmetric_key = b"symmetric_key"
+                # Use a valid 32-byte Fernet key
+                mock_symmetric_key = Fernet.generate_key()  # This generates a valid key
                 mock_private_key_obj.decrypt.return_value = mock_symmetric_key
                 
                 # Mock symmetric decryption
@@ -231,9 +232,8 @@ class TestEncryptionUtils:
         test_value = "test_value"
         expected_result = "ssh_encrypted_result"
         
-        with patch('src.utils.encryption_utils.EncryptionUtils.encrypt_with_ssh') as mock_ssh_encrypt:
-            mock_ssh_encrypt.return_value = expected_result
-            
+        # We need to patch at the module level, not the class level
+        with patch.object(EncryptionUtils, 'encrypt_with_ssh', return_value=expected_result) as mock_ssh_encrypt:
             result = EncryptionUtils.encrypt_value(test_value)
             
             assert result == expected_result
@@ -244,15 +244,12 @@ class TestEncryptionUtils:
         test_value = "test_value"
         expected_result = b"fernet_encrypted_result"
         
-        with patch('src.utils.encryption_utils.EncryptionUtils.encrypt_with_ssh') as mock_ssh_encrypt, \
-             patch('src.utils.encryption_utils.EncryptionUtils.get_encryption_key') as mock_get_key, \
+        with patch.object(EncryptionUtils, 'encrypt_with_ssh', side_effect=Exception("SSH error")) as mock_ssh_encrypt, \
+             patch.object(EncryptionUtils, 'get_encryption_key') as mock_get_key, \
              patch('src.utils.encryption_utils.Fernet') as mock_fernet_class:
             
-            # SSH encryption fails
-            mock_ssh_encrypt.side_effect = Exception("SSH error")
-            
             # Fernet encryption succeeds
-            mock_key = b"fernet_key"
+            mock_key = Fernet.generate_key()  # Use a valid key
             mock_get_key.return_value = mock_key
             mock_fernet = Mock()
             mock_fernet.encrypt.return_value = expected_result
@@ -268,11 +265,8 @@ class TestEncryptionUtils:
         test_encrypted_value = "ssh_encrypted_value"
         expected_result = "decrypted_value"
         
-        with patch('src.utils.encryption_utils.EncryptionUtils.is_ssh_encrypted') as mock_is_ssh, \
-             patch('src.utils.encryption_utils.EncryptionUtils.decrypt_with_ssh') as mock_ssh_decrypt:
-            
-            mock_is_ssh.return_value = True
-            mock_ssh_decrypt.return_value = expected_result
+        with patch.object(EncryptionUtils, 'is_ssh_encrypted', return_value=True) as mock_is_ssh, \
+             patch.object(EncryptionUtils, 'decrypt_with_ssh', return_value=expected_result) as mock_ssh_decrypt:
             
             result = EncryptionUtils.decrypt_value(test_encrypted_value)
             
@@ -284,14 +278,12 @@ class TestEncryptionUtils:
         test_encrypted_value = "fernet_encrypted_value"
         expected_result = "decrypted_value"
         
-        with patch('src.utils.encryption_utils.EncryptionUtils.is_ssh_encrypted') as mock_is_ssh, \
-             patch('src.utils.encryption_utils.EncryptionUtils.get_encryption_key') as mock_get_key, \
+        with patch.object(EncryptionUtils, 'is_ssh_encrypted', return_value=False) as mock_is_ssh, \
+             patch.object(EncryptionUtils, 'get_encryption_key') as mock_get_key, \
              patch('src.utils.encryption_utils.Fernet') as mock_fernet_class:
             
-            mock_is_ssh.return_value = False
-            
             # Fernet decryption
-            mock_key = b"fernet_key"
+            mock_key = Fernet.generate_key()  # Use a valid key
             mock_get_key.return_value = mock_key
             mock_fernet = Mock()
             mock_fernet.decrypt.return_value = expected_result.encode()

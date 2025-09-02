@@ -479,7 +479,7 @@ class TestChatHistoryServiceUnit:
             session_id="session-456",
             user_id="user@company.com",
             message_type="assistant",
-            content="I've created a complete crew for you",
+            content="I've created a complete plan for you",
             generation_result=complex_result,
             timestamp=datetime.utcnow()
         )
@@ -490,7 +490,7 @@ class TestChatHistoryServiceUnit:
             session_id="session-456",
             user_id="user@company.com",
             message_type="assistant",
-            content="I've created a complete crew for you",
+            content="I've created a complete plan for you",
             generation_result=complex_result,
             group_context=group_context
         )

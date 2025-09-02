@@ -9,7 +9,7 @@ import RouterIcon from '@mui/icons-material/Router';
 import { Theme } from '@mui/material/styles';
 import ConditionEditForm from './ConditionEditForm';
 import type { FlowFormData } from '../../types/flow';
-import axios from 'axios';
+import { apiClient } from '../../config/api/ApiConfig';
 import { CrewService } from '../../api/CrewService';
 
 interface ConditionFlowNodeData {
@@ -69,7 +69,7 @@ const ConditionFlowNode: React.FC<{ data: ConditionFlowNodeData; id: string }> =
       // Fetch tasks
       const fetchTasks = async () => {
         try {
-          const response = await axios.get('http://localhost:8000/api/tasks');
+          const response = await apiClient.get('/tasks');
           const tasks = response.data;
           setAvailableTasks(tasks.map((task: { id: string; name: string }) => ({
             id: task.id.toString(),

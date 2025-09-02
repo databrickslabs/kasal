@@ -201,7 +201,8 @@ const ShowTrace: React.FC<ShowTraceProps> = ({ open, onClose, runId }) => {
     if (trace.task_id && taskDetails[trace.task_id] && taskDetails[trace.task_id].name) {
       return `Task: ${taskDetails[trace.task_id].name}`;
     }
-    return trace.event_context || '';
+    // Display event_source (agent name) instead of event_context
+    return trace.event_source || trace.event_context || '';
   };
 
   const MarkdownParagraph = React.forwardRef<HTMLParagraphElement, MarkdownProps>((props, ref) => (

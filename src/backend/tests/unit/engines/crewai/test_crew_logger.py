@@ -14,7 +14,7 @@ from unittest.mock import patch, MagicMock, AsyncMock, call, PropertyMock
 from contextlib import contextmanager
 from datetime import datetime
 
-from src.engines.crewai.crew_logger import CrewLogger, CrewLoggerHandler, EXTENDED_EVENTS_AVAILABLE
+from src.engines.crewai.crew_logger import CrewLogger, CrewLoggerHandler
 
 
 @pytest.fixture
@@ -75,7 +75,6 @@ class TestCrewLogger:
         assert crew_logger_instance._crew_logger == mock_logger_manager.crew
         assert crew_logger_instance._initialized is True
         assert crew_logger_instance._active_jobs == {}
-        assert crew_logger_instance._event_handlers == {}
     
     def test_setup_crewai_logging(self, crew_logger_instance):
         """Test setup of CrewAI logging redirection."""
@@ -102,27 +101,43 @@ class TestCrewLogger:
     def test_module_coverage_verification(self):
         """Verify module constants and coverage."""
         # Simple test to verify module is loaded and accessible
-        from src.engines.crewai.crew_logger import EXTENDED_EVENTS_AVAILABLE, logger
+        from src.engines.crewai.crew_logger import logger
         
-        # Test the key constants exist
-        assert isinstance(EXTENDED_EVENTS_AVAILABLE, bool)
+        # Test the logger exists
         assert logger is not None
 
-    def test_import_error_handling_for_extended_events(self):
-        """Test the ImportError handling for extended events."""
-        # This tests the ImportError path in lines 59-61
-        # We can't easily test the module-level import error, so we test the concept
-        from src.engines.crewai.crew_logger import EXTENDED_EVENTS_AVAILABLE
+    def test_setup_for_job(self, crew_logger_instance, mock_group_context):
+        """Test setup for job functionality."""
+        job_id = "test_job_123"
         
-        # The module either has extended events available or not
-        # Both cases are valid and should be handled
-        assert isinstance(EXTENDED_EVENTS_AVAILABLE, bool)
+        with patch("src.engines.crewai.crew_logger.CrewLoggerHandler") as mock_handler_class:
+            mock_handler = MagicMock()
+            mock_handler_class.return_value = mock_handler
+            
+            crew_logger_instance.setup_for_job(job_id, mock_group_context)
+            
+            # Verify handler was created and added
+            mock_handler_class.assert_called_once_with(job_id=job_id, group_context=mock_group_context)
+            crew_logger_instance._crew_logger.addHandler.assert_called_once_with(mock_handler)
+            assert job_id in crew_logger_instance._active_jobs
+
+    def test_cleanup_for_job(self, crew_logger_instance, mock_group_context):
+        """Test cleanup for job functionality."""
+        job_id = "test_job_123"
         
-        # Test that the module handles the case when extended events aren't available
-        if not EXTENDED_EVENTS_AVAILABLE:
-            # This means the ImportError path was taken during module load
-            # The test passes just by verifying the boolean is set correctly
-            assert EXTENDED_EVENTS_AVAILABLE is False
+        # Setup a job first
+        with patch("src.engines.crewai.crew_logger.CrewLoggerHandler") as mock_handler_class:
+            mock_handler = MagicMock()
+            mock_handler_class.return_value = mock_handler
+            
+            crew_logger_instance.setup_for_job(job_id, mock_group_context)
+            
+            # Now test cleanup
+            crew_logger_instance.cleanup_for_job(job_id)
+            
+            # Verify handler was removed
+            crew_logger_instance._crew_logger.removeHandler.assert_called_with(mock_handler)
+            assert job_id not in crew_logger_instance._active_jobs
 
 
 class TestCrewLoggerHandler:

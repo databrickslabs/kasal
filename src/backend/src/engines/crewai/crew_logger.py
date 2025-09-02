@@ -23,42 +23,7 @@ warnings.filterwarnings("ignore", message=".*Use 'content=.*' to upload raw byte
 warnings.filterwarnings("ignore", message=".*Accessing the 'model_fields' attribute on the instance is deprecated.*")
 warnings.filterwarnings("ignore", message=".*remove second argument of ws_handler.*")
 
-# Import CrewAI's event system
-from crewai.utilities.events import (
-    AgentExecutionCompletedEvent,
-    AgentExecutionStartedEvent,
-    ToolUsageStartedEvent,
-    ToolUsageFinishedEvent,
-    LLMCallStartedEvent,
-    LLMCallCompletedEvent,
-    TaskCompletedEvent,
-    TaskStartedEvent,
-    CrewKickoffStartedEvent,
-    CrewKickoffCompletedEvent,
-    CrewKickoffFailedEvent,
-    crewai_event_bus
-)
-
-# Import shared utilities
-from src.engines.crewai.utils.agent_utils import extract_agent_name_from_event
-
-# Try to import additional events if available
-try:
-    from crewai.utilities.events import (
-        AgentExecutionErrorEvent,
-        ToolUsageErrorEvent,
-        TaskEvaluationEvent,
-        CrewTestStartedEvent,
-        CrewTestCompletedEvent,
-        CrewTestFailedEvent,
-        CrewTrainStartedEvent,
-        CrewTrainCompletedEvent,
-        CrewTrainFailedEvent
-    )
-    EXTENDED_EVENTS_AVAILABLE = True
-except ImportError:
-    # These events might not be available in all CrewAI versions
-    EXTENDED_EVENTS_AVAILABLE = False
+# Import CrewAI's Printer for output redirection (still needed)
 from crewai.utilities.printer import Printer
 
 # Import core logger
@@ -73,9 +38,6 @@ from src.utils.user_context import GroupContext
 # Configure logger
 logger = logging.getLogger(__name__)
 
-# Log extended events availability after logger is configured
-if not EXTENDED_EVENTS_AVAILABLE:
-    logger.info("Some extended CrewAI events are not available in this version")
 
 class CrewLogger:
     """
@@ -103,8 +65,6 @@ class CrewLogger:
             # Store original print method for Printer class
             self._original_print_method = None
             
-            # Initialize event listeners
-            self._event_handlers = {}
             
             # Track active job IDs with their handlers
             self._active_jobs = {}
@@ -166,6 +126,9 @@ class CrewLogger:
         """
         Set up comprehensive logging for a specific job.
         
+        NOTE: Event handling is now done via execution-scoped callbacks passed to crew.kickoff()
+        This method now focuses on stdout/stderr capture and printer patching.
+        
         Args:
             job_id: The execution/job ID
             group_context: Group context for logging isolation
@@ -182,19 +145,15 @@ class CrewLogger:
         self._active_jobs[job_id] = {
             "handler": handler,
             "original_print_method": None,
-            "event_handlers": []  # Store event handler references for cleanup
         }
         
         # Attach handler to crew logger
         self._crew_logger.addHandler(handler)
         
         # Log setup confirmation
-        self._crew_logger.info(f"CrewLogger set up for job {job_id}")
+        self._crew_logger.info(f"CrewLogger set up for job {job_id} (using execution-scoped callbacks)")
         
-        # Set up event bus listeners
-        self._register_event_listeners(job_id)
-        
-        # Override CrewAI's Printer
+        # Override CrewAI's Printer (still needed for print() statements)
         self._patch_printer(job_id)
     
     def cleanup_for_job(self, job_id: str) -> None:
@@ -227,246 +186,6 @@ class CrewLogger:
         # Log cleanup confirmation (won't go through our handler since it's removed)
         logger.info(f"CrewLogger cleaned up for job {job_id}")
     
-    def _register_event_listeners(self, job_id: str) -> None:
-        """
-        Register listeners for all relevant CrewAI events with detailed formatting.
-        
-        Args:
-            job_id: The execution/job ID
-        """
-        logger.info(f"[CrewLogger] Registering event listeners for job {job_id}")
-        
-        # Check if we already have event handlers for any job
-        # This is a temporary fix to prevent duplicate registrations
-        if self._event_handlers:
-            logger.warning(f"[CrewLogger] Event handlers already exist from previous jobs. Skipping registration for job {job_id} to prevent duplicates.")
-            return
-        
-        # Register Crew-level events
-        self._register_crew_events(job_id)
-        
-        # Register Agent-level events  
-        self._register_agent_events(job_id)
-        
-        # Register Task-level events
-        self._register_task_events(job_id)
-        
-        # Register Tool usage events
-        self._register_tool_events(job_id)
-        
-        # Register LLM call events
-        self._register_llm_events(job_id)
-        
-        # Register extended events if available
-        if EXTENDED_EVENTS_AVAILABLE:
-            self._register_extended_events(job_id)
-        
-        # Mark that we have registered handlers
-        self._event_handlers[job_id] = True
-    
-    def _register_crew_events(self, job_id: str) -> None:
-        """Register crew-level event handlers."""
-        
-        @crewai_event_bus.on(CrewKickoffStartedEvent)
-        def on_crew_kickoff_started(source, event):
-            try:
-                crew_name = getattr(event, 'crew_name', 'Unknown Crew')
-                log_message = f"CREW STARTED: {crew_name} (Job: {job_id})"
-                self._crew_logger.info(log_message)
-                
-                # Also directly enqueue to ensure it reaches the execution logs table
-                group_context = None
-                if job_id in self._active_jobs:
-                    job_handler = self._active_jobs[job_id]["handler"]
-                    group_context = getattr(job_handler, 'group_context', None)
-                
-                enqueue_log(
-                    execution_id=job_id, 
-                    content=f"[CREW] {datetime.now().strftime('%Y-%m-%d %H:%M:%S')} - INFO - {log_message}", 
-                    group_context=group_context
-                )
-            except Exception as e:
-                self._crew_logger.error(f"Error in crew kickoff started handler: {e}")
-        
-        @crewai_event_bus.on(CrewKickoffCompletedEvent)  
-        def on_crew_kickoff_completed(source, event):
-            try:
-                crew_name = getattr(event, 'crew_name', 'Unknown Crew')
-                output = getattr(event, 'output', 'No output provided')
-                output_preview = str(output)[:200] + "..." if len(str(output)) > 200 else str(output)
-                log_message = f"CREW COMPLETED: {crew_name} (Job: {job_id}) - Output: {output_preview}"
-                self._crew_logger.info(log_message)
-                
-                # Also directly enqueue to ensure it reaches the execution logs table
-                group_context = None
-                if job_id in self._active_jobs:
-                    job_handler = self._active_jobs[job_id]["handler"]
-                    group_context = getattr(job_handler, 'group_context', None)
-                
-                enqueue_log(
-                    execution_id=job_id, 
-                    content=f"[CREW] {datetime.now().strftime('%Y-%m-%d %H:%M:%S')} - INFO - {log_message}", 
-                    group_context=group_context
-                )
-            except Exception as e:
-                self._crew_logger.error(f"Error in crew kickoff completed handler: {e}")
-        
-        @crewai_event_bus.on(CrewKickoffFailedEvent)
-        def on_crew_kickoff_failed(source, event):
-            try:
-                crew_name = getattr(event, 'crew_name', 'Unknown Crew')
-                error = getattr(event, 'error', 'Unknown error')
-                self._crew_logger.error(f"CREW FAILED: {crew_name} (Job: {job_id}) - Error: {str(error)}")
-            except Exception as e:
-                self._crew_logger.error(f"Error in crew kickoff failed handler: {e}")
-    
-    def _register_agent_events(self, job_id: str) -> None:
-        """Register agent-level event handlers."""
-        
-        @crewai_event_bus.on(AgentExecutionStartedEvent)
-        def on_agent_execution_started(source, event):
-            try:
-                agent_role = extract_agent_name_from_event(event, f"[CrewLogger][{job_id}]")
-                task_desc = getattr(event.task, 'description', 'Unknown Task') if hasattr(event, 'task') else 'Unknown Task'
-                task_preview = task_desc[:100] + "..." if len(task_desc) > 100 else task_desc
-                log_message = f"AGENT STARTED: {agent_role} - Task: {task_preview}"
-                self._crew_logger.info(log_message)
-                
-                # Also directly enqueue to ensure it reaches the execution logs table
-                group_context = None
-                if job_id in self._active_jobs:
-                    job_handler = self._active_jobs[job_id]["handler"]
-                    group_context = getattr(job_handler, 'group_context', None)
-                
-                enqueue_log(
-                    execution_id=job_id, 
-                    content=f"[CREW] {datetime.now().strftime('%Y-%m-%d %H:%M:%S')} - INFO - {log_message}", 
-                    group_context=group_context
-                )
-            except Exception as e:
-                self._crew_logger.error(f"Error in agent execution started handler: {e}")
-        
-        @crewai_event_bus.on(AgentExecutionCompletedEvent)
-        def on_agent_execution_completed(source, event):
-            try:
-                agent_role = extract_agent_name_from_event(event, f"[CrewLogger][{job_id}]")
-                task_desc = getattr(event.task, 'description', 'Unknown Task') if hasattr(event, 'task') else 'Unknown Task'
-                task_preview = task_desc[:100] + "..." if len(task_desc) > 100 else task_desc
-                output = getattr(event, 'output', 'No output')
-                output_preview = str(output)[:150] + "..." if len(str(output)) > 150 else str(output)
-                self._crew_logger.info(f"AGENT COMPLETED: {agent_role} - Task: {task_preview} - Output: {output_preview}")
-            except Exception as e:
-                self._crew_logger.error(f"Error in agent execution completed handler: {e}")
-    
-    def _register_task_events(self, job_id: str) -> None:
-        """Register task-level event handlers."""
-        
-        @crewai_event_bus.on(TaskStartedEvent)
-        def on_task_started(source, event):
-            try:
-                task_desc = getattr(event.task, 'description', 'Unknown Task') if hasattr(event, 'task') else 'Unknown Task'
-                agent_role = extract_agent_name_from_event(event, f"[CrewLogger][{job_id}]")
-                task_preview = task_desc[:120] + "..." if len(task_desc) > 120 else task_desc
-                log_message = f"TASK STARTED: {task_preview} (Agent: {agent_role})"
-                self._crew_logger.info(log_message)
-                
-                # Also directly enqueue to ensure it reaches the execution logs table
-                group_context = None
-                if job_id in self._active_jobs:
-                    job_handler = self._active_jobs[job_id]["handler"]
-                    group_context = getattr(job_handler, 'group_context', None)
-                
-                enqueue_log(
-                    execution_id=job_id, 
-                    content=f"[CREW] {datetime.now().strftime('%Y-%m-%d %H:%M:%S')} - INFO - {log_message}", 
-                    group_context=group_context
-                )
-            except Exception as e:
-                self._crew_logger.error(f"Error in task started handler: {e}")
-        
-        @crewai_event_bus.on(TaskCompletedEvent)
-        def on_task_completed(source, event):
-            try:
-                task_desc = getattr(event.task, 'description', 'Unknown Task') if hasattr(event, 'task') else 'Unknown Task'
-                agent_role = extract_agent_name_from_event(event, f"[CrewLogger][{job_id}]")
-                task_preview = task_desc[:120] + "..." if len(task_desc) > 120 else task_desc
-                output = getattr(event, 'output', 'No output')
-                output_preview = str(output)[:150] + "..." if len(str(output)) > 150 else str(output)
-                self._crew_logger.info(f"TASK COMPLETED: {task_preview} (Agent: {agent_role}) - Result: {output_preview}")
-            except Exception as e:
-                self._crew_logger.error(f"Error in task completed handler: {e}")
-    
-    def _register_tool_events(self, job_id: str) -> None:
-        """Register tool usage event handlers."""
-        
-        @crewai_event_bus.on(ToolUsageStartedEvent)
-        def on_tool_usage_started(source, event):
-            try:
-                tool_name = getattr(event, 'tool_name', 'Unknown Tool')
-                agent_role = extract_agent_name_from_event(event, f"[CrewLogger][{job_id}]")
-                tool_args = getattr(event, 'args', {})
-                args_preview = str(tool_args)[:100] + "..." if len(str(tool_args)) > 100 else str(tool_args)
-                self._crew_logger.info(f"TOOL STARTED: {tool_name} (Agent: {agent_role}) - Args: {args_preview}")
-            except Exception as e:
-                self._crew_logger.error(f"Error in tool usage started handler: {e}")
-        
-        @crewai_event_bus.on(ToolUsageFinishedEvent)
-        def on_tool_usage_finished(source, event):
-            try:
-                tool_name = getattr(event, 'tool_name', 'Unknown Tool')
-                agent_role = extract_agent_name_from_event(event, f"[CrewLogger][{job_id}]")
-                output = getattr(event, 'output', 'No output')
-                output_preview = str(output)[:120] + "..." if len(str(output)) > 120 else str(output)
-                self._crew_logger.info(f"TOOL COMPLETED: {tool_name} (Agent: {agent_role}) - Result: {output_preview}")
-            except Exception as e:
-                self._crew_logger.error(f"Error in tool usage finished handler: {e}")
-    
-    def _register_llm_events(self, job_id: str) -> None:
-        """Register LLM call event handlers."""
-        
-        @crewai_event_bus.on(LLMCallStartedEvent)
-        def on_llm_call_started(source, event):
-            try:
-                agent_role = extract_agent_name_from_event(event, f"[CrewLogger][{job_id}]", source)
-                self._crew_logger.info(f"LLM CALL STARTED: Agent {agent_role}")
-            except Exception as e:
-                self._crew_logger.error(f"Error in LLM call started handler: {e}")
-        
-        @crewai_event_bus.on(LLMCallCompletedEvent)
-        def on_llm_call_completed(source, event):
-            try:
-                agent_role = extract_agent_name_from_event(event, f"[CrewLogger][{job_id}]", source)
-                output = getattr(event, 'output', 'No output')
-                output_preview = str(output)[:100] + "..." if len(str(output)) > 100 else str(output)
-                self._crew_logger.info(f"LLM CALL COMPLETED: Agent {agent_role} - Response: {output_preview}")
-            except Exception as e:
-                self._crew_logger.error(f"Error in LLM call completed handler: {e}")
-    
-    def _register_extended_events(self, job_id: str) -> None:
-        """Register extended event handlers if available."""
-        try:
-            # Only register if the events were successfully imported
-            if 'AgentExecutionErrorEvent' in globals():
-                @crewai_event_bus.on(AgentExecutionErrorEvent)
-                def on_agent_execution_error(source, event):
-                    try:
-                        agent_role = extract_agent_name_from_event(event, f"[CrewLogger][{job_id}]")
-                        error = getattr(event, 'error', 'Unknown error')
-                        self._crew_logger.error(f"AGENT ERROR: {agent_role} - Error: {str(error)}")
-                    except Exception as e:
-                        self._crew_logger.error(f"Error in agent execution error handler: {e}")
-            
-            if 'ToolUsageErrorEvent' in globals():
-                @crewai_event_bus.on(ToolUsageErrorEvent)
-                def on_tool_usage_error(source, event):
-                    try:
-                        tool_name = getattr(event, 'tool_name', 'Unknown Tool')
-                        error = getattr(event, 'error', 'Unknown error')
-                        self._crew_logger.error(f"TOOL ERROR: {tool_name} - Error: {str(error)}")
-                    except Exception as e:
-                        self._crew_logger.error(f"Error in tool usage error handler: {e}")
-        except Exception as e:
-            self._crew_logger.warning(f"Could not register extended events: {e}")
     
     
     def _patch_printer(self, job_id: str) -> None:

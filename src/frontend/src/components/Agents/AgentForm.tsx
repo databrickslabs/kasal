@@ -25,6 +25,7 @@ import {
   DialogActions,
   IconButton,
   InputAdornment,
+  Alert,
 } from '@mui/material';
 import ExpandMoreIcon from '@mui/icons-material/ExpandMore';
 import OpenInFullIcon from '@mui/icons-material/OpenInFull';
@@ -33,8 +34,14 @@ import { AgentService } from '../../api/AgentService';
 import { Agent, AgentFormProps, KnowledgeSource } from '../../types/agent';
 import { ModelService } from '../../api/ModelService';
 import { Models } from '../../types/models';
+import { PerplexityConfig, SerperConfig } from '../../types/config';
 
 import { GenerateService } from '../../api/GenerateService';
+import { DefaultMemoryBackendService } from '../../api/DefaultMemoryBackendService';
+import { GenieSpaceSelector } from '../Common/GenieSpaceSelector';
+import { PerplexityConfigSelector } from '../Common/PerplexityConfigSelector';
+import { SerperConfigSelector } from '../Common/SerperConfigSelector';
+import { MCPServerSelector } from '../Common/MCPServerSelector';
 // TODO: Re-enable when knowledge sources are restored
 // import { KnowledgeSourcesSection } from './KnowledgeSourcesSection';
 
@@ -58,6 +65,14 @@ const AgentForm: React.FC<AgentFormProps> = ({ initialData, onCancel, onAgentSav
   const [loadingModels, setLoadingModels] = useState(true);
   const [expandedGoal, setExpandedGoal] = useState<boolean>(false);
   const [expandedBackstory, setExpandedBackstory] = useState<boolean>(false);
+  const [expandedSystemTemplate, setExpandedSystemTemplate] = useState<boolean>(false);
+  const [expandedPromptTemplate, setExpandedPromptTemplate] = useState<boolean>(false);
+  const [expandedResponseTemplate, setExpandedResponseTemplate] = useState<boolean>(false);
+  const [selectedGenieSpace, setSelectedGenieSpace] = useState<string>('');
+  const [perplexityConfig, setPerplexityConfig] = useState<PerplexityConfig>({});
+  const [serperConfig, setSerperConfig] = useState<SerperConfig>({});
+  const [selectedMcpServers, setSelectedMcpServers] = useState<string[]>([]);
+  const [toolConfigs, setToolConfigs] = useState<Record<string, unknown>>(initialData?.tool_configs || {});
   
   // Function calling models are typically a subset - we'll filter for these
   const functionCallingModels = Object.entries(models).filter(([_, model]) => 
@@ -65,6 +80,11 @@ const AgentForm: React.FC<AgentFormProps> = ({ initialData, onCancel, onAgentSav
   );
   
   const [formData, setFormData] = useState<AgentFormData>(() => {
+    // Get default memory backend config if not editing an existing agent
+    const defaultMemoryBackend = !initialData?.id 
+      ? DefaultMemoryBackendService.getInstance().getDefaultConfig() 
+      : undefined;
+      
     const data = {
       name: initialData?.name || '',
       role: initialData?.role || '',
@@ -88,8 +108,14 @@ const AgentForm: React.FC<AgentFormProps> = ({ initialData, onCancel, onAgentSav
       max_retry_limit: initialData?.max_retry_limit || 3,
       use_system_prompt: initialData?.use_system_prompt || true,
       respect_context_window: initialData?.respect_context_window || true,
-      embedder_config: initialData?.embedder_config || undefined,
+      embedder_config: initialData?.embedder_config || {
+        provider: 'databricks',
+        config: {
+          model: 'databricks-gte-large-en'
+        }
+      },
       knowledge_sources: initialData?.knowledge_sources || [],
+      memory_backend_config: initialData?.memory_backend_config || defaultMemoryBackend || undefined,
     };
     
     if (initialData?.id) {
@@ -98,6 +124,48 @@ const AgentForm: React.FC<AgentFormProps> = ({ initialData, onCancel, onAgentSav
     
     return data;
   });
+  
+  // Load tool_configs and set Genie space and Perplexity config if they exist
+  useEffect(() => {
+    if (initialData?.tool_configs) {
+      console.log('AgentForm: Loading tool_configs from initialData:', initialData.tool_configs);
+      setToolConfigs(initialData.tool_configs);
+      
+      // Check for GenieTool config - try both spaceId and space_id for compatibility
+      const genieConfig = initialData.tool_configs.GenieTool as Record<string, unknown>;
+      if (genieConfig) {
+        console.log('AgentForm: Found GenieTool config:', genieConfig);
+        const spaceId = genieConfig.spaceId || genieConfig.space_id;
+        if (spaceId && typeof spaceId === 'string') {
+          console.log('AgentForm: Setting selectedGenieSpace to:', spaceId);
+          setSelectedGenieSpace(spaceId);
+        }
+      }
+      
+      if (initialData.tool_configs.PerplexityTool) {
+        console.log('AgentForm: Found PerplexityTool config:', initialData.tool_configs.PerplexityTool);
+        setPerplexityConfig(initialData.tool_configs.PerplexityTool);
+      }
+      
+      if (initialData.tool_configs.SerperDevTool) {
+        console.log('AgentForm: Found SerperDevTool config:', initialData.tool_configs.SerperDevTool);
+        setSerperConfig(initialData.tool_configs.SerperDevTool);
+      }
+      
+      // Check for MCP_SERVERS config
+      if (initialData.tool_configs.MCP_SERVERS) {
+        console.log('AgentForm: Found MCP_SERVERS config:', initialData.tool_configs.MCP_SERVERS);
+        const mcpConfig = initialData.tool_configs.MCP_SERVERS as Record<string, unknown>;
+        const mcpServers = Array.isArray(mcpConfig.servers) 
+          ? mcpConfig.servers 
+          : Array.isArray(initialData.tool_configs.MCP_SERVERS)
+          ? initialData.tool_configs.MCP_SERVERS  // Fallback for old format
+          : [];
+        setSelectedMcpServers(mcpServers);
+      }
+    }
+  }, [initialData?.tool_configs]);
+
 
   // Load models from ModelService - moved after formData is defined
   useEffect(() => {
@@ -149,6 +217,83 @@ const AgentForm: React.FC<AgentFormProps> = ({ initialData, onCancel, onAgentSav
     
     // Make a deep copy of the formData to avoid modifying the original
     const agentToSave = JSON.parse(JSON.stringify(formData));
+    
+    // Build tool_configs for tools that need configuration
+    let updatedToolConfigs = { ...toolConfigs };
+    
+    // Handle GenieTool config
+    if (selectedGenieSpace && agentToSave.tools.some((toolId: string) => {
+      const tool = tools.find(t => String(t.id) === String(toolId));
+      return tool?.title === 'GenieTool';
+    })) {
+      updatedToolConfigs = {
+        ...updatedToolConfigs,
+        GenieTool: {
+          spaceId: selectedGenieSpace
+        }
+      };
+    } else if (!selectedGenieSpace) {
+      // Remove GenieTool config if no space selected
+      delete updatedToolConfigs.GenieTool;
+    }
+    
+    // Handle PerplexityTool config
+    if (perplexityConfig && Object.keys(perplexityConfig).length > 0 && agentToSave.tools.some((toolId: string) => {
+      const tool = tools.find(t => String(t.id) === String(toolId));
+      return tool?.title === 'PerplexityTool';
+    })) {
+      updatedToolConfigs = {
+        ...updatedToolConfigs,
+        PerplexityTool: perplexityConfig
+      };
+    } else if (!agentToSave.tools.some((toolId: string) => {
+      const tool = tools.find(t => String(t.id) === String(toolId));
+      return tool?.title === 'PerplexityTool';
+    })) {
+      // Remove PerplexityTool config if tool not selected
+      delete updatedToolConfigs.PerplexityTool;
+    }
+    
+    // Handle SerperDevTool config
+    if (serperConfig && Object.keys(serperConfig).length > 0 && agentToSave.tools.some((toolId: string) => {
+      const tool = tools.find(t => String(t.id) === String(toolId));
+      return tool?.title === 'SerperDevTool';
+    })) {
+      updatedToolConfigs = {
+        ...updatedToolConfigs,
+        SerperDevTool: serperConfig
+      };
+    } else if (!agentToSave.tools.some((toolId: string) => {
+      const tool = tools.find(t => String(t.id) === String(toolId));
+      return tool?.title === 'SerperDevTool';
+    })) {
+      // Remove SerperDevTool config if tool not selected
+      delete updatedToolConfigs.SerperDevTool;
+    }
+    
+    // Handle MCP_SERVERS config - use dict format to match schema
+    if (selectedMcpServers && selectedMcpServers.length > 0) {
+      updatedToolConfigs = {
+        ...updatedToolConfigs,
+        MCP_SERVERS: {
+          servers: selectedMcpServers
+        }
+      };
+    } else {
+      // Remove MCP_SERVERS config if none selected
+      delete updatedToolConfigs.MCP_SERVERS;
+    }
+    
+    // Add tool_configs to the agent if we have any
+    if (Object.keys(updatedToolConfigs).length > 0) {
+      agentToSave.tool_configs = updatedToolConfigs;
+    }
+    
+    // If memory is disabled, remove embedder_config and memory_backend_config
+    if (!agentToSave.memory) {
+      delete agentToSave.embedder_config;
+      delete agentToSave.memory_backend_config;
+    }
     
     // Preserve file information in knowledge sources
     if (agentToSave.knowledge_sources && agentToSave.knowledge_sources.length > 0) {
@@ -204,6 +349,7 @@ const AgentForm: React.FC<AgentFormProps> = ({ initialData, onCancel, onAgentSav
       [field]: value
     }));
   };
+
 
   const handleToolsChange = (event: SelectChangeEvent<string[]>) => {
     // Get the selected values from the event
@@ -287,6 +433,30 @@ const AgentForm: React.FC<AgentFormProps> = ({ initialData, onCancel, onAgentSav
     setExpandedBackstory(false);
   };
 
+  const handleOpenSystemTemplateDialog = () => {
+    setExpandedSystemTemplate(true);
+  };
+
+  const handleCloseSystemTemplateDialog = () => {
+    setExpandedSystemTemplate(false);
+  };
+
+  const handleOpenPromptTemplateDialog = () => {
+    setExpandedPromptTemplate(true);
+  };
+
+  const handleClosePromptTemplateDialog = () => {
+    setExpandedPromptTemplate(false);
+  };
+
+  const handleOpenResponseTemplateDialog = () => {
+    setExpandedResponseTemplate(true);
+  };
+
+  const handleCloseResponseTemplateDialog = () => {
+    setExpandedResponseTemplate(false);
+  };
+
   return (
     <>
       <Card sx={{ 
@@ -320,6 +490,18 @@ const AgentForm: React.FC<AgentFormProps> = ({ initialData, onCancel, onAgentSav
               value={formData.name}
               onChange={(e) => handleInputChange('name', e.target.value)}
               required
+              margin="normal"
+              sx={{
+                '& .MuiOutlinedInput-root': {
+                  '& fieldset': {
+                    borderColor: 'rgba(0, 0, 0, 0.23)',
+                  },
+                },
+                '& .MuiInputLabel-root': {
+                  backgroundColor: 'white',
+                  padding: '0 4px',
+                },
+              }}
             />
             <TextField
               fullWidth
@@ -400,7 +582,25 @@ const AgentForm: React.FC<AgentFormProps> = ({ initialData, onCancel, onAgentSav
                     onChange={(e) => handleInputChange('system_template', e.target.value)}
                     multiline
                     rows={4}
+                    InputProps={{
+                      endAdornment: (
+                        <InputAdornment position="end">
+                          <IconButton
+                            edge="end"
+                            onClick={handleOpenSystemTemplateDialog}
+                            size="small"
+                            sx={{ opacity: 0.7 }}
+                            title="Expand system template"
+                          >
+                            <OpenInFullIcon fontSize="small" />
+                          </IconButton>
+                        </InputAdornment>
+                      )
+                    }}
                   />
+                  <Typography variant="caption" color="text.secondary" sx={{ mt: 0.5, mb: 1 }}>
+                    Defines the agent&apos;s core identity and fundamental instructions. Controls how the agent understands its {'{role}'}, {'{goal}'}, and {'{backstory}'}. Use this to establish expertise boundaries, ethical guidelines, and overall behavior patterns.
+                  </Typography>
                   <TextField
                     fullWidth
                     label="Prompt Template"
@@ -408,7 +608,25 @@ const AgentForm: React.FC<AgentFormProps> = ({ initialData, onCancel, onAgentSav
                     onChange={(e) => handleInputChange('prompt_template', e.target.value)}
                     multiline
                     rows={4}
+                    InputProps={{
+                      endAdornment: (
+                        <InputAdornment position="end">
+                          <IconButton
+                            edge="end"
+                            onClick={handleOpenPromptTemplateDialog}
+                            size="small"
+                            sx={{ opacity: 0.7 }}
+                            title="Expand prompt template"
+                          >
+                            <OpenInFullIcon fontSize="small" />
+                          </IconButton>
+                        </InputAdornment>
+                      )
+                    }}
                   />
+                  <Typography variant="caption" color="text.secondary" sx={{ mt: 0.5, mb: 1 }}>
+                    Structures how tasks are presented to the agent. Controls the format and flow of task instructions. Include placeholders for dynamic content like {'{input}'}, {'{context}'}, and task-specific variables to ensure consistent task processing.
+                  </Typography>
                   <TextField
                     fullWidth
                     label="Response Template"
@@ -416,7 +634,25 @@ const AgentForm: React.FC<AgentFormProps> = ({ initialData, onCancel, onAgentSav
                     onChange={(e) => handleInputChange('response_template', e.target.value)}
                     multiline
                     rows={4}
+                    InputProps={{
+                      endAdornment: (
+                        <InputAdornment position="end">
+                          <IconButton
+                            edge="end"
+                            onClick={handleOpenResponseTemplateDialog}
+                            size="small"
+                            sx={{ opacity: 0.7 }}
+                            title="Expand response template"
+                          >
+                            <OpenInFullIcon fontSize="small" />
+                          </IconButton>
+                        </InputAdornment>
+                      )
+                    }}
                   />
+                  <Typography variant="caption" color="text.secondary" sx={{ mt: 0.5, mb: 1 }}>
+                    Guides how the agent formats its responses and output structure. Enforces consistency in deliverables by defining sections like THOUGHTS, ACTION, and RESULT. Use this to ensure structured, actionable, and predictable agent outputs.
+                  </Typography>
                 </Box>
               </AccordionDetails>
             </Accordion>
@@ -460,6 +696,164 @@ const AgentForm: React.FC<AgentFormProps> = ({ initialData, onCancel, onAgentSav
                   ))}
               </Select>
             </FormControl>
+
+            {/* Genie Space Selector - Show only when GenieTool is selected */}
+            {formData.tools.some(toolId => {
+              const tool = tools.find(t => String(t.id) === String(toolId));
+              return tool?.title === 'GenieTool';
+            }) && (
+              <Box sx={{ mt: 2 }}>
+                <GenieSpaceSelector
+                  value={selectedGenieSpace}
+                  onChange={(value) => {
+                    setSelectedGenieSpace(value as string || '');
+                    // Update tool configs when space changes
+                    if (value) {
+                      setToolConfigs(prev => ({
+                        ...prev,
+                        GenieTool: {
+                          spaceId: value as string
+                        }
+                      }));
+                    } else {
+                      // Remove GenieTool config if no space selected
+                      setToolConfigs(prev => {
+                        const newConfigs = { ...prev };
+                        delete newConfigs.GenieTool;
+                        return newConfigs;
+                      });
+                    }
+                  }}
+                  label="Genie Space"
+                  placeholder="Search for Genie spaces..."
+                  helperText="Select the Genie space to use with this agent"
+                  required
+                  fullWidth
+                />
+              </Box>
+            )}
+
+            {/* Perplexity Configuration - Show only when PerplexityTool is selected */}
+            {formData.tools.some(toolId => {
+              const tool = tools.find(t => String(t.id) === String(toolId));
+              return tool?.title === 'PerplexityTool';
+            }) && (
+              <Box sx={{ mt: 2 }}>
+                <PerplexityConfigSelector
+                  value={perplexityConfig}
+                  onChange={(config) => {
+                    setPerplexityConfig(config);
+                    // Update tool configs when configuration changes
+                    setToolConfigs(prev => ({
+                      ...prev,
+                      PerplexityTool: config
+                    }));
+                  }}
+                  label="Perplexity Configuration"
+                  helperText="Configure Perplexity AI search parameters for this agent"
+                  fullWidth
+                />
+              </Box>
+            )}
+
+            {/* Serper Configuration - Show only when SerperDevTool is selected */}
+            {formData.tools.some(toolId => {
+              const tool = tools.find(t => String(t.id) === String(toolId));
+              return tool?.title === 'SerperDevTool';
+            }) && (
+              <Box sx={{ mt: 2 }}>
+                <SerperConfigSelector
+                  value={serperConfig}
+                  onChange={(config) => {
+                    setSerperConfig(config);
+                    // Update tool configs when configuration changes
+                    setToolConfigs(prev => ({
+                      ...prev,
+                      SerperDevTool: config
+                    }));
+                  }}
+                  label="Serper Configuration"
+                  helperText="Configure Serper.dev search parameters for this agent"
+                  fullWidth
+                />
+              </Box>
+            )}
+
+            {/* MCP Server Configuration - Always show as it's independent of regular tools */}
+            <Box sx={{ mt: 2 }}>
+              {/* Show selected MCP servers visually */}
+              {selectedMcpServers.length > 0 && (
+                <Box sx={{ 
+                  mb: 2, 
+                  p: 2, 
+                  backgroundColor: 'rgba(25, 118, 210, 0.04)', 
+                  borderRadius: 1,
+                  border: '1px solid rgba(25, 118, 210, 0.12)'
+                }}>
+                  <Typography 
+                    variant="subtitle2" 
+                    color="primary" 
+                    sx={{ 
+                      mb: 1, 
+                      fontWeight: 600,
+                      fontSize: '0.875rem'
+                    }}
+                  >
+                    Selected MCP Servers ({selectedMcpServers.length})
+                  </Typography>
+                  <Box sx={{ 
+                    display: 'flex', 
+                    flexWrap: 'wrap', 
+                    gap: 1
+                  }}>
+                    {selectedMcpServers.map((server) => (
+                      <Chip
+                        key={server}
+                        label={server}
+                        size="medium"
+                        color="primary"
+                        variant="filled"
+                        onDelete={() => {
+                          const newServers = selectedMcpServers.filter(s => s !== server);
+                          setSelectedMcpServers(newServers);
+                          setToolConfigs(prev => ({
+                            ...prev,
+                            MCP_SERVERS: newServers
+                          }));
+                        }}
+                        sx={{ 
+                          '& .MuiChip-deleteIcon': { 
+                            fontSize: '18px',
+                            '&:hover': {
+                              color: 'error.main'
+                            }
+                          },
+                          fontWeight: 500
+                        }}
+                      />
+                    ))}
+                  </Box>
+                </Box>
+              )}
+              
+              <MCPServerSelector
+                value={selectedMcpServers}
+                onChange={(servers) => {
+                  const serverArray = Array.isArray(servers) ? servers : (servers ? [servers] : []);
+                  setSelectedMcpServers(serverArray);
+                  // Update tool configs when MCP servers change
+                  setToolConfigs(prev => ({
+                    ...prev,
+                    MCP_SERVERS: serverArray
+                  }));
+                }}
+                label="MCP Servers"
+                placeholder="Select MCP servers for this agent..."
+                helperText="Choose which MCP (Model Context Protocol) servers this agent should have access to"
+                multiple={true}
+                fullWidth
+              />
+            </Box>
 
             {/* TODO: Re-enable knowledge sources in the future */}
             {/* <Accordion>
@@ -889,6 +1283,22 @@ const AgentForm: React.FC<AgentFormProps> = ({ initialData, onCancel, onAgentSav
                     />
                   </Grid>
 
+                  {/* Memory Storage Backend Info */}
+                  <Grid item xs={12}>
+                    <Divider sx={{ my: 2 }} />
+                    <Alert severity="info" sx={{ mt: 2 }}>
+                      <Typography variant="body2">
+                        Memory storage backend is configured globally in the Configuration settings.
+                        {formData.memory_backend_config && (
+                          <>
+                            <br />
+                            Current backend: <strong>{formData.memory_backend_config.backend_type === 'databricks' ? 'Databricks Vector Search' : 'Default (ChromaDB + SQLite)'}</strong>
+                          </>
+                        )}
+                      </Typography>
+                    </Alert>
+                  </Grid>
+
                   {/* Customization Help */}
                   <Grid item xs={12}>
                     <Typography variant="body2" color="text.secondary" sx={{ mt: 1 }}>
@@ -899,9 +1309,6 @@ const AgentForm: React.FC<AgentFormProps> = ({ initialData, onCancel, onAgentSav
                       <li>Long-Term Memory: Preserves insights and learnings between executions</li>
                       <li>Entity Memory: Tracks information about important entities</li>
                     </ul>
-                    <Typography variant="body2" color="text.secondary">
-                      Memory is stored in system-specific locations, which can be customized via the CREWAI_STORAGE_DIR environment variable.
-                    </Typography>
                   </Grid>
                 </Grid>
               </AccordionDetails>
@@ -1026,6 +1433,108 @@ const AgentForm: React.FC<AgentFormProps> = ({ initialData, onCancel, onAgentSav
         </DialogContent>
         <DialogActions>
           <Button onClick={handleCloseBackstoryDialog} variant="contained">
+            Done
+          </Button>
+        </DialogActions>
+      </Dialog>
+
+      {/* System Template Dialog */}
+      <Dialog 
+        open={expandedSystemTemplate} 
+        onClose={handleCloseSystemTemplateDialog}
+        fullWidth
+        maxWidth="md"
+      >
+        <DialogTitle>
+          <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+            System Template
+            <IconButton onClick={handleCloseSystemTemplateDialog}>
+              <CloseIcon />
+            </IconButton>
+          </Box>
+        </DialogTitle>
+        <DialogContent>
+          <TextField
+            autoFocus
+            fullWidth
+            multiline
+            rows={15}
+            value={formData.system_template || ''}
+            onChange={(e) => handleInputChange('system_template', e.target.value)}
+            variant="outlined"
+            sx={{ mt: 2 }}
+          />
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={handleCloseSystemTemplateDialog} variant="contained">
+            Done
+          </Button>
+        </DialogActions>
+      </Dialog>
+
+      {/* Prompt Template Dialog */}
+      <Dialog 
+        open={expandedPromptTemplate} 
+        onClose={handleClosePromptTemplateDialog}
+        fullWidth
+        maxWidth="md"
+      >
+        <DialogTitle>
+          <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+            Prompt Template
+            <IconButton onClick={handleClosePromptTemplateDialog}>
+              <CloseIcon />
+            </IconButton>
+          </Box>
+        </DialogTitle>
+        <DialogContent>
+          <TextField
+            autoFocus
+            fullWidth
+            multiline
+            rows={15}
+            value={formData.prompt_template || ''}
+            onChange={(e) => handleInputChange('prompt_template', e.target.value)}
+            variant="outlined"
+            sx={{ mt: 2 }}
+          />
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={handleClosePromptTemplateDialog} variant="contained">
+            Done
+          </Button>
+        </DialogActions>
+      </Dialog>
+
+      {/* Response Template Dialog */}
+      <Dialog 
+        open={expandedResponseTemplate} 
+        onClose={handleCloseResponseTemplateDialog}
+        fullWidth
+        maxWidth="md"
+      >
+        <DialogTitle>
+          <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+            Response Template
+            <IconButton onClick={handleCloseResponseTemplateDialog}>
+              <CloseIcon />
+            </IconButton>
+          </Box>
+        </DialogTitle>
+        <DialogContent>
+          <TextField
+            autoFocus
+            fullWidth
+            multiline
+            rows={15}
+            value={formData.response_template || ''}
+            onChange={(e) => handleInputChange('response_template', e.target.value)}
+            variant="outlined"
+            sx={{ mt: 2 }}
+          />
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={handleCloseResponseTemplateDialog} variant="contained">
             Done
           </Button>
         </DialogActions>

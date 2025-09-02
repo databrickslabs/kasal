@@ -41,7 +41,7 @@ describe('MCPConfiguration', () => {
     {
       id: '1',
       name: 'Test Server 1',
-      server_type: 'sse',
+      server_type: 'streamable',
       server_url: 'https://test1.databricksapps.com',
       auth_type: 'databricks_obo',
       enabled: true,
@@ -52,7 +52,7 @@ describe('MCPConfiguration', () => {
     {
       id: '2',
       name: 'Test Server 2',
-      server_type: 'sse',
+      server_type: 'streamable',
       server_url: 'https://api.example.com/mcp',
       auth_type: 'api_key',
       api_key: 'test-api-key',
@@ -172,10 +172,10 @@ describe('MCPConfiguration', () => {
     const serverTypeSelect = screen.getByLabelText('Server Type');
     fireEvent.mouseDown(serverTypeSelect);
 
-    // Check options (STDIO removed)
+    // Check options (only Streamable HTTP)
     await waitFor(() => {
-      expect(screen.getByRole('option', { name: 'SSE (Server-Sent Events)' })).toBeInTheDocument();
       expect(screen.getByRole('option', { name: 'Streamable HTTP' })).toBeInTheDocument();
+      expect(screen.queryByRole('option', { name: 'SSE (Server-Sent Events)' })).not.toBeInTheDocument();
       expect(screen.queryByRole('option', { name: 'STDIO' })).not.toBeInTheDocument();
     });
   });

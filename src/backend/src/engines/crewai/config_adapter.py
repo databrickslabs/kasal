@@ -91,6 +91,11 @@ def adapt_config(config: CrewConfig) -> Dict[str, Any]:
         # Log that we're using the default model for reasoning
         logger.info(f"Using default model for reasoning: {engine_config['model']}")
     
+    # If memory_backend_config is specified in inputs, preserve it
+    if config.inputs and "memory_backend_config" in config.inputs:
+        engine_config["memory_backend_config"] = config.inputs["memory_backend_config"]
+        logger.info(f"Preserving memory backend configuration: {config.inputs['memory_backend_config']}")
+    
     return engine_config
 
 def normalize_config(execution_config: Dict[str, Any]) -> Dict[str, Any]:
@@ -137,6 +142,7 @@ def normalize_flow_config(config: Dict[str, Any]) -> Dict[str, Any]:
             'goal': agent.get('goal'),
             'backstory': agent.get('backstory'),
             'tools': agent.get('tools', []),
+            'tool_configs': agent.get('tool_configs', {}),  # Include tool_configs
             'allow_delegation': agent.get('allow_delegation', True),
             'verbose': agent.get('verbose', True),
             'memory': agent.get('memory', {}),
@@ -153,6 +159,7 @@ def normalize_flow_config(config: Dict[str, Any]) -> Dict[str, Any]:
             'agent': task.get('agent'),
             'expected_output': task.get('expected_output'),
             'tools': task.get('tools', []),
+            'tool_configs': task.get('tool_configs', {}),  # Include tool_configs
             'context': task.get('context', {}),
             'async_execution': task.get('async_execution', False),
             'markdown': task.get('markdown', False)

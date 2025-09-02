@@ -48,6 +48,40 @@ class MCPServerRepository(BaseRepository[MCPServer]):
         query = select(self.model).where(self.model.enabled == True)
         result = await self.session.execute(query)
         return list(result.scalars().all())
+    
+    async def find_global_enabled(self) -> List[MCPServer]:
+        """
+        Find all globally enabled MCP servers.
+        
+        Returns:
+            List of globally enabled MCP servers
+        """
+        query = select(self.model).where(
+            (self.model.enabled == True) & 
+            (self.model.global_enabled == True)
+        )
+        result = await self.session.execute(query)
+        return list(result.scalars().all())
+    
+    async def find_by_names(self, names: List[str]) -> List[MCPServer]:
+        """
+        Find MCP servers by a list of names.
+        
+        Args:
+            names: List of server names to search for
+            
+        Returns:
+            List of MCP servers matching the names
+        """
+        if not names:
+            return []
+        
+        query = select(self.model).where(
+            (self.model.name.in_(names)) & 
+            (self.model.enabled == True)
+        )
+        result = await self.session.execute(query)
+        return list(result.scalars().all())
 
     async def toggle_enabled(self, server_id: int) -> Optional[MCPServer]:
         """
@@ -73,6 +107,33 @@ class MCPServerRepository(BaseRepository[MCPServer]):
             # Log the error and rollback
             import logging
             logging.error(f"Error in toggle_enabled for MCP server ID {server_id}: {str(e)}")
+            await self.session.rollback()
+            raise
+    
+    async def toggle_global_enabled(self, server_id: int) -> Optional[MCPServer]:
+        """
+        Toggle the global enabled status of a MCP server.
+        
+        Args:
+            server_id: ID of the server to toggle global enablement
+            
+        Returns:
+            Updated MCP server if found, else None
+        """
+        try:
+            server = await self.get(server_id)
+            if not server:
+                return None
+            
+            # Toggle the global enabled status
+            server.global_enabled = not server.global_enabled
+            await self.session.commit()
+            await self.session.refresh(server)
+            return server
+        except Exception as e:
+            # Log the error and rollback
+            import logging
+            logging.error(f"Error in toggle_global_enabled for MCP server ID {server_id}: {str(e)}")
             await self.session.rollback()
             raise
 
@@ -124,6 +185,45 @@ class MCPSettingsRepository(BaseRepository[MCPSettings]):
         """
         settings = await self.get_settings()
         settings.global_enabled = enabled
+        await self.session.commit()
+        await self.session.refresh(settings)
+        return settings
+    
+    async def update_individual_enabled(self, enabled: bool) -> MCPSettings:
+        """
+        Update the individual enabled status.
+        
+        Args:
+            enabled: New individual enabled status
+            
+        Returns:
+            Updated MCPSettings object
+        """
+        settings = await self.get_settings()
+        settings.individual_enabled = enabled
+        await self.session.commit()
+        await self.session.refresh(settings)
+        return settings
+    
+    async def update_settings(self, global_enabled: Optional[bool] = None, individual_enabled: Optional[bool] = None) -> MCPSettings:
+        """
+        Update MCP settings.
+        
+        Args:
+            global_enabled: New global enabled status (optional)
+            individual_enabled: New individual enabled status (optional)
+            
+        Returns:
+            Updated MCPSettings object
+        """
+        settings = await self.get_settings()
+        
+        if global_enabled is not None:
+            settings.global_enabled = global_enabled
+        
+        if individual_enabled is not None:
+            settings.individual_enabled = individual_enabled
+            
         await self.session.commit()
         await self.session.refresh(settings)
         return settings
@@ -184,4 +284,34 @@ class SyncMCPServerRepository:
         Returns:
             List of enabled MCP servers
         """
-        return self.db.query(MCPServer).filter(MCPServer.enabled == True).all() 
+        return self.db.query(MCPServer).filter(MCPServer.enabled == True).all()
+    
+    def find_global_enabled(self) -> List[MCPServer]:
+        """
+        Find all globally enabled MCP servers.
+        
+        Returns:
+            List of globally enabled MCP servers
+        """
+        return self.db.query(MCPServer).filter(
+            (MCPServer.enabled == True) & 
+            (MCPServer.global_enabled == True)
+        ).all()
+    
+    def find_by_names(self, names: List[str]) -> List[MCPServer]:
+        """
+        Find MCP servers by a list of names.
+        
+        Args:
+            names: List of server names to search for
+            
+        Returns:
+            List of MCP servers matching the names
+        """
+        if not names:
+            return []
+        
+        return self.db.query(MCPServer).filter(
+            (MCPServer.name.in_(names)) & 
+            (MCPServer.enabled == True)
+        ).all() 

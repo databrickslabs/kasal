@@ -16,20 +16,12 @@ export const apiClient = axios.create({
   },
 });
 
-// Add a request interceptor to include authentication tokens and tenant headers
+// Add a request interceptor to include authentication tokens
 apiClient.interceptors.request.use(
   (config) => {
     const token = localStorage.getItem('token');
     if (token) {
       config.headers.Authorization = `Bearer ${token}`;
-    }
-    
-    // For local development: add mock tenant headers
-    const mockUserEmail = localStorage.getItem('mockUserEmail');
-    if (mockUserEmail && process.env.NODE_ENV === 'development') {
-      config.headers['X-Forwarded-Email'] = mockUserEmail;
-      config.headers['X-Forwarded-Access-Token'] = 'mock-token-for-dev';
-      console.log(`[DEV] Using mock user: ${mockUserEmail}`);
     }
     
     return config;
@@ -46,11 +38,14 @@ apiClient.interceptors.response.use(
     if (error.response) {
       // The request was made and the server responded with a status code
       // that falls out of the range of 2xx
-      console.error('API Error Response:', {
-        status: error.response.status,
-        data: error.response.data,
-        headers: error.response.headers,
-      });
+      // Don't log 404 errors as they might be expected (e.g., no default config)
+      if (error.response.status !== 404) {
+        console.error('API Error Response:', {
+          status: error.response.status,
+          data: error.response.data,
+          headers: error.response.headers,
+        });
+      }
     } else if (error.request) {
       // The request was made but no response was received
       console.error('API No Response:', error.request);

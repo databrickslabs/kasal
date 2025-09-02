@@ -30,6 +30,7 @@ yarn-error.log*
 *.swp
 *.swo
 .cursorrules
+.serena/
 
 # OS generated files
 .DS_Store
@@ -59,6 +60,7 @@ logs/
 build_*.log
 deploy_*.log 
 .databricks
+.databricks_seeded
 
 # SSH keys and encryption
 .backendcrew/
@@ -150,3 +152,5 @@ logs/
 
 # Exception: Include frontend Memory configuration
 !frontend/src/components/Configuration/Memory/
+# ChromaDB lock files
+chromadb-*.lock

@@ -254,6 +254,20 @@ def get_tool_configs():
         },  # YoutubeVideoSearchTool
         "31": {
             "perplexity_api_key": "your-perplexity-api-key-here",
+            "model": "sonar",  # Options: sonar, sonar-pro, sonar-deep-research, sonar-reasoning, sonar-reasoning-pro, r1-1776
+            "max_tokens": 2000,  # Max output tokens (default: 2000, documented limit: 4000)
+            "temperature": 0.1,  # Controls randomness (0.0-1.0)
+            "top_p": 0.9,  # Nucleus sampling parameter
+            "top_k": 0,  # Top-k sampling parameter
+            "presence_penalty": 0.0,  # Penalizes new topics (-2.0 to 2.0)
+            "frequency_penalty": 1.0,  # Penalizes repetition (-2.0 to 2.0)
+            "search_recency_filter": "month",  # Options: day, week, month, year
+            "search_domain_filter": ["<any>"],  # List of domains to search or ["<any>"] for all
+            "return_images": False,  # Include images in response
+            "return_related_questions": False,  # Include related questions
+            "web_search_options": {
+                "search_context_size": "high"  # Options: low, medium, high
+            },
             "result_as_answer": False
         },  # PerplexityTool
         "34": {
@@ -267,8 +281,6 @@ def get_tool_configs():
             "result_as_answer": False
         },  # SpiderTool
         "35": {
-            "spaceId": ["01efdd2cd03211d0ab74f620f0023b77"],
-            "DATABRICKS_HOST": ["https://your-workspace.cloud.databricks.com/"],
             "result_as_answer": False
         },  # GenieTool
         "39": {

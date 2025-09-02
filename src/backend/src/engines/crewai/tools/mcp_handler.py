@@ -15,6 +15,67 @@ logger = logging.getLogger(__name__)
 # Dictionary to track all active MCP adapters
 _active_mcp_adapters = {}
 
+# Connection pool for MCP adapters to reuse connections
+_mcp_connection_pool = {}
+
+async def get_or_create_mcp_adapter(server_params, adapter_id=None):
+    """
+    Get an existing MCP adapter from the connection pool or create a new one.
+    This improves performance by reusing existing connections when possible.
+    
+    Args:
+        server_params: Dictionary containing MCP server configuration
+        adapter_id: Optional adapter ID for registration tracking
+        
+    Returns:
+        MCPAdapter instance (reused from pool or newly created)
+    """
+    global _mcp_connection_pool
+    
+    # Create a unique key for this server configuration
+    # Include URL and auth type to ensure different auth contexts get different adapters
+    server_url = server_params.get('url', 'stdio')
+    auth_type = server_params.get('auth_type', 'default')
+    
+    # For stdio transport, include the command in the key
+    if server_params.get('transport') == 'stdio' and server_params.get('command'):
+        command_str = ' '.join(server_params['command']) if isinstance(server_params['command'], list) else server_params['command']
+        pool_key = f"stdio_{command_str}"
+    else:
+        # For HTTP-based servers, use URL and auth type
+        pool_key = f"{server_url}_{auth_type}"
+    
+    # Check if we have a valid adapter in the pool
+    if pool_key in _mcp_connection_pool:
+        adapter = _mcp_connection_pool[pool_key]
+        # Verify the adapter is still initialized and functional
+        if hasattr(adapter, '_initialized') and adapter._initialized:
+            logger.info(f"Reusing MCP adapter from pool for key: {pool_key}")
+            # Still register it with the specific adapter_id if provided
+            if adapter_id:
+                register_mcp_adapter(adapter_id, adapter)
+            return adapter
+        else:
+            # Remove stale adapter from pool
+            logger.warning(f"Removing stale adapter from pool for key: {pool_key}")
+            del _mcp_connection_pool[pool_key]
+    
+    # Create new adapter
+    logger.info(f"Creating new MCP adapter for key: {pool_key}")
+    from src.engines.common.mcp_adapter import MCPAdapter
+    
+    adapter = MCPAdapter(server_params)
+    await adapter.initialize()
+    
+    # Add to connection pool for reuse
+    _mcp_connection_pool[pool_key] = adapter
+    
+    # Also register it for tracking if adapter_id provided
+    if adapter_id:
+        register_mcp_adapter(adapter_id, adapter)
+    
+    return adapter
+
 def register_mcp_adapter(adapter_id, adapter):
     """
     Register an MCP adapter for tracking
@@ -35,8 +96,19 @@ async def stop_all_adapters():
     are properly released, especially important for stdio adapters that
     could otherwise leave lingering processes.
     """
-    global _active_mcp_adapters
+    global _active_mcp_adapters, _mcp_connection_pool
     logger.info(f"Stopping all MCP adapters, count: {len(_active_mcp_adapters)}")
+    
+    # First, stop all pooled adapters
+    for pool_key, adapter in list(_mcp_connection_pool.items()):
+        try:
+            logger.info(f"Stopping pooled MCP adapter: {pool_key}")
+            await stop_mcp_adapter(adapter)
+        except Exception as e:
+            logger.error(f"Error stopping pooled adapter {pool_key}: {str(e)}")
+    
+    # Clear the connection pool
+    _mcp_connection_pool.clear()
     
     # Make a copy of the keys since we'll be modifying the dictionary
     adapter_ids = list(_active_mcp_adapters.keys())

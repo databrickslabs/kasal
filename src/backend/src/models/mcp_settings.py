@@ -15,5 +15,6 @@ class MCPSettings(Base):
     
     id = Column(Integer, primary_key=True)
     global_enabled = Column(Boolean, default=False)  # Master switch for all MCP functionality
+    individual_enabled = Column(Boolean, default=True)  # Allow agent/task-specific MCP selection
     created_at = Column(DateTime, default=datetime.utcnow)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow) 

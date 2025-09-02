@@ -787,6 +787,10 @@ class TestStartLogsWriter:
         """Test starting logs writer when no task exists."""
         shutdown_event = asyncio.Event()
         
+        # Ensure clean global state
+        import src.services.execution_logs_service
+        src.services.execution_logs_service._logs_writer_task = None
+        
         with patch('src.services.execution_logs_service.asyncio.create_task') as mock_create_task:
             mock_task = MagicMock()
             mock_create_task.return_value = mock_task

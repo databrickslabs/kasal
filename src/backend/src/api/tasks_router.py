@@ -94,6 +94,13 @@ async def get_task(
                 status_code=status.HTTP_404_NOT_FOUND,
                 detail="Task not found",
             )
+        
+        # Debug logging for tool_configs
+        if hasattr(task, 'tool_configs'):
+            logger.info(f"GET task {task_id} - tool_configs value: {task.tool_configs}")
+        else:
+            logger.warning(f"GET task {task_id} - no tool_configs attribute found")
+        
         return task
     except HTTPException as he:
         raise he

@@ -136,16 +136,22 @@ class TestTemplateGenerationService:
     @pytest.mark.asyncio
     async def test_generate_templates_success(self, template_generation_service, mock_log_service, 
                                             sample_request, sample_valid_templates):
-        """Test successful template generation."""
+        """Test successful template generation with ModelConfigService."""
         # Mock dependencies
-        with patch('src.services.template_generation_service.get_model_config') as mock_get_model, \
+        with patch('src.services.template_generation_service.UnitOfWork') as mock_uow, \
+             patch('src.services.template_generation_service.ModelConfigService') as mock_model_service, \
              patch('src.services.template_generation_service.TemplateService') as mock_template_service, \
              patch('src.services.template_generation_service.LLMManager') as mock_llm_manager, \
              patch('src.services.template_generation_service.litellm') as mock_litellm, \
              patch('src.services.template_generation_service.robust_json_parser') as mock_parser:
             
-            # Setup mocks
-            mock_get_model.return_value = {"name": "gpt-3.5-turbo"}
+            # Setup mocks for ModelConfigService
+            mock_uow_instance = AsyncMock()
+            mock_uow.return_value.__aenter__.return_value = mock_uow_instance
+            mock_model_service_instance = AsyncMock()
+            mock_model_service.from_unit_of_work = AsyncMock(return_value=mock_model_service_instance)
+            mock_model_service_instance.get_model_config = AsyncMock(return_value={"name": "gpt-3.5-turbo"})
+            
             mock_template_service.get_template_content = AsyncMock(return_value="System template from DB")
             mock_llm_manager.configure_litellm = AsyncMock(return_value={"model": "gpt-3.5-turbo"})
             
@@ -160,6 +166,10 @@ class TestTemplateGenerationService:
             assert result.prompt_template == sample_valid_templates["prompt_template"]
             assert result.response_template == sample_valid_templates["response_template"]
             
+            # Verify ModelConfigService was used correctly
+            mock_model_service.from_unit_of_work.assert_called_once_with(mock_uow_instance)
+            mock_model_service_instance.get_model_config.assert_called_once_with("gpt-3.5-turbo")
+            
             # Verify LLM was called correctly
             mock_litellm.acompletion.assert_called_once()
             call_kwargs = mock_litellm.acompletion.call_args.kwargs
@@ -171,12 +181,35 @@ class TestTemplateGenerationService:
             mock_log_service.create_log.assert_called_once()
     
     @pytest.mark.asyncio
+    async def test_generate_templates_model_not_found(self, template_generation_service, sample_request):
+        """Test template generation when model is not found in database."""
+        with patch('src.services.template_generation_service.UnitOfWork') as mock_uow, \
+             patch('src.services.template_generation_service.ModelConfigService') as mock_model_service:
+            
+            # Setup mocks for ModelConfigService returning None
+            mock_uow_instance = AsyncMock()
+            mock_uow.return_value.__aenter__.return_value = mock_uow_instance
+            mock_model_service_instance = AsyncMock()
+            mock_model_service.from_unit_of_work = AsyncMock(return_value=mock_model_service_instance)
+            mock_model_service_instance.get_model_config = AsyncMock(return_value=None)
+            
+            with pytest.raises(ValueError, match="Model gpt-3.5-turbo not found in the database"):
+                await template_generation_service.generate_templates(sample_request)
+
+    @pytest.mark.asyncio
     async def test_generate_templates_no_prompt_template(self, template_generation_service, sample_request):
         """Test template generation when no prompt template is found."""
-        with patch('src.services.template_generation_service.get_model_config') as mock_get_model, \
+        with patch('src.services.template_generation_service.UnitOfWork') as mock_uow, \
+             patch('src.services.template_generation_service.ModelConfigService') as mock_model_service, \
              patch('src.services.template_generation_service.TemplateService') as mock_template_service:
             
-            mock_get_model.return_value = {"name": "gpt-3.5-turbo"}
+            # Setup mocks for ModelConfigService
+            mock_uow_instance = AsyncMock()
+            mock_uow.return_value.__aenter__.return_value = mock_uow_instance
+            mock_model_service_instance = AsyncMock()
+            mock_model_service.from_unit_of_work = AsyncMock(return_value=mock_model_service_instance)
+            mock_model_service_instance.get_model_config = AsyncMock(return_value={"name": "gpt-3.5-turbo"})
+            
             mock_template_service.get_template_content = AsyncMock(return_value=None)
             
             with pytest.raises(ValueError, match="Required prompt template 'generate_templates' not found"):
@@ -185,13 +218,19 @@ class TestTemplateGenerationService:
     @pytest.mark.asyncio
     async def test_generate_templates_llm_error(self, template_generation_service, mock_log_service, sample_request):
         """Test template generation when LLM completion fails."""
-        with patch('src.services.template_generation_service.get_model_config') as mock_get_model, \
+        with patch('src.services.template_generation_service.UnitOfWork') as mock_uow, \
+             patch('src.services.template_generation_service.ModelConfigService') as mock_model_service, \
              patch('src.services.template_generation_service.TemplateService') as mock_template_service, \
              patch('src.services.template_generation_service.LLMManager') as mock_llm_manager, \
              patch('src.services.template_generation_service.litellm') as mock_litellm:
             
-            # Setup mocks
-            mock_get_model.return_value = {"name": "gpt-3.5-turbo"}
+            # Setup mocks for ModelConfigService
+            mock_uow_instance = AsyncMock()
+            mock_uow.return_value.__aenter__.return_value = mock_uow_instance
+            mock_model_service_instance = AsyncMock()
+            mock_model_service.from_unit_of_work = AsyncMock(return_value=mock_model_service_instance)
+            mock_model_service_instance.get_model_config = AsyncMock(return_value={"name": "gpt-3.5-turbo"})
+            
             mock_template_service.get_template_content = AsyncMock(return_value="System template")
             mock_llm_manager.configure_litellm = AsyncMock(return_value={"model": "gpt-3.5-turbo"})
             mock_litellm.acompletion = AsyncMock(side_effect=Exception("LLM error"))
@@ -207,14 +246,19 @@ class TestTemplateGenerationService:
     @pytest.mark.asyncio
     async def test_generate_templates_json_parse_error(self, template_generation_service, sample_request):
         """Test template generation when JSON parsing fails."""
-        with patch('src.services.template_generation_service.get_model_config') as mock_get_model, \
+        with patch('src.services.template_generation_service.UnitOfWork') as mock_uow, \
+             patch('src.services.template_generation_service.ModelConfigService') as mock_model_service, \
              patch('src.services.template_generation_service.TemplateService') as mock_template_service, \
              patch('src.services.template_generation_service.LLMManager') as mock_llm_manager, \
              patch('src.services.template_generation_service.litellm') as mock_litellm, \
              patch('src.services.template_generation_service.robust_json_parser') as mock_parser:
             
-            # Setup mocks
-            mock_get_model.return_value = {"name": "gpt-3.5-turbo"}
+            # Setup mocks for ModelConfigService
+            mock_uow_instance = AsyncMock()
+            mock_uow.return_value.__aenter__.return_value = mock_uow_instance
+            mock_model_service_instance = AsyncMock()
+            mock_model_service.from_unit_of_work = AsyncMock(return_value=mock_model_service_instance)
+            mock_model_service_instance.get_model_config = AsyncMock(return_value={"name": "gpt-3.5-turbo"})
             mock_template_service.get_template_content = AsyncMock(return_value="System template")
             mock_llm_manager.configure_litellm = AsyncMock(return_value={"model": "gpt-3.5-turbo"})
             
@@ -234,14 +278,19 @@ class TestTemplateGenerationService:
             "response_template": "Complete response template"
         }
         
-        with patch('src.services.template_generation_service.get_model_config') as mock_get_model, \
+        with patch('src.services.template_generation_service.UnitOfWork') as mock_uow, \
+             patch('src.services.template_generation_service.ModelConfigService') as mock_model_service, \
              patch('src.services.template_generation_service.TemplateService') as mock_template_service, \
              patch('src.services.template_generation_service.LLMManager') as mock_llm_manager, \
              patch('src.services.template_generation_service.litellm') as mock_litellm, \
              patch('src.services.template_generation_service.robust_json_parser') as mock_parser:
             
-            # Setup mocks
-            mock_get_model.return_value = {"name": "gpt-3.5-turbo"}
+            # Setup mocks for ModelConfigService
+            mock_uow_instance = AsyncMock()
+            mock_uow.return_value.__aenter__.return_value = mock_uow_instance
+            mock_model_service_instance = AsyncMock()
+            mock_model_service.from_unit_of_work = AsyncMock(return_value=mock_model_service_instance)
+            mock_model_service_instance.get_model_config = AsyncMock(return_value={"name": "gpt-3.5-turbo"})
             mock_template_service.get_template_content = AsyncMock(return_value="System template")
             mock_llm_manager.configure_litellm = AsyncMock(return_value={"model": "gpt-3.5-turbo"})
             
@@ -262,14 +311,19 @@ class TestTemplateGenerationService:
             "Response Template": "Response template content"
         }
         
-        with patch('src.services.template_generation_service.get_model_config') as mock_get_model, \
+        with patch('src.services.template_generation_service.UnitOfWork') as mock_uow, \
+             patch('src.services.template_generation_service.ModelConfigService') as mock_model_service, \
              patch('src.services.template_generation_service.TemplateService') as mock_template_service, \
              patch('src.services.template_generation_service.LLMManager') as mock_llm_manager, \
              patch('src.services.template_generation_service.litellm') as mock_litellm, \
              patch('src.services.template_generation_service.robust_json_parser') as mock_parser:
             
-            # Setup mocks
-            mock_get_model.return_value = {"name": "gpt-3.5-turbo"}
+            # Setup mocks for ModelConfigService
+            mock_uow_instance = AsyncMock()
+            mock_uow.return_value.__aenter__.return_value = mock_uow_instance
+            mock_model_service_instance = AsyncMock()
+            mock_model_service.from_unit_of_work = AsyncMock(return_value=mock_model_service_instance)
+            mock_model_service_instance.get_model_config = AsyncMock(return_value={"name": "gpt-3.5-turbo"})
             mock_template_service.get_template_content = AsyncMock(return_value="System template")
             mock_llm_manager.configure_litellm = AsyncMock(return_value={"model": "gpt-3.5-turbo"})
             
@@ -292,14 +346,19 @@ class TestTemplateGenerationService:
             "Response_Template": "Response template content"
         }
         
-        with patch('src.services.template_generation_service.get_model_config') as mock_get_model, \
+        with patch('src.services.template_generation_service.UnitOfWork') as mock_uow, \
+             patch('src.services.template_generation_service.ModelConfigService') as mock_model_service, \
              patch('src.services.template_generation_service.TemplateService') as mock_template_service, \
              patch('src.services.template_generation_service.LLMManager') as mock_llm_manager, \
              patch('src.services.template_generation_service.litellm') as mock_litellm, \
              patch('src.services.template_generation_service.robust_json_parser') as mock_parser:
             
-            # Setup mocks
-            mock_get_model.return_value = {"name": "gpt-3.5-turbo"}
+            # Setup mocks for ModelConfigService
+            mock_uow_instance = AsyncMock()
+            mock_uow.return_value.__aenter__.return_value = mock_uow_instance
+            mock_model_service_instance = AsyncMock()
+            mock_model_service.from_unit_of_work = AsyncMock(return_value=mock_model_service_instance)
+            mock_model_service_instance.get_model_config = AsyncMock(return_value={"name": "gpt-3.5-turbo"})
             mock_template_service.get_template_content = AsyncMock(return_value="System template")
             mock_llm_manager.configure_litellm = AsyncMock(return_value={"model": "gpt-3.5-turbo"})
             
@@ -316,14 +375,19 @@ class TestTemplateGenerationService:
     @pytest.mark.asyncio
     async def test_generate_templates_prompt_construction(self, template_generation_service, sample_request):
         """Test that the user prompt is constructed correctly."""
-        with patch('src.services.template_generation_service.get_model_config') as mock_get_model, \
+        with patch('src.services.template_generation_service.UnitOfWork') as mock_uow, \
+             patch('src.services.template_generation_service.ModelConfigService') as mock_model_service, \
              patch('src.services.template_generation_service.TemplateService') as mock_template_service, \
              patch('src.services.template_generation_service.LLMManager') as mock_llm_manager, \
              patch('src.services.template_generation_service.litellm') as mock_litellm, \
              patch('src.services.template_generation_service.robust_json_parser') as mock_parser:
             
-            # Setup mocks
-            mock_get_model.return_value = {"name": "gpt-3.5-turbo"}
+            # Setup mocks for ModelConfigService
+            mock_uow_instance = AsyncMock()
+            mock_uow.return_value.__aenter__.return_value = mock_uow_instance
+            mock_model_service_instance = AsyncMock()
+            mock_model_service.from_unit_of_work = AsyncMock(return_value=mock_model_service_instance)
+            mock_model_service_instance.get_model_config = AsyncMock(return_value={"name": "gpt-3.5-turbo"})
             system_message = "Custom system template"
             mock_template_service.get_template_content = AsyncMock(return_value=system_message)
             mock_llm_manager.configure_litellm = AsyncMock(return_value={"model": "gpt-3.5-turbo"})
@@ -352,14 +416,21 @@ class TestTemplateGenerationService:
     @pytest.mark.asyncio
     async def test_generate_templates_model_configuration(self, template_generation_service, sample_request):
         """Test different model configurations."""
-        with patch('src.services.template_generation_service.get_model_config') as mock_get_model, \
+        with patch('src.services.template_generation_service.UnitOfWork') as mock_uow, \
+             patch('src.services.template_generation_service.ModelConfigService') as mock_model_service, \
              patch('src.services.template_generation_service.TemplateService') as mock_template_service, \
              patch('src.services.template_generation_service.LLMManager') as mock_llm_manager, \
              patch('src.services.template_generation_service.litellm') as mock_litellm, \
              patch('src.services.template_generation_service.robust_json_parser') as mock_parser:
             
-            # Test with different model
-            mock_get_model.return_value = {"name": "gpt-4"}
+            # Setup mocks for ModelConfigService
+            mock_uow_instance = AsyncMock()
+            mock_uow.return_value.__aenter__.return_value = mock_uow_instance
+            mock_model_service_instance = AsyncMock()
+            mock_model_service.from_unit_of_work = AsyncMock(return_value=mock_model_service_instance)
+            
+            # Test with different model configuration
+            mock_model_service_instance.get_model_config = AsyncMock(return_value={"name": "gpt-4"})
             mock_template_service.get_template_content = AsyncMock(return_value="System template")
             mock_llm_manager.configure_litellm = AsyncMock(return_value={"model": "gpt-4", "api_key": "test"})
             
@@ -371,7 +442,7 @@ class TestTemplateGenerationService:
             result = await template_generation_service.generate_templates(sample_request)
             
             # Verify model config was called with correct model
-            mock_get_model.assert_called_once_with("gpt-3.5-turbo")
+            mock_model_service_instance.get_model_config.assert_called_with("gpt-3.5-turbo")
             mock_llm_manager.configure_litellm.assert_called_once_with("gpt-4")
             
             assert isinstance(result, TemplateGenerationResponse)
@@ -380,14 +451,19 @@ class TestTemplateGenerationService:
     @patch('src.services.template_generation_service.logger')
     async def test_logging_throughout_process(self, mock_logger, template_generation_service, sample_request, sample_valid_templates):
         """Test that appropriate logging occurs throughout the process."""
-        with patch('src.services.template_generation_service.get_model_config') as mock_get_model, \
+        with patch('src.services.template_generation_service.UnitOfWork') as mock_uow, \
+             patch('src.services.template_generation_service.ModelConfigService') as mock_model_service, \
              patch('src.services.template_generation_service.TemplateService') as mock_template_service, \
              patch('src.services.template_generation_service.LLMManager') as mock_llm_manager, \
              patch('src.services.template_generation_service.litellm') as mock_litellm, \
              patch('src.services.template_generation_service.robust_json_parser') as mock_parser:
             
-            # Setup mocks
-            mock_get_model.return_value = {"name": "gpt-3.5-turbo"}
+            # Setup mocks for ModelConfigService
+            mock_uow_instance = AsyncMock()
+            mock_uow.return_value.__aenter__.return_value = mock_uow_instance
+            mock_model_service_instance = AsyncMock()
+            mock_model_service.from_unit_of_work = AsyncMock(return_value=mock_model_service_instance)
+            mock_model_service_instance.get_model_config = AsyncMock(return_value={"name": "gpt-3.5-turbo"})
             mock_template_service.get_template_content = AsyncMock(return_value="System template")
             mock_llm_manager.configure_litellm = AsyncMock(return_value={"model": "gpt-3.5-turbo"})
             
@@ -406,8 +482,11 @@ class TestTemplateGenerationService:
     @patch('src.services.template_generation_service.logger')
     async def test_error_logging(self, mock_logger, template_generation_service, sample_request):
         """Test that errors are properly logged."""
-        with patch('src.services.template_generation_service.get_model_config') as mock_get_model:
-            mock_get_model.side_effect = Exception("Model config error")
+        with patch('src.services.template_generation_service.UnitOfWork') as mock_uow, \
+             patch('src.services.template_generation_service.ModelConfigService') as mock_model_service:
+            
+            # Setup mock to throw exception
+            mock_uow.side_effect = Exception("Model config error")
             
             with pytest.raises(Exception):
                 await template_generation_service.generate_templates(sample_request)
@@ -428,14 +507,19 @@ class TestTemplateGenerationService:
             "Response_Template": "Response content"  # Underscore format
         }
         
-        with patch('src.services.template_generation_service.get_model_config') as mock_get_model, \
+        with patch('src.services.template_generation_service.UnitOfWork') as mock_uow, \
+             patch('src.services.template_generation_service.ModelConfigService') as mock_model_service, \
              patch('src.services.template_generation_service.TemplateService') as mock_template_service, \
              patch('src.services.template_generation_service.LLMManager') as mock_llm_manager, \
              patch('src.services.template_generation_service.litellm') as mock_litellm, \
              patch('src.services.template_generation_service.robust_json_parser') as mock_parser:
             
-            # Setup mocks
-            mock_get_model.return_value = {"name": "gpt-3.5-turbo"}
+            # Setup mocks for ModelConfigService
+            mock_uow_instance = AsyncMock()
+            mock_uow.return_value.__aenter__.return_value = mock_uow_instance
+            mock_model_service_instance = AsyncMock()
+            mock_model_service.from_unit_of_work = AsyncMock(return_value=mock_model_service_instance)
+            mock_model_service_instance.get_model_config = AsyncMock(return_value={"name": "gpt-3.5-turbo"})
             mock_template_service.get_template_content = AsyncMock(return_value="System template")
             mock_llm_manager.configure_litellm = AsyncMock(return_value={"model": "gpt-3.5-turbo"})
             

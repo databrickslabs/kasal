@@ -3,7 +3,8 @@ import os
 import asyncio
 import json
 import base64
-from typing import TYPE_CHECKING, Any, Dict, List, Optional, Type, Union
+import hashlib
+from typing import TYPE_CHECKING, Any, ClassVar, Dict, List, Optional, Type, Union
 from datetime import datetime
 import time
 
@@ -12,6 +13,10 @@ from crewai.tools import BaseTool
 from pydantic import BaseModel, Field, PrivateAttr, model_validator
 
 logger = logging.getLogger(__name__)
+
+# Global execution tracking dictionaries (outside of class to avoid Pydantic field interpretation)
+_GLOBAL_RUN_EXECUTIONS: Dict[str, str] = {}
+_GLOBAL_CREATE_EXECUTIONS: Dict[str, str] = {}
 
 
 class DatabricksJobsToolSchema(BaseModel):
@@ -78,12 +83,47 @@ class DatabricksJobsTool(BaseTool):
     - Analyze job notebooks for parameter understanding
     
     Authentication methods supported:
-    - OAuth/OBO: User token for on-behalf-of authentication
-    - PAT: Personal Access Token from API Keys service
+    - PAT: Personal Access Token from API Keys service or environment variables
     - Databricks CLI: Environment configuration
     
     All operations use direct REST API calls for optimal performance.
     """
+    
+    # Default action limits (can be overridden in __init__)
+    DEFAULT_ACTION_LIMITS: ClassVar[Dict[str, Optional[int]]] = {
+        'run': 1,      # Limit job runs to prevent duplicates
+        'create': 1,   # Limit job creation to prevent duplicates
+        'list': None,  # No limit for listing
+        'list_my_jobs': None,  # No limit for listing
+        'get': None,   # No limit for getting details
+        'get_notebook': None,  # No limit for notebook analysis
+        'monitor': None  # No limit for monitoring
+    }
+    
+    @staticmethod
+    def _deterministic_hash(data: Any) -> str:
+        """Create a deterministic hash of the data."""
+        # Convert to JSON with sorted keys for consistent ordering
+        json_str = json.dumps(data, sort_keys=True, default=str)
+        # Use SHA256 for consistent hashing across instances
+        return hashlib.sha256(json_str.encode()).hexdigest()[:16]
+    
+    @classmethod
+    def clear_execution_tracking(cls):
+        """Clear all execution tracking (mainly for testing)."""
+        global _GLOBAL_RUN_EXECUTIONS, _GLOBAL_CREATE_EXECUTIONS
+        _GLOBAL_RUN_EXECUTIONS.clear()
+        _GLOBAL_CREATE_EXECUTIONS.clear()
+        logger.info("[SINGLE_EXECUTION] Cleared all execution tracking")
+    
+    @classmethod
+    def get_execution_stats(cls) -> Dict[str, int]:
+        """Get execution tracking statistics."""
+        global _GLOBAL_RUN_EXECUTIONS, _GLOBAL_CREATE_EXECUTIONS
+        return {
+            "tracked_runs": len(_GLOBAL_RUN_EXECUTIONS),
+            "tracked_creates": len(_GLOBAL_CREATE_EXECUTIONS)
+        }
     
     name: str = "Databricks Jobs Manager"
     description: str = (
@@ -94,22 +134,20 @@ class DatabricksJobsTool(BaseTool):
         "Provide 'action' parameter with values: 'list', 'list_my_jobs', 'get', 'get_notebook', 'run', 'monitor', or 'create'."
     )
     args_schema: Type[BaseModel] = DatabricksJobsToolSchema
-    max_usage_count: int = 1  # Limit to 1 usage for 'run' and 'create' actions
+    max_usage_count: Optional[int] = None  # Set to None to bypass CrewAI's limit check
     current_usage_count: int = 0
     
     _host: str = PrivateAttr(default=None)
     _token: str = PrivateAttr(default=None)
-    _user_token: str = PrivateAttr(default=None)
-    _use_oauth: bool = PrivateAttr(default=False)
-    _run_executions: Dict[str, str] = PrivateAttr(default_factory=dict)
-    _create_executions: Dict[str, str] = PrivateAttr(default_factory=dict)
+    _action_limits: Dict[str, Optional[int]] = PrivateAttr(default=None)
+    _action_usage_counts: Dict[str, int] = PrivateAttr(default_factory=dict)
     
     def __init__(
         self,
         databricks_host: Optional[str] = None,
         tool_config: Optional[dict] = None,
         token_required: bool = True,
-        user_token: str = None,
+        action_limits: Optional[Dict[str, Optional[int]]] = None,
         **kwargs: Any,
     ) -> None:
         """
@@ -119,19 +157,27 @@ class DatabricksJobsTool(BaseTool):
             databricks_host (Optional[str]): Databricks workspace host URL.
             tool_config (Optional[dict]): Tool configuration with auth details.
             token_required (bool): Whether authentication token is required.
-            user_token (str): User token for OBO authentication.
+            action_limits (Optional[Dict[str, Optional[int]]]): Per-action usage limits.
+                Example: {'run': 2, 'create': 1, 'list': None} where None means unlimited.
+                If not provided, uses DEFAULT_ACTION_LIMITS.
             **kwargs: Additional keyword arguments passed to BaseTool.
         """
         super().__init__(**kwargs)
         
+        # Initialize action limits and usage counts
+        if action_limits is None:
+            self._action_limits = self.DEFAULT_ACTION_LIMITS.copy()
+        else:
+            # Merge provided limits with defaults
+            self._action_limits = self.DEFAULT_ACTION_LIMITS.copy()
+            self._action_limits.update(action_limits)
+        
+        # Initialize usage counts for all actions
+        self._action_usage_counts = {action: 0 for action in self._action_limits.keys()}
+        
         if tool_config is None:
             tool_config = {}
         
-        # Set user token for OBO authentication if provided
-        if user_token:
-            self._user_token = user_token
-            self._use_oauth = True
-            logger.info("Using user token for OBO authentication")
         
         # Initialize databricks_host from parameter if provided
         initial_databricks_host = databricks_host
@@ -139,20 +185,13 @@ class DatabricksJobsTool(BaseTool):
         
         # Get configuration from tool_config
         if tool_config:
-            # Check if user token is provided in config
-            if 'user_token' in tool_config:
-                self._user_token = tool_config['user_token']
-                self._use_oauth = True
-                logger.info("Using user token from tool_config for OBO authentication")
-            
-            # Check if token is directly provided in config (fallback to PAT)
-            if not self._use_oauth:
-                if 'DATABRICKS_API_KEY' in tool_config:
-                    self._token = tool_config['DATABRICKS_API_KEY']
-                    logger.info("Using PAT token from tool_config")
-                elif 'token' in tool_config:
-                    self._token = tool_config['token']
-                    logger.info("Using PAT token from config")
+            # Check if token is directly provided in config
+            if 'DATABRICKS_API_KEY' in tool_config:
+                self._token = tool_config['DATABRICKS_API_KEY']
+                logger.info("Using PAT token from tool_config")
+            elif 'token' in tool_config:
+                self._token = tool_config['token']
+                logger.info("Using PAT token from config")
             
             # Handle different possible key formats for host
             if initial_databricks_host:
@@ -197,15 +236,14 @@ class DatabricksJobsTool(BaseTool):
             self._host = databricks_host
             logger.info(f"Final host after processing: {self._host}")
         
-        # Try enhanced authentication if not using OAuth
-        if not self._use_oauth:
+        # Try to get authentication if token not already set
+        if not self._token:
             try:
                 # Try to get authentication through enhanced auth system
                 from src.utils.databricks_auth import is_databricks_apps_environment
                 if is_databricks_apps_environment():
-                    self._use_oauth = True
-                    logger.info("Detected Databricks Apps environment - using OAuth authentication")
-                elif not self._token:
+                    logger.info("Detected Databricks Apps environment")
+                if not self._token:
                     # Second fallback: Try to get Databricks API key from API Keys Service
                     logger.info("Attempting to get Databricks API key from API Keys Service...")
                     try:
@@ -301,20 +339,18 @@ class DatabricksJobsTool(BaseTool):
             logger.info(f"Using host from environment or default: {self._host}")
         
         # Check authentication requirements
-        if token_required and not self._use_oauth and not self._token:
-            logger.warning("DATABRICKS_API_KEY is required but not provided. Tool will attempt OAuth authentication or return an error when used.")
+        if token_required and not self._token:
+            logger.warning("DATABRICKS_API_KEY is required but not provided. Tool will return an error when used.")
         
         # Log configuration
         logger.info("DatabricksJobsTool Configuration:")
         logger.info(f"Host: {self._host}")
-        logger.info(f"Authentication Method: {'OAuth/OBO' if self._use_oauth else 'PAT'}")
-        logger.info(f"Single Execution Control: Enabled (max_usage_count={self.max_usage_count})")
+        logger.info(f"Authentication Method: PAT")
+        logger.info(f"Single Execution Control: Enabled (per-action limits)")
+        logger.info(f"Action Limits: {self._action_limits}")
         
         # Log token (masked)
-        if self._user_token:
-            masked_token = f"{self._user_token[:4]}...{self._user_token[-4:]}" if len(self._user_token) > 8 else "***"
-            logger.info(f"User Token (masked): {masked_token}")
-        elif self._token:
+        if self._token:
             masked_token = f"{self._token[:4]}...{self._token[-4:]}" if len(self._token) > 8 else "***"
             logger.info(f"PAT Token (masked): {masked_token}")
         else:
@@ -324,57 +360,58 @@ class DatabricksJobsTool(BaseTool):
         """
         Reset the execution state to allow new runs and creates.
         
-        This method clears the execution tracking and resets the usage count.
+        This method clears the execution tracking and resets the usage counts.
         Use with caution as it removes protection against duplicate runs and job creation.
         
         Returns:
             str: Confirmation message
         """
+        global _GLOBAL_RUN_EXECUTIONS, _GLOBAL_CREATE_EXECUTIONS
+        
         previous_count = self.current_usage_count
-        previous_run_executions = len(self._run_executions)
-        previous_create_executions = len(self._create_executions)
+        previous_run_executions = len(_GLOBAL_RUN_EXECUTIONS)
+        previous_create_executions = len(_GLOBAL_CREATE_EXECUTIONS)
         total_executions = previous_run_executions + previous_create_executions
         
+        # Get previous action usage counts
+        previous_action_counts = self._action_usage_counts.copy()
+        
+        # Reset everything
         self.current_usage_count = 0
-        self._run_executions.clear()
-        self._create_executions.clear()
+        _GLOBAL_RUN_EXECUTIONS.clear()
+        _GLOBAL_CREATE_EXECUTIONS.clear()
+        self._action_usage_counts = {action: 0 for action in self._action_limits.keys()}
         
-        logger.info(f"[RESET_EXECUTION_STATE] Cleared {previous_run_executions} run executions and {previous_create_executions} create executions, reset usage count from {previous_count} to 0")
+        logger.info(f"[RESET_EXECUTION_STATE] Cleared {previous_run_executions} run executions and {previous_create_executions} create executions, reset all usage counts")
         
-        return f"🔄 EXECUTION STATE RESET\n\nCleared tracking for:\n- {previous_run_executions} previous job runs\n- {previous_create_executions} previous job creations\n- Total: {total_executions} executions\n\nUsage count reset from {previous_count} to 0.\n\n⚠️ Single execution protection is now reset - the tool can run and create jobs again."
+        # Build detailed message
+        output = f"🔄 EXECUTION STATE RESET\n\nCleared tracking for:\n"
+        output += f"- {previous_run_executions} previous job runs\n"
+        output += f"- {previous_create_executions} previous job creations\n"
+        output += f"- Total: {total_executions} executions\n\n"
+        
+        output += "Action usage counts reset:\n"
+        for action, count in previous_action_counts.items():
+            limit = self._action_limits.get(action)
+            limit_str = f"/{limit}" if limit is not None else "/unlimited"
+            output += f"- {action}: {count}{limit_str} → 0{limit_str}\n"
+        
+        output += f"\n⚠️ Single execution protection is now reset - the tool can run and create jobs again."
+        
+        return output
 
     async def _get_auth_headers(self) -> Dict[str, str]:
-        """Get authentication headers for API requests with comprehensive fallback logic."""
+        """Get authentication headers for API requests."""
         auth_token = None
         auth_method = "unknown"
         
-        # First priority: OAuth/OBO with user token
-        if self._use_oauth and self._user_token:
-            logger.debug("🔐 Attempting OAuth/OBO authentication with user token")
-            try:
-                from src.utils.databricks_auth import get_databricks_auth_headers
-                headers, error = await get_databricks_auth_headers(user_token=self._user_token)
-                if not error:
-                    logger.info("✅ OAuth/OBO authentication successful")
-                    return headers
-                else:
-                    logger.warning(f"❌ OAuth/OBO authentication failed: {error}")
-                    logger.info("🔄 Falling back to direct user token")
-                    auth_token = self._user_token
-                    auth_method = "user_token_direct"
-            except ImportError:
-                logger.warning("❌ Enhanced auth module not available")
-                logger.info("🔄 Using user token directly")
-                auth_token = self._user_token
-                auth_method = "user_token_direct"
-                
-        # Second priority: PAT token from API Keys Service or environment
-        elif self._token:
+        # First priority: PAT token from API Keys Service or environment
+        if self._token:
             logger.debug("🔐 Using PAT token authentication")
             auth_token = self._token
             auth_method = "pat_token"
             
-        # Last resort: Try to get token from API Keys Service at runtime
+        # Second priority: Try to get token from API Keys Service at runtime
         else:
             logger.warning("🚨 No authentication token available, attempting runtime API key retrieval")
             try:
@@ -392,7 +429,7 @@ class DatabricksJobsTool(BaseTool):
                     auth_method = "runtime_api_service"
                 else:
                     logger.error("❌ No token found in API Keys Service at runtime")
-                    raise Exception("🚨 AUTHENTICATION FAILURE: No authentication token available from any source (user token, PAT, API service)")
+                    raise Exception("🚨 AUTHENTICATION FAILURE: No authentication token available from any source (PAT, API service)")
                     
             except Exception as e:
                 logger.error(f"❌ Runtime API key retrieval failed: {e}")
@@ -526,12 +563,15 @@ class DatabricksJobsTool(BaseTool):
         Returns:
             str: Formatted results of the action
         """
+        # Declare globals at the beginning of the method
+        global _GLOBAL_RUN_EXECUTIONS, _GLOBAL_CREATE_EXECUTIONS
+        
         start_time = time.time()
         
         try:
             # Check if authentication is available
-            if not self._use_oauth and not self._token and not self._user_token:
-                return "Error: Cannot execute action - no authentication available. Please configure authentication."
+            if not self._token:
+                return "Error: Cannot execute action - no authentication available. Please configure a PAT token."
             
             # Get and validate parameters
             action = kwargs.get("action", "").lower()
@@ -542,37 +582,48 @@ class DatabricksJobsTool(BaseTool):
             name_filter = kwargs.get("name_filter")
             job_params = kwargs.get("job_params")
             
-            # SINGLE EXECUTION CONTROL: Check for duplicate 'run' and 'create' actions
+            # SINGLE EXECUTION CONTROL: Check action-specific limits
+            action_limit = self._action_limits.get(action)
+            action_usage = self._action_usage_counts.get(action, 0)
+            
+            # Check if this action has reached its limit
+            if action_limit is not None and action_usage >= action_limit:
+                logger.warning(f"[ACTION_LIMIT] Action '{action}' has reached its limit of {action_limit} executions")
+                
+                # Build usage summary
+                usage_summary = "Current action usage:\n"
+                for act, count in self._action_usage_counts.items():
+                    limit = self._action_limits.get(act)
+                    limit_str = f"/{limit}" if limit is not None else "/unlimited"
+                    usage_summary += f"- {act}: {count}{limit_str}\n"
+                
+                return f"⚠️ ACTION LIMIT REACHED\n\nThe '{action}' action has reached its usage limit of {action_limit}.\n🔒 This prevents accidental overuse of this action.\n\n{usage_summary}\n💡 Use reset_execution_state() or create a new tool instance to reset limits."
+            
+            # DUPLICATE PREVENTION: Check for duplicate 'run' and 'create' actions
             if action == "run":
                 # Create a unique execution key based on job_id and parameters
-                execution_key = f"run_{job_id}_{str(hash(str(job_params))) if job_params else 'no_params'}"
+                param_hash = DatabricksJobsTool._deterministic_hash(job_params) if job_params else 'no_params'
+                execution_key = f"run_{job_id}_{param_hash}"
                 
-                # Check if this exact run has already been executed
-                if execution_key in self._run_executions:
-                    previous_run_id = self._run_executions[execution_key]
-                    logger.warning(f"[SINGLE_EXECUTION] Preventing duplicate run of job {job_id} - already executed with run_id: {previous_run_id}")
-                    return f"⚠️ DUPLICATE RUN PREVENTED\n\nJob {job_id} with these parameters has already been executed.\nPrevious run_id: {previous_run_id}\n\n🔒 This tool enforces single execution to prevent duplicate job runs.\n💡 Use action='monitor', run_id={previous_run_id} to check the status of the existing run."
-                
-                # Check global usage count for run actions
-                if self.current_usage_count >= self.max_usage_count:
-                    logger.warning(f"[SINGLE_EXECUTION] Max usage count ({self.max_usage_count}) reached for 'run' actions")
-                    return f"⚠️ USAGE LIMIT REACHED\n\nThis tool has reached its maximum usage limit of {self.max_usage_count} for 'run' actions.\n🔒 This prevents accidental multiple job executions.\n💡 Create a new tool instance if you need to run additional jobs."
+                # Check if this exact run has already been executed (class-level tracking)
+                if execution_key in _GLOBAL_RUN_EXECUTIONS:
+                    previous_run_id = _GLOBAL_RUN_EXECUTIONS[execution_key]
+                    stats = DatabricksJobsTool.get_execution_stats()
+                    logger.warning(f"[DUPLICATE_PREVENTION] Preventing duplicate run of job {job_id} - already executed with run_id: {previous_run_id}. Total tracked runs: {stats['tracked_runs']}")
+                    return f"⚠️ DUPLICATE RUN PREVENTED\n\nJob {job_id} with these parameters has already been executed.\nPrevious run_id: {previous_run_id}\n\n🔒 This tool enforces single execution to prevent duplicate job runs.\n💡 Use action='monitor', run_id={previous_run_id} to check the status of the existing run.\n\n📊 Global tracking stats: {stats['tracked_runs']} runs, {stats['tracked_creates']} creates"
             
             elif action == "create":
                 # Create a unique execution key based on job config
                 job_name = job_config.get("name", "") if job_config else ""
-                execution_key = f"create_{str(hash(str(job_config)))}"
+                config_hash = DatabricksJobsTool._deterministic_hash(job_config) if job_config else 'no_config'
+                execution_key = f"create_{config_hash}"
                 
-                # Check if this exact job config has already been created
-                if execution_key in self._create_executions:
-                    previous_job_id = self._create_executions[execution_key]
-                    logger.warning(f"[SINGLE_EXECUTION] Preventing duplicate creation of job '{job_name}' - already created with job_id: {previous_job_id}")
-                    return f"⚠️ DUPLICATE CREATE PREVENTED\n\nA job with this exact configuration has already been created.\nPrevious job_id: {previous_job_id}\nJob name: {job_name}\n\n🔒 This tool enforces single execution to prevent duplicate job creation.\n💡 Use action='get', job_id={previous_job_id} to view the existing job."
-                
-                # Check global usage count for create actions
-                if self.current_usage_count >= self.max_usage_count:
-                    logger.warning(f"[SINGLE_EXECUTION] Max usage count ({self.max_usage_count}) reached for 'create' actions")
-                    return f"⚠️ USAGE LIMIT REACHED\n\nThis tool has reached its maximum usage limit of {self.max_usage_count} for 'create' actions.\n🔒 This prevents accidental multiple job creations.\n💡 Create a new tool instance if you need to create additional jobs."
+                # Check if this exact job config has already been created (class-level tracking)
+                if execution_key in _GLOBAL_CREATE_EXECUTIONS:
+                    previous_job_id = _GLOBAL_CREATE_EXECUTIONS[execution_key]
+                    stats = DatabricksJobsTool.get_execution_stats()
+                    logger.warning(f"[DUPLICATE_PREVENTION] Preventing duplicate creation of job '{job_name}' - already created with job_id: {previous_job_id}. Total tracked creates: {stats['tracked_creates']}")
+                    return f"⚠️ DUPLICATE CREATE PREVENTED\n\nA job with this exact configuration has already been created.\nPrevious job_id: {previous_job_id}\nJob name: {job_name}\n\n🔒 This tool enforces single execution to prevent duplicate job creation.\n💡 Use action='get', job_id={previous_job_id} to view the existing job.\n\n📊 Global tracking stats: {stats['tracked_runs']} runs, {stats['tracked_creates']} creates"
             
             # Validate input
             validated_input = DatabricksJobsToolSchema(
@@ -592,12 +643,16 @@ class DatabricksJobsTool(BaseTool):
             try:
                 if action == "list":
                     result = loop.run_until_complete(self._list_jobs(limit, name_filter))
+                    self._action_usage_counts[action] += 1
                 elif action == "list_my_jobs":
                     result = loop.run_until_complete(self._list_my_jobs(limit, name_filter))
+                    self._action_usage_counts[action] += 1
                 elif action == "get":
                     result = loop.run_until_complete(self._get_job(job_id))
+                    self._action_usage_counts[action] += 1
                 elif action == "get_notebook":
                     result = loop.run_until_complete(self._get_notebook_content(job_id))
+                    self._action_usage_counts[action] += 1
                 elif action == "run":
                     result = loop.run_until_complete(self._run_job(job_id, job_params))
                     
@@ -608,17 +663,24 @@ class DatabricksJobsTool(BaseTool):
                         run_id_match = re.search(r'Run ID: (\d+)', result)
                         if run_id_match:
                             new_run_id = run_id_match.group(1)
-                            execution_key = f"run_{job_id}_{str(hash(str(job_params))) if job_params else 'no_params'}"
-                            self._run_executions[execution_key] = new_run_id
+                            param_hash = DatabricksJobsTool._deterministic_hash(job_params) if job_params else 'no_params'
+                            execution_key = f"run_{job_id}_{param_hash}"
+                            _GLOBAL_RUN_EXECUTIONS[execution_key] = new_run_id
                             self.current_usage_count += 1
-                            logger.info(f"[SINGLE_EXECUTION] Tracked successful run: job_id={job_id}, run_id={new_run_id}, usage_count={self.current_usage_count}")
+                            self._action_usage_counts[action] += 1
+                            logger.info(f"[SINGLE_EXECUTION] Tracked successful run: job_id={job_id}, run_id={new_run_id}, action_usage={self._action_usage_counts[action]}, total_tracked_runs={len(_GLOBAL_RUN_EXECUTIONS)}")
                             
                             # Add execution tracking info to result
                             result += f"\n\n🔒 EXECUTION TRACKING: This tool will prevent duplicate runs of this job with these parameters."
-                            result += f"\n📊 Usage Count: {self.current_usage_count}/{self.max_usage_count}"
+                            action_limit = self._action_limits.get(action)
+                            if action_limit is not None:
+                                result += f"\n📊 Action Usage: {action} {self._action_usage_counts[action]}/{action_limit}"
+                            else:
+                                result += f"\n📊 Action Usage: {action} {self._action_usage_counts[action]}/unlimited"
                         
                 elif action == "monitor":
                     result = loop.run_until_complete(self._monitor_run(run_id))
+                    self._action_usage_counts[action] += 1
                 elif action == "create":
                     result = loop.run_until_complete(self._create_job(job_config))
                     
@@ -629,14 +691,20 @@ class DatabricksJobsTool(BaseTool):
                         job_id_match = re.search(r'Job ID: (\d+)', result)
                         if job_id_match:
                             new_job_id = job_id_match.group(1)
-                            execution_key = f"create_{str(hash(str(job_config)))}"
-                            self._create_executions[execution_key] = new_job_id
+                            config_hash = DatabricksJobsTool._deterministic_hash(job_config) if job_config else 'no_config'
+                            execution_key = f"create_{config_hash}"
+                            _GLOBAL_CREATE_EXECUTIONS[execution_key] = new_job_id
                             self.current_usage_count += 1
-                            logger.info(f"[SINGLE_EXECUTION] Tracked successful creation: job_name={job_config.get('name', 'Unknown')}, job_id={new_job_id}, usage_count={self.current_usage_count}")
+                            self._action_usage_counts[action] += 1
+                            logger.info(f"[SINGLE_EXECUTION] Tracked successful creation: job_name={job_config.get('name', 'Unknown')}, job_id={new_job_id}, action_usage={self._action_usage_counts[action]}, total_tracked_creates={len(_GLOBAL_CREATE_EXECUTIONS)}")
                             
                             # Add execution tracking info to result
                             result += f"\n\n🔒 EXECUTION TRACKING: This tool will prevent duplicate creation of jobs with this configuration."
-                            result += f"\n📊 Usage Count: {self.current_usage_count}/{self.max_usage_count}"
+                            action_limit = self._action_limits.get(action)
+                            if action_limit is not None:
+                                result += f"\n📊 Action Usage: {action} {self._action_usage_counts[action]}/{action_limit}"
+                            else:
+                                result += f"\n📊 Action Usage: {action} {self._action_usage_counts[action]}/unlimited"
                 else:
                     result = f"Error: Unknown action '{action}'"
             finally:

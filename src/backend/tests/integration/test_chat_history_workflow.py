@@ -348,7 +348,7 @@ class TestChatHistoryWorkflowIntegration:
         complex_message = {
             "session_id": session_id,
             "message_type": "assistant",
-            "content": "I've created a complete crew for you",
+            "content": "I've created a complete plan for you",
             "intent": "generate_crew",
             "confidence": 0.97,
             "generation_result": {

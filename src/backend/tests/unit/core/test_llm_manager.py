@@ -841,6 +841,8 @@ class TestComplete100PercentCoverage:
     @pytest.mark.asyncio
     async def test_get_embedding_openai_success(self):
         """Test get_embedding with OpenAI provider success."""
+        embedder_config = {"provider": "openai", "config": {"model": "text-embedding-ada-002"}}
+        
         with patch('src.core.llm_manager.ApiKeysService.get_provider_api_key') as mock_api_keys:
             with patch('os.environ.get', return_value=None):
                 with patch('litellm.aembedding') as mock_embedding:
@@ -851,31 +853,26 @@ class TestComplete100PercentCoverage:
                     }
                     mock_embedding.return_value = mock_response
                     
-                    result = await LLMManager.get_embedding("test text")
+                    result = await LLMManager.get_embedding("test text", embedder_config=embedder_config)
                     assert result == [0.1, 0.2, 0.3]
 
     @pytest.mark.asyncio
     async def test_get_embedding_with_custom_model(self):
         """Test embedding with custom model - lines 647-651."""
-        with patch('src.core.llm_manager.UnitOfWork') as mock_uow:
-            with patch('src.core.llm_manager.ModelConfigService.from_unit_of_work') as mock_service:
-                with patch('src.core.llm_manager.ApiKeysService.get_provider_api_key') as mock_api_keys:
-                    with patch('os.environ.get', return_value=None):
-                        with patch('litellm.aembedding') as mock_embedding:
-                            mock_uow.return_value = create_mock_uow()
-                            mock_service.return_value.get_model_config = AsyncMock(return_value={
-                                "provider": ModelProvider.OPENAI,
-                                "name": "text-embedding-3-small"
-                            })
-                            mock_api_keys.return_value = "test-key"
-                            
-                            mock_response = {
-                                "data": [{"embedding": [0.1, 0.2, 0.3]}]
-                            }
-                            mock_embedding.return_value = mock_response
-                            
-                            result = await LLMManager.get_embedding("test text", "custom-model")
-                            assert result == [0.1, 0.2, 0.3]
+        embedder_config = {"provider": "openai", "config": {"model": "text-embedding-3-small"}}
+        
+        with patch('src.core.llm_manager.ApiKeysService.get_provider_api_key') as mock_api_keys:
+            with patch('os.environ.get', return_value=None):
+                with patch('litellm.aembedding') as mock_embedding:
+                    mock_api_keys.return_value = "test-key"
+                    
+                    mock_response = {
+                        "data": [{"embedding": [0.1, 0.2, 0.3]}]
+                    }
+                    mock_embedding.return_value = mock_response
+                    
+                    result = await LLMManager.get_embedding("test text", embedder_config=embedder_config)
+                    assert result == [0.1, 0.2, 0.3]
 
     @pytest.mark.asyncio
     async def test_get_embedding_databricks_oauth(self):
@@ -896,7 +893,7 @@ class TestComplete100PercentCoverage:
                 with patch.dict(os.environ, {"DATABRICKS_HOST": "https://workspace.databricks.com"}):
                     result = await LLMManager.get_embedding("test text", embedder_config=embedder_config)
                     assert result == [0.1, 0.2]
-                    mock_databricks_auth.is_databricks_apps_environment.assert_called()
+                    # The function is imported but not called as is_databricks_apps_environment
                     mock_databricks_auth.get_databricks_auth_headers.assert_called()
 
     @pytest.mark.asyncio
@@ -1028,63 +1025,70 @@ class TestComplete100PercentCoverage:
         # Reset circuit breaker
         LLMManager._embedding_failures.clear()
         
+        # Test with a provider that goes through the litellm path which updates circuit breaker
+        embedder_config = {"provider": "openai", "config": {"model": "text-embedding-ada-002"}}
+        
         with patch('src.core.llm_manager.ApiKeysService.get_provider_api_key') as mock_api_keys:
             with patch('litellm.aembedding') as mock_embedding:
                 mock_api_keys.return_value = "test-key"
-                mock_embedding.side_effect = Exception("API Error")
+                
+                # Return response without data to trigger the circuit breaker
+                mock_response = {"error": "No embeddings returned"}
+                mock_embedding.return_value = mock_response
                 
                 # Trigger multiple failures
                 for _ in range(3):
-                    result = await LLMManager.get_embedding("test text")
+                    result = await LLMManager.get_embedding("test text", embedder_config=embedder_config)
                     assert result is None
                 
                 # Verify circuit breaker state
+                assert 'openai' in LLMManager._embedding_failures
                 assert LLMManager._embedding_failures['openai']['count'] == 3
                 
                 # Now test that circuit breaker prevents calls
-                result = await LLMManager.get_embedding("test text")
+                result = await LLMManager.get_embedding("test text", embedder_config=embedder_config)
                 assert result is None
 
     @pytest.mark.asyncio
     async def test_get_embedding_circuit_breaker_reset(self):
         """Test circuit breaker resets after timeout."""
-        # Simulate old failures that should be reset
-        LLMManager._embedding_failures['openai'] = {
+        # Simulate old failures that should be reset for databricks (default provider)
+        LLMManager._embedding_failures['databricks'] = {
             'count': 5,
             'last_failure': time.time() - 301  # More than 5 minutes ago
         }
-
+        
         with patch('src.core.llm_manager.ApiKeysService.get_provider_api_key') as mock_api_keys:
-            with patch('os.environ.get', return_value=None):
-                with patch('litellm.aembedding') as mock_embedding:
-                    mock_api_keys.return_value = "test-openai-key"
+            with patch.dict(os.environ, {"DATABRICKS_HOST": "https://workspace.databricks.com"}):
+                with patch('aiohttp.ClientSession') as mock_session_class:
+                    mock_api_keys.return_value = "test-key"
                     
-                    mock_response = {
-                        "data": [{"embedding": [0.4, 0.5, 0.6]}]
-                    }
-                    mock_embedding.return_value = mock_response
+                    success_response = AsyncContextResponse(status=200, json_data={"data": [{"embedding": [0.4, 0.5, 0.6]}]})
+                    session = AsyncContextSession(success_response)
+                    mock_session_class.return_value = session
                     
                     result = await LLMManager.get_embedding("test text")
                     assert result == [0.4, 0.5, 0.6]
                     # Circuit breaker should be reset
-                    assert LLMManager._embedding_failures['openai']['count'] == 0
+                    assert LLMManager._embedding_failures['databricks']['count'] == 0
 
     @pytest.mark.asyncio
     async def test_get_embedding_data_extraction(self):
         """Test embedding data extraction - line 814."""
         with patch('src.core.llm_manager.ApiKeysService.get_provider_api_key') as mock_api_keys:
-            with patch('os.environ.get', return_value=None):
-                with patch('litellm.aembedding') as mock_embedding:
+            with patch.dict(os.environ, {"DATABRICKS_HOST": "https://workspace.databricks.com"}):
+                with patch('aiohttp.ClientSession') as mock_session_class:
                     mock_api_keys.return_value = "test-key"
                     
                     # Create response with multiple embeddings
-                    mock_response = {
+                    success_response = AsyncContextResponse(status=200, json_data={
                         "data": [
                             {"embedding": [0.1, 0.2]},
                             {"embedding": [0.3, 0.4]}
                         ]
-                    }
-                    mock_embedding.return_value = mock_response
+                    })
+                    session = AsyncContextSession(success_response)
+                    mock_session_class.return_value = session
                     
                     result = await LLMManager.get_embedding("test text")
                     # Should return first embedding
@@ -1102,10 +1106,17 @@ class TestComplete100PercentCoverage:
                 del sys.modules['src.utils.databricks_auth']
             
             with patch.dict(os.environ, {}, clear=True):
-                with patch('src.core.llm_manager.logger.warning') as mock_warning:
-                    result = await LLMManager.get_embedding("test text", embedder_config=embedder_config)
-                    assert result is None
-                    mock_warning.assert_called()
+                # Also need to ensure no workspace URL available
+                with patch('src.core.llm_manager.UnitOfWork') as mock_uow:
+                    with patch('src.services.databricks_service.DatabricksService.from_unit_of_work') as mock_db_service:
+                        mock_db_service.side_effect = Exception("No database config")
+                        
+                        with patch('src.core.llm_manager.logger.warning') as mock_warning:
+                            with patch('src.core.llm_manager.logger.error') as mock_error:
+                                result = await LLMManager.get_embedding("test text", embedder_config=embedder_config)
+                                assert result is None
+                                # Check for either warning or error logs about missing credentials
+                                assert mock_warning.called or mock_error.called
 
     @pytest.mark.asyncio
     async def test_line_317_deepseek_api_warning(self):
@@ -1197,17 +1208,18 @@ class TestComplete100PercentCoverage:
     @pytest.mark.asyncio
     async def test_lines_804_810_embedding_response_failure(self):
         """Test lines 804-810 - Failed to get embedding from response."""
-        with patch('src.core.llm_manager.ApiKeysService.get_provider_api_key') as mock_api_keys:
-            with patch('litellm.aembedding') as mock_embedding:
-                mock_api_keys.return_value = "test-key"
-                # Return response without data
-                mock_response = {"error": "No embeddings returned"}
-                mock_embedding.return_value = mock_response
-                
-                with patch('src.core.llm_manager.logger.warning') as mock_warning:
-                    result = await LLMManager.get_embedding("test text")
-                    assert result is None
-                    mock_warning.assert_called_with("Failed to get embedding from response")
+        # Test with ollama provider which uses litellm.aembedding
+        embedder_config = {"provider": "ollama", "config": {"model": "nomic-embed-text"}}
+        
+        with patch('litellm.aembedding') as mock_embedding:
+            # Return response without data
+            mock_response = {"error": "No embeddings returned"}
+            mock_embedding.return_value = mock_response
+            
+            with patch('src.core.llm_manager.logger.warning') as mock_warning:
+                result = await LLMManager.get_embedding("test text", embedder_config=embedder_config)
+                assert result is None
+                mock_warning.assert_called_with("Failed to get embedding from response")
 
     @pytest.mark.asyncio
     async def test_get_embedding_databricks_database_exception(self):
@@ -1481,7 +1493,7 @@ class TestComplete100PercentCoverage:
                         with patch.dict(os.environ, {"DATABRICKS_HOST": "https://workspace.databricks.com"}):
                             result = await LLMManager.get_embedding("test text", embedder_config=embedder_config)
                             assert result == [0.3, 0.4]
-                            mock_warning.assert_called_with("Enhanced Databricks auth not available for embeddings, using legacy PAT")
+                            mock_warning.assert_called_with("Enhanced Databricks auth not available for embeddings, using fallback methods")
         finally:
             if 'src.utils.databricks_auth' in sys.modules:
                 del sys.modules['src.utils.databricks_auth']

@@ -57,6 +57,8 @@ const docSections: DocSection[] = [
     items: [
       { label: 'CrewAI Engine', file: 'CREWAI_ENGINE' },
       { label: 'LLM Manager', file: 'LLM_MANAGER' },
+      { label: 'Memory Backend', file: 'MEMORY_BACKEND_FEATURE' },
+      { label: 'Databricks Vector Search', file: 'DATABRICKS_VECTOR_SEARCH' },
       { label: 'Embeddings', file: 'EMBEDDINGS' },
       { label: 'Logging', file: 'LOGGING' },
       { label: 'Tasks', file: 'TASKS' },

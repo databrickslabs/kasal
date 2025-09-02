@@ -13,11 +13,18 @@ import time
 
 from crewai import LLM
 from src.schemas.model_provider import ModelProvider
+from src.utils.databricks_url_utils import DatabricksURLUtils
 from src.services.model_config_service import ModelConfigService
 from src.services.api_keys_service import ApiKeysService
 from src.core.unit_of_work import UnitOfWork
-import litellm
 import pathlib
+
+# CRITICAL: Import and apply model handlers BEFORE importing litellm
+# This ensures the monkey patches are applied to handle model-specific responses
+from src.core.llm_handlers.databricks_gpt_oss_handler import DatabricksGPTOSSHandler, DatabricksGPTOSSLLM
+
+# Now import litellm after the monkey patch has been applied
+import litellm
 from litellm.integrations.custom_logger import CustomLogger
 
 # Get the absolute path to the logs directory
@@ -31,6 +38,12 @@ os.environ["LITELLM_LOG_FILE"] = log_file_path  # Configure LiteLLM to write log
 # Configure standard Python logger to also write to the llm.log file
 logger = logging.getLogger(__name__)
 logger.setLevel(logging.DEBUG)
+
+# Set drop_params to True to automatically drop unsupported parameters
+# This is especially useful for GPT-5 and other new models that may have different parameter support
+# Note: With litellm 1.75.8+, GPT-5 is natively supported
+litellm.drop_params = True
+logger.info("Set litellm.drop_params=True to handle unsupported parameters gracefully")
 # Check if handlers already exist to avoid duplicates
 if not logger.handlers:
     file_handler = logging.FileHandler(log_file_path)
@@ -262,7 +275,7 @@ litellm.failure_callback = [litellm_file_logger]
 logger.info(f"Configured LiteLLM to write logs to: {log_file_path}")
 
 # Export functions for external use
-__all__ = ['LLMManager']
+__all__ = ['LLMManager', 'DatabricksGPTOSSHandler', 'DatabricksGPTOSSLLM']
 
 class LLMManager:
     """Manager for LLM configurations and interactions."""
@@ -303,9 +316,24 @@ class LLMManager:
         logger.info(f"Using provider: {provider} for model: {model}")
         
         # Set up model parameters for litellm
+        # Use longer timeout for GPT-5 models as they take more time to respond
+        timeout_value = 300 if (provider == ModelProvider.OPENAI and "gpt-5" in model_name.lower()) else 120
+        
         model_params = {
-            "model": model_name
+            "model": model_name,
+            "timeout": timeout_value  # Extended timeout for GPT-5 (300s), standard for others (120s)
         }
+        
+        # GPT-5 doesn't support certain parameters - remove them
+        if provider == ModelProvider.OPENAI and "gpt-5" in model_name.lower():
+            # Set drop_params for this specific call
+            model_params["drop_params"] = True
+            # Also specify additional params to drop that litellm might not know about
+            model_params["additional_drop_params"] = ["stop", "presence_penalty", "frequency_penalty", "logit_bias"]
+            logger.info(f"Enabled drop_params and additional_drop_params for GPT-5 model: {model_name}")
+        
+        if timeout_value == 300:
+            logger.info(f"Using extended timeout of {timeout_value}s for GPT-5 model in litellm: {model_name}")
         
         # Get API key for the provider using ApiKeysService
         if provider in [ModelProvider.OPENAI, ModelProvider.ANTHROPIC, ModelProvider.DEEPSEEK]:
@@ -367,10 +395,8 @@ class LLMManager:
             # Get workspace URL from environment first, then database configuration
             workspace_url = os.getenv("DATABRICKS_HOST", "")
             if workspace_url:
-                # Ensure proper format
-                if not workspace_url.startswith('https://'):
-                    workspace_url = f"https://{workspace_url}"
-                model_params["api_base"] = f"{workspace_url.rstrip('/')}/serving-endpoints"
+                # Use centralized URL utility for consistent handling
+                model_params["api_base"] = DatabricksURLUtils.construct_serving_endpoints_url(workspace_url)
                 logger.info(f"Using Databricks workspace URL from environment: {workspace_url}")
             else:
                 # Fallback to database configuration or endpoint env var
@@ -382,10 +408,9 @@ class LLMManager:
                             databricks_service = await DatabricksService.from_unit_of_work(uow)
                             config = await databricks_service.get_databricks_config()
                             if config and config.workspace_url:
-                                workspace_url = config.workspace_url.rstrip('/')
-                                if not workspace_url.startswith('https://'):
-                                    workspace_url = f"https://{workspace_url}"
-                                model_params["api_base"] = f"{workspace_url}/serving-endpoints"
+                                workspace_url = config.workspace_url
+                                # Use centralized URL utility for consistent handling
+                                model_params["api_base"] = DatabricksURLUtils.construct_serving_endpoints_url(workspace_url)
                                 logger.info(f"Using workspace URL from database: {workspace_url}")
                             else:
                                 # Try to get from enhanced auth system
@@ -393,7 +418,8 @@ class LLMManager:
                                     from src.utils.databricks_auth import _databricks_auth
                                     if hasattr(_databricks_auth, '_workspace_host') and _databricks_auth._workspace_host:
                                         workspace_url = _databricks_auth._workspace_host
-                                        model_params["api_base"] = f"{workspace_url}/serving-endpoints"
+                                        # Use centralized URL utility for consistent handling
+                                        model_params["api_base"] = DatabricksURLUtils.construct_serving_endpoints_url(workspace_url)
                                         logger.info(f"Using workspace URL from enhanced auth: {workspace_url}")
                                 except Exception as e:
                                     logger.debug(f"Could not get workspace URL from enhanced auth: {e}")
@@ -505,10 +531,8 @@ class LLMManager:
             # Get workspace URL from environment first, then database
             workspace_url = os.getenv("DATABRICKS_HOST", "")
             if workspace_url:
-                # Ensure proper format
-                if not workspace_url.startswith('https://'):
-                    workspace_url = f"https://{workspace_url}"
-                api_base = f"{workspace_url.rstrip('/')}/serving-endpoints"
+                # Use centralized URL utility for consistent handling
+                api_base = DatabricksURLUtils.construct_serving_endpoints_url(workspace_url)
                 logger.info(f"Using Databricks workspace URL from environment for CrewAI: {workspace_url}")
             else:
                 # Fallback to DATABRICKS_ENDPOINT or database
@@ -522,10 +546,9 @@ class LLMManager:
                             databricks_service = await DatabricksService.from_unit_of_work(uow)
                             config = await databricks_service.get_databricks_config()
                             if config and config.workspace_url:
-                                workspace_url = config.workspace_url.rstrip('/')
-                                if not workspace_url.startswith('https://'):
-                                    workspace_url = f"https://{workspace_url}"
-                                api_base = f"{workspace_url}/serving-endpoints"
+                                workspace_url = config.workspace_url
+                                # Use centralized URL utility for consistent handling
+                                api_base = DatabricksURLUtils.construct_serving_endpoints_url(workspace_url)
                                 logger.info(f"Using workspace URL from database for CrewAI: {workspace_url}")
                     except Exception as e:
                         logger.error(f"Error getting Databricks workspace URL for CrewAI: {e}")
@@ -547,11 +570,19 @@ class LLMManager:
             
             # Add max_output_tokens if defined in model config
             if "max_output_tokens" in model_config_dict and model_config_dict["max_output_tokens"]:
+                # GPT-5 and newer OpenAI models use max_completion_tokens instead of max_tokens
+                # Since this is inside Databricks provider block, this won't apply to GPT-5
                 llm_params["max_tokens"] = model_config_dict["max_output_tokens"]
                 logger.info(f"Setting max_tokens to {model_config_dict['max_output_tokens']} for model {prefixed_model}")
                 
             logger.info(f"Creating CrewAI LLM with model: {prefixed_model}, has_api_key: {bool(api_key)}, api_base: {api_base}")
-            return LLM(**llm_params)
+            
+            # Use custom wrapper for GPT-OSS models
+            if DatabricksGPTOSSHandler.is_gpt_oss_model(model_name_value):
+                logger.info(f"Using DatabricksGPTOSSLLM wrapper for GPT-OSS model: {model_name_value}")
+                return DatabricksGPTOSSLLM(**llm_params)
+            else:
+                return LLM(**llm_params)
         elif provider == ModelProvider.GEMINI:
             api_key = await ApiKeysService.get_provider_api_key(provider)
             # Set in environment variables for better compatibility with various libraries
@@ -573,11 +604,25 @@ class LLMManager:
             prefixed_model = f"{provider.lower()}/{model_name_value}" if provider else model_name_value
         
         # Configure LLM parameters (for all providers except Databricks which returns early)
+        # Use longer timeout for GPT-5 models as they take more time to respond
+        timeout_value = 300 if (provider == ModelProvider.OPENAI and "gpt-5" in model_name_value.lower()) else 120
+        
         llm_params = {
             "model": prefixed_model,
             # Add built-in retry capability
-            "timeout": 120,  # Longer timeout to prevent premature failures
+            "timeout": timeout_value,  # Longer timeout for GPT-5 (300s), standard for others (120s)
         }
+        
+        # GPT-5 doesn't support certain parameters - enable drop_params
+        if provider == ModelProvider.OPENAI and "gpt-5" in model_name_value.lower():
+            # CrewAI's LLM will pass this to litellm
+            llm_params["drop_params"] = True
+            # Also specify additional params to drop that litellm might not know about
+            llm_params["additional_drop_params"] = ["stop", "presence_penalty", "frequency_penalty", "logit_bias"]
+            logger.info(f"Enabled drop_params and additional_drop_params for GPT-5 CrewAI model: {model_name_value}")
+        
+        if timeout_value == 300:
+            logger.info(f"Using extended timeout of {timeout_value}s for GPT-5 model: {model_name_value}")
         
         # Add API key and base URL if available
         if api_key:
@@ -587,10 +632,12 @@ class LLMManager:
         
         # Add max_output_tokens if defined in model config
         if "max_output_tokens" in model_config_dict and model_config_dict["max_output_tokens"]:
+            # litellm 1.75.8+ handles GPT-5 max_completion_tokens automatically
             llm_params["max_tokens"] = model_config_dict["max_output_tokens"]
             logger.info(f"Setting max_tokens to {model_config_dict['max_output_tokens']} for model {prefixed_model}")
         
         # Create and return the CrewAI LLM
+        # litellm 1.75.8+ handles GPT-5 natively, no need for custom wrapper
         logger.info(f"Creating CrewAI LLM with model: {prefixed_model}")
         return LLM(**llm_params)
 
@@ -610,7 +657,7 @@ class LLMManager:
         return llm
 
     @staticmethod
-    async def get_embedding(text: str, model: str = "text-embedding-ada-002", embedder_config: Optional[Dict[str, Any]] = None) -> Optional[List[float]]:
+    async def get_embedding(text: str, model: str = "databricks-gte-large-en", embedder_config: Optional[Dict[str, Any]] = None) -> Optional[List[float]]:
         """
         Get an embedding vector for the given text using configurable embedder.
         
@@ -622,15 +669,15 @@ class LLMManager:
         Returns:
             List[float]: The embedding vector or None if creation fails
         """
-        provider = 'openai'  # Default provider
+        provider = 'databricks'  # Default provider
         try:
             # Determine provider and model from embedder_config or defaults
             if embedder_config:
-                provider = embedder_config.get('provider', 'openai')
+                provider = embedder_config.get('provider', 'databricks')
                 config = embedder_config.get('config', {})
                 embedding_model = config.get('model', model)
             else:
-                provider = 'openai'
+                provider = 'databricks'
                 embedding_model = model
             
             # Check circuit breaker for this provider
@@ -654,37 +701,70 @@ class LLMManager:
             
             # Handle different embedding providers
             if provider == 'databricks' or 'databricks' in embedding_model:
-                # Use enhanced Databricks authentication for embeddings
+                # Use enhanced Databricks authentication for embeddings - follow GenieTool pattern
                 try:
                     from src.utils.databricks_auth import is_databricks_apps_environment, get_databricks_auth_headers
                     
-                    # Check if running in Databricks Apps environment
-                    if is_databricks_apps_environment():
-                        logger.info("Using Databricks Apps OAuth authentication for embeddings")
-                        # Get OAuth headers directly from enhanced auth system
-                        headers_result, error = await get_databricks_auth_headers()
-                        if error or not headers_result:
-                            logger.error(f"Failed to get OAuth headers for embeddings: {error}")
-                            return None
+                    # First try: OBO authentication if available
+                    logger.info("Attempting enhanced Databricks authentication for embeddings")
+                    headers_result, error = await get_databricks_auth_headers()
+                    if headers_result and not error:
+                        logger.info("Using enhanced Databricks authentication (OAuth/OBO) for embeddings")
                         headers = headers_result
                         api_key = None  # OAuth handled by headers
                     else:
-                        # Only use API key service when NOT in Databricks Apps context
+                        logger.info(f"Enhanced auth failed ({error}), falling back to API key service")
+                        # Second try: API key from service
                         api_key = await ApiKeysService.get_provider_api_key("DATABRICKS")
-                        headers = None
+                        if api_key:
+                            logger.info("Using API key from service for embeddings")
+                            headers = None
+                        else:
+                            # Third try: Client credentials from environment
+                            client_id = os.getenv("DATABRICKS_CLIENT_ID")
+                            client_secret = os.getenv("DATABRICKS_CLIENT_SECRET")
+                            if client_id and client_secret:
+                                logger.info("Using client credentials for embeddings")
+                                # Let the enhanced auth handle client credentials
+                                headers_result, error = await get_databricks_auth_headers()
+                                if headers_result and not error:
+                                    headers = headers_result
+                                    api_key = None
+                                else:
+                                    # Fourth try: Environment variable DATABRICKS_TOKEN
+                                    api_key = os.getenv("DATABRICKS_TOKEN") or os.getenv("DATABRICKS_API_KEY")
+                                    if api_key:
+                                        logger.info("Using DATABRICKS_TOKEN from environment for embeddings")
+                                        headers = None
+                                    else:
+                                        logger.error("No Databricks authentication method available")
+                                        return None
+                            else:
+                                # Fourth try: Environment variable DATABRICKS_TOKEN
+                                api_key = os.getenv("DATABRICKS_TOKEN") or os.getenv("DATABRICKS_API_KEY")
+                                if api_key:
+                                    logger.info("Using DATABRICKS_TOKEN from environment for embeddings")
+                                    headers = None
+                                else:
+                                    logger.error("No Databricks authentication method available")
+                                    return None
                         
                 except ImportError:
-                    logger.warning("Enhanced Databricks auth not available for embeddings, using legacy PAT")
+                    logger.warning("Enhanced Databricks auth not available for embeddings, using fallback methods")
+                    # Try API key service first
                     api_key = await ApiKeysService.get_provider_api_key("DATABRICKS")
+                    if not api_key:
+                        # Fall back to environment variable
+                        api_key = os.getenv("DATABRICKS_TOKEN") or os.getenv("DATABRICKS_API_KEY")
+                        if api_key:
+                            logger.info("Using DATABRICKS_TOKEN from environment for embeddings (no enhanced auth)")
                     headers = None
                 
                 # Get workspace URL from environment first, then database
                 workspace_url = os.getenv("DATABRICKS_HOST", "")
                 if workspace_url:
-                    # Ensure proper format
-                    if not workspace_url.startswith('https://'):
-                        workspace_url = f"https://{workspace_url}"
-                    api_base = f"{workspace_url.rstrip('/')}/serving-endpoints"
+                    # Use centralized URL utility for consistent handling
+                    api_base = DatabricksURLUtils.construct_serving_endpoints_url(workspace_url)
                     logger.info(f"Using Databricks workspace URL from environment for embeddings: {workspace_url}")
                 else:
                     # Fallback to database configuration
@@ -695,10 +775,9 @@ class LLMManager:
                             databricks_service = await DatabricksService.from_unit_of_work(uow)
                             config = await databricks_service.get_databricks_config()
                             if config and config.workspace_url:
-                                workspace_url = config.workspace_url.rstrip('/')
-                                if not workspace_url.startswith('https://'):
-                                    workspace_url = f"https://{workspace_url}"
-                                api_base = f"{workspace_url}/serving-endpoints"
+                                workspace_url = config.workspace_url
+                                # Use centralized URL utility for consistent handling
+                                api_base = DatabricksURLUtils.construct_serving_endpoints_url(workspace_url)
                                 logger.info(f"Using workspace URL from database for embeddings: {workspace_url}")
                     except Exception as e:
                         logger.error(f"Error getting Databricks workspace URL for embeddings: {e}")
@@ -716,8 +795,10 @@ class LLMManager:
                 import aiohttp
                 
                 try:
-                    # Construct the direct API endpoint
-                    endpoint_url = f"{api_base}/{embedding_model.replace('databricks/', '')}/invocations"
+                    # Construct the direct API endpoint using centralized utility
+                    # Extract workspace URL from api_base (which contains /serving-endpoints)
+                    workspace_url = DatabricksURLUtils.extract_workspace_from_endpoint(api_base)
+                    endpoint_url = DatabricksURLUtils.construct_model_invocation_url(workspace_url, embedding_model)
                     
                     # Use OAuth headers if available, otherwise fall back to API key
                     if headers:

@@ -7,7 +7,7 @@ export interface DispatcherRequest {
 }
 
 export interface DispatcherResponse {
-  intent: 'generate_agent' | 'generate_task' | 'generate_crew' | 'configure_crew' | 'conversation' | 'unknown';
+  intent: 'generate_agent' | 'generate_task' | 'generate_crew' | 'generate_plan' | 'execute_crew' | 'configure_crew' | 'conversation' | 'unknown';
   confidence: number;
   extracted_info: Record<string, unknown>;
   suggested_prompt?: string;

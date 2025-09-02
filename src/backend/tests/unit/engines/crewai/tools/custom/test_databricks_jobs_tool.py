@@ -270,12 +270,10 @@ class TestDatabricksJobsTool(unittest.TestCase):
         
         self.assertEqual(tool._host, "test-workspace.cloud.databricks.com")
         self.assertEqual(tool._token, "test-api-key")
-        self.assertFalse(tool._use_oauth)
         # Test single execution control attributes
-        self.assertEqual(tool.max_usage_count, 1)
+        self.assertIsNone(tool.max_usage_count)
         self.assertEqual(tool.current_usage_count, 0)
-        self.assertEqual(len(tool._run_executions), 0)
-        self.assertEqual(len(tool._create_executions), 0)
+        # Global tracking is tested separately in single_execution tests
 
     def test_tool_initialization_empty_config(self):
         """Test initialization with empty config"""
@@ -319,25 +317,17 @@ class TestDatabricksJobsTool(unittest.TestCase):
         
         self.assertEqual(tool._token, "test-token-key")
 
-    def test_oauth_initialization_with_user_token(self):
-        """Test OAuth initialization with user_token parameter"""
-        tool = DatabricksJobsTool(user_token="user-oauth-token")
-        
-        self.assertEqual(tool._user_token, "user-oauth-token")
-        self.assertTrue(tool._use_oauth)
-
-    def test_oauth_initialization_with_config(self):
-        """Test OAuth initialization with config"""
+    def test_initialization_with_pat_config(self):
+        """Test initialization with PAT token in config"""
         tool_config = {
             "DATABRICKS_HOST": "test-workspace.cloud.databricks.com",
-            "user_token": "test-user-token"
+            "DATABRICKS_API_KEY": "test-pat-token"
         }
         
         tool = DatabricksJobsTool(tool_config=tool_config)
         
         self.assertEqual(tool._host, "test-workspace.cloud.databricks.com")
-        self.assertEqual(tool._user_token, "test-user-token")
-        self.assertTrue(tool._use_oauth)
+        self.assertEqual(tool._token, "test-pat-token")
 
     def test_host_processing_https(self):
         """Test host URL processing with https prefix"""
@@ -378,10 +368,6 @@ class TestDatabricksJobsTool(unittest.TestCase):
         )
         self.assertEqual(tool._token, "short")
 
-    def test_user_token_masking_short(self):
-        """Test user token masking with short token"""
-        tool = DatabricksJobsTool(user_token="short")
-        self.assertEqual(tool._user_token, "short")
 
     @patch.dict('os.environ', {'DATABRICKS_HOST': 'env-workspace.cloud.databricks.com', 'DATABRICKS_API_KEY': 'env-api-key'})
     @patch('src.core.unit_of_work.UnitOfWork')
@@ -407,19 +393,10 @@ class TestDatabricksJobsTool(unittest.TestCase):
         self.assertEqual(tool._host, "env-workspace.cloud.databricks.com")
         self.assertEqual(tool._token, "env-token")
 
-    def test_databricks_apps_environment_detection(self):
-        """Test OAuth is enabled when user_token is provided"""
-        tool = DatabricksJobsTool(user_token="test-token")
-        
-        self.assertTrue(tool._use_oauth)
-        self.assertEqual(tool._user_token, "test-token")
-
     def test_authentication_validation_no_auth(self):
         """Test authentication validation with no auth"""
         tool = DatabricksJobsTool(token_required=True)
-        tool._use_oauth = False
         tool._token = None
-        tool._user_token = None
         
         result = tool._run(action="list")
         
@@ -527,68 +504,7 @@ class TestDatabricksJobsTool(unittest.TestCase):
         self.assertEqual(headers["Authorization"], "Bearer test-api-key")
         self.assertEqual(headers["Content-Type"], "application/json")
 
-    @patch('src.engines.crewai.tools.custom.databricks_jobs_tool.aiohttp.ClientSession')
-    def test_get_auth_headers_with_oauth(self, mock_session):
-        """Test _get_auth_headers with OAuth token"""
-        tool = DatabricksJobsTool(user_token="oauth-token")
-        
-        # Run async method
-        loop = asyncio.new_event_loop()
-        headers = loop.run_until_complete(tool._get_auth_headers())
-        loop.close()
-        
-        self.assertEqual(headers["Authorization"], "Bearer oauth-token")
-        self.assertEqual(headers["Content-Type"], "application/json")
 
-    @patch('src.utils.databricks_auth.get_databricks_auth_headers')
-    @patch('src.engines.crewai.tools.custom.databricks_jobs_tool.aiohttp.ClientSession')
-    def test_get_auth_headers_with_enhanced_auth_success(self, mock_session, mock_get_auth):
-        """Test _get_auth_headers with successful enhanced auth"""
-        tool = DatabricksJobsTool(user_token="user-token")
-        
-        # Mock successful enhanced auth
-        async def mock_auth_success(*args, **kwargs):
-            return (
-                {"Authorization": "Bearer enhanced-token", "Content-Type": "application/json"},
-                None
-            )
-        mock_get_auth.side_effect = mock_auth_success
-        
-        loop = asyncio.new_event_loop()
-        headers = loop.run_until_complete(tool._get_auth_headers())
-        loop.close()
-        
-        self.assertEqual(headers["Authorization"], "Bearer enhanced-token")
-
-    @patch('src.utils.databricks_auth.get_databricks_auth_headers')
-    @patch('src.engines.crewai.tools.custom.databricks_jobs_tool.aiohttp.ClientSession')
-    def test_get_auth_headers_with_enhanced_auth_failure(self, mock_session, mock_get_auth):
-        """Test _get_auth_headers when enhanced auth fails"""
-        tool = DatabricksJobsTool(user_token="user-token")
-        
-        # Mock failed enhanced auth
-        async def mock_auth_fail(*args, **kwargs):
-            return (None, "Auth error")
-        mock_get_auth.side_effect = mock_auth_fail
-        
-        loop = asyncio.new_event_loop()
-        headers = loop.run_until_complete(tool._get_auth_headers())
-        loop.close()
-        
-        # Should fall back to user token
-        self.assertEqual(headers["Authorization"], "Bearer user-token")
-
-    def test_get_auth_headers_enhanced_auth_import_error(self):
-        """Test _get_auth_headers when enhanced auth module is not available"""
-        tool = DatabricksJobsTool(user_token="user-token")
-        
-        # The tool should handle ImportError internally and fall back to user token
-        loop = asyncio.new_event_loop()
-        headers = loop.run_until_complete(tool._get_auth_headers())
-        loop.close()
-        
-        # Should use the user token
-        self.assertEqual(headers["Authorization"], "Bearer user-token")
 
     @patch('src.engines.crewai.tools.custom.databricks_jobs_tool.aiohttp.ClientSession')
     @patch('src.services.api_keys_service.ApiKeysService.get_provider_api_key', new_callable=AsyncMock)
@@ -597,8 +513,6 @@ class TestDatabricksJobsTool(unittest.TestCase):
         """Test _get_auth_headers with no token raises error"""
         tool = DatabricksJobsTool()
         tool._token = None
-        tool._user_token = None
-        tool._use_oauth = False
         
         # Mock the API Keys Service to return None (no API key found)
         mock_get_api_key.return_value = None
@@ -1936,15 +1850,13 @@ spark.sql("SELECT * FROM table")
 
     def test_all_initialization_paths(self):
         """Test all possible initialization paths"""
-        # Test with both user_token and PAT in config (OAuth should take precedence)
+        # Test with PAT in config
         tool = DatabricksJobsTool(
             tool_config={
-                "user_token": "oauth-token",
                 "DATABRICKS_API_KEY": "pat-token"
             }
         )
-        self.assertTrue(tool._use_oauth)
-        self.assertEqual(tool._user_token, "oauth-token")
+        self.assertEqual(tool._token, "pat-token")
         
         # Test with parameter taking precedence over config
         tool = DatabricksJobsTool(
@@ -1974,21 +1886,31 @@ spark.sql("SELECT * FROM table")
     # Single Execution Control Tests
     def test_single_execution_run_duplicate_prevention(self):
         """Test that duplicate run actions are prevented"""
+        # Clear global tracking before test
+        DatabricksJobsTool.clear_execution_tracking()
+        
         tool = DatabricksJobsTool(tool_config=self.tool_config)
         
         # First run should succeed
         with patch.object(tool, '_run_job', return_value="✅ Successfully triggered job 123\nRun ID: 456\nStatus: RUNNING"):
             result1 = tool._run(action="run", job_id=123, job_params={"test": "value"})
             self.assertIn("Successfully triggered job 123", result1)
-            self.assertIn("📊 Usage Count: 1/1", result1)
+            self.assertIn("📊 Action Usage: run 1/1", result1)
         
-        # Second identical run should be prevented
+        # Verify global tracking
+        stats = DatabricksJobsTool.get_execution_stats()
+        self.assertEqual(stats['tracked_runs'], 1)
+        
+        # Second identical run should be prevented by action limit
         result2 = tool._run(action="run", job_id=123, job_params={"test": "value"})
-        self.assertIn("⚠️ DUPLICATE RUN PREVENTED", result2)
-        self.assertIn("Previous run_id: 456", result2)
+        self.assertIn("⚠️ ACTION LIMIT REACHED", result2)
+        self.assertIn("usage limit of 1", result2)
 
     def test_single_execution_run_different_params_blocked(self):
         """Test that different params for same job are blocked after first run"""
+        # Clear global tracking before test
+        DatabricksJobsTool.clear_execution_tracking()
+        
         tool = DatabricksJobsTool(tool_config=self.tool_config)
         
         # First run with params
@@ -1998,11 +1920,14 @@ spark.sql("SELECT * FROM table")
         
         # Second run with different params should hit usage limit
         result2 = tool._run(action="run", job_id=123, job_params={"test": "value2"})
-        self.assertIn("⚠️ USAGE LIMIT REACHED", result2)
-        self.assertIn("maximum usage limit of 1", result2)
+        self.assertIn("⚠️ ACTION LIMIT REACHED", result2)
+        self.assertIn("usage limit of 1", result2)
 
     def test_single_execution_create_duplicate_prevention(self):
         """Test that duplicate create actions are prevented"""
+        # Clear global tracking before test
+        DatabricksJobsTool.clear_execution_tracking()
+        
         tool = DatabricksJobsTool(tool_config=self.tool_config)
         
         job_config = {"name": "Test Job", "tasks": [{"task_key": "task1"}]}
@@ -2011,15 +1936,22 @@ spark.sql("SELECT * FROM table")
         with patch.object(tool, '_create_job', return_value="✅ Successfully created job 'Test Job'\nJob ID: 789"):
             result1 = tool._run(action="create", job_config=job_config)
             self.assertIn("Successfully created job", result1)
-            self.assertIn("📊 Usage Count: 1/1", result1)
+            self.assertIn("📊 Action Usage: create 1/1", result1)
         
-        # Second identical create should be prevented
+        # Verify global tracking
+        stats = DatabricksJobsTool.get_execution_stats()
+        self.assertEqual(stats['tracked_creates'], 1)
+        
+        # Second identical create should be prevented by action limit
         result2 = tool._run(action="create", job_config=job_config)
-        self.assertIn("⚠️ DUPLICATE CREATE PREVENTED", result2)
-        self.assertIn("Previous job_id: 789", result2)
+        self.assertIn("⚠️ ACTION LIMIT REACHED", result2)
+        self.assertIn("usage limit of 1", result2)
 
     def test_single_execution_create_different_config_blocked(self):
         """Test that different job configs are blocked after first create"""
+        # Clear global tracking before test
+        DatabricksJobsTool.clear_execution_tracking()
+        
         tool = DatabricksJobsTool(tool_config=self.tool_config)
         
         # First create
@@ -2031,11 +1963,14 @@ spark.sql("SELECT * FROM table")
         # Second create with different config should hit usage limit
         job_config2 = {"name": "Test Job 2", "tasks": [{"task_key": "task2"}]}
         result2 = tool._run(action="create", job_config=job_config2)
-        self.assertIn("⚠️ USAGE LIMIT REACHED", result2)
-        self.assertIn("maximum usage limit of 1", result2)
+        self.assertIn("⚠️ ACTION LIMIT REACHED", result2)
+        self.assertIn("usage limit of 1", result2)
 
     def test_single_execution_other_actions_unlimited(self):
         """Test that other actions (list, get, monitor) are not limited"""
+        # Clear global tracking before test
+        DatabricksJobsTool.clear_execution_tracking()
+        
         tool = DatabricksJobsTool(tool_config=self.tool_config)
         
         # Simulate using up the single execution limit with a run
@@ -2055,28 +1990,38 @@ spark.sql("SELECT * FROM table")
             result = tool._run(action="monitor", run_id=456)
             self.assertIn("Run status", result)
 
-    def test_reset_execution_state(self):
-        """Test reset_execution_state method"""
-        tool = DatabricksJobsTool(tool_config=self.tool_config)
+    def test_single_execution_across_multiple_instances(self):
+        """Test that duplicate runs are prevented across multiple tool instances"""
+        # Clear global tracking before test
+        DatabricksJobsTool.clear_execution_tracking()
         
-        # Simulate some executions
-        tool._run_executions["test_run"] = "123"
-        tool._create_executions["test_create"] = "456"
-        tool.current_usage_count = 1
+        # Create first tool instance
+        tool1 = DatabricksJobsTool(tool_config=self.tool_config)
         
-        # Reset state
-        result = tool.reset_execution_state()
+        # First run with tool1 should succeed
+        with patch.object(tool1, '_run_job', return_value="✅ Successfully triggered job 123\nRun ID: 456\nStatus: RUNNING"):
+            result1 = tool1._run(action="run", job_id=123, job_params={"test": "value"})
+            self.assertIn("Successfully triggered job 123", result1)
         
-        self.assertIn("🔄 EXECUTION STATE RESET", result)
-        self.assertIn("1 previous job runs", result)
-        self.assertIn("1 previous job creations", result)
-        self.assertIn("Total: 2 executions", result)
-        self.assertEqual(tool.current_usage_count, 0)
-        self.assertEqual(len(tool._run_executions), 0)
-        self.assertEqual(len(tool._create_executions), 0)
+        # Create second tool instance (simulating what happens in workflow)
+        tool2 = DatabricksJobsTool(tool_config=self.tool_config)
+        
+        # Second run with tool2 should be prevented due to global tracking
+        result2 = tool2._run(action="run", job_id=123, job_params={"test": "value"})
+        self.assertIn("⚠️ DUPLICATE RUN PREVENTED", result2)
+        self.assertIn("Previous run_id: 456", result2)
+        self.assertIn("Global tracking stats: 1 runs", result2)
+        
+        # Verify global tracking persists across instances
+        stats = DatabricksJobsTool.get_execution_stats()
+        self.assertEqual(stats['tracked_runs'], 1)
+        self.assertEqual(stats['tracked_creates'], 0)
 
     def test_single_execution_run_without_params(self):
         """Test single execution control with run action without parameters"""
+        # Clear global tracking before test
+        DatabricksJobsTool.clear_execution_tracking()
+        
         tool = DatabricksJobsTool(tool_config=self.tool_config)
         
         # First run without params
@@ -2086,10 +2031,13 @@ spark.sql("SELECT * FROM table")
         
         # Second run without params should be prevented
         result2 = tool._run(action="run", job_id=123)
-        self.assertIn("⚠️ DUPLICATE RUN PREVENTED", result2)
+        self.assertIn("⚠️ ACTION LIMIT REACHED", result2)
 
     def test_single_execution_failed_run_not_tracked(self):
         """Test that failed runs are not tracked for duplicate prevention"""
+        # Clear global tracking before test
+        DatabricksJobsTool.clear_execution_tracking()
+        
         tool = DatabricksJobsTool(tool_config=self.tool_config)
         
         # First run fails
@@ -2098,6 +2046,10 @@ spark.sql("SELECT * FROM table")
             self.assertIn("Error: Job failed to start", result1)
             self.assertNotIn("📊 Usage Count", result1)
         
+        # Verify nothing was tracked globally
+        stats = DatabricksJobsTool.get_execution_stats()
+        self.assertEqual(stats['tracked_runs'], 0)
+        
         # Second run with same params should be allowed (since first failed)
         with patch.object(tool, '_run_job', return_value="✅ Successfully triggered job 123\nRun ID: 456"):
             result2 = tool._run(action="run", job_id=123, job_params={"test": "value"})
@@ -2105,6 +2057,9 @@ spark.sql("SELECT * FROM table")
 
     def test_single_execution_failed_create_not_tracked(self):
         """Test that failed creates are not tracked for duplicate prevention"""
+        # Clear global tracking before test
+        DatabricksJobsTool.clear_execution_tracking()
+        
         tool = DatabricksJobsTool(tool_config=self.tool_config)
         
         job_config = {"name": "Test Job", "tasks": [{"task_key": "task1"}]}
@@ -2115,10 +2070,250 @@ spark.sql("SELECT * FROM table")
             self.assertIn("Error: Job creation failed", result1)
             self.assertNotIn("📊 Usage Count", result1)
         
+        # Verify nothing was tracked globally
+        stats = DatabricksJobsTool.get_execution_stats()
+        self.assertEqual(stats['tracked_creates'], 0)
+        
         # Second create with same config should be allowed (since first failed)
         with patch.object(tool, '_create_job', return_value="✅ Successfully created job 'Test Job'\nJob ID: 789"):
             result2 = tool._run(action="create", job_config=job_config)
             self.assertIn("Successfully created job", result2)
+
+    def test_deterministic_hash_consistency(self):
+        """Test that the deterministic hash produces consistent results"""
+        # Same data should produce same hash
+        data1 = {"search_id": "abc", "params": {"query": "test", "city": "zurich"}}
+        data2 = {"params": {"city": "zurich", "query": "test"}, "search_id": "abc"}  # Different order
+        
+        hash1 = DatabricksJobsTool._deterministic_hash(data1)
+        hash2 = DatabricksJobsTool._deterministic_hash(data2)
+        
+        self.assertEqual(hash1, hash2)  # Should be equal despite different ordering
+        self.assertEqual(len(hash1), 16)  # Hash should be 16 characters
+        
+        # Different data should produce different hash
+        data3 = {"search_id": "xyz", "params": {"query": "test", "city": "zurich"}}
+        hash3 = DatabricksJobsTool._deterministic_hash(data3)
+        
+        self.assertNotEqual(hash1, hash3)
+        
+        # Test with nested structures
+        complex_data1 = {
+            "job_params": {
+                "search_params": {"city": "zurich", "query": "gym"},
+                "api_key": "test-key",
+                "unique_identifier": "test-uuid"
+            }
+        }
+        complex_data2 = {
+            "job_params": {
+                "unique_identifier": "test-uuid",
+                "search_params": {"query": "gym", "city": "zurich"},  # Different order
+                "api_key": "test-key"
+            }
+        }
+        
+        complex_hash1 = DatabricksJobsTool._deterministic_hash(complex_data1)
+        complex_hash2 = DatabricksJobsTool._deterministic_hash(complex_data2)
+        
+        self.assertEqual(complex_hash1, complex_hash2)  # Should be equal despite different ordering
+
+    def test_per_action_limits_initialization(self):
+        """Test per-action limits initialization"""
+        # Test with default limits
+        tool1 = DatabricksJobsTool(tool_config=self.tool_config)
+        self.assertEqual(tool1._action_limits['run'], 1)
+        self.assertEqual(tool1._action_limits['create'], 1)
+        self.assertIsNone(tool1._action_limits['list'])
+        self.assertIsNone(tool1._action_limits['get'])
+        
+        # Test with custom limits
+        custom_limits = {
+            'run': 3,
+            'create': 2,
+            'list': 10,
+            'get': None
+        }
+        tool2 = DatabricksJobsTool(
+            tool_config=self.tool_config,
+            action_limits=custom_limits
+        )
+        self.assertEqual(tool2._action_limits['run'], 3)
+        self.assertEqual(tool2._action_limits['create'], 2)
+        self.assertEqual(tool2._action_limits['list'], 10)
+        self.assertIsNone(tool2._action_limits['get'])
+
+    def test_per_action_limits_enforcement(self):
+        """Test that per-action limits are properly enforced"""
+        # Clear global tracking before test
+        DatabricksJobsTool.clear_execution_tracking()
+        
+        # Create tool with custom limits
+        tool = DatabricksJobsTool(
+            tool_config=self.tool_config,
+            action_limits={
+                'run': 2,      # Allow 2 runs
+                'create': 1,   # Allow 1 create
+                'get': 3,      # Allow 3 gets
+                'list': None   # Unlimited lists
+            }
+        )
+        
+        # Test run action (limit of 2)
+        with patch.object(tool, '_run_job', return_value="✅ Successfully triggered job 123\nRun ID: 456"):
+            # First run should work
+            result1 = tool._run(action="run", job_id=123)
+            self.assertIn("Successfully triggered job", result1)
+            self.assertIn("Action Usage: run 1/2", result1)
+            
+            # Second run should work
+            result2 = tool._run(action="run", job_id=124)
+            self.assertIn("Successfully triggered job", result2)
+            self.assertIn("Action Usage: run 2/2", result2)
+            
+            # Third run should be blocked
+            result3 = tool._run(action="run", job_id=125)
+            self.assertIn("⚠️ ACTION LIMIT REACHED", result3)
+            self.assertIn("'run' action has reached its usage limit of 2", result3)
+        
+        # Test get action (limit of 3)
+        with patch.object(tool, '_get_job', return_value="Job details"):
+            for i in range(3):
+                result = tool._run(action="get", job_id=100+i)
+                self.assertIn("Job details", result)
+                self.assertEqual(tool._action_usage_counts['get'], i+1)
+            
+            # Fourth get should be blocked
+            result = tool._run(action="get", job_id=104)
+            self.assertIn("⚠️ ACTION LIMIT REACHED", result)
+            self.assertIn("'get' action has reached its usage limit of 3", result)
+        
+        # Test list action (unlimited)
+        with patch.object(tool, '_list_jobs', return_value="Jobs listed"):
+            for i in range(10):  # Should all work
+                result = tool._run(action="list")
+                self.assertIn("Jobs listed", result)
+                self.assertEqual(tool._action_usage_counts['list'], i+1)
+
+    def test_per_action_limits_with_failures(self):
+        """Test that only successful run/create actions count against limits"""
+        # Clear global tracking before test
+        DatabricksJobsTool.clear_execution_tracking()
+        
+        tool = DatabricksJobsTool(
+            tool_config=self.tool_config,
+            action_limits={'run': 2}  # Allow 2 runs
+        )
+        
+        # Failed run doesn't count against limit (for run/create actions)
+        with patch.object(tool, '_run_job', return_value="Error: Failed to trigger job"):
+            result1 = tool._run(action="run", job_id=123)
+            self.assertIn("Error", result1)
+            self.assertEqual(tool._action_usage_counts['run'], 0)  # Not incremented for failures
+            
+        # First successful run should work
+        with patch.object(tool, '_run_job', return_value="✅ Successfully triggered job 123\nRun ID: 456"):
+            result2 = tool._run(action="run", job_id=123)
+            self.assertIn("Successfully triggered job", result2)
+            self.assertEqual(tool._action_usage_counts['run'], 1)
+            
+        # Second successful run should work (within limit of 2)
+        with patch.object(tool, '_run_job', return_value="✅ Successfully triggered job 124\nRun ID: 457"):
+            result3 = tool._run(action="run", job_id=124)
+            self.assertIn("Successfully triggered job", result3)
+            self.assertEqual(tool._action_usage_counts['run'], 2)
+            
+        # Third run should hit the limit
+        result4 = tool._run(action="run", job_id=125)
+        self.assertIn("⚠️ ACTION LIMIT REACHED", result4)
+        
+        # Test that other actions (list, get) always increment even on failure
+        tool2 = DatabricksJobsTool(
+            tool_config=self.tool_config,
+            action_limits={'get': 1}
+        )
+        
+        with patch.object(tool2, '_get_job', return_value="Error: Job not found"):
+            result = tool2._run(action="get", job_id=999)
+            self.assertIn("Error", result)
+            self.assertEqual(tool2._action_usage_counts['get'], 1)  # Incremented even on error
+            
+        # Second get should hit limit
+        result = tool2._run(action="get", job_id=998)
+        self.assertIn("⚠️ ACTION LIMIT REACHED", result)
+
+    def test_per_action_reset_execution_state(self):
+        """Test that reset_execution_state resets per-action counters"""
+        # Clear global tracking before test
+        DatabricksJobsTool.clear_execution_tracking()
+        
+        tool = DatabricksJobsTool(
+            tool_config=self.tool_config,
+            action_limits={
+                'run': 2,
+                'create': 1,
+                'get': 3
+            }
+        )
+        
+        # Use up some actions
+        with patch.object(tool, '_run_job', return_value="✅ Successfully triggered job 123\nRun ID: 456"):
+            tool._run(action="run", job_id=123)
+            tool._run(action="run", job_id=124)
+        
+        with patch.object(tool, '_get_job', return_value="Job details"):
+            tool._run(action="get", job_id=100)
+            tool._run(action="get", job_id=101)
+        
+        # Check usage before reset
+        self.assertEqual(tool._action_usage_counts['run'], 2)
+        self.assertEqual(tool._action_usage_counts['get'], 2)
+        
+        # Reset execution state
+        reset_result = tool.reset_execution_state()
+        self.assertIn("Action usage counts reset:", reset_result)
+        self.assertIn("run: 2/2 → 0/2", reset_result)
+        self.assertIn("get: 2/3 → 0/3", reset_result)
+        
+        # Verify counters are reset
+        self.assertEqual(tool._action_usage_counts['run'], 0)
+        self.assertEqual(tool._action_usage_counts['get'], 0)
+        
+        # Should be able to run again
+        with patch.object(tool, '_run_job', return_value="✅ Successfully triggered job 125\nRun ID: 457"):
+            result = tool._run(action="run", job_id=125)
+            self.assertIn("Successfully triggered job", result)
+            self.assertIn("Action Usage: run 1/2", result)
+
+    def test_action_limits_summary_in_error(self):
+        """Test that usage summary is shown when limit is reached"""
+        # Clear global tracking before test
+        DatabricksJobsTool.clear_execution_tracking()
+        
+        tool = DatabricksJobsTool(
+            tool_config=self.tool_config,
+            action_limits={
+                'run': 1,
+                'create': 2,
+                'get': 3,
+                'list': None,
+                'monitor': 5
+            }
+        )
+        
+        # Use up the run limit
+        with patch.object(tool, '_run_job', return_value="✅ Successfully triggered job 123\nRun ID: 456"):
+            tool._run(action="run", job_id=123)
+        
+        # Try to run again - should show full usage summary
+        result = tool._run(action="run", job_id=124)
+        self.assertIn("⚠️ ACTION LIMIT REACHED", result)
+        self.assertIn("Current action usage:", result)
+        self.assertIn("- run: 1/1", result)
+        self.assertIn("- create: 0/2", result)
+        self.assertIn("- get: 0/3", result)
+        self.assertIn("- list: 0/unlimited", result)
+        self.assertIn("- monitor: 0/5", result)
 
 
 if __name__ == '__main__':

@@ -124,9 +124,13 @@ const EnhancedScheduleDialog: React.FC<EnhancedScheduleDialogProps> = ({
     onCronExpressionChange(syntheticEvent);
   }, [frequency, selectedTime, selectedDays, selectedMonths, selectedDaysOfMonth, onCronExpressionChange]);
 
+  // Track if we're initializing to prevent update loops
+  const [isInitializing, setIsInitializing] = useState(false);
+
   // Initialize values when dialog opens
   useEffect(() => {
     if (open) {
+      setIsInitializing(true);
       if (cronExpression && cronExpression !== '0 0 * * *') {
         parseCronExpression(cronExpression);
       } else {
@@ -138,15 +142,17 @@ const EnhancedScheduleDialog: React.FC<EnhancedScheduleDialogProps> = ({
         setSelectedDaysOfMonth([]);
       }
       setError(null);
+      // Allow updates after a short delay
+      setTimeout(() => setIsInitializing(false), 100);
     }
-  }, [open, parseCronExpression, cronExpression]);
+  }, [open, cronExpression, parseCronExpression]); // Keep dependencies but prevent loops with isInitializing flag
 
   // Update cron expression when visual controls change
   useEffect(() => {
-    if (cronMode === 'visual' && open) {
+    if (cronMode === 'visual' && open && !isInitializing) {
       updateCronFromVisual();
     }
-  }, [cronMode, updateCronFromVisual, open]);
+  }, [cronMode, frequency, selectedTime, selectedDays, selectedMonths, selectedDaysOfMonth, open, isInitializing, updateCronFromVisual]); // Keep all dependencies
 
   const handleScheduleJob = async () => {
     if (!scheduleName || !cronExpression) {

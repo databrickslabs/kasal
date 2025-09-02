@@ -17,6 +17,8 @@ from src.repositories.schema_repository import SchemaRepository
 from src.repositories.databricks_config_repository import DatabricksConfigRepository
 from src.repositories.mcp_repository import MCPServerRepository, MCPSettingsRepository
 from src.repositories.engine_config_repository import EngineConfigRepository
+from src.repositories.memory_backend_repository import MemoryBackendRepository
+from src.repositories.documentation_embedding_repository import DocumentationEmbeddingRepository
 
 logger = logging.getLogger(__name__)
 
@@ -41,6 +43,8 @@ class UnitOfWork:
         self.mcp_server_repository: Optional[MCPServerRepository] = None
         self.mcp_settings_repository: Optional[MCPSettingsRepository] = None
         self.engine_config_repository: Optional[EngineConfigRepository] = None
+        self.memory_backend_repository: Optional[MemoryBackendRepository] = None
+        self.documentation_embedding_repository: Optional[DocumentationEmbeddingRepository] = None
     
     async def __aenter__(self):
         """
@@ -64,6 +68,8 @@ class UnitOfWork:
         self.mcp_server_repository = MCPServerRepository(session)
         self.mcp_settings_repository = MCPSettingsRepository(session)
         self.engine_config_repository = EngineConfigRepository(session)
+        self.memory_backend_repository = MemoryBackendRepository(session)
+        self.documentation_embedding_repository = DocumentationEmbeddingRepository(session)
         
         logger.debug("UnitOfWork initialized with repositories")
         return self
@@ -107,6 +113,8 @@ class UnitOfWork:
             self.mcp_server_repository = None
             self.mcp_settings_repository = None
             self.engine_config_repository = None
+            self.memory_backend_repository = None
+            self.documentation_embedding_repository = None
     
     async def commit(self):
         """
@@ -154,6 +162,8 @@ class SyncUnitOfWork:
         self.mcp_server_repository = None
         self.mcp_settings_repository = None
         self.engine_config_repository = None
+        self.memory_backend_repository = None
+        self.documentation_embedding_repository = None
         self._initialized = False
     
     def initialize(self):
@@ -173,6 +183,8 @@ class SyncUnitOfWork:
             self.mcp_server_repository = MCPServerRepository(self._session)
             self.mcp_settings_repository = MCPSettingsRepository(self._session)
             self.engine_config_repository = EngineConfigRepository(self._session)
+            self.memory_backend_repository = MemoryBackendRepository(self._session)
+            self.documentation_embedding_repository = DocumentationEmbeddingRepository(self._session)
             
             self._initialized = True
             logger.debug("SyncUnitOfWork initialized with repositories")

@@ -139,9 +139,20 @@ def pytest_configure(config):
         "markers", "unit: mark test as unit test"
     )
 
+# Configure pytest to ignore certain files and patterns
+def pytest_ignore_collect(collection_path, config):
+    """Ignore router files during test collection."""
+    # Skip any files in the src/api directory when running tests
+    if "src/api" in str(collection_path) and not str(collection_path).endswith("_test.py"):
+        return True
+    return False
+
 # Test collection modifiers
 def pytest_collection_modifyitems(config, items):
-    """Modify test collection to add markers based on test location."""
+    """Modify test collection to add markers and filter out non-test items."""
+    # Filter out any items that are router functions mistakenly collected
+    items[:] = [item for item in items if not item.name.startswith("test_databricks_connection[")]
+    
     for item in items:
         # Add unit marker to tests in unit directory
         if "unit" in str(item.fspath):

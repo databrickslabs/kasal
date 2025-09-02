@@ -6,6 +6,10 @@ from datetime import datetime
 from contextlib import asynccontextmanager
 from sqlalchemy import text
 
+# CRITICAL: Set USE_NULLPOOL BEFORE any database imports to prevent asyncpg connection pool issues
+# This must be done before importing any modules that might create database connections
+os.environ["USE_NULLPOOL"] = "true"
+
 from fastapi import FastAPI, HTTPException, Request, Depends
 from fastapi.middleware.cors import CORSMiddleware
 from starlette.middleware.base import BaseHTTPMiddleware
@@ -16,6 +20,7 @@ from src.core.logger import LoggerManager
 from src.db.session import get_db, async_session_factory
 from src.services.scheduler_service import SchedulerService
 from src.services.execution_cleanup_service import ExecutionCleanupService
+from src.utils.databricks_url_utils import DatabricksURLUtils
 
 # Set up basic logging initially, will be enhanced in lifespan
 logging.basicConfig(
@@ -52,6 +57,13 @@ async def lifespan(app: FastAPI):
     
     system_logger = logger_manager.system
     system_logger.info(f"Starting application... Logs will be stored in: {log_dir}")
+    
+    # Validate and fix Databricks environment variables early in startup
+    try:
+        system_logger.info("Validating Databricks environment configuration...")
+        DatabricksURLUtils.validate_and_fix_environment()
+    except Exception as e:
+        system_logger.warning(f"Error validating Databricks environment: {e}")
     
     # Import needed for DB init
     # pylint: disable=unused-import,import-outside-toplevel
@@ -137,14 +149,29 @@ async def lifespan(app: FastAPI):
         if should_seed:
             system_logger.info("Running database seeders...")
             try:
-                system_logger.info("Starting run_all_seeders() from lifespan...")
-                await run_all_seeders()
-                system_logger.info("Database seeding completed successfully!")
+                # Always run seeders in background to avoid blocking startup
+                import asyncio
+                system_logger.info("Starting seeders in background...")
+                
+                async def run_seeders_background():
+                    try:
+                        system_logger.info("Background seeders started...")
+                        await run_all_seeders()
+                        system_logger.info("Background database seeding completed successfully!")
+                    except Exception as e:
+                        system_logger.error(f"Error running background seeders: {str(e)}")
+                        import traceback
+                        error_trace = traceback.format_exc()
+                        system_logger.error(f"Background seeder error trace: {error_trace}")
+                
+                # Create background task
+                asyncio.create_task(run_seeders_background())
+                system_logger.info("Seeders started in background, application startup continues...")
             except Exception as e:
-                system_logger.error(f"Error running seeders: {str(e)}")
+                system_logger.error(f"Error starting seeders: {str(e)}")
                 import traceback
                 error_trace = traceback.format_exc()
-                system_logger.error(f"Seeder error trace: {error_trace}")
+                system_logger.error(f"Seeder startup error trace: {error_trace}")
                 # Don't raise so app can start even if seeding fails
         else:
             system_logger.info("Database seeding skipped (AUTO_SEED_DATABASE is False)")

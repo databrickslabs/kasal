@@ -8,7 +8,9 @@ class MCPServerBase(BaseModel):
     name: str = Field(..., description="Name of the MCP server")
     server_url: str = Field(..., description="URL of the MCP server")
     server_type: str = Field(default="sse", description="Type of MCP server (sse or streamable)")
+    auth_type: str = Field(default="api_key", description="Authentication type (api_key or databricks_obo)")
     enabled: bool = Field(default=False, description="Whether the server is enabled")
+    global_enabled: bool = Field(default=False, description="Whether the server is enabled globally for all agents/tasks")
     timeout_seconds: int = Field(default=30, description="Timeout in seconds for server requests")
     max_retries: int = Field(default=3, description="Maximum number of retry attempts")
     model_mapping_enabled: bool = Field(default=False, description="Enable model name mapping")
@@ -27,7 +29,9 @@ class MCPServerUpdate(BaseModel):
     server_url: Optional[str] = Field(default=None, description="URL of the MCP server")
     api_key: Optional[str] = Field(default=None, description="API key for authentication (will be encrypted)")
     server_type: Optional[str] = Field(default=None, description="Type of MCP server (sse or streamable)")
+    auth_type: Optional[str] = Field(default=None, description="Authentication type (api_key or databricks_obo)")
     enabled: Optional[bool] = Field(default=None, description="Whether the server is enabled")
+    global_enabled: Optional[bool] = Field(default=None, description="Whether the server is enabled globally for all agents/tasks")
     timeout_seconds: Optional[int] = Field(default=None, description="Timeout in seconds for server requests")
     max_retries: Optional[int] = Field(default=None, description="Maximum number of retry attempts")
     model_mapping_enabled: Optional[bool] = Field(default=None, description="Enable model name mapping")
@@ -64,6 +68,7 @@ class MCPTestConnectionRequest(BaseModel):
     server_url: str = Field(..., description="URL of the MCP server")
     api_key: str = Field(..., description="API key for authentication")
     server_type: str = Field(default="sse", description="Type of MCP server (sse or streamable)")
+    auth_type: str = Field(default="api_key", description="Authentication type (api_key or databricks_obo)")
     timeout_seconds: int = Field(default=30, description="Timeout in seconds")
 
 
@@ -76,6 +81,7 @@ class MCPTestConnectionResponse(BaseModel):
 class MCPSettingsBase(BaseModel):
     """Base MCP Settings schema"""
     global_enabled: bool = Field(default=False, description="Master switch for all MCP functionality")
+    individual_enabled: bool = Field(default=True, description="Allow agent/task-specific MCP selection")
 
 
 class MCPSettingsUpdate(MCPSettingsBase):

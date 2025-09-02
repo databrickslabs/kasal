@@ -22,6 +22,10 @@ fi
 export OTEL_SDK_DISABLED=true
 export CREWAI_DISABLE_TELEMETRY=true
 
+# CRITICAL: Use NullPool to prevent asyncpg connection issues with multiple event loops
+# This is needed for Databricks memory operations that run in separate event loops
+export USE_NULLPOOL=true
+
 # Check if port 8000 is already in use
 if lsof -Pi :8000 -sTCP:LISTEN -t >/dev/null ; then
     echo "Port 8000 is already in use. Killing existing process..."

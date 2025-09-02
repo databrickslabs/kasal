@@ -335,7 +335,8 @@ class TestExecutionService:
             
             # Verify mocks were called
             mock_status_service.create_execution.assert_called_once()
-            mock_check_jobs.assert_called_once_with(mock_group_context)
+            # Note: _check_for_running_jobs is currently disabled/commented out
+            mock_check_jobs.assert_not_called()
     
     @pytest.mark.asyncio
     async def test_create_execution_with_flow_id(self, execution_service, sample_flow_config, mock_group_context):
@@ -402,18 +403,34 @@ class TestExecutionService:
     
     @pytest.mark.asyncio
     async def test_create_execution_running_job_constraint(self, execution_service, sample_crew_config, mock_group_context):
-        """Test execution creation fails when there's already a running job."""
-        with patch.object(execution_service, '_check_for_running_jobs') as mock_check_jobs:
+        """Test execution creation succeeds even when there would be a running job (constraint disabled)."""
+        with patch('src.services.execution_status_service.ExecutionStatusService.create_execution') as mock_create_execution, \
+             patch.object(execution_service, '_check_for_running_jobs') as mock_check_jobs, \
+             patch('asyncio.create_task') as mock_create_task, \
+             patch('src.services.execution_service.ExecutionService.add_execution_to_memory') as mock_add_to_memory:
             
-            mock_check_jobs.side_effect = ValueError("Another job is currently running")
+            # Setup mocks
+            mock_create_execution.return_value = True
+            mock_create_task.return_value = MagicMock()
+            mock_add_to_memory.return_value = None
             
-            with pytest.raises(HTTPException) as exc_info:
-                await execution_service.create_execution(
-                    sample_crew_config, group_context=mock_group_context
-                )
+            # Mock the execution name service response
+            mock_name_response = MagicMock()
+            mock_name_response.name = "Test Execution Name"
+            execution_service.execution_name_service.generate_execution_name = AsyncMock(return_value=mock_name_response)
             
-            assert exc_info.value.status_code == 409
-            assert "Another job is currently running" in str(exc_info.value.detail)
+            # Since _check_for_running_jobs is commented out, it should never be called
+            # and execution should succeed regardless of running job constraints
+            result = await execution_service.create_execution(
+                sample_crew_config, group_context=mock_group_context
+            )
+            
+            # Verify execution succeeds
+            assert isinstance(result, dict)
+            assert result["status"] == ExecutionStatus.RUNNING.value
+            
+            # Verify the constraint check was not called (since it's disabled)
+            mock_check_jobs.assert_not_called()
     
     @pytest.mark.asyncio
     async def test_get_execution_status_success(self, mock_group_context):
@@ -715,7 +732,7 @@ class TestExecutionService:
             mock_crew_service = MagicMock()
             mock_crew_service.run_crew_execution = AsyncMock(return_value={"status": "completed"})
             mock_crew_service_class.return_value = mock_crew_service
-            mock_databricks_service.setup_token_sync = MagicMock(return_value=True)
+            mock_databricks_service.setup_token = AsyncMock(return_value=True)
             
             result = await ExecutionService.run_crew_execution(
                 execution_id, sample_crew_config, "crew", mock_group_context
@@ -1361,7 +1378,7 @@ class TestExecutionService:
             mock_crew_service = MagicMock()
             mock_crew_service.run_crew_execution = AsyncMock(return_value={"status": "completed"})
             mock_crew_service_class.return_value = mock_crew_service
-            mock_databricks_service.setup_token_sync = MagicMock(return_value=False)  # Setup fails
+            mock_databricks_service.setup_token = AsyncMock(return_value=False)  # Setup fails
             
             result = await ExecutionService.run_crew_execution(
                 execution_id, sample_crew_config, "crew", mock_group_context
@@ -1369,7 +1386,7 @@ class TestExecutionService:
             
             # Should still complete despite setup failure
             assert result["status"] == "completed"
-            mock_databricks_service.setup_token_sync.assert_called_once()
+            mock_databricks_service.setup_token.assert_called_once()
     
     def test_execute_crew_sync_databricks_setup_error(self, sample_crew_config):
         """Test synchronous crew execution with Databricks setup error."""

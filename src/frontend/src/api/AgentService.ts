@@ -12,6 +12,11 @@ export class AgentService {
   static async getAgent(id: number | string): Promise<Agent | null> {
     try {
       const response = await apiClient.get<Agent>(`/agents/${id}`);
+      console.log('Fetched agent:', response.data);
+      console.log('Agent tool_configs:', response.data?.tool_configs);
+      if (response.data?.tool_configs?.GenieTool) {
+        console.log('GenieTool config in fetched agent:', response.data.tool_configs.GenieTool);
+      }
       // Check knowledge sources and verify files still exist
       if (response.data && response.data.knowledge_sources && response.data.knowledge_sources.length > 0) {
         await this.verifyKnowledgeSources(response.data.knowledge_sources);
@@ -19,6 +24,59 @@ export class AgentService {
       return response.data;
     } catch (error) {
       console.error('Error fetching agent:', error);
+      return null;
+    }
+  }
+
+  static async findOrCreateAgent(agent: Omit<Agent, 'id' | 'created_at'>): Promise<Agent | null> {
+    try {
+      const defaultValues: Partial<Agent> = {
+        llm: 'databricks-llama-4-maverick',
+        tools: [],
+        max_iter: 25,
+        verbose: false,
+        allow_delegation: false,
+        cache: true,
+        allow_code_execution: false,
+        code_execution_mode: 'safe' as const,
+        max_retry_limit: 2,
+        use_system_prompt: true,
+        respect_context_window: true,
+        memory: true,
+        max_tokens: 2000, // Default max output tokens
+        max_context_window_size: 8192, // Default context window size
+        max_rpm: 3, // Default RPM to prevent rate limiting with Anthropic models
+      };
+
+      // If a model is specified, get its configuration
+      if (agent.llm) {
+        try {
+          // First try to get models from database via ModelService
+          const models = await this.modelService.getActiveModels();
+          if (models[agent.llm]) {
+            // Update max_context_window_size based on model configuration
+            const modelConfig = models[agent.llm];
+            if (modelConfig.context_window) {
+              defaultValues.max_context_window_size = modelConfig.context_window;
+            }
+            
+            // Update max_tokens based on model configuration
+            if (modelConfig.max_output_tokens) {
+              defaultValues.max_tokens = modelConfig.max_output_tokens;
+            }
+          }
+        } catch (error) {
+          console.error('Error getting models from ModelService:', error);
+        }
+      }
+
+      const agentToSend = { ...defaultValues, ...agent };
+      
+      // Use find-or-create endpoint to prevent duplicates
+      const response = await apiClient.post<Agent>(`/agents/find-or-create`, agentToSend);
+      return response.data;
+    } catch (error) {
+      console.error('Error in find-or-create agent:', error);
       return null;
     }
   }
@@ -77,11 +135,12 @@ export class AgentService {
       }
 
       // Set up default memory configuration if memory is enabled but embedder_config is missing
+      // Default to Databricks embeddings to maintain consistency
       if (agent.memory && !agent.embedder_config) {
         defaultValues.embedder_config = {
-          provider: 'openai',
+          provider: 'databricks',
           config: {
-            model: 'text-embedding-3-small'
+            model: 'databricks-gte-large-en'
           }
         };
       }
@@ -99,6 +158,11 @@ export class AgentService {
 
       // Create a copy to ensure fileInfo is sent to the server
       const agentToSend = JSON.parse(JSON.stringify(agentToCreate));
+      
+      // Log tool_configs if present
+      if (agentToSend.tool_configs) {
+        console.log('AgentService - Creating agent with tool_configs:', agentToSend.tool_configs);
+      }
       
       // Ensure fileInfo is sent with each knowledge source
       const response = await apiClient.post<Agent>(`/agents`, agentToSend);
@@ -196,11 +260,12 @@ export class AgentService {
       }
       
       // Set up default memory configuration if memory is enabled but embedder_config is missing
+      // Default to Databricks embeddings to maintain consistency
       if (agent.memory && !agent.embedder_config) {
         agent.embedder_config = {
-          provider: 'openai',
+          provider: 'databricks',
           config: {
-            model: 'text-embedding-3-small'
+            model: 'databricks-gte-large-en'
           }
         };
       }
@@ -221,6 +286,11 @@ export class AgentService {
       // Explicitly ensure knowledge_sources array is included with fileInfo preserved
       if (agentToUpdate.knowledge_sources) {
         console.log('Updating with knowledge sources:', agentToUpdate.knowledge_sources);
+      }
+      
+      // Log tool_configs if present
+      if (agentToUpdate.tool_configs) {
+        console.log('AgentService - Updating agent with tool_configs:', agentToUpdate.tool_configs);
       }
       
       const response = await apiClient.put<Agent>(`/agents/${id}/full`, agentToUpdate);

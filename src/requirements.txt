@@ -6,6 +6,7 @@ cryptography
 python-multipart
 databricks
 databricks-sdk
+databricks-vectorsearch
 croniter
 crewai
 pydantic[email]
@@ -33,3 +34,4 @@ bcrypt==4.0.1
 starlette==0.40.0
 
 # Add any other dependencies your project requires below
+pytest-cov

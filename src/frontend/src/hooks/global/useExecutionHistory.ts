@@ -1,4 +1,4 @@
-import { useState, useCallback, useEffect, useMemo } from 'react';
+import { useState, useCallback, useEffect, useMemo, useRef } from 'react';
 import type { Run } from '../../api/ExecutionHistoryService';
 import { useRunStatusStore } from '../../store/runStatus';
 import { toast } from 'react-hot-toast';
@@ -111,8 +111,6 @@ export const useRunHistory = () => {
       
       // Then fetch from scratch to ensure we have the latest data
       await fetchRunHistory();
-      
-      toast.success(t('runHistory.deleteRunSuccess'));
     } catch (err) {
       historyLogger.error('Error deleting run:', err);
       toast.error(t('runHistory.deleteRunError'));
@@ -202,38 +200,32 @@ export const useRunHistory = () => {
     return sortedRuns.slice(startIndex, startIndex + jobsPerPage);
   }, [page, sortedRuns]);
 
-  // Auto-refresh on an interval
+  // Track if there are running jobs using a ref to avoid dependency issues
+  const hasRunningJobsRef = useRef(false);
+  
+  // Update the ref whenever runHistory changes
   useEffect(() => {
-    // Check if there are any running jobs
-    const hasRunningJobs = runHistory.some(
+    hasRunningJobsRef.current = runHistory.some(
       run => run.status === 'running' || run.status === 'queued' || run.status === 'pending'
     );
-    
-    // Only set an interval for refresh if we have running jobs
-    if (hasRunningJobs) {
-      const refreshInterval = 10000; // 10 seconds for running jobs
-      
-      const intervalId = setInterval(() => {
+  }, [runHistory]);
+  
+  // Auto-refresh on an interval (only depends on fetchRuns)
+  useEffect(() => {
+    // Set up interval that checks the ref
+    const intervalId = setInterval(() => {
+      // Only refresh if there are running jobs
+      if (hasRunningJobsRef.current) {
         historyLogger.debug('Refreshing data, running jobs detected');
         fetchRuns().catch(err => 
           historyLogger.error('Error refreshing in interval:', err)
         );
-      }, refreshInterval);
-      
-      // Clean up interval on unmount
-      return () => clearInterval(intervalId);
-    } else {
-      // If there are no running jobs, do a single refresh after 30 seconds
-      // This ensures we get updates but don't spam with logs
-      const timeoutId = setTimeout(() => {
-        fetchRuns().catch(err => 
-          historyLogger.error('Error in delayed refresh:', err)
-        );
-      }, 30000);
-      
-      return () => clearTimeout(timeoutId);
-    }
-  }, [fetchRuns, runHistory]);
+      }
+    }, 10000); // Check every 10 seconds
+    
+    // Clean up interval on unmount
+    return () => clearInterval(intervalId);
+  }, [fetchRuns]); // Only depends on fetchRuns, not runHistory
 
   // Debounced loading state management
   useEffect(() => {

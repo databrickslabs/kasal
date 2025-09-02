@@ -214,6 +214,18 @@ function APIKeys(): JSX.Element {
   }
 
   const handleEditApiKey = (apiKey: ApiKey) => {
+    // Check if this is a placeholder key (negative ID)
+    if (apiKey.id < 0) {
+      // Open create dialog for placeholder keys
+      setNewApiKey({
+        name: apiKey.name,
+        value: '',
+        description: apiKey.description || ''
+      });
+      setCreateDialog(true);
+      return;
+    }
+    
     // Create a copy for editing - show key status as placeholder
     const editingCopy = {
       ...apiKey,
@@ -427,11 +439,13 @@ function APIKeys(): JSX.Element {
                           <EditIcon />
                         </IconButton>
                       </Tooltip>
-                      <Tooltip title="Delete">
-                        <IconButton onClick={() => handleDeleteApiKey(apiKey.name)} color="error">
-                          <DeleteIcon />
-                        </IconButton>
-                      </Tooltip>
+                      {apiKey.id >= 0 && (
+                        <Tooltip title="Delete">
+                          <IconButton onClick={() => handleDeleteApiKey(apiKey.name)} color="error">
+                            <DeleteIcon />
+                          </IconButton>
+                        </Tooltip>
+                      )}
                     </Box>
                   </TableCell>
                 </TableRow>
@@ -595,7 +609,25 @@ function APIKeys(): JSX.Element {
                 Add New Key
               </Button>
             </Box>
-            {renderApiKeysTable(localApiKeys)}
+            {(() => {
+              // Add placeholder entries for specific keys if they don't exist
+              const placeholderKeys = ['SERPER_API_KEY', 'PERPLEXITY_API_KEY'];
+              const existingKeyNames = localApiKeys.map(k => k.name);
+              
+              const placeholderApiKeys: ApiKey[] = placeholderKeys
+                .filter(keyName => !existingKeyNames.includes(keyName))
+                .map((keyName, index) => ({
+                  id: -1000 - index, // Use negative IDs for placeholders
+                  name: keyName,
+                  value: 'Not set',
+                  description: `API Key for ${keyName.replace(/_/g, ' ').toLowerCase()}`,
+                  created_at: '',
+                  updated_at: ''
+                }));
+              
+              const combinedKeys = [...localApiKeys, ...placeholderApiKeys];
+              return renderApiKeysTable(combinedKeys);
+            })()}
           </>
         )}
 

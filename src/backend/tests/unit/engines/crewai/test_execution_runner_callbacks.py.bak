@@ -1,0 +1,442 @@
+"""
+Unit tests for execution runner callback integration.
+
+Tests the integration of execution-scoped callbacks in the execution runner
+to ensure proper isolation between concurrent executions.
+"""
+import pytest
+import asyncio
+from unittest.mock import patch, MagicMock, AsyncMock, call
+from datetime import datetime
+
+from src.engines.crewai.execution_runner import run_crew
+
+
+@pytest.fixture
+def mock_crew():
+    """Create a mock CrewAI crew."""
+    crew = MagicMock()
+    crew.agents = []
+    crew.tasks = []
+    crew.kickoff = MagicMock(return_value="Test result")
+    return crew
+
+
+@pytest.fixture
+def mock_group_context():
+    """Create a mock group context."""
+    context = MagicMock()
+    context.primary_group_id = "group_123"
+    context.group_email = "test@example.com"
+    context.access_token = "token_123"
+    return context
+
+
+@pytest.fixture
+def running_jobs():
+    """Create a mock running jobs dictionary."""
+    return {}
+
+
+@pytest.fixture
+def sample_config():
+    """Create a sample configuration."""
+    return {
+        "model": "test-model",
+        "agents": [{"role": "Test Agent"}],
+        "tasks": [{"description": "Test task"}],
+        "inputs": {"test_input": "test_value"}
+    }
+
+
+class TestExecutionRunnerCallbacks:
+    """Test cases for execution runner callback integration."""
+    
+    def setup_standard_mocks(self):
+        """Setup standard mocks for execution runner tests."""
+        patches = [
+            patch("src.engines.crewai.execution_runner.crew_logger"),
+            patch("src.engines.crewai.execution_runner.create_execution_callbacks"),
+            patch("src.engines.crewai.execution_runner.create_crew_callbacks"),
+            patch("src.engines.crewai.execution_runner.log_crew_initialization"),
+            patch("src.engines.crewai.execution_runner.AgentTraceEventListener"),
+            patch("src.engines.crewai.execution_runner.TraceManager"),
+            patch("src.engines.crewai.execution_runner.EventStreamingCallback"),
+            patch("src.engines.crewai.execution_runner.ExecutionStatusService"),
+            patch("src.engines.crewai.execution_runner.asyncio.to_thread"),
+            patch("src.engines.crewai.execution_runner.ApiKeysService"),
+            patch("src.engines.crewai.execution_runner.LLMManager"),
+            patch("src.engines.crewai.execution_runner.UserContext"),
+            patch("src.engines.crewai.execution_runner.stop_all_adapters"),
+            patch("src.engines.crewai.execution_runner.update_execution_status_with_retry")
+        ]
+        return patches
+    
+    @pytest.mark.asyncio
+    async def test_callbacks_created_and_set_on_crew(self, mock_crew, mock_group_context, running_jobs, sample_config):
+        """Test that execution-scoped callbacks are created and set on crew."""
+        execution_id = "test_execution_123"
+        
+        with patch("src.engines.crewai.execution_runner.crew_logger") as mock_crew_logger, \
+             patch("src.engines.crewai.execution_runner.create_execution_callbacks") as mock_create_callbacks, \
+             patch("src.engines.crewai.execution_runner.create_crew_callbacks") as mock_create_crew_callbacks, \
+             patch("src.engines.crewai.execution_runner.log_crew_initialization") as mock_log_init, \
+             patch("src.engines.crewai.execution_runner.AgentTraceEventListener") as mock_listener, \
+             patch("src.engines.crewai.execution_runner.TraceManager") as mock_trace_manager, \
+             patch("src.engines.crewai.execution_runner.EventStreamingCallback") as mock_streaming, \
+             patch("src.engines.crewai.execution_runner.ExecutionStatusService") as mock_status_service, \
+             patch("src.engines.crewai.execution_runner.asyncio.to_thread") as mock_to_thread, \
+             patch("src.engines.crewai.execution_runner.ApiKeysService") as mock_api_service, \
+             patch("src.engines.crewai.execution_runner.LLMManager") as mock_llm_manager, \
+             patch("src.engines.crewai.execution_runner.UserContext") as mock_user_context:
+            
+            # Setup mocks
+            mock_step_callback = MagicMock()
+            mock_task_callback = MagicMock()
+            mock_create_callbacks.return_value = (mock_step_callback, mock_task_callback)
+            mock_create_crew_callbacks.return_value = {
+                'on_start': MagicMock(),
+                'on_complete': MagicMock(),
+                'on_error': MagicMock()
+            }
+            mock_to_thread.return_value = "Test result"
+            mock_status_service.update_status = AsyncMock()
+            mock_trace_manager.ensure_writer_started = AsyncMock()
+            mock_api_service.setup_openai_api_key = AsyncMock()
+            mock_api_service.setup_anthropic_api_key = AsyncMock()
+            mock_api_service.setup_gemini_api_key = AsyncMock()
+            mock_llm_manager.configure_crewai_llm = AsyncMock()
+            
+            # Setup config for running jobs
+            running_jobs[execution_id] = {"config": sample_config}
+            
+            # Run the execution
+            await run_crew(
+                execution_id=execution_id,
+                crew=mock_crew,
+                running_jobs=running_jobs,
+                group_context=mock_group_context,
+                config=sample_config
+            )
+            
+            # Verify callbacks were created
+            mock_create_callbacks.assert_called_once_with(
+                job_id=execution_id,
+                config=sample_config,
+                group_context=mock_group_context
+            )
+            
+            # Verify callbacks were set on crew
+            assert mock_crew.step_callback == mock_step_callback
+            assert mock_crew.task_callback == mock_task_callback
+    
+    @pytest.mark.asyncio
+    async def test_callback_error_handling(self, mock_crew, mock_group_context, running_jobs, sample_config):
+        """Test that callback setup errors are handled gracefully."""
+        execution_id = "test_execution_123"
+        
+        with patch("src.engines.crewai.execution_runner.crew_logger") as mock_crew_logger, \
+             patch("src.engines.crewai.execution_runner.create_execution_callbacks") as mock_create_callbacks, \
+             patch("src.engines.crewai.execution_runner.create_crew_callbacks") as mock_create_crew_callbacks, \
+             patch("src.engines.crewai.execution_runner.log_crew_initialization") as mock_log_init, \
+             patch("src.engines.crewai.execution_runner.AgentTraceEventListener") as mock_listener, \
+             patch("src.engines.crewai.execution_runner.TraceManager") as mock_trace_manager, \
+             patch("src.engines.crewai.execution_runner.EventStreamingCallback") as mock_streaming, \
+             patch("src.engines.crewai.execution_runner.ExecutionStatusService") as mock_status_service, \
+             patch("src.engines.crewai.execution_runner.asyncio.to_thread") as mock_to_thread, \
+             patch("src.engines.crewai.execution_runner.ApiKeysService") as mock_api_service:
+            
+            # Setup mocks - callbacks creation succeeds but setting on crew fails
+            mock_step_callback = MagicMock()
+            mock_task_callback = MagicMock()
+            mock_create_callbacks.return_value = (mock_step_callback, mock_task_callback)
+            mock_create_crew_callbacks.return_value = {
+                'on_start': MagicMock(),
+                'on_complete': MagicMock(),
+                'on_error': MagicMock()
+            }
+            mock_to_thread.return_value = "Test result"
+            
+            # Make setting callbacks on crew fail
+            type(mock_crew).step_callback = PropertyMock(side_effect=Exception("Callback error"))
+            
+            # Setup config for running jobs
+            running_jobs[execution_id] = {"config": sample_config}
+            
+            # Run the execution - should not raise exception
+            await run_crew(
+                execution_id=execution_id,
+                crew=mock_crew,
+                running_jobs=running_jobs,
+                group_context=mock_group_context,
+                config=sample_config
+            )
+            
+            # Verify execution continued despite callback error
+            mock_to_thread.assert_called_once()
+    
+    @pytest.mark.asyncio
+    async def test_crew_callbacks_invoked(self, mock_crew, mock_group_context, running_jobs, sample_config):
+        """Test that crew lifecycle callbacks are properly invoked."""
+        execution_id = "test_execution_123"
+        
+        with patch("src.engines.crewai.execution_runner.crew_logger") as mock_crew_logger, \
+             patch("src.engines.crewai.execution_runner.create_execution_callbacks") as mock_create_callbacks, \
+             patch("src.engines.crewai.execution_runner.create_crew_callbacks") as mock_create_crew_callbacks, \
+             patch("src.engines.crewai.execution_runner.log_crew_initialization") as mock_log_init, \
+             patch("src.engines.crewai.execution_runner.AgentTraceEventListener") as mock_listener, \
+             patch("src.engines.crewai.execution_runner.TraceManager") as mock_trace_manager, \
+             patch("src.engines.crewai.execution_runner.EventStreamingCallback") as mock_streaming, \
+             patch("src.engines.crewai.execution_runner.ExecutionStatusService") as mock_status_service, \
+             patch("src.engines.crewai.execution_runner.asyncio.to_thread") as mock_to_thread, \
+             patch("src.engines.crewai.execution_runner.ApiKeysService") as mock_api_service:
+            
+            # Setup mocks
+            mock_step_callback = MagicMock()
+            mock_task_callback = MagicMock()
+            mock_create_callbacks.return_value = (mock_step_callback, mock_task_callback)
+            
+            mock_on_start = MagicMock()
+            mock_on_complete = MagicMock()
+            mock_on_error = MagicMock()
+            mock_create_crew_callbacks.return_value = {
+                'on_start': mock_on_start,
+                'on_complete': mock_on_complete,
+                'on_error': mock_on_error
+            }
+            mock_to_thread.return_value = "Test result"
+            
+            # Setup config for running jobs
+            running_jobs[execution_id] = {"config": sample_config}
+            
+            # Run the execution
+            await run_crew(
+                execution_id=execution_id,
+                crew=mock_crew,
+                running_jobs=running_jobs,
+                group_context=mock_group_context,
+                config=sample_config
+            )
+            
+            # Verify crew callbacks were invoked
+            mock_on_start.assert_called_once()
+            mock_on_complete.assert_called_once_with("Test result")
+            mock_on_error.assert_not_called()
+    
+    @pytest.mark.asyncio
+    async def test_crew_error_callback_invoked(self, mock_crew, mock_group_context, running_jobs, sample_config):
+        """Test that crew error callback is invoked on execution failure."""
+        execution_id = "test_execution_123"
+        
+        with patch("src.engines.crewai.execution_runner.crew_logger") as mock_crew_logger, \
+             patch("src.engines.crewai.execution_runner.create_execution_callbacks") as mock_create_callbacks, \
+             patch("src.engines.crewai.execution_runner.create_crew_callbacks") as mock_create_crew_callbacks, \
+             patch("src.engines.crewai.execution_runner.log_crew_initialization") as mock_log_init, \
+             patch("src.engines.crewai.execution_runner.AgentTraceEventListener") as mock_listener, \
+             patch("src.engines.crewai.execution_runner.TraceManager") as mock_trace_manager, \
+             patch("src.engines.crewai.execution_runner.EventStreamingCallback") as mock_streaming, \
+             patch("src.engines.crewai.execution_runner.ExecutionStatusService") as mock_status_service, \
+             patch("src.engines.crewai.execution_runner.asyncio.to_thread") as mock_to_thread, \
+             patch("src.engines.crewai.execution_runner.ApiKeysService") as mock_api_service:
+            
+            # Setup mocks
+            mock_step_callback = MagicMock()
+            mock_task_callback = MagicMock()
+            mock_create_callbacks.return_value = (mock_step_callback, mock_task_callback)
+            
+            mock_on_start = MagicMock()
+            mock_on_complete = MagicMock()
+            mock_on_error = MagicMock()
+            mock_create_crew_callbacks.return_value = {
+                'on_start': mock_on_start,
+                'on_complete': mock_on_complete,
+                'on_error': mock_on_error
+            }
+            
+            # Make crew execution fail
+            test_error = Exception("Crew execution failed")
+            mock_to_thread.side_effect = test_error
+            
+            # Setup config for running jobs
+            running_jobs[execution_id] = {"config": sample_config}
+            
+            # Run the execution
+            await run_crew(
+                execution_id=execution_id,
+                crew=mock_crew,
+                running_jobs=running_jobs,
+                group_context=mock_group_context,
+                config=sample_config
+            )
+            
+            # Verify error callback was invoked
+            mock_on_start.assert_called_once()
+            mock_on_complete.assert_not_called()
+            mock_on_error.assert_called_once_with(test_error)
+    
+    @pytest.mark.asyncio
+    async def test_trace_manager_started(self, mock_crew, mock_group_context, running_jobs, sample_config):
+        """Test that trace manager is started during execution."""
+        execution_id = "test_execution_123"
+        
+        with patch("src.engines.crewai.execution_runner.crew_logger") as mock_crew_logger, \
+             patch("src.engines.crewai.execution_runner.create_execution_callbacks") as mock_create_callbacks, \
+             patch("src.engines.crewai.execution_runner.create_crew_callbacks") as mock_create_crew_callbacks, \
+             patch("src.engines.crewai.execution_runner.log_crew_initialization") as mock_log_init, \
+             patch("src.engines.crewai.execution_runner.AgentTraceEventListener") as mock_listener, \
+             patch("src.engines.crewai.execution_runner.TraceManager") as mock_trace_manager, \
+             patch("src.engines.crewai.execution_runner.EventStreamingCallback") as mock_streaming, \
+             patch("src.engines.crewai.execution_runner.ExecutionStatusService") as mock_status_service, \
+             patch("src.engines.crewai.execution_runner.asyncio.to_thread") as mock_to_thread, \
+             patch("src.engines.crewai.execution_runner.ApiKeysService") as mock_api_service:
+            
+            # Setup mocks
+            mock_create_callbacks.return_value = (MagicMock(), MagicMock())
+            mock_create_crew_callbacks.return_value = {
+                'on_start': MagicMock(),
+                'on_complete': MagicMock(),
+                'on_error': MagicMock()
+            }
+            mock_to_thread.return_value = "Test result"
+            
+            # Setup config for running jobs
+            running_jobs[execution_id] = {"config": sample_config}
+            
+            # Run the execution
+            await run_crew(
+                execution_id=execution_id,
+                crew=mock_crew,
+                running_jobs=running_jobs,
+                group_context=mock_group_context,
+                config=sample_config
+            )
+            
+            # Verify trace manager was started
+            mock_trace_manager.ensure_writer_started.assert_called_once()
+    
+    @pytest.mark.asyncio
+    async def test_callbacks_not_passed_to_kickoff(self, mock_crew, mock_group_context, running_jobs, sample_config):
+        """Test that callbacks are not passed as parameters to crew.kickoff()."""
+        execution_id = "test_execution_123"
+        
+        with patch("src.engines.crewai.execution_runner.crew_logger") as mock_crew_logger, \
+             patch("src.engines.crewai.execution_runner.create_execution_callbacks") as mock_create_callbacks, \
+             patch("src.engines.crewai.execution_runner.create_crew_callbacks") as mock_create_crew_callbacks, \
+             patch("src.engines.crewai.execution_runner.log_crew_initialization") as mock_log_init, \
+             patch("src.engines.crewai.execution_runner.AgentTraceEventListener") as mock_listener, \
+             patch("src.engines.crewai.execution_runner.TraceManager") as mock_trace_manager, \
+             patch("src.engines.crewai.execution_runner.EventStreamingCallback") as mock_streaming, \
+             patch("src.engines.crewai.execution_runner.ExecutionStatusService") as mock_status_service, \
+             patch("src.engines.crewai.execution_runner.asyncio.to_thread") as mock_to_thread, \
+             patch("src.engines.crewai.execution_runner.ApiKeysService") as mock_api_service:
+            
+            # Setup mocks
+            mock_create_callbacks.return_value = (MagicMock(), MagicMock())
+            mock_create_crew_callbacks.return_value = {
+                'on_start': MagicMock(),
+                'on_complete': MagicMock(),
+                'on_error': MagicMock()
+            }
+            
+            # Setup a mock for the actual crew.kickoff call
+            mock_kickoff = MagicMock(return_value="Test result")
+            mock_to_thread.return_value = "Test result"
+            
+            # Setup config for running jobs with inputs
+            config_with_inputs = dict(sample_config)
+            config_with_inputs["inputs"] = {"test_input": "test_value"}
+            running_jobs[execution_id] = {"config": config_with_inputs}
+            
+            # Run the execution
+            await run_crew(
+                execution_id=execution_id,
+                crew=mock_crew,
+                running_jobs=running_jobs,
+                group_context=mock_group_context,
+                config=config_with_inputs
+            )
+            
+            # Verify crew.kickoff was called through asyncio.to_thread
+            mock_to_thread.assert_called()
+            
+            # Get the call args to verify no callback parameters were passed
+            call_args = mock_to_thread.call_args
+            assert call_args is not None
+            
+            # The call should be to crew.kickoff with inputs only, no callback parameters
+            args, kwargs = call_args
+            assert args[0] == mock_crew.kickoff  # First arg should be the kickoff method
+            
+            # Check that callback parameters are not in kwargs
+            if 'inputs' in kwargs:
+                # If inputs are provided, verify callbacks are not
+                assert 'step_callback' not in kwargs
+                assert 'task_callback' not in kwargs
+
+
+class TestCallbackIsolationInExecutionRunner:
+    """Test cases to verify callback isolation in execution runner context."""
+    
+    @pytest.mark.asyncio
+    async def test_concurrent_executions_have_separate_callbacks(self, mock_group_context):
+        """Test that concurrent executions get separate callback instances."""
+        execution_id_1 = "execution_1"
+        execution_id_2 = "execution_2"
+        
+        mock_crew_1 = MagicMock()
+        mock_crew_2 = MagicMock()
+        running_jobs = {}
+        sample_config = {"model": "test"}
+        
+        with patch("src.engines.crewai.execution_runner.crew_logger"), \
+             patch("src.engines.crewai.execution_runner.create_execution_callbacks") as mock_create_callbacks, \
+             patch("src.engines.crewai.execution_runner.create_crew_callbacks"), \
+             patch("src.engines.crewai.execution_runner.log_crew_initialization"), \
+             patch("src.engines.crewai.execution_runner.AgentTraceEventListener"), \
+             patch("src.engines.crewai.execution_runner.TraceManager"), \
+             patch("src.engines.crewai.execution_runner.EventStreamingCallback"), \
+             patch("src.engines.crewai.execution_runner.ExecutionStatusService"), \
+             patch("src.engines.crewai.execution_runner.asyncio.to_thread") as mock_to_thread, \
+             patch("src.engines.crewai.execution_runner.ApiKeysService"):
+            
+            # Setup mocks to return different callbacks for each execution
+            callback_calls = []
+            
+            def track_callback_creation(job_id, config, group_context):
+                callbacks = (MagicMock(name=f"step_{job_id}"), MagicMock(name=f"task_{job_id}"))
+                callback_calls.append((job_id, callbacks))
+                return callbacks
+            
+            mock_create_callbacks.side_effect = track_callback_creation
+            mock_to_thread.return_value = "Test result"
+            
+            # Setup configs
+            running_jobs[execution_id_1] = {"config": sample_config}
+            running_jobs[execution_id_2] = {"config": sample_config}
+            
+            # Run both executions concurrently
+            await asyncio.gather(
+                run_crew(execution_id_1, mock_crew_1, running_jobs, mock_group_context, config=sample_config),
+                run_crew(execution_id_2, mock_crew_2, running_jobs, mock_group_context, config=sample_config)
+            )
+            
+            # Verify separate callbacks were created for each execution
+            assert len(callback_calls) == 2
+            
+            job_id_1, callbacks_1 = callback_calls[0]
+            job_id_2, callbacks_2 = callback_calls[1]
+            
+            # Verify job IDs are different
+            assert job_id_1 != job_id_2
+            assert {job_id_1, job_id_2} == {execution_id_1, execution_id_2}
+            
+            # Verify callbacks are different instances
+            step_1, task_1 = callbacks_1
+            step_2, task_2 = callbacks_2
+            
+            assert step_1 is not step_2
+            assert task_1 is not task_2
+            
+            # Verify different callbacks were set on different crews
+            assert mock_crew_1.step_callback is not mock_crew_2.step_callback
+            assert mock_crew_1.task_callback is not mock_crew_2.task_callback

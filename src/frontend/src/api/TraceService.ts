@@ -224,7 +224,9 @@ export const TraceService = {
             task_id: trace.task_id || undefined,
             created_at: trace.created_at || trace.timestamp || new Date().toISOString(),
             // Handle the case where the output might be in output_data, output, or directly in the trace
-            output: trace.output || trace.output_data || ''
+            output: trace.output || trace.output_data || '',
+            // Include extra_data if present
+            extra_data: trace.extra_data || undefined
           } as Trace;
         });
       } else {
@@ -238,7 +240,8 @@ export const TraceService = {
             event_type: item.event_type || '',
             task_id: item.task_id || undefined,
             created_at: item.created_at || item.timestamp || new Date().toISOString(),
-            output: item.output || item.output_data || ''
+            output: item.output || item.output_data || '',
+            extra_data: item.extra_data || undefined
           } as Trace));
         }
         // Return empty array if no traces or invalid format

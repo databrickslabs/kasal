@@ -66,6 +66,10 @@ class GenieTool(BaseTool):
         super().__init__()
         if tool_config is None:
             tool_config = {}
+        
+        # Debug logging for spaceId issue
+        logger.info(f"GenieTool.__init__ called with tool_config: {tool_config}")
+        logger.info(f"Keys in tool_config: {list(tool_config.keys()) if tool_config else []}")
             
         # Set tool ID if provided
         if tool_id is not None:
@@ -76,6 +80,17 @@ class GenieTool(BaseTool):
             self._user_token = user_token
             self._use_oauth = True
             logger.info("Using user token for OBO authentication")
+        
+        # PRIORITY 1: Check environment variable first (highest priority)
+        env_databricks_host = os.getenv("DATABRICKS_HOST")
+        if env_databricks_host:
+            # Process the environment host
+            if env_databricks_host.startswith('https://'):
+                env_databricks_host = env_databricks_host[8:]
+            if env_databricks_host.endswith('/'):
+                env_databricks_host = env_databricks_host[:-1]
+            self._host = env_databricks_host
+            logger.info(f"Using DATABRICKS_HOST from environment variable: {self._host}")
         
         # Get configuration from tool_config
         if tool_config:
@@ -94,31 +109,33 @@ class GenieTool(BaseTool):
                     self._token = tool_config['token']
                     logger.info("Using PAT token from config")
             
-            # Handle different possible key formats for host
-            databricks_host = None
-            # Check for the uppercase DATABRICKS_HOST (used in tool_factory.py)
-            if 'DATABRICKS_HOST' in tool_config:
-                databricks_host = tool_config['DATABRICKS_HOST']
-                logger.info(f"Found DATABRICKS_HOST in config: {databricks_host}")
-            # Also check for lowercase databricks_host as a fallback
-            elif 'databricks_host' in tool_config:
-                databricks_host = tool_config['databricks_host']
-                logger.info(f"Found databricks_host in config: {databricks_host}")
-            
-            # Process host if found in any format
-            if databricks_host:
-                # Handle if databricks_host is a list
-                if isinstance(databricks_host, list) and databricks_host:
-                    databricks_host = databricks_host[0]
-                    logger.info(f"Converting databricks_host from list to string: {databricks_host}")
-                # Strip https:// and trailing slash if present
-                if isinstance(databricks_host, str):
-                    if databricks_host.startswith('https://'):
-                        databricks_host = databricks_host[8:]
-                    if databricks_host.endswith('/'):
-                        databricks_host = databricks_host[:-1]
-                self._host = databricks_host
-                logger.info(f"Using host from config: {self._host}")
+            # PRIORITY 2: Only use config host if environment variable is not set
+            if not self._host:
+                # Handle different possible key formats for host
+                databricks_host = None
+                # Check for the uppercase DATABRICKS_HOST (used in tool_factory.py)
+                if 'DATABRICKS_HOST' in tool_config:
+                    databricks_host = tool_config['DATABRICKS_HOST']
+                    logger.info(f"Found DATABRICKS_HOST in config: {databricks_host}")
+                # Also check for lowercase databricks_host as a fallback
+                elif 'databricks_host' in tool_config:
+                    databricks_host = tool_config['databricks_host']
+                    logger.info(f"Found databricks_host in config: {databricks_host}")
+                
+                # Process host if found in any format
+                if databricks_host:
+                    # Handle if databricks_host is a list
+                    if isinstance(databricks_host, list) and databricks_host:
+                        databricks_host = databricks_host[0]
+                        logger.info(f"Converting databricks_host from list to string: {databricks_host}")
+                    # Strip https:// and trailing slash if present
+                    if isinstance(databricks_host, str):
+                        if databricks_host.startswith('https://'):
+                            databricks_host = databricks_host[8:]
+                        if databricks_host.endswith('/'):
+                            databricks_host = databricks_host[:-1]
+                    self._host = databricks_host
+                    logger.info(f"Using host from config: {self._host}")
             
             # Set space_id from different possible formats
             if 'spaceId' in tool_config:
@@ -157,15 +174,54 @@ class GenieTool(BaseTool):
                     if self._token:
                         logger.info("Using DATABRICKS_API_KEY from environment")
             
-        # Set fallback values from environment if not set from config
+        # PRIORITY 3: SDK auto-detection if still no host
         if not self._host:
-            self._host = os.getenv("DATABRICKS_HOST", "your-workspace.cloud.databricks.com")
-            logger.info(f"Using host from environment or default: {self._host}")
+            # First check if we're in Databricks Apps environment and can auto-detect
+            try:
+                from src.utils.databricks_auth import is_databricks_apps_environment
+                in_databricks_apps = is_databricks_apps_environment()
+            except ImportError:
+                in_databricks_apps = False
+            
+            if in_databricks_apps:
+                # Try SDK Config auto-detection
+                try:
+                    from databricks.sdk.config import Config
+                    sdk_config = Config()
+                    if sdk_config.host:
+                        databricks_host = sdk_config.host
+                        logger.info(f"Auto-detected host from SDK Config in Databricks Apps: {databricks_host}")
+                        
+                        # Process the detected host
+                        if databricks_host.startswith('https://'):
+                            databricks_host = databricks_host[8:]
+                        if databricks_host.endswith('/'):
+                            databricks_host = databricks_host[:-1]
+                        self._host = databricks_host
+                        logger.info(f"Using auto-detected host in Databricks Apps: {self._host}")
+                except Exception as e:
+                    logger.debug(f"Could not auto-detect host from SDK: {e}")
+                
+                if not self._host:
+                    # No fallback - require explicit configuration
+                    logger.error("Could not auto-detect host in Databricks Apps and DATABRICKS_HOST not set!")
+                    logger.error("Please set DATABRICKS_HOST environment variable to your Databricks workspace URL")
+                    self._host = None  # Will cause clear error when used
+            else:
+                # Not in Databricks Apps, no auto-detection available
+                logger.error("DATABRICKS_HOST is not configured!")
+                logger.error("Please set DATABRICKS_HOST environment variable to your Databricks workspace URL, e.g.:")
+                logger.error("export DATABRICKS_HOST=your-workspace.cloud.databricks.com")
+                self._host = None  # Will cause clear error when used
             
         if not self._space_id:
-            self._space_id = os.getenv("DATABRICKS_SPACE_ID", "01efdd2cd03211d0ab74f620f0023b77")
-            logger.warning(f"Using default spaceId - this may not be the correct Genie space: {self._space_id}")
-            logger.warning(f"To fix: Set the correct Genie space ID in tool configuration")
+            # Check environment variable but don't provide a default
+            self._space_id = os.getenv("DATABRICKS_SPACE_ID")
+            if self._space_id:
+                logger.info(f"Using spaceId from DATABRICKS_SPACE_ID environment variable: {self._space_id}")
+            else:
+                logger.warning("No Genie space ID configured!")
+                logger.warning("Please set the Genie space ID in the agent/task tool configuration or DATABRICKS_SPACE_ID environment variable")
         
         # Check authentication requirements
         if token_required and not self._use_oauth and not self._token:
@@ -183,6 +239,8 @@ class GenieTool(BaseTool):
         logger.info(f"Host: {self._host}")
         logger.info(f"Space ID: {self._space_id}")
         logger.info(f"Authentication Method: {'OAuth/OBO' if self._use_oauth else 'PAT'}")
+        logger.info(f"Environment DATABRICKS_HOST: {os.getenv('DATABRICKS_HOST', 'NOT SET')}")
+        logger.info(f"Config received: {list(tool_config.keys()) if tool_config else 'None'}")
         
         # Log token (masked)
         if self._user_token:
@@ -202,6 +260,10 @@ class GenieTool(BaseTool):
 
     def _make_url(self, path: str) -> str:
         """Create a full URL from a path."""
+        # Check if host is configured
+        if not self._host:
+            raise ValueError("DATABRICKS_HOST is not configured. Please configure DATABRICKS_HOST in tool configuration or environment variables.")
+        
         # Ensure host is properly formatted
         host = self._host
         if host.startswith('https://'):
@@ -215,6 +277,8 @@ class GenieTool(BaseTool):
             
         # Ensure spaceId is used correctly
         if "{self._space_id}" in path:
+            if not self._space_id:
+                raise ValueError("Genie space ID is not configured. Please configure spaceId in tool configuration or DATABRICKS_SPACE_ID environment variable.")
             path = path.replace("{self._space_id}", self._space_id)
             
         return f"https://{host}{path}"
@@ -639,6 +703,28 @@ class GenieTool(BaseTool):
         """
         Execute a query using the Genie API and wait for results.
         """
+        # Check if host is properly configured
+        if not self._host:
+            return """ERROR: DATABRICKS_HOST is not configured!
+            
+Please set the DATABRICKS_HOST environment variable to your Databricks workspace URL.
+Example: export DATABRICKS_HOST=your-workspace.cloud.databricks.com
+
+Alternatively, ensure your tool configuration includes the Databricks host.
+"""
+        
+        # Check if space_id is properly configured
+        if not self._space_id:
+            return """ERROR: Genie space ID is not configured!
+            
+Please configure the Genie space ID in one of the following ways:
+1. Set it in the agent/task tool configuration when setting up the workflow
+2. Set the DATABRICKS_SPACE_ID environment variable
+Example: export DATABRICKS_SPACE_ID=your-space-id
+
+To find your Genie space ID, go to your Databricks workspace and navigate to the Genie space.
+"""
+        
         # Handle empty inputs or 'None' as an input
         if not question or question.lower() == 'none':
             return """To use the GenieTool, please provide a specific business question. 

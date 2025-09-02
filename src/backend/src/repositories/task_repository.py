@@ -203,6 +203,12 @@ class TaskRepository(BaseRepository[Task]):
             
             db_obj = await self.get(id)
             if db_obj:
+                # Debug logging for tool_configs
+                if 'tool_configs' in obj_in:
+                    import logging
+                    logger = logging.getLogger(__name__)
+                    logger.info(f"Updating task {id} with tool_configs: {obj_in.get('tool_configs')}")
+                
                 for key, value in obj_in.items():
                     setattr(db_obj, key, value)
                 await self.session.flush()

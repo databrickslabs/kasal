@@ -1,0 +1,402 @@
+"""
+Unit tests for trace management with execution-scoped callbacks.
+
+Tests the integration between execution-scoped callbacks and trace management
+to ensure proper event filtering and processing.
+"""
+import pytest
+import asyncio
+from unittest.mock import patch, MagicMock, AsyncMock, call
+from datetime import datetime
+
+from src.engines.crewai.trace_management import TraceManager
+
+
+@pytest.fixture
+def mock_trace_queue():
+    """Create a mock trace queue."""
+    queue = MagicMock()
+    queue.qsize.return_value = 0
+    queue.get.side_effect = Exception("Queue empty")
+    queue.task_done = MagicMock()
+    return queue
+
+
+@pytest.fixture
+def mock_execution_history_service():
+    """Create a mock execution history service."""
+    service = MagicMock()
+    service.get_execution_by_job_id = AsyncMock(return_value=MagicMock())
+    return service
+
+
+@pytest.fixture
+def sample_trace_data():
+    """Create sample trace data from execution callbacks."""
+    return {
+        "job_id": "test_job_123",
+        "event_source": "Test Agent",
+        "event_context": "agent_step",
+        "event_type": "agent_execution",
+        "timestamp": "2025-07-13T20:00:00Z",
+        "output_content": "Agent executed successfully",
+        "extra_data": {"type": "step_callback"},
+        "group_id": "group_123",
+        "group_email": "test@example.com"
+    }
+
+
+class TestTraceManagerWithCallbacks:
+    """Test cases for TraceManager with execution-scoped callbacks."""
+    
+    @pytest.mark.asyncio
+    async def test_trace_writer_processes_callback_events(self, mock_trace_queue, mock_execution_history_service, sample_trace_data):
+        """Test that trace writer processes events from execution callbacks."""
+        # Setup queue to return our sample trace data once
+        mock_trace_queue.get.side_effect = [sample_trace_data, Exception("Queue empty")]
+        
+        with patch("src.engines.crewai.trace_management.get_trace_queue") as mock_get_queue, \
+             patch("src.engines.crewai.trace_management.get_execution_history_service") as mock_get_service, \
+             patch("src.engines.crewai.trace_management.ExecutionTraceService") as mock_trace_service, \
+             patch("src.engines.crewai.trace_management.ExecutionStatusService") as mock_status_service:
+            
+            mock_get_queue.return_value = mock_trace_queue
+            mock_get_service.return_value = mock_execution_history_service
+            mock_trace_service.create_trace = AsyncMock()
+            mock_status_service.create_execution = AsyncMock(return_value=True)
+            
+            # Start the writer loop with a short timeout
+            TraceManager._shutdown_event.clear()
+            writer_task = asyncio.create_task(TraceManager._trace_writer_loop())
+            
+            # Let it run briefly to process the trace
+            await asyncio.sleep(0.1)
+            
+            # Stop the writer
+            TraceManager._shutdown_event.set()
+            mock_trace_queue.get.side_effect = [None]  # Signal shutdown
+            
+            try:
+                await asyncio.wait_for(writer_task, timeout=1.0)
+            except asyncio.TimeoutError:
+                writer_task.cancel()
+            
+            # Verify trace was processed
+            mock_trace_service.create_trace.assert_called_once()
+            call_args = mock_trace_service.create_trace.call_args[0][0]
+            
+            assert call_args["job_id"] == "test_job_123"
+            assert call_args["event_type"] == "agent_execution"
+            assert call_args["event_source"] == "Test Agent"
+            assert call_args["group_id"] == "group_123"
+    
+    @pytest.mark.asyncio
+    async def test_important_event_types_processed(self, mock_trace_queue, mock_execution_history_service):
+        """Test that important event types from callbacks are processed."""
+        important_events = [
+            {
+                "job_id": "test_job",
+                "event_type": "agent_execution",
+                "event_source": "agent",
+                "event_context": "step",
+                "output_content": "agent output"
+            },
+            {
+                "job_id": "test_job", 
+                "event_type": "task_completed",
+                "event_source": "task",
+                "event_context": "completion",
+                "output_content": "task output"
+            },
+            {
+                "job_id": "test_job",
+                "event_type": "crew_started", 
+                "event_source": "crew",
+                "event_context": "startup",
+                "output_content": "crew started"
+            },
+            {
+                "job_id": "test_job",
+                "event_type": "crew_completed",
+                "event_source": "crew", 
+                "event_context": "completion",
+                "output_content": "crew completed"
+            }
+        ]
+        
+        # Setup queue to return important events
+        mock_trace_queue.get.side_effect = important_events + [Exception("Queue empty")]
+        
+        with patch("src.engines.crewai.trace_management.get_trace_queue") as mock_get_queue, \
+             patch("src.engines.crewai.trace_management.get_execution_history_service") as mock_get_service, \
+             patch("src.engines.crewai.trace_management.ExecutionTraceService") as mock_trace_service, \
+             patch("src.engines.crewai.trace_management.ExecutionStatusService") as mock_status_service:
+            
+            mock_get_queue.return_value = mock_trace_queue
+            mock_get_service.return_value = mock_execution_history_service
+            mock_trace_service.create_trace = AsyncMock()
+            mock_status_service.create_execution = AsyncMock(return_value=True)
+            
+            # Start the writer loop
+            TraceManager._shutdown_event.clear()
+            writer_task = asyncio.create_task(TraceManager._trace_writer_loop())
+            
+            # Let it process events
+            await asyncio.sleep(0.1)
+            
+            # Stop the writer
+            TraceManager._shutdown_event.set()
+            mock_trace_queue.get.side_effect = [None]
+            
+            try:
+                await asyncio.wait_for(writer_task, timeout=1.0)
+            except asyncio.TimeoutError:
+                writer_task.cancel()
+            
+            # Verify all important events were processed
+            assert mock_trace_service.create_trace.call_count == len(important_events)
+            
+            # Verify event types
+            processed_events = [call[0][0] for call in mock_trace_service.create_trace.call_args_list]
+            processed_event_types = [event["event_type"] for event in processed_events]
+            
+            expected_types = ["agent_execution", "task_completed", "crew_started", "crew_completed"]
+            assert set(processed_event_types) == set(expected_types)
+    
+    @pytest.mark.asyncio 
+    async def test_unimportant_events_filtered_out(self, mock_trace_queue, mock_execution_history_service):
+        """Test that unimportant event types are filtered out."""
+        mixed_events = [
+            {
+                "job_id": "test_job",
+                "event_type": "agent_execution",  # Important
+                "event_source": "agent",
+                "output_content": "important event"
+            },
+            {
+                "job_id": "test_job", 
+                "event_type": "debug_info",  # Not important
+                "event_source": "debug",
+                "output_content": "debug event"
+            },
+            {
+                "job_id": "test_job",
+                "event_type": "task_completed",  # Important
+                "event_source": "task", 
+                "output_content": "task event"
+            },
+            {
+                "job_id": "test_job",
+                "event_type": "random_event",  # Not important
+                "event_source": "random",
+                "output_content": "random event"
+            }
+        ]
+        
+        # Setup queue to return mixed events
+        mock_trace_queue.get.side_effect = mixed_events + [Exception("Queue empty")]
+        
+        with patch("src.engines.crewai.trace_management.get_trace_queue") as mock_get_queue, \
+             patch("src.engines.crewai.trace_management.get_execution_history_service") as mock_get_service, \
+             patch("src.engines.crewai.trace_management.ExecutionTraceService") as mock_trace_service, \
+             patch("src.engines.crewai.trace_management.ExecutionStatusService") as mock_status_service:
+            
+            mock_get_queue.return_value = mock_trace_queue
+            mock_get_service.return_value = mock_execution_history_service
+            mock_trace_service.create_trace = AsyncMock()
+            mock_status_service.create_execution = AsyncMock(return_value=True)
+            
+            # Start the writer loop
+            TraceManager._shutdown_event.clear()
+            writer_task = asyncio.create_task(TraceManager._trace_writer_loop())
+            
+            # Let it process events
+            await asyncio.sleep(0.1)
+            
+            # Stop the writer
+            TraceManager._shutdown_event.set()
+            mock_trace_queue.get.side_effect = [None]
+            
+            try:
+                await asyncio.wait_for(writer_task, timeout=1.0)
+            except asyncio.TimeoutError:
+                writer_task.cancel()
+            
+            # Verify only important events were processed (2 out of 4)
+            assert mock_trace_service.create_trace.call_count == 2
+            
+            # Verify only important event types were processed
+            processed_events = [call[0][0] for call in mock_trace_service.create_trace.call_args_list]
+            processed_event_types = [event["event_type"] for event in processed_events]
+            
+            assert "agent_execution" in processed_event_types
+            assert "task_completed" in processed_event_types
+            assert "debug_info" not in processed_event_types
+            assert "random_event" not in processed_event_types
+    
+    @pytest.mark.asyncio
+    async def test_trace_isolation_by_job_id(self, mock_trace_queue, mock_execution_history_service):
+        """Test that traces are properly isolated by job ID."""
+        job_1_events = [
+            {
+                "job_id": "job_1",
+                "event_type": "agent_execution",
+                "event_source": "agent_1",
+                "output_content": "job 1 event"
+            }
+        ]
+        
+        job_2_events = [
+            {
+                "job_id": "job_2", 
+                "event_type": "task_completed",
+                "event_source": "task_2",
+                "output_content": "job 2 event"
+            }
+        ]
+        
+        all_events = job_1_events + job_2_events
+        mock_trace_queue.get.side_effect = all_events + [Exception("Queue empty")]
+        
+        with patch("src.engines.crewai.trace_management.get_trace_queue") as mock_get_queue, \
+             patch("src.engines.crewai.trace_management.get_execution_history_service") as mock_get_service, \
+             patch("src.engines.crewai.trace_management.ExecutionTraceService") as mock_trace_service, \
+             patch("src.engines.crewai.trace_management.ExecutionStatusService") as mock_status_service:
+            
+            mock_get_queue.return_value = mock_trace_queue
+            mock_get_service.return_value = mock_execution_history_service
+            mock_trace_service.create_trace = AsyncMock()
+            mock_status_service.create_execution = AsyncMock(return_value=True)
+            
+            # Start the writer loop
+            TraceManager._shutdown_event.clear()
+            writer_task = asyncio.create_task(TraceManager._trace_writer_loop())
+            
+            # Let it process events
+            await asyncio.sleep(0.1)
+            
+            # Stop the writer
+            TraceManager._shutdown_event.set()
+            mock_trace_queue.get.side_effect = [None]
+            
+            try:
+                await asyncio.wait_for(writer_task, timeout=1.0)
+            except asyncio.TimeoutError:
+                writer_task.cancel()
+            
+            # Verify both events were processed
+            assert mock_trace_service.create_trace.call_count == 2
+            
+            # Verify job IDs are preserved and different
+            processed_events = [call[0][0] for call in mock_trace_service.create_trace.call_args_list]
+            job_ids = [event["job_id"] for event in processed_events]
+            
+            assert "job_1" in job_ids
+            assert "job_2" in job_ids
+            assert len(set(job_ids)) == 2  # Two different job IDs
+    
+    @pytest.mark.asyncio
+    async def test_group_context_preserved_in_traces(self, mock_trace_queue, mock_execution_history_service):
+        """Test that group context from callbacks is preserved in traces."""
+        trace_with_group = {
+            "job_id": "test_job",
+            "event_type": "agent_execution", 
+            "event_source": "agent",
+            "output_content": "test output",
+            "group_id": "group_123",
+            "group_email": "test@group.com"
+        }
+        
+        mock_trace_queue.get.side_effect = [trace_with_group, Exception("Queue empty")]
+        
+        with patch("src.engines.crewai.trace_management.get_trace_queue") as mock_get_queue, \
+             patch("src.engines.crewai.trace_management.get_execution_history_service") as mock_get_service, \
+             patch("src.engines.crewai.trace_management.ExecutionTraceService") as mock_trace_service, \
+             patch("src.engines.crewai.trace_management.ExecutionStatusService") as mock_status_service:
+            
+            mock_get_queue.return_value = mock_trace_queue
+            mock_get_service.return_value = mock_execution_history_service
+            mock_trace_service.create_trace = AsyncMock()
+            mock_status_service.create_execution = AsyncMock(return_value=True)
+            
+            # Start the writer loop
+            TraceManager._shutdown_event.clear()
+            writer_task = asyncio.create_task(TraceManager._trace_writer_loop())
+            
+            # Let it process the trace
+            await asyncio.sleep(0.1)
+            
+            # Stop the writer
+            TraceManager._shutdown_event.set()
+            mock_trace_queue.get.side_effect = [None]
+            
+            try:
+                await asyncio.wait_for(writer_task, timeout=1.0)
+            except asyncio.TimeoutError:
+                writer_task.cancel()
+            
+            # Verify trace was processed with group context
+            mock_trace_service.create_trace.assert_called_once()
+            processed_trace = mock_trace_service.create_trace.call_args[0][0]
+            
+            assert processed_trace["group_id"] == "group_123"
+            assert processed_trace["group_email"] == "test@group.com"
+
+
+class TestTraceManagerLifecycle:
+    """Test cases for TraceManager lifecycle management."""
+    
+    @pytest.mark.asyncio
+    async def test_ensure_writer_started(self):
+        """Test that ensure_writer_started initializes the writer correctly."""
+        # Reset state
+        TraceManager._writer_started = False
+        TraceManager._trace_writer_task = None
+        
+        with patch("src.engines.crewai.trace_management.get_trace_queue") as mock_get_queue, \
+             patch("src.engines.crewai.trace_management.get_execution_history_service"), \
+             patch("src.services.execution_logs_service.start_logs_writer") as mock_start_logs:
+            
+            mock_queue = MagicMock()
+            mock_queue.get.side_effect = Exception("Queue empty")
+            mock_get_queue.return_value = mock_queue
+            mock_start_logs.return_value = MagicMock()
+            
+            # Start the writer
+            await TraceManager.ensure_writer_started()
+            
+            # Verify writer was marked as started
+            assert TraceManager._writer_started is True
+            assert TraceManager._trace_writer_task is not None
+            
+            # Clean up
+            await TraceManager.stop_writer()
+    
+    @pytest.mark.asyncio 
+    async def test_stop_writer(self):
+        """Test that stop_writer properly shuts down the writer."""
+        # Start the writer first
+        TraceManager._writer_started = False
+        TraceManager._trace_writer_task = None
+        
+        with patch("src.engines.crewai.trace_management.get_trace_queue") as mock_get_queue, \
+             patch("src.engines.crewai.trace_management.get_execution_history_service"), \
+             patch("src.services.execution_logs_service.start_logs_writer") as mock_start_logs, \
+             patch("src.services.execution_logs_service.stop_logs_writer") as mock_stop_logs:
+            
+            mock_queue = MagicMock()
+            mock_queue.get.side_effect = Exception("Queue empty")
+            mock_queue.put_nowait = MagicMock()
+            mock_get_queue.return_value = mock_queue
+            mock_start_logs.return_value = MagicMock()
+            mock_stop_logs.return_value = True
+            
+            # Start then stop the writer
+            await TraceManager.ensure_writer_started()
+            await TraceManager.stop_writer()
+            
+            # Verify shutdown event was set
+            assert TraceManager._shutdown_event.is_set()
+            
+            # Verify writer was marked as stopped
+            assert TraceManager._writer_started is False

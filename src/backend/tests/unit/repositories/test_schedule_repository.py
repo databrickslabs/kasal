@@ -478,9 +478,15 @@ class TestScheduleRepositoryUpdateAfterExecution:
                 result = await schedule_repository.update_after_execution(1, execution_time)
                 
                 assert result == schedule
-                assert schedule.last_run_at == execution_time
+                # The service converts timezone-aware datetime to timezone-naive for database storage
+                if hasattr(execution_time, 'tzinfo') and execution_time.tzinfo is not None:
+                    expected_time = execution_time.replace(tzinfo=None)
+                else:
+                    expected_time = execution_time
+                assert schedule.last_run_at == expected_time
                 assert schedule.next_run_at == new_next_run
-                mock_calc_next.assert_called_once_with(schedule.cron_expression, execution_time)
+                # The service calls calculate_next_run_from_last with timezone-naive datetime
+                mock_calc_next.assert_called_once_with(schedule.cron_expression, expected_time)
                 mock_async_session.commit.assert_called_once()
                 mock_async_session.refresh.assert_called_once_with(schedule)
     
@@ -688,5 +694,11 @@ class TestScheduleRepositoryEdgeCases:
                 result = await schedule_repository.update_after_execution(1, execution_time)
                 
                 assert result == schedule
-                assert schedule.last_run_at == execution_time
-                mock_calc_next.assert_called_once_with(schedule.cron_expression, execution_time)
+                # The service converts timezone-aware datetime to timezone-naive for database storage
+                if hasattr(execution_time, 'tzinfo') and execution_time.tzinfo is not None:
+                    expected_time = execution_time.replace(tzinfo=None)
+                else:
+                    expected_time = execution_time
+                assert schedule.last_run_at == expected_time
+                # The service calls calculate_next_run_from_last with timezone-naive datetime
+                mock_calc_next.assert_called_once_with(schedule.cron_expression, expected_time)

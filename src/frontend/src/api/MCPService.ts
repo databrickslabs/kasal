@@ -136,6 +136,25 @@ export class MCPService {
   }
 
   /**
+   * Toggle the global enabled state of an MCP server
+   * @param id Server ID
+   * @returns Updated global enabled state
+   */
+  async toggleMcpServerGlobalEnabled(id: string): Promise<{ enabled: boolean }> {
+    try {
+      const response = await apiClient.patch<{ message: string; enabled: boolean }>(
+        `/mcp/servers/${id}/toggle-global-enabled`
+      );
+      console.log(`Toggled MCP server ${id} global enabled state:`, response.data);
+      return { enabled: response.data.enabled };
+    } catch (error) {
+      console.error(`Error toggling MCP server ${id} global enabled state:`, error);
+      const axiosError = error as AxiosError<ErrorResponse>;
+      throw new Error(axiosError.response?.data?.detail || `Error toggling MCP server ${id} global enabled state`);
+    }
+  }
+
+  /**
    * Test connection to an MCP server
    * @param serverConfig Server configuration to test
    * @returns Connection status

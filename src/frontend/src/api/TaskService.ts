@@ -19,10 +19,41 @@ export class TaskService {
     try {
       const response = await apiClient.get<Task>(`/tasks/${id}`);
       console.log('Fetched task:', response.data);
+      console.log('Task tool_configs:', response.data?.tool_configs);
+      if (response.data?.tool_configs?.GenieTool) {
+        console.log('GenieTool config in fetched task:', response.data.tool_configs.GenieTool);
+      }
       return response.data;
     } catch (error) {
       console.error('Error fetching task:', error);
       return null;
+    }
+  }
+
+  static async findOrCreateTask(task: Partial<Task>): Promise<Task> {
+    try {
+      // Use the same logic as createTask but with find-or-create endpoint
+      const taskData = { ...task };
+      
+      // Ensure required fields have defaults
+      if (!taskData.tools) taskData.tools = [];
+      if (!taskData.context) taskData.context = [];
+      if (!taskData.async_execution) taskData.async_execution = false;
+      
+      console.log('TaskService - find-or-create task data:', {
+        name: taskData.name,
+        config: taskData.config
+      });
+
+      // Use find-or-create endpoint to prevent duplicates
+      const response = await apiClient.post<Task>('/tasks/find-or-create', taskData);
+      
+      console.log('Task find-or-create successful:', response.data);
+      return response.data;
+    } catch (error) {
+      const axiosError = error as AxiosError<ErrorResponse>;
+      console.error('Error in find-or-create task:', axiosError.response?.data?.detail || axiosError.message);
+      throw axiosError;
     }
   }
 
@@ -36,9 +67,13 @@ export class TaskService {
         name: task.name,
         config: task.config,
         markdown: task.markdown,
-        configMarkdown: task.config?.markdown
+        configMarkdown: task.config?.markdown,
+        tool_configs: task.tool_configs
       });
       console.log('TaskService - Initial output_pydantic value:', task.config?.output_pydantic);
+      if (task.tool_configs) {
+        console.log('TaskService - Creating task with tool_configs:', task.tool_configs);
+      }
       
       // Validate and format the task data
       const taskData = {
@@ -47,6 +82,7 @@ export class TaskService {
         description: task.description?.trim(),
         expected_output: task.expected_output?.trim(),
         tools: task.tools || [],
+        tool_configs: task.tool_configs || {},  // Include tool_configs
         agent_id: task.agent_id || "",
         async_execution: task.async_execution !== undefined ? Boolean(task.async_execution) : false,
         markdown: task.markdown !== undefined ? Boolean(task.markdown) : Boolean(task.config?.markdown),
@@ -124,9 +160,13 @@ export class TaskService {
       console.log('TaskService - Initial update data received:', {
         id,
         name: task.name,
-        config: task.config
+        config: task.config,
+        tool_configs: task.tool_configs
       });
       console.log('TaskService - Initial output_pydantic value for update:', task.config?.output_pydantic);
+      if (task.tool_configs) {
+        console.log('TaskService - Updating task with tool_configs:', task.tool_configs);
+      }
       
       // Validate and format the task data
       const taskData = {
@@ -135,6 +175,7 @@ export class TaskService {
         description: task.description?.trim(),
         expected_output: task.expected_output?.trim(),
         tools: task.tools || [],
+        tool_configs: task.tool_configs || {},  // Include tool_configs
         agent_id: task.agent_id || "",
         async_execution: task.async_execution !== undefined ? Boolean(task.async_execution) : false,
         markdown: task.markdown !== undefined ? Boolean(task.markdown) : Boolean(task.config?.markdown),

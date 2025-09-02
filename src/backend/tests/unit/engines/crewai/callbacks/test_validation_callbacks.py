@@ -9,9 +9,12 @@ import json
 import re
 
 # Add the backend src to path
-sys.path.insert(0, '/Users/nehme.tohme/workspace/kasal/src/backend/src')
+from pathlib import Path
+current_dir = Path(__file__).parent
+backend_src = current_dir.parent.parent.parent.parent / 'src'
+sys.path.insert(0, str(backend_src))
 
-from engines.crewai.callbacks.validation_callbacks import (
+from src.engines.crewai.callbacks.validation_callbacks import (
     SchemaValidator,
     ContentValidator,
     TypeValidator
