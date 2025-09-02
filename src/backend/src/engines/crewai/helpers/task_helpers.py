@@ -509,6 +509,17 @@ async def create_task(
         # Create the task with properly separated parameters
         task = Task(**task_args)
         
+        # Store the task ID from config if available
+        # This ID matches the database task ID and is used for status tracking
+        if 'id' in task_config:
+            # Extract just the UUID part if the ID has a prefix like "task-"
+            task_id = task_config['id']
+            if isinstance(task_id, str) and task_id.startswith('task-'):
+                # Remove the "task-" prefix to get just the UUID
+                task_id = task_id[5:]  # len('task-') = 5
+            task._kasal_task_id = task_id
+            logger.info(f"Attached Kasal task ID to task: {task_id} (from {task_config['id']})")
+        
         logger.info(f"Successfully created task: {task_key}")
         
         # Debug the task to see if tools are properly attached

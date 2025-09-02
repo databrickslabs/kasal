@@ -36,6 +36,7 @@ import RightSidebar from './RightSidebar';
 import LeftSidebar from './LeftSidebar';
 import { useUILayoutStore } from '../../store/uiLayout';
 import { CanvasLayoutManager } from '../../utils/CanvasLayoutManager';
+import { useTaskExecutionStore } from '../../store/taskExecutionStore';
 
 // Dialog Imports
 import AgentDialog from '../Agents/AgentDialog';
@@ -470,13 +471,32 @@ const WorkflowDesigner: React.FC<WorkflowDesignerProps> = (): JSX.Element => {
   // Track the currently executing job ID
   const [executingJobId, setExecutingJobId] = React.useState<string | null>(null);
   const runningTabTimeoutRef = React.useRef<NodeJS.Timeout | null>(null);
+  const taskStatusPollingInterval = React.useRef<NodeJS.Timeout | null>(null);
+
+  // Get task execution store methods
+  const { loadTaskStates, clearTaskStates } = useTaskExecutionStore();
 
   // Listen for job created events to track the executing job
   useEffect(() => {
     const handleJobCreated = (event: CustomEvent) => {
       const { jobId } = event.detail;
-      console.log('[WorkflowDesigner] Job created, tracking job ID:', jobId);
       setExecutingJobId(jobId);
+      
+      // Clear any existing task states
+      clearTaskStates();
+      
+      // Clear any existing polling interval
+      if (taskStatusPollingInterval.current) {
+        clearInterval(taskStatusPollingInterval.current);
+      }
+      
+      // Start polling every 2 seconds
+      taskStatusPollingInterval.current = setInterval(() => {
+        loadTaskStates(jobId);
+      }, 2000);
+      
+      // Also load immediately
+      loadTaskStates(jobId);
       
       // Ensure polling is running to monitor job status
       console.log('[WorkflowDesigner] Starting run status polling for job monitoring');
@@ -487,13 +507,25 @@ const WorkflowDesigner: React.FC<WorkflowDesignerProps> = (): JSX.Element => {
     return () => {
       window.removeEventListener('jobCreated', handleJobCreated as EventListener);
     };
-  }, [startRunStatusPolling]);
+  }, [startRunStatusPolling, loadTaskStates, clearTaskStates]);
 
   // Listen for job completion events to clear running tab and update status
   useEffect(() => {
     const handleJobCompleted = (event: CustomEvent) => {
       console.log('[WorkflowDesigner] Job completed event received:', event.detail);
       console.log('[WorkflowDesigner] Current runningTabId:', runningTabId);
+      
+      // Stop task status polling
+      if (taskStatusPollingInterval.current) {
+        console.log('[WorkflowDesigner] Stopping task status polling');
+        clearInterval(taskStatusPollingInterval.current);
+        taskStatusPollingInterval.current = null;
+      }
+      
+      // Clear task states after a short delay to show final states
+      setTimeout(() => {
+        clearTaskStates();
+      }, 3000);
       
       // Get the active tab to ensure we clear the right one
       const activeTab = getActiveTab();
@@ -534,6 +566,18 @@ const WorkflowDesigner: React.FC<WorkflowDesignerProps> = (): JSX.Element => {
     const handleJobFailed = (event: CustomEvent) => {
       console.log('[WorkflowDesigner] Job failed event received:', event.detail);
       console.log('[WorkflowDesigner] Current runningTabId:', runningTabId);
+      
+      // Stop task status polling
+      if (taskStatusPollingInterval.current) {
+        console.log('[WorkflowDesigner] Stopping task status polling');
+        clearInterval(taskStatusPollingInterval.current);
+        taskStatusPollingInterval.current = null;
+      }
+      
+      // Clear task states after a short delay to show final states
+      setTimeout(() => {
+        clearTaskStates();
+      }, 3000);
       
       // Get the active tab to ensure we clear the right one
       const activeTab = getActiveTab();
@@ -580,8 +624,14 @@ const WorkflowDesigner: React.FC<WorkflowDesignerProps> = (): JSX.Element => {
     return () => {
       window.removeEventListener('jobCompleted', handleJobCompleted as EventListener);
       window.removeEventListener('jobFailed', handleJobFailed as EventListener);
+      
+      // Clean up polling interval if component unmounts
+      if (taskStatusPollingInterval.current) {
+        clearInterval(taskStatusPollingInterval.current);
+        taskStatusPollingInterval.current = null;
+      }
     };
-  }, [runningTabId, getActiveTab]);
+  }, [runningTabId, getActiveTab, clearTaskStates]);
 
   // Fallback: Monitor job status directly from runHistory
   useEffect(() => {
@@ -690,6 +740,69 @@ const WorkflowDesigner: React.FC<WorkflowDesignerProps> = (): JSX.Element => {
       stopRunStatusPolling();
     };
   }, [stopRunStatusPolling]);
+
+  // Check for running jobs on component mount and start polling if found
+  useEffect(() => {
+    const checkForRunningJobs = async () => {
+      // Get fresh data from stores
+      const { tabs: currentTabs } = useTabManagerStore.getState();
+      const { fetchRunHistory: fetchHistory } = useRunStatusStore.getState();
+      const { loadTaskStates: loadStates, clearTaskStates: clearStates } = useTaskExecutionStore.getState();
+      
+      // First check the tabs for any running status
+      const runningTab = currentTabs.find(tab => tab.executionStatus === 'running');
+      if (runningTab) {
+        setRunningTabId(runningTab.id);
+      }
+      
+      // Fetch the latest run history to ensure we have the most recent data
+      await fetchHistory();
+      
+      // Get updated run history after fetch
+      const { runHistory: updatedRunHistory } = useRunStatusStore.getState();
+      
+      // Check the runHistory for any running jobs
+      if (updatedRunHistory.length > 0) {
+        const runningJobs = updatedRunHistory.filter(run => 
+          run.status.toLowerCase() === 'running' || 
+          run.status.toLowerCase() === 'queued'
+        );
+        
+        if (runningJobs.length > 0) {
+          // Take the most recent running job
+          const mostRecentJob = runningJobs[0];
+          setExecutingJobId(mostRecentJob.job_id);
+          
+          // Clear any existing task states
+          clearStates();
+          
+          // Clear any existing polling interval
+          if (taskStatusPollingInterval.current) {
+            clearInterval(taskStatusPollingInterval.current);
+          }
+          
+          // Start polling every 2 seconds
+          taskStatusPollingInterval.current = setInterval(() => {
+            loadStates(mostRecentJob.job_id);
+          }, 2000);
+          
+          // Do initial load immediately
+          loadStates(mostRecentJob.job_id);
+        }
+      }
+    };
+    
+    // Run the check after a short delay to ensure stores are initialized
+    const timer = setTimeout(checkForRunningJobs, 100);
+    
+    return () => {
+      clearTimeout(timer);
+      // Clean up polling interval if it exists
+      if (taskStatusPollingInterval.current) {
+        clearInterval(taskStatusPollingInterval.current);
+      }
+    };
+  }, []); // Run only once on mount
 
   // Use node positioning logic
   useNodePositioning(
