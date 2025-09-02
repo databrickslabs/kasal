@@ -119,6 +119,84 @@ async def get_traces_by_job_id(
             detail=f"Failed to retrieve traces: {str(e)}"
         )
 
+@router.get("/job/{job_id}/task-states")
+async def get_current_task_states(job_id: str):
+    """
+    Get current task execution states from traces.
+    Returns which tasks are running, completed, or failed.
+    
+    Args:
+        job_id: String ID of the execution (job_id)
+    
+    Returns:
+        Dictionary mapping task IDs to their current states
+    """
+    try:
+        # Get all traces for the job
+        result = await ExecutionTraceService.get_traces_by_job_id(None, job_id, limit=500, offset=0)
+        if not result:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail=f"Execution with job_id {job_id} not found"
+            )
+        
+        task_states = {}
+        
+        # Process traces to determine current task states
+        for trace in result.traces:
+            # Check if this is a task-related event
+            if trace.event_type in ["TASK_STARTED", "TASK_COMPLETED", "TASK_FAILED"]:
+                # Extract task_id from trace metadata if available
+                task_id = None
+                if trace.trace_metadata and isinstance(trace.trace_metadata, dict):
+                    task_id = trace.trace_metadata.get("task_id")
+                
+                # If no task_id in metadata, try to generate one from event_context
+                if not task_id and trace.event_context:
+                    # Use event_context (task name) as a fallback identifier
+                    task_id = f"task_{hash(trace.event_context) % 1000000}"
+                
+                if task_id:
+                    # Update task state based on event type
+                    if trace.event_type == "TASK_STARTED":
+                        task_states[task_id] = {
+                            "status": "running",
+                            "started_at": trace.created_at.isoformat() if trace.created_at else None,
+                            "task_name": trace.event_context
+                        }
+                    elif trace.event_type == "TASK_COMPLETED":
+                        # Update existing state or create new one
+                        if task_id in task_states:
+                            task_states[task_id]["status"] = "completed"
+                            task_states[task_id]["completed_at"] = trace.created_at.isoformat() if trace.created_at else None
+                        else:
+                            task_states[task_id] = {
+                                "status": "completed",
+                                "completed_at": trace.created_at.isoformat() if trace.created_at else None,
+                                "task_name": trace.event_context
+                            }
+                    elif trace.event_type == "TASK_FAILED":
+                        # Update existing state or create new one
+                        if task_id in task_states:
+                            task_states[task_id]["status"] = "failed"
+                            task_states[task_id]["failed_at"] = trace.created_at.isoformat() if trace.created_at else None
+                        else:
+                            task_states[task_id] = {
+                                "status": "failed",
+                                "failed_at": trace.created_at.isoformat() if trace.created_at else None,
+                                "task_name": trace.event_context
+                            }
+        
+        return task_states
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error getting task states for job_id {job_id}: {str(e)}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to retrieve task states: {str(e)}"
+        )
+
 @router.get("/{trace_id}", response_model=ExecutionTraceItem)
 async def get_trace_by_id(trace_id: int):
     """

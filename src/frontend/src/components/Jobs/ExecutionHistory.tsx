@@ -41,6 +41,7 @@ import { useRunStatusStore } from '../../store/runStatus';
 import RunActions from './ExecutionActions';
 import RunDialogs from './RunDialogs';
 import { AgentYaml, TaskYaml } from '../../types/crew';
+import { useTaskExecutionStore } from '../../store/taskExecutionStore';
 
 export interface RunHistoryRef {
   refreshRuns: () => Promise<void>;
@@ -390,6 +391,10 @@ const RunHistory = forwardRef<RunHistoryRef, RunHistoryProps>(({ executionHistor
       
       executionLogService.connectToJobLogs(jobId);
       
+      // Load task states for this execution
+      const { loadTaskStates } = useTaskExecutionStore.getState();
+      await loadTaskStates(jobId);
+      
       const unsubscribeConnect = executionLogService.onConnected(jobId, () => {
         setIsConnecting(false);
         console.log('Connected to WebSocket for job logs:', jobId);
@@ -437,6 +442,9 @@ const RunHistory = forwardRef<RunHistoryRef, RunHistoryProps>(({ executionHistor
       executionLogService.disconnectFromJobLogs(selectedJobId);
       setSelectedJobId(null);
     }
+    // Clear task states when closing dialog
+    const { clearTaskStates } = useTaskExecutionStore.getState();
+    clearTaskStates();
     setShowLogsDialog(false);
     setSelectedJobLogs([]);
     fetchRuns().catch(err => console.error('Error refreshing after closing logs:', err));

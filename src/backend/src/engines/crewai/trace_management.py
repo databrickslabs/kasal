@@ -147,6 +147,31 @@ class TraceManager:
                                 
                                 # Only proceed if job exists
                                 if job_exists:
+                                    # Broadcast task status events via WebSocket for real-time updates
+                                    if event_type in ["TASK_STARTED", "TASK_COMPLETED", "TASK_FAILED"]:
+                                        from src.services.execution_logs_service import execution_logs_service
+                                        import json
+                                        
+                                        task_status_msg = json.dumps({
+                                            "type": "task_status_update",
+                                            "event_type": event_type,
+                                            "task_id": trace_data.get("task_id"),
+                                            "task_name": trace_data.get("event_context"),
+                                            "timestamp": trace_data.get("created_at", datetime.now().isoformat()) if isinstance(trace_data.get("created_at"), str) else datetime.now().isoformat(),
+                                            "output": trace_data.get("output")
+                                        })
+                                        
+                                        # Extract group context if available
+                                        group_context = trace_data.get("group_context")
+                                        
+                                        # Broadcast the task status update
+                                        await execution_logs_service.broadcast_to_execution(
+                                            job_id,
+                                            task_status_msg,
+                                            group_context
+                                        )
+                                        logger.debug(f"[TraceManager._trace_writer_loop] Broadcast task status update for {event_type} - task: {trace_data.get('event_context')}")
+                                    
                                     # FILTER: Store important events in execution_trace
                                     # Include agent_execution, tool_usage, crew_started, crew_completed, task_started, task_completed
                                     important_event_types = [

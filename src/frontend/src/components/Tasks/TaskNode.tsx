@@ -1,16 +1,19 @@
 import React, { useCallback, useState, useEffect } from 'react';
 import { Handle, Position, useReactFlow } from 'reactflow';
-import { Box, Typography, Dialog, DialogTitle, DialogContent, Tooltip } from '@mui/material';
+import { Box, Typography, Dialog, DialogTitle, DialogContent, Tooltip, Chip, CircularProgress } from '@mui/material';
 import AddTaskIcon from '@mui/icons-material/AddTask';
 import DeleteIcon from '@mui/icons-material/Delete';
 import IconButton from '@mui/material/IconButton';
 import EditIcon from '@mui/icons-material/Edit';
 import CloseIcon from '@mui/icons-material/Close';
+import CheckCircleIcon from '@mui/icons-material/CheckCircle';
+import ErrorIcon from '@mui/icons-material/Error';
 import { Task } from '../../api/TaskService';
 import { ToolService, Tool } from '../../api/ToolService';
 import TaskForm from './TaskForm';
 import { Theme } from '@mui/material/styles';
 import { useTabDirtyState } from '../../hooks/workflow/useTabDirtyState';
+import { useTaskExecutionStore } from '../../store/taskExecutionStore';
 
 export interface TaskNodeData {
   label?: string;
@@ -87,6 +90,9 @@ const TaskNode: React.FC<TaskNodeProps> = ({ data, id }) => {
 
   // Tab dirty state management
   const { markCurrentTabDirty } = useTabDirtyState();
+  
+  // Task execution state
+  const taskStatus = useTaskExecutionStore(state => state.getTaskStatus(data.taskId));
   
   // Add debugging logs on component mount
   useEffect(() => {
@@ -270,8 +276,27 @@ const TaskNode: React.FC<TaskNodeProps> = ({ data, id }) => {
     
     return <AddTaskIcon sx={iconStyles} />;
   };
+  
+  const getStatusIcon = () => {
+    if (!taskStatus) return null;
+    
+    switch (taskStatus.status) {
+      case 'running':
+        return <CircularProgress size={14} sx={{ color: 'info.main' }} />;
+      case 'completed':
+        return <CheckCircleIcon sx={{ fontSize: 16, color: 'success.main' }} />;
+      case 'failed':
+        return <ErrorIcon sx={{ fontSize: 16, color: 'error.main' }} />;
+      default:
+        return null;
+    }
+  };
 
   const getTaskStyles = () => {
+    const isRunning = taskStatus?.status === 'running';
+    const isCompleted = taskStatus?.status === 'completed';
+    const isFailed = taskStatus?.status === 'failed';
+    
     const baseStyles = {
       minWidth: 160,
       minHeight: 120,
@@ -279,17 +304,39 @@ const TaskNode: React.FC<TaskNodeProps> = ({ data, id }) => {
       flexDirection: 'column',
       position: 'relative',
       padding: 2,
-      background: (theme: Theme) => isSelected 
-        ? `${theme.palette.primary.light}20` // Light background when selected
-        : theme.palette.background.paper,
+      background: (theme: Theme) => {
+        if (isRunning) {
+          return `linear-gradient(135deg, ${theme.palette.info.light}15, ${theme.palette.info.main}10)`;
+        }
+        if (isCompleted) {
+          return `linear-gradient(135deg, ${theme.palette.success.light}15, ${theme.palette.success.main}10)`;
+        }
+        if (isFailed) {
+          return `linear-gradient(135deg, ${theme.palette.error.light}15, ${theme.palette.error.main}10)`;
+        }
+        return isSelected 
+          ? `${theme.palette.primary.light}20`
+          : theme.palette.background.paper;
+      },
       borderRadius: '8px',
       border: '1px solid',
-      borderColor: (theme: Theme) => isSelected 
-        ? theme.palette.primary.main 
-        : theme.palette.grey[300],
+      borderColor: (theme: Theme) => {
+        if (isRunning) return theme.palette.info.main;
+        if (isCompleted) return theme.palette.success.main;
+        if (isFailed) return theme.palette.error.main;
+        return isSelected 
+          ? theme.palette.primary.main 
+          : theme.palette.grey[300];
+      },
       boxShadow: (theme: Theme) => isSelected 
         ? `0 0 0 2px ${theme.palette.primary.main}` 
         : `0 2px 4px ${theme.palette.mode === 'light' ? 'rgba(0, 0, 0, 0.05)' : 'rgba(0, 0, 0, 0.2)'}`,
+      animation: isRunning ? 'pulse 2s infinite' : 'none',
+      '@keyframes pulse': {
+        '0%': { boxShadow: '0 0 0 0 rgba(33, 150, 243, 0.4)' },
+        '70%': { boxShadow: '0 0 0 10px rgba(33, 150, 243, 0)' },
+        '100%': { boxShadow: '0 0 0 0 rgba(33, 150, 243, 0)' }
+      },
       '&:hover': {
         boxShadow: '0 4px 8px rgba(0, 0, 0, 0.15)',
         '& .action-buttons': {
@@ -363,6 +410,30 @@ const TaskNode: React.FC<TaskNodeProps> = ({ data, id }) => {
         data-nodetype="task"
         data-selected={isSelected ? 'true' : 'false'}
       >
+        {taskStatus && (
+          <Chip
+            icon={getStatusIcon() || undefined}
+            label={taskStatus.status === 'running' ? 'Running' : 
+                   taskStatus.status === 'completed' ? 'Completed' : 'Failed'}
+            size="small"
+            color={
+              taskStatus.status === 'running' ? 'info' :
+              taskStatus.status === 'completed' ? 'success' : 
+              'error'
+            }
+            sx={{ 
+              position: 'absolute', 
+              top: 8, 
+              left: 8,
+              fontSize: '0.7rem',
+              height: 20,
+              '& .MuiChip-icon': {
+                marginLeft: '4px',
+                marginRight: '-2px'
+              }
+            }}
+          />
+        )}
         <div className="action-buttons">
           <Tooltip title="Edit Task" open={editTooltipOpen} onOpen={() => setEditTooltipOpen(true)} onClose={() => setEditTooltipOpen(false)}>
             <IconButton

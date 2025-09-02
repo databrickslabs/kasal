@@ -98,6 +98,44 @@ class ExecutionLogService {
         try {
           const data = JSON.parse(event.data);
           
+          // Check if the content is a JSON string containing task status update
+          let parsedContent: any = null;
+          try {
+            if (typeof data.content === 'string' && data.content.includes('"type":"task_status_update"')) {
+              parsedContent = JSON.parse(data.content);
+            }
+          } catch {
+            // Not a JSON content, treat as regular log
+          }
+          
+          // Handle task status updates
+          if (parsedContent && parsedContent.type === 'task_status_update') {
+            // Import the store dynamically to avoid circular dependencies
+            import('../store/taskExecutionStore').then(({ useTaskExecutionStore }) => {
+              const { setTaskState } = useTaskExecutionStore.getState();
+              
+              const taskId = parsedContent.task_id || `task_${parsedContent.task_name}`;
+              const status = parsedContent.event_type === 'TASK_STARTED' ? 'running' :
+                            parsedContent.event_type === 'TASK_COMPLETED' ? 'completed' : 
+                            'failed';
+              
+              setTaskState(taskId, {
+                status,
+                task_name: parsedContent.task_name,
+                [`${status === 'running' ? 'started' : status}_at`]: parsedContent.timestamp
+              });
+              
+              console.log(`Task status update: ${taskId} is now ${status}`);
+            });
+            
+            // Also emit event for other listeners
+            this.eventEmitter.emit(`task-status-${jobId}`, parsedContent);
+            
+            // Don't emit as a regular log since it's a status update
+            return;
+          }
+          
+          // Handle regular log messages
           const logMessage: LogMessage = {
             id: data.id || Date.now(),
             job_id: jobId,
@@ -197,6 +235,14 @@ class ExecutionLogService {
 
   onClose(jobId: string, callback: (event: CloseEvent) => void): () => void {
     const eventName = `close-${jobId}`;
+    this.eventEmitter.on(eventName, callback);
+    return () => {
+      this.eventEmitter.off(eventName, callback);
+    };
+  }
+
+  onTaskStatus(jobId: string, callback: (status: any) => void): () => void {
+    const eventName = `task-status-${jobId}`;
     this.eventEmitter.on(eventName, callback);
     return () => {
       this.eventEmitter.off(eventName, callback);
