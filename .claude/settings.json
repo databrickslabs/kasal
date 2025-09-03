@@ -1,0 +1,40 @@
+{
+  "hooks": {
+    "PreToolUse": [
+      {
+        "matcher": "Bash",
+        "condition": "args.command.includes('git push')",
+        "hooks": [
+          {
+            "type": "task",
+            "description": "Review code for best practices",
+            "prompt": "Review all modified files for compliance with CLAUDE.md best practices",
+            "subagent_type": "best-practices-reviewer"
+          }
+        ]
+      }
+    ],
+    "UserPromptSubmit": [
+      {
+        "condition": "prompt.includes('git push') || prompt.includes('commit')",
+        "hooks": [
+          {
+            "type": "message",
+            "message": "📋 Remember to run best practices review before pushing. Use: Task tool with 'best-practices-reviewer' agent"
+          }
+        ]
+      }
+    ],
+    "PostToolUse": [
+      {
+        "matcher": "Write|Edit|MultiEdit",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "echo '📝 File modified. Remember to review for best practices before committing.'"
+          }
+        ]
+      }
+    ]
+  }
+}

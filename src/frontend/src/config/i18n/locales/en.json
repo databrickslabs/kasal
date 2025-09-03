@@ -1,0 +1,387 @@
+{
+  "common": {
+    "save": "Save",
+    "cancel": "Cancel",
+    "loading": "Loading...",
+    "error": "Error",
+    "success": "Success",
+    "close": "Close",
+    "delete": "Delete",
+    "view": "View",
+    "confirm": "Confirm",
+    "retry": "Retry",
+    "enabled": "Enabled",
+    "disabled": "Disabled",
+    "status": "Status",
+    "actions": "Actions",
+    "edit": "Edit",
+    "saving": "Saving..."
+  },
+  "navigation": {
+    "nemo": "Nemo",
+    "runs": "Run History",
+    "logs": "Logs",
+    "tools": "Tools",
+    "ucTools": "Unity Catalog Tools",
+    "apiKeys": "API Keys",
+    "configuration": "Configuration"
+  },
+  "configuration": {
+    "title": "Configuration",
+    "language": {
+      "title": "Language Settings",
+      "select": "Select Language",
+      "saved": "Language settings saved successfully"
+    },
+    "databricks": {
+      "title": "Databricks Settings",
+      "workspaceUrl": "Databricks Workspace URL",
+      "warehouseId": "Warehouse ID",
+      "catalog": "Catalog",
+      "schema": "Schema",
+      "secretScope": "Secret Scope",
+      "saved": "Databricks configuration saved successfully",
+      "info": "The Databricks configuration is used to connect to your Databricks workspace. The Databricks token should be managed through the API Keys section."
+    },
+    "tools": {
+      "title": "Tools Management",
+      "manageTools": "Manage Tools",
+      "toolsConfig": "Configure your AI tools and extensions"
+    },
+    "logs": {
+      "title": "Logs Management",
+      "viewLogs": "View Logs",
+      "logsConfig": "Configure logging preferences and view system logs"
+    },
+    "objects": {
+      "tab": "Object Management",
+      "title": "Object Management",
+      "description": "Manage Pydantic schema objects used throughout the system",
+      "addSchema": "Add Schema",
+      "viewSchema": "View Schema",
+      "editSchema": "Edit Schema",
+      "deleteSchema": "Delete Schema",
+      "schemaJson": "Schema JSON",
+      "fieldDescriptions": "Field Descriptions",
+      "exampleData": "Example Data",
+      "messages": {
+        "createSuccess": "Schema created successfully",
+        "updateSuccess": "Schema updated successfully",
+        "deleteSuccess": "Schema deleted successfully",
+        "deleteConfirm": "Are you sure you want to delete this schema?",
+        "validationError": "Please ensure all required fields are filled correctly"
+      }
+    },
+    "memory": {
+      "tab": "Memory"
+    },
+    "models": {
+      "title": "Model Configuration",
+      "add": "Add Model",
+      "edit": "Edit Model",
+      "search": "Search models...",
+      "key": "Key",
+      "name": "Name",
+      "provider": "Provider",
+      "parameters": "Model Parameters",
+      "status": "Status",
+      "actions": "Actions",
+      "keyHelp": "Unique identifier for this model",
+      "nameHelp": "Full name of the model (e.g., \"gpt-4-turbo-preview\")",
+      "temperature": "Temperature",
+      "temperatureHelp": "Controls randomness (0.0 to 2.0)",
+      "contextWindow": "Context Window",
+      "contextWindowHelp": "Maximum token context length",
+      "maxOutputTokens": "Max Output Tokens",
+      "maxOutputTokensHelp": "Maximum tokens to generate",
+      "extendedThinking": "Extended Thinking",
+      "enabled": "Enabled",
+      "disabled": "Disabled",
+      "enableAll": "Enable All",
+      "disableAll": "Disable All",
+      "enableAllSuccess": "All models enabled successfully",
+      "disableAllSuccess": "All models disabled successfully"
+    }
+  },
+  "runHistory": {
+    "title": "Run History",
+    "search": "Search runs...",
+    "filter": "Filter runs",
+    "noSearchResults": "No results match your search",
+    "noRuns": "No runs available",
+    "loadError": "Failed to load run history",
+    "deleteError": "Failed to delete runs",
+    "deleteConfirm": "Are you sure you want to delete all runs? This action cannot be undone.",
+    "deleteAllRuns": "Delete All Runs",
+    "deleteRunConfirm": "Are you sure you want to delete this run? This action cannot be undone.",
+    "deleteRunSuccess": "Run deleted successfully",
+    "deleteRunError": "Failed to delete run",
+    "columns": {
+      "jobId": "Run Name",
+      "status": "Status",
+      "startTime": "Created Date",
+      "duration": "Duration",
+      "actions": "Actions"
+    },
+    "status": {
+      "pending": "Pending",
+      "running": "Running",
+      "completed": "Completed",
+      "failed": "Failed"
+    },
+    "actions": {
+      "viewTrace": "View Execution Trace",
+      "viewResult": "View Result",
+      "viewInputs": "View Inputs",
+      "viewLogs": "View Logs",
+      "downloadPdf": "Download PDF",
+      "schedule": "Schedule Job",
+      "loadCrew": "Load Crew",
+      "deleteRun": "Delete Run"
+    }
+  },
+  "logs": {
+    "title": "LLM API Logs",
+    "filterByEndpoint": "Filter by Endpoint",
+    "allEndpoints": "All Endpoints",
+    "noLogs": "No logs available",
+    "columns": {
+      "timestamp": "Timestamp",
+      "endpoint": "Endpoint",
+      "model": "Model",
+      "tokens": "Tokens",
+      "duration": "Duration",
+      "status": "Status"
+    },
+    "details": {
+      "title": "Request Details",
+      "prompt": "Prompt:",
+      "response": "Response:",
+      "additionalData": "Additional Data:",
+      "error": "Error:"
+    },
+    "executionLogs": {
+      "title": "Execution Logs",
+      "connecting": "Connecting to log stream...",
+      "connectionError": "Failed to connect to log stream. Please try again.",
+      "autoScrollOn": "Auto-scroll ON",
+      "autoScrollOff": "Auto-scroll OFF",
+      "refreshLogs": "Refresh Logs"
+    }
+  },
+  "tools": {
+    "regular": {
+      "title": "Existing Tools",
+      "addTool": "Add New Tool",
+      "editTool": "Edit Tool",
+      "searchPlaceholder": "Search tools by title or description...",
+      "existingTools": "Existing Tools",
+      "enableAll": "Enable All",
+      "disableAll": "Disable All",
+      "fields": {
+        "name": "Name",
+        "description": "Description",
+        "icon": "Icon",
+        "category": "Category"
+      },
+      "tabs": {
+        "prebuilt": "PreBuilt Tools",
+        "custom": "Custom Tools",
+        "unityCatalog": "Unity Catalog Tools"
+      },
+      "categories": {
+        "prebuilt": "PreBuilt Tools",
+        "custom": "Custom Tools",
+        "unityCatalog": "Unity Catalog Tools"
+      },
+      "confirmations": {
+        "delete": "Are you sure you want to delete this tool?"
+      },
+      "columns": {
+        "title": "Title",
+        "description": "Description",
+        "icon": "Icon",
+        "actions": "Actions"
+      },
+      "form": {
+        "title": "Title",
+        "description": "Description",
+        "icon": "Icon",
+        "category": "Category",
+        "configuration": "Configuration",
+        "addParameter": "Add Parameter",
+        "parameterName": "Parameter Name",
+        "value": "Value"
+      },
+      "messages": {
+        "deleteConfirm": "Are you sure you want to delete this tool?",
+        "errorLoading": "Error loading tools",
+        "errorFetching": "Could not fetch latest tool data",
+        "errorDeleting": "Error deleting tool",
+        "errorSaving": "Error saving tool",
+        "updateSuccess": "Tool updated successfully!",
+        "createSuccess": "Tool created successfully!",
+        "deleteSuccess": "Tool deleted successfully!",
+        "enableAllSuccess": "All tools enabled successfully",
+        "disableAllSuccess": "All tools disabled successfully"
+      }
+    },
+    "unityCatalog": {
+      "fields": {
+        "name": "Name",
+        "fullName": "Full Name",
+        "catalog": "Catalog",
+        "schema": "Schema",
+        "returnType": "Return Type"
+      },
+      "noToolsFound": "No Unity Catalog tools found"
+    },
+    "uc": {
+      "title": "Unity Catalog Tools",
+      "noTools": "No Unity Catalog tools found.",
+      "columns": {
+        "name": "Name",
+        "catalog": "Catalog",
+        "schema": "Schema",
+        "description": "Description",
+        "actions": "Actions"
+      },
+      "details": {
+        "title": "Function Details",
+        "noDescription": "No description available"
+      }
+    }
+  },
+  "nemo": {
+    "model": {
+      "label": "Choose Model",
+      "provider": "Provider"
+    },
+    "planning": {
+      "label": "Planning",
+      "tooltip": "When enabled, an AI planner will create a step-by-step plan for your crew before execution, improving task coordination and performance"
+    },
+    "buttons": {
+      "schedule": "Schedule",
+      "addAgent": "Add Agent",
+      "addTask": "Add Task",
+      "generateCrew": "Generate Crew",
+      "execute": "Execute",
+      "openCrew": "Open Crew",
+      "saveCrew": "Save Crew",
+      "deleteEdge": "Delete Edge",
+      "apiKeys": "Manage API Keys",
+      "tools": "Manage Tools",
+      "logs": "View Logs",
+      "configuration": "Configuration"
+    },
+    "errors": {
+      "agentConnection": "Cannot connect an agent to another agent",
+      "missingNodes": "Please add both agents and tasks before generating connections",
+      "jobExecution": "Failed to execute job"
+    }
+  },
+  "trace": {
+    "title": "Execution Trace",
+    "noTraces": "No traces available for this run",
+    "retry": "Retry Loading Traces",
+    "retrying": "Retrying...",
+    "error": {
+      "failedToLoad": "Failed to load traces",
+      "unknown": "An unknown error occurred",
+      "runNotExists": "Run ID \"{{runId}}\" does not exist in the database. The run may have been deleted or is not accessible.",
+      "noTraces": "No traces are available for this run. The task may not have generated any traces yet.",
+      "serverError": "Backend server error (500). This could be due to a database issue or the run ID \"{{runId}}\" may no longer be valid. Please check your database or contact the administrator.",
+      "notFound": "Run ID \"{{runId}}\" was not found. It may have been deleted or is not accessible.",
+      "statusCode": "Request failed with status code {{code}}"
+    }
+  },
+  "memory": {
+    "title": "Memory Management",
+    "description": "Manage crew memory storage for agents and crews. Memories are used to maintain context across runs and provide long-term learning.",
+    "noMemories": "No crew memories available",
+    "currentPath": "Current memory path",
+    "defaultPath": "Default system path",
+    "changePath": "Change Path",
+    "changePathDescription": "Specify the directory where CrewAI memories are stored. Leave empty to use the system default location.",
+    "path": "Memory Directory Path",
+    "pathHelp": "Full absolute path to the memory directory",
+    "tabList": "Memory List",
+    "tabDetails": "Memory Details",
+    "tabStats": "Statistics",
+    "overview": "Overview",
+    "details": "Memory Details",
+    "noStats": "No statistics available",
+    "availableMemories": "Available Memories",
+    "refresh": "Refresh",
+    "reset": "Reset",
+    "resetAll": "Reset All",
+    "deleteMemory": "Delete Memory",
+    "crewName": "Crew Name",
+    "actions": "Actions",
+    "selectMemory": "Select a memory from the Overview tab",
+    "noDetails": "No details available for the selected memory",
+    "detailsFor": "Memory Details for {{name}}",
+    "noMessages": "No messages available",
+    "search": {
+      "title": "Search Memories",
+      "query": "Search Query",
+      "button": "Search",
+      "crew": "Crew",
+      "snippet": "Snippet"
+    },
+    "cleanup": {
+      "title": "Cleanup Old Memories",
+      "days": "Days",
+      "description": "Remove memories older than the specified number of days",
+      "button": "Cleanup"
+    },
+    "detailFields": {
+      "path": "Path",
+      "size": "Size",
+      "created": "Created",
+      "modified": "Last Modified",
+      "tables": "Database Tables",
+      "records": "Memory Records",
+      "timestamp": "Timestamp",
+      "content": "Content",
+      "role": "Role"
+    },
+    "longTerm": {
+      "title": "Long-Term Memory"
+    },
+    "shortTerm": {
+      "title": "Short-Term Memory"
+    },
+    "stats": {
+      "title": "Statistics",
+      "totalCrews": "Total Crews",
+      "totalSize": "Total Size",
+      "avgSize": "Average Size",
+      "oldestMemory": "Oldest Memory",
+      "detailedStats": "Detailed Statistics by Crew",
+      "crew": "Crew",
+      "size": "Size (KB)",
+      "lastModified": "Last Modified",
+      "messagesCount": "Messages",
+      "formatting": {
+        "sizeBytes": "{{size}} B",
+        "sizeKB": "{{size}} KB",
+        "sizeMB": "{{size}} MB",
+        "noValue": "N/A"
+      }
+    },
+    "confirmReset": {
+      "title": "Reset Memory",
+      "message": "Are you sure you want to reset memory for \"{{name}}\"? This cannot be undone."
+    },
+    "confirmResetAll": {
+      "title": "Reset All Memories",
+      "message": "Are you sure you want to reset ALL crew memories? This cannot be undone."
+    },
+    "confirmDelete": {
+      "title": "Delete Memory Permanently",
+      "message": "Are you sure you want to permanently delete the memory folder for \"{{name}}\"? This action cannot be undone."
+    }
+  }
+} 
