@@ -8,7 +8,7 @@ databricks
 databricks-sdk
 databricks-vectorsearch
 croniter
-crewai
+crewai==0.175.0
 pydantic[email]
 passlib
 email-validator
@@ -35,3 +35,4 @@ starlette==0.40.0
 
 # Add any other dependencies your project requires below
 pytest-cov
+psutil  # For process management and cleanup in ProcessCrewExecutor
