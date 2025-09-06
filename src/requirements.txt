@@ -8,7 +8,7 @@ databricks
 databricks-sdk
 databricks-vectorsearch
 croniter
-crewai
+crewai==0.175.0
 pydantic[email]
 passlib
 email-validator
