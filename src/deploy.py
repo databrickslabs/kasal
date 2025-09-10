@@ -248,6 +248,10 @@ starlette==0.40.0
                 str(databricks_dist), 
                 workspace_dir
             ]
+
+            if profile is not None:
+                import_cmd.append("--profile")
+                import_cmd.append(profile)
             
             logger.info(f"About to run command: {' '.join(import_cmd)}")
             logger.info(f"Uploading from: {databricks_dist}")
