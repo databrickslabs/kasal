@@ -47,6 +47,7 @@ router = APIRouter(
 async def list_groups(
     session: SessionDep,
     admin_user: AdminUserDep,
+    group_context: GroupContextDep,
     skip: int = 0,
     limit: int = 100
 ) -> List[GroupResponse]:
@@ -81,7 +82,8 @@ async def list_groups(
 async def create_group(
     group_data: GroupCreateRequest,
     session: SessionDep,
-    admin_user: AdminUserDep
+    admin_user: AdminUserDep,
+    group_context: GroupContextDep
 ) -> GroupResponse:
     """
     Create a new group manually.
@@ -137,7 +139,8 @@ async def create_group(
 async def get_group(
     group_id: str,
     session: SessionDep,
-    admin_user: AdminUserDep
+    admin_user: AdminUserDep,
+    group_context: GroupContextDep
 ) -> GroupResponse:
     """Get a specific group by ID. Requires admin privileges."""
     group_service = GroupService(session)
@@ -181,7 +184,8 @@ async def update_group(
     group_id: str,
     group_data: GroupUpdateRequest,
     session: SessionDep,
-    admin_user: AdminUserDep
+    admin_user: AdminUserDep,
+    group_context: GroupContextDep
 ) -> GroupResponse:
     """Update a group. Requires admin privileges."""
     group_service = GroupService(session)
@@ -226,7 +230,8 @@ async def update_group(
 async def delete_group(
     group_id: str,
     session: SessionDep,
-    admin_user: AdminUserDep
+    admin_user: AdminUserDep,
+    group_context: GroupContextDep
 ):
     """
     Delete a group and all associated data.
@@ -263,6 +268,7 @@ async def list_group_users(
     group_id: str,
     session: SessionDep,
     admin_user: AdminUserDep,
+    group_context: GroupContextDep,
     skip: int = 0,
     limit: int = 100
 ) -> List[GroupUserResponse]:
@@ -306,7 +312,8 @@ async def assign_user_to_group(
     group_id: str,
     user_data: GroupUserCreateRequest,
     session: SessionDep,
-    admin_user: AdminUserDep
+    admin_user: AdminUserDep,
+    group_context: GroupContextDep
 ) -> GroupUserResponse:
     """
     Assign a user to a group manually.
@@ -357,7 +364,8 @@ async def update_group_user(
     user_id: str,
     user_data: GroupUserUpdateRequest,
     session: SessionDep,
-    admin_user: AdminUserDep
+    admin_user: AdminUserDep,
+    group_context: GroupContextDep
 ) -> GroupUserResponse:
     """Update a user's role or status in a group. Requires admin privileges."""
     group_service = GroupService(session)
@@ -410,7 +418,8 @@ async def remove_user_from_group(
     group_id: str,
     user_id: str,
     session: SessionDep,
-    admin_user: AdminUserDep
+    admin_user: AdminUserDep,
+    group_context: GroupContextDep
 ):
     """Remove a user from a group. Requires admin privileges."""
     group_service = GroupService(session)
@@ -439,7 +448,8 @@ async def remove_user_from_group(
 @router.get("/stats", response_model=GroupStatsResponse)
 async def get_group_stats(
     session: SessionDep,
-    admin_user: AdminUserDep
+    admin_user: AdminUserDep,
+    group_context: GroupContextDep
 ) -> GroupStatsResponse:
     """
     Get group statistics.

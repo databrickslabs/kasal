@@ -3,7 +3,7 @@ from typing import Annotated, List
 from fastapi import APIRouter, Depends, HTTPException, status
 import logging
 
-from src.core.dependencies import SessionDep
+from src.core.dependencies import SessionDep, GroupContextDep
 from src.services.api_keys_service import ApiKeysService
 from src.schemas.api_key import ApiKeyCreate, ApiKeyUpdate, ApiKeyResponse
 
@@ -17,12 +17,16 @@ router = APIRouter(
 logger = logging.getLogger(__name__)
 
 # Dependency to get ApiKeyService
-def get_api_key_service(session: SessionDep) -> ApiKeysService:
+def get_api_key_service(
+    session: SessionDep
+) -> ApiKeysService:
+    """Create ApiKeysService."""
     return ApiKeysService(session)
 
 
 @router.get("", response_model=List[ApiKeyResponse])
 async def get_api_keys_metadata(
+    group_context: GroupContextDep,
     service: Annotated[ApiKeysService, Depends(get_api_key_service)],
 ):
     """
@@ -37,6 +41,8 @@ async def get_api_keys_metadata(
         List of API keys with empty values (metadata only)
     """
     try:
+        # Set group_id in service
+        service.group_id = group_context.primary_group_id if group_context else None
         api_keys = await service.get_api_keys_metadata()
         return api_keys
     except Exception as e:
@@ -47,6 +53,7 @@ async def get_api_keys_metadata(
 @router.post("", response_model=ApiKeyResponse, status_code=status.HTTP_201_CREATED)
 async def create_api_key(
     api_key_data: ApiKeyCreate,
+    group_context: GroupContextDep,
     service: Annotated[ApiKeysService, Depends(get_api_key_service)],
 ):
     """
@@ -60,6 +67,9 @@ async def create_api_key(
         Created API key
     """
     try:
+        # Set group_id in service
+        service.group_id = group_context.primary_group_id if group_context else None
+        
         # Check if API key already exists
         existing_key = await service.find_by_name(api_key_data.name)
         if existing_key:
@@ -68,8 +78,11 @@ async def create_api_key(
                 detail=f"API key with name '{api_key_data.name}' already exists"
             )
             
+        # Get user email from group context
+        created_by_email = group_context.group_email if group_context else None
+            
         # Create in database
-        return await service.create_api_key(api_key_data)
+        return await service.create_api_key(api_key_data, created_by_email=created_by_email)
     except HTTPException:
         raise
     except Exception as e:
@@ -81,6 +94,7 @@ async def create_api_key(
 async def update_api_key(
     api_key_name: str,
     api_key_data: ApiKeyUpdate,
+    group_context: GroupContextDep,
     service: Annotated[ApiKeysService, Depends(get_api_key_service)],
 ):
     """
@@ -95,6 +109,9 @@ async def update_api_key(
         Updated API key
     """
     try:
+        # Set group_id in service
+        service.group_id = group_context.primary_group_id if group_context else None
+        
         # Log the request for debugging
         logger.info(f"Attempting to update API key: {api_key_name}")
         
@@ -132,6 +149,7 @@ async def update_api_key(
 @router.delete("/{api_key_name}", status_code=status.HTTP_204_NO_CONTENT)
 async def delete_api_key(
     api_key_name: str,
+    group_context: GroupContextDep,
     service: Annotated[ApiKeysService, Depends(get_api_key_service)],
 ):
     """
@@ -142,6 +160,9 @@ async def delete_api_key(
         service: API key service injected by dependency
     """
     try:
+        # Set group_id in service
+        service.group_id = group_context.primary_group_id if group_context else None
+        
         # Check if API key exists in database
         existing_key = await service.find_by_name(api_key_name)
         

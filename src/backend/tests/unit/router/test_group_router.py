@@ -671,7 +671,7 @@ class TestGroupRouter:
         assert response.status_code == 500
         assert "Failed to remove user from group" in response.json()["detail"]
     
-    def test_get_group_stats_success(self, client, mock_db_session):
+    def test_get_group_stats_success(self, client, mock_db_session, mock_group_context):
         """Test successful group statistics retrieval."""
         from fastapi import FastAPI
         from src.api.group_router import get_group_stats
@@ -702,7 +702,8 @@ class TestGroupRouter:
             async def run_test():
                 result = await get_group_stats(
                     session=mock_db_session,
-                    admin_user=MockAdminUser()
+                    admin_user=MockAdminUser(),
+                    group_context=mock_group_context
                 )
                 return result
                 
@@ -712,7 +713,7 @@ class TestGroupRouter:
             assert result.active_groups == 8
             assert result.total_users == 50
     
-    def test_get_group_stats_exception(self, client, mock_db_session):
+    def test_get_group_stats_exception(self, client, mock_db_session, mock_group_context):
         """Test group statistics retrieval with service exception."""
         from src.api.group_router import get_group_stats
         from fastapi import HTTPException
@@ -735,7 +736,8 @@ class TestGroupRouter:
                 try:
                     await get_group_stats(
                         session=mock_db_session,
-                        admin_user=MockAdminUser()
+                        admin_user=MockAdminUser(),
+                        group_context=mock_group_context
                     )
                     assert False, "Expected HTTPException to be raised"
                 except HTTPException as e:
