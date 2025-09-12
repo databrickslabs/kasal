@@ -28,6 +28,7 @@ class Agent(Base):
     
     # Core configuration
     llm = Column(String, default="databricks-llama-4-maverick")
+    temperature = Column(Integer, nullable=True)  # Optional temperature override (0-100, will be converted to 0.0-1.0)
     tools = Column(JSON, default=list, nullable=False)
     tool_configs = Column(JSON, default=dict, nullable=True)  # User-specific tool configuration overrides
     function_calling_llm = Column(String)

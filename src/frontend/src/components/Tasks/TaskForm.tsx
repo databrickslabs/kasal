@@ -28,6 +28,7 @@ import { type Task } from '../../api/TaskService';
 import ExpandMoreIcon from '@mui/icons-material/ExpandMore';
 import OpenInFullIcon from '@mui/icons-material/OpenInFull';
 import CloseIcon from '@mui/icons-material/Close';
+import HelpOutlineIcon from '@mui/icons-material/HelpOutline';
 import { TaskAdvancedConfig } from './TaskAdvancedConfig';
 import { TaskService } from '../../api/TaskService';
 import useStableResize from '../../hooks/global/useStableResize';
@@ -36,6 +37,7 @@ import { PerplexityConfigSelector } from '../Common/PerplexityConfigSelector';
 import { SerperConfigSelector } from '../Common/SerperConfigSelector';
 import { MCPServerSelector } from '../Common/MCPServerSelector';
 import { PerplexityConfig, SerperConfig } from '../../types/config';
+import TaskBestPractices from '../BestPractices/TaskBestPractices';
 
 interface TaskFormProps {
   initialData?: Task;
@@ -45,6 +47,7 @@ interface TaskFormProps {
   isEdit?: boolean;
   tools: Tool[];
   hideTitle?: boolean;
+  isCreateMode?: boolean;
 }
 
 interface Tool {
@@ -55,7 +58,7 @@ interface Tool {
   enabled?: boolean;
 }
 
-const TaskForm: React.FC<TaskFormProps> = ({ initialData, onCancel, onTaskSaved, onSubmit, isEdit, tools, hideTitle }) => {
+const TaskForm: React.FC<TaskFormProps> = ({ initialData, onCancel, onTaskSaved, onSubmit, isEdit, tools, hideTitle, isCreateMode }) => {
   const [expandedAccordion, setExpandedAccordion] = useState<boolean>(false);
   const [expandedDescription, setExpandedDescription] = useState<boolean>(false);
   const [expandedOutput, setExpandedOutput] = useState<boolean>(false);
@@ -82,6 +85,7 @@ const TaskForm: React.FC<TaskFormProps> = ({ initialData, onCancel, onTaskSaved,
       output_json: null,
       output_pydantic: null,
       callback: null,
+      callback_config: null,
       human_input: false,
       guardrail: null,
       markdown: false
@@ -97,6 +101,7 @@ const TaskForm: React.FC<TaskFormProps> = ({ initialData, onCancel, onTaskSaved,
       output_json: initialData.config.output_json ?? null,
       output_pydantic: initialData.config.output_pydantic ?? null,
       callback: initialData.config.callback ?? null,
+      callback_config: initialData.config.callback_config ?? null,
       human_input: initialData.config.human_input ?? false,
       condition: initialData.config.condition,
       guardrail: initialData.config.guardrail ?? null,
@@ -110,11 +115,10 @@ const TaskForm: React.FC<TaskFormProps> = ({ initialData, onCancel, onTaskSaved,
   const [serperConfig, setSerperConfig] = useState<SerperConfig>({});
   const [selectedMcpServers, setSelectedMcpServers] = useState<string[]>([]);
   const [toolConfigs, setToolConfigs] = useState<Record<string, unknown>>(initialData?.tool_configs || {});
+  const [showBestPractices, setShowBestPractices] = useState(false);
 
   useEffect(() => {
     if (initialData?.tools) {
-      console.log('Setting tools from initialData:', initialData.tools);
-      console.log('Available tools:', tools);
       setFormData(prev => ({
         ...prev,
         tools: initialData.tools
@@ -122,33 +126,27 @@ const TaskForm: React.FC<TaskFormProps> = ({ initialData, onCancel, onTaskSaved,
     }
     // Load tool_configs and set Genie space and Perplexity config if they exist
     if (initialData?.tool_configs) {
-      console.log('TaskForm: Loading tool_configs from initialData:', initialData.tool_configs);
       setToolConfigs(initialData.tool_configs);
       
       // Check for GenieTool config - try both spaceId and space_id for compatibility
       const genieConfig = initialData.tool_configs.GenieTool as Record<string, unknown>;
       if (genieConfig) {
-        console.log('TaskForm: Found GenieTool config:', genieConfig);
         const spaceId = genieConfig.spaceId || genieConfig.space_id;
         if (spaceId && typeof spaceId === 'string') {
-          console.log('TaskForm: Setting selectedGenieSpace to:', spaceId);
           setSelectedGenieSpace(spaceId);
         }
       }
       
       if (initialData.tool_configs.PerplexityTool) {
-        console.log('TaskForm: Found PerplexityTool config:', initialData.tool_configs.PerplexityTool);
         setPerplexityConfig(initialData.tool_configs.PerplexityTool as PerplexityConfig);
       }
       
       if (initialData.tool_configs.SerperDevTool) {
-        console.log('TaskForm: Found SerperDevTool config:', initialData.tool_configs.SerperDevTool);
         setSerperConfig(initialData.tool_configs.SerperDevTool as SerperConfig);
       }
       
       // Check for MCP_SERVERS config
       if (initialData.tool_configs.MCP_SERVERS) {
-        console.log('TaskForm: Found MCP_SERVERS config:', initialData.tool_configs.MCP_SERVERS);
         const mcpConfig = initialData.tool_configs.MCP_SERVERS as Record<string, unknown>;
         const mcpServers = Array.isArray(mcpConfig.servers) 
           ? mcpConfig.servers 
@@ -183,13 +181,11 @@ const TaskForm: React.FC<TaskFormProps> = ({ initialData, onCancel, onTaskSaved,
     }));
   };
 
-  const handleAdvancedConfigChange = (field: string, value: string | number | boolean | null) => {
-    console.log(`Changing ${field} to:`, value);
+  const handleAdvancedConfigChange = (field: string, value: string | number | boolean | null | Record<string, unknown>) => {
     
     setFormData(prev => {
       // Handle special fields that exist at the top level of formData
       if (field === 'async_execution') {
-        console.log(`Setting async_execution to ${value} (type: ${typeof value})`);
         return {
           ...prev,
           async_execution: value === undefined ? false : Boolean(value)
@@ -202,7 +198,10 @@ const TaskForm: React.FC<TaskFormProps> = ({ initialData, onCancel, onTaskSaved,
         [field]: field === 'condition' ? (value ? 'is_data_missing' : undefined) : value,
       };
       
-      console.log('Updated config will be:', updatedConfig);
+      // Debug logging for callback_config updates
+      if (field === 'callback_config') {
+        console.log('TaskForm - Updating callback_config:', value);
+      }
       
       return {
         ...prev,
@@ -216,7 +215,6 @@ const TaskForm: React.FC<TaskFormProps> = ({ initialData, onCancel, onTaskSaved,
       ? event.target.value 
       : [event.target.value];
     
-    console.log('Tools selected:', selectedTools);
     
     setFormData(prev => ({
       ...prev,
@@ -237,11 +235,6 @@ const TaskForm: React.FC<TaskFormProps> = ({ initialData, onCancel, onTaskSaved,
           return;
         }
         
-        console.log('Current formData before saving:', formData);
-        console.log('Current config values:', {
-          output_pydantic: formData.config.output_pydantic,
-          callback: formData.config.callback
-        });
 
         // Build tool_configs for tools that need configuration
         let updatedToolConfigs = { ...toolConfigs };
@@ -340,6 +333,7 @@ const TaskForm: React.FC<TaskFormProps> = ({ initialData, onCancel, onTaskSaved,
             ...formData.config,
             condition: formData.config.condition === 'is_data_missing' ? 'is_data_missing' : undefined,
             callback: formData.config.callback,
+            callback_config: formData.config.callback_config,
             // Ensure output_pydantic is properly set in config
             output_pydantic: formData.config.output_pydantic,
             // Ensure config.markdown is synchronized with top-level markdown
@@ -348,28 +342,16 @@ const TaskForm: React.FC<TaskFormProps> = ({ initialData, onCancel, onTaskSaved,
         };
         
         
-        console.log('Cleaned formData to save:', cleanedFormData);
-        console.log('Final config values to save:', {
-          output_pydantic: cleanedFormData.config.output_pydantic,
-          callback: cleanedFormData.config.callback
-        });
 
         try {
           // Create or update the task in the database
           let savedTask;
           if (formData.id) {
-            console.log('Updating existing task with ID:', formData.id);
             savedTask = await TaskService.updateTask(formData.id, cleanedFormData);
           } else {
-            console.log('Creating new task');
             savedTask = await TaskService.createTask(cleanedFormData);
           }
           
-          console.log('Task saved successfully:', savedTask);
-          console.log('Saved config values:', {
-            output_pydantic: savedTask.config.output_pydantic,
-            callback: savedTask.config.callback
-          });
 
           if (onTaskSaved) {
             onTaskSaved(savedTask);
@@ -435,23 +417,35 @@ const TaskForm: React.FC<TaskFormProps> = ({ initialData, onCancel, onTaskSaved,
         position: 'relative',
         overflow: 'hidden'
       }}>
-        <Box sx={{ p: 3, pb: 2 }}>
-          <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 3 }}>
-            {!hideTitle && (
-              <Typography variant="h6">
-                {initialData?.id ? 'Edit Task' : 'Create New Task'}
-              </Typography>
-            )}
+        {!isCreateMode && (
+          <Box sx={{ p: 3, pb: 2 }}>
+            <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 3 }}>
+              {!hideTitle && (
+                <Typography variant="h6">
+                  {initialData?.id ? 'Edit Task' : 'Create New Task'}
+                </Typography>
+              )}
+              <Button
+                startIcon={<HelpOutlineIcon />}
+                onClick={() => setShowBestPractices(true)}
+                variant="outlined"
+                size="small"
+                sx={{ ml: 2 }}
+              >
+                Best Practices
+              </Button>
+            </Box>
+            <Divider />
           </Box>
-          <Divider />
-        </Box>
+        )}
 
         <Box sx={{ 
           flex: '1 1 auto', 
           overflow: 'auto',
           px: 3, 
           pb: 2,
-          height: 'calc(90vh - 170px)',
+          pt: isCreateMode ? 3 : 0,
+          height: isCreateMode ? 'calc(90vh - 120px)' : 'calc(90vh - 170px)',
         }}>
           <Box 
             component="form" 
@@ -777,6 +771,7 @@ const TaskForm: React.FC<TaskFormProps> = ({ initialData, onCancel, onTaskSaved,
                     cache_response: formData.config?.cache_response || false,
                     cache_ttl: formData.config?.cache_ttl || 3600,
                     callback: formData.config?.callback || null,
+                    callback_config: formData.config?.callback_config || null,
                     context: formData.context || [],
                     dependencies: [],
                     error_handling: formData.config?.error_handling || 'default',
@@ -899,6 +894,12 @@ const TaskForm: React.FC<TaskFormProps> = ({ initialData, onCancel, onTaskSaved,
           </Button>
         </DialogActions>
       </Dialog>
+
+      {/* Best Practices Dialog */}
+      <TaskBestPractices
+        open={showBestPractices}
+        onClose={() => setShowBestPractices(false)}
+      />
 
     </>
   );

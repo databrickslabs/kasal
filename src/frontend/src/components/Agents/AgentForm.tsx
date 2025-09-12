@@ -28,8 +28,10 @@ import {
   Alert,
 } from '@mui/material';
 import ExpandMoreIcon from '@mui/icons-material/ExpandMore';
+import HelpOutlineIcon from '@mui/icons-material/HelpOutline';
 import OpenInFullIcon from '@mui/icons-material/OpenInFull';
 import CloseIcon from '@mui/icons-material/Close';
+import DeleteIcon from '@mui/icons-material/Delete';
 import { AgentService } from '../../api/AgentService';
 import { Agent, AgentFormProps, KnowledgeSource } from '../../types/agent';
 import { ModelService } from '../../api/ModelService';
@@ -42,6 +44,7 @@ import { GenieSpaceSelector } from '../Common/GenieSpaceSelector';
 import { PerplexityConfigSelector } from '../Common/PerplexityConfigSelector';
 import { SerperConfigSelector } from '../Common/SerperConfigSelector';
 import { MCPServerSelector } from '../Common/MCPServerSelector';
+import AgentBestPractices from '../BestPractices/AgentBestPractices';
 // TODO: Re-enable when knowledge sources are restored
 // import { KnowledgeSourcesSection } from './KnowledgeSourcesSection';
 
@@ -60,7 +63,7 @@ type AgentFormData = Omit<Agent, 'id' | 'created_at'> & {
   id?: string;
 };
 
-const AgentForm: React.FC<AgentFormProps> = ({ initialData, onCancel, onAgentSaved, tools }) => {
+const AgentForm: React.FC<AgentFormProps> = ({ initialData, onCancel, onAgentSaved, tools, isCreateMode }) => {
   const [models, setModels] = useState<Models>(DEFAULT_FALLBACK_MODEL);
   const [loadingModels, setLoadingModels] = useState(true);
   const [expandedGoal, setExpandedGoal] = useState<boolean>(false);
@@ -91,6 +94,7 @@ const AgentForm: React.FC<AgentFormProps> = ({ initialData, onCancel, onAgentSav
       goal: initialData?.goal || '',
       backstory: initialData?.backstory || '',
       llm: initialData?.llm || 'databricks-llama-4-maverick',
+      temperature: initialData?.temperature || undefined,
       tools: initialData?.tools ? initialData.tools.map(id => String(id)) : [],
       function_calling_llm: initialData?.function_calling_llm || undefined,
       max_iter: initialData?.max_iter || 25,
@@ -128,33 +132,27 @@ const AgentForm: React.FC<AgentFormProps> = ({ initialData, onCancel, onAgentSav
   // Load tool_configs and set Genie space and Perplexity config if they exist
   useEffect(() => {
     if (initialData?.tool_configs) {
-      console.log('AgentForm: Loading tool_configs from initialData:', initialData.tool_configs);
       setToolConfigs(initialData.tool_configs);
       
       // Check for GenieTool config - try both spaceId and space_id for compatibility
       const genieConfig = initialData.tool_configs.GenieTool as Record<string, unknown>;
       if (genieConfig) {
-        console.log('AgentForm: Found GenieTool config:', genieConfig);
         const spaceId = genieConfig.spaceId || genieConfig.space_id;
         if (spaceId && typeof spaceId === 'string') {
-          console.log('AgentForm: Setting selectedGenieSpace to:', spaceId);
           setSelectedGenieSpace(spaceId);
         }
       }
       
       if (initialData.tool_configs.PerplexityTool) {
-        console.log('AgentForm: Found PerplexityTool config:', initialData.tool_configs.PerplexityTool);
         setPerplexityConfig(initialData.tool_configs.PerplexityTool);
       }
       
       if (initialData.tool_configs.SerperDevTool) {
-        console.log('AgentForm: Found SerperDevTool config:', initialData.tool_configs.SerperDevTool);
         setSerperConfig(initialData.tool_configs.SerperDevTool);
       }
       
       // Check for MCP_SERVERS config
       if (initialData.tool_configs.MCP_SERVERS) {
-        console.log('AgentForm: Found MCP_SERVERS config:', initialData.tool_configs.MCP_SERVERS);
         const mcpConfig = initialData.tool_configs.MCP_SERVERS as Record<string, unknown>;
         const mcpServers = Array.isArray(mcpConfig.servers) 
           ? mcpConfig.servers 
@@ -183,7 +181,6 @@ const AgentForm: React.FC<AgentFormProps> = ({ initialData, onCancel, onAgentSav
           if (currentModelKey && !fetchedModels[currentModelKey]) {
             // If current model is invalid, select the first available one
             const firstModelKey = Object.keys(fetchedModels)[0];
-            console.log(`Model ${currentModelKey} not available, using ${firstModelKey} instead`);
             
             // Update the form data with the new model
             setFormData(prev => ({
@@ -211,6 +208,7 @@ const AgentForm: React.FC<AgentFormProps> = ({ initialData, onCancel, onAgentSav
   }, []);
 
   const [isGeneratingTemplates, setIsGeneratingTemplates] = useState(false);
+  const [showBestPractices, setShowBestPractices] = useState(false);
 
   const handleSubmit = async () => {
     if (!formData) return;
@@ -357,9 +355,6 @@ const AgentForm: React.FC<AgentFormProps> = ({ initialData, onCancel, onAgentSav
       ? event.target.value 
       : [event.target.value];
     
-    // Log selections for debugging
-    console.log('Current tools:', formData.tools);
-    console.log('New selection from event:', selectedValues);
     
     // Create a new set of tools, ensuring all IDs are strings
     const newTools = selectedValues.map(id => String(id));
@@ -383,7 +378,6 @@ const AgentForm: React.FC<AgentFormProps> = ({ initialData, onCancel, onAgentSav
     
     // Ensure uniqueness
     const uniqueTools = Array.from(new Set(newTools));
-    console.log('Final unique tools:', uniqueTools);
     
     // Update the form data
     handleInputChange('tools', uniqueTools);
@@ -466,21 +460,33 @@ const AgentForm: React.FC<AgentFormProps> = ({ initialData, onCancel, onAgentSav
         position: 'relative',
         overflow: 'hidden'
       }}>
-        <Box sx={{ p: 3, pb: 2 }}>
-          <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 3 }}>
-            <Typography variant="h6">
-              {initialData?.id ? 'Edit Agent' : 'Create New Agent'}
-            </Typography>
+        {!isCreateMode && (
+          <Box sx={{ p: 3, pb: 2 }}>
+            <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 3 }}>
+              <Typography variant="h6">
+                {initialData?.id ? 'Edit Agent' : 'Create New Agent'}
+              </Typography>
+              <Button
+                startIcon={<HelpOutlineIcon />}
+                onClick={() => setShowBestPractices(true)}
+                variant="outlined"
+                size="small"
+                sx={{ ml: 2 }}
+              >
+                Best Practices
+              </Button>
+            </Box>
+            <Divider />
           </Box>
-          <Divider />
-        </Box>
+        )}
 
         <Box sx={{ 
           flex: '1 1 auto', 
           overflow: 'auto',
           px: 3, 
           pb: 2,
-          height: 'calc(90vh - 170px)',
+          pt: isCreateMode ? 3 : 0,
+          height: isCreateMode ? 'calc(90vh - 120px)' : 'calc(90vh - 170px)',
         }}>
           <Box sx={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
             {/* Basic Information */}
@@ -855,18 +861,74 @@ const AgentForm: React.FC<AgentFormProps> = ({ initialData, onCancel, onAgentSav
               />
             </Box>
 
-            {/* TODO: Re-enable knowledge sources in the future */}
-            {/* <Accordion>
+            {/* Knowledge Sources */}
+            <Accordion defaultExpanded={(formData.knowledge_sources?.length || 0) > 0}>
               <AccordionSummary expandIcon={<ExpandMoreIcon />}>
-                <Typography>Knowledge Sources</Typography>
+                <Typography>
+                  Knowledge Sources ({formData.knowledge_sources?.length || 0})
+                </Typography>
               </AccordionSummary>
               <AccordionDetails>
-                <KnowledgeSourcesSection
-                  knowledgeSources={formData.knowledge_sources || []}
-                  onChange={(sources) => handleInputChange('knowledge_sources', sources)}
-                />
+                <Box sx={{ display: 'flex', flexDirection: 'column', gap: 1 }}>
+                  {formData.knowledge_sources && formData.knowledge_sources.length > 0 ? (
+                    <>
+                      {formData.knowledge_sources.map((source: any, index: number) => (
+                        <Box 
+                          key={index} 
+                          sx={{ 
+                            p: 1.5, 
+                            border: '1px solid',
+                            borderColor: 'divider',
+                            borderRadius: 1,
+                            backgroundColor: 'background.paper'
+                          }}
+                        >
+                          <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+                            <Chip 
+                              label={source.type === 'databricks_volume' ? 'Databricks Volume' : source.type}
+                              size="small"
+                              color="primary"
+                              variant="outlined"
+                            />
+                            <Typography variant="body2" sx={{ flex: 1 }}>
+                              {source.metadata?.filename || source.source || 'Unknown source'}
+                            </Typography>
+                            <IconButton
+                              size="small"
+                              onClick={() => {
+                                const newSources = (formData.knowledge_sources || []).filter((_: any, i: number) => i !== index);
+                                handleInputChange('knowledge_sources', newSources);
+                              }}
+                              title="Remove knowledge source"
+                            >
+                              <DeleteIcon fontSize="small" />
+                            </IconButton>
+                          </Box>
+                          {source.metadata && (
+                            <Box sx={{ mt: 1, pl: 2 }}>
+                              <Typography variant="caption" color="text.secondary">
+                                Uploaded: {new Date(source.metadata.uploaded_at).toLocaleString()}
+                              </Typography>
+                            </Box>
+                          )}
+                        </Box>
+                      ))}
+                    </>
+                  ) : (
+                    <Box sx={{ py: 2, textAlign: 'center' }}>
+                      <Typography variant="body2" color="text.secondary">
+                        No knowledge sources configured for this agent
+                      </Typography>
+                    </Box>
+                  )}
+                  <Typography variant="caption" color="text.secondary" sx={{ mt: 2, display: 'block' }}>
+                    Knowledge sources can be uploaded through the chat panel. Select this agent when uploading files
+                    to automatically configure them as knowledge sources. Files are stored in Databricks volumes
+                    and enable retrieval-augmented generation (RAG) for improved agent responses.
+                  </Typography>
+                </Box>
               </AccordionDetails>
-            </Accordion> */}
+            </Accordion>
 
             {/* LLM Configuration */}
             <Accordion>
@@ -910,6 +972,24 @@ const AgentForm: React.FC<AgentFormProps> = ({ initialData, onCancel, onAgentSav
                         )}
                       </Select>
                     </FormControl>
+                  </Grid>
+                  <Grid item xs={12}>
+                    <TextField
+                      fullWidth
+                      type="number"
+                      label="Temperature Override (0-100)"
+                      value={formData.temperature || ''}
+                      onChange={(e) => {
+                        const value = e.target.value ? parseInt(e.target.value) : undefined;
+                        if (value === undefined || (value >= 0 && value <= 100)) {
+                          handleInputChange('temperature', value);
+                        }
+                      }}
+                      helperText="Override the default model temperature. 0 = deterministic, 100 = creative. Leave empty to use model default."
+                      InputProps={{
+                        inputProps: { min: 0, max: 100 }
+                      }}
+                    />
                   </Grid>
                   <Grid item xs={12}>
                     <FormControl fullWidth>
@@ -1540,6 +1620,11 @@ const AgentForm: React.FC<AgentFormProps> = ({ initialData, onCancel, onAgentSav
         </DialogActions>
       </Dialog>
 
+      {/* Best Practices Dialog */}
+      <AgentBestPractices
+        open={showBestPractices}
+        onClose={() => setShowBestPractices(false)}
+      />
 
     </>
   );

@@ -1,5 +1,15 @@
-import { UploadedFileInfo } from '../api/UploadService';
 import { MemoryBackendConfig } from './memoryBackend';
+
+// Define UploadedFileInfo locally since we removed UploadService
+export interface UploadedFileInfo {
+  filename: string;
+  path: string;
+  full_path: string;
+  file_size_bytes?: number;
+  is_uploaded: boolean;
+  exists?: boolean;
+  success?: boolean;
+}
 
 export interface KnowledgeSource {
   type: string;
@@ -54,6 +64,7 @@ export interface Agent {
   goal: string;
   backstory: string;
   llm: string;
+  temperature?: number;  // Temperature override (0-100, will be converted to 0.0-1.0 on backend)
   tools: string[];
   tool_configs?: Record<string, unknown>;  // User-specific tool configuration overrides
   function_calling_llm?: string;
@@ -113,6 +124,7 @@ export interface AgentFormProps {
   onSubmit?: (agent: Agent) => Promise<void>;
   isEdit?: boolean;
   tools: Tool[];
+  isCreateMode?: boolean;
 }
 
 export interface NotificationState {
@@ -129,4 +141,5 @@ export interface AgentDialogProps {
   onShowAgentForm: () => void;
   fetchAgents: () => Promise<void>;
   showErrorMessage: (message: string, severity?: 'error' | 'warning' | 'info' | 'success') => void;
+  openInCreateMode?: boolean;
 } 

@@ -85,7 +85,7 @@ class TestTaskConfig:
         assert config.cache_response is None
         assert config.cache_ttl is None
         assert config.retry_on_fail is None
-        assert config.max_retries is None
+        assert config.guardrail_max_retries is None
         assert config.timeout is None
         assert config.priority is None
         assert config.error_handling is None
@@ -93,6 +93,7 @@ class TestTaskConfig:
         assert config.output_json is None
         assert config.output_pydantic is None
         assert config.callback is None
+        assert config.callback_config is None
         assert config.human_input is None
         assert config.condition is None
         assert config.guardrail is None
@@ -105,7 +106,7 @@ class TestTaskConfig:
             "cache_response": True,
             "cache_ttl": 3600,
             "retry_on_fail": True,
-            "max_retries": 5,
+            "guardrail_max_retries": 5,
             "timeout": 1200,
             "priority": 1,
             "error_handling": "continue",
@@ -113,6 +114,7 @@ class TestTaskConfig:
             "output_json": "result.json",
             "output_pydantic": "TaskResult",
             "callback": "task_complete_callback",
+            "callback_config": {"key": "value"},
             "human_input": True,
             "condition": condition,
             "guardrail": "safety_check",
@@ -122,7 +124,7 @@ class TestTaskConfig:
         assert config.cache_response is True
         assert config.cache_ttl == 3600
         assert config.retry_on_fail is True
-        assert config.max_retries == 5
+        assert config.guardrail_max_retries == 5
         assert config.timeout == 1200
         assert config.priority == 1
         assert config.error_handling == "continue"
@@ -130,6 +132,7 @@ class TestTaskConfig:
         assert config.output_json == "result.json"
         assert config.output_pydantic == "TaskResult"
         assert config.callback == "task_complete_callback"
+        assert config.callback_config == {"key": "value"}
         assert config.human_input is True
         assert isinstance(config.condition, ConditionConfig)
         assert config.condition.type == "timeout"
@@ -140,12 +143,12 @@ class TestTaskConfig:
         """Test TaskConfig with partial fields."""
         config_data = {
             "cache_response": False,
-            "max_retries": 3,
+            "guardrail_max_retries": 3,
             "human_input": True
         }
         config = TaskConfig(**config_data)
         assert config.cache_response is False
-        assert config.max_retries == 3
+        assert config.guardrail_max_retries == 3
         assert config.human_input is True
         assert config.cache_ttl is None
         assert config.timeout is None
@@ -378,7 +381,7 @@ class TestTaskUpdate:
     
     def test_task_update_full(self):
         """Test TaskUpdate with all fields."""
-        config = TaskConfig(max_retries=10, priority=3)
+        config = TaskConfig(guardrail_max_retries=10, priority=3)
         update_data = {
             "name": "Fully Updated Task",
             "description": "Updated description",
@@ -407,7 +410,7 @@ class TestTaskUpdate:
         assert update.async_execution is False
         assert update.context == ["updated-context-1"]
         assert isinstance(update.config, TaskConfig)
-        assert update.config.max_retries == 10
+        assert update.config.guardrail_max_retries == 10
         assert update.config.priority == 3
         assert update.output_json == "updated.json"
         assert update.output_pydantic == "UpdatedResult"

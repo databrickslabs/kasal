@@ -73,22 +73,24 @@ async def list_tasks(
 async def get_task(
     task_id: Annotated[str, Path(title="The ID of the task to get")],
     service: Annotated[TaskService, Depends(get_task_service)],
+    group_context: GroupContextDep,
 ):
     """
-    Get a specific task by ID.
+    Get a specific task by ID with group isolation.
     
     Args:
         task_id: ID of the task to get
         service: Task service injected by dependency
+        group_context: Group context from headers
         
     Returns:
-        Task if found
+        Task if found and belongs to user's group
         
     Raises:
-        HTTPException: If task not found
+        HTTPException: If task not found or not authorized
     """
     try:
-        task = await service.get(task_id)
+        task = await service.get_with_group_check(task_id, group_context)
         if not task:
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND,
@@ -114,23 +116,25 @@ async def update_task_full(
     task_id: Annotated[str, Path(title="The ID of the task to update")],
     task_in: dict,
     service: Annotated[TaskService, Depends(get_task_service)],
+    group_context: GroupContextDep,
 ):
     """
-    Update all fields of an existing task.
+    Update all fields of an existing task with group isolation.
     
     Args:
         task_id: ID of the task to update
         task_in: Full task data for update
         service: Task service injected by dependency
+        group_context: Group context from headers
         
     Returns:
         Updated task
         
     Raises:
-        HTTPException: If task not found
+        HTTPException: If task not found or not authorized
     """
     try:
-        task = await service.update_full(task_id, task_in)
+        task = await service.update_full_with_group_check(task_id, task_in, group_context)
         if not task:
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND,
@@ -150,23 +154,25 @@ async def update_task(
     task_id: Annotated[str, Path(title="The ID of the task to update")],
     task_in: TaskUpdate,
     service: Annotated[TaskService, Depends(get_task_service)],
+    group_context: GroupContextDep,
 ):
     """
-    Update an existing task with partial data.
+    Update an existing task with partial data and group isolation.
     
     Args:
         task_id: ID of the task to update
         task_in: Task data for update
         service: Task service injected by dependency
+        group_context: Group context from headers
         
     Returns:
         Updated task
         
     Raises:
-        HTTPException: If task not found
+        HTTPException: If task not found or not authorized
     """
     try:
-        task = await service.update_with_partial_data(task_id, task_in)
+        task = await service.update_with_group_check(task_id, task_in, group_context)
         if not task:
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND,
@@ -185,19 +191,21 @@ async def update_task(
 async def delete_task(
     task_id: Annotated[str, Path(title="The ID of the task to delete")],
     service: Annotated[TaskService, Depends(get_task_service)],
+    group_context: GroupContextDep,
 ):
     """
-    Delete a task.
+    Delete a task with group isolation.
     
     Args:
         task_id: ID of the task to delete
         service: Task service injected by dependency
+        group_context: Group context from headers
         
     Raises:
-        HTTPException: If task not found
+        HTTPException: If task not found or not authorized
     """
     try:
-        deleted = await service.delete(task_id)
+        deleted = await service.delete_with_group_check(task_id, group_context)
         if not deleted:
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND,
@@ -214,15 +222,17 @@ async def delete_task(
 @router.delete("", status_code=status.HTTP_204_NO_CONTENT)
 async def delete_all_tasks(
     service: Annotated[TaskService, Depends(get_task_service)],
+    group_context: GroupContextDep,
 ):
     """
-    Delete all tasks.
+    Delete all tasks for the current group.
     
     Args:
         service: Task service injected by dependency
+        group_context: Group context from headers
     """
     try:
-        await service.delete_all()
+        await service.delete_all_for_group(group_context)
     except Exception as e:
         logger.error(f"Error deleting all tasks: {e}")
         raise HTTPException(status_code=500, detail=str(e)) 

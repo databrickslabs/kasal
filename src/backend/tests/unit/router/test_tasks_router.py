@@ -5,7 +5,7 @@ Tests the functionality of task management endpoints including
 CRUD operations with group isolation.
 """
 import pytest
-from unittest.mock import AsyncMock, MagicMock
+from unittest.mock import AsyncMock, MagicMock, ANY
 from datetime import datetime
 from src.dependencies.admin_auth import (
     require_authenticated_user, get_authenticated_user, get_admin_user
@@ -21,6 +21,7 @@ from src.utils.user_context import GroupContext
 class MockTask:
     def __init__(self, id="task-123", name="Test Task", description="Test task description",
                  expected_output="Test output", agent_id="agent-123", group_id="group-123"):
+        self.tool_configs = {}
         self.id = id
         self.name = name
         self.description = description
@@ -242,7 +243,7 @@ class TestGetTask:
     def test_get_task_success(self, client, mock_task_service):
         """Test successful task retrieval."""
         task = MockTask()
-        mock_task_service.get.return_value = task
+        mock_task_service.get_with_group_check.return_value = task
         
         response = client.get("/tasks/task-123")
         
@@ -250,11 +251,11 @@ class TestGetTask:
         data = response.json()
         assert data["id"] == "task-123"
         assert data["name"] == "Test Task"
-        mock_task_service.get.assert_called_once_with("task-123")
+        mock_task_service.get_with_group_check.assert_called_once_with("task-123", ANY)
     
     def test_get_task_not_found(self, client, mock_task_service):
         """Test getting non-existent task."""
-        mock_task_service.get.return_value = None
+        mock_task_service.get_with_group_check.return_value = None
         
         response = client.get("/tasks/nonexistent")
         
@@ -263,7 +264,7 @@ class TestGetTask:
     
     def test_get_task_service_error(self, client, mock_task_service):
         """Test getting task with service error."""
-        mock_task_service.get.side_effect = Exception("Database error")
+        mock_task_service.get_with_group_check.side_effect = Exception("Database error")
         
         response = client.get("/tasks/task-123")
         
@@ -274,10 +275,10 @@ class TestGetTask:
 class TestUpdateTaskFull:
     """Test cases for full update task endpoint."""
     
-    def test_update_task_full_success(self, client, mock_task_service):
+    def test_update_task_full_success(self, client, mock_task_service, mock_group_context):
         """Test successful full task update."""
         updated_task = MockTask(name="Fully Updated Task")
-        mock_task_service.update_full.return_value = updated_task
+        mock_task_service.update_full_with_group_check.return_value = updated_task
         
         task_data = {
             "name": "Fully Updated Task",
@@ -291,11 +292,11 @@ class TestUpdateTaskFull:
         assert response.status_code == 200
         data = response.json()
         assert data["name"] == "Fully Updated Task"
-        mock_task_service.update_full.assert_called_once_with("task-123", task_data)
+        mock_task_service.update_full_with_group_check.assert_called_once_with("task-123", task_data, mock_group_context)
     
-    def test_update_task_full_not_found(self, client, mock_task_service):
+    def test_update_task_full_not_found(self, client, mock_task_service, mock_group_context):
         """Test full update of non-existent task."""
-        mock_task_service.update_full.return_value = None
+        mock_task_service.update_full_with_group_check.return_value = None
         
         task_data = {"name": "Updated Task"}
         
@@ -304,9 +305,9 @@ class TestUpdateTaskFull:
         assert response.status_code == 404
         assert "Task not found" in response.json()["detail"]
     
-    def test_update_task_full_service_error(self, client, mock_task_service):
+    def test_update_task_full_service_error(self, client, mock_task_service, mock_group_context):
         """Test full update with service error."""
-        mock_task_service.update_full.side_effect = Exception("Database error")
+        mock_task_service.update_full_with_group_check.side_effect = Exception("Database error")
         
         task_data = {"name": "Updated Task"}
         
@@ -322,18 +323,18 @@ class TestUpdateTask:
     def test_update_task_success(self, client, mock_task_service, sample_task_update):
         """Test successful partial task update."""
         updated_task = MockTask(name="Updated Task")
-        mock_task_service.update_with_partial_data.return_value = updated_task
+        mock_task_service.update_with_group_check.return_value = updated_task
         
         response = client.put("/tasks/task-123", json=sample_task_update.model_dump())
         
         assert response.status_code == 200
         data = response.json()
         assert data["name"] == "Updated Task"
-        mock_task_service.update_with_partial_data.assert_called_once_with("task-123", sample_task_update)
+        mock_task_service.update_with_group_check.assert_called_once_with("task-123", sample_task_update, ANY)
     
     def test_update_task_not_found(self, client, mock_task_service, sample_task_update):
         """Test partial update of non-existent task."""
-        mock_task_service.update_with_partial_data.return_value = None
+        mock_task_service.update_with_group_check.return_value = None
         
         response = client.put("/tasks/nonexistent", json=sample_task_update.model_dump())
         
@@ -342,7 +343,7 @@ class TestUpdateTask:
     
     def test_update_task_service_error(self, client, mock_task_service, sample_task_update):
         """Test partial update with service error."""
-        mock_task_service.update_with_partial_data.side_effect = Exception("Database error")
+        mock_task_service.update_with_group_check.side_effect = Exception("Database error")
         
         response = client.put("/tasks/task-123", json=sample_task_update.model_dump())
         
@@ -355,16 +356,16 @@ class TestDeleteTask:
     
     def test_delete_task_success(self, client, mock_task_service):
         """Test successful task deletion."""
-        mock_task_service.delete.return_value = True
+        mock_task_service.delete_with_group_check.return_value = True
         
         response = client.delete("/tasks/task-123")
         
         assert response.status_code == 204
-        mock_task_service.delete.assert_called_once_with("task-123")
+        mock_task_service.delete_with_group_check.assert_called_once_with("task-123", ANY)
     
     def test_delete_task_not_found(self, client, mock_task_service):
         """Test deleting non-existent task."""
-        mock_task_service.delete.return_value = False
+        mock_task_service.delete_with_group_check.return_value = False
         
         response = client.delete("/tasks/nonexistent")
         
@@ -373,7 +374,7 @@ class TestDeleteTask:
     
     def test_delete_task_service_error(self, client, mock_task_service):
         """Test deleting task with service error."""
-        mock_task_service.delete.side_effect = Exception("Database error")
+        mock_task_service.delete_with_group_check.side_effect = Exception("Database error")
         
         response = client.delete("/tasks/task-123")
         
@@ -391,11 +392,11 @@ class TestDeleteAllTasks:
         response = client.delete("/tasks")
         
         assert response.status_code == 204
-        mock_task_service.delete_all.assert_called_once()
+        mock_task_service.delete_all_for_group.assert_called_once()
     
     def test_delete_all_tasks_service_error(self, client, mock_task_service):
         """Test deleting all tasks with service error."""
-        mock_task_service.delete_all.side_effect = Exception("Database error")
+        mock_task_service.delete_all_for_group.side_effect = Exception("Database error")
         
         response = client.delete("/tasks")
         
