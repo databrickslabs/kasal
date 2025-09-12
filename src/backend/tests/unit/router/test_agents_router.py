@@ -293,7 +293,7 @@ class TestGetAgent:
     def test_get_agent_success(self, client, mock_agent_service):
         """Test successful agent retrieval."""
         agent = MockAgent()
-        mock_agent_service.get.return_value = agent
+        mock_agent_service.get_with_group_check.return_value = agent
         
         response = client.get("/agents/agent-123")
         
@@ -304,7 +304,7 @@ class TestGetAgent:
     
     def test_get_agent_not_found(self, client, mock_agent_service):
         """Test getting non-existent agent."""
-        mock_agent_service.get.return_value = None
+        mock_agent_service.get_with_group_check.return_value = None
         
         response = client.get("/agents/nonexistent")
         
@@ -313,7 +313,7 @@ class TestGetAgent:
     
     def test_get_agent_service_error(self, client, mock_agent_service):
         """Test getting agent with service error."""
-        mock_agent_service.get.side_effect = Exception("Service error")
+        mock_agent_service.get_with_group_check.side_effect = Exception("Service error")
         
         response = client.get("/agents/agent-123")
         
@@ -327,7 +327,7 @@ class TestUpdateAgentFull:
     def test_update_agent_full_success(self, client, mock_agent_service, sample_agent_update):
         """Test successful full agent update."""
         updated_agent = MockAgent(name="Updated Agent", role="Senior Developer")
-        mock_agent_service.update_with_partial_data.return_value = updated_agent
+        mock_agent_service.update_with_group_check.return_value = updated_agent
         
         response = client.put("/agents/agent-123/full", json=sample_agent_update.model_dump())
         
@@ -338,7 +338,7 @@ class TestUpdateAgentFull:
     
     def test_update_agent_full_not_found(self, client, mock_agent_service, sample_agent_update):
         """Test updating non-existent agent."""
-        mock_agent_service.update_with_partial_data.return_value = None
+        mock_agent_service.update_with_group_check.return_value = None
         
         response = client.put("/agents/nonexistent/full", json=sample_agent_update.model_dump())
         
@@ -348,7 +348,7 @@ class TestUpdateAgentFull:
     
     def test_update_agent_full_service_error(self, client, mock_agent_service, sample_agent_update):
         """Test full update with service error."""
-        mock_agent_service.update_with_partial_data.side_effect = Exception("Service error")
+        mock_agent_service.update_with_group_check.side_effect = Exception("Service error")
         
         response = client.put("/agents/agent-123/full", json=sample_agent_update.model_dump())
         
@@ -362,7 +362,7 @@ class TestUpdateAgentLimited:
     def test_update_agent_limited_success(self, client, mock_agent_service, sample_agent_limited_update):
         """Test successful limited agent update."""
         updated_agent = MockAgent(name="Slightly Updated Agent")
-        mock_agent_service.update_limited_fields.return_value = updated_agent
+        mock_agent_service.update_limited_with_group_check.return_value = updated_agent
         
         response = client.put("/agents/agent-123", json=sample_agent_limited_update.model_dump())
         
@@ -372,7 +372,7 @@ class TestUpdateAgentLimited:
     
     def test_update_agent_limited_not_found(self, client, mock_agent_service, sample_agent_limited_update):
         """Test limited update of non-existent agent."""
-        mock_agent_service.update_limited_fields.return_value = None
+        mock_agent_service.update_limited_with_group_check.return_value = None
         
         response = client.put("/agents/nonexistent", json=sample_agent_limited_update.model_dump())
         
@@ -382,7 +382,7 @@ class TestUpdateAgentLimited:
     
     def test_update_agent_limited_service_error(self, client, mock_agent_service, sample_agent_limited_update):
         """Test limited update with service error."""
-        mock_agent_service.update_limited_fields.side_effect = Exception("Service error")
+        mock_agent_service.update_limited_with_group_check.side_effect = Exception("Service error")
         
         response = client.put("/agents/agent-123", json=sample_agent_limited_update.model_dump())
         
@@ -395,7 +395,7 @@ class TestDeleteAgent:
     
     def test_delete_agent_success(self, client, mock_agent_service):
         """Test successful agent deletion."""
-        mock_agent_service.delete.return_value = True
+        mock_agent_service.delete_with_group_check.return_value = True
         
         response = client.delete("/agents/agent-123")
         
@@ -403,7 +403,7 @@ class TestDeleteAgent:
     
     def test_delete_agent_not_found(self, client, mock_agent_service):
         """Test deleting non-existent agent."""
-        mock_agent_service.delete.return_value = False
+        mock_agent_service.delete_with_group_check.return_value = False
         
         response = client.delete("/agents/nonexistent")
         
@@ -413,7 +413,7 @@ class TestDeleteAgent:
     
     def test_delete_agent_service_error(self, client, mock_agent_service):
         """Test deleting agent with service error."""
-        mock_agent_service.delete.side_effect = Exception("Service error")
+        mock_agent_service.delete_with_group_check.side_effect = Exception("Service error")
         
         response = client.delete("/agents/agent-123")
         
@@ -434,7 +434,7 @@ class TestDeleteAllAgents:
     
     def test_delete_all_agents_integrity_error(self, client, mock_agent_service):
         """Test deleting all agents with integrity constraint."""
-        mock_agent_service.delete_all.side_effect = IntegrityError("statement", "params", "orig")
+        mock_agent_service.delete_all_for_group.side_effect = IntegrityError("statement", "params", "orig")
         
         response = client.delete("/agents")
         
@@ -443,7 +443,7 @@ class TestDeleteAllAgents:
     
     def test_delete_all_agents_service_error(self, client, mock_agent_service):
         """Test deleting all agents with service error."""
-        mock_agent_service.delete_all.side_effect = Exception("Service error")
+        mock_agent_service.delete_all_for_group.side_effect = Exception("Service error")
         
         response = client.delete("/agents")
         

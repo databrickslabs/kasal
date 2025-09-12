@@ -57,6 +57,24 @@ class AgentService(BaseService[Agent, AgentCreate]):
             Agent if found, else None
         """
         return await self.repository.get(id)
+    
+    async def get_with_group_check(self, id: str, group_context: GroupContext) -> Optional[Agent]:
+        """
+        Get an agent by ID with group verification.
+        
+        Args:
+            id: ID of the agent to get
+            group_context: Group context for verification
+            
+        Returns:
+            Agent if found and belongs to user's group, else None
+        """
+        agent = await self.repository.get(id)
+        if agent and group_context and group_context.group_ids:
+            # Check if agent belongs to one of the user's groups
+            if agent.group_id not in group_context.group_ids:
+                return None  # Return None to trigger 404, not 403 (avoid information leakage)
+        return agent
         
     async def create(self, obj_in: AgentCreate) -> Agent:
         """
@@ -110,6 +128,31 @@ class AgentService(BaseService[Agent, AgentCreate]):
         
         return await self.repository.update(id, update_data)
     
+    async def update_with_group_check(self, id: str, obj_in: AgentUpdate, group_context: GroupContext) -> Optional[Agent]:
+        """
+        Update an agent with group verification.
+        
+        Args:
+            id: ID of the agent to update
+            obj_in: Schema with fields to update
+            group_context: Group context for verification
+            
+        Returns:
+            Updated agent if found and belongs to user's group, else None
+        """
+        # First verify the agent belongs to the user's group
+        agent = await self.get_with_group_check(id, group_context)
+        if not agent:
+            return None
+        
+        # Exclude unset fields (None) from update
+        update_data = obj_in.model_dump(exclude_none=True)
+        if not update_data:
+            # No fields to update
+            return agent
+        
+        return await self.repository.update(id, update_data)
+    
     async def update_limited_fields(self, id: str, obj_in: AgentLimitedUpdate) -> Optional[Agent]:
         """
         Update only limited fields of an agent.
@@ -129,6 +172,31 @@ class AgentService(BaseService[Agent, AgentCreate]):
         
         return await self.repository.update(id, update_data)
     
+    async def update_limited_with_group_check(self, id: str, obj_in: AgentLimitedUpdate, group_context: GroupContext) -> Optional[Agent]:
+        """
+        Update limited fields of an agent with group verification.
+        
+        Args:
+            id: ID of the agent to update
+            obj_in: Schema with limited fields to update
+            group_context: Group context for verification
+            
+        Returns:
+            Updated agent if found and belongs to user's group, else None
+        """
+        # First verify the agent belongs to the user's group
+        agent = await self.get_with_group_check(id, group_context)
+        if not agent:
+            return None
+        
+        # Exclude unset fields (None) from update
+        update_data = obj_in.model_dump(exclude_none=True)
+        if not update_data:
+            # No fields to update
+            return agent
+        
+        return await self.repository.update(id, update_data)
+    
     async def delete(self, id: str) -> bool:
         """
         Delete an agent by ID.
@@ -141,6 +209,24 @@ class AgentService(BaseService[Agent, AgentCreate]):
         """
         return await self.repository.delete(id)
     
+    async def delete_with_group_check(self, id: str, group_context: GroupContext) -> bool:
+        """
+        Delete an agent by ID with group verification.
+        
+        Args:
+            id: ID of the agent to delete
+            group_context: Group context for verification
+            
+        Returns:
+            True if agent was deleted, False if not found or not authorized
+        """
+        # First verify the agent belongs to the user's group
+        agent = await self.get_with_group_check(id, group_context)
+        if not agent:
+            return False
+        
+        return await self.repository.delete(id)
+    
     async def delete_all(self) -> None:
         """
         Delete all agents.
@@ -149,6 +235,26 @@ class AgentService(BaseService[Agent, AgentCreate]):
             None
         """
         await self.repository.delete_all()
+    
+    async def delete_all_for_group(self, group_context: GroupContext) -> None:
+        """
+        Delete all agents for a specific group.
+        
+        Args:
+            group_context: Group context for filtering
+            
+        Returns:
+            None
+        """
+        if not group_context or not group_context.group_ids:
+            return
+        
+        # Get all agents for the group
+        agents = await self.find_by_group(group_context)
+        
+        # Delete each agent
+        for agent in agents:
+            await self.repository.delete(agent.id)
     
 
     async def create_with_group(self, obj_in: AgentCreate, group_context: GroupContext) -> Agent:

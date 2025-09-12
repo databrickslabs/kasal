@@ -16,7 +16,7 @@ class TaskConfig(BaseModel):
     cache_response: Optional[bool] = None
     cache_ttl: Optional[int] = None
     retry_on_fail: Optional[bool] = None
-    max_retries: Optional[int] = None
+    guardrail_max_retries: Optional[int] = None
     timeout: Optional[int] = None
     priority: Optional[int] = None
     error_handling: Optional[str] = None
@@ -24,6 +24,7 @@ class TaskConfig(BaseModel):
     output_json: Optional[str] = None
     output_pydantic: Optional[str] = None
     callback: Optional[str] = None
+    callback_config: Optional[Dict[str, Any]] = None
     human_input: Optional[bool] = None
     condition: Optional[ConditionConfig] = None
     guardrail: Optional[str] = None
@@ -48,6 +49,7 @@ class TaskBase(BaseModel):
     output: Optional[Dict[str, Any]] = None
     markdown: bool = False
     callback: Optional[str] = None
+    callback_config: Optional[Dict[str, Any]] = None
     human_input: bool = False
     converter_cls: Optional[str] = None
     guardrail: Optional[str] = None
@@ -77,6 +79,7 @@ class TaskUpdate(BaseModel):
     output: Optional[Dict[str, Any]] = None
     markdown: Optional[bool] = None
     callback: Optional[str] = None
+    callback_config: Optional[Dict[str, Any]] = None
     human_input: Optional[bool] = None
     converter_cls: Optional[str] = None
     guardrail: Optional[str] = None

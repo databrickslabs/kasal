@@ -21,6 +21,7 @@ export interface Task {
     output_json: string | null;
     output_pydantic: string | null;
     callback: string | null;
+    callback_config?: Record<string, unknown> | null;
     human_input: boolean;
     markdown: boolean;
     condition?: string;
@@ -82,6 +83,7 @@ export interface AdvancedConfig {
   cache_response: boolean;
   cache_ttl: number;
   callback: string | null;
+  callback_config?: Record<string, unknown> | null;
   context: string[];
   dependencies: string[];
   error_handling: string;
@@ -101,7 +103,7 @@ export interface AdvancedConfig {
 
 export interface TaskAdvancedConfigProps {
   advancedConfig: AdvancedConfig;
-  onConfigChange: (field: string, value: string | number | boolean | null) => void;
+  onConfigChange: (field: string, value: string | number | boolean | null | Record<string, unknown>) => void;
   availableTasks: Task[];
 }
 
@@ -112,6 +114,7 @@ export interface TaskSelectionDialogProps {
   tasks: Task[];
   onShowTaskForm: () => void;
   fetchTasks: () => Promise<void>;
+  openInCreateMode?: boolean;
 }
 
 export interface TaskGenerationDialogProps {
