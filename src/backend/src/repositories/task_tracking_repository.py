@@ -13,9 +13,32 @@ from src.schemas.task_tracking import TaskStatusEnum, TaskStatusCreate, TaskStat
 logger = logging.getLogger(__name__)
 
 class TaskTrackingRepository:
-    """
-    Repository for task tracking and job execution status operations.
-    Handles data access for Run and TaskStatus models.
+    """Repository for task execution tracking and monitoring.
+    
+    This repository provides data access operations for tracking task execution
+    status, managing job runs, and monitoring task progress in the AI agent system.
+    It handles both job-level and task-level status tracking with support for
+    async database operations.
+    
+    The repository implements the repository pattern for clean separation between
+    business logic and data access, supporting both session-managed and
+    self-managed database connections.
+    
+    Attributes:
+        db: Optional async database session
+        _owns_session: Boolean indicating if repository manages its own sessions
+    
+    Key Operations:
+        - Job execution tracking and retrieval
+        - Task status creation and updates
+        - Error trace recording
+        - Execution history management
+        - Real-time status monitoring
+    
+    Example:
+        >>> repo = TaskTrackingRepository()
+        >>> job = await repo.find_job_by_id("job_123")
+        >>> tasks = await repo.find_task_statuses_by_job_id("job_123")
     """
     
     def __init__(self, db: Optional[AsyncSession] = None):
@@ -163,7 +186,7 @@ class TaskTrackingRepository:
             task_id=task.task_id,
             status=task.status,
             agent_name=task.agent_name,
-            started_at=datetime.now(UTC),
+            started_at=datetime.utcnow(),  # Use timezone-naive UTC per model requirement
             completed_at=None
         )
         
@@ -198,7 +221,7 @@ class TaskTrackingRepository:
         
         # If status is completed or failed, update completed_at
         if task_update.status in [TaskStatusEnum.COMPLETED, TaskStatusEnum.FAILED]:
-            db_task.completed_at = datetime.now(UTC)
+            db_task.completed_at = datetime.utcnow()  # Use timezone-naive UTC per model requirement
             
         await session.commit()
         await session.refresh(db_task)
@@ -276,7 +299,7 @@ class TaskTrackingRepository:
             task_id=task_status.task_id,
             status=task_status.status,
             agent_name=task_status.agent_name,
-            started_at=datetime.now(UTC),
+            started_at=datetime.utcnow(),  # Use timezone-naive UTC per model requirement
             completed_at=None
         )
         
@@ -334,7 +357,7 @@ class TaskTrackingRepository:
         
         # If status is completed or failed, update completed_at
         if task_status.status in [TaskStatusEnum.COMPLETED, TaskStatusEnum.FAILED]:
-            db_task_status.completed_at = datetime.now(UTC)
+            db_task_status.completed_at = datetime.utcnow()  # Use timezone-naive UTC per model requirement
         
         await session.commit()
         await session.refresh(db_task_status)

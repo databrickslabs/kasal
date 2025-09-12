@@ -5,7 +5,7 @@ Tests the functionality of execution trace operations including
 retrieving traces by run_id, job_id, creating traces, and deleting traces.
 """
 import pytest
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import AsyncMock, MagicMock, Mock, patch
 from datetime import datetime, UTC
 from typing import List, Optional, Dict, Any
 
@@ -85,35 +85,42 @@ class TestExecutionTraceService:
         job_id = "job-123"
         
         # Mock repository methods
-        mock_execution_trace_repository.get_execution_job_id_by_run_id.return_value = job_id
         mock_execution_trace_repository.get_by_run_id.return_value = mock_traces[:2]
         
-        result = await ExecutionTraceService.get_traces_by_run_id(
-            db=None, run_id=run_id, limit=100, offset=0
-        )
-        
-        assert isinstance(result, ExecutionTraceResponseByRunId)
-        assert result.run_id == run_id
-        assert len(result.traces) == 2
-        assert all(isinstance(trace, ExecutionTraceItem) for trace in result.traces)
-        
-        mock_execution_trace_repository.get_execution_job_id_by_run_id.assert_called_once_with(run_id)
-        mock_execution_trace_repository.get_by_run_id.assert_called_once_with(run_id, 100, 0)
+        # Mock execution_history_repository for authorization
+        with patch('src.repositories.execution_history_repository.execution_history_repository') as mock_exec_repo:
+            mock_exec_repo.get_execution_by_id = AsyncMock(return_value=Mock(job_id=job_id))
+            
+            result = await ExecutionTraceService.get_traces_by_run_id(
+                group_context=None, run_id=run_id, limit=100, offset=0
+            )
+            
+            assert isinstance(result, ExecutionTraceResponseByRunId)
+            assert result.run_id == run_id
+            assert len(result.traces) == 2
+            assert all(isinstance(trace, ExecutionTraceItem) for trace in result.traces)
+            
+            # Verify repository calls
+            mock_exec_repo.get_execution_by_id.assert_called_once_with(run_id, group_ids=None)
+            mock_execution_trace_repository.get_by_run_id.assert_called_once_with(run_id, 100, 0)
     
     @pytest.mark.asyncio
     async def test_get_traces_by_run_id_execution_not_found(self, mock_execution_trace_repository):
         """Test get_traces_by_run_id when execution doesn't exist."""
         run_id = 999
         
-        mock_execution_trace_repository.get_execution_job_id_by_run_id.return_value = None
         
-        result = await ExecutionTraceService.get_traces_by_run_id(
-            db=None, run_id=run_id, limit=100, offset=0
-        )
-        
-        assert result is None
-        mock_execution_trace_repository.get_execution_job_id_by_run_id.assert_called_once_with(run_id)
-        mock_execution_trace_repository.get_by_run_id.assert_not_called()
+        # Mock execution_history_repository returning None (not found)
+        with patch('src.repositories.execution_history_repository.execution_history_repository') as mock_exec_repo:
+            mock_exec_repo.get_execution_by_id = AsyncMock(return_value=None)
+            
+            result = await ExecutionTraceService.get_traces_by_run_id(
+                group_context=None, run_id=run_id, limit=100, offset=0
+            )
+            
+            assert result is None
+            mock_exec_repo.get_execution_by_id.assert_called_once_with(run_id, group_ids=None)
+            mock_execution_trace_repository.get_by_run_id.assert_not_called()
     
     @pytest.mark.asyncio
     async def test_get_traces_by_run_id_update_missing_job_id(self, mock_execution_trace_repository):
@@ -127,42 +134,49 @@ class TestExecutionTraceService:
             MockExecutionTrace(id=2, run_id=run_id, job_id="job-123")
         ]
         
-        mock_execution_trace_repository.get_execution_job_id_by_run_id.return_value = job_id
         mock_execution_trace_repository.get_by_run_id.return_value = traces_with_missing_job_id
         
-        result = await ExecutionTraceService.get_traces_by_run_id(
-            db=None, run_id=run_id, limit=100, offset=0
-        )
-        
-        assert result is not None
-        assert len(result.traces) == 2
-        # Verify job_id was updated for the trace that was missing it
-        assert traces_with_missing_job_id[0].job_id == job_id
-        assert traces_with_missing_job_id[1].job_id == "job-123"
+        # Mock execution_history_repository for authorization
+        with patch('src.repositories.execution_history_repository.execution_history_repository') as mock_exec_repo:
+            mock_exec_repo.get_execution_by_id = AsyncMock(return_value=Mock(job_id=job_id))
+            
+            result = await ExecutionTraceService.get_traces_by_run_id(
+                group_context=None, run_id=run_id, limit=100, offset=0
+            )
+            
+            assert result is not None
+            assert len(result.traces) == 2
+            # Verify job_id was updated for the trace that was missing it
+            assert traces_with_missing_job_id[0].job_id == job_id
+            assert traces_with_missing_job_id[1].job_id == "job-123"
     
     @pytest.mark.asyncio
     async def test_get_traces_by_run_id_sqlalchemy_error(self, mock_execution_trace_repository):
         """Test get_traces_by_run_id handles SQLAlchemy errors."""
         run_id = 1
         
-        mock_execution_trace_repository.get_execution_job_id_by_run_id.side_effect = SQLAlchemyError("Database error")
-        
-        with pytest.raises(SQLAlchemyError):
-            await ExecutionTraceService.get_traces_by_run_id(
-                db=None, run_id=run_id, limit=100, offset=0
-            )
+        # Mock execution_history_repository to raise SQLAlchemyError
+        with patch('src.repositories.execution_history_repository.execution_history_repository') as mock_exec_repo:
+            mock_exec_repo.get_execution_by_id.side_effect = SQLAlchemyError("Database error")
+            
+            with pytest.raises(SQLAlchemyError):
+                await ExecutionTraceService.get_traces_by_run_id(
+                    group_context=None, run_id=run_id, limit=100, offset=0
+                )
     
     @pytest.mark.asyncio
     async def test_get_traces_by_run_id_general_error(self, mock_execution_trace_repository):
         """Test get_traces_by_run_id handles general errors."""
         run_id = 1
         
-        mock_execution_trace_repository.get_execution_job_id_by_run_id.side_effect = Exception("General error")
-        
-        with pytest.raises(Exception):
-            await ExecutionTraceService.get_traces_by_run_id(
-                db=None, run_id=run_id, limit=100, offset=0
-            )
+        # Mock execution_history_repository to raise general Exception
+        with patch('src.repositories.execution_history_repository.execution_history_repository') as mock_exec_repo:
+            mock_exec_repo.get_execution_by_id.side_effect = Exception("General error")
+            
+            with pytest.raises(Exception):
+                await ExecutionTraceService.get_traces_by_run_id(
+                    group_context=None, run_id=run_id, limit=100, offset=0
+                )
     
     @pytest.mark.asyncio
     async def test_get_traces_by_job_id_success(self, mock_execution_trace_repository, mock_traces):
@@ -173,17 +187,21 @@ class TestExecutionTraceService:
         mock_execution_trace_repository.get_execution_run_id_by_job_id.return_value = run_id
         mock_execution_trace_repository.get_by_job_id.return_value = mock_traces[:2]
         
-        result = await ExecutionTraceService.get_traces_by_job_id(
-            db=None, job_id=job_id, limit=100, offset=0
-        )
-        
-        assert isinstance(result, ExecutionTraceResponseByJobId)
-        assert result.job_id == job_id
-        assert len(result.traces) == 2
-        assert all(isinstance(trace, ExecutionTraceItem) for trace in result.traces)
-        
-        mock_execution_trace_repository.get_execution_run_id_by_job_id.assert_called_once_with(job_id)
-        mock_execution_trace_repository.get_by_job_id.assert_called_once_with(job_id, 100, 0)
+        # Mock execution_history_repository for authorization
+        with patch('src.repositories.execution_history_repository.execution_history_repository') as mock_exec_repo:
+            mock_exec_repo.get_execution_by_job_id = AsyncMock(return_value=Mock(job_id=job_id))
+            
+            result = await ExecutionTraceService.get_traces_by_job_id(
+                group_context=None, job_id=job_id, limit=100, offset=0
+            )
+            
+            assert isinstance(result, ExecutionTraceResponseByJobId)
+            assert result.job_id == job_id
+            assert len(result.traces) == 2
+            assert all(isinstance(trace, ExecutionTraceItem) for trace in result.traces)
+            
+            mock_exec_repo.get_execution_by_job_id.assert_called_once_with(job_id, group_ids=None)
+            mock_execution_trace_repository.get_by_job_id.assert_called_once_with(job_id, 100, 0)
     
     @pytest.mark.asyncio
     async def test_get_traces_by_job_id_execution_not_found(self, mock_execution_trace_repository):
@@ -192,13 +210,17 @@ class TestExecutionTraceService:
         
         mock_execution_trace_repository.get_execution_run_id_by_job_id.return_value = None
         
-        result = await ExecutionTraceService.get_traces_by_job_id(
-            db=None, job_id=job_id, limit=100, offset=0
-        )
-        
-        assert result is None
-        mock_execution_trace_repository.get_execution_run_id_by_job_id.assert_called_once_with(job_id)
-        mock_execution_trace_repository.get_by_job_id.assert_not_called()
+        # Mock execution_history_repository returning None (not found)
+        with patch('src.repositories.execution_history_repository.execution_history_repository') as mock_exec_repo:
+            mock_exec_repo.get_execution_by_job_id = AsyncMock(return_value=None)
+            
+            result = await ExecutionTraceService.get_traces_by_job_id(
+                group_context=None, job_id=job_id, limit=100, offset=0
+            )
+            
+            assert result is None
+            mock_exec_repo.get_execution_by_job_id.assert_called_once_with(job_id, group_ids=None)
+            mock_execution_trace_repository.get_by_job_id.assert_not_called()
     
     @pytest.mark.asyncio
     async def test_get_traces_by_job_id_fallback_to_run_id(self, mock_execution_trace_repository, mock_traces):
@@ -216,42 +238,50 @@ class TestExecutionTraceService:
         mock_execution_trace_repository.get_by_job_id.return_value = []  # No direct traces
         mock_execution_trace_repository.get_by_run_id.return_value = traces_with_missing_job_id
         
-        result = await ExecutionTraceService.get_traces_by_job_id(
-            db=None, job_id=job_id, limit=100, offset=0
-        )
-        
-        assert result is not None
-        assert len(result.traces) == 2
-        # Verify job_id was updated for traces that were missing it
-        assert traces_with_missing_job_id[0].job_id == job_id
-        assert traces_with_missing_job_id[1].job_id == job_id
-        
-        mock_execution_trace_repository.get_by_job_id.assert_called_once_with(job_id, 100, 0)
-        mock_execution_trace_repository.get_by_run_id.assert_called_once_with(run_id, 100, 0)
+        # Mock execution_history_repository for authorization
+        with patch('src.repositories.execution_history_repository.execution_history_repository') as mock_exec_repo:
+            mock_exec_repo.get_execution_by_job_id = AsyncMock(return_value=Mock(job_id=job_id, id=run_id))
+            
+            result = await ExecutionTraceService.get_traces_by_job_id(
+                group_context=None, job_id=job_id, limit=100, offset=0
+            )
+            
+            assert result is not None
+            assert len(result.traces) == 2
+            # Verify job_id was updated for traces that were missing it
+            assert traces_with_missing_job_id[0].job_id == job_id
+            assert traces_with_missing_job_id[1].job_id == job_id
+            
+            mock_execution_trace_repository.get_by_job_id.assert_called_once_with(job_id, 100, 0)
+            mock_execution_trace_repository.get_by_run_id.assert_called_once_with(run_id, 100, 0)
     
     @pytest.mark.asyncio
     async def test_get_traces_by_job_id_sqlalchemy_error(self, mock_execution_trace_repository):
         """Test get_traces_by_job_id handles SQLAlchemy errors."""
         job_id = "job-123"
         
-        mock_execution_trace_repository.get_execution_run_id_by_job_id.side_effect = SQLAlchemyError("Database error")
-        
-        with pytest.raises(SQLAlchemyError):
-            await ExecutionTraceService.get_traces_by_job_id(
-                db=None, job_id=job_id, limit=100, offset=0
-            )
+        # Mock execution_history_repository to raise SQLAlchemyError
+        with patch('src.repositories.execution_history_repository.execution_history_repository') as mock_exec_repo:
+            mock_exec_repo.get_execution_by_job_id = AsyncMock(side_effect=SQLAlchemyError("Database error"))
+            
+            with pytest.raises(SQLAlchemyError):
+                await ExecutionTraceService.get_traces_by_job_id(
+                    group_context=None, job_id=job_id, limit=100, offset=0
+                )
     
     @pytest.mark.asyncio
     async def test_get_traces_by_job_id_general_error(self, mock_execution_trace_repository):
         """Test get_traces_by_job_id handles general errors."""
         job_id = "job-123"
         
-        mock_execution_trace_repository.get_execution_run_id_by_job_id.side_effect = Exception("General error")
-        
-        with pytest.raises(Exception):
-            await ExecutionTraceService.get_traces_by_job_id(
-                db=None, job_id=job_id, limit=100, offset=0
-            )
+        # Mock execution_history_repository to raise general Exception
+        with patch('src.repositories.execution_history_repository.execution_history_repository') as mock_exec_repo:
+            mock_exec_repo.get_execution_by_job_id = AsyncMock(side_effect=Exception("General error"))
+            
+            with pytest.raises(Exception):
+                await ExecutionTraceService.get_traces_by_job_id(
+                    group_context=None, job_id=job_id, limit=100, offset=0
+                )
     
     @pytest.mark.asyncio
     async def test_get_all_traces_success(self, mock_execution_trace_repository, mock_traces):
@@ -535,15 +565,18 @@ class TestExecutionTraceService:
         limit = 50
         offset = 10
         
-        mock_execution_trace_repository.get_execution_job_id_by_run_id.return_value = job_id
         mock_execution_trace_repository.get_by_run_id.return_value = mock_traces[:1]
         
-        result = await ExecutionTraceService.get_traces_by_run_id(
-            db=None, run_id=run_id, limit=limit, offset=offset
-        )
-        
-        assert result is not None
-        mock_execution_trace_repository.get_by_run_id.assert_called_once_with(run_id, limit, offset)
+        # Mock execution_history_repository for authorization
+        with patch('src.repositories.execution_history_repository.execution_history_repository') as mock_exec_repo:
+            mock_exec_repo.get_execution_by_id = AsyncMock(return_value=Mock(job_id=job_id))
+            
+            result = await ExecutionTraceService.get_traces_by_run_id(
+                group_context=None, run_id=run_id, limit=limit, offset=offset
+            )
+            
+            assert result is not None
+            mock_execution_trace_repository.get_by_run_id.assert_called_once_with(run_id, limit, offset)
     
     @pytest.mark.asyncio
     async def test_get_traces_by_job_id_custom_pagination(self, mock_execution_trace_repository, mock_traces):
@@ -556,12 +589,16 @@ class TestExecutionTraceService:
         mock_execution_trace_repository.get_execution_run_id_by_job_id.return_value = run_id
         mock_execution_trace_repository.get_by_job_id.return_value = mock_traces[:1]
         
-        result = await ExecutionTraceService.get_traces_by_job_id(
-            db=None, job_id=job_id, limit=limit, offset=offset
-        )
-        
-        assert result is not None
-        mock_execution_trace_repository.get_by_job_id.assert_called_once_with(job_id, limit, offset)
+        # Mock execution_history_repository for authorization
+        with patch('src.repositories.execution_history_repository.execution_history_repository') as mock_exec_repo:
+            mock_exec_repo.get_execution_by_job_id = AsyncMock(return_value=Mock(job_id=job_id))
+            
+            result = await ExecutionTraceService.get_traces_by_job_id(
+                group_context=None, job_id=job_id, limit=limit, offset=offset
+            )
+            
+            assert result is not None
+            mock_execution_trace_repository.get_by_job_id.assert_called_once_with(job_id, limit, offset)
     
     @pytest.mark.asyncio
     async def test_get_all_traces_custom_pagination(self, mock_execution_trace_repository, mock_traces):

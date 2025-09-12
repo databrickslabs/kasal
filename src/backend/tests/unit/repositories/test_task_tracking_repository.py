@@ -400,7 +400,7 @@ class TestTaskTrackingRepositoryUpdateTask:
         with patch.object(task_tracking_repo_with_session, '_get_session', return_value=task_tracking_repo_with_session.db):
             with patch('src.repositories.task_tracking_repository.datetime') as mock_datetime:
                 now_time = datetime.now(UTC)
-                mock_datetime.now.return_value = now_time
+                mock_datetime.utcnow.return_value = now_time
                 mock_datetime.UTC = UTC
                 
                 result = await task_tracking_repo_with_session.update_task(1, sample_task_update)
@@ -622,7 +622,7 @@ class TestTaskTrackingRepositoryUpdateTaskStatusAsync:
         
         with patch('src.repositories.task_tracking_repository.datetime') as mock_datetime:
             now_time = datetime.now(UTC)
-            mock_datetime.now.return_value = now_time
+            mock_datetime.utcnow.return_value = now_time
             mock_datetime.UTC = UTC
             
             result = await task_tracking_repo_with_session._update_task_status_async(
