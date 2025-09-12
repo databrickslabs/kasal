@@ -17,6 +17,7 @@ from src.schemas.execution_trace import (
     ExecutionTraceResponseByJobId,
     DeleteTraceResponse
 )
+from src.utils.user_context import GroupContext
 
 from src.core.logger import LoggerManager
 
@@ -28,29 +29,42 @@ class ExecutionTraceService:
     
     @staticmethod
     async def get_traces_by_run_id(
-        db, 
-        run_id: int,
+        group_context=None, 
+        run_id: int = None,
         limit: int = 100,
         offset: int = 0
     ) -> ExecutionTraceResponseByRunId:
         """
-        Get traces for an execution by run_id with pagination.
+        Get traces for an execution by run_id with pagination and authorization.
         
         Args:
-            db: No longer used, kept for backward compatibility
+            group_context: Group context for authorization (contains group_ids and email)
             run_id: Database ID of the execution
             limit: Maximum number of traces to return
             offset: Number of traces to skip
             
         Returns:
-            ExecutionTraceResponseByRunId with traces for the execution
+            ExecutionTraceResponseByRunId with traces for the execution if authorized
         """
         try:
-            # Check if the execution exists using repository
-            job_id = await execution_trace_repository.get_execution_job_id_by_run_id(run_id)
+            # First check if the execution exists and belongs to the user's group
+            from src.repositories.execution_history_repository import execution_history_repository
             
-            if not job_id:
+            # Get group IDs from context for filtering
+            group_ids = group_context.group_ids if group_context else None
+            
+            # Check if the execution exists and the user has access to it
+            execution = await execution_history_repository.get_execution_by_id(
+                run_id, 
+                group_ids=group_ids
+            )
+            
+            if not execution:
+                # Either doesn't exist or user doesn't have access
                 return None
+            
+            # Get job_id from the execution
+            job_id = execution.job_id
             
             # Get traces using repository
             traces = await execution_trace_repository.get_by_run_id(
@@ -83,29 +97,42 @@ class ExecutionTraceService:
     
     @staticmethod
     async def get_traces_by_job_id(
-        db, 
-        job_id: str,
+        group_context=None, 
+        job_id: str = None,
         limit: int = 100,
         offset: int = 0
     ) -> ExecutionTraceResponseByJobId:
         """
-        Get traces for an execution by job_id with pagination.
+        Get traces for an execution by job_id with pagination and authorization.
         
         Args:
-            db: No longer used, kept for backward compatibility
+            group_context: Group context for authorization (contains group_ids and email)
             job_id: String ID of the execution (job_id in database)
             limit: Maximum number of traces to return
             offset: Number of traces to skip
             
         Returns:
-            ExecutionTraceResponseByJobId with traces for the execution
+            ExecutionTraceResponseByJobId with traces for the execution if authorized
         """
         try:
-            # Check if the execution exists using repository
-            run_id = await execution_trace_repository.get_execution_run_id_by_job_id(job_id)
+            # First check if the execution exists and belongs to the user's group
+            from src.repositories.execution_history_repository import execution_history_repository
             
-            if not run_id:
+            # Get group IDs from context for filtering
+            group_ids = group_context.group_ids if group_context else None
+            
+            # Check if the execution exists and the user has access to it
+            execution = await execution_history_repository.get_execution_by_job_id(
+                job_id, 
+                group_ids=group_ids
+            )
+            
+            if not execution:
+                # Either doesn't exist or user doesn't have access
                 return None
+            
+            # Get the run_id from the execution
+            run_id = execution.id
             
             # Get traces using repository - direct lookup by job_id
             traces = await execution_trace_repository.get_by_job_id(
@@ -183,6 +210,69 @@ class ExecutionTraceService:
             raise
     
     @staticmethod
+    async def get_all_traces_for_group(
+        group_context: GroupContext,
+        limit: int = 100,
+        offset: int = 0
+    ) -> ExecutionTraceList:
+        """
+        Get all traces for a specific group with pagination.
+        
+        Args:
+            group_context: Group context for authorization
+            limit: Maximum number of traces to return
+            offset: Number of traces to skip
+            
+        Returns:
+            ExecutionTraceList with paginated traces for the group
+        """
+        try:
+            if not group_context or not group_context.group_ids:
+                return ExecutionTraceList(traces=[], total=0, limit=limit, offset=offset)
+            
+            # Get all executions for the group first
+            from src.repositories.execution_history_repository import execution_history_repository
+            executions = await execution_history_repository.get_all_executions_for_groups(
+                group_ids=group_context.group_ids
+            )
+            
+            if not executions:
+                return ExecutionTraceList(traces=[], total=0, limit=limit, offset=offset)
+            
+            # Get job_ids from executions
+            job_ids = [exec.job_id for exec in executions if exec.job_id]
+            
+            if not job_ids:
+                return ExecutionTraceList(traces=[], total=0, limit=limit, offset=offset)
+            
+            # Get traces for these job_ids
+            traces = []
+            for job_id in job_ids:
+                job_traces = await execution_trace_repository.get_by_job_id(job_id, limit=100, offset=0)
+                traces.extend(job_traces)
+            
+            # Apply pagination
+            total_count = len(traces)
+            traces = traces[offset:offset + limit]
+            
+            # Convert to schema objects
+            trace_items = [ExecutionTraceItem.model_validate(trace) for trace in traces]
+            
+            return ExecutionTraceList(
+                traces=trace_items,
+                total=total_count,
+                limit=limit,
+                offset=offset
+            )
+            
+        except SQLAlchemyError as e:
+            logger.error(f"Database error retrieving group traces: {str(e)}")
+            raise
+        except Exception as e:
+            logger.error(f"Error retrieving group traces: {str(e)}")
+            raise
+    
+    @staticmethod
     async def get_trace_by_id(trace_id: int) -> Optional[ExecutionTraceItem]:
         """
         Get a specific trace by ID.
@@ -209,6 +299,46 @@ class ExecutionTraceService:
             raise
     
     @staticmethod
+    async def get_trace_by_id_with_group_check(
+        trace_id: int,
+        group_context: GroupContext
+    ) -> Optional[ExecutionTraceItem]:
+        """
+        Get a specific trace by ID with group authorization.
+        
+        Args:
+            trace_id: ID of the trace to retrieve
+            group_context: Group context for authorization
+            
+        Returns:
+            ExecutionTraceItem if found and authorized, None otherwise
+        """
+        try:
+            trace = await execution_trace_repository.get_by_id(trace_id)
+                
+            if not trace:
+                return None
+            
+            # Check if trace belongs to user's group via job_id
+            if trace.job_id and group_context and group_context.group_ids:
+                from src.repositories.execution_history_repository import execution_history_repository
+                execution = await execution_history_repository.get_execution_by_job_id(
+                    trace.job_id,
+                    group_ids=group_context.group_ids
+                )
+                if not execution:
+                    return None  # Not authorized
+                
+            return ExecutionTraceItem.model_validate(trace)
+            
+        except SQLAlchemyError as e:
+            logger.error(f"Database error retrieving trace {trace_id}: {str(e)}")
+            raise
+        except Exception as e:
+            logger.error(f"Error retrieving trace {trace_id}: {str(e)}")
+            raise
+    
+    @staticmethod
     async def create_trace(trace_data: Dict[str, Any]) -> ExecutionTraceItem:
         """
         Create a new trace.
@@ -220,6 +350,43 @@ class ExecutionTraceService:
             Created ExecutionTraceItem
         """
         try:
+            trace = await execution_trace_repository.create(trace_data)
+                
+            return ExecutionTraceItem.model_validate(trace)
+            
+        except SQLAlchemyError as e:
+            logger.error(f"Database error creating trace: {str(e)}")
+            raise
+        except Exception as e:
+            logger.error(f"Error creating trace: {str(e)}")
+            raise
+    
+    @staticmethod
+    async def create_trace_with_group(
+        trace_data: Dict[str, Any],
+        group_context: GroupContext
+    ) -> ExecutionTraceItem:
+        """
+        Create a new trace with group verification.
+        
+        Args:
+            trace_data: Dictionary with trace data
+            group_context: Group context for authorization
+            
+        Returns:
+            Created ExecutionTraceItem
+        """
+        try:
+            # If job_id is provided, verify it belongs to the group
+            if 'job_id' in trace_data and trace_data['job_id'] and group_context and group_context.group_ids:
+                from src.repositories.execution_history_repository import execution_history_repository
+                execution = await execution_history_repository.get_execution_by_job_id(
+                    trace_data['job_id'],
+                    group_ids=group_context.group_ids
+                )
+                if not execution:
+                    raise ValueError("Not authorized to create trace for this job")
+            
             trace = await execution_trace_repository.create(trace_data)
                 
             return ExecutionTraceItem.model_validate(trace)
@@ -265,6 +432,53 @@ class ExecutionTraceService:
             raise
     
     @staticmethod
+    async def delete_trace_with_group_check(
+        trace_id: int,
+        group_context: GroupContext
+    ) -> Optional[DeleteTraceResponse]:
+        """
+        Delete a specific trace by ID with group authorization.
+        
+        Args:
+            trace_id: ID of the trace to delete
+            group_context: Group context for authorization
+            
+        Returns:
+            DeleteTraceResponse with information about the deleted trace
+        """
+        try:
+            # Check if the trace exists and belongs to group
+            trace = await execution_trace_repository.get_by_id(trace_id)
+            
+            if not trace:
+                return None
+            
+            # Check authorization via job_id
+            if trace.job_id and group_context and group_context.group_ids:
+                from src.repositories.execution_history_repository import execution_history_repository
+                execution = await execution_history_repository.get_execution_by_job_id(
+                    trace.job_id,
+                    group_ids=group_context.group_ids
+                )
+                if not execution:
+                    return None  # Not authorized
+            
+            # Delete the trace
+            deleted_count = await execution_trace_repository.delete_by_id(trace_id)
+            
+            return DeleteTraceResponse(
+                deleted_traces=deleted_count,
+                message=f"Successfully deleted trace {trace_id}"
+            )
+            
+        except SQLAlchemyError as e:
+            logger.error(f"Database error deleting trace {trace_id}: {str(e)}")
+            raise
+        except Exception as e:
+            logger.error(f"Error deleting trace {trace_id}: {str(e)}")
+            raise
+    
+    @staticmethod
     async def delete_traces_by_run_id(run_id: int) -> DeleteTraceResponse:
         """
         Delete all traces for a specific execution.
@@ -276,6 +490,50 @@ class ExecutionTraceService:
             DeleteTraceResponse with information about deleted traces
         """
         try:
+            # Delete the traces
+            deleted_count = await execution_trace_repository.delete_by_run_id(run_id)
+            
+            return DeleteTraceResponse(
+                deleted_traces=deleted_count,
+                message=f"Successfully deleted {deleted_count} traces for execution {run_id}"
+            )
+            
+        except SQLAlchemyError as e:
+            logger.error(f"Database error deleting traces for execution {run_id}: {str(e)}")
+            raise
+        except Exception as e:
+            logger.error(f"Error deleting traces for execution {run_id}: {str(e)}")
+            raise
+    
+    @staticmethod
+    async def delete_traces_by_run_id_with_group_check(
+        run_id: int,
+        group_context: GroupContext
+    ) -> DeleteTraceResponse:
+        """
+        Delete all traces for a specific execution with group authorization.
+        
+        Args:
+            run_id: Database ID of the execution
+            group_context: Group context for authorization
+            
+        Returns:
+            DeleteTraceResponse with information about deleted traces
+        """
+        try:
+            # Check if execution belongs to group
+            if group_context and group_context.group_ids:
+                from src.repositories.execution_history_repository import execution_history_repository
+                execution = await execution_history_repository.get_execution_by_id(
+                    run_id,
+                    group_ids=group_context.group_ids
+                )
+                if not execution:
+                    return DeleteTraceResponse(
+                        deleted_traces=0,
+                        message="Execution not found or not authorized"
+                    )
+            
             # Delete the traces
             deleted_count = await execution_trace_repository.delete_by_run_id(run_id)
             
@@ -319,6 +577,50 @@ class ExecutionTraceService:
             raise
     
     @staticmethod
+    async def delete_traces_by_job_id_with_group_check(
+        job_id: str,
+        group_context: GroupContext
+    ) -> DeleteTraceResponse:
+        """
+        Delete all traces for a specific job with group authorization.
+        
+        Args:
+            job_id: String ID of the execution (job_id)
+            group_context: Group context for authorization
+            
+        Returns:
+            DeleteTraceResponse with information about deleted traces
+        """
+        try:
+            # Check if job belongs to group
+            if group_context and group_context.group_ids:
+                from src.repositories.execution_history_repository import execution_history_repository
+                execution = await execution_history_repository.get_execution_by_job_id(
+                    job_id,
+                    group_ids=group_context.group_ids
+                )
+                if not execution:
+                    return DeleteTraceResponse(
+                        deleted_traces=0,
+                        message="Job not found or not authorized"
+                    )
+            
+            # Delete the traces
+            deleted_count = await execution_trace_repository.delete_by_job_id(job_id)
+            
+            return DeleteTraceResponse(
+                deleted_traces=deleted_count,
+                message=f"Successfully deleted {deleted_count} traces for job {job_id}"
+            )
+            
+        except SQLAlchemyError as e:
+            logger.error(f"Database error deleting traces for job_id {job_id}: {str(e)}")
+            raise
+        except Exception as e:
+            logger.error(f"Error deleting traces for job_id {job_id}: {str(e)}")
+            raise
+    
+    @staticmethod
     async def delete_all_traces() -> DeleteTraceResponse:
         """
         Delete all execution traces.
@@ -340,4 +642,55 @@ class ExecutionTraceService:
             raise
         except Exception as e:
             logger.error(f"Error deleting all traces: {str(e)}")
+            raise
+    
+    @staticmethod
+    async def delete_all_traces_for_group(
+        group_context: GroupContext
+    ) -> DeleteTraceResponse:
+        """
+        Delete all execution traces for a specific group.
+        
+        Args:
+            group_context: Group context for authorization
+        
+        Returns:
+            DeleteTraceResponse with information about deleted traces
+        """
+        try:
+            if not group_context or not group_context.group_ids:
+                return DeleteTraceResponse(
+                    deleted_traces=0,
+                    message="No group context provided"
+                )
+            
+            # Get all executions for the group
+            from src.repositories.execution_history_repository import execution_history_repository
+            executions = await execution_history_repository.get_all_executions_for_groups(
+                group_ids=group_context.group_ids
+            )
+            
+            if not executions:
+                return DeleteTraceResponse(
+                    deleted_traces=0,
+                    message="No executions found for group"
+                )
+            
+            # Delete traces for each execution
+            total_deleted = 0
+            for execution in executions:
+                if execution.job_id:
+                    deleted_count = await execution_trace_repository.delete_by_job_id(execution.job_id)
+                    total_deleted += deleted_count
+            
+            return DeleteTraceResponse(
+                deleted_traces=total_deleted,
+                message=f"Successfully deleted {total_deleted} traces for group"
+            )
+            
+        except SQLAlchemyError as e:
+            logger.error(f"Database error deleting group traces: {str(e)}")
+            raise
+        except Exception as e:
+            logger.error(f"Error deleting group traces: {str(e)}")
             raise 

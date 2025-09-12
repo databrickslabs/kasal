@@ -226,7 +226,9 @@ export const TraceService = {
             // Handle the case where the output might be in output_data, output, or directly in the trace
             output: trace.output || trace.output_data || '',
             // Include extra_data if present
-            extra_data: trace.extra_data || undefined
+            extra_data: trace.extra_data || undefined,
+            // Include trace_metadata if present
+            trace_metadata: trace.trace_metadata || undefined
           } as Trace;
         });
       } else {
@@ -241,7 +243,8 @@ export const TraceService = {
             task_id: item.task_id || undefined,
             created_at: item.created_at || item.timestamp || new Date().toISOString(),
             output: item.output || item.output_data || '',
-            extra_data: item.extra_data || undefined
+            extra_data: item.extra_data || undefined,
+            trace_metadata: item.trace_metadata || undefined
           } as Trace));
         }
         // Return empty array if no traces or invalid format

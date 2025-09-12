@@ -317,6 +317,14 @@ def create_execution_callbacks(job_id: str, config: Dict[str, Any] = None, group
             
             # Check if we're starting a new task
             current_task = execution_context.get("current_task")
+            
+            # DEBUG: Log execution context state
+            logger.info(f"{log_prefix} [DEBUG STEP] Current agent: {agent_name}")
+            logger.info(f"{log_prefix} [DEBUG STEP] Current task from context: {current_task}")
+            logger.info(f"{log_prefix} [DEBUG STEP] Last task ID: {execution_context.get('last_task_id')}")
+            logger.info(f"{log_prefix} [DEBUG STEP] Task index: {execution_context.get('task_index', 0)}")
+            logger.info(f"{log_prefix} [DEBUG STEP] Tasks already logged: {execution_context.get('task_started_logged', set())}")
+            
             if current_task:
                 # Get the task ID
                 task_id = None
@@ -329,6 +337,16 @@ def create_execution_callbacks(job_id: str, config: Dict[str, Any] = None, group
                 
                 if hasattr(current_task, 'description'):
                     task_description = current_task.description
+                
+                # If no task ID found, generate one based on task index and description
+                if not task_id:
+                    task_idx = execution_context.get("task_index", 0)
+                    task_id = f"task_{task_idx}_{hash(task_description)}"
+                    logger.info(f"{log_prefix} [DEBUG STEP] Generated task ID: {task_id} for task index {task_idx}")
+                
+                logger.info(f"{log_prefix} [DEBUG STEP] Task description: {task_description[:50]}...")
+                logger.info(f"{log_prefix} [DEBUG STEP] Task ID: {task_id}")
+                logger.info(f"{log_prefix} [DEBUG STEP] Will log start event? {task_id and task_id not in execution_context['task_started_logged']}")
                 
                 # Check if this is a new task that we haven't logged a start for
                 if task_id and task_id not in execution_context["task_started_logged"]:
@@ -543,14 +561,42 @@ def create_execution_callbacks(job_id: str, config: Dict[str, Any] = None, group
                     next_task_idx = current_task_idx + 1
                     execution_context["task_index"] = next_task_idx
                     
+                    logger.info(f"{log_prefix} [DEBUG TASK COMPLETE] Current task index: {current_task_idx}, Next task index: {next_task_idx}")
+                    logger.info(f"{log_prefix} [DEBUG TASK COMPLETE] Total tasks: {len(crew_ref.tasks) if crew_ref and hasattr(crew_ref, 'tasks') else 0}")
+                    
                     if next_task_idx < len(crew_ref.tasks):
                         next_task = crew_ref.tasks[next_task_idx]
+                        logger.info(f"{log_prefix} [DEBUG TASK COMPLETE] Next task object: {next_task}")
+                        
                         if next_task and hasattr(next_task, 'agent') and hasattr(next_task.agent, 'role'):
                             next_agent_name = next_task.agent.role
+                            
+                            # Get next task ID for debugging
+                            next_task_id = None
+                            if hasattr(next_task, '_kasal_task_id'):
+                                next_task_id = str(next_task._kasal_task_id)
+                            elif hasattr(next_task, 'id'):
+                                next_task_id = str(next_task.id)
+                            
+                            logger.info(f"{log_prefix} [DEBUG TASK COMPLETE] Next task ID: {next_task_id}")
+                            logger.info(f"{log_prefix} [DEBUG TASK COMPLETE] Before context update - current_task: {execution_context.get('current_task')}")
+                            logger.info(f"{log_prefix} [DEBUG TASK COMPLETE] Before context update - last_task_id: {execution_context.get('last_task_id')}")
+                            
                             # IMMEDIATELY update context to the next agent
                             execution_context["current_agent"] = next_agent_name
                             execution_context["current_task"] = next_task
                             execution_context["last_known_agent"] = next_agent_name
+                            
+                            # Clear the last task ID to allow the next task's start to be logged
+                            execution_context["last_task_id"] = None
+                            
+                            # IMPORTANT: Remove the next task from task_started_logged so it can be logged again
+                            if next_task_id and next_task_id in execution_context["task_started_logged"]:
+                                execution_context["task_started_logged"].discard(next_task_id)
+                                logger.info(f"{log_prefix} [DEBUG TASK COMPLETE] Cleared task {next_task_id} from logged set to allow re-logging")
+                            
+                            logger.info(f"{log_prefix} [DEBUG TASK COMPLETE] After context update - current_task: {execution_context.get('current_task')}")
+                            logger.info(f"{log_prefix} [DEBUG TASK COMPLETE] After context update - last_task_id: {execution_context.get('last_task_id')}")
                             logger.info(f"{log_prefix} *** CONTEXT SWITCH: Task {current_task_idx} ({agent_name}) completed → Task {next_task_idx} ({next_agent_name}) starting ***")
                         else:
                             logger.warning(f"{log_prefix} Next task exists but has no agent")

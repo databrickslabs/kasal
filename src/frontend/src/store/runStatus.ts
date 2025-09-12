@@ -213,7 +213,6 @@ export const useRunStatusStore = create<RunStatusState>((set, get) => {
       
       // Add debounce to prevent too many API calls in quick succession
       if (now - state.lastFetchAttempt < INTERVALS.DEBOUNCE_THRESHOLD) {
-        console.log('[RunStatusStore] Debouncing API call, too soon after previous call');
         return;
       }
       
@@ -242,9 +241,12 @@ export const useRunStatusStore = create<RunStatusState>((set, get) => {
           if (wasRunning && (run.status.toLowerCase() === 'completed' || run.status.toLowerCase() === 'failed')) {
             // Check if we've already processed this completion to avoid duplicate events
             const completionKey = `${run.job_id}-${run.status.toLowerCase()}`;
-            if (currentProcessedCompletions.has(completionKey)) {
-              console.log(`[RunStatusStore] Already processed ${run.status} event for job ${run.job_id}, skipping`);
-              return run;
+            const alreadyProcessed = currentProcessedCompletions.has(completionKey);
+            
+            if (alreadyProcessed) {
+              console.log(`[RunStatusStore] Already dispatched ${run.status} event for job ${run.job_id}, skipping event dispatch`);
+              // Don't return here! We still need to update the run data in the store
+              // Just skip the event dispatch below
             }
             
             // Dispatch appropriate event for status change
@@ -257,31 +259,34 @@ export const useRunStatusStore = create<RunStatusState>((set, get) => {
               // If status is COMPLETED, ignore the error field and treat as success
             }
             
-            // Only dispatch ONE event based on status, ignoring error field if status is completed
-            if (run.status.toLowerCase() === 'completed') {
-              console.log(`[RunStatusStore] Dispatching jobCompleted event for job ${run.job_id}`);
-              
-              // Mark as processed before dispatching
-              currentProcessedCompletions.add(completionKey);
-              
-              window.dispatchEvent(new CustomEvent('jobCompleted', { 
-                detail: { 
-                  jobId: run.job_id,
-                  result: run.result
-                }
-              }));
-            } else if (run.status.toLowerCase() === 'failed') {
-              console.log(`[RunStatusStore] Dispatching jobFailed event for job ${run.job_id} with error: ${run.error}`);
-              
-              // Mark as processed before dispatching
-              currentProcessedCompletions.add(completionKey);
-              
-              window.dispatchEvent(new CustomEvent('jobFailed', { 
-                detail: { 
-                  jobId: run.job_id,
-                  error: run.error || 'Job execution failed'
-                }
-              }));
+            // Only dispatch events if we haven't already processed this completion
+            if (!alreadyProcessed) {
+              // Only dispatch ONE event based on status, ignoring error field if status is completed
+              if (run.status.toLowerCase() === 'completed') {
+                console.log(`[RunStatusStore] Dispatching jobCompleted event for job ${run.job_id}`);
+                
+                // Mark as processed before dispatching
+                currentProcessedCompletions.add(completionKey);
+                
+                window.dispatchEvent(new CustomEvent('jobCompleted', { 
+                  detail: { 
+                    jobId: run.job_id,
+                    result: run.result
+                  }
+                }));
+              } else if (run.status.toLowerCase() === 'failed') {
+                console.log(`[RunStatusStore] Dispatching jobFailed event for job ${run.job_id} with error: ${run.error}`);
+                
+                // Mark as processed before dispatching
+                currentProcessedCompletions.add(completionKey);
+                
+                window.dispatchEvent(new CustomEvent('jobFailed', { 
+                  detail: { 
+                    jobId: run.job_id,
+                    error: run.error || 'Job execution failed'
+                  }
+                }));
+              }
             }
           }
           
@@ -290,7 +295,6 @@ export const useRunStatusStore = create<RunStatusState>((set, get) => {
           if ((run.status.toLowerCase() === 'completed' || run.status.toLowerCase() === 'failed')) {
             // Ensure the completed job has a completed_at timestamp
             if (!run.completed_at) {
-              console.log(`[RunStatusStore] Fixing missing completed_at for job ${run.job_id} with status ${run.status}`);
               return {
                 ...run,
                 completed_at: run.updated_at || new Date().toISOString()

@@ -13,6 +13,8 @@ import {
   Collapse,
   Chip,
   Button,
+  Tooltip,
+  Divider,
 } from '@mui/material';
 import CloseIcon from '@mui/icons-material/Close';
 import ExpandMoreIcon from '@mui/icons-material/ExpandMore';
@@ -21,8 +23,18 @@ import AccessTimeIcon from '@mui/icons-material/AccessTime';
 import CheckCircleIcon from '@mui/icons-material/CheckCircle';
 import PlayCircleIcon from '@mui/icons-material/PlayCircle';
 import ContentCopyIcon from '@mui/icons-material/ContentCopy';
+import PreviewIcon from '@mui/icons-material/Preview';
+import TerminalIcon from '@mui/icons-material/Terminal';
+import RefreshIcon from '@mui/icons-material/Refresh';
 import { ShowTraceProps, Trace } from '../../types/trace';
 import TraceService from '../../api/TraceService';
+import { useUserPreferencesStore } from '../../store/userPreferencesStore';
+import { useTranslation } from 'react-i18next';
+import ShowLogs from './ShowLogs';
+import { executionLogService, LogEntry } from '../../api/ExecutionLogs';
+import { useRunResult } from '../../hooks/global/useExecutionResult';
+import ReactMarkdown from 'react-markdown';
+import remarkGfm from 'remark-gfm';
 
 interface GroupedTrace {
   agent: string;
@@ -56,7 +68,18 @@ interface ProcessedTraces {
   };
 }
 
-const ShowTraceTimeline: React.FC<ShowTraceProps> = ({ open, onClose, runId }) => {
+const ShowTraceTimeline: React.FC<ShowTraceProps> = ({ 
+  open, 
+  onClose, 
+  runId, 
+  run, 
+  onViewResult, 
+  onShowLogs, 
+ 
+}) => {
+  const { t } = useTranslation();
+  const { useNewExecutionUI } = useUserPreferencesStore();
+  const { showRunResult } = useRunResult();
   const [_traces, setTraces] = useState<Trace[]>([]);
   const [processedTraces, setProcessedTraces] = useState<ProcessedTraces | null>(null);
   const [loading, setLoading] = useState<boolean>(true);
@@ -68,10 +91,48 @@ const ShowTraceTimeline: React.FC<ShowTraceProps> = ({ open, onClose, runId }) =
     description: string;
     output?: string | Record<string, unknown>;
   } | null>(null);
+  const [showLogsDialog, setShowLogsDialog] = useState(false);
+  const [logs, setLogs] = useState<LogEntry[]>([]);
+  const [isLoadingLogs, setIsLoadingLogs] = useState(false);
+  const [logsError, setLogsError] = useState<string | null>(null);
+  const [isRefreshing, setIsRefreshing] = useState(false);
+
+  // Handle opening logs dialog
+  const handleOpenLogs = async () => {
+    if (!run) return;
+    
+    setShowLogsDialog(true);
+    setIsLoadingLogs(true);
+    setLogsError(null);
+    
+    try {
+      const fetchedLogs = await executionLogService.getHistoricalLogs(run.job_id);
+      // Convert LogMessage to LogEntry format
+      const logEntries: LogEntry[] = fetchedLogs.map(log => ({
+        id: log.id,
+        output: log.output,
+        content: log.content,
+        timestamp: log.timestamp,
+        logType: log.type
+      }));
+      setLogs(logEntries);
+    } catch (error) {
+      console.error('Error fetching logs:', error);
+      setLogsError('Failed to fetch logs');
+    } finally {
+      setIsLoadingLogs(false);
+    }
+  };
 
   // Process traces into hierarchical structure
   const processTraces = useCallback((rawTraces: Trace[]): ProcessedTraces => {
-    const sorted = [...rawTraces].sort((a, b) => 
+    // Filter out Task Orchestrator events before processing
+    const filteredTraces = rawTraces.filter(trace => 
+      trace.event_source !== 'Task Orchestrator' && 
+      trace.event_context !== 'task_management'
+    );
+    
+    const sorted = [...filteredTraces].sort((a, b) => 
       new Date(a.created_at).getTime() - new Date(b.created_at).getTime()
     );
 
@@ -131,8 +192,11 @@ const ShowTraceTimeline: React.FC<ShowTraceProps> = ({ open, onClose, runId }) =
 
     // Second pass: group traces by agent
     sorted.forEach(trace => {
-      // Skip global events and task events for agent grouping
-      if (trace.event_source === 'crew' || trace.event_source === 'task') {
+      // Skip global events, task orchestration events, and task events for agent grouping
+      if (trace.event_source === 'crew' || 
+          trace.event_source === 'task' || 
+          trace.event_source === 'Task Orchestrator' ||
+          trace.event_context === 'task_management') {
         return;
       }
 
@@ -173,32 +237,70 @@ const ShowTraceTimeline: React.FC<ShowTraceProps> = ({ open, onClose, runId }) =
       const agentStart = new Date(agentTraces[0].created_at);
       const agentEnd = new Date(agentTraces[agentTraces.length - 1].created_at);
 
-      // Group agent traces by task - using timestamps to determine task boundaries
+      // Group agent traces by task - using task_started events to determine task boundaries
       const taskMap = new Map<string, Trace[]>();
       let currentTask: string | null = null;
+      let taskCounter = 0;
 
       agentTraces.forEach(trace => {
-        // Look for a task that encompasses this trace's timestamp
-        const traceTime = new Date(trace.created_at).getTime();
-        
-        // Find matching task by checking task completions
-        const taskEntries = Array.from(taskDescriptions.entries());
-        for (const [taskContext, taskDesc] of taskEntries) {
-          // Find task completion trace
-          const taskCompletion = sorted.find(t => 
-            t.event_source === 'task' && 
-            t.event_type === 'task_completed' && 
-            t.event_context === taskContext
-          );
+        // Check if this is a task_started event - if so, start a new task section
+        if (trace.event_type === 'task_started') {
+          // Extract task name from the task_started event
+          let newTaskName: string | null = null;
           
-          if (taskCompletion) {
-            const taskEndTime = new Date(taskCompletion.created_at).getTime();
-            // If trace is before task completion and agent matches, it belongs to this task
-            if (traceTime <= taskEndTime + 1000) { // Within 1 second after task completion
-              const taskAgent = agentTaskMap.get(taskContext);
-              if (!taskAgent || taskAgent === agentName) {
-                currentTask = taskDesc;
-                break;
+          // First try trace_metadata (where task_name is typically stored)
+          if (trace.trace_metadata) {
+            const metadata = trace.trace_metadata as Record<string, unknown>;
+            const taskName = metadata.task_name as string;
+            if (taskName) {
+              newTaskName = taskName;
+            }
+          }
+          
+          // Fallback to extra_data if trace_metadata doesn't have task_name
+          if (!newTaskName && trace.extra_data) {
+            const extraData = trace.extra_data as Record<string, unknown>;
+            const taskName = extraData.task_name as string;
+            if (taskName) {
+              newTaskName = taskName;
+            }
+          }
+          
+          // If we found a task name, use it as the new current task
+          if (newTaskName) {
+            // Make task name unique if it already exists
+            let uniqueTaskName = newTaskName;
+            if (taskMap.has(newTaskName)) {
+              taskCounter++;
+              uniqueTaskName = `${newTaskName} (${taskCounter})`;
+            }
+            currentTask = uniqueTaskName;
+          }
+        }
+        
+        // If we still don't have a current task, try to find it from task descriptions
+        if (!currentTask) {
+          const traceTime = new Date(trace.created_at).getTime();
+          
+          // Find matching task by checking task completions
+          const taskEntries = Array.from(taskDescriptions.entries());
+          for (const [taskContext, taskDesc] of taskEntries) {
+            // Find task completion trace
+            const taskCompletion = sorted.find(t => 
+              t.event_source === 'task' && 
+              t.event_type === 'task_completed' && 
+              t.event_context === taskContext
+            );
+            
+            if (taskCompletion) {
+              const taskEndTime = new Date(taskCompletion.created_at).getTime();
+              // If trace is before task completion and agent matches, it belongs to this task
+              if (traceTime <= taskEndTime + 1000) { // Within 1 second after task completion
+                const taskAgent = agentTaskMap.get(taskContext);
+                if (!taskAgent || taskAgent === agentName) {
+                  currentTask = taskDesc;
+                  break;
+                }
               }
             }
           }
@@ -260,12 +362,21 @@ const ShowTraceTimeline: React.FC<ShowTraceProps> = ({ open, onClose, runId }) =
               description += ` - ${shortModelName}`;
             }
           } else if (trace.event_type === 'tool_usage') {
-            // Tool usage event
+            // Tool usage event - tool name is now in event_context
             eventType = 'tool';
-            const toolName = trace.event_source || 'Tool';
+            const toolName = trace.event_context || 'Tool';
             description = toolName;
           } else if (trace.event_type === 'agent_execution' || trace.event_type === 'agent_step') {
-            const output = typeof trace.output === 'string' ? trace.output : '';
+            // Extract the actual content from the output JSON structure
+            let outputStr = '';
+            if (trace.output) {
+              if (typeof trace.output === 'string') {
+                outputStr = trace.output;
+              } else if (typeof trace.output === 'object' && 'content' in trace.output) {
+                outputStr = String((trace.output as Record<string, unknown>).content || '');
+              }
+            }
+            const output = outputStr;
             
             // Check extra_data for step type information
             let stepType = '';
@@ -292,7 +403,7 @@ const ShowTraceTimeline: React.FC<ShowTraceProps> = ({ open, onClose, runId }) =
             } else if (stepType === 'AgentStart') {
               eventType = 'agent_start';
               description = 'Task Started';
-            } else if (trace.output && typeof trace.output === 'string' && trace.output.length > 100) {
+            } else if (output && output.length > 100) {
               // Long output usually means the agent is providing results
               eventType = 'agent_output';
               description = 'Task Output';
@@ -302,10 +413,85 @@ const ShowTraceTimeline: React.FC<ShowTraceProps> = ({ open, onClose, runId }) =
             }
           } else if (trace.event_type === 'task_started') {
             eventType = 'task_start';
-            description = 'Task Started';
+            // Extract task name from trace_metadata first, then extra_data
+            let taskName = 'Task Started';
+            if (trace.trace_metadata && typeof trace.trace_metadata === 'object') {
+              const metadata = trace.trace_metadata as Record<string, unknown>;
+              const name = metadata.task_name as string;
+              if (name) {
+                // Truncate long task names for display
+                taskName = name.length > 50 ? name.substring(0, 47) + '...' : name;
+              }
+            } else if (trace.extra_data && typeof trace.extra_data === 'object') {
+              const extraData = trace.extra_data as Record<string, unknown>;
+              const name = extraData.task_name as string;
+              if (name) {
+                // Truncate long task names for display
+                taskName = name.length > 50 ? name.substring(0, 47) + '...' : name;
+              }
+            }
+            description = `Starting: ${taskName}`;
           } else if (trace.event_type === 'task_completed') {
             eventType = 'task_complete';
-            description = 'Task Completed';
+            // Extract task name from trace_metadata first, then extra_data
+            let taskName = 'Task Completed';
+            if (trace.trace_metadata && typeof trace.trace_metadata === 'object') {
+              const metadata = trace.trace_metadata as Record<string, unknown>;
+              const name = metadata.task_name as string;
+              if (name) {
+                // Truncate long task names for display
+                taskName = name.length > 50 ? name.substring(0, 47) + '...' : name;
+              }
+            } else if (trace.extra_data && typeof trace.extra_data === 'object') {
+              const extraData = trace.extra_data as Record<string, unknown>;
+              const name = extraData.task_name as string;
+              if (name) {
+                // Truncate long task names for display
+                taskName = name.length > 50 ? name.substring(0, 47) + '...' : name;
+              }
+            }
+            description = `Completed: ${taskName}`;
+          } else if (trace.event_type === 'memory_operation') {
+            eventType = 'memory_operation';
+            // Extract operation type from context or output
+            if (trace.event_context) {
+              if (trace.event_context.includes('query')) {
+                description = 'Memory Query';
+              } else if (trace.event_context.includes('sav')) {
+                description = 'Memory Save';
+              } else {
+                description = 'Memory Operation';
+              }
+            } else {
+              description = 'Memory Operation';
+            }
+          } else if (trace.event_type === 'knowledge_operation') {
+            eventType = 'knowledge_operation';
+            description = 'Knowledge Operation';
+          } else if (trace.event_type === 'agent_reasoning' || trace.event_type === 'agent_reasoning_error') {
+            eventType = 'reasoning';
+            // Extract reasoning details
+            if (trace.event_type === 'agent_reasoning_error') {
+              description = 'Reasoning Failed';
+            } else {
+              description = 'Agent Reasoning';
+              // Check if there's a plan in the output
+              if (trace.output && typeof trace.output === 'string' && trace.output.includes('plan')) {
+                description = 'Agent Planning';
+              }
+            }
+          } else if (trace.event_type === 'llm_guardrail') {
+            eventType = 'guardrail';
+            description = 'LLM Guardrail Check';
+            // Check if it passed or failed from extra_data
+            if (trace.extra_data && typeof trace.extra_data === 'object') {
+              const extraData = trace.extra_data as Record<string, unknown>;
+              if (extraData.success === true) {
+                description = 'Guardrail Passed';
+              } else if (extraData.success === false) {
+                description = 'Guardrail Failed';
+              }
+            }
           } else {
             eventType = trace.event_type;
             // Make the description more readable
@@ -315,12 +501,22 @@ const ShowTraceTimeline: React.FC<ShowTraceProps> = ({ open, onClose, runId }) =
             description = readableDesc;
           }
 
+          // Extract the actual content from the output JSON structure
+          let outputContent: string | Record<string, unknown> | undefined = trace.output;
+          if (trace.output && typeof trace.output === 'object' && 'content' in trace.output) {
+            const content = (trace.output as Record<string, unknown>).content;
+            // Ensure content is of the right type
+            if (typeof content === 'string' || (typeof content === 'object' && content !== null)) {
+              outputContent = content as string | Record<string, unknown>;
+            }
+          }
+          
           return {
             type: eventType,
             description,
             timestamp,
             duration,
-            output: trace.output
+            output: outputContent
           };
         });
 
@@ -352,16 +548,22 @@ const ShowTraceTimeline: React.FC<ShowTraceProps> = ({ open, onClose, runId }) =
     };
   }, []);
 
-  const fetchTraceData = useCallback(async () => {
+  const fetchTraceData = useCallback(async (isInitialLoad = true) => {
     if (!runId) return;
     
     try {
-      setLoading(true);
+      // Use different loading states for initial load vs refresh
+      if (isInitialLoad) {
+        setLoading(true);
+      } else {
+        setIsRefreshing(true);
+      }
       
       const runExists = await TraceService.checkRunExists(runId);
       if (!runExists) {
         setError(`Run ID ${runId} does not exist or is no longer available.`);
         setLoading(false);
+        setIsRefreshing(false);
         return;
       }
 
@@ -379,8 +581,20 @@ const ShowTraceTimeline: React.FC<ShowTraceProps> = ({ open, onClose, runId }) =
         setTraces(traces);
         const processed = processTraces(traces);
         setProcessedTraces(processed);
-        // Expand all agents by default
-        setExpandedAgents(new Set(processed.agents.map((_, idx) => idx)));
+        
+        if (isInitialLoad) {
+          // Only expand all agents on initial load
+          setExpandedAgents(new Set(processed.agents.map((_, idx) => idx)));
+        } else {
+          // During refresh, preserve expanded state but auto-expand new tasks for expanded agents
+          // We'll handle this outside the callback to avoid dependency issues
+          setExpandedAgents(prev => {
+            // Just preserve the current expanded agents
+            return prev;
+          });
+        }
+        // Don't reset selectedEvent during refresh
+        // This preserves any open event detail dialog
         setError(null);
       }
     } catch (err) {
@@ -389,14 +603,63 @@ const ShowTraceTimeline: React.FC<ShowTraceProps> = ({ open, onClose, runId }) =
       setTraces([]);
     } finally {
       setLoading(false);
+      setIsRefreshing(false);
     }
   }, [runId, processTraces]);
 
   useEffect(() => {
     if (open) {
-      fetchTraceData();
+      fetchTraceData(true); // Initial load
     }
   }, [open, fetchTraceData]);
+
+  // Auto-expand tasks for expanded agents when traces update
+  useEffect(() => {
+    if (!processedTraces || !isRefreshing) return;
+    
+    setExpandedTasks(prevExpandedTasks => {
+      const newExpandedTasks = new Set(prevExpandedTasks);
+      
+      // For each expanded agent, ensure all its tasks are in the expanded set
+      expandedAgents.forEach(agentIdx => {
+        if (processedTraces.agents[agentIdx]) {
+          processedTraces.agents[agentIdx].tasks.forEach((_, taskIdx) => {
+            const taskKey = `${agentIdx}-${taskIdx}`;
+            // Add new tasks to expanded set if the agent is expanded
+            newExpandedTasks.add(taskKey);
+          });
+        }
+      });
+      
+      return newExpandedTasks;
+    });
+  }, [processedTraces, expandedAgents, isRefreshing]);
+
+  // Auto-refresh every 5 seconds while dialog is open and execution is not completed
+  useEffect(() => {
+    if (!open) return;
+
+    // Check if execution is in a terminal state (don't refresh if completed/failed/cancelled/stopped)
+    const isTerminalState = run?.status && [
+      'completed', 
+      'failed', 
+      'cancelled', 
+      'stopped',
+      'error'
+    ].includes(run.status.toLowerCase());
+
+    if (isTerminalState) {
+      return; // Don't set up refresh interval if execution is done
+    }
+
+    const refreshInterval = setInterval(() => {
+      fetchTraceData(false); // Refresh (not initial load)
+    }, 5000); // Refresh every 5 seconds
+
+    return () => {
+      clearInterval(refreshInterval);
+    };
+  }, [open, run?.status, fetchTraceData]);
 
   const formatDuration = (ms: number): string => {
     if (ms < 1000) return `${ms}ms`;
@@ -435,6 +698,7 @@ const ShowTraceTimeline: React.FC<ShowTraceProps> = ({ open, onClose, runId }) =
     switch (type) {
       case 'tool':
       case 'tool_result':
+      case 'tool_usage':
         return '🔧';
       case 'llm':
         return '🤖';
@@ -447,9 +711,18 @@ const ShowTraceTimeline: React.FC<ShowTraceProps> = ({ open, onClose, runId }) =
       case 'completed':
         return '✅';
       case 'agent_output':
+      case 'agent_execution':
         return '📝';
       case 'agent_processing':
         return '⚙️';
+      case 'memory_operation':
+        return '💾';
+      case 'knowledge_operation':
+        return '📚';
+      case 'crew_started':
+        return '🚀';
+      case 'crew_completed':
+        return '🏁';
       default:
         return '•';
     }
@@ -484,6 +757,7 @@ const ShowTraceTimeline: React.FC<ShowTraceProps> = ({ open, onClose, runId }) =
   if (!open) return null;
 
   return (
+    <>
     <Dialog 
       open={open} 
       onClose={onClose}
@@ -496,20 +770,84 @@ const ShowTraceTimeline: React.FC<ShowTraceProps> = ({ open, onClose, runId }) =
         }
       }}
     >
-      <DialogTitle sx={{ m: 0, p: 2, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-        <Typography variant="h6">Execution Trace Timeline</Typography>
-        <IconButton
-          aria-label="close"
-          onClick={onClose}
-          sx={{
-            position: 'absolute',
-            right: 8,
-            top: 8,
-            color: (theme: Theme) => theme.palette.grey[500],
-          }}
-        >
-          <CloseIcon />
-        </IconButton>
+      <DialogTitle sx={{ m: 0, p: 2 }}>
+        <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+          <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+            <Typography variant="h6">Execution Trace Timeline</Typography>
+            {isRefreshing && (
+              <Tooltip title="Refreshing...">
+                <RefreshIcon 
+                  sx={{ 
+                    fontSize: 20, 
+                    color: 'primary.main',
+                    animation: 'spin 1s linear infinite',
+                    '@keyframes spin': {
+                      '0%': { transform: 'rotate(0deg)' },
+                      '100%': { transform: 'rotate(360deg)' }
+                    }
+                  }} 
+                />
+              </Tooltip>
+            )}
+            <Tooltip title={
+              run?.status && ['completed', 'failed', 'cancelled', 'stopped', 'error'].includes(run.status.toLowerCase())
+                ? "Refresh now (auto-refresh disabled - execution completed)"
+                : "Refresh now (auto-refreshes every 5s)"
+            }>
+              <IconButton 
+                size="small" 
+                onClick={() => fetchTraceData(false)}
+                disabled={isRefreshing || loading}
+                sx={{ ml: 0.5 }}
+              >
+                <RefreshIcon fontSize="small" />
+              </IconButton>
+            </Tooltip>
+          </Box>
+          <Box sx={{ display: 'flex', gap: 1, alignItems: 'center' }}>
+            {/* Show action buttons only in new UI mode and when we have the run data */}
+            {useNewExecutionUI && run && (
+              <>
+                <Tooltip title={t('runHistory.actions.viewResult')}>
+                  <span>
+                    <IconButton
+                      size="small"
+                      onClick={() => {
+                        if (onViewResult && run) {
+                          // Use showRunResult from hook to ensure proper z-index handling
+                          showRunResult(run);
+                        }
+                      }}
+                      color="primary"
+                      disabled={['running', 'pending', 'queued', 'in_progress'].includes(run?.status?.toLowerCase() || '')}
+                    >
+                      <PreviewIcon fontSize="small" />
+                    </IconButton>
+                  </span>
+                </Tooltip>
+                <Tooltip title={t('runHistory.actions.viewLogs')}>
+                  <IconButton
+                    size="small"
+                    onClick={handleOpenLogs}
+                    color="primary"
+                  >
+                    <TerminalIcon fontSize="small" />
+                  </IconButton>
+                </Tooltip>
+                <Divider orientation="vertical" flexItem sx={{ mx: 1 }} />
+              </>
+            )}
+            <IconButton
+              aria-label="close"
+              onClick={onClose}
+              sx={{
+                color: (theme: Theme) => theme.palette.grey[500],
+              }}
+            >
+              <CloseIcon />
+            </IconButton>
+          </Box>
+        </Box>
       </DialogTitle>
 
       <DialogContent dividers sx={{ p: 0 }}>
@@ -610,11 +948,21 @@ const ShowTraceTimeline: React.FC<ShowTraceProps> = ({ open, onClose, runId }) =
                             <Box sx={{ pl: 4, mt: 1 }}>
                               {task.events.map((event, eventIdx) => {
                                 const hasOutput = !!event.output;
+                                // Make all events with output clickable, including memory operations
                                 const isClickable = hasOutput && (
                                   event.type === 'llm' || 
                                   event.type === 'agent_complete' || 
                                   event.type === 'agent_output' ||
-                                  event.type === 'tool_result'
+                                  event.type === 'tool_result' ||
+                                  event.type === 'task_complete' ||
+                                  event.type === 'memory_operation' ||
+                                  event.type === 'tool_usage' ||
+                                  event.type === 'knowledge_operation' ||
+                                  event.type === 'agent_execution' ||
+                                  // Also check for underscore versions
+                                  event.type.includes('memory') ||
+                                  event.type.includes('tool') ||
+                                  event.type.includes('knowledge')
                                 );
                                 
                                 return (
@@ -772,7 +1120,12 @@ const ShowTraceTimeline: React.FC<ShowTraceProps> = ({ open, onClose, runId }) =
         {selectedEvent && (
           <>
             <DialogTitle sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-              <Typography variant="h6">{selectedEvent.description}</Typography>
+              <Box>
+                <Typography variant="h6">{selectedEvent.description}</Typography>
+                <Typography variant="caption" color="text.secondary">
+                  Event Type: {selectedEvent.type}
+                </Typography>
+              </Box>
               <IconButton
                 onClick={() => setSelectedEvent(null)}
                 size="small"
@@ -782,23 +1135,147 @@ const ShowTraceTimeline: React.FC<ShowTraceProps> = ({ open, onClose, runId }) =
             </DialogTitle>
             <DialogContent dividers>
               <Box sx={{ position: 'relative' }}>
-                <Typography variant="caption" color="text.secondary" gutterBottom>
-                  Event Type: {selectedEvent.type}
-                </Typography>
+                {/* Special formatting for memory operations */}
+                {selectedEvent.type === 'memory_operation' || selectedEvent.type.includes('memory') ? (
+                  <Box>
+                    <Typography variant="subtitle2" gutterBottom>
+                      Memory Operation Details
+                    </Typography>
+                    {typeof selectedEvent.output === 'object' && selectedEvent.output && (
+                      <Box sx={{ mb: 2 }}>
+                        {('operation' in selectedEvent.output) && (
+                          <Chip 
+                            label={`Operation: ${selectedEvent.output.operation as string}`} 
+                            sx={{ mr: 1, mb: 1 }} 
+                            size="small"
+                            color="primary"
+                          />
+                        )}
+                        {('memory_type' in selectedEvent.output) && (
+                          <Chip 
+                            label={`Type: ${selectedEvent.output.memory_type as string}`} 
+                            sx={{ mr: 1, mb: 1 }} 
+                            size="small"
+                            color="secondary"
+                          />
+                        )}
+                      </Box>
+                    )}
+                  </Box>
+                ) : null}
+                
+                {/* Special formatting for tool usage */}
+                {selectedEvent.type === 'tool_usage' || selectedEvent.type === 'tool_result' ? (
+                  <Box>
+                    <Typography variant="subtitle2" gutterBottom>
+                      Tool Usage Details
+                    </Typography>
+                    {typeof selectedEvent.output === 'object' && selectedEvent.output && (
+                      <Box sx={{ mb: 2 }}>
+                        {('tool_name' in selectedEvent.output) && (
+                          <Chip 
+                            label={`Tool: ${selectedEvent.output.tool_name as string}`} 
+                            sx={{ mr: 1, mb: 1 }} 
+                            size="small"
+                            color="info"
+                          />
+                        )}
+                      </Box>
+                    )}
+                  </Box>
+                ) : null}
+                
                 <Paper 
                   sx={{ 
                     p: 2, 
                     mt: 1,
-                    backgroundColor: 'grey.50',
+                    backgroundColor: (theme) => theme.palette.mode === 'dark' ? 'grey.900' : 'grey.50',
                     maxHeight: '60vh',
                     overflow: 'auto',
-                    fontFamily: 'monospace',
-                    fontSize: '0.875rem',
-                    whiteSpace: 'pre-wrap',
-                    wordBreak: 'break-word'
+                    '& pre': {
+                      overflowX: 'auto',
+                      padding: 1,
+                      borderRadius: 1,
+                      backgroundColor: (theme) => theme.palette.mode === 'dark' ? 'grey.800' : 'grey.100',
+                      fontFamily: 'monospace',
+                      fontSize: '0.875rem',
+                    },
+                    '& code': {
+                      fontFamily: 'monospace',
+                      fontSize: '0.875rem',
+                      backgroundColor: (theme) => theme.palette.mode === 'dark' ? 'grey.800' : 'grey.200',
+                      padding: '2px 4px',
+                      borderRadius: '3px',
+                    },
+                    '& p': {
+                      marginTop: 1,
+                      marginBottom: 1,
+                    },
+                    '& ul, & ol': {
+                      paddingLeft: 3,
+                      marginTop: 1,
+                      marginBottom: 1,
+                    },
+                    '& li': {
+                      marginTop: 0.5,
+                      marginBottom: 0.5,
+                    },
+                    '& blockquote': {
+                      borderLeft: '4px solid',
+                      borderColor: 'primary.main',
+                      paddingLeft: 2,
+                      marginLeft: 0,
+                      marginTop: 1,
+                      marginBottom: 1,
+                      fontStyle: 'italic',
+                      color: 'text.secondary',
+                    },
+                    '& h1, & h2, & h3, & h4, & h5, & h6': {
+                      marginTop: 2,
+                      marginBottom: 1,
+                      fontWeight: 'bold',
+                    },
+                    '& h1': { fontSize: '1.5rem' },
+                    '& h2': { fontSize: '1.3rem' },
+                    '& h3': { fontSize: '1.1rem' },
+                    '& h4': { fontSize: '1rem' },
+                    '& h5': { fontSize: '0.9rem' },
+                    '& h6': { fontSize: '0.85rem' },
+                    '& table': {
+                      width: '100%',
+                      borderCollapse: 'collapse',
+                      marginTop: 1,
+                      marginBottom: 1,
+                    },
+                    '& th, & td': {
+                      border: '1px solid',
+                      borderColor: 'divider',
+                      padding: 1,
+                      textAlign: 'left',
+                    },
+                    '& th': {
+                      backgroundColor: (theme) => theme.palette.mode === 'dark' ? 'grey.800' : 'grey.200',
+                      fontWeight: 'bold',
+                    },
+                    '& hr': {
+                      marginTop: 2,
+                      marginBottom: 2,
+                      border: 'none',
+                      borderTop: '1px solid',
+                      borderColor: 'divider',
+                    },
+                    '& a': {
+                      color: 'primary.main',
+                      textDecoration: 'none',
+                      '&:hover': {
+                        textDecoration: 'underline',
+                      },
+                    },
                   }}
                 >
-                  {formatOutput(selectedEvent.output)}
+                  <ReactMarkdown remarkPlugins={[remarkGfm]}>
+                    {formatOutput(selectedEvent.output)}
+                  </ReactMarkdown>
                 </Paper>
               </Box>
             </DialogContent>
@@ -820,6 +1297,20 @@ const ShowTraceTimeline: React.FC<ShowTraceProps> = ({ open, onClose, runId }) =
         )}
       </Dialog>
     </Dialog>
+    
+    {/* Render dialogs outside of main dialog to ensure proper z-index stacking */}
+    {/* Show Logs Dialog - only in new UI mode */}
+    {useNewExecutionUI && run && showLogsDialog && (
+      <ShowLogs
+        open={showLogsDialog}
+        onClose={() => setShowLogsDialog(false)}
+        logs={logs}
+        jobId={run.job_id}
+        isConnecting={isLoadingLogs}
+        connectionError={logsError}
+      />
+    )}
+  </>
   );
 };
 
