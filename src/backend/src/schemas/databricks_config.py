@@ -12,6 +12,18 @@ class DatabricksConfigBase(BaseModel):
     secret_scope: str = ""
     enabled: bool = True
     apps_enabled: bool = False
+    
+    # Volume configuration fields
+    volume_enabled: bool = False
+    volume_path: Optional[str] = None
+    volume_file_format: str = "json"
+    volume_create_date_dirs: bool = True
+    
+    # Knowledge source volume configuration
+    knowledge_volume_enabled: bool = False
+    knowledge_volume_path: Optional[str] = None
+    knowledge_chunk_size: int = 1000
+    knowledge_chunk_overlap: int = 200
 
 
 class DatabricksConfigCreate(DatabricksConfigBase):
@@ -64,6 +76,18 @@ class DatabricksConfigUpdate(DatabricksConfigBase):
     secret_scope: Optional[str] = None
     enabled: Optional[bool] = None
     apps_enabled: Optional[bool] = None
+    
+    # Volume configuration fields
+    volume_enabled: Optional[bool] = None
+    volume_path: Optional[str] = None
+    volume_file_format: Optional[str] = None
+    volume_create_date_dirs: Optional[bool] = None
+    
+    # Knowledge source volume configuration
+    knowledge_volume_enabled: Optional[bool] = None
+    knowledge_volume_path: Optional[str] = None
+    knowledge_chunk_size: Optional[int] = None
+    knowledge_chunk_overlap: Optional[int] = None
 
 
 class DatabricksConfigInDB(DatabricksConfigBase):

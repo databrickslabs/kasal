@@ -18,24 +18,27 @@ class DatabricksService:
     Service for Databricks integration operations.
     """
     
-    def __init__(self, databricks_repository: DatabricksConfigRepository):
+    def __init__(self, databricks_repository: DatabricksConfigRepository, group_id: Optional[str] = None):
         """
         Initialize the service with a repository instance.
         
         Args:
             databricks_repository: Repository for database operations
+            group_id: Group ID for multi-tenant filtering
         """
         self.repository = databricks_repository
+        self.group_id = group_id
         self.secrets_service = DatabricksSecretsService(databricks_repository)
         # Set self in secrets_service to resolve circular dependency
         self.secrets_service.set_databricks_service(self)
     
-    async def set_databricks_config(self, config_in: DatabricksConfigCreate) -> Dict:
+    async def set_databricks_config(self, config_in: DatabricksConfigCreate, created_by_email: Optional[str] = None) -> Dict:
         """
         Set Databricks configuration.
         
         Args:
             config_in: Configuration data
+            created_by_email: Email of the user creating the config
             
         Returns:
             Configuration response with success message
@@ -50,7 +53,19 @@ class DatabricksService:
                 "secret_scope": config_in.secret_scope,
                 "is_active": True,
                 "is_enabled": config_in.enabled,
-                "apps_enabled": config_in.apps_enabled
+                "apps_enabled": config_in.apps_enabled,
+                "group_id": self.group_id,
+                "created_by_email": created_by_email,
+                # Volume configuration fields
+                "volume_enabled": config_in.volume_enabled,
+                "volume_path": config_in.volume_path,
+                "volume_file_format": config_in.volume_file_format,
+                "volume_create_date_dirs": config_in.volume_create_date_dirs,
+                # Knowledge source volume configuration
+                "knowledge_volume_enabled": config_in.knowledge_volume_enabled,
+                "knowledge_volume_path": config_in.knowledge_volume_path,
+                "knowledge_chunk_size": config_in.knowledge_chunk_size,
+                "knowledge_chunk_overlap": config_in.knowledge_chunk_overlap
             }
             
             # Create the new configuration through repository
@@ -67,7 +82,17 @@ class DatabricksService:
                     schema=new_config.schema,
                     secret_scope=new_config.secret_scope,
                     enabled=new_config.is_enabled,
-                    apps_enabled=new_config.apps_enabled
+                    apps_enabled=new_config.apps_enabled,
+                    # Volume configuration fields
+                    volume_enabled=new_config.volume_enabled if hasattr(new_config, 'volume_enabled') else False,
+                    volume_path=new_config.volume_path if hasattr(new_config, 'volume_path') else None,
+                    volume_file_format=new_config.volume_file_format if hasattr(new_config, 'volume_file_format') else 'json',
+                    volume_create_date_dirs=new_config.volume_create_date_dirs if hasattr(new_config, 'volume_create_date_dirs') else True,
+                    # Knowledge source volume configuration
+                    knowledge_volume_enabled=new_config.knowledge_volume_enabled if hasattr(new_config, 'knowledge_volume_enabled') else False,
+                    knowledge_volume_path=new_config.knowledge_volume_path if hasattr(new_config, 'knowledge_volume_path') else None,
+                    knowledge_chunk_size=new_config.knowledge_chunk_size if hasattr(new_config, 'knowledge_chunk_size') else 1000,
+                    knowledge_chunk_overlap=new_config.knowledge_chunk_overlap if hasattr(new_config, 'knowledge_chunk_overlap') else 200
                 )
             }
         except Exception as e:
@@ -76,13 +101,13 @@ class DatabricksService:
     
     async def get_databricks_config(self) -> DatabricksConfigResponse:
         """
-        Get the current Databricks configuration.
+        Get the current Databricks configuration for the group.
         
         Returns:
             Current Databricks configuration
         """
         try:
-            config = await self.repository.get_active_config()
+            config = await self.repository.get_active_config(group_id=self.group_id)
             
             if not config:
                 raise HTTPException(status_code=404, detail="Databricks configuration not found")
@@ -96,7 +121,17 @@ class DatabricksService:
                 schema=config.schema,
                 secret_scope=config.secret_scope,
                 enabled=config.is_enabled,
-                apps_enabled=config.apps_enabled
+                apps_enabled=config.apps_enabled,
+                # Volume configuration fields
+                volume_enabled=config.volume_enabled if hasattr(config, 'volume_enabled') else False,
+                volume_path=config.volume_path if hasattr(config, 'volume_path') else None,
+                volume_file_format=config.volume_file_format if hasattr(config, 'volume_file_format') else 'json',
+                volume_create_date_dirs=config.volume_create_date_dirs if hasattr(config, 'volume_create_date_dirs') else True,
+                # Knowledge source volume configuration
+                knowledge_volume_enabled=config.knowledge_volume_enabled if hasattr(config, 'knowledge_volume_enabled') else False,
+                knowledge_volume_path=config.knowledge_volume_path if hasattr(config, 'knowledge_volume_path') else None,
+                knowledge_chunk_size=config.knowledge_chunk_size if hasattr(config, 'knowledge_chunk_size') else 1000,
+                knowledge_chunk_overlap=config.knowledge_chunk_overlap if hasattr(config, 'knowledge_chunk_overlap') else 200
             )
         except HTTPException:
             raise

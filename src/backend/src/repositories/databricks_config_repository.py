@@ -26,21 +26,34 @@ class DatabricksConfigRepository(BaseRepository[DatabricksConfig]):
         """
         super().__init__(DatabricksConfig, session)
     
-    async def get_active_config(self) -> Optional[DatabricksConfig]:
+    async def get_active_config(self, group_id: Optional[str] = None) -> Optional[DatabricksConfig]:
         """
-        Get the currently active Databricks configuration.
+        Get the currently active Databricks configuration for the specified group.
+        If multiple active configurations exist, returns the most recently updated one.
         
+        Args:
+            group_id: Optional group ID to filter by
+            
         Returns:
             Active configuration if found, else None
         """
         query = select(self.model).where(self.model.is_active == True)
-        result = await self.session.execute(query)
-        return result.scalar_one_or_none()
-    
-    async def deactivate_all(self) -> None:
-        """
-        Deactivate all existing Databricks configurations.
+        if group_id is not None:
+            query = query.where(self.model.group_id == group_id)
         
+        # Order by updated_at descending to get the most recent one
+        query = query.order_by(self.model.updated_at.desc())
+        
+        result = await self.session.execute(query)
+        return result.scalars().first()
+    
+    async def deactivate_all(self, group_id: Optional[str] = None) -> None:
+        """
+        Deactivate all existing Databricks configurations for the specified group.
+        
+        Args:
+            group_id: Optional group ID to filter by
+            
         Returns:
             None
         """
@@ -49,6 +62,8 @@ class DatabricksConfigRepository(BaseRepository[DatabricksConfig]):
             .where(self.model.is_active == True)
             .values(is_active=False, updated_at=datetime.now(timezone.utc))
         )
+        if group_id is not None:
+            query = query.where(self.model.group_id == group_id)
         await self.session.execute(query)
         await self.session.commit()  # Make sure the changes are committed
     
@@ -62,8 +77,12 @@ class DatabricksConfigRepository(BaseRepository[DatabricksConfig]):
         Returns:
             The created configuration
         """
-        # First deactivate any existing active configurations
-        await self.deactivate_all()
+        if config_data is None:
+            raise TypeError("config_data cannot be None")
+            
+        # First deactivate any existing active configurations for this group
+        group_id = config_data.get('group_id')
+        await self.deactivate_all(group_id=group_id)
         
         # Create the new configuration
         db_config = DatabricksConfig(**config_data)

@@ -10,9 +10,16 @@ import {
   Stack,
   FormControlLabel,
   Switch,
+  Divider,
+  FormControl,
+  InputLabel,
+  Select,
+  MenuItem,
+  Paper,
 } from '@mui/material';
 import SaveIcon from '@mui/icons-material/Save';
 import CheckCircleOutlineIcon from '@mui/icons-material/CheckCircleOutline';
+import StorageIcon from '@mui/icons-material/Storage';
 import { useTranslation } from 'react-i18next';
 import { DatabricksService, DatabricksConfig, DatabricksTokenStatus, DatabricksConnectionStatus } from '../../api/DatabricksService';
 
@@ -27,9 +34,18 @@ const DatabricksConfiguration: React.FC<DatabricksConfigurationProps> = ({ onSav
     warehouse_id: '',
     catalog: '',
     schema: '',
-    secret_scope: '',
+
     enabled: false,
     apps_enabled: false,
+    volume_enabled: false,
+    volume_path: 'main.default.task_outputs',
+    volume_file_format: 'json',
+    volume_create_date_dirs: true,
+    // Knowledge source volume configuration
+    knowledge_volume_enabled: false,
+    knowledge_volume_path: 'main.default.knowledge',
+    knowledge_chunk_size: 1000,
+    knowledge_chunk_overlap: 200,
   });
   const [loading, setLoading] = useState(false);
   const [tokenStatus, setTokenStatus] = useState<DatabricksTokenStatus | null>(null);
@@ -69,7 +85,7 @@ const DatabricksConfiguration: React.FC<DatabricksConfigurationProps> = ({ onSav
         'Warehouse ID': config.warehouse_id?.trim(),
         'Catalog': config.catalog?.trim(),
         'Schema': config.schema?.trim(),
-        'Secret Scope': config.secret_scope?.trim(),
+
       };
 
       const emptyFields = Object.entries(requiredFields)
@@ -247,7 +263,7 @@ const DatabricksConfiguration: React.FC<DatabricksConfigurationProps> = ({ onSav
           value={config.warehouse_id}
           onChange={handleInputChange('warehouse_id')}
           fullWidth
-          disabled={loading || !config.enabled}
+          disabled={loading || !config.enabled || config.apps_enabled}
           size="small"
         />
 
@@ -256,7 +272,7 @@ const DatabricksConfiguration: React.FC<DatabricksConfigurationProps> = ({ onSav
           value={config.catalog}
           onChange={handleInputChange('catalog')}
           fullWidth
-          disabled={loading || !config.enabled}
+          disabled={loading || !config.enabled || config.apps_enabled}
           size="small"
         />
 
@@ -265,19 +281,230 @@ const DatabricksConfiguration: React.FC<DatabricksConfigurationProps> = ({ onSav
           value={config.schema}
           onChange={handleInputChange('schema')}
           fullWidth
-          disabled={loading || !config.enabled}
+          disabled={loading || !config.enabled || config.apps_enabled}
           size="small"
         />
 
-        <TextField
-          label={t('configuration.databricks.secretScope')}
-          value={config.secret_scope}
-          onChange={handleInputChange('secret_scope')}
-          fullWidth
-          disabled={loading || !config.enabled}
-          size="small"
-        />
+
       </Stack>
+
+      {/* Volume Configuration Section */}
+      <Divider sx={{ my: 3 }} />
+      
+      <Box sx={{ mb: 3 }}>
+        <Box sx={{ display: 'flex', alignItems: 'center', mb: 2 }}>
+          <StorageIcon sx={{ mr: 1, color: 'primary.main' }} />
+          <Typography variant="subtitle1" fontWeight="medium">
+            {t('configuration.databricks.volume.title', { defaultValue: 'Volume Uploads Configuration' })}
+          </Typography>
+        </Box>
+
+        <Alert severity="info" sx={{ mb: 2 }}>
+          {t('configuration.databricks.volume.description', { 
+            defaultValue: 'Configure Databricks Volume settings for task outputs. When enabled, all task outputs will be automatically uploaded to the specified volume path. Tasks can override these settings individually.'
+          })}
+        </Alert>
+
+        <Stack spacing={2}>
+          <FormControlLabel
+            control={
+              <Switch
+                checked={config.volume_enabled || false}
+                onChange={(e) => setConfig(prev => ({ ...prev, volume_enabled: e.target.checked }))}
+                color="primary"
+                disabled={!config.enabled}
+              />
+            }
+            label={
+              <Box>
+                <Typography variant="body1">
+                  {t('configuration.databricks.volume.enable', { defaultValue: 'Enable Volume Uploads for All Tasks' })}
+                </Typography>
+                <Typography variant="caption" color="text.secondary">
+                  {t('configuration.databricks.volume.enableDescription', { defaultValue: 'Automatically upload task outputs to Databricks Volumes' })}
+                </Typography>
+              </Box>
+            }
+          />
+
+          <TextField
+            label={t('configuration.databricks.volume.path', { defaultValue: 'Volume Path' })}
+            value={config.volume_path || 'main.default.task_outputs'}
+            onChange={(e) => setConfig(prev => ({ ...prev, volume_path: e.target.value }))}
+            fullWidth
+            disabled={loading || !config.enabled || !config.volume_enabled}
+            size="small"
+            helperText={t('configuration.databricks.volume.pathHelp', { 
+              defaultValue: 'Format: catalog.schema.volume (e.g., main.default.task_outputs)'
+            })}
+            placeholder="catalog.schema.volume"
+          />
+
+          <FormControl fullWidth size="small" disabled={loading || !config.enabled || !config.volume_enabled}>
+            <InputLabel>{t('configuration.databricks.volume.format', { defaultValue: 'Default File Format' })}</InputLabel>
+            <Select
+              value={config.volume_file_format || 'json'}
+              onChange={(e) => setConfig(prev => ({ ...prev, volume_file_format: e.target.value as 'json' | 'csv' | 'txt' }))}
+              label={t('configuration.databricks.volume.format', { defaultValue: 'Default File Format' })}
+            >
+              <MenuItem value="json">JSON</MenuItem>
+              <MenuItem value="csv">CSV</MenuItem>
+              <MenuItem value="txt">Text</MenuItem>
+            </Select>
+          </FormControl>
+
+          <FormControlLabel
+            control={
+              <Switch
+                checked={config.volume_create_date_dirs !== false}
+                onChange={(e) => setConfig(prev => ({ ...prev, volume_create_date_dirs: e.target.checked }))}
+                color="primary"
+                disabled={!config.enabled || !config.volume_enabled}
+              />
+            }
+            label={
+              <Box>
+                <Typography variant="body1">
+                  {t('configuration.databricks.volume.dateDirs', { defaultValue: 'Create Date-based Directories' })}
+                </Typography>
+                <Typography variant="caption" color="text.secondary">
+                  {t('configuration.databricks.volume.dateDirsDescription', { defaultValue: 'Organize outputs in YYYY/MM/DD folder structure' })}
+                </Typography>
+              </Box>
+            }
+          />
+
+          {config.volume_enabled && config.enabled && (
+            <Alert severity="info">
+              <Typography variant="body2" sx={{ mb: 1 }}>
+                <strong>{t('configuration.databricks.volume.example', { defaultValue: 'Example output path:' })}</strong>
+              </Typography>
+              <Typography variant="body2" component="code" sx={{ 
+                display: 'block', 
+                p: 1, 
+                bgcolor: 'grey.100',
+                borderRadius: 1,
+                fontFamily: 'monospace',
+                fontSize: '0.875rem'
+              }}>
+                /Volumes/{(config.volume_path || 'main.default.task_outputs').replace(/\./g, '/')}/[execution_name]
+                {config.volume_create_date_dirs && '/YYYY/MM/DD'}
+                /task_output.{config.volume_file_format || 'json'}
+              </Typography>
+              <Typography variant="caption" color="text.secondary" sx={{ mt: 1, display: 'block' }}>
+                {t('configuration.databricks.volume.executionNote', { 
+                  defaultValue: 'Note: [execution_name] will be replaced with the actual execution or run name'
+                })}
+              </Typography>
+            </Alert>
+          )}
+        </Stack>
+      </Box>
+
+      {/* Knowledge Source Volume Configuration Section */}
+      <Divider sx={{ my: 3 }} />
+      
+      <Box sx={{ mb: 3 }}>
+        <Box sx={{ display: 'flex', alignItems: 'center', mb: 2 }}>
+          <StorageIcon sx={{ mr: 1, color: 'secondary.main' }} />
+          <Typography variant="subtitle1" fontWeight="medium">
+            {t('configuration.databricks.knowledge.title', { defaultValue: 'Knowledge Source Volume Configuration' })}
+          </Typography>
+        </Box>
+
+        <Alert severity="info" sx={{ mb: 2 }}>
+          {t('configuration.databricks.knowledge.description', { 
+            defaultValue: 'Configure Databricks Volume settings for knowledge sources (RAG). When enabled, uploaded knowledge files will be stored in the specified volume and made available to AI agents during execution.'
+          })}
+        </Alert>
+
+        <Stack spacing={2}>
+          <FormControlLabel
+            control={
+              <Switch
+                checked={config.knowledge_volume_enabled || false}
+                onChange={(e) => setConfig(prev => ({ ...prev, knowledge_volume_enabled: e.target.checked }))}
+                color="secondary"
+                disabled={!config.enabled}
+              />
+            }
+            label={
+              <Box>
+                <Typography variant="body1">
+                  {t('configuration.databricks.knowledge.enable', { defaultValue: 'Enable Knowledge Source Volume' })}
+                </Typography>
+                <Typography variant="caption" color="text.secondary">
+                  {t('configuration.databricks.knowledge.enableDescription', { defaultValue: 'Store and retrieve knowledge files from Databricks Volumes for RAG' })}
+                </Typography>
+              </Box>
+            }
+          />
+
+          <TextField
+            label={t('configuration.databricks.knowledge.path', { defaultValue: 'Knowledge Volume Path' })}
+            value={config.knowledge_volume_path || 'main.default.knowledge'}
+            onChange={(e) => setConfig(prev => ({ ...prev, knowledge_volume_path: e.target.value }))}
+            fullWidth
+            disabled={loading || !config.enabled || !config.knowledge_volume_enabled}
+            size="small"
+            helperText={t('configuration.databricks.knowledge.pathHelp', { 
+              defaultValue: 'Format: catalog.schema.volume (e.g., main.default.knowledge)'
+            })}
+            placeholder="catalog.schema.volume"
+          />
+
+          <TextField
+            label={t('configuration.databricks.knowledge.chunkSize', { defaultValue: 'Chunk Size' })}
+            value={config.knowledge_chunk_size || 1000}
+            onChange={(e) => setConfig(prev => ({ ...prev, knowledge_chunk_size: parseInt(e.target.value) || 1000 }))}
+            fullWidth
+            disabled={loading || !config.enabled || !config.knowledge_volume_enabled}
+            size="small"
+            type="number"
+            helperText={t('configuration.databricks.knowledge.chunkSizeHelp', { 
+              defaultValue: 'Size of text chunks for knowledge processing (default: 1000 characters)'
+            })}
+          />
+
+          <TextField
+            label={t('configuration.databricks.knowledge.chunkOverlap', { defaultValue: 'Chunk Overlap' })}
+            value={config.knowledge_chunk_overlap || 200}
+            onChange={(e) => setConfig(prev => ({ ...prev, knowledge_chunk_overlap: parseInt(e.target.value) || 200 }))}
+            fullWidth
+            disabled={loading || !config.enabled || !config.knowledge_volume_enabled}
+            size="small"
+            type="number"
+            helperText={t('configuration.databricks.knowledge.chunkOverlapHelp', { 
+              defaultValue: 'Overlap between chunks to maintain context (default: 200 characters)'
+            })}
+          />
+
+          {config.knowledge_volume_enabled && config.enabled && (
+            <Paper elevation={0} sx={{ p: 2, bgcolor: 'grey.50' }}>
+              <Typography variant="body2" sx={{ mb: 1 }}>
+                <strong>{t('configuration.databricks.knowledge.structure', { defaultValue: 'Knowledge files will be organized as:' })}</strong>
+              </Typography>
+              <Typography variant="body2" component="code" sx={{ 
+                display: 'block', 
+                p: 1, 
+                bgcolor: 'white',
+                border: '1px solid',
+                borderColor: 'grey.300',
+                borderRadius: 1,
+                fontFamily: 'monospace',
+                fontSize: '0.875rem'
+              }}>
+                /Volumes/{(config.knowledge_volume_path || 'main.default.knowledge').replace(/\./g, '/')}/[group_id]/[execution_id]/[files]
+              </Typography>
+              <Typography variant="caption" color="text.secondary" sx={{ mt: 1, display: 'block' }}>
+                {t('configuration.databricks.knowledge.structureNote', { 
+                  defaultValue: 'Files are organized by group and execution ID for proper isolation and access control'
+                })}
+              </Typography>
+            </Paper>
+          )}
+        </Stack>
+      </Box>
 
       <Box sx={{ 
         display: 'flex', 

@@ -7,7 +7,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from src.schemas.databricks_config import DatabricksConfigCreate, DatabricksConfigResponse
 from src.services.databricks_service import DatabricksService
 from src.services.api_keys_service import ApiKeysService
-from src.core.dependencies import SessionDep
+from src.core.dependencies import SessionDep, GroupContextDep
 from src.utils.databricks_auth import is_databricks_apps_environment
 
 router = APIRouter(
@@ -19,31 +19,53 @@ router = APIRouter(
 logger = logging.getLogger(__name__)
 
 # Dependency to get ApiKeysService
-def get_api_keys_service(session: SessionDep) -> ApiKeysService:
-    """Get ApiKeysService instance."""
-    return ApiKeysService(session)
+def get_api_keys_service(
+    session: SessionDep,
+    group_context: GroupContextDep
+) -> ApiKeysService:
+    """Get ApiKeysService instance with group context."""
+    from src.repositories.api_key_repository import ApiKeyRepository
+    
+    group_id = group_context.primary_group_id if group_context else None
+    repository = ApiKeyRepository(session)
+    return ApiKeysService(repository=repository, group_id=group_id)
 
 # Dependency to get DatabricksService
 def get_databricks_service(
     session: SessionDep,
+    group_context: GroupContextDep,
     api_keys_service: Annotated[ApiKeysService, Depends(get_api_keys_service)]
 ) -> DatabricksService:
     """
-    Get a properly initialized DatabricksService instance.
+    Get a properly initialized DatabricksService instance with group context.
     
     Args:
         session: Database session from dependency injection
+        group_context: Group context for multi-tenant filtering
         api_keys_service: ApiKeysService instance
         
     Returns:
         Initialized DatabricksService with all dependencies
     """
-    return DatabricksService.from_session(session, api_keys_service)
+    from src.repositories.databricks_config_repository import DatabricksConfigRepository
+    
+    # Get group_id from context
+    group_id = group_context.primary_group_id if group_context else None
+    
+    # Create repository and service with group context
+    databricks_repository = DatabricksConfigRepository(session)
+    service = DatabricksService(databricks_repository, group_id=group_id)
+    
+    # Set the API keys service
+    service.secrets_service.set_api_keys_service(api_keys_service)
+    
+    return service
 
 
 @router.post("/config", response_model=Dict)
 async def set_databricks_config(
     request: DatabricksConfigCreate,
+    group_context: GroupContextDep,
     service: Annotated[DatabricksService, Depends(get_databricks_service)],
 ):
     """
@@ -51,13 +73,16 @@ async def set_databricks_config(
     
     Args:
         request: Configuration data
+        group_context: Group context for multi-tenant operations
         service: Databricks service
         
     Returns:
         Success response with configuration
     """
     try:
-        return await service.set_databricks_config(request)
+        # Get user email from group context
+        created_by_email = group_context.group_email if group_context else None
+        return await service.set_databricks_config(request, created_by_email=created_by_email)
     except Exception as e:
         logger.error(f"Error setting Databricks configuration: {str(e)}")
         raise HTTPException(status_code=500, detail=f"Error setting Databricks configuration: {str(e)}")
@@ -65,12 +90,14 @@ async def set_databricks_config(
 
 @router.get("/config", response_model=DatabricksConfigResponse)
 async def get_databricks_config(
+    group_context: GroupContextDep,
     service: Annotated[DatabricksService, Depends(get_databricks_service)],
 ):
     """
     Get current Databricks configuration.
     
     Args:
+        group_context: Group context for multi-tenant operations
         service: Databricks service
         
     Returns:
@@ -87,12 +114,14 @@ async def get_databricks_config(
 
 @router.get("/status/personal-token-required", response_model=Dict)
 async def check_personal_token_required(
+    group_context: GroupContextDep,
     service: Annotated[DatabricksService, Depends(get_databricks_service)],
 ):
     """
     Check if personal access token is required for Databricks.
     
     Args:
+        group_context: Group context for multi-tenant operations
         service: Databricks service
         
     Returns:
@@ -107,12 +136,14 @@ async def check_personal_token_required(
 
 @router.get("/connection", response_model=Dict)
 async def check_databricks_connection(
+    group_context: GroupContextDep,
     service: Annotated[DatabricksService, Depends(get_databricks_service)],
 ):
     """
     Check connection to Databricks.
     
     Args:
+        group_context: Group context for multi-tenant operations
         service: Databricks service
         
     Returns:

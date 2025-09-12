@@ -6,9 +6,19 @@ export interface DatabricksConfig {
   warehouse_id: string;
   catalog: string;
   schema: string;
-  secret_scope: string;
+
   enabled: boolean;
   apps_enabled: boolean;
+  // Volume configuration fields
+  volume_enabled?: boolean;
+  volume_path?: string;
+  volume_file_format?: 'json' | 'csv' | 'txt';
+  volume_create_date_dirs?: boolean;
+  // Knowledge source volume configuration
+  knowledge_volume_enabled?: boolean;
+  knowledge_volume_path?: string;
+  knowledge_chunk_size?: number;
+  knowledge_chunk_overlap?: number;
 }
 
 export interface DatabricksTokenStatus {
@@ -85,5 +95,16 @@ export class DatabricksService {
       }
       throw new Error('Failed to connect to the server');
     }
+  }
+
+  // Static methods for DatabricksVolumeConfiguration component
+  public static async getConfiguration(): Promise<DatabricksConfig | null> {
+    const instance = DatabricksService.getInstance();
+    return instance.getDatabricksConfig();
+  }
+
+  public static async updateConfiguration(config: DatabricksConfig): Promise<DatabricksConfig> {
+    const instance = DatabricksService.getInstance();
+    return instance.setDatabricksConfig(config);
   }
 } 
