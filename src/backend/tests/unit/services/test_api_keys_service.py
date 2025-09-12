@@ -144,7 +144,7 @@ class TestApiKeysServiceFindByName:
         result = await api_keys_service_with_repository.find_by_name("OPENAI_API_KEY")
         
         assert result == api_key
-        mock_repository.find_by_name.assert_called_once_with("OPENAI_API_KEY")
+        mock_repository.find_by_name.assert_called_once_with("OPENAI_API_KEY", group_id=None)
     
     @pytest.mark.asyncio
     async def test_find_by_name_async_not_found(self, api_keys_service_with_repository, mock_repository):
@@ -154,7 +154,7 @@ class TestApiKeysServiceFindByName:
         result = await api_keys_service_with_repository.find_by_name("NONEXISTENT_KEY")
         
         assert result is None
-        mock_repository.find_by_name.assert_called_once_with("NONEXISTENT_KEY")
+        mock_repository.find_by_name.assert_called_once_with("NONEXISTENT_KEY", group_id=None)
     
     @pytest.mark.asyncio
     async def test_find_by_name_sync_fallback(self, api_keys_service_with_sync_session):
@@ -175,7 +175,7 @@ class TestApiKeysServiceFindByName:
         result = api_keys_service_with_sync_session.find_by_name_sync("SYNC_KEY")
         
         assert result == api_key
-        api_keys_service_with_sync_session.repository.find_by_name_sync.assert_called_once_with("SYNC_KEY")
+        api_keys_service_with_sync_session.repository.find_by_name_sync.assert_called_once_with("SYNC_KEY", group_id=None)
     
     def test_find_by_name_sync_with_async_session_raises_error(self, api_keys_service_with_repository):
         """Test sync method with async session raises TypeError."""
@@ -241,7 +241,7 @@ class TestApiKeysServiceUpdate:
             
             assert result == updated_key
             assert result.value == sample_api_key_update.value
-            mock_repository.find_by_name.assert_called_once_with("EXISTING_KEY")
+            mock_repository.find_by_name.assert_called_once_with("EXISTING_KEY", group_id=None)
             mock_repository.update.assert_called_once()
             update_args = mock_repository.update.call_args[0]
             assert update_args[0] == existing_key.id
@@ -256,7 +256,7 @@ class TestApiKeysServiceUpdate:
         result = await api_keys_service_with_repository.update_api_key("NONEXISTENT", sample_api_key_update)
         
         assert result is None
-        mock_repository.find_by_name.assert_called_once_with("NONEXISTENT")
+        mock_repository.find_by_name.assert_called_once_with("NONEXISTENT", group_id=None)
         mock_repository.update.assert_not_called()
     
     @pytest.mark.asyncio
@@ -290,7 +290,7 @@ class TestApiKeysServiceDelete:
         result = await api_keys_service_with_repository.delete_api_key("DELETE_ME")
         
         assert result is True
-        mock_repository.find_by_name.assert_called_once_with("DELETE_ME")
+        mock_repository.find_by_name.assert_called_once_with("DELETE_ME", group_id=None)
         mock_repository.delete.assert_called_once_with("key-123")
     
     @pytest.mark.asyncio
@@ -301,7 +301,7 @@ class TestApiKeysServiceDelete:
         result = await api_keys_service_with_repository.delete_api_key("NONEXISTENT")
         
         assert result is False
-        mock_repository.find_by_name.assert_called_once_with("NONEXISTENT")
+        mock_repository.find_by_name.assert_called_once_with("NONEXISTENT", group_id=None)
         mock_repository.delete.assert_not_called()
 
 

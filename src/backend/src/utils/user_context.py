@@ -1,10 +1,31 @@
-"""
-User and group context utility for handling user tokens and group identification.
+"""Multi-tenant user and group context management for authentication and isolation.
 
-This module provides utilities to extract and manage user access tokens
-from HTTP headers, particularly for Databricks Apps where user tokens
-are forwarded via the X-Forwarded-Access-Token header. It also handles
-automatic group extraction from user email domains.
+This module provides comprehensive utilities for managing user authentication
+contexts and group-based multi-tenant data isolation in the AI agent system.
+It handles access token extraction from HTTP headers, group membership management,
+and context propagation throughout the execution pipeline.
+
+The module supports hybrid isolation modes:
+- Individual mode: Users without groups get private data spaces
+- Group mode: Users in groups share data within their assigned groups
+
+Key Features:
+    - Access token extraction from HTTP headers (Databricks integration)
+    - Automatic group assignment based on email domains
+    - Hybrid individual/group isolation modes
+    - Context variable management for request-scoped data
+    - Group membership lookup and caching
+
+Architecture:
+    Uses Python's contextvars for thread-safe, async-compatible context
+    management across the entire request lifecycle.
+
+Example:
+    >>> context = await GroupContext.from_email(
+    ...     email="user@company.com",
+    ...     access_token="token_123"
+    ... )
+    >>> UserContext.set_group_context(context)
 """
 
 import logging
@@ -23,14 +44,38 @@ _group_context: ContextVar[Optional['GroupContext']] = ContextVar('group_context
 
 @dataclass
 class GroupContext:
-    """
-    Hybrid group context for multi-group data isolation.
+    """Hybrid group context for multi-tenant data isolation and access control.
     
-    Supports two modes:
-    1. Individual mode: Users not in any groups get their own private group
-    2. Group mode: Users in groups see data from all their assigned groups
+    This class manages group-based data isolation with support for both individual
+    and collaborative access modes. It provides the foundation for multi-tenant
+    data segregation throughout the application.
     
-    This provides both individual privacy and team collaboration.
+    Supports two isolation modes:
+        1. Individual mode: Users not in any groups get their own private group
+           for complete data isolation
+        2. Group mode: Users in groups can access data from all their assigned
+           groups, enabling team collaboration
+    
+    Attributes:
+        group_ids: List of all group IDs the user belongs to
+        group_email: User's email address for identification
+        email_domain: Domain extracted from email for organization mapping
+        user_id: Optional user identifier from authentication system
+        access_token: Databricks or OAuth access token for API calls
+    
+    Properties:
+        primary_group_id: Returns the first group ID for creating new data
+    
+    Example:
+        >>> context = await GroupContext.from_email(
+        ...     email="alice@acme-corp.com",
+        ...     access_token="Bearer token_123"
+        ... )
+        >>> print(context.primary_group_id)  # "acme_corp" or "user_alice_acme_corp_com"
+    
+    Note:
+        The context is designed to be immutable once created and should be
+        passed through the execution pipeline for consistent isolation.
     """
     group_ids: Optional[list] = None      # All group IDs user belongs to
     group_email: Optional[str] = None     # e.g., "alice@acme-corp.com"
@@ -48,6 +93,18 @@ class GroupContext:
         - The first group group ID (if in groups)
         """
         return self.group_ids[0] if self.group_ids and len(self.group_ids) > 0 else None
+    
+    def to_dict(self) -> dict:
+        """Convert GroupContext to a dictionary for serialization."""
+        return {
+            'group_ids': self.group_ids,
+            'group_email': self.group_email,
+            'email_domain': self.email_domain,
+            'user_id': self.user_id,
+            'access_token': self.access_token,
+            'primary_group_id': self.primary_group_id,  # Include computed property
+            'group_id': self.primary_group_id  # Alias for backward compatibility
+        }
     
     @classmethod
     async def from_email(cls, email: str, access_token: str = None, user_id: str = None) -> 'GroupContext':
@@ -145,8 +202,34 @@ class GroupContext:
 
 
 class UserContext:
-    """
-    Manages user context including access tokens extracted from HTTP headers.
+    """Thread-safe user context manager for authentication and authorization.
+    
+    This class provides static methods for managing user authentication context
+    throughout the request lifecycle. It uses Python's contextvars to maintain
+    thread-safe, async-compatible context that follows the request through all
+    layers of the application.
+    
+    The context manager handles:
+    - User access token storage and retrieval
+    - User metadata and profile information
+    - Group context for multi-tenant isolation
+    - Request-scoped context propagation
+    
+    All methods are static as the class acts as a namespace for context
+    operations, with the actual state stored in context variables.
+    
+    Example:
+        >>> # Set context at request entry
+        >>> UserContext.set_user_token("Bearer token_123")
+        >>> UserContext.set_group_context(group_context)
+        >>> 
+        >>> # Retrieve context anywhere in the request
+        >>> token = UserContext.get_user_token()
+        >>> group = UserContext.get_group_context()
+    
+    Note:
+        Context is automatically cleaned up at the end of each request/task
+        by the async runtime.
     """
     
     @staticmethod

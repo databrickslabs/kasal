@@ -3,7 +3,7 @@ from typing import Annotated, List, Dict, Any
 from fastapi import APIRouter, Depends, HTTPException, status
 import logging
 
-from src.core.dependencies import SessionDep
+from src.core.dependencies import SessionDep, GroupContextDep
 from src.core.unit_of_work import UnitOfWork
 from src.models.model_config import ModelConfig
 from src.schemas.model_config import (
@@ -33,6 +33,7 @@ async def get_model_config_service() -> ModelConfigService:
 @router.get("", response_model=ModelListResponse)
 async def get_models(
     service: Annotated[ModelConfigService, Depends(get_model_config_service)],
+    group_context: GroupContextDep,
 ):
     """
     Get all model configurations.
@@ -46,8 +47,8 @@ async def get_models(
     try:
         logger.info("API call: GET /models")
         
-        models = await service.find_all()
-        logger.info(f"Found {len(models)} models in database")
+        models = await service.find_all_for_group(group_context)
+        logger.info(f"Found {len(models)} models for group")
         
         # Log first few models for debugging
         for model in models[:3]:
@@ -62,6 +63,7 @@ async def get_models(
 @router.get("/enabled", response_model=ModelListResponse)
 async def get_enabled_models(
     service: Annotated[ModelConfigService, Depends(get_model_config_service)],
+    group_context: GroupContextDep,
 ):
     """
     Get only enabled model configurations.
@@ -75,10 +77,10 @@ async def get_enabled_models(
     try:
         logger.info("API call: GET /models/enabled")
         
-        models = await service.find_enabled_models()
-        logger.info(f"Found {len(models)} enabled models in database")
+        enabled_models = await service.find_enabled_models_for_group(group_context)
+        logger.info(f"Found {len(enabled_models)} enabled models for group")
         
-        return ModelListResponse(models=models, count=len(models))
+        return ModelListResponse(models=enabled_models, count=len(enabled_models))
     except Exception as e:
         logger.error(f"Error getting enabled models: {str(e)}")
         raise HTTPException(status_code=500, detail=str(e))
@@ -88,6 +90,7 @@ async def get_enabled_models(
 async def get_model(
     model_key: str,
     service: Annotated[ModelConfigService, Depends(get_model_config_service)],
+    group_context: GroupContextDep,
 ):
     """
     Get a specific model configuration by key.
@@ -125,6 +128,7 @@ async def get_model(
 async def create_model(
     model: ModelConfigCreate,
     service: Annotated[ModelConfigService, Depends(get_model_config_service)],
+    group_context: GroupContextDep,
 ):
     """
     Create a new model configuration.
@@ -163,6 +167,7 @@ async def update_model(
     model_key: str,
     model: ModelConfigUpdate,
     service: Annotated[ModelConfigService, Depends(get_model_config_service)],
+    group_context: GroupContextDep,
 ):
     """
     Update an existing model configuration.
@@ -203,6 +208,7 @@ async def toggle_model(
     model_key: str,
     toggle_data: ModelToggleUpdate,
     service: Annotated[ModelConfigService, Depends(get_model_config_service)],
+    group_context: GroupContextDep,
 ):
     """
     Enable or disable a model configuration.
@@ -221,7 +227,7 @@ async def toggle_model(
     try:
         logger.info(f"API call: PATCH /models/{model_key}/toggle - Setting enabled={toggle_data.enabled}")
         
-        updated_model = await service.toggle_model_enabled(model_key, toggle_data.enabled)
+        updated_model = await service.toggle_model_enabled_with_group(model_key, toggle_data.enabled, group_context)
         if not updated_model:
             logger.warning(f"Model with key {model_key} not found for toggle")
             raise HTTPException(
@@ -242,6 +248,7 @@ async def toggle_model(
 async def delete_model(
     model_key: str,
     service: Annotated[ModelConfigService, Depends(get_model_config_service)],
+    group_context: GroupContextDep,
 ):
     """
     Delete a model configuration.
@@ -275,6 +282,7 @@ async def delete_model(
 @router.post("/enable-all", response_model=ModelListResponse)
 async def enable_all_models(
     service: Annotated[ModelConfigService, Depends(get_model_config_service)],
+    group_context: GroupContextDep,
 ):
     """
     Enable all model configurations.
@@ -300,6 +308,7 @@ async def enable_all_models(
 @router.post("/disable-all", response_model=ModelListResponse)
 async def disable_all_models(
     service: Annotated[ModelConfigService, Depends(get_model_config_service)],
+    group_context: GroupContextDep,
 ):
     """
     Disable all model configurations.

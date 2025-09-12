@@ -47,6 +47,24 @@ class ModelConfigRepository(BaseRepository[ModelConfig]):
         result = await self.session.execute(query)
         return result.scalars().first()
     
+    async def find_by_key_and_group(self, key: str, group_id: str) -> Optional[ModelConfig]:
+        """
+        Find a model configuration by key and group_id.
+        
+        Args:
+            key: Model configuration key to search for
+            group_id: Group ID to filter by
+            
+        Returns:
+            ModelConfig if found, else None
+        """
+        query = select(self.model).where(
+            (self.model.key == key) & 
+            (self.model.group_id == group_id)
+        )
+        result = await self.session.execute(query)
+        return result.scalars().first()
+    
     async def find_enabled_models(self) -> List[ModelConfig]:
         """
         Find all enabled model configurations.

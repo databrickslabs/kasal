@@ -24,13 +24,14 @@ logger = logging.getLogger(__name__)
 class ApiKeysService(BaseService):
     """Service for managing API keys."""
     
-    def __init__(self, session=None, repository=None):
+    def __init__(self, session=None, repository=None, group_id: Optional[str] = None):
         """
         Initialize the service with session or repository.
         
         Args:
             session: SQLAlchemy session (can be async or sync, for backwards compatibility)
             repository: ApiKeyRepository instance (preferred way)
+            group_id: Group ID for multi-tenant filtering
         """
         if repository is not None:
             self.repository = repository
@@ -44,10 +45,11 @@ class ApiKeysService(BaseService):
             raise ValueError("Either session or repository must be provided")
         
         self.encryption_utils = EncryptionUtils()
+        self.group_id = group_id
     
     async def find_by_name(self, name: str) -> Optional[ApiKey]:
         """
-        Find an API key by name.
+        Find an API key by name within the current group context.
         
         Args:
             name: Name to search for
@@ -58,11 +60,11 @@ class ApiKeysService(BaseService):
         if not self.is_async:
             # If using a sync session, call the sync method
             return self.find_by_name_sync(name)
-        return await self.repository.find_by_name(name)
+        return await self.repository.find_by_name(name, group_id=self.group_id)
     
     def find_by_name_sync(self, name: str) -> Optional[ApiKey]:
         """
-        Find an API key by name synchronously.
+        Find an API key by name synchronously within the current group context.
         
         Args:
             name: Name to search for
@@ -74,14 +76,15 @@ class ApiKeysService(BaseService):
         if not isinstance(self.session, Session):
             raise TypeError("This method requires a synchronous session")
         
-        return self.repository.find_by_name_sync(name)
+        return self.repository.find_by_name_sync(name, group_id=self.group_id)
     
-    async def create_api_key(self, api_key_data: ApiKeyCreate) -> ApiKey:
+    async def create_api_key(self, api_key_data: ApiKeyCreate, created_by_email: Optional[str] = None) -> ApiKey:
         """
         Create a new API key with encrypted value.
         
         Args:
             api_key_data: API key data for creation
+            created_by_email: Email of the user creating the key
             
         Returns:
             Created API key
@@ -93,7 +96,9 @@ class ApiKeysService(BaseService):
         api_key_dict = {
             "name": api_key_data.name,
             "encrypted_value": encrypted_value,
-            "description": api_key_data.description or ""
+            "description": api_key_data.description or "",
+            "group_id": self.group_id,
+            "created_by_email": created_by_email
         }
         
         # Save to database
@@ -158,12 +163,12 @@ class ApiKeysService(BaseService):
     
     async def get_all_api_keys(self) -> List[ApiKey]:
         """
-        Get all API keys with decrypted values.
+        Get all API keys with decrypted values for the current group.
         
         Returns:
             List of all API keys with decrypted values
         """
-        api_keys = await self.repository.find_all()
+        api_keys = await self.repository.find_all(group_id=self.group_id)
         
         # Decrypt values for the response
         for key in api_keys:
@@ -187,7 +192,7 @@ class ApiKeysService(BaseService):
         Returns:
             List of API keys with metadata and set/not set status
         """
-        api_keys = await self.repository.find_all()
+        api_keys = await self.repository.find_all(group_id=self.group_id)
         
         # Set status indicator instead of actual values for security
         for key in api_keys:
