@@ -958,8 +958,13 @@ export const DatabricksOneClickSetup: React.FC = () => {
         // Show success message
         const deletedCount = response.data.deleted_count || 0;
         setError(''); // Clear any errors
-        // Show success notification
-        alert(`Successfully emptied ${indexType.replace('_', ' ')} index. ${deletedCount} documents removed.\n\nNote: The index was deleted and recreated to clear all documents.`);
+        
+        // Show appropriate message based on whether index existed
+        if (response.data.message && response.data.message.includes('created new index')) {
+          alert(`Index ${indexType.replace('_', ' ')} was not found, so a new one was created successfully.`);
+        } else {
+          alert(`Successfully emptied ${indexType.replace('_', ' ')} index. ${deletedCount} documents removed.\n\nNote: The index was deleted and recreated to clear all documents.`);
+        }
       } else {
         // For Direct Access indexes, show the detailed message
         const errorMessage = response.data.message || 'Failed to empty index';

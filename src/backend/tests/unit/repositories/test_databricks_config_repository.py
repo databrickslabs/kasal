@@ -88,7 +88,9 @@ class TestDatabricksConfigRepositoryGetActiveConfig:
         active_config = sample_databricks_configs[0]  # is_active=True
         
         mock_result = MagicMock()
-        mock_result.scalar_one_or_none.return_value = active_config
+        mock_scalars = MagicMock()
+        mock_scalars.first.return_value = active_config
+        mock_result.scalars.return_value = mock_scalars
         mock_async_session.execute.return_value = mock_result
         
         result = await databricks_config_repository.get_active_config()
@@ -104,7 +106,9 @@ class TestDatabricksConfigRepositoryGetActiveConfig:
     async def test_get_active_config_none_found(self, databricks_config_repository, mock_async_session):
         """Test get active config when no active configuration exists."""
         mock_result = MagicMock()
-        mock_result.scalar_one_or_none.return_value = None
+        mock_scalars = MagicMock()
+        mock_scalars.first.return_value = None
+        mock_result.scalars.return_value = mock_scalars
         mock_async_session.execute.return_value = mock_result
         
         result = await databricks_config_repository.get_active_config()
@@ -281,7 +285,9 @@ class TestDatabricksConfigRepositoryIntegration:
         # First, mock getting an active config
         existing_config = MockDatabricksConfig(id=1, is_active=True)
         mock_result = MagicMock()
-        mock_result.scalar_one_or_none.return_value = existing_config
+        mock_scalars = MagicMock()
+        mock_scalars.first.return_value = existing_config
+        mock_result.scalars.return_value = mock_scalars
         mock_async_session.execute.return_value = mock_result
         
         active_config = await databricks_config_repository.get_active_config()
@@ -316,7 +322,9 @@ class TestDatabricksConfigRepositoryIntegration:
         
         # Now get active config (should be None)
         mock_get_result = MagicMock()
-        mock_get_result.scalar_one_or_none.return_value = None
+        mock_scalars = MagicMock()
+        mock_scalars.first.return_value = None
+        mock_get_result.scalars.return_value = mock_scalars
         mock_async_session.execute.return_value = mock_get_result
         
         active_config = await databricks_config_repository.get_active_config()
@@ -439,7 +447,9 @@ class TestDatabricksConfigRepositoryEdgeCases:
         """Test calling get_active_config multiple times."""
         active_config = sample_databricks_configs[0]
         mock_result = MagicMock()
-        mock_result.scalar_one_or_none.return_value = active_config
+        mock_scalars = MagicMock()
+        mock_scalars.first.return_value = active_config
+        mock_result.scalars.return_value = mock_scalars
         mock_async_session.execute.return_value = mock_result
         
         # Call multiple times
@@ -505,7 +515,9 @@ class TestDatabricksConfigRepositoryLogging:
         """Test that operations work correctly even though they don't explicitly log."""
         # This repository doesn't have explicit logging calls, but operations should still work
         mock_result = MagicMock()
-        mock_result.scalar_one_or_none.return_value = None
+        mock_scalars = MagicMock()
+        mock_scalars.first.return_value = None
+        mock_result.scalars.return_value = mock_scalars
         mock_async_session.execute.return_value = mock_result
         
         result = await databricks_config_repository.get_active_config()
