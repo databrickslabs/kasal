@@ -17,6 +17,8 @@ class ExecutionStatus(str, Enum):
     PENDING = "PENDING"
     PREPARING = "PREPARING"
     RUNNING = "RUNNING"
+    STOPPING = "STOPPING"  # Execution is in the process of being stopped
+    STOPPED = "STOPPED"    # Execution was successfully stopped by user
     COMPLETED = "COMPLETED"
     FAILED = "FAILED"
-    CANCELLED = "CANCELLED" 
+    CANCELLED = "CANCELLED"  # Execution was cancelled (not by stop request) 

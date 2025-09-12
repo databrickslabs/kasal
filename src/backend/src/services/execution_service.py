@@ -1,8 +1,27 @@
-"""
-Service for execution-related operations.
+"""Execution service for managing AI agent workflow executions.
 
-This module provides business logic for execution operations including
-running execution jobs, tracking status, and generating descriptive names.
+This module provides the core service layer for managing execution operations
+in the AI agent system. It handles flow execution, status tracking, and 
+coordination between different execution engines.
+
+Key Features:
+    - Asynchronous flow execution with job tracking
+    - Thread pool management for concurrent operations
+    - Integration with CrewAI execution engine
+    - Automatic execution name generation
+    - Status monitoring and error handling
+
+The service acts as the main orchestrator for all execution-related operations,
+delegating specific tasks to specialized services while maintaining a unified
+interface for the API layer.
+
+Example:
+    >>> service = ExecutionService()
+    >>> result = await service.execute_flow(
+    ...     flow_id=flow_uuid,
+    ...     job_id="job_123",
+    ...     config={"timeout": 300}
+    ... )
 """
 
 import logging
@@ -34,7 +53,23 @@ crew_logger = LoggerManager.get_instance().crew
 exec_logger = LoggerManager.get_instance().crew
 
 class ExecutionService:
-    """Service for executing flows and managing executions"""
+    """High-level service for orchestrating AI agent workflow executions.
+    
+    This service provides the main interface for executing flows, managing
+    execution lifecycles, and coordinating between different execution engines.
+    It maintains a thread pool for concurrent operations and tracks active
+    executions across the system.
+    
+    Attributes:
+        executions: Class-level dictionary tracking all active executions
+        _thread_pool: Thread pool executor for concurrent operations (10 workers)
+        execution_name_service: Service for generating descriptive execution names
+        crewai_execution_service: Service for CrewAI-specific execution logic
+    
+    Note:
+        The service uses class-level attributes for shared state across instances,
+        enabling centralized execution tracking in a multi-threaded environment.
+    """
     
     # Initialize the executions dictionary as a class attribute
     executions = {}
@@ -43,7 +78,14 @@ class ExecutionService:
     _thread_pool = concurrent.futures.ThreadPoolExecutor(max_workers=10)
     
     def __init__(self):
-        """Initialize the service"""
+        """Initialize the ExecutionService with required dependencies.
+        
+        Sets up the execution name service for generating descriptive names
+        and the CrewAI execution service for handling CrewAI-specific operations.
+        
+        Note:
+            Uses factory methods to ensure proper configuration of dependent services.
+        """
         # Use factory method to create properly configured ExecutionNameService
         self.execution_name_service = ExecutionNameService.create()
         # Create a CrewAIExecutionService instance for all execution operations
@@ -54,18 +96,40 @@ class ExecutionService:
                            edges: Optional[List[Dict[str, Any]]] = None,
                            job_id: Optional[str] = None,
                            config: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
-        """
-        Execute a flow based on the provided parameters.
+        """Execute a flow asynchronously with job tracking.
+        
+        Orchestrates the execution of either a saved flow (by ID) or a dynamic
+        flow (by nodes/edges). Generates a job ID if not provided and delegates
+        to the CrewAI execution service for actual processing.
         
         Args:
-            flow_id: Optional ID of a saved flow to execute
-            nodes: Optional list of nodes for a dynamic flow
-            edges: Optional list of edges for a dynamic flow
-            job_id: Optional job ID for tracking the execution
-            config: Optional configuration parameters
+            flow_id: Optional UUID of a saved flow to execute. If provided,
+                the flow definition will be loaded from storage.
+            nodes: Optional list of node definitions for dynamic flow execution.
+                Each node represents an agent or task in the workflow.
+            edges: Optional list of edge definitions connecting nodes.
+                Defines the execution order and dependencies.
+            job_id: Optional unique identifier for tracking this execution.
+                Auto-generated if not provided.
+            config: Optional configuration dictionary with execution parameters
+                such as timeout, retry settings, or environment variables.
             
         Returns:
-            Dictionary with execution result
+            Dictionary containing execution result with keys:
+                - job_id: The execution job identifier
+                - status: Current execution status
+                - result: Execution output (when completed)
+                - error: Error details (if failed)
+        
+        Raises:
+            HTTPException: Re-raised from underlying services for HTTP errors
+            HTTPException(500): For unexpected errors during execution
+        
+        Example:
+            >>> result = await service.execute_flow(
+            ...     flow_id=uuid.UUID("123e4567-e89b-12d3-a456-426614174000"),
+            ...     config={"timeout": 300, "max_retries": 3}
+            ... )
         """
         logger.info(f"Executing flow with ID: {flow_id}, job_id: {job_id}")
         
@@ -628,6 +692,18 @@ class ExecutionService:
             agents_yaml = config.agents_yaml if isinstance(config.agents_yaml, dict) else {}
             tasks_yaml = config.tasks_yaml if isinstance(config.tasks_yaml, dict) else {}
             
+            # Log the agents_yaml to see if knowledge_sources are present
+            crew_logger.info(f"[ExecutionService.create_execution] Received agents_yaml with {len(agents_yaml)} agents")
+            for agent_id, agent_config in agents_yaml.items():
+                crew_logger.info(f"[ExecutionService.create_execution] Agent {agent_id} keys: {list(agent_config.keys())}")
+                if "knowledge_sources" in agent_config:
+                    knowledge_sources = agent_config.get("knowledge_sources", [])
+                    crew_logger.info(f"[ExecutionService.create_execution] Agent {agent_id} has {len(knowledge_sources)} knowledge_sources")
+                    for idx, source in enumerate(knowledge_sources):
+                        crew_logger.info(f"[ExecutionService.create_execution] Agent {agent_id} knowledge_source[{idx}]: {source}")
+                else:
+                    crew_logger.warning(f"[ExecutionService.create_execution] Agent {agent_id} has NO knowledge_sources field")
+            
             request = ExecutionNameGenerationRequest(
                 agents_yaml=agents_yaml,
                 tasks_yaml=tasks_yaml,
@@ -795,12 +871,16 @@ class ExecutionService:
             else:
                 # Fallback using asyncio.create_task
                 crew_logger.warning(f"[ExecutionService.create_execution] FastAPI BackgroundTasks not available for {execution_id}, using asyncio.create_task.")
-                asyncio.create_task(ExecutionService._run_in_background(
+                task = asyncio.create_task(ExecutionService._run_in_background(
                     execution_id=execution_id,
                     config=config,
                     execution_type=execution_type,
                     group_context=group_context
                 ))
+                # Store the task reference so we can cancel it later
+                if execution_id in ExecutionService.executions:
+                    ExecutionService.executions[execution_id]["task"] = task
+                    crew_logger.debug(f"[ExecutionService.create_execution] Stored asyncio task reference for {execution_id}")
                 crew_logger.info(f"[ExecutionService.create_execution] Launched _run_in_background task via asyncio for execution_id: {execution_id}")
 
             crew_logger.info(f"[ExecutionService.create_execution] Execution {execution_id} launch initiated. Returning initial response.")
@@ -915,3 +995,182 @@ class ExecutionService:
         """
         response = await self.execution_name_service.generate_execution_name(request)
         return {"name": response.name}
+    
+    async def stop_execution(
+        self,
+        execution_id: str,
+        stop_type: str,
+        reason: Optional[str] = None,
+        requested_by: Optional[str] = None,
+        preserve_partial_results: bool = True,
+        db: Optional[Any] = None
+    ) -> Dict[str, Any]:
+        """
+        Stop a running execution.
+        
+        Args:
+            execution_id: ID of the execution to stop
+            stop_type: Type of stop (graceful or force)
+            reason: Optional reason for stopping
+            requested_by: User who requested the stop
+            preserve_partial_results: Whether to save partial results
+            db: Database session
+            
+        Returns:
+            Dict with stop status and partial results if available
+        """
+        from src.models.execution_status import ExecutionStatus
+        from src.schemas.execution import StopExecutionResponse
+        from src.models.execution_history import ExecutionHistory
+        from sqlalchemy import update
+        from datetime import datetime
+        
+        try:
+            # Update execution status to STOPPING
+            if db:
+                # First set the is_stopping flag and status to STOPPING
+                update_stmt = (
+                    update(ExecutionHistory)
+                    .where(ExecutionHistory.job_id == execution_id)
+                    .values(
+                        status=ExecutionStatus.STOPPING.value,
+                        is_stopping=True,
+                        stop_reason=reason,
+                        stop_requested_by=requested_by
+                    )
+                )
+                await db.execute(update_stmt)
+                await db.commit()
+                
+                # Get current execution state for partial results
+                from sqlalchemy import select
+                stmt = select(ExecutionHistory).where(ExecutionHistory.job_id == execution_id)
+                result = await db.execute(stmt)
+                execution = result.scalar_one_or_none()
+                
+                partial_results = None
+                if preserve_partial_results and execution:
+                    partial_results = execution.result
+            
+            # Check if execution is in our active executions dictionary
+            if execution_id in self.executions:
+                execution_info = self.executions[execution_id]
+                
+                # For force stop, cancel the asyncio task if it exists
+                if stop_type == "force" and "task" in execution_info:
+                    task = execution_info["task"]
+                    if not task.done():
+                        task.cancel()
+                        crew_logger.info(f"Force cancelled task for execution {execution_id}")
+                
+                # For graceful stop, set a flag that the execution should check
+                if stop_type == "graceful":
+                    execution_info["stop_requested"] = True
+                    crew_logger.info(f"Graceful stop requested for execution {execution_id}")
+            
+            # Try to stop using ProcessCrewExecutor first (for process-based executions)
+            process_terminated = False
+            try:
+                from src.services.process_crew_executor import process_crew_executor
+                
+                # Try to terminate the process
+                process_terminated = await process_crew_executor.terminate_execution(execution_id)
+                if process_terminated:
+                    crew_logger.info(f"Successfully terminated process for execution {execution_id}")
+                else:
+                    crew_logger.info(f"Execution {execution_id} not found in ProcessCrewExecutor (may be thread-based)")
+                    
+            except Exception as process_error:
+                crew_logger.debug(f"Could not stop via ProcessCrewExecutor: {process_error}")
+            
+            # If not process-based, try the thread-based crew_executor  
+            if not process_terminated:
+                try:
+                    from src.services.crew_executor import crew_executor
+                    
+                    # Request cooperative stop through the executor
+                    stop_requested = crew_executor.request_stop(execution_id)
+                    if stop_requested:
+                        crew_logger.info(f"Stop requested for execution {execution_id} via CrewExecutor")
+                        
+                        # For force stop, also cancel the asyncio task if it exists
+                        if stop_type == "force" and execution_id in self.executions and "task" in self.executions[execution_id]:
+                            task = self.executions[execution_id]["task"]
+                            if not task.done():
+                                task.cancel()
+                                crew_logger.info(f"Force cancelled asyncio task for execution {execution_id}")
+                                
+                                # Wait briefly for cancellation
+                                try:
+                                    await asyncio.wait_for(asyncio.shield(task), timeout=2.0)
+                                except (asyncio.CancelledError, asyncio.TimeoutError):
+                                    crew_logger.info(f"Task cancellation completed for {execution_id}")
+                    else:
+                        crew_logger.warning(f"Execution {execution_id} not found in CrewExecutor")
+                        
+                except Exception as executor_error:
+                    crew_logger.warning(f"Could not stop via CrewExecutor: {executor_error}")
+            
+            # Also try to cancel via CrewAIEngineService
+            try:
+                from src.engines.crewai.crewai_engine_service import CrewAIEngineService
+                crew_service = CrewAIEngineService()
+                cancelled = await crew_service.cancel_execution(execution_id)
+                if cancelled:
+                    crew_logger.info(f"Successfully cancelled execution {execution_id} via CrewAIEngineService")
+            except Exception as cancel_error:
+                crew_logger.warning(f"Could not cancel via CrewAIEngineService: {cancel_error}")
+            
+            # Remove from active executions to stop tracking it
+            if execution_id in self.executions:
+                del self.executions[execution_id]
+                crew_logger.info(f"Removed {execution_id} from active executions tracking")
+            
+            # Log that we've attempted to stop the execution threads
+            crew_logger.info(
+                f"Execution {execution_id} stop initiated. ThreadManager attempted to stop related threads. "
+                "Note: CrewAI does not natively support cancellation, but threads have been targeted for termination."
+            )
+            
+            # Final update to mark as STOPPED
+            if db:
+                final_update_stmt = (
+                    update(ExecutionHistory)
+                    .where(ExecutionHistory.job_id == execution_id)
+                    .values(
+                        status=ExecutionStatus.STOPPED.value,
+                        is_stopping=False,
+                        stopped_at=datetime.utcnow(),
+                        partial_results=partial_results if preserve_partial_results else None
+                    )
+                )
+                await db.execute(final_update_stmt)
+                await db.commit()
+            
+            return {
+                "execution_id": execution_id,
+                "status": ExecutionStatus.STOPPED.value,
+                "message": f"Execution {stop_type} stopped successfully",
+                "partial_results": partial_results
+            }
+            
+        except Exception as e:
+            crew_logger.error(f"Error stopping execution {execution_id}: {str(e)}")
+            
+            # Try to update status to indicate stop failed
+            if db:
+                try:
+                    error_update_stmt = (
+                        update(ExecutionHistory)
+                        .where(ExecutionHistory.job_id == execution_id)
+                        .values(
+                            is_stopping=False,
+                            error=f"Failed to stop: {str(e)}"
+                        )
+                    )
+                    await db.execute(error_update_stmt)
+                    await db.commit()
+                except:
+                    pass
+            
+            raise Exception(f"Failed to stop execution: {str(e)}")

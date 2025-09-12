@@ -219,6 +219,10 @@ export const useCrewExecutionStore = create<CrewExecutionState>((set, get) => ({
         jobId: response.job_id
       });
 
+      // Open Execution History panel automatically when crew is executed
+      const openExecutionHistoryEvent = new CustomEvent('openExecutionHistory');
+      window.dispatchEvent(openExecutionHistoryEvent);
+
       // Dispatch custom jobCreated event to update the run history immediately
       const jobCreatedEvent = new CustomEvent('jobCreated', { 
         detail: { 
