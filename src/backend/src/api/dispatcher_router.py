@@ -50,7 +50,8 @@ async def dispatch_request(
 
 @router.post("/detect-intent", response_model=DispatcherResponse)
 async def detect_intent_only(
-    request: DispatcherRequest
+    request: DispatcherRequest,
+    group_context: GroupContextDep
 ) -> DispatcherResponse:
     """
     Detect intent from a natural language message without executing generation.

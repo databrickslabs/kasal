@@ -1,14 +1,16 @@
 import React from 'react';
 import { Box, IconButton, Tooltip } from '@mui/material';
 import DeleteIcon from '@mui/icons-material/Delete';
-import VisibilityIcon from '@mui/icons-material/Visibility';
 import PictureAsPdfIcon from '@mui/icons-material/PictureAsPdf';
 import PreviewIcon from '@mui/icons-material/Preview';
 import TerminalIcon from '@mui/icons-material/Terminal';
 import ScheduleIcon from '@mui/icons-material/Schedule';
+import VisibilityIcon from '@mui/icons-material/Visibility';
 import { Run } from '../../api/ExecutionHistoryService';
 import { generateRunPDF } from '../../utils/pdfGenerator';
 import { useTranslation } from 'react-i18next';
+import ExecutionStopButton from '../ExecutionStopButton';
+import { useUserPreferencesStore } from '../../store/userPreferencesStore';
 
 interface RunActionsProps {
   run: Run;
@@ -17,6 +19,7 @@ interface RunActionsProps {
   onShowLogs: (jobId: string) => void;
   onSchedule: (run: Run) => void;
   onDelete: (run: Run) => void;
+  onStatusChange?: (runId: string, newStatus: string) => void;
 }
 
 const RunActions: React.FC<RunActionsProps> = ({
@@ -25,12 +28,56 @@ const RunActions: React.FC<RunActionsProps> = ({
   onShowTrace,
   onShowLogs,
   onSchedule,
-  onDelete
+  onDelete,
+  onStatusChange
 }) => {
   const { t } = useTranslation();
+  const { useNewExecutionUI } = useUserPreferencesStore();
 
+  // If using new UI, only show Stop and Delete buttons (Result and Trace are in separate columns)
+  if (useNewExecutionUI) {
+    return (
+      <Box sx={{ display: 'flex', gap: 0.5, alignItems: 'center' }}>
+        {/* Stop button - only shows when execution is running */}
+        <ExecutionStopButton
+          executionId={run.job_id}
+          status={run.status}
+          variant="icon"
+          size="small"
+          onStatusChange={(newStatus) => {
+            if (onStatusChange) {
+              onStatusChange(run.id, newStatus);
+            }
+          }}
+        />
+        <Tooltip title={t('runHistory.actions.deleteRun')}>
+          <IconButton
+            size="small"
+            onClick={() => onDelete(run)}
+            color="error"
+          >
+            <DeleteIcon fontSize="small" />
+          </IconButton>
+        </Tooltip>
+      </Box>
+    );
+  }
+
+  // Traditional view with all buttons
   return (
-    <Box sx={{ display: 'flex', gap: 0.5 }}>
+    <Box sx={{ display: 'flex', gap: 0.5, alignItems: 'center' }}>
+      {/* Stop button - only shows when execution is running */}
+      <ExecutionStopButton
+        executionId={run.job_id}
+        status={run.status}
+        variant="icon"
+        size="small"
+        onStatusChange={(newStatus) => {
+          if (onStatusChange) {
+            onStatusChange(run.id, newStatus);
+          }
+        }}
+      />
       <Tooltip title={t('runHistory.actions.viewResult')}>
         <IconButton
           size="small"

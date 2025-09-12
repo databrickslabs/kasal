@@ -25,6 +25,9 @@ import SearchIcon from '@mui/icons-material/Search';
 import FilterListIcon from '@mui/icons-material/FilterList';
 import ArrowUpwardIcon from '@mui/icons-material/ArrowUpward';
 import ArrowDownwardIcon from '@mui/icons-material/ArrowDownward';
+import PreviewIcon from '@mui/icons-material/Preview';
+import VisibilityIcon from '@mui/icons-material/Visibility';
+import ScheduleIcon from '@mui/icons-material/Schedule';
 import { Run, calculateDurationFromTraces } from '../../api/ExecutionHistoryService';
 import { ScheduleService } from '../../api/ScheduleService';
 import ShowTraceTimeline from './ShowTraceTimeline';
@@ -36,12 +39,16 @@ import type { LogMessage, LogEntry } from '../../api/ExecutionLogs';
 import { useTranslation } from 'react-i18next';
 import { toast } from 'react-hot-toast';
 import { useRunResult } from '../../hooks/global/useExecutionResult';
+import { useUserPreferencesStore } from '../../store/userPreferencesStore';
+import UIPreferenceDialog from '../Settings/UIPreferenceDialog';
+import SettingsIcon from '@mui/icons-material/Settings';
 import { useRunHistory } from '../../hooks/global/useExecutionHistory';
 import { useRunStatusStore } from '../../store/runStatus';
 import RunActions from './ExecutionActions';
 import RunDialogs from './RunDialogs';
 import { AgentYaml, TaskYaml } from '../../types/crew';
 import { useTaskExecutionStore } from '../../store/taskExecutionStore';
+import ExecutionStatusBadge from '../ExecutionStatusBadge';
 
 export interface RunHistoryRef {
   refreshRuns: () => Promise<void>;
@@ -134,10 +141,11 @@ interface RunHistoryProps {
 const RunHistory = forwardRef<RunHistoryRef, RunHistoryProps>(({ executionHistoryHeight = 200, onExecutionCountChange }, ref) => {
   const { t } = useTranslation();
   const { showRunResult, selectedRun, isOpen, closeRunResult } = useRunResult();
+  const { hasSeenUIPreferenceDialog } = useUserPreferencesStore();
   const {
     runs,
     searchQuery,
-    loading,
+    loading: _loading,
     showSkeleton,
     error,
     page: _page,
@@ -162,6 +170,7 @@ const RunHistory = forwardRef<RunHistoryRef, RunHistoryProps>(({ executionHistor
   const cleanupStore = useRunStatusStore(state => state.cleanup);
 
   const [selectedRunId, setSelectedRunId] = useState<string | null>(null);
+  const [selectedRunForTrace, setSelectedRunForTrace] = useState<Run | null>(null);
   const [showTraceOpen, setShowTraceOpen] = useState<boolean>(false);
   const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
   const [deleteLoading, setDeleteLoading] = useState(false);
@@ -176,6 +185,7 @@ const RunHistory = forwardRef<RunHistoryRef, RunHistoryProps>(({ executionHistor
   const [cronExpression, setCronExpression] = useState('0 0 * * *');
   const [anchorEl, setAnchorEl] = useState<HTMLButtonElement | null>(null);
   const searchInputRef = useRef<HTMLInputElement>(null);
+  const [showPreferenceDialog, setShowPreferenceDialog] = useState(false);
   const scheduleNameInputRef = useRef<HTMLInputElement>(null);
   const [deleteRunDialogOpen, setDeleteRunDialogOpen] = useState(false);
   const [runToDelete, setRunToDelete] = useState<Run | null>(null);
@@ -324,6 +334,9 @@ const RunHistory = forwardRef<RunHistoryRef, RunHistoryProps>(({ executionHistor
   const handleShowTrace = (runId: string) => {
     console.log(`[RunHistory] Showing trace for run ID: ${runId}`);
     setSelectedRunId(runId);
+    // Find the run data
+    const run = runs.find(r => r.id === runId);
+    setSelectedRunForTrace(run || null);
     setShowTraceOpen(true);
   };
 
@@ -331,6 +344,7 @@ const RunHistory = forwardRef<RunHistoryRef, RunHistoryProps>(({ executionHistor
     console.log('[RunHistory] Closing trace dialog');
     setShowTraceOpen(false);
     setSelectedRunId(null);
+    setSelectedRunForTrace(null);
     fetchRuns().catch(err => console.error('Error refreshing after closing trace:', err));
   };
 
@@ -455,6 +469,15 @@ const RunHistory = forwardRef<RunHistoryRef, RunHistoryProps>(({ executionHistor
       executionLogService.cleanup();
     };
   }, []);
+
+  // Show preference dialog if user hasn't seen it
+  useEffect(() => {
+    if (!hasSeenUIPreferenceDialog) {
+      // Small delay to let the component render first
+      const timer = setTimeout(() => setShowPreferenceDialog(true), 500);
+      return () => clearTimeout(timer);
+    }
+  }, [hasSeenUIPreferenceDialog]);
 
   const handleScheduleJob = async () => {
     if (!selectedRunForSchedule || !scheduleName || !cronExpression) {
@@ -802,6 +825,9 @@ const RunHistory = forwardRef<RunHistoryRef, RunHistoryProps>(({ executionHistor
                       {renderSortIcon('status')}
                     </Box>
                   </TableCell>
+                  <TableCell sx={{ py: 0.25, fontSize: '0.8125rem', backgroundColor: theme => theme.palette.background.paper, textAlign: 'center' }}>
+                    Schedule Execution
+                  </TableCell>
                   <TableCell sx={{ py: 0.25, fontSize: '0.8125rem', backgroundColor: theme => theme.palette.background.paper }}>
                     Submitter
                   </TableCell>
@@ -817,41 +843,66 @@ const RunHistory = forwardRef<RunHistoryRef, RunHistoryProps>(({ executionHistor
                   <TableCell sx={{ py: 0.25, fontSize: '0.8125rem', backgroundColor: theme => theme.palette.background.paper }}>
                     Duration
                   </TableCell>
-                  <TableCell sx={{ py: 0.25, fontSize: '0.8125rem', width: '240px', backgroundColor: theme => theme.palette.background.paper }}>
+                  <TableCell sx={{ py: 0.25, fontSize: '0.8125rem', backgroundColor: theme => theme.palette.background.paper, textAlign: 'center' }}>
+                    Result
+                  </TableCell>
+                  <TableCell sx={{ py: 0.25, fontSize: '0.8125rem', backgroundColor: theme => theme.palette.background.paper, textAlign: 'center' }}>
+                    Trace
+                  </TableCell>
+                  <TableCell sx={{ py: 0.25, fontSize: '0.8125rem', width: '120px', backgroundColor: theme => theme.palette.background.paper }}>
                     <Box sx={{ 
                       display: 'flex', 
                       justifyContent: 'space-between', 
                       alignItems: 'center',
                       position: 'relative',
-                      '&:hover .delete-all-button': {
+                      '&:hover .delete-all-button, &:hover .settings-button': {
                         opacity: 1,
                         visibility: 'visible'
                       }
                     }}>
                       <Box>{t('runHistory.columns.actions')}</Box>
-                      <Tooltip title={t('runHistory.deleteAllRuns')}>
-                        <IconButton
-                          className="delete-all-button"
-                          size="small"
-                          color="error"
-                          onClick={() => setDeleteDialogOpen(true)}
-                          disabled={runs.length === 0}
-                          sx={{ 
-                            height: '20px', 
-                            width: '20px',
-                            p: 0.25,
-                            opacity: 0,
-                            visibility: 'hidden',
-                            transition: 'opacity 0.2s ease-in-out, visibility 0.2s ease-in-out',
-                            '&.Mui-disabled': {
+                      <Box sx={{ display: 'flex', gap: 0.5 }}>
+                        <Tooltip title="UI Preferences">
+                          <IconButton
+                            className="settings-button"
+                            size="small"
+                            onClick={() => setShowPreferenceDialog(true)}
+                            sx={{ 
+                              height: '20px', 
+                              width: '20px',
+                              p: 0.25,
                               opacity: 0,
-                              visibility: 'hidden'
-                            }
-                          }}
-                        >
-                          <DeleteIcon sx={{ fontSize: '0.875rem' }} />
-                        </IconButton>
-                      </Tooltip>
+                              visibility: 'hidden',
+                              transition: 'opacity 0.2s ease-in-out, visibility 0.2s ease-in-out'
+                            }}
+                          >
+                            <SettingsIcon sx={{ fontSize: '0.875rem' }} />
+                          </IconButton>
+                        </Tooltip>
+                        <Tooltip title={t('runHistory.deleteAllRuns')}>
+                          <IconButton
+                            className="delete-all-button"
+                            size="small"
+                            color="error"
+                            onClick={() => setDeleteDialogOpen(true)}
+                            disabled={runs.length === 0}
+                            sx={{ 
+                              height: '20px', 
+                              width: '20px',
+                              p: 0.25,
+                              opacity: 0,
+                              visibility: 'hidden',
+                              transition: 'opacity 0.2s ease-in-out, visibility 0.2s ease-in-out',
+                              '&.Mui-disabled': {
+                                opacity: 0,
+                                visibility: 'hidden'
+                              }
+                            }}
+                          >
+                            <DeleteIcon sx={{ fontSize: '0.875rem' }} />
+                          </IconButton>
+                        </Tooltip>
+                      </Box>
                     </Box>
                   </TableCell>
                 </TableRow>
@@ -859,7 +910,7 @@ const RunHistory = forwardRef<RunHistoryRef, RunHistoryProps>(({ executionHistor
               <TableBody>
                 {displayedRuns.length === 0 ? (
                   <TableRow>
-                    <TableCell colSpan={6} align="center" sx={{ py: 1, fontSize: '0.8125rem' }}>
+                    <TableCell colSpan={9} align="center" sx={{ py: 1, fontSize: '0.8125rem' }}>
                       {searchQuery ? t('runHistory.noSearchResults') : t('runHistory.noRuns')}
                     </TableCell>
                   </TableRow>
@@ -881,39 +932,51 @@ const RunHistory = forwardRef<RunHistoryRef, RunHistoryProps>(({ executionHistor
                           : run.run_name
                       }</TableCell>
                       <TableCell>
-                        <Chip
-                          label={t(`runHistory.status.${run.status.toLowerCase()}`)}
-                          color={
-                            run.status === 'completed'
-                              ? 'success'
-                              : run.status === 'failed'
-                                ? 'error'
-                                : run.status === 'running'
-                                  ? 'primary'
-                                  : run.status === 'queued' || run.status === 'pending'
-                                    ? 'warning'
-                                    : 'default'
-                          }
+                        <ExecutionStatusBadge 
+                          status={run.status}
                           size="small"
-                          sx={{ 
-                            transition: 'all 0.2s ease-in-out',
-                            opacity: loading ? 0.7 : 1,
-                            animation: (run.status === 'running' || run.status === 'pending' || run.status === 'queued') 
-                              ? 'pulse 2s infinite' : 'none',
-                            '@keyframes pulse': {
-                              '0%': { opacity: 1 },
-                              '50%': { opacity: 0.6 },
-                              '100%': { opacity: 1 }
-                            },
-                            height: '18px',
-                            '& .MuiChip-label': { px: 0.75, fontSize: '0.7rem' }
-                          }}
                         />
+                      </TableCell>
+                      <TableCell align="center">
+                        <Tooltip title={t('runHistory.actions.schedule')}>
+                          <IconButton
+                            size="small"
+                            onClick={() => handleOpenScheduleDialog(run)}
+                            color="primary"
+                          >
+                            <ScheduleIcon fontSize="small" />
+                          </IconButton>
+                        </Tooltip>
                       </TableCell>
                       <TableCell>{run.group_email || '-'}</TableCell>
                       <TableCell>{new Date(run.created_at).toLocaleString()}</TableCell>
                       <TableCell>
                         <DurationCell run={run} />
+                      </TableCell>
+                      <TableCell align="center">
+                        <Tooltip title={t('runHistory.actions.viewResult')}>
+                          <span>
+                            <IconButton
+                              size="small"
+                              onClick={() => handleShowResult(run)}
+                              color="primary"
+                              disabled={['running', 'pending', 'queued', 'in_progress'].includes(run.status?.toLowerCase() || '')}
+                            >
+                              <PreviewIcon fontSize="small" />
+                            </IconButton>
+                          </span>
+                        </Tooltip>
+                      </TableCell>
+                      <TableCell align="center">
+                        <Tooltip title={t('runHistory.actions.viewTrace')}>
+                          <IconButton
+                            size="small"
+                            onClick={() => handleShowTrace(run.id)}
+                            color="primary"
+                          >
+                            <VisibilityIcon fontSize="small" />
+                          </IconButton>
+                        </Tooltip>
                       </TableCell>
                       <TableCell>
                         <RunActions
@@ -923,6 +986,10 @@ const RunHistory = forwardRef<RunHistoryRef, RunHistoryProps>(({ executionHistor
                           onShowLogs={handleShowLogs}
                           onSchedule={handleOpenScheduleDialog}
                           onDelete={openDeleteRunDialog}
+                          onStatusChange={(runId, newStatus) => {
+                            // Update the run status locally
+                            fetchRuns();
+                          }}
                         />
                       </TableCell>
                     </TableRow>
@@ -957,6 +1024,9 @@ const RunHistory = forwardRef<RunHistoryRef, RunHistoryProps>(({ executionHistor
               open={showTraceOpen}
               onClose={handleCloseTrace}
               runId={selectedRunId}
+              run={selectedRunForTrace || undefined}
+              onViewResult={handleShowResult}
+              onShowLogs={handleShowLogs}
             />
           )}
 
@@ -999,6 +1069,13 @@ const RunHistory = forwardRef<RunHistoryRef, RunHistoryProps>(({ executionHistor
             open={isOpen && !!selectedRun}
             onClose={closeRunResult}
             result={memoizedResult}
+            run={selectedRun || undefined}
+          />
+          
+          {/* UI Preference Dialog */}
+          <UIPreferenceDialog 
+            open={showPreferenceDialog}
+            onClose={() => setShowPreferenceDialog(false)}
           />
         </CardContent>
       </Card>

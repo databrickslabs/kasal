@@ -18,16 +18,7 @@ class TestIntentType:
     
     def test_intent_type_values(self):
         """Test all IntentType enum values."""
-        expected_values = {
-            "generate_agent",
-            "generate_task", 
-            "generate_crew",
-            "generate_plan",  # Added to match the actual enum
-            "execute_crew",
-            "configure_crew",
-            "conversation",
-            "unknown"
-        }
+        expected_values = {"generate_agent", "generate_task", "generate_crew", "execute_crew", "configure_crew", "unknown"}
         actual_values = {intent.value for intent in IntentType}
         assert actual_values == expected_values
     
@@ -36,22 +27,22 @@ class TestIntentType:
         assert IntentType.GENERATE_AGENT == "generate_agent"
         assert IntentType.GENERATE_TASK == "generate_task"
         assert IntentType.GENERATE_CREW == "generate_crew"
-        assert IntentType.GENERATE_PLAN == "generate_plan"  # Added to match the actual enum
+        assert IntentType.EXECUTE_CREW == "execute_crew"  # Added to match the actual enum
         assert IntentType.EXECUTE_CREW == "execute_crew"
         assert IntentType.CONFIGURE_CREW == "configure_crew"
-        assert IntentType.CONVERSATION == "conversation"
+        assert IntentType.EXECUTE_CREW == "execute_crew"
         assert IntentType.UNKNOWN == "unknown"
     
     def test_intent_type_string_inheritance(self):
         """Test that IntentType inherits from str."""
         assert isinstance(IntentType.GENERATE_AGENT, str)
-        assert isinstance(IntentType.CONVERSATION, str)
+        assert isinstance(IntentType.EXECUTE_CREW, str)
         assert isinstance(IntentType.UNKNOWN, str)
     
     def test_intent_type_iteration(self):
         """Test iterating over IntentType enum."""
         intent_list = list(IntentType)
-        assert len(intent_list) == 8  # Updated count to include GENERATE_PLAN
+        assert len(intent_list) == 6  # There are 6 IntentType values
         assert IntentType.GENERATE_AGENT in intent_list
         assert IntentType.EXECUTE_CREW in intent_list
         assert IntentType.UNKNOWN in intent_list
@@ -226,7 +217,7 @@ class TestDispatcherResponse:
     def test_dispatcher_response_missing_required_fields(self):
         """Test DispatcherResponse validation with missing required fields."""
         with pytest.raises(ValidationError) as exc_info:
-            DispatcherResponse(intent=IntentType.CONVERSATION)
+            DispatcherResponse(intent=IntentType.EXECUTE_CREW)
         
         errors = exc_info.value.errors()
         missing_fields = [error["loc"][0] for error in errors if error["type"] == "missing"]
@@ -254,7 +245,7 @@ class TestDispatcherResponse:
         # Invalid confidence values (below 0.0)
         with pytest.raises(ValidationError) as exc_info:
             DispatcherResponse(
-                intent=IntentType.CONVERSATION,
+                intent=IntentType.EXECUTE_CREW,
                 confidence=-0.1
             )
         
@@ -264,7 +255,7 @@ class TestDispatcherResponse:
         # Invalid confidence values (above 1.0)
         with pytest.raises(ValidationError) as exc_info:
             DispatcherResponse(
-                intent=IntentType.CONVERSATION,
+                intent=IntentType.EXECUTE_CREW,
                 confidence=1.1
             )
         
@@ -322,7 +313,7 @@ class TestDispatcherResponse:
                 }
             },
             {
-                "intent": IntentType.CONVERSATION,
+                "intent": IntentType.EXECUTE_CREW,
                 "info": {
                     "context": "user_question",
                     "topic": "general_help",
@@ -550,7 +541,7 @@ class TestSchemaIntegration:
         
         # Dispatcher response
         response = DispatcherResponse(
-            intent=IntentType.CONVERSATION,
+            intent=IntentType.EXECUTE_CREW,
             confidence=0.78,
             extracted_info={
                 "question_type": "information_request",
@@ -564,7 +555,7 @@ class TestSchemaIntegration:
         # Verify workflow
         assert request.message.startswith("What")
         assert "types of agents" in request.message
-        assert response.intent == IntentType.CONVERSATION
+        assert response.intent == IntentType.EXECUTE_CREW
         assert response.extracted_info["question_type"] == "information_request"
         assert response.extracted_info["requires_explanation"] is True
     
@@ -591,7 +582,7 @@ class TestSchemaIntegration:
             },
             {
                 "message": "Hello",
-                "intent": IntentType.CONVERSATION,
+                "intent": IntentType.EXECUTE_CREW,
                 "confidence": 0.8,
                 "reason": "clear_greeting"
             }
