@@ -173,24 +173,34 @@ class TestExecutionLogsService:
         execution_id = "exec-123"
         
         historical_logs = [MockExecutionLog(id=1, execution_id=execution_id, content="Group log")]
+        mock_execution = MagicMock(id=execution_id)
         
         with patch('src.services.execution_logs_service.execution_logs_repository') as mock_repo:
             mock_repo.get_by_execution_id_and_group_with_managed_session.return_value = historical_logs
             
-            await service.connect_with_group(mock_websocket, execution_id, group_context)
-            
-            # Verify WebSocket was accepted
-            mock_websocket.accept.assert_called_once()
-            
-            # Verify connection was added
-            assert execution_id in service.active_connections
-            assert mock_websocket in service.active_connections[execution_id]
-            
-            # Verify group-specific repository method was called
-            mock_repo.get_by_execution_id_and_group_with_managed_session.assert_called_once_with(
-                execution_id=execution_id,
-                group_id=group_context.primary_group_id
-            )
+            with patch('src.repositories.execution_history_repository.execution_history_repository') as mock_exec_repo:
+                mock_exec_repo.get_execution_by_job_id = AsyncMock(return_value=mock_execution)
+                
+                await service.connect_with_group(mock_websocket, execution_id, group_context)
+                
+                # Verify execution access check was made
+                mock_exec_repo.get_execution_by_job_id.assert_called_once_with(
+                    execution_id,
+                    group_ids=['group-123']
+                )
+                
+                # Verify WebSocket was accepted
+                mock_websocket.accept.assert_called_once()
+                
+                # Verify connection was added
+                assert execution_id in service.active_connections
+                assert mock_websocket in service.active_connections[execution_id]
+                
+                # Verify group-specific repository method was called
+                mock_repo.get_by_execution_id_and_group_with_managed_session.assert_called_once_with(
+                    execution_id=execution_id,
+                    group_id=group_context.primary_group_id
+                )
     
     @pytest.mark.asyncio
     async def test_connect_with_group_no_group_id(self, execution_logs_service_instance, mock_websocket):
@@ -200,31 +210,44 @@ class TestExecutionLogsService:
         group_context = GroupContext(group_ids=None, group_email="test@example.com")
         
         with patch('src.services.execution_logs_service.execution_logs_repository') as mock_repo:
-            await service.connect_with_group(mock_websocket, execution_id, group_context)
-            
-            # Should not call repository methods due to security
-            mock_repo.get_by_execution_id_and_group_with_managed_session.assert_not_called()
-            mock_repo.get_by_execution_id_with_managed_session.assert_not_called()
-            
-            # But connection should still be established
-            assert execution_id in service.active_connections
-            assert mock_websocket in service.active_connections[execution_id]
+            with patch('src.repositories.execution_history_repository.execution_history_repository') as mock_exec_repo:
+                # When no group_ids, the service should reject the connection
+                mock_exec_repo.get_execution_by_job_id = AsyncMock(return_value=None)  # Simulate no access
+                
+                await service.connect_with_group(mock_websocket, execution_id, group_context)
+                
+                # Should not call repository methods due to security
+                mock_repo.get_by_execution_id_and_group_with_managed_session.assert_not_called()
+                mock_repo.get_by_execution_id_with_managed_session.assert_not_called()
+                
+                # Connection should be rejected (closed)
+                mock_websocket.close.assert_called_once_with(code=1008, reason="Execution not found or access denied")
+                
+                # Connection should NOT be established
+                assert execution_id not in service.active_connections
     
     @pytest.mark.asyncio
     async def test_connect_with_group_error(self, execution_logs_service_instance, mock_websocket, group_context):
         """Test connecting with group when historical logs retrieval fails."""
         service = execution_logs_service_instance
         execution_id = "exec-123"
+        mock_execution = MagicMock(id=execution_id)
         
         with patch('src.services.execution_logs_service.execution_logs_repository') as mock_repo:
             mock_repo.get_by_execution_id_and_group_with_managed_session.side_effect = Exception("DB Error")
             
-            # Should not raise exception
-            await service.connect_with_group(mock_websocket, execution_id, group_context)
-            
-            # Connection should still be established
-            assert execution_id in service.active_connections
-            assert mock_websocket in service.active_connections[execution_id]
+            with patch('src.repositories.execution_history_repository.execution_history_repository') as mock_exec_repo:
+                mock_exec_repo.get_execution_by_job_id = AsyncMock(return_value=mock_execution)
+                
+                # Should not raise exception
+                await service.connect_with_group(mock_websocket, execution_id, group_context)
+                
+                # WebSocket should be accepted despite error
+                mock_websocket.accept.assert_called_once()
+                
+                # Connection should still be established
+                assert execution_id in service.active_connections
+                assert mock_websocket in service.active_connections[execution_id]
     
     @pytest.mark.asyncio
     async def test_disconnect_existing_connection(self, execution_logs_service_instance, mock_websocket):
@@ -513,24 +536,28 @@ class TestExecutionLogsService:
         """Test getting execution logs by group."""
         service = execution_logs_service_instance
         execution_id = "exec-123"
+        mock_execution = MagicMock(id=execution_id)
         
         mock_logs = [MockExecutionLog(id=1, execution_id=execution_id, content="Group log")]
         
         with patch('src.services.execution_logs_service.execution_logs_repository') as mock_repo:
             mock_repo.get_by_execution_id_and_group_with_managed_session = AsyncMock(return_value=mock_logs)
             
-            result = await service.get_execution_logs_by_group(execution_id, group_context)
-            
-            assert len(result) == 1
-            assert result[0].content == "Group log"
-            
-            mock_repo.get_by_execution_id_and_group_with_managed_session.assert_called_once_with(
-                execution_id=execution_id,
-                group_id=group_context.primary_group_id,
-                limit=1000,
-                offset=0,
-                include_null_group=True
-            )
+            with patch('src.repositories.execution_history_repository.execution_history_repository') as mock_exec_repo:
+                mock_exec_repo.get_execution_by_job_id = AsyncMock(return_value=mock_execution)
+                
+                result = await service.get_execution_logs_by_group(execution_id, group_context)
+                
+                assert len(result) == 1
+                assert result[0].content == "Group log"
+                
+                mock_repo.get_by_execution_id_and_group_with_managed_session.assert_called_once_with(
+                    execution_id=execution_id,
+                    group_id=group_context.primary_group_id,
+                    limit=1000,
+                    offset=0,
+                    include_null_group=True
+                )
     
     @pytest.mark.asyncio
     async def test_get_execution_logs_by_group_no_group_id(self, execution_logs_service_instance):
@@ -539,22 +566,19 @@ class TestExecutionLogsService:
         execution_id = "exec-123"
         group_context = GroupContext(group_ids=None, group_email="test@example.com")
         
-        mock_logs = [MockExecutionLog(id=1, execution_id=execution_id, content="Fallback log")]
-        
         with patch('src.services.execution_logs_service.execution_logs_repository') as mock_repo:
-            mock_repo.get_by_execution_id_with_managed_session = AsyncMock(return_value=mock_logs)
-            
-            result = await service.get_execution_logs_by_group(execution_id, group_context)
-            
-            assert len(result) == 1
-            assert result[0].content == "Fallback log"
-            
-            # Should fall back to non-group method
-            mock_repo.get_by_execution_id_with_managed_session.assert_called_once_with(
-                execution_id=execution_id,
-                limit=1000,
-                offset=0
-            )
+            with patch('src.repositories.execution_history_repository.execution_history_repository') as mock_exec_repo:
+                # When no group_ids, access is denied
+                mock_exec_repo.get_execution_by_job_id = AsyncMock(return_value=None)
+                
+                result = await service.get_execution_logs_by_group(execution_id, group_context)
+                
+                # Should return empty list for security when no group ID
+                assert len(result) == 0
+                
+                # Repository should not be called for logs due to access denial
+                mock_repo.get_by_execution_id_and_group_with_managed_session.assert_not_called()
+                mock_repo.get_by_execution_id_with_managed_session.assert_not_called()
     
     @pytest.mark.asyncio
     async def test_count_logs(self, execution_logs_service_instance):
@@ -954,6 +978,7 @@ class TestStopLogsWriter:
         """Test connecting with group when websocket send fails."""
         service = execution_logs_service_instance
         execution_id = "exec-123"
+        mock_execution = MagicMock(id=execution_id)
         
         historical_logs = [MockExecutionLog(id=1, execution_id=execution_id, content="Log 1")]
         
@@ -963,12 +988,15 @@ class TestStopLogsWriter:
         with patch('src.services.execution_logs_service.execution_logs_repository') as mock_repo:
             mock_repo.get_by_execution_id_and_group_with_managed_session = AsyncMock(return_value=historical_logs)
             
-            # Should not raise exception, should handle gracefully
-            await service.connect_with_group(mock_websocket, execution_id, group_context)
-            
-            # Connection should still be established despite send error
-            assert execution_id in service.active_connections
-            assert mock_websocket in service.active_connections[execution_id]
+            with patch('src.repositories.execution_history_repository.execution_history_repository') as mock_exec_repo:
+                mock_exec_repo.get_execution_by_job_id = AsyncMock(return_value=mock_execution)
+                
+                # Should not raise exception, should handle gracefully
+                await service.connect_with_group(mock_websocket, execution_id, group_context)
+                
+                # Connection should still be established despite send error
+                assert execution_id in service.active_connections
+                assert mock_websocket in service.active_connections[execution_id]
 
 
 class TestLogsWriterLoopAdditionalCoverage:

@@ -146,12 +146,14 @@ async def create_crew(
 @router.post("/debug")
 async def debug_crew_data(
     crew_in: CrewCreate,
+    group_context: GroupContextDep,
 ):
     """
     Debug endpoint to validate crew data structure without saving.
     
     Args:
         crew_in: Crew data to validate
+        group_context: Group context from headers
         
     Returns:
         Validation result

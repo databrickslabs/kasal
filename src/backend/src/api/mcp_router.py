@@ -21,6 +21,7 @@ from src.schemas.mcp import (
     MCPSettingsUpdate
 )
 from src.db.session import get_db
+from src.core.dependencies import GroupContextDep
 from src.services.mcp_service import MCPService
 
 # Create router instance
@@ -36,7 +37,8 @@ logger = logging.getLogger(__name__)
 
 @router.get("/servers", response_model=MCPServerListResponse)
 async def get_mcp_servers(
-    db: AsyncSession = Depends(get_db)
+    db: AsyncSession = Depends(get_db),
+    group_context: GroupContextDep = None
 ) -> MCPServerListResponse:
     """
     Get all MCP servers.
@@ -54,7 +56,8 @@ async def get_mcp_servers(
 
 @router.get("/servers/enabled", response_model=MCPServerListResponse)
 async def get_enabled_mcp_servers(
-    db: AsyncSession = Depends(get_db)
+    db: AsyncSession = Depends(get_db),
+    group_context: GroupContextDep = None
 ) -> MCPServerListResponse:
     """
     Get all enabled MCP servers.
@@ -68,7 +71,8 @@ async def get_enabled_mcp_servers(
 
 @router.get("/servers/global", response_model=MCPServerListResponse)
 async def get_global_mcp_servers(
-    db: AsyncSession = Depends(get_db)
+    db: AsyncSession = Depends(get_db),
+    group_context: GroupContextDep = None
 ) -> MCPServerListResponse:
     """
     Get all globally enabled MCP servers.
@@ -83,7 +87,8 @@ async def get_global_mcp_servers(
 @router.get("/servers/{server_id}", response_model=MCPServerResponse)
 async def get_mcp_server(
     server_id: int,
-    db: AsyncSession = Depends(get_db)
+    db: AsyncSession = Depends(get_db),
+    group_context: GroupContextDep = None
 ) -> MCPServerResponse:
     """
     Get an MCP server by ID.
@@ -101,7 +106,8 @@ async def get_mcp_server(
 @router.post("/servers", response_model=MCPServerResponse, status_code=status.HTTP_201_CREATED)
 async def create_mcp_server(
     server_data: MCPServerCreate,
-    db: AsyncSession = Depends(get_db)
+    db: AsyncSession = Depends(get_db),
+    group_context: GroupContextDep = None
 ) -> MCPServerResponse:
     """
     Create a new MCP server.
@@ -120,7 +126,8 @@ async def create_mcp_server(
 async def update_mcp_server(
     server_id: int,
     server_data: MCPServerUpdate,
-    db: AsyncSession = Depends(get_db)
+    db: AsyncSession = Depends(get_db),
+    group_context: GroupContextDep = None
 ) -> MCPServerResponse:
     """
     Update an existing MCP server.
@@ -138,7 +145,8 @@ async def update_mcp_server(
 @router.delete("/servers/{server_id}", status_code=status.HTTP_204_NO_CONTENT)
 async def delete_mcp_server(
     server_id: int,
-    db: AsyncSession = Depends(get_db)
+    db: AsyncSession = Depends(get_db),
+    group_context: GroupContextDep = None
 ) -> None:
     """
     Delete an MCP server.
@@ -155,7 +163,8 @@ async def delete_mcp_server(
 @router.patch("/servers/{server_id}/toggle-enabled", response_model=MCPToggleResponse)
 async def toggle_mcp_server_enabled(
     server_id: int,
-    db: AsyncSession = Depends(get_db)
+    db: AsyncSession = Depends(get_db),
+    group_context: GroupContextDep = None
 ) -> MCPToggleResponse:
     """
     Toggle the enabled status of an MCP server.
@@ -174,7 +183,8 @@ async def toggle_mcp_server_enabled(
 @router.patch("/servers/{server_id}/toggle-global-enabled", response_model=MCPToggleResponse)
 async def toggle_mcp_server_global_enabled(
     server_id: int,
-    db: AsyncSession = Depends(get_db)
+    db: AsyncSession = Depends(get_db),
+    group_context: GroupContextDep = None
 ) -> MCPToggleResponse:
     """
     Toggle the global enabled status of an MCP server.
@@ -193,7 +203,8 @@ async def toggle_mcp_server_global_enabled(
 @router.post("/test-connection", response_model=MCPTestConnectionResponse)
 async def test_mcp_connection(
     test_data: MCPTestConnectionRequest,
-    db: AsyncSession = Depends(get_db)
+    db: AsyncSession = Depends(get_db),
+    group_context: GroupContextDep = None
 ) -> MCPTestConnectionResponse:
     """
     Test connection to an MCP server.
@@ -215,7 +226,8 @@ async def test_mcp_connection(
 
 @router.get("/settings", response_model=MCPSettingsResponse)
 async def get_mcp_settings(
-    db: AsyncSession = Depends(get_db)
+    db: AsyncSession = Depends(get_db),
+    group_context: GroupContextDep = None
 ) -> MCPSettingsResponse:
     """
     Get global MCP settings.
@@ -233,7 +245,8 @@ async def get_mcp_settings(
 @router.put("/settings", response_model=MCPSettingsResponse)
 async def update_mcp_settings(
     settings_data: MCPSettingsUpdate,
-    db: AsyncSession = Depends(get_db)
+    db: AsyncSession = Depends(get_db),
+    group_context: GroupContextDep = None
 ) -> MCPSettingsResponse:
     """
     Update global MCP settings.

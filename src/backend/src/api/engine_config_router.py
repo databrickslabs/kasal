@@ -3,7 +3,7 @@ from typing import Annotated, List, Dict, Any
 from fastapi import APIRouter, Depends, HTTPException, status
 import logging
 
-from src.core.dependencies import SessionDep
+from src.core.dependencies import SessionDep, GroupContextDep
 from src.core.unit_of_work import UnitOfWork
 from src.models.engine_config import EngineConfig
 from src.schemas.engine_config import (
@@ -35,6 +35,7 @@ async def get_engine_config_service() -> EngineConfigService:
 @router.get("", response_model=EngineConfigListResponse)
 async def get_engine_configs(
     service: Annotated[EngineConfigService, Depends(get_engine_config_service)],
+    group_context: GroupContextDep,
 ):
     """
     Get all engine configurations.
@@ -60,6 +61,7 @@ async def get_engine_configs(
 @router.get("/enabled", response_model=EngineConfigListResponse)
 async def get_enabled_engine_configs(
     service: Annotated[EngineConfigService, Depends(get_engine_config_service)],
+    group_context: GroupContextDep,
 ):
     """
     Get only enabled engine configurations.
@@ -86,6 +88,7 @@ async def get_enabled_engine_configs(
 async def get_engine_config(
     engine_name: str,
     service: Annotated[EngineConfigService, Depends(get_engine_config_service)],
+    group_context: GroupContextDep,
 ):
     """
     Get a specific engine configuration by engine name.
@@ -124,6 +127,7 @@ async def get_engine_config_by_key(
     engine_name: str,
     config_key: str,
     service: Annotated[EngineConfigService, Depends(get_engine_config_service)],
+    group_context: GroupContextDep,
 ):
     """
     Get a specific engine configuration by engine name and config key.
@@ -162,6 +166,7 @@ async def get_engine_config_by_key(
 async def get_engine_configs_by_type(
     engine_type: str,
     service: Annotated[EngineConfigService, Depends(get_engine_config_service)],
+    group_context: GroupContextDep,
 ):
     """
     Get all engine configurations by engine type.
@@ -189,6 +194,7 @@ async def get_engine_configs_by_type(
 async def create_engine_config(
     config: EngineConfigCreate,
     service: Annotated[EngineConfigService, Depends(get_engine_config_service)],
+    group_context: GroupContextDep,
 ):
     """
     Create a new engine configuration.
@@ -227,6 +233,7 @@ async def update_engine_config(
     engine_name: str,
     config: EngineConfigUpdate,
     service: Annotated[EngineConfigService, Depends(get_engine_config_service)],
+    group_context: GroupContextDep,
 ):
     """
     Update an existing engine configuration.
@@ -267,6 +274,7 @@ async def toggle_engine_config(
     engine_name: str,
     toggle_data: EngineConfigToggleUpdate,
     service: Annotated[EngineConfigService, Depends(get_engine_config_service)],
+    group_context: GroupContextDep,
 ):
     """
     Toggle the enabled status of an engine configuration.
@@ -308,6 +316,7 @@ async def update_config_value(
     config_key: str,
     value_data: EngineConfigValueUpdate,
     service: Annotated[EngineConfigService, Depends(get_engine_config_service)],
+    group_context: GroupContextDep,
 ):
     """
     Update the configuration value for a specific engine and key.
@@ -347,6 +356,7 @@ async def update_config_value(
 @router.get("/crewai/flow-enabled")
 async def get_crewai_flow_enabled(
     service: Annotated[EngineConfigService, Depends(get_engine_config_service)],
+    group_context: GroupContextDep,
 ):
     """
     Get the CrewAI flow enabled status.
@@ -373,6 +383,7 @@ async def get_crewai_flow_enabled(
 async def set_crewai_flow_enabled(
     config_data: CrewAIFlowConfigUpdate,
     service: Annotated[EngineConfigService, Depends(get_engine_config_service)],
+    group_context: GroupContextDep,
 ):
     """
     Set the CrewAI flow enabled status.
@@ -407,6 +418,7 @@ async def set_crewai_flow_enabled(
 async def delete_engine_config(
     engine_name: str,
     service: Annotated[EngineConfigService, Depends(get_engine_config_service)],
+    group_context: GroupContextDep,
 ):
     """
     Delete an engine configuration.

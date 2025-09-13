@@ -5,6 +5,7 @@ Handles Genie-related API endpoints using proper service/repository architecture
 """
 
 from fastapi import APIRouter, Request, HTTPException, Depends
+from src.core.dependencies import GroupContextDep
 from typing import Optional
 import logging
 
@@ -29,7 +30,8 @@ router = APIRouter(prefix="/api/genie", tags=["genie"])
 async def get_genie_spaces(
     request: Request,
     page_token: Optional[str] = None,
-    page_size: int = 50
+    page_size: int = 50,
+    group_context: GroupContextDep = None
 ) -> GenieSpacesResponse:
     """
     Fetch available Genie spaces from Databricks with pagination.
@@ -77,7 +79,8 @@ async def get_genie_spaces(
 @router.post("/spaces/search", response_model=GenieSpacesResponse)
 async def search_genie_spaces(
     request: Request,
-    spaces_request: GenieSpacesRequest
+    spaces_request: GenieSpacesRequest,
+    group_context: GroupContextDep = None
 ) -> GenieSpacesResponse:
     """
     Search and filter Genie spaces from Databricks with pagination.
@@ -116,7 +119,11 @@ async def search_genie_spaces(
 
 
 @router.get("/spaces/{space_id}", response_model=GenieSpace)
-async def get_genie_space_details(space_id: str, request: Request) -> GenieSpace:
+async def get_genie_space_details(
+    space_id: str,
+    request: Request,
+    group_context: GroupContextDep = None
+) -> GenieSpace:
     """
     Get details for a specific Genie space.
     
@@ -158,7 +165,8 @@ async def get_genie_space_details(space_id: str, request: Request) -> GenieSpace
 @router.post("/execute", response_model=GenieExecutionResponse)
 async def execute_genie_query(
     request: Request,
-    execution_request: GenieExecutionRequest
+    execution_request: GenieExecutionRequest,
+    group_context: GroupContextDep = None
 ) -> GenieExecutionResponse:
     """
     Execute a Genie query in a specific space.
@@ -201,7 +209,8 @@ async def execute_genie_query(
 @router.post("/send-message", response_model=GenieSendMessageResponse)
 async def send_genie_message(
     request: Request,
-    message_request: GenieSendMessageRequest
+    message_request: GenieSendMessageRequest,
+    group_context: GroupContextDep = None
 ) -> GenieSendMessageResponse:
     """
     Send a message to Genie.

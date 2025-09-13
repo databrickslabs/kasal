@@ -6,7 +6,7 @@ This module provides endpoints for managing and searching documentation embeddin
 from fastapi import APIRouter, HTTPException, Query, Depends, Header
 from typing import List, Optional, Annotated
 
-from src.core.dependencies import SessionDep
+from src.core.dependencies import SessionDep, GroupContextDep
 from src.core.unit_of_work import UnitOfWork
 from src.services.documentation_embedding_service import DocumentationEmbeddingService
 from src.schemas.documentation_embedding import (
@@ -35,6 +35,7 @@ async def get_documentation_embedding_service(session: SessionDep) -> Documentat
 async def create_documentation_embedding(
     embedding: DocumentationEmbeddingCreate,
     service: Annotated[DocumentationEmbeddingService, Depends(get_documentation_embedding_service)],
+    group_context: GroupContextDep,
     x_forwarded_access_token: Optional[str] = Header(None, alias="X-Forwarded-Access-Token"),
     x_auth_request_access_token: Optional[str] = Header(None, alias="X-Auth-Request-Access-Token")
 ):
@@ -52,7 +53,8 @@ async def create_documentation_embedding(
 @router.get("/search", response_model=List[DocumentationEmbeddingSchema])
 async def search_documentation_embeddings(
     query_embedding: List[float] = Query(..., description="Query embedding vector"),
-    limit: int = Query(5, ge=1, le=20, description="Maximum number of results")
+    limit: int = Query(5, ge=1, le=20, description="Maximum number of results"),
+    group_context: GroupContextDep = None
 ):
     """Search for similar documentation embeddings."""
     try:
@@ -73,7 +75,8 @@ async def get_documentation_embeddings(
     skip: int = Query(0, ge=0, description="Number of items to skip"),
     limit: int = Query(100, ge=1, le=1000, description="Maximum number of items to return"),
     source: Optional[str] = Query(None, description="Filter by source"),
-    title: Optional[str] = Query(None, description="Filter by title (partial match)")
+    title: Optional[str] = Query(None, description="Filter by title (partial match)"),
+    group_context: GroupContextDep = None
 ):
     """Get documentation embeddings with optional filtering."""
     try:
@@ -113,7 +116,8 @@ async def get_documentation_embeddings(
 
 @router.get("/recent", response_model=List[DocumentationEmbeddingSchema])
 async def get_recent_documentation_embeddings(
-    limit: int = Query(10, ge=1, le=50, description="Maximum number of recent items")
+    limit: int = Query(10, ge=1, le=50, description="Maximum number of recent items"),
+    group_context: GroupContextDep = None
 ):
     """Get the most recently created documentation embeddings."""
     try:
@@ -128,7 +132,8 @@ async def get_recent_documentation_embeddings(
 
 @router.get("/{embedding_id}", response_model=DocumentationEmbeddingSchema)
 async def get_documentation_embedding(
-    embedding_id: int
+    embedding_id: int,
+    group_context: GroupContextDep = None
 ):
     """Get a specific documentation embedding by ID."""
     try:
@@ -149,7 +154,8 @@ async def get_documentation_embedding(
 
 @router.delete("/{embedding_id}")
 async def delete_documentation_embedding(
-    embedding_id: int
+    embedding_id: int,
+    group_context: GroupContextDep = None
 ):
     """Delete a documentation embedding by ID."""
     try:
@@ -171,6 +177,7 @@ async def delete_documentation_embedding(
 
 @router.post("/seed-all")
 async def seed_all_documentation_embeddings(
+    group_context: GroupContextDep,
     x_forwarded_access_token: Optional[str] = Header(None, alias="X-Forwarded-Access-Token"),
     x_auth_request_access_token: Optional[str] = Header(None, alias="X-Auth-Request-Access-Token")
 ):

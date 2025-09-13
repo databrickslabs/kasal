@@ -525,8 +525,8 @@ class DatabricksIndexService:
             # Get repository
             repo = self._get_index_repository(workspace_url)
             
-            # Use repository to empty the index
-            result = await repo.empty_index(index_name, endpoint_name, embedding_dimension, user_token)
+            # Use repository to empty the index (pass index_type for schema creation if index doesn't exist)
+            result = await repo.empty_index(index_name, endpoint_name, embedding_dimension, user_token, index_type)
             
             if result.get("success"):
                 logger.info(f"Successfully emptied {index_type} index {index_name}")

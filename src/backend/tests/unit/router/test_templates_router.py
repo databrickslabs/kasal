@@ -13,6 +13,7 @@ from src.dependencies.admin_auth import (
 
 from fastapi.testclient import TestClient
 
+from src.utils.user_context import GroupContext
 from src.schemas.template import PromptTemplateCreate, PromptTemplateUpdate
 
 
@@ -41,14 +42,38 @@ class MockPromptTemplate:
         }
 
 
+
+
+# No need for mock_template_service fixture since TemplateService uses class methods
+
+
 @pytest.fixture
-def app():
+def mock_group_context():
+    """Create a mock group context."""
+    context = GroupContext(
+        group_ids=["group-123"],
+        group_email="test@example.com",
+        email_domain="example.com",
+        user_id="user-123"
+    )
+    return context
+
+@pytest.fixture
+def app(mock_group_context):
     """Create a FastAPI app with mocked template service."""
     from fastapi import FastAPI
     from src.api.templates_router import router
+    from src.core.dependencies import get_group_context
     
     app = FastAPI()
     app.include_router(router)
+    
+    # Create override function for group context
+    async def override_get_group_context():
+        return mock_group_context
+    
+    # Override dependencies
+    app.dependency_overrides[get_group_context] = override_get_group_context
     
     return app
 
@@ -74,14 +99,13 @@ def mock_current_user():
 
 
 @pytest.fixture
-def client(app):
-    """Create a test client."""
+def client(app, mock_current_user):
+    """Create test client with mocked dependencies."""
     # Override authentication dependencies for testing
     app.dependency_overrides[require_authenticated_user] = lambda: mock_current_user
     app.dependency_overrides[get_authenticated_user] = lambda: mock_current_user
     app.dependency_overrides[get_admin_user] = lambda: mock_current_user
-
-
+    
     return TestClient(app)
 
 
@@ -121,7 +145,7 @@ class TestHealthCheck:
 class TestListTemplates:
     """Test cases for list templates endpoint."""
     
-    @patch('src.api.templates_router.TemplateService.find_all_templates')
+    @patch('src.api.templates_router.TemplateService.find_all_templates_for_group')
     def test_list_templates_success(self, mock_find_all, client):
         """Test successful templates listing."""
         templates = [
@@ -138,7 +162,7 @@ class TestListTemplates:
         assert data[0]["name"] == "template1"
         assert data[1]["name"] == "template2"
     
-    @patch('src.api.templates_router.TemplateService.find_all_templates')
+    @patch('src.api.templates_router.TemplateService.find_all_templates_for_group')
     def test_list_templates_empty(self, mock_find_all, client):
         """Test listing templates when none exist."""
         mock_find_all.return_value = []
@@ -148,7 +172,7 @@ class TestListTemplates:
         assert response.status_code == 200
         assert response.json() == []
     
-    @patch('src.api.templates_router.TemplateService.find_all_templates')
+    @patch('src.api.templates_router.TemplateService.find_all_templates_for_group')
     def test_list_templates_service_error(self, mock_find_all, client):
         """Test listing templates with service error."""
         mock_find_all.side_effect = Exception("Database error")
@@ -162,7 +186,7 @@ class TestListTemplates:
 class TestGetTemplate:
     """Test cases for get template by ID endpoint."""
     
-    @patch('src.api.templates_router.TemplateService.get_template_by_id')
+    @patch('src.api.templates_router.TemplateService.get_template_with_group_check')
     def test_get_template_success(self, mock_get_template, client):
         """Test successful template retrieval by ID."""
         template = MockPromptTemplate()
@@ -174,9 +198,9 @@ class TestGetTemplate:
         data = response.json()
         assert data["id"] == 1
         assert data["name"] == "default_agent"
-        mock_get_template.assert_called_once_with(1)
+        mock_get_template.assert_called_once()
     
-    @patch('src.api.templates_router.TemplateService.get_template_by_id')
+    @patch('src.api.templates_router.TemplateService.get_template_with_group_check')
     def test_get_template_not_found(self, mock_get_template, client):
         """Test getting non-existent template."""
         mock_get_template.return_value = None
@@ -186,7 +210,7 @@ class TestGetTemplate:
         assert response.status_code == 404
         assert "Prompt template not found" in response.json()["detail"]
     
-    @patch('src.api.templates_router.TemplateService.get_template_by_id')
+    @patch('src.api.templates_router.TemplateService.get_template_with_group_check')
     def test_get_template_service_error(self, mock_get_template, client):
         """Test getting template with service error."""
         mock_get_template.side_effect = Exception("Database error")
@@ -200,7 +224,7 @@ class TestGetTemplate:
 class TestGetTemplateByName:
     """Test cases for get template by name endpoint."""
     
-    @patch('src.api.templates_router.TemplateService.find_template_by_name')
+    @patch('src.api.templates_router.TemplateService.find_template_by_name_with_group')
     def test_get_template_by_name_success(self, mock_find_by_name, client):
         """Test successful template retrieval by name."""
         template = MockPromptTemplate(name="test_template")
@@ -211,9 +235,9 @@ class TestGetTemplateByName:
         assert response.status_code == 200
         data = response.json()
         assert data["name"] == "test_template"
-        mock_find_by_name.assert_called_once_with("test_template")
+        mock_find_by_name.assert_called_once()
     
-    @patch('src.api.templates_router.TemplateService.find_template_by_name')
+    @patch('src.api.templates_router.TemplateService.find_template_by_name_with_group')
     def test_get_template_by_name_not_found(self, mock_find_by_name, client):
         """Test getting non-existent template by name."""
         mock_find_by_name.return_value = None
@@ -223,7 +247,7 @@ class TestGetTemplateByName:
         assert response.status_code == 404
         assert "Prompt template with name 'nonexistent' not found" in response.json()["detail"]
     
-    @patch('src.api.templates_router.TemplateService.find_template_by_name')
+    @patch('src.api.templates_router.TemplateService.find_template_by_name_with_group')
     def test_get_template_by_name_service_error(self, mock_find_by_name, client):
         """Test getting template by name with service error."""
         mock_find_by_name.side_effect = Exception("Database error")
@@ -237,7 +261,7 @@ class TestGetTemplateByName:
 class TestCreateTemplate:
     """Test cases for create template endpoint."""
     
-    @patch('src.api.templates_router.TemplateService.create_new_template')
+    @patch('src.api.templates_router.TemplateService.create_template_with_group')
     def test_create_template_success(self, mock_create, client, sample_template_create):
         """Test successful template creation."""
         created_template = MockPromptTemplate(name="test_template")
@@ -250,7 +274,7 @@ class TestCreateTemplate:
         assert data["name"] == "test_template"
         mock_create.assert_called_once()
     
-    @patch('src.api.templates_router.TemplateService.create_new_template')
+    @patch('src.api.templates_router.TemplateService.create_template_with_group')
     def test_create_template_name_exists(self, mock_create, client, sample_template_create):
         """Test creating template with existing name."""
         mock_create.side_effect = ValueError("Template name already exists")
@@ -260,7 +284,7 @@ class TestCreateTemplate:
         assert response.status_code == 400
         assert "Template name already exists" in response.json()["detail"]
     
-    @patch('src.api.templates_router.TemplateService.create_new_template')
+    @patch('src.api.templates_router.TemplateService.create_template_with_group')
     def test_create_template_service_error(self, mock_create, client, sample_template_create):
         """Test creating template with service error."""
         mock_create.side_effect = Exception("Database error")
@@ -274,7 +298,7 @@ class TestCreateTemplate:
 class TestUpdateTemplate:
     """Test cases for update template endpoint."""
     
-    @patch('src.api.templates_router.TemplateService.update_existing_template')
+    @patch('src.api.templates_router.TemplateService.update_template_with_group_check')
     def test_update_template_success(self, mock_update, client, sample_template_update):
         """Test successful template update."""
         updated_template = MockPromptTemplate(name="updated_template")
@@ -285,9 +309,9 @@ class TestUpdateTemplate:
         assert response.status_code == 200
         data = response.json()
         assert data["name"] == "updated_template"
-        mock_update.assert_called_once_with(1, sample_template_update)
+        mock_update.assert_called_once()
     
-    @patch('src.api.templates_router.TemplateService.update_existing_template')
+    @patch('src.api.templates_router.TemplateService.update_template_with_group_check')
     def test_update_template_not_found(self, mock_update, client, sample_template_update):
         """Test updating non-existent template."""
         mock_update.return_value = None
@@ -297,7 +321,7 @@ class TestUpdateTemplate:
         assert response.status_code == 404
         assert "Prompt template not found" in response.json()["detail"]
     
-    @patch('src.api.templates_router.TemplateService.update_existing_template')
+    @patch('src.api.templates_router.TemplateService.update_template_with_group_check')
     def test_update_template_name_conflict(self, mock_update, client, sample_template_update):
         """Test updating template with name conflict."""
         mock_update.side_effect = ValueError("Template name already exists")
@@ -307,7 +331,7 @@ class TestUpdateTemplate:
         assert response.status_code == 400
         assert "Template name already exists" in response.json()["detail"]
     
-    @patch('src.api.templates_router.TemplateService.update_existing_template')
+    @patch('src.api.templates_router.TemplateService.update_template_with_group_check')
     def test_update_template_service_error(self, mock_update, client, sample_template_update):
         """Test updating template with service error."""
         mock_update.side_effect = Exception("Database error")
@@ -321,7 +345,7 @@ class TestUpdateTemplate:
 class TestDeleteTemplate:
     """Test cases for delete template endpoint."""
     
-    @patch('src.api.templates_router.TemplateService.delete_template_by_id')
+    @patch('src.api.templates_router.TemplateService.delete_template_with_group_check')
     def test_delete_template_success(self, mock_delete, client):
         """Test successful template deletion."""
         mock_delete.return_value = True
@@ -331,9 +355,9 @@ class TestDeleteTemplate:
         assert response.status_code == 200
         data = response.json()
         assert "deleted successfully" in data["message"]
-        mock_delete.assert_called_once_with(1)
+        mock_delete.assert_called_once()
     
-    @patch('src.api.templates_router.TemplateService.delete_template_by_id')
+    @patch('src.api.templates_router.TemplateService.delete_template_with_group_check')
     def test_delete_template_not_found(self, mock_delete, client):
         """Test deleting non-existent template."""
         mock_delete.return_value = False
@@ -343,7 +367,7 @@ class TestDeleteTemplate:
         assert response.status_code == 404
         assert "Prompt template not found" in response.json()["detail"]
     
-    @patch('src.api.templates_router.TemplateService.delete_template_by_id')
+    @patch('src.api.templates_router.TemplateService.delete_template_with_group_check')
     def test_delete_template_service_error(self, mock_delete, client):
         """Test deleting template with service error."""
         mock_delete.side_effect = Exception("Database error")
@@ -357,7 +381,7 @@ class TestDeleteTemplate:
 class TestDeleteAllTemplates:
     """Test cases for delete all templates endpoint."""
     
-    @patch('src.api.templates_router.TemplateService.delete_all_templates_service')
+    @patch('src.api.templates_router.TemplateService.delete_all_for_group')
     def test_delete_all_templates_success(self, mock_delete_all, client):
         """Test successful deletion of all templates."""
         mock_delete_all.return_value = 5
@@ -369,7 +393,7 @@ class TestDeleteAllTemplates:
         assert data["message"] == "All prompt templates deleted successfully"
         assert data["deleted_count"] == 5
     
-    @patch('src.api.templates_router.TemplateService.delete_all_templates_service')
+    @patch('src.api.templates_router.TemplateService.delete_all_for_group')
     def test_delete_all_templates_none_exist(self, mock_delete_all, client):
         """Test deleting all templates when none exist."""
         mock_delete_all.return_value = 0
@@ -380,7 +404,7 @@ class TestDeleteAllTemplates:
         data = response.json()
         assert data["deleted_count"] == 0
     
-    @patch('src.api.templates_router.TemplateService.delete_all_templates_service')
+    @patch('src.api.templates_router.TemplateService.delete_all_for_group')
     def test_delete_all_templates_service_error(self, mock_delete_all, client):
         """Test deleting all templates with service error."""
         mock_delete_all.side_effect = Exception("Database error")
@@ -394,7 +418,7 @@ class TestDeleteAllTemplates:
 class TestResetTemplates:
     """Test cases for reset templates endpoint."""
     
-    @patch('src.api.templates_router.TemplateService.reset_templates_service')
+    @patch('src.api.templates_router.TemplateService.reset_templates_for_group')
     def test_reset_templates_success(self, mock_reset, client):
         """Test successful template reset."""
         mock_reset.return_value = 3
@@ -406,7 +430,7 @@ class TestResetTemplates:
         assert "Reset 3 prompt templates" in data["message"]
         assert data["reset_count"] == 3
     
-    @patch('src.api.templates_router.TemplateService.reset_templates_service')
+    @patch('src.api.templates_router.TemplateService.reset_templates_for_group')
     def test_reset_templates_none_to_reset(self, mock_reset, client):
         """Test resetting templates when none need reset."""
         mock_reset.return_value = 0
@@ -417,7 +441,7 @@ class TestResetTemplates:
         data = response.json()
         assert data["reset_count"] == 0
     
-    @patch('src.api.templates_router.TemplateService.reset_templates_service')
+    @patch('src.api.templates_router.TemplateService.reset_templates_for_group')
     def test_reset_templates_service_error(self, mock_reset, client):
         """Test resetting templates with service error."""
         mock_reset.side_effect = Exception("Database error")

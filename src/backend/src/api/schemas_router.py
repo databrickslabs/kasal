@@ -2,6 +2,7 @@ from typing import List
 import logging
 
 from fastapi import APIRouter, HTTPException, status
+from src.core.dependencies import GroupContextDep
 
 from src.services.schema_service import SchemaService
 from src.schemas.schema import SchemaCreate, SchemaUpdate, SchemaResponse, SchemaListResponse
@@ -17,7 +18,9 @@ router = APIRouter(
 logger = logging.getLogger(__name__)
 
 @router.get("", response_model=SchemaListResponse)
-async def get_all_schemas() -> SchemaListResponse:
+async def get_all_schemas(
+    group_context: GroupContextDep = None
+) -> SchemaListResponse:
     """
     Get all schemas.
     """
@@ -30,6 +33,7 @@ async def get_all_schemas() -> SchemaListResponse:
 @router.get("/by-type/{schema_type}", response_model=SchemaListResponse)
 async def get_schemas_by_type(
     schema_type: str,
+    group_context: GroupContextDep = None
 ) -> SchemaListResponse:
     """
     Get schemas by type.
@@ -43,6 +47,7 @@ async def get_schemas_by_type(
 @router.get("/{schema_name}", response_model=SchemaResponse)
 async def get_schema_by_name(
     schema_name: str,
+    group_context: GroupContextDep = None
 ) -> SchemaResponse:
     """
     Get a schema by name.
@@ -60,6 +65,7 @@ async def get_schema_by_name(
 @router.post("", response_model=SchemaResponse, status_code=status.HTTP_201_CREATED)
 async def create_schema(
     schema_data: SchemaCreate,
+    group_context: GroupContextDep = None
 ) -> SchemaResponse:
     """
     Create a new schema.
@@ -78,6 +84,7 @@ async def create_schema(
 async def update_schema(
     schema_name: str,
     schema_data: SchemaUpdate,
+    group_context: GroupContextDep = None
 ) -> SchemaResponse:
     """
     Update an existing schema.
@@ -95,6 +102,7 @@ async def update_schema(
 @router.delete("/{schema_name}", status_code=status.HTTP_204_NO_CONTENT)
 async def delete_schema(
     schema_name: str,
+    group_context: GroupContextDep = None
 ) -> None:
     """
     Delete a schema.

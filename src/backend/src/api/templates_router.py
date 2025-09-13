@@ -1,8 +1,9 @@
 from typing import Annotated, List, Dict, Any
 
-from fastapi import APIRouter, HTTPException, status
+from fastapi import APIRouter, HTTPException, status, Depends
 import logging
 
+from src.core.dependencies import GroupContextDep
 from src.services.template_service import TemplateService
 from src.models.template import PromptTemplate
 from src.schemas.template import (
@@ -35,17 +36,22 @@ async def health_check():
 
 
 @router.get("", response_model=List[PromptTemplateResponse])
-async def list_templates():
+async def list_templates(
+    group_context: GroupContextDep,
+):
     """
-    Get all prompt templates.
+    Get all prompt templates for the current group.
     
+    Args:
+        group_context: Group context from headers
+        
     Returns:
-        List of prompt templates
+        List of prompt templates for the current group
     """
     try:
         logger.info("API call: GET /templates")
         
-        templates = await TemplateService.find_all_templates()
+        templates = await TemplateService.find_all_templates_for_group(group_context)
         logger.info(f"Retrieved {len(templates)} prompt templates")
         
         return templates
@@ -55,23 +61,27 @@ async def list_templates():
 
 
 @router.get("/{template_id}", response_model=PromptTemplateResponse)
-async def get_template(template_id: int):
+async def get_template(
+    template_id: int,
+    group_context: GroupContextDep,
+):
     """
-    Get a specific prompt template by ID.
+    Get a specific prompt template by ID with group isolation.
     
     Args:
         template_id: ID of the template to get
+        group_context: Group context from headers
         
     Returns:
-        Prompt template if found
+        Prompt template if found and belongs to user's group
         
     Raises:
-        HTTPException: If template not found
+        HTTPException: If template not found or not authorized
     """
     try:
         logger.info(f"API call: GET /templates/{template_id}")
         
-        template = await TemplateService.get_template_by_id(template_id)
+        template = await TemplateService.get_template_with_group_check(template_id, group_context)
         if not template:
             logger.warning(f"Template with ID {template_id} not found")
             raise HTTPException(
@@ -88,23 +98,27 @@ async def get_template(template_id: int):
 
 
 @router.get("/by-name/{name}", response_model=PromptTemplateResponse)
-async def get_template_by_name(name: str):
+async def get_template_by_name(
+    name: str,
+    group_context: GroupContextDep,
+):
     """
-    Get a specific prompt template by name.
+    Get a specific prompt template by name with group isolation.
     
     Args:
         name: Name of the template to get
+        group_context: Group context from headers
         
     Returns:
-        Prompt template if found
+        Prompt template if found and belongs to user's group
         
     Raises:
-        HTTPException: If template not found
+        HTTPException: If template not found or not authorized
     """
     try:
         logger.info(f"API call: GET /templates/by-name/{name}")
         
-        template = await TemplateService.find_template_by_name(name)
+        template = await TemplateService.find_template_by_name_with_group(name, group_context)
         if not template:
             logger.warning(f"Template with name '{name}' not found")
             raise HTTPException(
@@ -121,12 +135,16 @@ async def get_template_by_name(name: str):
 
 
 @router.post("", response_model=PromptTemplateResponse, status_code=status.HTTP_201_CREATED)
-async def create_template(template: PromptTemplateCreate):
+async def create_template(
+    template: PromptTemplateCreate,
+    group_context: GroupContextDep,
+):
     """
-    Create a new prompt template.
+    Create a new prompt template with group isolation.
     
     Args:
         template: Template data for creation
+        group_context: Group context from headers
         
     Returns:
         Created prompt template
@@ -137,7 +155,7 @@ async def create_template(template: PromptTemplateCreate):
     try:
         logger.info(f"API call: POST /templates - Creating template '{template.name}'")
         
-        created_template = await TemplateService.create_new_template(template)
+        created_template = await TemplateService.create_template_with_group(template, group_context)
         logger.info(f"Created new prompt template with name '{template.name}'")
         
         return created_template
@@ -154,24 +172,29 @@ async def create_template(template: PromptTemplateCreate):
 
 
 @router.put("/{template_id}", response_model=PromptTemplateResponse)
-async def update_template(template_id: int, template: PromptTemplateUpdate):
+async def update_template(
+    template_id: int,
+    template: PromptTemplateUpdate,
+    group_context: GroupContextDep,
+):
     """
-    Update an existing prompt template.
+    Update an existing prompt template with group isolation.
     
     Args:
         template_id: ID of the template to update
         template: Template data for update
+        group_context: Group context from headers
         
     Returns:
         Updated prompt template
         
     Raises:
-        HTTPException: If template not found or name conflict
+        HTTPException: If template not found or not authorized
     """
     try:
         logger.info(f"API call: PUT /templates/{template_id}")
         
-        updated_template = await TemplateService.update_existing_template(template_id, template)
+        updated_template = await TemplateService.update_template_with_group_check(template_id, template, group_context)
         if not updated_template:
             logger.warning(f"Template with ID {template_id} not found for update")
             raise HTTPException(
@@ -196,23 +219,27 @@ async def update_template(template_id: int, template: PromptTemplateUpdate):
 
 
 @router.delete("/{template_id}", status_code=status.HTTP_200_OK)
-async def delete_template(template_id: int):
+async def delete_template(
+    template_id: int,
+    group_context: GroupContextDep,
+):
     """
-    Delete a prompt template.
+    Delete a prompt template with group isolation.
     
     Args:
         template_id: ID of the template to delete
+        group_context: Group context from headers
         
     Returns:
         Success message
         
     Raises:
-        HTTPException: If template not found
+        HTTPException: If template not found or not authorized
     """
     try:
         logger.info(f"API call: DELETE /templates/{template_id}")
         
-        deleted = await TemplateService.delete_template_by_id(template_id)
+        deleted = await TemplateService.delete_template_with_group_check(template_id, group_context)
         if not deleted:
             logger.warning(f"Template with ID {template_id} not found for deletion")
             raise HTTPException(
@@ -230,17 +257,22 @@ async def delete_template(template_id: int):
 
 
 @router.delete("", status_code=status.HTTP_200_OK)
-async def delete_all_templates():
+async def delete_all_templates(
+    group_context: GroupContextDep,
+):
     """
-    Delete all prompt templates.
+    Delete all prompt templates for the current group.
     
+    Args:
+        group_context: Group context from headers
+        
     Returns:
         Success message with count of deleted templates
     """
     try:
         logger.info("API call: DELETE /templates")
         
-        deleted_count = await TemplateService.delete_all_templates_service()
+        deleted_count = await TemplateService.delete_all_for_group(group_context)
         logger.info(f"Deleted {deleted_count} prompt templates")
         
         return {
@@ -253,17 +285,22 @@ async def delete_all_templates():
 
 
 @router.post("/reset", response_model=ResetResponse, status_code=status.HTTP_200_OK)
-async def reset_templates():
+async def reset_templates(
+    group_context: GroupContextDep,
+):
     """
-    Reset all prompt templates to default values.
+    Reset all prompt templates to default values for the current group.
     
+    Args:
+        group_context: Group context from headers
+        
     Returns:
         Success message with count of reset templates
     """
     try:
         logger.info("API call: POST /templates/reset")
         
-        reset_count = await TemplateService.reset_templates_service()
+        reset_count = await TemplateService.reset_templates_for_group(group_context)
         logger.info(f"Reset {reset_count} prompt templates to default values")
         
         return {

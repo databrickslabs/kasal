@@ -2,7 +2,7 @@ from typing import List, Optional
 from fastapi import APIRouter, Depends, HTTPException, status, Query
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from src.core.dependencies import SessionDep
+from src.core.dependencies import SessionDep, GroupContextDep
 from src.dependencies.admin_auth import AdminUserDep, AuthenticatedUserDep
 from src.schemas.user import (
     UserInDB, UserUpdate, UserProfileUpdate, UserWithProfile, 
@@ -21,6 +21,7 @@ router = APIRouter(
 async def read_users_me(
     current_user: AuthenticatedUserDep,
     session: SessionDep,
+    group_context: GroupContextDep,
 ):
     """Get current user's information"""
     user_service = UserService(session)
@@ -31,6 +32,7 @@ async def update_users_me(
     user_update: UserUpdate,
     current_user: AuthenticatedUserDep,
     session: SessionDep,
+    group_context: GroupContextDep,
 ):
     """Update current user's information"""
     user_service = UserService(session)
@@ -41,6 +43,7 @@ async def update_users_profile(
     profile_update: UserProfileUpdate,
     current_user: AuthenticatedUserDep,
     session: SessionDep,
+    group_context: GroupContextDep,
 ):
     """Update current user's profile"""
     user_service = UserService(session)
@@ -50,6 +53,7 @@ async def update_users_profile(
 async def read_users_external_identities(
     current_user: AuthenticatedUserDep,
     session: SessionDep,
+    group_context: GroupContextDep,
 ):
     """Get current user's external identities"""
     user_service = UserService(session)
@@ -60,6 +64,7 @@ async def delete_external_identity(
     provider: str,
     current_user: AuthenticatedUserDep,
     session: SessionDep,
+    group_context: GroupContextDep,
 ):
     """Remove an external identity from current user"""
     user_service = UserService(session)
@@ -76,6 +81,7 @@ async def delete_external_identity(
 async def read_users(
     session: SessionDep,
     admin_user: AdminUserDep,
+    group_context: GroupContextDep,
     skip: int = 0,
     limit: int = 100,
     role: Optional[str] = None,
@@ -99,6 +105,7 @@ async def read_user(
     user_id: str,
     session: SessionDep,
     admin_user: AdminUserDep,
+    group_context: GroupContextDep,
 ):
     """Get user by ID (admin only)"""
     user_service = UserService(session)
@@ -118,6 +125,7 @@ async def update_user(
     user_update: UserUpdate,
     session: SessionDep,
     admin_user: AdminUserDep,
+    group_context: GroupContextDep,
 ):
     """Update user information (admin only)"""
     user_service = UserService(session)
@@ -137,6 +145,7 @@ async def assign_user_role(
     role_assign: UserRoleAssign,
     session: SessionDep,
     admin_user: AdminUserDep,
+    group_context: GroupContextDep,
 ):
     """Assign a role to a user (admin only)"""
     user_service = UserService(session)
@@ -155,6 +164,7 @@ async def delete_user(
     user_id: str,
     session: SessionDep,
     admin_user: AdminUserDep,
+    group_context: GroupContextDep,
 ):
     """Delete a user (admin only)"""
     user_service = UserService(session)

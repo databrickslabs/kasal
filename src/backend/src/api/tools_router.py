@@ -9,6 +9,7 @@ import logging
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from src.core.dependencies import GroupContextDep
 from src.schemas.tool import ToolCreate, ToolUpdate, ToolResponse, ToolListResponse, ToggleResponse
 from src.db.session import get_db
 from src.services.tool_service import ToolService
@@ -27,17 +28,22 @@ logger = logging.getLogger(__name__)
 
 @router.get("", response_model=List[ToolResponse])
 async def get_tools(
-    db: AsyncSession = Depends(get_db)
+    db: AsyncSession = Depends(get_db),
+    group_context: GroupContextDep = None,
 ) -> List[ToolResponse]:
     """
-    Get all tools.
+    Get all tools for the current group.
+    
+    Args:
+        db: Database session
+        group_context: Group context from headers
     
     Returns:
-        List of tools
+        List of tools for the current group
     """
     try:
         service = ToolService(db)
-        tools = await service.get_all_tools()
+        tools = await service.get_all_tools_for_group(group_context)
         return tools.tools
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
@@ -45,14 +51,19 @@ async def get_tools(
 
 @router.get("/enabled", response_model=ToolListResponse)
 async def get_enabled_tools(
-    db: AsyncSession = Depends(get_db)
+    db: AsyncSession = Depends(get_db),
+    group_context: GroupContextDep = None,
 ) -> ToolListResponse:
     """
-    Get all enabled tools.
+    Get all enabled tools for the current group.
+    
+    Args:
+        db: Database session
+        group_context: Group context from headers
     """
     logger.info("Getting enabled tools")
     service = ToolService(db)
-    tools_response = await service.get_enabled_tools()
+    tools_response = await service.get_enabled_tools_for_group(group_context)
     logger.info(f"Found {tools_response.count} enabled tools")
     return tools_response
 
@@ -60,15 +71,21 @@ async def get_enabled_tools(
 @router.get("/{tool_id}", response_model=ToolResponse)
 async def get_tool_by_id(
     tool_id: int,
-    db: AsyncSession = Depends(get_db)
+    db: AsyncSession = Depends(get_db),
+    group_context: GroupContextDep = None,
 ) -> ToolResponse:
     """
-    Get a tool by ID.
+    Get a tool by ID with group isolation.
+    
+    Args:
+        tool_id: ID of the tool to get
+        db: Database session
+        group_context: Group context from headers
     """
     logger.info(f"Getting tool with ID {tool_id}")
     try:
         service = ToolService(db)
-        tool = await service.get_tool_by_id(tool_id)
+        tool = await service.get_tool_with_group_check(tool_id, group_context)
         logger.info(f"Found tool with ID {tool_id}")
         return tool
     except HTTPException as e:
@@ -79,15 +96,21 @@ async def get_tool_by_id(
 @router.post("/", response_model=ToolResponse, status_code=status.HTTP_201_CREATED)
 async def create_tool(
     tool_data: ToolCreate,
-    db: AsyncSession = Depends(get_db)
+    db: AsyncSession = Depends(get_db),
+    group_context: GroupContextDep = None,
 ) -> ToolResponse:
     """
-    Create a new tool.
+    Create a new tool with group isolation.
+    
+    Args:
+        tool_data: Tool data for creation
+        db: Database session
+        group_context: Group context from headers
     """
     logger.info(f"Creating tool with title '{tool_data.title}'")
     try:
         service = ToolService(db)
-        tool = await service.create_tool(tool_data)
+        tool = await service.create_tool_with_group(tool_data, group_context)
         logger.info(f"Created tool with ID {tool.id}")
         return tool
     except HTTPException as e:
@@ -99,15 +122,22 @@ async def create_tool(
 async def update_tool(
     tool_id: int,
     tool_data: ToolUpdate,
-    db: AsyncSession = Depends(get_db)
+    db: AsyncSession = Depends(get_db),
+    group_context: GroupContextDep = None,
 ) -> ToolResponse:
     """
-    Update an existing tool.
+    Update an existing tool with group isolation.
+    
+    Args:
+        tool_id: ID of the tool to update
+        tool_data: Tool data for update
+        db: Database session
+        group_context: Group context from headers
     """
     logger.info(f"Updating tool with ID {tool_id}")
     try:
         service = ToolService(db)
-        tool = await service.update_tool(tool_id, tool_data)
+        tool = await service.update_tool_with_group_check(tool_id, tool_data, group_context)
         logger.info(f"Updated tool with ID {tool_id}")
         return tool
     except HTTPException as e:
@@ -118,15 +148,21 @@ async def update_tool(
 @router.delete("/{tool_id}", status_code=status.HTTP_204_NO_CONTENT)
 async def delete_tool(
     tool_id: int,
-    db: AsyncSession = Depends(get_db)
+    db: AsyncSession = Depends(get_db),
+    group_context: GroupContextDep = None,
 ) -> None:
     """
-    Delete a tool.
+    Delete a tool with group isolation.
+    
+    Args:
+        tool_id: ID of the tool to delete
+        db: Database session
+        group_context: Group context from headers
     """
     logger.info(f"Deleting tool with ID {tool_id}")
     try:
         service = ToolService(db)
-        await service.delete_tool(tool_id)
+        await service.delete_tool_with_group_check(tool_id, group_context)
         logger.info(f"Deleted tool with ID {tool_id}")
     except HTTPException as e:
         logger.warning(f"Tool deletion failed: {str(e)}")
@@ -136,15 +172,21 @@ async def delete_tool(
 @router.patch("/{tool_id}/toggle-enabled", response_model=ToggleResponse)
 async def toggle_tool_enabled(
     tool_id: int,
-    db: AsyncSession = Depends(get_db)
+    db: AsyncSession = Depends(get_db),
+    group_context: GroupContextDep = None,
 ) -> ToggleResponse:
     """
-    Toggle the enabled status of a tool.
+    Toggle the enabled status of a tool with group isolation.
+    
+    Args:
+        tool_id: ID of the tool to toggle
+        db: Database session
+        group_context: Group context from headers
     """
     logger.info(f"Toggling enabled status for tool with ID {tool_id}")
     try:
         service = ToolService(db)
-        response = await service.toggle_tool_enabled(tool_id)
+        response = await service.toggle_tool_enabled_with_group_check(tool_id, group_context)
         status_text = "enabled" if response.enabled else "disabled"
         logger.info(f"Tool with ID {tool_id} {status_text}")
         return response
@@ -157,10 +199,15 @@ async def toggle_tool_enabled(
 
 @router.get("/configurations/all", response_model=Dict[str, Dict[str, Any]])
 async def get_all_tool_configurations(
-    db: AsyncSession = Depends(get_db)
+    db: AsyncSession = Depends(get_db),
+    group_context: GroupContextDep = None,
 ) -> Dict[str, Dict[str, Any]]:
     """
-    Get configurations for all tools.
+    Get configurations for all tools for the current group.
+    
+    Args:
+        db: Database session
+        group_context: Group context from headers
     
     Returns:
         Dictionary mapping tool names to their configurations
@@ -191,13 +238,16 @@ async def get_all_tool_configurations(
 @router.get("/configurations/{tool_name}", response_model=Dict[str, Any])
 async def get_tool_configuration(
     tool_name: str,
-    db: AsyncSession = Depends(get_db)
+    db: AsyncSession = Depends(get_db),
+    group_context: GroupContextDep = None,
 ) -> Dict[str, Any]:
     """
-    Get configuration for a specific tool.
+    Get configuration for a specific tool with group isolation.
     
     Args:
         tool_name: Name of the tool
+        db: Database session
+        group_context: Group context from headers
         
     Returns:
         Tool configuration dictionary
@@ -234,14 +284,17 @@ async def get_tool_configuration(
 async def update_tool_configuration(
     tool_name: str,
     config: Dict[str, Any],
-    db: AsyncSession = Depends(get_db)
+    db: AsyncSession = Depends(get_db),
+    group_context: GroupContextDep = None,
 ) -> Dict[str, Any]:
     """
-    Update configuration for a specific tool.
+    Update configuration for a specific tool with group isolation.
     
     Args:
         tool_name: Name of the tool
         config: New configuration dictionary
+        db: Database session
+        group_context: Group context from headers
         
     Returns:
         Updated tool configuration dictionary
@@ -282,13 +335,16 @@ async def update_tool_configuration(
 @router.get("/configurations/{tool_name}/schema", response_model=Dict[str, Any])
 async def get_tool_configuration_schema(
     tool_name: str,
-    db: AsyncSession = Depends(get_db)
+    db: AsyncSession = Depends(get_db),
+    group_context: GroupContextDep = None,
 ) -> Dict[str, Any]:
     """
-    Get configuration schema for a specific tool.
+    Get configuration schema for a specific tool with group isolation.
     
     Args:
         tool_name: Name of the tool
+        db: Database session
+        group_context: Group context from headers
         
     Returns:
         JSON schema dictionary describing the tool's configuration format
@@ -328,7 +384,8 @@ async def get_tool_configuration_schema(
 async def update_tool_configuration_in_memory(
     tool_name: str,
     config: Dict[str, Any],
-    db: AsyncSession = Depends(get_db)
+    db: AsyncSession = Depends(get_db),
+    group_context: GroupContextDep = None,
 ) -> Dict[str, Any]:
     """
     Update a tool's configuration in memory without requiring a database entry.
@@ -339,6 +396,8 @@ async def update_tool_configuration_in_memory(
     Args:
         tool_name: Name of the tool
         config: New configuration dictionary
+        db: Database session
+        group_context: Group context from headers
         
     Returns:
         Updated tool configuration dictionary

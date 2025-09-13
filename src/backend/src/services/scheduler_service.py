@@ -222,6 +222,37 @@ class SchedulerService:
             )
         return ScheduleResponse.model_validate(schedule)
     
+    async def get_schedule_by_id_with_group_check(self, schedule_id: int, group_context: GroupContext = None) -> ScheduleResponse:
+        """
+        Get a schedule by ID with group isolation.
+        
+        Args:
+            schedule_id: ID of the schedule to retrieve
+            group_context: Group context for isolation
+            
+        Returns:
+            ScheduleResponse if schedule found and belongs to group
+            
+        Raises:
+            HTTPException: If schedule not found or doesn't belong to group
+        """
+        schedule = await self.repository.find_by_id(schedule_id)
+        if not schedule:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail=f"Schedule with ID {schedule_id} not found"
+            )
+        
+        # Check group access
+        if group_context and group_context.primary_group_id:
+            if schedule.group_id != group_context.primary_group_id:
+                raise HTTPException(
+                    status_code=status.HTTP_404_NOT_FOUND,
+                    detail=f"Schedule with ID {schedule_id} not found"
+                )
+        
+        return ScheduleResponse.model_validate(schedule)
+    
     async def update_schedule(self, schedule_id: int, schedule_data: ScheduleUpdate) -> ScheduleResponse:
         """
         Update a schedule.
@@ -245,6 +276,56 @@ class SchedulerService:
                     detail=f"Schedule with ID {schedule_id} not found"
                 )
             
+            return ScheduleResponse.model_validate(schedule)
+        except HTTPException:
+            raise
+        except ValueError as e:
+            logger.error(f"Invalid cron expression: {str(e)}")
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"Invalid cron expression: {str(e)}"
+            )
+        except Exception as e:
+            logger.error(f"Failed to update schedule: {str(e)}")
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail=f"Failed to update schedule: {str(e)}"
+            )
+    
+    async def update_schedule_with_group_check(self, schedule_id: int, schedule_data: ScheduleUpdate, group_context: GroupContext = None) -> ScheduleResponse:
+        """
+        Update a schedule with group isolation.
+        
+        Args:
+            schedule_id: ID of the schedule to update
+            schedule_data: New schedule data
+            group_context: Group context for isolation
+            
+        Returns:
+            ScheduleResponse of updated schedule
+            
+        Raises:
+            HTTPException: If schedule not found, doesn't belong to group, or update fails
+        """
+        try:
+            # First check if schedule exists and belongs to group
+            schedule = await self.repository.find_by_id(schedule_id)
+            if not schedule:
+                raise HTTPException(
+                    status_code=status.HTTP_404_NOT_FOUND,
+                    detail=f"Schedule with ID {schedule_id} not found"
+                )
+            
+            # Check group access
+            if group_context and group_context.primary_group_id:
+                if schedule.group_id != group_context.primary_group_id:
+                    raise HTTPException(
+                        status_code=status.HTTP_404_NOT_FOUND,
+                        detail=f"Schedule with ID {schedule_id} not found"
+                    )
+            
+            # Update schedule
+            schedule = await self.repository.update(schedule_id, schedule_data.model_dump())
             return ScheduleResponse.model_validate(schedule)
         except HTTPException:
             raise
@@ -293,6 +374,49 @@ class SchedulerService:
                 detail=f"Failed to delete schedule: {str(e)}"
             )
     
+    async def delete_schedule_with_group_check(self, schedule_id: int, group_context: GroupContext = None) -> Dict[str, str]:
+        """
+        Delete a schedule with group isolation.
+        
+        Args:
+            schedule_id: ID of the schedule to delete
+            group_context: Group context for isolation
+            
+        Returns:
+            Success message
+            
+        Raises:
+            HTTPException: If schedule not found, doesn't belong to group, or deletion fails
+        """
+        try:
+            # First check if schedule exists and belongs to group
+            schedule = await self.repository.find_by_id(schedule_id)
+            if not schedule:
+                raise HTTPException(
+                    status_code=status.HTTP_404_NOT_FOUND,
+                    detail=f"Schedule with ID {schedule_id} not found"
+                )
+            
+            # Check group access
+            if group_context and group_context.primary_group_id:
+                if schedule.group_id != group_context.primary_group_id:
+                    raise HTTPException(
+                        status_code=status.HTTP_404_NOT_FOUND,
+                        detail=f"Schedule with ID {schedule_id} not found"
+                    )
+            
+            # Delete schedule
+            deleted = await self.repository.delete(schedule_id)
+            return {"message": "Schedule deleted successfully"}
+        except HTTPException:
+            raise
+        except Exception as e:
+            logger.error(f"Failed to delete schedule: {str(e)}")
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail=f"Failed to delete schedule: {str(e)}"
+            )
+    
     async def toggle_schedule(self, schedule_id: int) -> ToggleResponse:
         """
         Toggle a schedule's active state.
@@ -315,6 +439,49 @@ class SchedulerService:
                     detail=f"Schedule with ID {schedule_id} not found"
                 )
             
+            return ToggleResponse.model_validate(schedule)
+        except HTTPException:
+            raise
+        except Exception as e:
+            logger.error(f"Failed to toggle schedule: {str(e)}")
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail=f"Failed to toggle schedule: {str(e)}"
+            )
+    
+    async def toggle_schedule_with_group_check(self, schedule_id: int, group_context: GroupContext = None) -> ToggleResponse:
+        """
+        Toggle a schedule's active state with group isolation.
+        
+        Args:
+            schedule_id: ID of the schedule to toggle
+            group_context: Group context for isolation
+            
+        Returns:
+            ToggleResponse of updated schedule
+            
+        Raises:
+            HTTPException: If schedule not found, doesn't belong to group, or toggle fails
+        """
+        try:
+            # First check if schedule exists and belongs to group
+            schedule = await self.repository.find_by_id(schedule_id)
+            if not schedule:
+                raise HTTPException(
+                    status_code=status.HTTP_404_NOT_FOUND,
+                    detail=f"Schedule with ID {schedule_id} not found"
+                )
+            
+            # Check group access
+            if group_context and group_context.primary_group_id:
+                if schedule.group_id != group_context.primary_group_id:
+                    raise HTTPException(
+                        status_code=status.HTTP_404_NOT_FOUND,
+                        detail=f"Schedule with ID {schedule_id} not found"
+                    )
+            
+            # Toggle schedule
+            schedule = await self.repository.toggle_active(schedule_id)
             return ToggleResponse.model_validate(schedule)
         except HTTPException:
             raise
@@ -639,6 +806,47 @@ class SchedulerService:
             jobs.append(job)
             
         return jobs
+    
+    async def get_all_jobs_for_group(self, group_context: GroupContext = None) -> List[SchedulerJobResponse]:
+        """
+        Get all scheduler jobs for a specific group.
+        
+        Args:
+            group_context: Group context for isolation
+            
+        Returns:
+            List of scheduler jobs for the group
+        """
+        # Get schedules for the group
+        if group_context and group_context.primary_group_id:
+            schedules = await self.repository.find_by_group(group_context.primary_group_id)
+        else:
+            schedules = await self.repository.find_all()
+        
+        # Convert schedules to job responses
+        jobs = []
+        for schedule in schedules:
+            job = SchedulerJobResponse(
+                id=schedule.id,
+                name=schedule.name,
+                description=f"Scheduled job from {schedule.name}",
+                schedule=schedule.cron_expression,
+                enabled=schedule.is_active,
+                job_data={
+                    "agents": schedule.agents_yaml,
+                    "tasks": schedule.tasks_yaml,
+                    "inputs": schedule.inputs,
+                    "planning": schedule.planning,
+                    "model": schedule.model
+                },
+                created_at=schedule.created_at,
+                updated_at=schedule.updated_at,
+                last_run_at=schedule.last_run_at,
+                next_run_at=schedule.next_run_at
+            )
+            jobs.append(job)
+            
+        return jobs
         
     async def create_job(self, job_create: SchedulerJobCreate) -> SchedulerJobResponse:
         """
@@ -698,6 +906,72 @@ class SchedulerService:
             last_run_at=schedule.last_run_at,
             next_run_at=schedule.next_run_at
         )
+    
+    async def create_job_with_group(self, job_create: SchedulerJobCreate, group_context: GroupContext = None) -> SchedulerJobResponse:
+        """
+        Create a new scheduler job with group isolation.
+        
+        Args:
+            job_create: Job data to create
+            group_context: Group context for isolation
+            
+        Returns:
+            Created job
+        """
+        # Convert job to schedule
+        agents_yaml = job_create.job_data.get("agents", {})
+        
+        # Extract model from job data or agent configurations
+        model = job_create.job_data.get("model")
+        if not model and agents_yaml:
+            # Extract model from first agent's llm configuration
+            for agent_key, agent_config in agents_yaml.items():
+                if isinstance(agent_config, dict) and agent_config.get("llm"):
+                    model = agent_config["llm"]
+                    break
+        # Fallback to default if no model found
+        if not model:
+            model = "gpt-4o-mini"
+            
+        schedule_dict = {
+            "name": job_create.name,
+            "cron_expression": job_create.schedule,
+            "agents_yaml": agents_yaml,
+            "tasks_yaml": job_create.job_data.get("tasks", {}),
+            "inputs": job_create.job_data.get("inputs", {}),
+            "is_active": job_create.enabled,
+            "planning": job_create.job_data.get("planning", False),
+            "model": model,
+            "next_run_at": calculate_next_run_from_last(job_create.schedule)
+        }
+        
+        # Add group context if provided
+        if group_context:
+            schedule_dict["group_id"] = group_context.primary_group_id
+            schedule_dict["created_by_email"] = group_context.group_email
+        
+        # Create schedule
+        schedule = await self.repository.create(schedule_dict)
+        
+        # Convert back to job response
+        return SchedulerJobResponse(
+            id=schedule.id,
+            name=schedule.name,
+            description=job_create.description,
+            schedule=schedule.cron_expression,
+            enabled=schedule.is_active,
+            job_data={
+                "agents": schedule.agents_yaml,
+                "tasks": schedule.tasks_yaml,
+                "inputs": schedule.inputs,
+                "planning": schedule.planning,
+                "model": schedule.model
+            },
+            created_at=schedule.created_at,
+            updated_at=schedule.updated_at,
+            last_run_at=schedule.last_run_at,
+            next_run_at=schedule.next_run_at
+        )
         
     async def update_job(self, job_id: int, job_update: SchedulerJobUpdate) -> SchedulerJobResponse:
         """
@@ -717,6 +991,82 @@ class SchedulerService:
                 status_code=status.HTTP_404_NOT_FOUND,
                 detail=f"Job with ID {job_id} not found"
             )
+        
+        # Prepare update data
+        update_data = {}
+        if job_update.name is not None:
+            update_data["name"] = job_update.name
+        if job_update.schedule is not None:
+            update_data["cron_expression"] = job_update.schedule
+        if job_update.enabled is not None:
+            update_data["is_active"] = job_update.enabled
+            
+        # Update job_data if provided
+        if job_update.job_data is not None:
+            if "agents" in job_update.job_data:
+                update_data["agents_yaml"] = job_update.job_data["agents"]
+            if "tasks" in job_update.job_data:
+                update_data["tasks_yaml"] = job_update.job_data["tasks"]
+            if "inputs" in job_update.job_data:
+                update_data["inputs"] = job_update.job_data["inputs"]
+            if "planning" in job_update.job_data:
+                update_data["planning"] = job_update.job_data["planning"]
+            if "model" in job_update.job_data:
+                update_data["model"] = job_update.job_data["model"]
+        
+        # Update schedule
+        updated_schedule = await self.repository.update(job_id, update_data)
+        
+        # Convert to job response
+        return SchedulerJobResponse(
+            id=updated_schedule.id,
+            name=updated_schedule.name,
+            description=job_update.description or f"Scheduled job from {updated_schedule.name}",
+            schedule=updated_schedule.cron_expression,
+            enabled=updated_schedule.is_active,
+            job_data={
+                "agents": updated_schedule.agents_yaml,
+                "tasks": updated_schedule.tasks_yaml,
+                "inputs": updated_schedule.inputs,
+                "planning": updated_schedule.planning,
+                "model": updated_schedule.model
+            },
+            created_at=updated_schedule.created_at,
+            updated_at=updated_schedule.updated_at,
+            last_run_at=updated_schedule.last_run_at,
+            next_run_at=updated_schedule.next_run_at
+        )
+    
+    async def update_job_with_group_check(self, job_id: int, job_update: SchedulerJobUpdate, group_context: GroupContext = None) -> SchedulerJobResponse:
+        """
+        Update a scheduler job with group isolation.
+        
+        Args:
+            job_id: ID of the job to update
+            job_update: Updated job data
+            group_context: Group context for isolation
+            
+        Returns:
+            Updated job
+            
+        Raises:
+            HTTPException: If job not found, doesn't belong to group, or update fails
+        """
+        # Get existing schedule
+        existing_schedule = await self.repository.find_by_id(job_id)
+        if not existing_schedule:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail=f"Job with ID {job_id} not found"
+            )
+        
+        # Check group access
+        if group_context and group_context.primary_group_id:
+            if existing_schedule.group_id != group_context.primary_group_id:
+                raise HTTPException(
+                    status_code=status.HTTP_404_NOT_FOUND,
+                    detail=f"Job with ID {job_id} not found"
+                )
         
         # Prepare update data
         update_data = {}

@@ -8,6 +8,7 @@ with proper validation and error handling.
 import logging
 import json
 from fastapi import APIRouter, HTTPException
+from src.core.dependencies import GroupContextDep
 
 from src.schemas.template_generation import TemplateGenerationRequest, TemplateGenerationResponse
 from src.services.template_generation_service import TemplateGenerationService
@@ -24,7 +25,8 @@ router = APIRouter(
 
 @router.post("/generate-templates", response_model=TemplateGenerationResponse)
 async def generate_templates(
-    request: TemplateGenerationRequest
+    request: TemplateGenerationRequest,
+    group_context: GroupContextDep = None
 ):
     """
     Generate templates for an agent based on role, goal, and backstory.

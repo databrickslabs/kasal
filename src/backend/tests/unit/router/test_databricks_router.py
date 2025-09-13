@@ -68,7 +68,7 @@ def app(mock_databricks_service, mock_api_keys_service, mock_db_session):
     
     # Override dependencies properly - return the mocks directly
     app.dependency_overrides[get_db] = lambda: mock_db_session
-    app.dependency_overrides[get_api_keys_service] = lambda session=None: mock_api_keys_service
+    app.dependency_overrides[get_api_keys_service] = lambda session=None, group_context=None: mock_api_keys_service
     app.dependency_overrides[get_databricks_service] = lambda session=None, api_keys_service=None: mock_databricks_service
     
     return app
@@ -311,43 +311,71 @@ class TestCheckDatabricksConnection:
 class TestDependencyInjection:
     """Test cases for dependency injection functions."""
     
+    @patch('src.repositories.api_key_repository.ApiKeyRepository')
     @patch('src.api.databricks_router.ApiKeysService')
-    def test_get_api_keys_service(self, mock_api_keys_service_class):
+    def test_get_api_keys_service(self, mock_api_keys_service_class, mock_repository_class):
         """Test get_api_keys_service dependency function."""
         from src.api.databricks_router import get_api_keys_service
         
         # Mock session
         mock_session = MagicMock()
         
+        # Mock group context
+        mock_group_context = MagicMock()
+        mock_group_context.primary_group_id = "test_group_123"
+        
+        # Mock repository instance
+        mock_repository_instance = MagicMock()
+        mock_repository_class.return_value = mock_repository_instance
+        
         # Mock service instance
         mock_service_instance = MagicMock()
         mock_api_keys_service_class.return_value = mock_service_instance
         
-        # Call the dependency function
-        result = get_api_keys_service(mock_session)
+        # Call the dependency function with group_context
+        result = get_api_keys_service(mock_session, mock_group_context)
         
-        # Verify service is created with session
-        mock_api_keys_service_class.assert_called_once_with(mock_session)
+        # Verify repository is created with session
+        mock_repository_class.assert_called_once_with(mock_session)
+        
+        # Verify service is created with repository and group_id
+        mock_api_keys_service_class.assert_called_once_with(repository=mock_repository_instance, group_id="test_group_123")
         assert result == mock_service_instance
     
+    @patch('src.repositories.databricks_config_repository.DatabricksConfigRepository')
     @patch('src.api.databricks_router.DatabricksService')
-    def test_get_databricks_service(self, mock_databricks_service_class):
+    def test_get_databricks_service(self, mock_databricks_service_class, mock_repository_class):
         """Test get_databricks_service dependency function."""
         from src.api.databricks_router import get_databricks_service
         
-        # Mock session and api_keys_service
+        # Mock session, group_context and api_keys_service
         mock_session = MagicMock()
+        mock_group_context = MagicMock()
+        mock_group_context.primary_group_id = "test_group_123"
         mock_api_keys_service = MagicMock()
         
-        # Mock service instance
+        # Mock repository and service instances
+        mock_repository_instance = MagicMock()
+        mock_repository_class.return_value = mock_repository_instance
+        
         mock_service_instance = MagicMock()
-        mock_databricks_service_class.from_session.return_value = mock_service_instance
+        mock_service_instance.secrets_service = MagicMock()
+        mock_databricks_service_class.return_value = mock_service_instance
         
-        # Call the dependency function
-        result = get_databricks_service(mock_session, mock_api_keys_service)
+        # Call the dependency function with all required arguments
+        result = get_databricks_service(mock_session, mock_group_context, mock_api_keys_service)
         
-        # Verify service is created properly
-        mock_databricks_service_class.from_session.assert_called_once_with(mock_session, mock_api_keys_service)
+        # Verify repository is created with session
+        mock_repository_class.assert_called_once_with(mock_session)
+        
+        # Verify service is created with repository and group_id
+        mock_databricks_service_class.assert_called_once_with(
+            mock_repository_instance, 
+            group_id="test_group_123"
+        )
+        
+        # Verify API keys service is set
+        mock_service_instance.secrets_service.set_api_keys_service.assert_called_once_with(mock_api_keys_service)
         assert result == mock_service_instance
 
 
@@ -523,7 +551,7 @@ class TestComprehensiveScenarios:
         
         # Test that we can override dependencies
         app.dependency_overrides[get_db] = lambda: mock_db_session
-        app.dependency_overrides[get_api_keys_service] = lambda session=None: mock_api_keys_service
+        app.dependency_overrides[get_api_keys_service] = lambda session=None, group_context=None: mock_api_keys_service
         app.dependency_overrides[get_databricks_service] = lambda session=None, api_keys_service=None: mock_databricks_service
         
         client = TestClient(app)

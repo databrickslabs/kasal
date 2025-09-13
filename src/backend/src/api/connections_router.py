@@ -8,6 +8,7 @@ between agents and tasks in the CrewAI ecosystem.
 import logging
 from fastapi import APIRouter, HTTPException
 
+from src.core.dependencies import GroupContextDep
 from src.schemas.connection import ConnectionRequest, ConnectionResponse, ApiKeyTestResponse
 from src.services.connection_service import ConnectionService
 
@@ -22,7 +23,10 @@ router = APIRouter(
 )
 
 @router.post("/generate-connections", response_model=ConnectionResponse)
-async def generate_connections(request: ConnectionRequest):
+async def generate_connections(
+    request: ConnectionRequest,
+    group_context: GroupContextDep
+):
     """
     Generate connections between agents and tasks.
     
@@ -55,7 +59,9 @@ async def generate_connections(request: ConnectionRequest):
         raise HTTPException(status_code=500, detail=error_msg)
 
 @router.get("/test-api-key", response_model=ApiKeyTestResponse)
-async def test_api_key():
+async def test_api_key(
+    group_context: GroupContextDep
+):
     """
     Test API keys and configuration.
     

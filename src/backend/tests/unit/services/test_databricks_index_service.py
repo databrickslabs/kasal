@@ -419,7 +419,8 @@ class TestDatabricksIndexService:
             "ml.agents.short_term",
             "test-endpoint",
             768,
-            None
+            None,
+            "short_term"  # Added index_type parameter
         )
     
     @pytest.mark.asyncio
@@ -452,7 +453,8 @@ class TestDatabricksIndexService:
             "ml.docs.embeddings",
             "doc-endpoint",
             768,
-            None
+            None,
+            "document"  # Added index_type parameter
         )
     
     @pytest.mark.asyncio
@@ -484,7 +486,8 @@ class TestDatabricksIndexService:
             "ml.agents.entity",
             "test-endpoint",
             768,
-            None
+            None,
+            "entity"  # Added index_type parameter
         )
     
     @pytest.mark.asyncio
