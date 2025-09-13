@@ -25,7 +25,6 @@ import { useJobManagementStore } from '../../store/jobManagement';
 import { useCrewExecutionStore } from '../../store/crewExecution';
 import { useErrorStore } from '../../store/error';
 import { useRunStatusStore } from '../../store/runStatus';
-import { logEdgeDetails } from '../../utils/flowUtils';
 import { useCrewExecution } from '../../hooks/workflow/useCrewExecution';
 import { useConnectionGenerator } from '../../hooks/workflow/useConnectionGenerator';
 import { useAgentHandlers } from '../../hooks/workflow/useAgentHandlers';
@@ -454,10 +453,6 @@ const CrewCanvas: React.FC<CrewCanvasProps> = ({
         animated: runStatusStore.hasRunningJobs // Make edges animated when jobs are running
       }));
       
-      console.log(`CrewCanvas: Edges - Total: ${edges.length}, Unique: ${edgesWithAnimation.length}`);
-      
-      // Log edge details for debugging
-      logEdgeDetails(edgesWithAnimation, "CrewCanvas: Filtered crew edges:");
       
       return edgesWithAnimation;
     } catch (error) {
@@ -483,14 +478,14 @@ const CrewCanvas: React.FC<CrewCanvasProps> = ({
     onEdgesChange(Array.from(allEdgesToDelete).map(edgeId => ({ type: 'remove', id: edgeId })));
   }, [onNodesChange, onEdgesChange, edges]);
 
-  const { shortcuts } = useShortcuts({
+  useShortcuts({
     flowInstance: reactFlowInstanceRef.current,
     onDeleteSelected: _handleDeleteSelected,
     onClearCanvas: handleClear,
     onZoomIn: () => reactFlowInstanceRef.current?.zoomIn(),
     onZoomOut: () => reactFlowInstanceRef.current?.zoomOut(),
     onFitView: () => reactFlowInstanceRef.current?.fitView({ padding: 0.2 }),
-    onExecuteCrew: handleExecuteCrewButtonClick,
+    // Don't override onExecuteCrew - let useShortcuts use its default handler with workflow store
     onExecuteFlow: () => {
       if (nodes.length > 0 || edges.length > 0) {
         const currentNodes = nodes.map(node => ({ ...node }));
@@ -513,13 +508,11 @@ const CrewCanvas: React.FC<CrewCanvasProps> = ({
     onOpenMaxRPMDialog: () => setIsMaxRPMSelectionDialogOpen(true),
     onOpenMCPConfigDialog: () => setIsMCPConfigDialogOpen(true),
     disabled: false,
-    useWorkflowStore: true
+    useWorkflowStore: true,
+    instanceId: 'crew-canvas',  // Unique identifier for this instance
+    priority: 10  // Higher priority than flow canvas
   });
 
-  useEffect(() => {
-    // Log shortcut changes for debugging purposes
-    console.log('CrewCanvas - Shortcuts updated:', shortcuts);
-  }, [shortcuts]);
 
   useEffect(() => {
     const checkDialogState = () => {

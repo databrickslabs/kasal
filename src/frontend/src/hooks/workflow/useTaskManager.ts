@@ -44,6 +44,7 @@ interface UseTaskManagerProps {
 export const useTaskManager = ({ nodes, setNodes }: UseTaskManagerProps) => {
   const [tasks, setTasks] = useState<Task[]>([]);
   const [isTaskDialogOpen, setIsTaskDialogOpen] = useState(false);
+  const [openInCreateMode, setOpenInCreateMode] = useState(false);
   // Get the resetTaskStatuses function from the TaskStatusContext
   // const { resetTaskStatuses } = useTaskStatus();
 
@@ -111,6 +112,11 @@ export const useTaskManager = ({ nodes, setNodes }: UseTaskManagerProps) => {
     console.log('Show task form');
   }, []);
 
+  const openTaskDialog = useCallback((createMode = false) => {
+    setOpenInCreateMode(createMode);
+    setIsTaskDialogOpen(true);
+  }, []);
+
   return {
     tasks,
     addTaskNode,
@@ -118,6 +124,8 @@ export const useTaskManager = ({ nodes, setNodes }: UseTaskManagerProps) => {
     setIsTaskDialogOpen,
     handleTaskSelect,
     handleShowTaskForm,
-    fetchTasks
+    fetchTasks,
+    openInCreateMode,
+    openTaskDialog
   };
 }; 

@@ -91,28 +91,85 @@ const TaskNode: React.FC<TaskNodeProps> = ({ data, id }) => {
   // Tab dirty state management
   const { markCurrentTabDirty } = useTabDirtyState();
   
-  // Task execution state
-  const taskStatus = useTaskExecutionStore(state => state.getTaskStatus(data.taskId));
+  // Task execution state - try multiple ID formats for compatibility
+  const taskStatus = useTaskExecutionStore(state => {
+    // DEBUG: Log what we're looking for
+    
+    let status = null;
+    
+    // Try with the label first (most reliable match with backend task names)
+    if (data.label) {
+      status = state.getTaskStatus(data.label);
+      
+      // Try lowercase version of label
+      if (!status) {
+        status = state.getTaskStatus(data.label.toLowerCase());
+      }
+      
+      // Try with underscores replaced by spaces
+      if (!status) {
+        const labelWithSpaces = data.label.replace(/_/g, ' ');
+        status = state.getTaskStatus(labelWithSpaces);
+      }
+      
+      // Try with task_ prefix and label
+      if (!status) {
+        const labelBasedId = `task_${data.label.replace(/\s+/g, '_').toLowerCase()}`;
+        status = state.getTaskStatus(labelBasedId);
+      }
+      
+      // Check if any task state key contains keywords from the label
+      // This handles cases where backend sends full description but label is short
+      if (!status) {
+        const labelLower = data.label.toLowerCase();
+        const labelWords = labelLower.split(/\s+/).filter(word => word.length > 2); // Get significant words
+        const allKeys = Array.from(state.taskStates.keys());
+        
+        for (const key of allKeys) {
+          const keyLower = key.toLowerCase();
+          
+          // Check if key starts with the label
+          if (keyLower.startsWith(labelLower) || 
+              keyLower.startsWith(labelLower.replace(/\s+/g, '_')) ||
+              keyLower.startsWith(labelLower.replace(/\s+/g, '-'))) {
+            status = state.getTaskStatus(key);
+            if (status) {
+              break;
+            }
+          }
+          
+          // Check if all significant words from label are in the key
+          if (!status && labelWords.length > 0) {
+            const allWordsFound = labelWords.every(word => keyLower.includes(word));
+            if (allWordsFound) {
+              status = state.getTaskStatus(key);
+              if (status) {
+                break;
+              }
+            }
+          }
+        }
+      }
+    }
+    
+    // Try exact taskId if provided and no match found yet
+    if (!status && data.taskId) {
+      status = state.getTaskStatus(data.taskId);
+      
+      // If taskId starts with "task-", also try just the UUID part
+      if (!status && data.taskId.startsWith('task-')) {
+        const uuidOnly = data.taskId.substring(5); // Remove "task-" prefix
+        status = state.getTaskStatus(uuidOnly);
+      }
+    }
+    
+    return status;
+  });
   
   // Add debugging logs on component mount
   useEffect(() => {
-    console.log(`TaskNode: Initialized node ${id} with label "${data.label}"`);
-    console.log(`TaskNode: Node ${id} data:`, data);
-    
-    // Log incoming and outgoing connections
-    const edges = getEdges();
-    const incomingEdges = edges.filter(edge => edge.target === id);
-    const outgoingEdges = edges.filter(edge => edge.source === id);
-    
-    console.log(`TaskNode: Node ${id} has ${incomingEdges.length} incoming edges and ${outgoingEdges.length} outgoing edges`);
-    
-    if (incomingEdges.length > 0) {
-      console.log(`TaskNode: Incoming edges to ${id}:`, incomingEdges);
-    }
-    
-    if (outgoingEdges.length > 0) {
-      console.log(`TaskNode: Outgoing edges from ${id}:`, outgoingEdges);
-    }
+    // Monitor edge connections
+    getEdges();
   }, [id, data, getEdges]);
 
   useEffect(() => {
@@ -144,17 +201,11 @@ const TaskNode: React.FC<TaskNodeProps> = ({ data, id }) => {
 
   // Simple toggle function for selection
   const toggleSelection = useCallback(() => {
-    console.log(`TaskNode ${id}: Toggling selection from ${isSelected} to ${!isSelected}`);
     setIsSelected(prev => !prev);
   }, [id, isSelected]);
 
   const handleDelete = useCallback(() => {
-    console.log(`TaskNode: Deleting node ${id}`);
     
-    // Log edges to be removed
-    const edges = getEdges();
-    const connectedEdges = edges.filter(edge => edge.source === id || edge.target === id);
-    console.log(`TaskNode: Removing ${connectedEdges.length} connected edges during node deletion`);
     
     setEditTooltipOpen(false);
     setDeleteTooltipOpen(false);
@@ -176,16 +227,13 @@ const TaskNode: React.FC<TaskNodeProps> = ({ data, id }) => {
     const edges = getEdges();
     const currentNode = nodes.find(node => node.id === id);
     
-    console.log(`TaskNode: Double-click on right handle of node ${id}`);
     
     if (!currentNode) {
-      console.warn(`TaskNode: Could not find current node with id ${id}`);
       return;
     }
 
     // Get all task nodes
     const taskNodes = nodes.filter(node => node.type === 'taskNode');
-    console.log(`TaskNode: Found ${taskNodes.length} task nodes for potential connection`);
     
     // Find the task node that's directly below this one
     const taskNodeBelow = taskNodes.find(taskNode => {
@@ -206,7 +254,6 @@ const TaskNode: React.FC<TaskNodeProps> = ({ data, id }) => {
 
     // If we found a task node below, create a connection
     if (taskNodeBelow) {
-      console.log(`TaskNode: Found task node below: ${taskNodeBelow.id} (${taskNodeBelow.data.label})`);
       
       // Check if this connection already exists
       const connectionExists = edges.some(
@@ -214,7 +261,6 @@ const TaskNode: React.FC<TaskNodeProps> = ({ data, id }) => {
       );
 
       if (!connectionExists) {
-        console.log(`TaskNode: Creating new edge from ${id} to ${taskNodeBelow.id}`);
         
         const newEdge = {
           id: `${id}-${taskNodeBelow.id}`,
@@ -225,11 +271,7 @@ const TaskNode: React.FC<TaskNodeProps> = ({ data, id }) => {
         };
 
         setEdges(edges => [...edges, newEdge]);
-      } else {
-        console.log(`TaskNode: Connection already exists from ${id} to ${taskNodeBelow.id}`);
       }
-    } else {
-      console.log(`TaskNode: No suitable task node found below ${id}`);
     }
   }, [id, getNodes, getEdges, setEdges]);
 
@@ -253,10 +295,7 @@ const TaskNode: React.FC<TaskNodeProps> = ({ data, id }) => {
     const isActionButton = !!target.closest('.action-buttons');
     
     if (!isButton && !isActionButton) {
-      console.log(`TaskNode click on ${id} - toggling selection`);
       toggleSelection();
-    } else {
-      console.log(`TaskNode click on ${id} ignored - clicked on button or action button`);
     }
   }, [id, toggleSelection]);
 
@@ -574,13 +613,6 @@ const TaskNode: React.FC<TaskNodeProps> = ({ data, id }) => {
                           markdown: savedTask.markdown !== undefined ? savedTask.markdown : (savedTask.config?.markdown || false)
                         }
                       };
-                      
-                      console.log(`TaskNode: Updated task ${id} after save`, {
-                        savedTaskMarkdown: savedTask.markdown,
-                        savedTaskConfigMarkdown: savedTask.config?.markdown,
-                        resultTopLevelMarkdown: updatedData.markdown,
-                        resultConfigMarkdown: updatedData.config.markdown
-                      });
                       
                       return {
                         ...node,

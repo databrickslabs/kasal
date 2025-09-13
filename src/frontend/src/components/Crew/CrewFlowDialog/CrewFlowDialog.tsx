@@ -17,7 +17,8 @@ import {
   TextField,
   InputAdornment,
   Tabs,
-  Tab
+  Tab,
+  Divider
 } from '@mui/material';
 import { CrewService } from '../../../api/CrewService';
 import { FlowService } from '../../../api/FlowService';
@@ -37,6 +38,14 @@ import FileUploadIcon from '@mui/icons-material/FileUpload';
 import EditFlowForm from '../../Flow/EditFlowForm';
 import { AgentService } from '../../../api/AgentService';
 import { TaskService } from '../../../api/TaskService';
+import { Agent } from '../../../types/agent';
+import { Task } from '../../../types/task';
+import GroupIcon from '@mui/icons-material/Group';
+import AssignmentIcon from '@mui/icons-material/Assignment';
+import List from '@mui/material/List';
+import ListItemButton from '@mui/material/ListItemButton';
+import ListItemIcon from '@mui/material/ListItemIcon';
+import ListItemText from '@mui/material/ListItemText';
 import { useFlowConfigStore } from '../../../store/flowConfig';
 
 interface TabPanelProps {
@@ -70,21 +79,46 @@ const CrewFlowSelectionDialog: React.FC<CrewFlowSelectionDialogProps> = ({
   onClose,
   onCrewSelect,
   onFlowSelect,
+  onAgentSelect,
+  onTaskSelect,
   initialTab = 0,
+  showOnlyTab,
 }): JSX.Element => {
   const [tabValue, setTabValue] = useState(initialTab);
+  
+  // When showing only one tab, always use that tab's value
+  useEffect(() => {
+    if (showOnlyTab !== undefined) {
+      setTabValue(showOnlyTab);
+    } else {
+      setTabValue(initialTab);
+    }
+  }, [showOnlyTab, initialTab]);
   const [crews, setCrews] = useState<CrewResponse[]>([]);
   const [flows, setFlows] = useState<FlowResponse[]>([]);
+  const [agents, setAgents] = useState<Agent[]>([]);
+  const [tasks, setTasks] = useState<Task[]>([]);
+  const [selectedAgents, setSelectedAgents] = useState<Agent[]>([]);
+  const [selectedTasks, setSelectedTasks] = useState<Task[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [importSuccess, setImportSuccess] = useState<string | null>(null);
   const searchInputRef = useRef<HTMLInputElement>(null);
   const [searchQuery, setSearchQuery] = useState('');
+  
+  // Clear search query when dialog opens or closes
+  useEffect(() => {
+    if (!open) {
+      setSearchQuery('');
+    }
+  }, [open]);
   const [editFlowDialogOpen, setEditFlowDialogOpen] = useState(false);
   const [selectedFlowId, setSelectedFlowId] = useState<number | string | null>(null);
   const [_focusedCardIndex, _setFocusedCardIndex] = useState<number>(0);
   const firstCrewCardRef = useRef<HTMLDivElement>(null);
   const firstFlowCardRef = useRef<HTMLDivElement>(null);
+  const firstAgentCardRef = useRef<HTMLDivElement>(null);
+  const firstTaskCardRef = useRef<HTMLDivElement>(null);
   
   // Get flow configuration to check if CrewAI flows are enabled
   const { crewAIFlowEnabled } = useFlowConfigStore();
@@ -98,18 +132,35 @@ const CrewFlowSelectionDialog: React.FC<CrewFlowSelectionDialogProps> = ({
   const crewFileInputRef = useRef<HTMLInputElement>(null);
   const flowFileInputRef = useRef<HTMLInputElement>(null);
   const bulkFileInputRef = useRef<HTMLInputElement>(null);
+  const agentFileInputRef = useRef<HTMLInputElement>(null);
+  const taskFileInputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
     if (open) {
-      // Load both crews and flows when dialog opens
-      loadCrews();
-      loadFlows();
+      // Load data based on current tab
+      if (tabValue === 0) {
+        loadCrews();
+      } else if (tabValue === 1) {
+        loadAgents();
+      } else if (tabValue === 2) {
+        loadTasks();
+      } else if (tabValue === 3 && crewAIFlowEnabled) {
+        loadFlows();
+      }
+    }
+  }, [open, tabValue, crewAIFlowEnabled]);
+
+  // Clear selections when closing dialog
+  useEffect(() => {
+    if (!open) {
+      setSelectedAgents([]);
+      setSelectedTasks([]);
     }
   }, [open]);
 
-  // Switch to Crews tab if CrewAI flow is disabled and user is on Flows tab
+  // Switch to Plans tab if CrewAI flow is disabled and user is on Flows tab
   useEffect(() => {
-    if (!crewAIFlowEnabled && tabValue === 1) {
+    if (!crewAIFlowEnabled && tabValue === 3) {
       setTabValue(0);
     }
   }, [crewAIFlowEnabled, tabValue]);
@@ -147,6 +198,34 @@ const CrewFlowSelectionDialog: React.FC<CrewFlowSelectionDialogProps> = ({
     } catch (error) {
       console.error('Error loading flows:', error);
       setError('Failed to load flows');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const loadAgents = async () => {
+    setLoading(true);
+    try {
+      const fetchedAgents = await AgentService.listAgents();
+      setAgents(fetchedAgents);
+      setError(null);
+    } catch (error) {
+      console.error('Error loading agents:', error);
+      setError('Failed to load agents');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const loadTasks = async () => {
+    setLoading(true);
+    try {
+      const fetchedTasks = await TaskService.listTasks();
+      setTasks(fetchedTasks);
+      setError(null);
+    } catch (error) {
+      console.error('Error loading tasks:', error);
+      setError('Failed to load tasks');
     } finally {
       setLoading(false);
     }
@@ -493,14 +572,167 @@ const CrewFlowSelectionDialog: React.FC<CrewFlowSelectionDialogProps> = ({
     loadFlows();
   };
 
-  const handleTabChange = (_event: React.SyntheticEvent, newValue: number) => {
-    // Prevent switching to Flows tab if CrewAI flow is disabled
-    if (newValue === 1 && !crewAIFlowEnabled) {
+  const handleDeleteAgent = async (event: React.MouseEvent, agentId: string) => {
+    event.stopPropagation();
+    try {
+      setLoading(true);
+      const success = await AgentService.deleteAgent(agentId);
+      if (success) {
+        await loadAgents();
+        // Remove from selected if it was selected
+        setSelectedAgents(prev => prev.filter(a => a.id !== agentId));
+      }
+    } catch (error) {
+      console.error('Error deleting agent:', error);
+      setError('Failed to delete agent');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleDeleteTask = async (event: React.MouseEvent, taskId: string) => {
+    event.stopPropagation();
+    try {
+      setLoading(true);
+      await TaskService.deleteTask(taskId);
+      await loadTasks();
+      // Remove from selected if it was selected
+      setSelectedTasks(prev => prev.filter(t => t.id !== taskId));
+    } catch (error) {
+      console.error('Error deleting task:', error);
+      setError('Failed to delete task');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleDeleteAllAgents = async () => {
+    if (!window.confirm('Are you sure you want to delete ALL agents? This action cannot be undone.')) {
       return;
     }
-    setTabValue(newValue);
-    // Reset search when changing tabs
-    setSearchQuery('');
+    
+    try {
+      setLoading(true);
+      setError(null);
+      
+      // Delete all agents
+      for (const agent of agents) {
+        if (agent.id) {
+          await AgentService.deleteAgent(agent.id);
+        }
+      }
+      
+      // Clear the lists
+      setAgents([]);
+      setSelectedAgents([]);
+      
+      // Reload to ensure consistency
+      await loadAgents();
+    } catch (err) {
+      setError('Failed to delete all agents');
+      console.error('Error deleting all agents:', err);
+      // Refresh to show current state
+      await loadAgents();
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleDeleteAllTasks = async () => {
+    if (!window.confirm('Are you sure you want to delete ALL tasks? This action cannot be undone.')) {
+      return;
+    }
+    
+    try {
+      setLoading(true);
+      setError(null);
+      
+      // Delete all tasks
+      for (const task of tasks) {
+        if (task.id) {
+          await TaskService.deleteTask(task.id);
+        }
+      }
+      
+      // Clear the lists
+      setTasks([]);
+      setSelectedTasks([]);
+      
+      // Reload to ensure consistency
+      await loadTasks();
+    } catch (err) {
+      setError('Failed to delete all tasks');
+      console.error('Error deleting all tasks:', err);
+      // Refresh to show current state
+      await loadTasks();
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleAgentToggle = (agent: Agent) => {
+    setSelectedAgents(prev => {
+      const isSelected = prev.some(a => a.id === agent.id);
+      if (isSelected) {
+        return prev.filter(a => a.id !== agent.id);
+      }
+      return [...prev, agent];
+    });
+  };
+
+  const handleTaskToggle = (task: Task) => {
+    setSelectedTasks(prev => {
+      const isSelected = prev.some(t => t.id === task.id);
+      if (isSelected) {
+        return prev.filter(t => t.id !== task.id);
+      }
+      return [...prev, task];
+    });
+  };
+
+  const handlePlaceAgents = () => {
+    if (onAgentSelect) {
+      onAgentSelect(selectedAgents);
+      setSelectedAgents([]);
+      onClose();
+    }
+  };
+
+  const handlePlaceTasks = () => {
+    if (onTaskSelect) {
+      onTaskSelect(selectedTasks);
+      setSelectedTasks([]);
+      onClose();
+    }
+  };
+
+  const handleSelectAllAgents = () => {
+    if (selectedAgents.length === agents.length) {
+      setSelectedAgents([]);
+    } else {
+      setSelectedAgents([...agents]);
+    }
+  };
+
+  const handleSelectAllTasks = () => {
+    if (selectedTasks.length === tasks.length) {
+      setSelectedTasks([]);
+    } else {
+      setSelectedTasks([...tasks]);
+    }
+  };
+
+  const handleTabChange = (_event: React.SyntheticEvent, newValue: number) => {
+    // Prevent switching to Flows tab if CrewAI flow is disabled
+    if (newValue === 3 && !crewAIFlowEnabled) {
+      return;
+    }
+    // Only allow tab changes when showing all tabs
+    if (showOnlyTab === undefined) {
+      setTabValue(newValue);
+      // Reset search when changing tabs
+      setSearchQuery('');
+    }
   };
 
   // Import functions
@@ -602,6 +834,123 @@ const CrewFlowSelectionDialog: React.FC<CrewFlowSelectionDialogProps> = ({
     }
   };
 
+  const handleImportAgentsClick = () => {
+    if (agentFileInputRef.current) {
+      agentFileInputRef.current.click();
+    }
+  };
+
+  const handleImportTasksClick = () => {
+    if (taskFileInputRef.current) {
+      taskFileInputRef.current.click();
+    }
+  };
+
+  const handleImportAgents = async (event: ChangeEvent<HTMLInputElement>) => {
+    if (!event.target.files || event.target.files.length === 0) return;
+    
+    try {
+      setLoading(true);
+      setError(null);
+      setImportSuccess(null);
+      
+      const file = event.target.files[0];
+      const fileContents = await file.text();
+      const importData = JSON.parse(fileContents);
+      
+      // Support both single agent and multiple agents format
+      const agentsToImport = importData.agents || (importData.name ? [importData] : []);
+      
+      if (!Array.isArray(agentsToImport) || agentsToImport.length === 0) {
+        throw new Error('Invalid agent data: no agents found in file');
+      }
+      
+      let importedCount = 0;
+      for (const agent of agentsToImport) {
+        if (agent.name && agent.role) {
+          await AgentService.createAgent({
+            name: agent.name,
+            role: agent.role,
+            backstory: agent.backstory || '',
+            goal: agent.goal || '',
+            verbose: agent.verbose || false,
+            allow_delegation: agent.allow_delegation || false,
+            tools: agent.tools || [],
+            max_iter: agent.max_iter || 15,
+            max_rpm: agent.max_rpm || null,
+            llm: agent.llm || '',
+            cache: agent.cache !== undefined ? agent.cache : true,
+            allow_code_execution: agent.allow_code_execution || false,
+            code_execution_mode: agent.code_execution_mode || 'safe'
+          });
+          importedCount++;
+        }
+      }
+      
+      await loadAgents();
+      setImportSuccess(`Successfully imported ${importedCount} agent(s)`);
+      
+      // Reset file input
+      event.target.value = '';
+    } catch (err) {
+      const error = err as Error;
+      console.error('Error importing agents:', error);
+      setError(`Failed to import agents: ${error.message}`);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleImportTasks = async (event: ChangeEvent<HTMLInputElement>) => {
+    if (!event.target.files || event.target.files.length === 0) return;
+    
+    try {
+      setLoading(true);
+      setError(null);
+      setImportSuccess(null);
+      
+      const file = event.target.files[0];
+      const fileContents = await file.text();
+      const importData = JSON.parse(fileContents);
+      
+      // Support both single task and multiple tasks format
+      const tasksToImport = importData.tasks || (importData.description ? [importData] : []);
+      
+      if (!Array.isArray(tasksToImport) || tasksToImport.length === 0) {
+        throw new Error('Invalid task data: no tasks found in file');
+      }
+      
+      let importedCount = 0;
+      for (const task of tasksToImport) {
+        if (task.description) {
+          await TaskService.createTask({
+            name: task.name || task.description.slice(0, 50),
+            description: task.description,
+            expected_output: task.expected_output || '',
+            tools: task.tools || [],
+            agent_id: task.agent_id || null,
+            async_execution: task.async_execution || false,
+            context: task.context || null,
+            config: task.config || {}
+          });
+          importedCount++;
+        }
+      }
+      
+      await loadTasks();
+      setImportSuccess(`Successfully imported ${importedCount} task(s)`);
+      
+      // Reset file input
+      event.target.value = '';
+    } catch (err) {
+      const error = err as Error;
+      console.error('Error importing tasks:', error);
+      setError(`Failed to import tasks: ${error.message}`);
+    } finally {
+      setLoading(false);
+    }
+  };
+
   const handleBulkImport = async (event: ChangeEvent<HTMLInputElement>) => {
     if (!event.target.files || event.target.files.length === 0) return;
     
@@ -615,12 +964,57 @@ const CrewFlowSelectionDialog: React.FC<CrewFlowSelectionDialogProps> = ({
       const bulkData = JSON.parse(fileContents);
       
       // Validate bulk data
-      if (!bulkData.crews && !bulkData.flows) {
-        throw new Error('Invalid import data: missing crews or flows array');
+      if (!bulkData.crews && !bulkData.flows && !bulkData.agents && !bulkData.tasks) {
+        throw new Error('Invalid import data: no valid data found');
       }
       
       let importedCrews = 0;
       let importedFlows = 0;
+      let importedAgents = 0;
+      let importedTasks = 0;
+      
+      // Import agents first (they may be referenced by tasks)
+      if (Array.isArray(bulkData.agents)) {
+        for (const agent of bulkData.agents) {
+          if (agent.name && agent.role) {
+            await AgentService.createAgent({
+              name: agent.name,
+              role: agent.role,
+              backstory: agent.backstory || '',
+              goal: agent.goal || '',
+              verbose: agent.verbose || false,
+              allow_delegation: agent.allow_delegation || false,
+              tools: agent.tools || [],
+              max_iter: agent.max_iter || 15,
+              max_rpm: agent.max_rpm || null,
+              llm: agent.llm || '',
+              cache: agent.cache !== undefined ? agent.cache : true,
+              allow_code_execution: agent.allow_code_execution || false,
+              code_execution_mode: agent.code_execution_mode || 'safe'
+            });
+            importedAgents++;
+          }
+        }
+      }
+      
+      // Import tasks
+      if (Array.isArray(bulkData.tasks)) {
+        for (const task of bulkData.tasks) {
+          if (task.description) {
+            await TaskService.createTask({
+              name: task.name || task.description.slice(0, 50),
+              description: task.description,
+              expected_output: task.expected_output || '',
+              tools: task.tools || [],
+              agent_id: task.agent_id || null,
+              async_execution: task.async_execution || false,
+              context: task.context || null,
+              config: task.config || {}
+            });
+            importedTasks++;
+          }
+        }
+      }
       
       // Import crews
       if (Array.isArray(bulkData.crews)) {
@@ -654,16 +1048,27 @@ const CrewFlowSelectionDialog: React.FC<CrewFlowSelectionDialogProps> = ({
         }
       }
       
-      // Reload data
+      // Reload data based on what was imported
+      if (importedAgents > 0) {
+        await loadAgents();
+      }
+      if (importedTasks > 0) {
+        await loadTasks();
+      }
       if (importedCrews > 0) {
         await loadCrews();
       }
-      
       if (importedFlows > 0) {
         await loadFlows();
       }
       
-      setImportSuccess(`Import successful: ${importedCrews} crews and ${importedFlows} flows imported.`);
+      const parts = [];
+      if (importedAgents > 0) parts.push(`${importedAgents} agents`);
+      if (importedTasks > 0) parts.push(`${importedTasks} tasks`);
+      if (importedCrews > 0) parts.push(`${importedCrews} crews`);
+      if (importedFlows > 0) parts.push(`${importedFlows} flows`);
+      
+      setImportSuccess(`Import successful: ${parts.join(', ')} imported.`);
       
       // Reset file input
       event.target.value = '';
@@ -741,6 +1146,72 @@ const CrewFlowSelectionDialog: React.FC<CrewFlowSelectionDialogProps> = ({
     }
   };
 
+  const handleExportAllAgents = async () => {
+    try {
+      setLoading(true);
+      setError(null);
+      
+      // Get all agents
+      const allAgents = await AgentService.listAgents();
+      
+      // Package in a format for export
+      const exportData = {
+        agents: allAgents,
+        exportedAt: new Date().toISOString(),
+        version: '1.0'
+      };
+      
+      // Create and download file
+      const blob = new Blob([JSON.stringify(exportData, null, 2)], { type: 'application/json' });
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement('a');
+      link.href = url;
+      link.download = `agents_export_${new Date().toISOString().split('T')[0]}.json`;
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+      URL.revokeObjectURL(url);
+    } catch (error) {
+      console.error('Error exporting agents:', error);
+      setError('Failed to export agents');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleExportAllTasks = async () => {
+    try {
+      setLoading(true);
+      setError(null);
+      
+      // Get all tasks
+      const allTasks = await TaskService.listTasks();
+      
+      // Package in a format for export
+      const exportData = {
+        tasks: allTasks,
+        exportedAt: new Date().toISOString(),
+        version: '1.0'
+      };
+      
+      // Create and download file
+      const blob = new Blob([JSON.stringify(exportData, null, 2)], { type: 'application/json' });
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement('a');
+      link.href = url;
+      link.download = `tasks_export_${new Date().toISOString().split('T')[0]}.json`;
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+      URL.revokeObjectURL(url);
+    } catch (error) {
+      console.error('Error exporting tasks:', error);
+      setError('Failed to export tasks');
+    } finally {
+      setLoading(false);
+    }
+  };
+
   const handleExportEverything = async () => {
     try {
       setLoading(true);
@@ -749,11 +1220,15 @@ const CrewFlowSelectionDialog: React.FC<CrewFlowSelectionDialogProps> = ({
       // Get all data
       const allCrews = await CrewService.getCrews();
       const allFlows = await FlowService.getFlows();
+      const allAgents = await AgentService.listAgents();
+      const allTasks = await TaskService.listTasks();
       
       // Package in a format for export
       const exportData = {
         crews: allCrews,
         flows: allFlows,
+        agents: allAgents,
+        tasks: allTasks,
         exportDate: new Date().toISOString()
       };
       
@@ -775,9 +1250,25 @@ const CrewFlowSelectionDialog: React.FC<CrewFlowSelectionDialogProps> = ({
     }
   };
 
-  const handleKeyDown = (e: React.KeyboardEvent, id: string, type: 'crew' | 'flow', index: number) => {
+  const handleKeyDown = (e: React.KeyboardEvent, id: string, type: 'crew' | 'flow' | 'agent' | 'task', index: number) => {
     // Get the right array based on the type
-    const itemsArray = type === 'crew' ? crews : flows;
+    let itemsArray: CrewResponse[] | FlowResponse[] | Agent[] | Task[];
+    switch(type) {
+      case 'crew':
+        itemsArray = crews;
+        break;
+      case 'flow':
+        itemsArray = flows;
+        break;
+      case 'agent':
+        itemsArray = agents;
+        break;
+      case 'task':
+        itemsArray = tasks;
+        break;
+      default:
+        itemsArray = [];
+    }
     
     if (e.key === 'Enter' || e.key === ' ') {
       e.preventDefault();
@@ -863,7 +1354,11 @@ const CrewFlowSelectionDialog: React.FC<CrewFlowSelectionDialogProps> = ({
       event.preventDefault();
       if (tabValue === 0 && firstCrewCardRef.current) {
         firstCrewCardRef.current.focus();
-      } else if (tabValue === 1 && firstFlowCardRef.current) {
+      } else if (tabValue === 1 && firstAgentCardRef.current) {
+        firstAgentCardRef.current.focus();
+      } else if (tabValue === 2 && firstTaskCardRef.current) {
+        firstTaskCardRef.current.focus();
+      } else if (tabValue === 3 && firstFlowCardRef.current) {
         firstFlowCardRef.current.focus();
       }
     }
@@ -886,7 +1381,13 @@ const CrewFlowSelectionDialog: React.FC<CrewFlowSelectionDialogProps> = ({
         }}
       >
         <DialogTitle sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-          <Box>Open Crew or Flow</Box>
+          <Box>
+            {showOnlyTab === 0 ? 'Load Existing Plans' :
+             showOnlyTab === 1 ? 'Load Existing Agents' :
+             showOnlyTab === 2 ? 'Load Existing Tasks' :
+             showOnlyTab === 3 ? 'Load Existing Flows' :
+             'Open Catalog'}
+          </Box>
           <IconButton onClick={onClose}>
             <CloseIcon />
           </IconButton>
@@ -904,28 +1405,47 @@ const CrewFlowSelectionDialog: React.FC<CrewFlowSelectionDialogProps> = ({
           )}
           
           <Box sx={{ width: '100%' }}>
-            <Box sx={{ borderBottom: 1, borderColor: 'divider' }}>
-              <Tabs value={tabValue} onChange={handleTabChange} aria-label="crew and flow tabs">
-                <Tab 
-                  icon={<PersonIcon />} 
-                  iconPosition="start" 
-                  label="Crews" 
-                  id="crew-tab-0" 
-                  aria-controls="tabpanel-0"
-                  sx={{ textTransform: 'none' }}
-                />
-                {crewAIFlowEnabled && (
+            {showOnlyTab === undefined ? (
+              // Show all tabs when opened from catalog
+              <Box sx={{ borderBottom: 1, borderColor: 'divider' }}>
+                <Tabs value={tabValue} onChange={handleTabChange} aria-label="catalog tabs">
                   <Tab 
-                    icon={<AccountTreeIcon />} 
+                    icon={<PersonIcon />} 
                     iconPosition="start" 
-                    label="Flows" 
-                    id="flow-tab-1" 
-                    aria-controls="tabpanel-1" 
+                    label="Plans (New Tab)" 
+                    id="plan-tab-0" 
+                    aria-controls="tabpanel-0"
                     sx={{ textTransform: 'none' }}
                   />
-                )}
-              </Tabs>
-            </Box>
+                  <Tab 
+                    icon={<GroupIcon />} 
+                    iconPosition="start" 
+                    label="Agents" 
+                    id="agent-tab-1" 
+                    aria-controls="tabpanel-1"
+                    sx={{ textTransform: 'none' }}
+                  />
+                  <Tab 
+                    icon={<AssignmentIcon />} 
+                    iconPosition="start" 
+                    label="Tasks" 
+                    id="task-tab-2" 
+                    aria-controls="tabpanel-2"
+                    sx={{ textTransform: 'none' }}
+                  />
+                  {crewAIFlowEnabled && (
+                    <Tab 
+                      icon={<AccountTreeIcon />} 
+                      iconPosition="start" 
+                      label="Flows" 
+                      id="flow-tab-3" 
+                      aria-controls="tabpanel-3" 
+                      sx={{ textTransform: 'none' }}
+                    />
+                  )}
+                </Tabs>
+              </Box>
+            ) : null}
 
             {/* Search and action buttons */}
             <Box sx={{ py: 1, display: 'flex', justifyContent: 'space-between' }}>
@@ -946,7 +1466,11 @@ const CrewFlowSelectionDialog: React.FC<CrewFlowSelectionDialogProps> = ({
                       // Check which tab is active and focus the appropriate first card
                       if (tabValue === 0 && firstCrewCardRef.current) {
                         firstCrewCardRef.current.focus();
-                      } else if (tabValue === 1 && firstFlowCardRef.current) {
+                      } else if (tabValue === 1 && firstAgentCardRef.current) {
+                        firstAgentCardRef.current.focus();
+                      } else if (tabValue === 2 && firstTaskCardRef.current) {
+                        firstTaskCardRef.current.focus();
+                      } else if (tabValue === 3 && firstFlowCardRef.current) {
                         firstFlowCardRef.current.focus();
                       }
                     } else if (e.key === 'Escape') {
@@ -963,8 +1487,9 @@ const CrewFlowSelectionDialog: React.FC<CrewFlowSelectionDialogProps> = ({
                   }}
                 />
               </Box>
-              <Box sx={{ ml: 2, display: 'flex', gap: 1 }}>
-                {tabValue === 0 ? (
+              {showOnlyTab === undefined && (
+                <Box sx={{ ml: 2, display: 'flex', gap: 1 }}>
+                  {tabValue === 0 ? (
                   <>
                     <Button
                       startIcon={<UploadIcon />}
@@ -981,10 +1506,27 @@ const CrewFlowSelectionDialog: React.FC<CrewFlowSelectionDialogProps> = ({
                       onClick={handleExportAllCrews}
                       disabled={crews.length === 0}
                     >
-                      Export All
+                      Export Plans
+                    </Button>
+                    <Button
+                      startIcon={<FileUploadIcon />}
+                      variant="outlined"
+                      size="small"
+                      onClick={handleBulkImportClick}
+                    >
+                      Import Everything
+                    </Button>
+                    <Button
+                      startIcon={<DownloadIcon />}
+                      variant="outlined"
+                      size="small"
+                      onClick={handleExportEverything}
+                      disabled={crews.length === 0 && flows.length === 0}
+                    >
+                      Export Everything
                     </Button>
                   </>
-                ) : (
+                ) : tabValue === 3 ? (
                   <>
                     <Button
                       startIcon={<UploadIcon />}
@@ -1001,38 +1543,28 @@ const CrewFlowSelectionDialog: React.FC<CrewFlowSelectionDialogProps> = ({
                       onClick={handleExportAllFlows}
                       disabled={flows.length === 0}
                     >
-                      Export All
+                      Export Flows
                     </Button>
                   </>
-                )}
-                <Button
-                  startIcon={<FileUploadIcon />}
-                  variant="outlined"
-                  size="small"
-                  onClick={handleBulkImportClick}
-                >
-                  Bulk Import
-                </Button>
-                <Button
-                  startIcon={<DownloadIcon />}
-                  variant="outlined"
-                  size="small"
-                  onClick={handleExportEverything}
-                  disabled={crews.length === 0 && flows.length === 0}
-                >
-                  Export All
-                </Button>
-              </Box>
+                ) : null}
+                </Box>
+              )}
             </Box>
             
-            <TabPanel value={tabValue} index={0}>
+            {(showOnlyTab === undefined || showOnlyTab === 0) && (
+              <TabPanel value={tabValue} index={0}>
+                {showOnlyTab === undefined && (
+                  <Alert severity="info" sx={{ mb: 2 }}>
+                    Loading a plan will open it in a new tab
+                  </Alert>
+                )}
               {loading ? (
                 <Box sx={{ display: 'flex', justifyContent: 'center', p: 4 }}>
                   <CircularProgress />
                 </Box>
               ) : crews.length === 0 ? (
                 <Alert severity="info">
-                  No crews found. Create a crew by adding agents and tasks, then click Save Crew.
+                  No plans found. Create a plan by adding agents and tasks, then click Save Plan.
                 </Alert>
               ) : (
                 <Grid container spacing={2}>
@@ -1082,7 +1614,7 @@ const CrewFlowSelectionDialog: React.FC<CrewFlowSelectionDialogProps> = ({
                                 {crew.name}
                               </Typography>
                               <Box>
-                                <Tooltip title="Export Crew">
+                                <Tooltip title="Export Plan">
                                   <IconButton 
                                     size="small" 
                                     onClick={(e) => handleExportCrew(e, crew)}
@@ -1090,7 +1622,7 @@ const CrewFlowSelectionDialog: React.FC<CrewFlowSelectionDialogProps> = ({
                                     <DownloadIcon fontSize="small" />
                                   </IconButton>
                                 </Tooltip>
-                                <Tooltip title="Delete Crew">
+                                <Tooltip title="Delete Plan">
                                   <IconButton 
                                     size="small" 
                                     onClick={(e) => handleDeleteCrew(e, crew.id)}
@@ -1164,9 +1696,200 @@ const CrewFlowSelectionDialog: React.FC<CrewFlowSelectionDialogProps> = ({
                     ))}
                 </Grid>
               )}
-            </TabPanel>
-            {crewAIFlowEnabled && (
+              </TabPanel>
+            )}
+            
+            {/* Agents Tab Panel */}
+            {(showOnlyTab === undefined || showOnlyTab === 1) && (
               <TabPanel value={tabValue} index={1}>
+                {showOnlyTab === undefined && (
+                  <Alert severity="info" sx={{ mb: 2 }}>
+                    Loading agents will add them to the current tab
+                  </Alert>
+                )}
+              <Box sx={{ mb: 2, display: 'flex', gap: 1, flexWrap: 'wrap' }}>
+                <Button
+                  variant="outlined"
+                  onClick={handleSelectAllAgents}
+                >
+                  {selectedAgents.length === agents.length ? 'Deselect All' : 'Select All'}
+                </Button>
+                <Button
+                  variant="contained"
+                  onClick={handlePlaceAgents}
+                  disabled={selectedAgents.length === 0}
+                >
+                  Place Agents ({selectedAgents.length})
+                </Button>
+                <Button
+                  variant="outlined"
+                  color="error"
+                  onClick={handleDeleteAllAgents}
+                  disabled={agents.length === 0 || loading}
+                  startIcon={<DeleteIcon />}
+                >
+                  Delete All
+                </Button>
+                <Button
+                  variant="outlined"
+                  onClick={handleImportAgentsClick}
+                  startIcon={<FileUploadIcon />}
+                >
+                  Import
+                </Button>
+                <Button
+                  variant="outlined"
+                  onClick={handleExportAllAgents}
+                  disabled={agents.length === 0 || loading}
+                  startIcon={<DownloadIcon />}
+                >
+                  Export Agents
+                </Button>
+              </Box>
+              <Divider sx={{ my: 2 }} />
+              {loading ? (
+                <Box sx={{ display: 'flex', justifyContent: 'center', p: 4 }}>
+                  <CircularProgress />
+                </Box>
+              ) : agents.length === 0 ? (
+                <Alert severity="info">
+                  No agents found. Create agents to use in your crews.
+                </Alert>
+              ) : (
+                <List sx={{ maxHeight: '50vh', overflow: 'auto' }}>
+                  {agents
+                    .filter(agent => {
+                      if (searchQuery) {
+                        return agent.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
+                               agent.role.toLowerCase().includes(searchQuery.toLowerCase());
+                      }
+                      return true;
+                    })
+                    .map((agent) => (
+                      <ListItemButton
+                        key={agent.id}
+                        onClick={() => handleAgentToggle(agent)}
+                        selected={selectedAgents.some(a => a.id === agent.id)}
+                      >
+                        <ListItemIcon>
+                          <GroupIcon />
+                        </ListItemIcon>
+                        <ListItemText
+                          primary={agent.name}
+                          secondary={`${agent.role} - LLM: ${agent.llm}`}
+                        />
+                        <Tooltip title="Delete Agent">
+                          <IconButton
+                            onClick={(e) => handleDeleteAgent(e, agent.id || '')}
+                            disabled={loading}
+                          >
+                            <DeleteIcon />
+                          </IconButton>
+                        </Tooltip>
+                      </ListItemButton>
+                    ))}
+                </List>
+              )}
+              </TabPanel>
+            )}
+            
+            {/* Tasks Tab Panel */}
+            {(showOnlyTab === undefined || showOnlyTab === 2) && (
+              <TabPanel value={tabValue} index={2}>
+                {showOnlyTab === undefined && (
+                  <Alert severity="info" sx={{ mb: 2 }}>
+                    Loading tasks will add them to the current tab
+                  </Alert>
+                )}
+              <Box sx={{ mb: 2, display: 'flex', gap: 1, flexWrap: 'wrap' }}>
+                <Button
+                  variant="outlined"
+                  onClick={handleSelectAllTasks}
+                >
+                  {selectedTasks.length === tasks.length ? 'Deselect All' : 'Select All'}
+                </Button>
+                <Button
+                  variant="contained"
+                  onClick={handlePlaceTasks}
+                  disabled={selectedTasks.length === 0}
+                >
+                  Place Tasks ({selectedTasks.length})
+                </Button>
+                <Button
+                  variant="outlined"
+                  color="error"
+                  onClick={handleDeleteAllTasks}
+                  disabled={tasks.length === 0 || loading}
+                  startIcon={<DeleteIcon />}
+                >
+                  Delete All
+                </Button>
+                <Button
+                  variant="outlined"
+                  onClick={handleImportTasksClick}
+                  startIcon={<FileUploadIcon />}
+                >
+                  Import
+                </Button>
+                <Button
+                  variant="outlined"
+                  onClick={handleExportAllTasks}
+                  disabled={tasks.length === 0 || loading}
+                  startIcon={<DownloadIcon />}
+                >
+                  Export Tasks
+                </Button>
+              </Box>
+              <Divider sx={{ my: 2 }} />
+              {loading ? (
+                <Box sx={{ display: 'flex', justifyContent: 'center', p: 4 }}>
+                  <CircularProgress />
+                </Box>
+              ) : tasks.length === 0 ? (
+                <Alert severity="info">
+                  No tasks found. Create tasks to use in your crews.
+                </Alert>
+              ) : (
+                <List sx={{ maxHeight: '50vh', overflow: 'auto' }}>
+                  {tasks
+                    .filter(task => {
+                      if (searchQuery) {
+                        return task.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
+                               task.description.toLowerCase().includes(searchQuery.toLowerCase());
+                      }
+                      return true;
+                    })
+                    .map((task) => (
+                      <ListItemButton
+                        key={task.id}
+                        onClick={() => handleTaskToggle(task)}
+                        selected={selectedTasks.some(t => t.id === task.id)}
+                      >
+                        <ListItemIcon>
+                          <AssignmentIcon />
+                        </ListItemIcon>
+                        <ListItemText
+                          primary={task.name}
+                          secondary={task.description}
+                        />
+                        <Tooltip title="Delete Task">
+                          <IconButton
+                            onClick={(e) => handleDeleteTask(e, task.id)}
+                            disabled={loading}
+                          >
+                            <DeleteIcon />
+                          </IconButton>
+                        </Tooltip>
+                      </ListItemButton>
+                    ))}
+                </List>
+              )}
+              </TabPanel>
+            )}
+            
+            {/* Flows Tab Panel */}
+            {crewAIFlowEnabled && (showOnlyTab === undefined || showOnlyTab === 3) && (
+              <TabPanel value={tabValue} index={3}>
               {loading ? (
                 <Box sx={{ display: 'flex', justifyContent: 'center', p: 4 }}>
                   <CircularProgress />
@@ -1352,6 +2075,20 @@ const CrewFlowSelectionDialog: React.FC<CrewFlowSelectionDialogProps> = ({
         style={{ display: 'none' }} 
         accept=".json"
         onChange={handleBulkImport}
+      />
+      <input 
+        type="file" 
+        ref={agentFileInputRef} 
+        style={{ display: 'none' }} 
+        accept=".json"
+        onChange={handleImportAgents}
+      />
+      <input 
+        type="file" 
+        ref={taskFileInputRef} 
+        style={{ display: 'none' }} 
+        accept=".json"
+        onChange={handleImportTasks}
       />
     </>
   );
