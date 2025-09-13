@@ -138,56 +138,63 @@ class TestFileResponse:
         response_data = {
             "filename": "response_test.pdf",
             "path": "uploads/response_test.pdf",
-            "full_path": "/var/app/uploads/response_test.pdf",
-            "file_size_bytes": 2048000,
-            "is_uploaded": True,
+            "size": 2048000,
+            "content_type": "application/pdf",
+            "upload_timestamp": "2024-03-15T10:30:00Z",
+            "execution_id": "exec-123",
+            "group_id": "group-456",
             "success": True
         }
         response = FileResponse(**response_data)
         assert response.filename == "response_test.pdf"
         assert response.path == "uploads/response_test.pdf"
-        assert response.full_path == "/var/app/uploads/response_test.pdf"
-        assert response.file_size_bytes == 2048000
-        assert response.is_uploaded is True
+        assert response.size == 2048000
+        assert response.content_type == "application/pdf"
+        assert response.upload_timestamp == "2024-03-15T10:30:00Z"
+        assert response.execution_id == "exec-123"
+        assert response.group_id == "group-456"
         assert response.success is True
     
     def test_file_response_inheritance(self):
-        """Test that FileResponse inherits from FileInfo."""
+        """Test FileResponse schema attributes."""
         response_data = {
             "filename": "inherit_test.txt",
             "path": "uploads/inherit_test.txt",
-            "full_path": "/var/app/uploads/inherit_test.txt",
-            "file_size_bytes": 512,
-            "is_uploaded": True
+            "size": 512,
+            "content_type": "text/plain",
+            "upload_timestamp": "2024-03-15T10:30:00Z"
         }
         response = FileResponse(**response_data)
         
-        # Should have all FileInfo attributes
+        # Should have FileResponse attributes
         assert hasattr(response, 'filename')
         assert hasattr(response, 'path')
-        assert hasattr(response, 'full_path')
-        assert hasattr(response, 'file_size_bytes')
-        assert hasattr(response, 'is_uploaded')
-        
-        # Should have FileResponse-specific attributes
+        assert hasattr(response, 'size')
+        assert hasattr(response, 'content_type')
+        assert hasattr(response, 'upload_timestamp')
+        assert hasattr(response, 'execution_id')
+        assert hasattr(response, 'group_id')
         assert hasattr(response, 'success')
         
-        # Should behave like base class with default success
+        # Check values and defaults
         assert response.filename == "inherit_test.txt"
         assert response.success is True  # Default value
+        assert response.execution_id is None  # Optional field
+        assert response.group_id is None  # Optional field
     
     def test_file_response_failure_scenario(self):
         """Test FileResponse for failed upload scenario."""
         response_data = {
             "filename": "failed_upload.txt",
             "path": "uploads/failed_upload.txt",
-            "full_path": "/var/app/uploads/failed_upload.txt",
-            "file_size_bytes": 1024,
-            "is_uploaded": False,
+            "size": 1024,
+            "content_type": "text/plain",
+            "upload_timestamp": "2024-03-15T10:30:00Z",
             "success": False
         }
         response = FileResponse(**response_data)
-        assert response.is_uploaded is False
+        assert response.filename == "failed_upload.txt"
+        assert response.size == 1024
         assert response.success is False
 
 
@@ -303,19 +310,19 @@ class TestMultiFileResponse:
     def test_valid_multi_file_response(self):
         """Test MultiFileResponse with multiple files."""
         files = [
-            FileInfo(
+            FileResponse(
                 filename="file1.txt",
                 path="uploads/file1.txt",
-                full_path="/var/app/uploads/file1.txt",
-                file_size_bytes=1024,
-                is_uploaded=True
+                size=1024,
+                content_type="text/plain",
+                upload_timestamp="2024-03-15T10:30:00Z"
             ),
-            FileInfo(
+            FileResponse(
                 filename="file2.pdf",
                 path="uploads/file2.pdf",
-                full_path="/var/app/uploads/file2.pdf",
-                file_size_bytes=2048,
-                is_uploaded=True
+                size=2048,
+                content_type="application/pdf",
+                upload_timestamp="2024-03-15T10:31:00Z"
             )
         ]
         
@@ -342,12 +349,12 @@ class TestMultiFileResponse:
     def test_multi_file_response_default_success(self):
         """Test MultiFileResponse with default success value."""
         files = [
-            FileInfo(
+            FileResponse(
                 filename="default_success.txt",
                 path="uploads/default_success.txt",
-                full_path="/var/app/uploads/default_success.txt",
-                file_size_bytes=512,
-                is_uploaded=True
+                size=512,
+                content_type="text/plain",
+                upload_timestamp="2024-03-15T10:30:00Z"
             )
         ]
         
@@ -359,19 +366,21 @@ class TestMultiFileResponse:
     def test_multi_file_response_failure_scenario(self):
         """Test MultiFileResponse for failed multi-upload scenario."""
         files = [
-            FileInfo(
+            FileResponse(
                 filename="partial1.txt",
                 path="uploads/partial1.txt",
-                full_path="/var/app/uploads/partial1.txt",
-                file_size_bytes=1024,
-                is_uploaded=True
+                size=1024,
+                content_type="text/plain",
+                upload_timestamp="2024-03-15T10:30:00Z",
+                success=True
             ),
-            FileInfo(
+            FileResponse(
                 filename="partial2.txt",
                 path="uploads/partial2.txt",
-                full_path="/var/app/uploads/partial2.txt",
-                file_size_bytes=2048,
-                is_uploaded=False
+                size=2048,
+                content_type="text/plain",
+                upload_timestamp="2024-03-15T10:31:00Z",
+                success=False
             )
         ]
         
@@ -382,8 +391,8 @@ class TestMultiFileResponse:
         multi_response = MultiFileResponse(**multi_response_data)
         assert len(multi_response.files) == 2
         assert multi_response.success is False
-        assert multi_response.files[0].is_uploaded is True
-        assert multi_response.files[1].is_uploaded is False
+        assert multi_response.files[0].success is True
+        assert multi_response.files[1].success is False
     
     def test_multi_file_response_missing_files(self):
         """Test MultiFileResponse validation with missing files field."""
@@ -401,16 +410,16 @@ class TestMultiFileResponse:
                 {
                     "filename": "dict_file.txt",
                     "path": "uploads/dict_file.txt",
-                    "full_path": "/var/app/uploads/dict_file.txt",
-                    "file_size_bytes": 256,
-                    "is_uploaded": True
+                    "size": 256,
+                    "content_type": "text/plain",
+                    "upload_timestamp": "2024-03-15T10:30:00Z"
                 }
             ],
             "success": True
         }
         multi_response = MultiFileResponse(**multi_response_data)
         assert len(multi_response.files) == 1
-        assert isinstance(multi_response.files[0], FileInfo)
+        assert isinstance(multi_response.files[0], FileResponse)
         assert multi_response.files[0].filename == "dict_file.txt"
 
 
@@ -537,9 +546,9 @@ class TestSchemaIntegration:
         upload_response = FileResponse(
             filename=file_info.filename,
             path=file_info.path,
-            full_path=file_info.full_path,
-            file_size_bytes=file_info.file_size_bytes,
-            is_uploaded=True,  # Now uploaded
+            size=file_info.file_size_bytes,
+            content_type="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+            upload_timestamp="2024-03-15T10:30:00Z",
             success=True
         )
         
@@ -547,9 +556,9 @@ class TestSchemaIntegration:
         check_exists = FileCheckResponse(
             filename=upload_response.filename,
             path=upload_response.path,
-            full_path=upload_response.full_path,
-            file_size_bytes=upload_response.file_size_bytes,
-            is_uploaded=upload_response.is_uploaded,
+            full_path="/var/app/uploads/documents/workflow_test.docx",
+            file_size_bytes=upload_response.size,
+            is_uploaded=True,
             exists=True
         )
         
@@ -557,7 +566,7 @@ class TestSchemaIntegration:
         assert file_info.is_uploaded is False
         assert check_not_found.exists is False
         assert upload_response.success is True
-        assert upload_response.is_uploaded is True
+        assert upload_response.size == 1048576
         assert check_exists.exists is True
         assert check_exists.filename == file_info.filename
     
@@ -565,12 +574,12 @@ class TestSchemaIntegration:
         """Test various multi-file upload scenarios."""
         # Successful multi-upload
         successful_files = [
-            FileInfo(
+            FileResponse(
                 filename=f"success_{i}.txt",
                 path=f"uploads/success_{i}.txt",
-                full_path=f"/var/app/uploads/success_{i}.txt",
-                file_size_bytes=1024 * i,
-                is_uploaded=True
+                size=1024 * i,
+                content_type="text/plain",
+                upload_timestamp=f"2024-03-15T10:3{i}:00Z"
             )
             for i in range(1, 4)
         ]
@@ -580,24 +589,26 @@ class TestSchemaIntegration:
             success=True
         )
         assert len(successful_response.files) == 3
-        assert all(f.is_uploaded for f in successful_response.files)
+        assert all(f.success for f in successful_response.files)
         assert successful_response.success is True
         
         # Partial failure scenario
         mixed_files = [
-            FileInfo(
+            FileResponse(
                 filename="partial_success_1.txt",
                 path="uploads/partial_success_1.txt",
-                full_path="/var/app/uploads/partial_success_1.txt",
-                file_size_bytes=1024,
-                is_uploaded=True
+                size=1024,
+                content_type="text/plain",
+                upload_timestamp="2024-03-15T10:30:00Z",
+                success=True
             ),
-            FileInfo(
+            FileResponse(
                 filename="partial_failure_2.txt",
                 path="uploads/partial_failure_2.txt",
-                full_path="/var/app/uploads/partial_failure_2.txt",
-                file_size_bytes=2048,
-                is_uploaded=False
+                size=2048,
+                content_type="text/plain",
+                upload_timestamp="2024-03-15T10:31:00Z",
+                success=False
             )
         ]
         
@@ -606,8 +617,8 @@ class TestSchemaIntegration:
             success=False
         )
         assert len(partial_response.files) == 2
-        assert partial_response.files[0].is_uploaded is True
-        assert partial_response.files[1].is_uploaded is False
+        assert partial_response.files[0].success is True
+        assert partial_response.files[1].success is False
         assert partial_response.success is False
     
     def test_file_listing_scenarios(self):

@@ -24,6 +24,7 @@ class TestAPIInit:
             agents_router,
             crews_router,
             databricks_router,
+            databricks_knowledge_router,
             flows_router,
             healthcheck_router,
             logs_router,
@@ -34,7 +35,7 @@ class TestAPIInit:
             templates_router,
             schemas_router,
             tools_router,
-            upload_router,
+            # upload_router,  # DISABLED: Local file uploads not allowed - use Databricks volumes instead
             task_tracking_router,
             scheduler_router,
             agent_generation_router,
@@ -57,15 +58,19 @@ class TestAPIInit:
             user_roles_router,
             identity_providers_router,
             group_router,
-            chat_history_router
+            chat_history_router,
+            memory_backend_router,
+            documentation_embeddings_router,
+            database_management_router,
+            genie_router
         )
         
         # Test that all routers are APIRouter instances
         routers = [
-            agents_router, crews_router, databricks_router,
+            agents_router, crews_router, databricks_router, databricks_knowledge_router,
             flows_router, healthcheck_router, logs_router, models_router,
             databricks_secrets_router, api_keys_router, tasks_router, templates_router,
-            schemas_router, tools_router, upload_router,
+            schemas_router, tools_router,  # upload_router removed - disabled functionality
             task_tracking_router, scheduler_router,
             agent_generation_router, connections_router, crew_generation_router,
             task_generation_router, template_generation_router, executions_router,
@@ -73,7 +78,8 @@ class TestAPIInit:
             mcp_router, dispatcher_router, engine_config_router, databricks_role_router,
             auth_router, users_router, roles_router, privileges_router,
             user_roles_router, identity_providers_router, group_router,
-            chat_history_router
+            chat_history_router, memory_backend_router, documentation_embeddings_router,
+            database_management_router, genie_router
         ]
         
         for router in routers:
@@ -130,6 +136,7 @@ class TestAPIInit:
             "agents_router",
             "crews_router",
             "databricks_router",
+            "databricks_knowledge_router",
             "flows_router",
             "healthcheck_router",
             "logs_router",
@@ -140,7 +147,7 @@ class TestAPIInit:
             "templates_router",
             "schemas_router",
             "tools_router",
-            "upload_router",
+            # "upload_router",  # DISABLED: Local file uploads not allowed - use Databricks volumes instead
             "task_tracking_router",
             "scheduler_router",
             "agent_generation_router",
@@ -164,7 +171,11 @@ class TestAPIInit:
             "identity_providers_router",
             "group_router",
             "databricks_role_router",
-            "chat_history_router"
+            "chat_history_router",
+            "memory_backend_router",
+            "documentation_embeddings_router",
+            "database_management_router",
+            "genie_router"
         ]
         
         for export in expected_exports:
