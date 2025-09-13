@@ -37,6 +37,24 @@ class ToolRepository(BaseRepository[Tool]):
         result = await self.session.execute(query)
         return result.scalars().first()
     
+    async def find_by_title_and_group(self, title: str, group_id: str) -> Optional[Tool]:
+        """
+        Find a tool by title and group_id.
+        
+        Args:
+            title: Tool title to search for
+            group_id: Group ID to filter by
+            
+        Returns:
+            Tool if found, else None
+        """
+        query = select(self.model).where(
+            (self.model.title == title) & 
+            (self.model.group_id == group_id)
+        )
+        result = await self.session.execute(query)
+        return result.scalars().first()
+    
     async def find_enabled(self) -> List[Tool]:
         """
         Find all enabled tools.

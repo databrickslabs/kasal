@@ -46,6 +46,27 @@ class DatabricksConfigRepository(BaseRepository[DatabricksConfig]):
         
         result = await self.session.execute(query)
         return result.scalars().first()
+
+    def get_active_config_sync(self, group_id: Optional[str] = None) -> Optional[DatabricksConfig]:
+        """
+        Synchronous version of get_active_config for use in non-async contexts.
+        
+        Args:
+            group_id: Optional group ID to filter by
+            
+        Returns:
+            Active configuration if found, else None
+        """
+        from sqlalchemy.orm import Session
+        
+        query = self.session.query(self.model).filter(self.model.is_active == True)
+        if group_id is not None:
+            query = query.filter(self.model.group_id == group_id)
+        
+        # Order by updated_at descending to get the most recent one
+        query = query.order_by(self.model.updated_at.desc())
+        
+        return query.first()
     
     async def deactivate_all(self, group_id: Optional[str] = None) -> None:
         """
