@@ -1,7 +1,8 @@
 import { apiClient } from '../config/api/ApiConfig';
 import { Agent, KnowledgeSource, StepCallback } from '../types/agent';
 import { ModelService } from './ModelService';
-import { uploadService } from './UploadService';
+// DISABLED: Local file uploads are not allowed - use Databricks volumes instead
+// import { uploadService } from './UploadService';
 
 // Re-export for backward compatibility
 export type { Agent, KnowledgeSource, StepCallback };
@@ -12,11 +13,6 @@ export class AgentService {
   static async getAgent(id: number | string): Promise<Agent | null> {
     try {
       const response = await apiClient.get<Agent>(`/agents/${id}`);
-      console.log('Fetched agent:', response.data);
-      console.log('Agent tool_configs:', response.data?.tool_configs);
-      if (response.data?.tool_configs?.GenieTool) {
-        console.log('GenieTool config in fetched agent:', response.data.tool_configs.GenieTool);
-      }
       // Check knowledge sources and verify files still exist
       if (response.data && response.data.knowledge_sources && response.data.knowledge_sources.length > 0) {
         await this.verifyKnowledgeSources(response.data.knowledge_sources);
@@ -161,7 +157,7 @@ export class AgentService {
       
       // Log tool_configs if present
       if (agentToSend.tool_configs) {
-        console.log('AgentService - Creating agent with tool_configs:', agentToSend.tool_configs);
+        // Tool configs are already validated and sent with the agent
       }
       
       // Ensure fileInfo is sent with each knowledge source
@@ -285,12 +281,12 @@ export class AgentService {
       
       // Explicitly ensure knowledge_sources array is included with fileInfo preserved
       if (agentToUpdate.knowledge_sources) {
-        console.log('Updating with knowledge sources:', agentToUpdate.knowledge_sources);
+        // Knowledge sources are already verified and included in agentToUpdate
       }
       
       // Log tool_configs if present
       if (agentToUpdate.tool_configs) {
-        console.log('AgentService - Updating agent with tool_configs:', agentToUpdate.tool_configs);
+        // Tool configs are already validated and sent with the agent
       }
       
       const response = await apiClient.put<Agent>(`/agents/${id}/full`, agentToUpdate);
@@ -340,26 +336,9 @@ export class AgentService {
    * @param sources The knowledge sources to verify
    */
   private static async verifyKnowledgeSources(sources: KnowledgeSource[]): Promise<void> {
-    for (const source of sources) {
-      // Skip text and URL sources
-      if (source.type === 'text' || source.type === 'url' || !source.source) {
-        continue;
-      }
-      
-      try {
-        // For file sources, always verify the file exists
-        const fileInfo = await uploadService.checkKnowledgeFile(source.source);
-        
-        // Update fileInfo regardless of previous state to ensure it's current
-        source.fileInfo = fileInfo;
-        
-        // Log warning if file doesn't exist
-        if (!fileInfo.exists) {
-          console.warn(`Knowledge source file not found: ${source.source}`);
-        }
-      } catch (error) {
-        console.error(`Error verifying knowledge source ${source.source}:`, error);
-      }
-    }
+    // DISABLED: Local file verification is not allowed - knowledge files must be in Databricks volumes
+    // Knowledge sources are now managed through Databricks volume uploads only
+    console.log('Knowledge sources verification skipped - using Databricks volumes');
+    return;
   }
 }

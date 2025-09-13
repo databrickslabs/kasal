@@ -139,9 +139,10 @@ function Configuration({ onClose }: ConfigurationProps): JSX.Element {
     // Only show Databricks tab if NOT in Databricks Apps environment
     ...(isDatabricksApps ? [] : [{
       label: t('configuration.databricks.tab', { defaultValue: 'Databricks' }),
-      icon: <KeyIcon fontSize="small" />,
+      icon: <CloudIcon fontSize="small" />,
       index: 5
     }]),
+
     {
       label: t('configuration.apiKeys.tab', { defaultValue: 'API Keys' }),
       icon: <KeyIcon fontSize="small" />,
