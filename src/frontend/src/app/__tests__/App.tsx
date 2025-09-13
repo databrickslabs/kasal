@@ -40,7 +40,6 @@ function App() {
             hasPermission: permissionResult.has_permission,
             checked: true
           };
-          console.log('Database Management permission cached:', permissionResult.has_permission);
         } catch (error) {
           console.error('Failed to check database management permission:', error);
           // Default to true on error for backward compatibility

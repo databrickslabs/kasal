@@ -178,10 +178,13 @@ export interface ShowLogsProps {
   connectionError: string | null;
 }
 
+import { Run } from '../api/ExecutionHistoryService';
+
 export interface ShowResultProps {
   open: boolean;
   onClose: () => void;
   result: Record<string, ResultValue>;
+  run?: Run;
 }
 
 export interface NavigationProps {

@@ -52,11 +52,6 @@ const AgentNode: React.FC<{ data: AgentNodeData; id: string }> = ({ data, id }) 
   const [isEditing, setIsEditing] = useState(false);
   const [agentData, setAgentData] = useState<Agent | null>(null);
   const [tools, setTools] = useState<Tool[]>([]);
-  const [editTooltipOpen, setEditTooltipOpen] = useState(false);
-  const [deleteTooltipOpen, setDeleteTooltipOpen] = useState(false);
-  const [fileTooltipOpen, setFileTooltipOpen] = useState(false);
-  const [codeTooltipOpen, setCodeTooltipOpen] = useState(false);
-  const [memoryTooltipOpen, setMemoryTooltipOpen] = useState(false);
 
   // Local selection state
   const [isSelected, setIsSelected] = useState(false);
@@ -87,12 +82,6 @@ const AgentNode: React.FC<{ data: AgentNodeData; id: string }> = ({ data, id }) 
   }, [id, isSelected]);
 
   const handleDelete = useCallback(() => {
-    setEditTooltipOpen(false);
-    setDeleteTooltipOpen(false);
-    setFileTooltipOpen(false);
-    setCodeTooltipOpen(false);
-    setMemoryTooltipOpen(false);
-    
     setNodes(nodes => nodes.filter(node => node.id !== id));
     setEdges(edges => edges.filter(edge => 
       edge.source !== id && edge.target !== id
@@ -101,23 +90,48 @@ const AgentNode: React.FC<{ data: AgentNodeData; id: string }> = ({ data, id }) 
 
   const handleEditClick = async () => {
     try {
-      setEditTooltipOpen(false);
-      setDeleteTooltipOpen(false);
-      setFileTooltipOpen(false);
-      setCodeTooltipOpen(false);
-      setMemoryTooltipOpen(false);
-      
+      // Don't manually close tooltips - let them close naturally
       document.activeElement && (document.activeElement as HTMLElement).blur();
       
-      const agentIdToUse = data.agentId;
+      // Try different sources for the agent ID
+      const agentIdToUse = data.agentId || data.id || data.agent_id;
       
       if (!agentIdToUse) {
-        console.error('Agent ID is missing in node data:', data);
+        console.warn('Agent ID is missing in node data, using data directly:', data);
+        // If there's no ID, use the data directly (might be a new unsaved agent)
+        // Convert label to name for Agent type
+        const agentFromData: Agent = {
+          id: undefined,
+          name: String(data.label || data.name || ''),
+          role: String(data.role || ''),
+          goal: String(data.goal || ''),
+          backstory: String(data.backstory || ''),
+          llm: String(data.llm || ''),
+          tools: data.tools || [],
+          max_iter: data.max_iter || 25,
+          verbose: data.verbose || false,
+          allow_delegation: data.allow_delegation || false,
+          cache: data.cache || true,
+          allow_code_execution: data.allow_code_execution || false,
+          code_execution_mode: (data.code_execution_mode === 'unsafe' ? 'unsafe' : 'safe') as 'safe' | 'unsafe',
+          memory: data.memory,
+          tool_configs: data.tool_configs,
+          temperature: typeof data.temperature === 'number' ? data.temperature : undefined,
+          function_calling_llm: data.function_calling_llm,
+          max_rpm: data.max_rpm,
+          max_execution_time: data.max_execution_time,
+          embedder_config: data.embedder_config as any,
+          knowledge_sources: data.knowledge_sources,
+        };
+        setAgentData(agentFromData);
+        setIsEditing(true);
         return;
       }
 
-      const response = await AgentService.getAgent(agentIdToUse);
+      // Always fetch fresh data from backend to get latest knowledge sources
+      const response = await AgentService.getAgent(agentIdToUse as string | number);
       if (response) {
+        console.log(`Fetched agent ${response.name} with ${response.knowledge_sources?.length || 0} knowledge sources`);
         setAgentData(response);
         setIsEditing(true);
       }
@@ -127,13 +141,7 @@ const AgentNode: React.FC<{ data: AgentNodeData; id: string }> = ({ data, id }) 
   };
 
   useEffect(() => {
-    if (isEditing) {
-      setEditTooltipOpen(false);
-      setDeleteTooltipOpen(false);
-      setFileTooltipOpen(false);
-      setCodeTooltipOpen(false);
-      setMemoryTooltipOpen(false);
-    }
+    // Cleanup when dialog opens/closes if needed
   }, [isEditing]);
 
   const handleDoubleClick = useCallback(() => {
@@ -165,6 +173,11 @@ const AgentNode: React.FC<{ data: AgentNodeData; id: string }> = ({ data, id }) 
 
   const handleUpdateNode = useCallback(async (updatedAgent: Agent) => {
     try {
+      // Update the agentData state if it exists (for when edit dialog is open)
+      if (agentData) {
+        setAgentData(updatedAgent);
+      }
+      
       setNodes(nodes => nodes.map(node => {
         if (node.id === id) {
           return {
@@ -204,7 +217,7 @@ const AgentNode: React.FC<{ data: AgentNodeData; id: string }> = ({ data, id }) 
     } catch (error) {
       console.error('Failed to update node:', error);
     }
-  }, [id, setNodes]);
+  }, [id, setNodes, agentData]);
 
   useEffect(() => {
     if (!isEditing && data.agentId) {
@@ -222,6 +235,17 @@ const AgentNode: React.FC<{ data: AgentNodeData; id: string }> = ({ data, id }) 
       refreshAgentData();
     }
   }, [isEditing, data.agentId, handleUpdateNode]);
+
+  // Update agentData when node data changes (e.g., after knowledge sources are added)
+  useEffect(() => {
+    if (isEditing && data.knowledge_sources !== agentData?.knowledge_sources) {
+      // Update agentData with new knowledge sources from node data
+      setAgentData(prev => prev ? {
+        ...prev,
+        knowledge_sources: data.knowledge_sources || []
+      } : null);
+    }
+  }, [data.knowledge_sources, isEditing, agentData?.knowledge_sources]);
 
   // Improved click handler with local selection
   const handleNodeClick = useCallback((event: React.MouseEvent) => {
@@ -339,7 +363,8 @@ const AgentNode: React.FC<{ data: AgentNodeData; id: string }> = ({ data, id }) 
   };
 
   const hasFiles = data.knowledge_sources?.some(source => 
-    source.type !== 'text' && source.type !== 'url' && source.fileInfo?.exists
+    source.type === 'databricks_volume' || 
+    (source.type !== 'text' && source.type !== 'url' && source.fileInfo?.exists)
   );
 
   return (
@@ -365,12 +390,9 @@ const AgentNode: React.FC<{ data: AgentNodeData; id: string }> = ({ data, id }) 
           }}
         >
           <Tooltip 
-            title="Has uploaded files" 
+            title={`Has ${data.knowledge_sources?.length || 0} knowledge source(s)`} 
             disableInteractive 
             placement="top"
-            open={fileTooltipOpen}
-            onOpen={() => setFileTooltipOpen(true)}
-            onClose={() => setFileTooltipOpen(false)}
           >
             <FileIcon fontSize="small" />
           </Tooltip>
@@ -452,9 +474,6 @@ const AgentNode: React.FC<{ data: AgentNodeData; id: string }> = ({ data, id }) 
             title="Code Execution Enabled" 
             disableInteractive 
             placement="top"
-            open={codeTooltipOpen}
-            onOpen={() => setCodeTooltipOpen(true)}
-            onClose={() => setCodeTooltipOpen(false)}
           >
             <div>
               <CodeIcon sx={{ fontSize: '1rem', color: '#2196f3' }} />
@@ -470,9 +489,6 @@ const AgentNode: React.FC<{ data: AgentNodeData; id: string }> = ({ data, id }) 
             }`}
             disableInteractive
             placement="top"
-            open={memoryTooltipOpen}
-            onOpen={() => setMemoryTooltipOpen(true)}
-            onClose={() => setMemoryTooltipOpen(false)}
           >
             <div>
               <MemoryIcon sx={{ fontSize: '1rem', color: '#2196f3' }} />
@@ -486,9 +502,6 @@ const AgentNode: React.FC<{ data: AgentNodeData; id: string }> = ({ data, id }) 
           title="Edit Agent" 
           disableInteractive 
           placement="top"
-          open={editTooltipOpen}
-          onOpen={() => setEditTooltipOpen(true)}
-          onClose={() => setEditTooltipOpen(false)}
         >
           <IconButton
             size="small"
@@ -509,9 +522,6 @@ const AgentNode: React.FC<{ data: AgentNodeData; id: string }> = ({ data, id }) 
           title="Delete Agent" 
           disableInteractive 
           placement="top"
-          open={deleteTooltipOpen}
-          onOpen={() => setDeleteTooltipOpen(true)}
-          onClose={() => setDeleteTooltipOpen(false)}
         >
           <IconButton
             size="small"

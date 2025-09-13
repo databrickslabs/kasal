@@ -73,6 +73,7 @@ export interface AgentYaml {
 }
 
 export interface TaskYaml {
+  id?: string;  // Optional frontend task ID for tracking
   description: string;
   expected_output: string;
   tools: string[];

@@ -1,5 +1,5 @@
 import { EventEmitter } from 'events';
-import { config } from '../config/api/ApiConfig';
+import { config, apiClient } from '../config/api/ApiConfig';
 
 export interface LogMessage {
   id?: number;
@@ -42,15 +42,10 @@ class ExecutionLogService {
 
   async getHistoricalLogs(jobId: string, limit = 1000, offset = 0): Promise<LogMessage[]> {
     try {
-      const response = await fetch(`${this.apiUrl}/runs/${jobId}/outputs?limit=${limit}&offset=${offset}`);
-      if (!response.ok) {
-        if (response.status === 404) {
-          console.warn(`No logs found for job ${jobId}`);
-          return [];
-        }
-        throw new Error(`HTTP error! status: ${response.status}`);
-      }
-      const data = await response.json();
+      const response = await apiClient.get(`/runs/${jobId}/outputs`, {
+        params: { limit, offset }
+      });
+      const data = response.data;
       
       const logs = data.logs || [];
       return logs.map((log: BackendLogEntry) => ({
@@ -62,7 +57,11 @@ class ExecutionLogService {
         timestamp: log.timestamp,
         type: 'historical'
       }));
-    } catch (error) {
+    } catch (error: any) {
+      if (error.response?.status === 404) {
+        console.warn(`No logs found for job ${jobId}`);
+        return [];
+      }
       console.error('Error fetching historical logs:', error);
       throw error;
     }

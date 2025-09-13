@@ -23,29 +23,144 @@ import CodeIcon from '@mui/icons-material/Code';
 import WebIcon from '@mui/icons-material/Web';
 import FullscreenIcon from '@mui/icons-material/Fullscreen';
 import FullscreenExitIcon from '@mui/icons-material/FullscreenExit';
+import PictureAsPdfIcon from '@mui/icons-material/PictureAsPdf';
+import HtmlIcon from '@mui/icons-material/Html';
+// import CloudIcon from '@mui/icons-material/Cloud';
+import FolderOpenIcon from '@mui/icons-material/FolderOpen';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import { ShowResultProps } from '../../types/common';
 import { ResultValue } from '../../types/result';
+import { generateRunPDF } from '../../utils/pdfGenerator';
+import { DatabricksService } from '../../api/DatabricksService';
+// import { Run } from '../../api/ExecutionHistoryService';
 
 // eslint-disable-next-line react/prop-types
-const ShowResult = memo<ShowResultProps>(({ open, onClose, result }) => {
+const ShowResult = memo<ShowResultProps>(({ open, onClose, result, run }) => {
   const theme = useTheme();
   const [copied, setCopied] = useState(false);
   const [viewMode, setViewMode] = useState<'code' | 'html'>('code');
   const [isFullscreen, setIsFullscreen] = useState(false);
+  const [databricksVolumeInfo, setDatabricksVolumeInfo] = useState<{ path: string; workspaceUrl?: string } | null>(null);
   const dialogRef = useRef<HTMLDivElement>(null);
   // Track if the dialog has been opened at least once
   const hasOpenedRef = useRef(false);
   
-  // Update the hasOpened ref when dialog opens
+  // Update the hasOpened ref when dialog opens and set view mode based on content
   useEffect(() => {
     if (open) {
       hasOpenedRef.current = true;
+      // Set view mode to 'html' if HTML content is detected
+      if (result) {
+        const resultString = JSON.stringify(result);
+        if (/<[^>]*>/.test(resultString) || resultString.includes('<!DOCTYPE') || resultString.includes('<html')) {
+          setViewMode('html');
+        } else {
+          setViewMode('code');
+        }
+        
+        // Check for Databricks volume information from configuration
+        checkForDatabricksVolumeInfo(result);
+      }
     }
-  }, [open]);
+  }, [open, result, run]);
+  
+  // Function to check for Databricks volume information from configuration
+  const checkForDatabricksVolumeInfo = async (resultData: any) => {
+    try {
+      // Check if we have run information with task configuration
+      if (!run) {
+        console.log('No run information available');
+        return;
+      }
+
+      const databricksService = DatabricksService.getInstance();
+      const globalConfig = await databricksService.getDatabricksConfig();
+      
+      if (!globalConfig || !globalConfig.workspace_url) {
+        console.log('No Databricks configuration found');
+        return;
+      }
+
+      let volumePath: string | null = null;
+      let volumeEnabled = false;
+
+      // First, check task-level configuration
+      // eslint-disable-next-line react/prop-types
+      if (run?.tasks_yaml) {
+        try {
+          // Parse the tasks YAML (it's actually stored as a string of the YAML content)
+          // Check if any task has volume configuration
+          // eslint-disable-next-line react/prop-types
+          const tasksContent = run?.tasks_yaml;
+          
+          // Look for callback_config in the tasks
+          // Pattern to find callback_config with DatabricksVolumeCallback
+          const callbackPattern = /callback_config:\s*["']?DatabricksVolumeCallback/;
+          const hasVolumeCallback = callbackPattern.test(tasksContent);
+          
+          if (hasVolumeCallback) {
+            // Extract volume path from callback config if specified
+            const volumePathPattern = /volume_path:\s*["']?([^"'\n]+)["']?/;
+            const pathMatch = volumePathPattern.exec(tasksContent);
+            
+            if (pathMatch && pathMatch[1]) {
+              volumePath = pathMatch[1];
+              volumeEnabled = true;
+            } else if (globalConfig.volume_enabled && globalConfig.volume_path) {
+              // Use global config if no specific path in task
+              volumePath = globalConfig.volume_path;
+              volumeEnabled = true;
+            }
+          }
+        } catch (error) {
+          console.error('Error parsing tasks configuration:', error);
+        }
+      }
+
+      // If no task-level config, check global configuration
+      if (!volumeEnabled && globalConfig.volume_enabled && globalConfig.volume_path) {
+        volumePath = globalConfig.volume_path;
+        volumeEnabled = true;
+      }
+
+      // If volume is enabled, construct the full path
+      if (volumeEnabled && volumePath) {
+        // Get execution name from run
+        // eslint-disable-next-line react/prop-types
+        const executionName = run?.run_name || run?.job_id || 'unknown';
+        
+        // Construct the full volume path
+        // Format: /Volumes/catalog/schema/volume/execution_name/[date]/files...
+        const fullVolumePath = `/Volumes/${volumePath.replace(/\./g, '/')}/${executionName}`;
+        
+        setDatabricksVolumeInfo({
+          path: fullVolumePath,
+          workspaceUrl: globalConfig.workspace_url
+        });
+        
+        console.log('Databricks volume detected:', {
+          path: fullVolumePath,
+          workspaceUrl: globalConfig.workspace_url
+        });
+      } else {
+        console.log('No volume configuration detected');
+      }
+    } catch (error) {
+      console.error('Error checking for Databricks volume info:', error);
+    }
+  };
+  
   // URL detection regex pattern
   const urlPattern = /(https?:\/\/[^\s]+)/g;
+  
+  // Check if result contains HTML content
+  const isHtmlContent = useMemo(() => {
+    if (!result) return false;
+    const resultString = JSON.stringify(result);
+    // Check for common HTML tags
+    return /<[^>]*>/.test(resultString) || resultString.includes('<!DOCTYPE') || resultString.includes('<html');
+  }, [result]);
 
   // Memoize the formatted result to prevent unnecessary re-processing
   const memoizedResult = useMemo(() => {
@@ -75,6 +190,64 @@ const ShowResult = memo<ShowResultProps>(({ open, onClose, result }) => {
         console.error('Error attempting to exit fullscreen:', err);
       }
     }
+  };
+
+  // Download HTML function
+  const handleDownloadHtml = () => {
+    if (!run) return;
+    
+    // Extract the HTML content from the result
+    let htmlContent = '';
+    
+    // Check if result contains HTML
+    if (result && typeof result === 'object') {
+      // Look for HTML in the result values
+      const resultString = JSON.stringify(result);
+      
+      // If the result contains HTML tags, extract the HTML
+      if (resultString.includes('<html') || resultString.includes('<!DOCTYPE')) {
+        // Find the actual HTML content in the result
+        for (const value of Object.values(result)) {
+          const valueStr = String(value);
+          if (valueStr.includes('<html') || valueStr.includes('<!DOCTYPE')) {
+            htmlContent = valueStr;
+            break;
+          }
+        }
+      }
+    }
+    
+    // If no HTML found, create a simple HTML with the result
+    if (!htmlContent) {
+      htmlContent = `
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Result</title>
+</head>
+<body>
+    <pre>${JSON.stringify(result, null, 2)}</pre>
+</body>
+</html>
+      `;
+    }
+    
+    const blob = new Blob([htmlContent], { type: 'text/html' });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.href = url;
+    // eslint-disable-next-line react/prop-types
+    const sanitizedName = run?.run_name ? run.run_name.replace(/[^a-z0-9]/gi, '_').toLowerCase() : 'result';
+    const timestamp = new Date().toISOString().split('T')[0];
+    // eslint-disable-next-line react/prop-types
+    const jobId = run?.job_id || 'unknown';
+    link.download = `${sanitizedName}_${timestamp}_${jobId}.html`;
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    URL.revokeObjectURL(url);
   };
 
   // Listen for fullscreen changes
@@ -815,6 +988,9 @@ const ShowResult = memo<ShowResultProps>(({ open, onClose, result }) => {
         typeof value === 'string' && isHTML(value)
       ) ? "xl" : "lg"} 
       fullWidth
+      sx={{
+        zIndex: (theme) => theme.zIndex.modal + 100, // Higher z-index to appear above other dialogs
+      }}
       PaperProps={{
         sx: { 
           maxHeight: isFullscreen ? '100vh' : '95vh',
@@ -911,7 +1087,71 @@ const ShowResult = memo<ShowResultProps>(({ open, onClose, result }) => {
           {renderContent(memoizedResult)}
         </Box>
       </DialogContent>
-      <DialogActions sx={{ px: 3, py: 2 }}>
+      <DialogActions sx={{ px: 3, py: 2, gap: 1 }}>
+        {databricksVolumeInfo && (
+          <Tooltip title="Open Databricks Volume Location">
+            <Button
+              onClick={() => {
+                if (databricksVolumeInfo.workspaceUrl) {
+                  // Construct the Databricks catalog URL
+                  // Format: https://<workspace>/explore/data/volumes/<catalog>/<schema>/<volume>
+                  const pathParts = databricksVolumeInfo.path.replace('/Volumes/', '').split('/');
+                  if (pathParts.length >= 3) {
+                    const catalog = pathParts[0];
+                    const schema = pathParts[1];
+                    const volume = pathParts[2];
+                    
+                    // Remove trailing slash from workspace URL if present
+                    const workspaceUrl = databricksVolumeInfo.workspaceUrl.replace(/\/$/, '');
+                    
+                    // Construct the URL to the volume in Databricks catalog
+                    const volumeUrl = `${workspaceUrl}/explore/data/volumes/${catalog}/${schema}/${volume}`;
+                    
+                    // Open in new tab
+                    window.open(volumeUrl, '_blank');
+                  } else {
+                    // Fallback to workspace URL if path parsing fails
+                    window.open(databricksVolumeInfo.workspaceUrl, '_blank');
+                  }
+                } else {
+                  // If no workspace URL, show alert
+                  alert('Databricks workspace URL not configured. Please configure Databricks to access the volume.');
+                }
+              }}
+              variant="outlined"
+              startIcon={<FolderOpenIcon />}
+              sx={{
+                borderRadius: '8px',
+                textTransform: 'none',
+                fontWeight: 500,
+                borderColor: '#FF5722',
+                color: '#FF5722',
+                '&:hover': {
+                  borderColor: '#F4511E',
+                  backgroundColor: 'rgba(255, 87, 34, 0.04)',
+                },
+              }}
+            >
+              Open in Databricks Volume
+            </Button>
+          </Tooltip>
+        )}
+        {run && (
+          <Tooltip title={isHtmlContent ? "Download as HTML" : "Download as PDF"}>
+            <Button
+              onClick={isHtmlContent ? handleDownloadHtml : () => generateRunPDF(run)}
+              variant="outlined"
+              startIcon={isHtmlContent ? <HtmlIcon /> : <PictureAsPdfIcon />}
+              sx={{
+                borderRadius: '8px',
+                textTransform: 'none',
+                fontWeight: 500,
+              }}
+            >
+              {isHtmlContent ? 'Download HTML' : 'Download PDF'}
+            </Button>
+          </Tooltip>
+        )}
         <Button 
           onClick={onClose}
           variant="contained"
