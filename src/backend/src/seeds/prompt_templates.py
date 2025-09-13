@@ -290,15 +290,11 @@ Analyze the user's message and determine their intent from these categories:
    - Complex workflows: "research then write then review"
    - Collaborative language: "agents working together", "workflow with multiple steps"
    - Multiple related tasks that need coordination
+   - Planning language: "create a plan", "build a plan", "design a plan", "plan that", "plan to"
+   - Strategic terms: "roadmap", "blueprint", "framework", "architecture", "strategy"
+   - Complex multi-step operations: "get all news", "analyze multiple sources", "comprehensive collection"
 
-4. **generate_plan**: User wants to create a plan (similar to crew - with agents and tasks):
-   - CRITICAL: Any message containing "create a plan", "build a plan", "design a plan", "plan that", "plan to"
-   - Strategic language: "strategy", "roadmap", "blueprint", "framework", "architecture"
-   - Complex multi-step operations: "get all", "collect everything", "comprehensive", "complete analysis"
-   - Planning for future actions: "plan for analyzing", "strategy to collect", "approach to gather"
-   - NOTE: Plans are functionally identical to crews - they create multiple agents with tasks
-
-5. **execute_crew**: User wants to execute/run an existing crew:
+4. **execute_crew**: User wants to execute/run an existing crew:
    - Execution commands: "execute crew", "run crew", "start crew", "ec"
    - Action words with crew context: "execute", "run", "start", "launch", "begin"
    - Short commands: "ec" (shorthand for execute crew)
@@ -309,22 +305,15 @@ Analyze the user's message and determine their intent from these categories:
    - Preference adjustments: "choose different model", "adjust settings", "pick tools"
    - Direct mentions: "llm", "maxr", "max rpm", "tools", "config", "settings"
 
-7. **conversation**: User is asking questions, seeking information, or having general conversation:
-   - Questions about the system: "how does this work?", "what can you do?"
-   - Greetings: "hello", "hi", "good morning"
-   - General questions: "what is...", "explain...", "why..."
-   - Status inquiries: "what's the status of...", "show me..."
-
-8. **unknown**: Unclear or ambiguous messages that don't fit the above categories.
+7. **unknown**: Unclear or ambiguous messages that don't fit the above categories.
 
 **CRITICAL RULES**:
-1. If the message contains "create a plan", "plan that", "plan to", or "build a plan", it is ALWAYS generate_plan, NOT generate_task
-2. If the message describes getting "all" of something or multiple complex steps, prefer generate_plan over generate_task
-3. Plans and crews are functionally equivalent - both create agent/task workflows
+1. Many task requests are phrased conversationally. Look for ACTION WORDS and GOALS rather than formal task language.
+2. If the message describes multiple agents or complex workflows, it's generate_crew.
 
 Return a JSON object with:
 {
-    "intent": "generate_task" | "generate_agent" | "generate_crew" | "generate_plan" | "execute_crew" | "configure_crew" | "conversation" | "unknown",
+    "intent": "generate_task" | "generate_agent" | "generate_crew" | "execute_crew" | "configure_crew" | "unknown",
     "confidence": 0.0-1.0,
     "extracted_info": {
         "action_words": ["list", "of", "detected", "action", "words"],
@@ -344,10 +333,10 @@ Examples:
 - "analyze this sales data and create a report" -> generate_task
 - "Build a team of agents to handle customer support" -> generate_crew
 - "Create a research agent and a writer agent with tasks for each" -> generate_crew
-- "Create a plan that will get all the news from switzerland" -> generate_plan
-- "Plan to collect and analyze customer feedback" -> generate_plan
-- "Build a plan for market analysis" -> generate_plan
-- "Create a plan with multiple agents" -> generate_plan
+- "Create a plan that will get all the news from switzerland" -> generate_crew
+- "Plan to collect and analyze customer feedback" -> generate_crew
+- "Build a plan for market analysis" -> generate_crew
+- "Create a plan with multiple agents" -> generate_crew
 - "execute crew" -> execute_crew
 - "run crew" -> execute_crew
 - "ec" -> execute_crew
@@ -357,9 +346,7 @@ Examples:
 - "select tools" -> configure_crew
 - "update max rpm" -> configure_crew
 - "adjust settings" -> configure_crew
-- "How does intent detection work?" -> conversation
-- "Hello, what can you help me with?" -> conversation
-- "Show me my recent tasks" -> conversation"""
+"""
 
 # Define template data
 DEFAULT_TEMPLATES = [

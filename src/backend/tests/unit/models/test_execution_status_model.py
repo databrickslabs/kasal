@@ -17,6 +17,8 @@ class TestExecutionStatus:
         assert ExecutionStatus.PENDING == "PENDING"
         assert ExecutionStatus.PREPARING == "PREPARING"
         assert ExecutionStatus.RUNNING == "RUNNING"
+        assert ExecutionStatus.STOPPING == "STOPPING"
+        assert ExecutionStatus.STOPPED == "STOPPED"
         assert ExecutionStatus.COMPLETED == "COMPLETED"
         assert ExecutionStatus.FAILED == "FAILED"
         assert ExecutionStatus.CANCELLED == "CANCELLED"
@@ -27,17 +29,19 @@ class TestExecutionStatus:
         assert isinstance(ExecutionStatus.PENDING, str)
         assert isinstance(ExecutionStatus.PREPARING, str)
         assert isinstance(ExecutionStatus.RUNNING, str)
+        assert isinstance(ExecutionStatus.STOPPING, str)
+        assert isinstance(ExecutionStatus.STOPPED, str)
         assert isinstance(ExecutionStatus.COMPLETED, str)
         assert isinstance(ExecutionStatus.FAILED, str)
         assert isinstance(ExecutionStatus.CANCELLED, str)
 
     def test_execution_status_enum_count(self):
-        """Test that ExecutionStatus has exactly 6 values."""
+        """Test that ExecutionStatus has exactly 8 values."""
         # Act
         status_values = list(ExecutionStatus)
         
         # Assert
-        assert len(status_values) == 6
+        assert len(status_values) == 8
 
     def test_execution_status_enum_membership(self):
         """Test ExecutionStatus enum membership."""
@@ -45,6 +49,8 @@ class TestExecutionStatus:
         assert "PENDING" in ExecutionStatus.__members__
         assert "PREPARING" in ExecutionStatus.__members__
         assert "RUNNING" in ExecutionStatus.__members__
+        assert "STOPPING" in ExecutionStatus.__members__
+        assert "STOPPED" in ExecutionStatus.__members__
         assert "COMPLETED" in ExecutionStatus.__members__
         assert "FAILED" in ExecutionStatus.__members__
         assert "CANCELLED" in ExecutionStatus.__members__
@@ -55,6 +61,8 @@ class TestExecutionStatus:
         assert ExecutionStatus.PENDING.value == "PENDING"
         assert ExecutionStatus.PREPARING.value == "PREPARING"
         assert ExecutionStatus.RUNNING.value == "RUNNING"
+        assert ExecutionStatus.STOPPING.value == "STOPPING"
+        assert ExecutionStatus.STOPPED.value == "STOPPED"
         assert ExecutionStatus.COMPLETED.value == "COMPLETED"
         assert ExecutionStatus.FAILED.value == "FAILED"
         assert ExecutionStatus.CANCELLED.value == "CANCELLED"
@@ -65,6 +73,8 @@ class TestExecutionStatus:
         assert ExecutionStatus.PENDING == "PENDING"
         assert ExecutionStatus.PREPARING == "PREPARING"
         assert ExecutionStatus.RUNNING == "RUNNING"
+        assert ExecutionStatus.STOPPING == "STOPPING"
+        assert ExecutionStatus.STOPPED == "STOPPED"
         assert ExecutionStatus.COMPLETED == "COMPLETED"
         assert ExecutionStatus.FAILED == "FAILED"
         assert ExecutionStatus.CANCELLED == "CANCELLED"
@@ -75,7 +85,7 @@ class TestExecutionStatus:
         status_values = [status.value for status in ExecutionStatus]
         
         # Assert
-        expected_values = ["PENDING", "PREPARING", "RUNNING", "COMPLETED", "FAILED", "CANCELLED"]
+        expected_values = ["PENDING", "PREPARING", "RUNNING", "STOPPING", "STOPPED", "COMPLETED", "FAILED", "CANCELLED"]
         assert status_values == expected_values
 
     def test_execution_status_workflow_order(self):
@@ -87,8 +97,10 @@ class TestExecutionStatus:
         assert status_list[0] == ExecutionStatus.PENDING
         assert status_list[1] == ExecutionStatus.PREPARING
         assert status_list[2] == ExecutionStatus.RUNNING
+        assert status_list[3] == ExecutionStatus.STOPPING
+        assert status_list[4] == ExecutionStatus.STOPPED
         # Final states can be in any order but should include:
-        final_states = status_list[3:]
+        final_states = status_list[5:]
         assert ExecutionStatus.COMPLETED in final_states
         assert ExecutionStatus.FAILED in final_states
         assert ExecutionStatus.CANCELLED in final_states
@@ -122,11 +134,11 @@ class TestExecutionStatus:
     def test_execution_status_final_states(self):
         """Test identification of final execution states."""
         # Arrange
-        final_states = [ExecutionStatus.COMPLETED, ExecutionStatus.FAILED, ExecutionStatus.CANCELLED]
+        final_states = [ExecutionStatus.STOPPED, ExecutionStatus.COMPLETED, ExecutionStatus.FAILED, ExecutionStatus.CANCELLED]
         
         # Act & Assert
         for status in final_states:
-            assert status in [ExecutionStatus.COMPLETED, ExecutionStatus.FAILED, ExecutionStatus.CANCELLED]
+            assert status in [ExecutionStatus.STOPPED, ExecutionStatus.COMPLETED, ExecutionStatus.FAILED, ExecutionStatus.CANCELLED]
 
     def test_execution_status_success_states(self):
         """Test identification of successful execution states."""
@@ -137,11 +149,11 @@ class TestExecutionStatus:
     def test_execution_status_error_states(self):
         """Test identification of error execution states."""
         # Arrange
-        error_states = [ExecutionStatus.FAILED, ExecutionStatus.CANCELLED]
+        error_states = [ExecutionStatus.FAILED, ExecutionStatus.CANCELLED, ExecutionStatus.STOPPED]
         
         # Act & Assert
         for status in error_states:
-            assert status in [ExecutionStatus.FAILED, ExecutionStatus.CANCELLED]
+            assert status in [ExecutionStatus.FAILED, ExecutionStatus.CANCELLED, ExecutionStatus.STOPPED]
 
     def test_execution_status_docstring(self):
         """Test that ExecutionStatus has proper documentation."""
@@ -207,7 +219,7 @@ class TestExecutionStatusUseCases:
         active_statuses = [s for s in all_statuses if active_filter(s)]
         
         # Test filtering completed executions
-        completed_filter = lambda s: s in [ExecutionStatus.COMPLETED, ExecutionStatus.FAILED, ExecutionStatus.CANCELLED]
+        completed_filter = lambda s: s in [ExecutionStatus.STOPPED, ExecutionStatus.COMPLETED, ExecutionStatus.FAILED, ExecutionStatus.CANCELLED]
         completed_statuses = [s for s in all_statuses if completed_filter(s)]
         
         # Assert
@@ -215,7 +227,8 @@ class TestExecutionStatusUseCases:
         assert ExecutionStatus.PREPARING in active_statuses
         assert ExecutionStatus.RUNNING in active_statuses
         
-        assert len(completed_statuses) == 3
+        assert len(completed_statuses) == 4
+        assert ExecutionStatus.STOPPED in completed_statuses
         assert ExecutionStatus.COMPLETED in completed_statuses
         assert ExecutionStatus.FAILED in completed_statuses
         assert ExecutionStatus.CANCELLED in completed_statuses
@@ -230,6 +243,8 @@ class TestExecutionStatusUseCases:
             "PENDING": "PENDING",
             "PREPARING": "PREPARING", 
             "RUNNING": "RUNNING",
+            "STOPPING": "STOPPING",
+            "STOPPED": "STOPPED",
             "COMPLETED": "COMPLETED",
             "FAILED": "FAILED",
             "CANCELLED": "CANCELLED"
