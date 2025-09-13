@@ -1282,10 +1282,14 @@ class CrewPreparation:
                 group_id = self.config.get('group_id', 'default')
                 
                 # Check if Databricks knowledge volume is enabled
-                from src.core.unit_of_work import UnitOfWork
-                async with UnitOfWork() as uow:
-                    databricks_repo = DatabricksConfigRepository(uow.session)
-                    databricks_config = await databricks_repo.get_active_config(group_id=group_id)
+                from src.core.unit_of_work import SyncUnitOfWork
+                from src.repositories.databricks_config_repository import DatabricksConfigRepository
+                
+                # Use synchronous UnitOfWork for non-async context
+                sync_uow = SyncUnitOfWork.get_instance()
+                sync_uow.initialize()
+                databricks_repo = sync_uow.databricks_config_repository
+                databricks_config = databricks_repo.get_active_config_sync(group_id=group_id)
                 
                 if databricks_config and databricks_config.knowledge_volume_enabled:
                     logger.info(f"Checking for knowledge sources for execution {execution_id}")

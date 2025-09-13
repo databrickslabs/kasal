@@ -287,6 +287,13 @@ def run_crew_in_process(
                 async_logger.info(f"[JOB_CONFIGURATION] ========== CONFIGURATION FOR {execution_id} ==========")
                 
                 # Use the CrewPreparation class for crew setup
+                # Debug log to check knowledge_sources right before CrewPreparation
+                async_logger.info(f"[DEBUG] Before CrewPreparation creation:")
+                for idx, agent_cfg in enumerate(crew_config.get('agents', [])):
+                    agent_id = agent_cfg.get('id', f'agent_{idx}')
+                    ks = agent_cfg.get('knowledge_sources', [])
+                    async_logger.info(f"[DEBUG] Agent {agent_id} has {len(ks)} knowledge_sources: {ks}")
+                
                 crew_preparation = CrewPreparation(crew_config, tool_service, tool_factory, None)
                 if not await crew_preparation.prepare():
                     raise RuntimeError(f"Failed to prepare crew for {execution_id}")
@@ -307,6 +314,14 @@ def run_crew_in_process(
                         for i, agent in enumerate(agents, 1):
                             async_logger.info(f"[JOB_CONFIGURATION]   Agent {i}: {agent.get('role', 'Unknown Role')}")
                             async_logger.info(f"[JOB_CONFIGURATION]     Goal: {agent.get('goal', 'No goal specified')}")
+                            # Log knowledge_sources if present
+                            if 'knowledge_sources' in agent:
+                                ks = agent['knowledge_sources']
+                                async_logger.info(f"[JOB_CONFIGURATION]     Knowledge Sources: {len(ks)} sources")
+                                for j, source in enumerate(ks):
+                                    async_logger.info(f"[JOB_CONFIGURATION]       Source {j+1}: {source}")
+                            else:
+                                async_logger.info(f"[JOB_CONFIGURATION]     Knowledge Sources: None")
                             if agent.get('llm'):
                                 llm_config = agent['llm']
                                 # Handle both string and dict formats for llm
