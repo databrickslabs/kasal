@@ -7,7 +7,7 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.ext.asyncio import AsyncSession
 from pydantic import BaseModel, ConfigDict
 
-from src.core.dependencies import SessionDep
+from src.core.dependencies import SessionDep, GroupContextDep
 from src.dependencies.admin_auth import AdminUserDep
 from src.services.databricks_role_service import DatabricksRoleService
 from src.repositories.user_repository import UserRepository, RoleRepository, UserRoleRepository
@@ -54,7 +54,8 @@ class UserResponse(BaseModel):
 @router.get("/", response_model=List[UserRoleResponse])
 async def get_user_role_assignments(
     session: SessionDep,
-    admin_user: AdminUserDep
+    admin_user: AdminUserDep,
+    group_context: GroupContextDep
 ) -> List[UserRoleResponse]:
     """
     Get all user-role assignments.
@@ -100,7 +101,8 @@ async def get_user_role_assignments(
 async def assign_role_to_user(
     assignment_data: AssignRoleToUserRequest,
     session: SessionDep,
-    admin_user: AdminUserDep
+    admin_user: AdminUserDep,
+    group_context: GroupContextDep
 ) -> UserRoleResponse:
     """
     Assign a role to a user.
@@ -163,7 +165,8 @@ async def remove_role_from_user(
     user_id: str,
     role_id: str,
     session: SessionDep,
-    admin_user: AdminUserDep
+    admin_user: AdminUserDep,
+    group_context: GroupContextDep
 ):
     """
     Remove a role from a user.
@@ -193,7 +196,8 @@ async def remove_role_from_user(
 async def get_user_roles(
     user_id: str,
     session: SessionDep,
-    admin_user: AdminUserDep
+    admin_user: AdminUserDep,
+    group_context: GroupContextDep
 ) -> List[str]:
     """
     Get all roles assigned to a user.
@@ -219,7 +223,8 @@ async def get_user_roles(
 async def get_user_privileges(
     user_id: str,
     session: SessionDep,
-    admin_user: AdminUserDep
+    admin_user: AdminUserDep,
+    group_context: GroupContextDep
 ) -> List[str]:
     """
     Get all privileges for a user based on their roles.
@@ -244,7 +249,8 @@ async def get_user_privileges(
 @router.get("/users", response_model=List[UserResponse])
 async def get_users_with_role_info(
     session: SessionDep,
-    admin_user: AdminUserDep
+    admin_user: AdminUserDep,
+    group_context: GroupContextDep
 ) -> List[UserResponse]:
     """
     Get all users with their role and privilege information.

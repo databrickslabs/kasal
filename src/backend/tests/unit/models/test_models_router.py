@@ -6,12 +6,13 @@ CRUD operations, bulk enable/disable operations, and dependency functions.
 """
 
 import pytest
-from unittest.mock import AsyncMock, patch, MagicMock
+from unittest.mock import AsyncMock, patch, MagicMock, ANY
 from datetime import datetime
 from fastapi import HTTPException, status
 from fastapi.testclient import TestClient
 
 from src.schemas.model_config import ModelConfigCreate, ModelConfigUpdate, ModelToggleUpdate
+from src.utils.user_context import GroupContext
 
 
 # Mock model config model
@@ -56,10 +57,23 @@ def mock_model_config_service():
 
 
 @pytest.fixture
-def app(mock_model_config_service):
+def mock_group_context():
+    """Create a mock group context."""
+    context = GroupContext(
+        group_ids=["group-123"],
+        group_email="test@example.com",
+        email_domain="example.com",
+        user_id="user-123"
+    )
+    return context
+
+
+@pytest.fixture
+def app(mock_model_config_service, mock_group_context):
     """Create a FastAPI app with mocked dependencies."""
     from fastapi import FastAPI
     from src.api.models_router import router, get_model_config_service
+    from src.core.dependencies import get_group_context
     
     app = FastAPI()
     app.include_router(router)
@@ -68,8 +82,13 @@ def app(mock_model_config_service):
     async def override_get_model_config_service():
         return mock_model_config_service
     
-    # Override dependency
+    # Create override function for group context
+    async def override_get_group_context():
+        return mock_group_context
+    
+    # Override dependencies
     app.dependency_overrides[get_model_config_service] = override_get_model_config_service
+    app.dependency_overrides[get_group_context] = override_get_group_context
     
     return app
 
@@ -187,7 +206,7 @@ class TestGetModels:
             MockModelConfig(id=1, key="gpt-4", name="GPT-4"),
             MockModelConfig(id=2, key="claude-3", name="Claude-3")
         ]
-        mock_model_config_service.find_all.return_value = models
+        mock_model_config_service.find_all_for_group.return_value = models
         
         response = client.get("/models")
         
@@ -200,7 +219,7 @@ class TestGetModels:
     
     def test_get_models_empty(self, client, mock_model_config_service):
         """Test getting models when none exist."""
-        mock_model_config_service.find_all.return_value = []
+        mock_model_config_service.find_all_for_group.return_value = []
         
         response = client.get("/models")
         
@@ -216,7 +235,7 @@ class TestGetModels:
             MockModelConfig(id=2, key="model-2", name="Model 2"),
             MockModelConfig(id=3, key="model-3", name="Model 3")
         ]
-        mock_model_config_service.find_all.return_value = models
+        mock_model_config_service.find_all_for_group.return_value = models
         
         response = client.get("/models")
         
@@ -231,7 +250,7 @@ class TestGetModels:
             MockModelConfig(id=i, key=f"model-{i}", name=f"Model {i}") 
             for i in range(1, 6)
         ]
-        mock_model_config_service.find_all.return_value = models
+        mock_model_config_service.find_all_for_group.return_value = models
         
         response = client.get("/models")
         
@@ -242,7 +261,7 @@ class TestGetModels:
     
     def test_get_models_service_error(self, client, mock_model_config_service):
         """Test getting models with service error."""
-        mock_model_config_service.find_all.side_effect = Exception("Database error")
+        mock_model_config_service.find_all_for_group.side_effect = Exception("Database error")
         
         response = client.get("/models")
         
@@ -258,7 +277,7 @@ class TestGetEnabledModels:
         enabled_models = [
             MockModelConfig(id=1, key="gpt-4", name="GPT-4", enabled=True)
         ]
-        mock_model_config_service.find_enabled_models.return_value = enabled_models
+        mock_model_config_service.find_enabled_models_for_group.return_value = enabled_models
         
         response = client.get("/models/enabled")
         
@@ -270,7 +289,7 @@ class TestGetEnabledModels:
     
     def test_get_enabled_models_none_enabled(self, client, mock_model_config_service):
         """Test getting enabled models when none are enabled."""
-        mock_model_config_service.find_enabled_models.return_value = []
+        mock_model_config_service.find_enabled_models_for_group.return_value = []
         
         response = client.get("/models/enabled")
         
@@ -281,7 +300,7 @@ class TestGetEnabledModels:
     
     def test_get_enabled_models_service_error(self, client, mock_model_config_service):
         """Test getting enabled models with service error."""
-        mock_model_config_service.find_enabled_models.side_effect = Exception("Database error")
+        mock_model_config_service.find_enabled_models_for_group.side_effect = Exception("Database error")
         
         response = client.get("/models/enabled")
         
@@ -422,18 +441,18 @@ class TestToggleModel:
     def test_toggle_model_success(self, client, mock_model_config_service, sample_toggle_update):
         """Test successful model toggle."""
         toggled_model = MockModelConfig(enabled=False)
-        mock_model_config_service.toggle_model_enabled.return_value = toggled_model
+        mock_model_config_service.toggle_model_enabled_with_group.return_value = toggled_model
         
         response = client.patch("/models/gpt-4/toggle", json=sample_toggle_update.model_dump())
         
         assert response.status_code == 200
         data = response.json()
         assert data["enabled"] is False
-        mock_model_config_service.toggle_model_enabled.assert_called_once_with("gpt-4", False)
+        mock_model_config_service.toggle_model_enabled_with_group.assert_called_once_with("gpt-4", False, ANY)
     
     def test_toggle_model_not_found(self, client, mock_model_config_service, sample_toggle_update):
         """Test toggling non-existent model."""
-        mock_model_config_service.toggle_model_enabled.return_value = None
+        mock_model_config_service.toggle_model_enabled_with_group.return_value = None
         
         response = client.patch("/models/nonexistent/toggle", json=sample_toggle_update.model_dump())
         
@@ -442,7 +461,7 @@ class TestToggleModel:
     
     def test_toggle_model_http_exception_reraise(self, client, mock_model_config_service, sample_toggle_update):
         """Test that HTTPExceptions are re-raised in toggle_model endpoint."""
-        mock_model_config_service.toggle_model_enabled.side_effect = HTTPException(
+        mock_model_config_service.toggle_model_enabled_with_group.side_effect = HTTPException(
             status_code=403, detail="Toggle forbidden"
         )
         
@@ -453,7 +472,7 @@ class TestToggleModel:
     
     def test_toggle_model_service_error(self, client, mock_model_config_service, sample_toggle_update):
         """Test toggling model with service error."""
-        mock_model_config_service.toggle_model_enabled.side_effect = Exception("Database error")
+        mock_model_config_service.toggle_model_enabled_with_group.side_effect = Exception("Database error")
         
         response = client.patch("/models/gpt-4/toggle", json=sample_toggle_update.model_dump())
         

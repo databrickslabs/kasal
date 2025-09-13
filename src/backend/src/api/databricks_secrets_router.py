@@ -10,7 +10,7 @@ from fastapi import APIRouter, Depends, HTTPException, Path, status
 import logging
 import os
 
-from src.core.dependencies import SessionDep
+from src.core.dependencies import SessionDep, GroupContextDep
 from src.services.databricks_secrets_service import DatabricksSecretsService
 from src.schemas.databricks_secret import (
     SecretBase,
@@ -54,6 +54,7 @@ async def get_secret_service():
 
 @router.get("", response_model=List[SecretResponse])
 async def get_databricks_secrets(
+    group_context: GroupContextDep,
     service: DatabricksSecretsService = Depends(get_secret_service),
 ):
     """
@@ -91,6 +92,7 @@ async def get_databricks_secrets(
 @router.post("", response_model=SecretResponse, status_code=status.HTTP_201_CREATED)
 async def create_databricks_secret(
     secret_data: SecretCreate,
+    group_context: GroupContextDep,
     service: DatabricksSecretsService = Depends(get_secret_service),
 ):
     """
@@ -146,6 +148,7 @@ async def create_databricks_secret(
 async def update_databricks_secret(
     secret_name: str,
     secret_data: SecretUpdate,
+    group_context: GroupContextDep,
     service: DatabricksSecretsService = Depends(get_secret_service),
 ):
     """
@@ -209,6 +212,7 @@ async def update_databricks_secret(
 @router.delete("/{secret_name}", status_code=status.HTTP_204_NO_CONTENT)
 async def delete_databricks_secret(
     secret_name: str,
+    group_context: GroupContextDep,
     service: DatabricksSecretsService = Depends(get_secret_service),
 ):
     """
@@ -247,6 +251,7 @@ async def delete_databricks_secret(
 
 @router.post("/scopes", status_code=status.HTTP_200_OK)
 async def create_databricks_secret_scope(
+    group_context: GroupContextDep,
     service: DatabricksSecretsService = Depends(get_secret_service),
 ):
     """
@@ -296,6 +301,7 @@ async def create_databricks_secret_scope(
 # Legacy routes for backward compatibility (matching old routing paths)
 @router.get("/secrets", response_model=List[Dict])
 async def get_secrets(
+    group_context: GroupContextDep,
     service: DatabricksSecretsService = Depends(get_secret_service),
 ):
     """Legacy endpoint for getting all secrets from a specific Databricks scope."""
@@ -318,6 +324,7 @@ async def get_secrets(
 async def set_secret(
     key: str,
     secret_data: SecretUpdate,
+    group_context: GroupContextDep,
     service: DatabricksSecretsService = Depends(get_secret_service),
 ):
     """Legacy endpoint for setting a secret value in Databricks."""
@@ -339,6 +346,7 @@ async def set_secret(
 @router.delete("/secrets/{key}", status_code=status.HTTP_204_NO_CONTENT)
 async def delete_secret_endpoint(
     key: str,
+    group_context: GroupContextDep,
     service: DatabricksSecretsService = Depends(get_secret_service),
 ):
     """Legacy endpoint for deleting a secret from Databricks."""
@@ -357,6 +365,7 @@ async def delete_secret_endpoint(
 
 @router.post("/secret-scopes", status_code=status.HTTP_200_OK)
 async def create_secret_scope_endpoint(
+    group_context: GroupContextDep,
     service: DatabricksSecretsService = Depends(get_secret_service),
 ):
     """Legacy endpoint for creating a secret scope if it doesn't exist."""
@@ -385,6 +394,7 @@ async def create_secret_scope_endpoint(
 @router.post("/databricks/token", status_code=status.HTTP_200_OK, response_model=Dict[str, str])
 async def set_databricks_token(
     request: DatabricksTokenRequest,
+    group_context: GroupContextDep,
     service: DatabricksSecretsService = Depends(get_secret_service),
 ):
     """Set Databricks token in the configuration."""
@@ -422,40 +432,44 @@ async def set_databricks_token(
 # of concerns between API keys and Databricks secrets
 @router.get("/api-keys", response_model=List[SecretResponse])
 async def get_legacy_api_keys(
+    group_context: GroupContextDep,
     service: DatabricksSecretsService = Depends(get_secret_service),
     source: Optional[str] = None,
 ):
     """Legacy endpoint for getting all API keys."""
     logger.info("Legacy API keys GET endpoint called - redirecting to Databricks secrets")
-    return await get_databricks_secrets(service=service)
+    return await get_databricks_secrets(group_context=group_context, service=service)
 
 
 @router.post("/api-key", response_model=SecretResponse)
 async def create_legacy_api_key(
     secret_data: SecretCreate,
+    group_context: GroupContextDep,
     service: DatabricksSecretsService = Depends(get_secret_service),
 ):
     """Legacy endpoint for creating a new API key."""
     logger.info(f"Legacy API key CREATE endpoint called for key '{secret_data.name}' - redirecting to Databricks secrets")
-    return await create_databricks_secret(secret_data, service)
+    return await create_databricks_secret(secret_data, group_context, service)
 
 
 @router.put("/api-keys/{secret_name}", response_model=SecretResponse)
 async def update_legacy_api_key(
     secret_name: str,
     secret_data: SecretUpdate,
+    group_context: GroupContextDep,
     service: DatabricksSecretsService = Depends(get_secret_service),
 ):
     """Legacy endpoint for updating an API key."""
     logger.info(f"Legacy API key UPDATE endpoint called for key '{secret_name}' - redirecting to Databricks secrets")
-    return await update_databricks_secret(secret_name, secret_data, service)
+    return await update_databricks_secret(secret_name, secret_data, group_context, service)
 
 
 @router.delete("/api-key/{secret_name}", status_code=status.HTTP_204_NO_CONTENT)
 async def delete_legacy_api_key(
     secret_name: str,
+    group_context: GroupContextDep,
     service: DatabricksSecretsService = Depends(get_secret_service),
 ):
     """Legacy endpoint for deleting an API key."""
     logger.info(f"Legacy API key DELETE endpoint called for key '{secret_name}' - redirecting to Databricks secrets")
-    await delete_databricks_secret(secret_name, service) 
+    await delete_databricks_secret(secret_name, group_context, service) 

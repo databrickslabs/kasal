@@ -3,6 +3,7 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.db.session import get_db
+from src.core.dependencies import GroupContextDep
 from src.dependencies.auth import get_current_user, check_user_role
 from src.services.identity_provider_service import IdentityProviderService
 from src.schemas.user import (
@@ -35,6 +36,7 @@ async def get_identity_providers(
     enabled_only: bool = False,
     session: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
+    group_context: GroupContextDep = None,
 ):
     # Non-admin users can only see enabled providers
     if current_user.role != "admin":
@@ -61,6 +63,7 @@ async def get_identity_providers(
 async def create_identity_provider(
     provider_data: IdentityProviderCreate,
     session: AsyncSession = Depends(get_db),
+    group_context: GroupContextDep = None,
 ):
     service = IdentityProviderService(session)
     try:
@@ -82,6 +85,7 @@ async def get_identity_provider(
     provider_id: str,
     session: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
+    group_context: GroupContextDep = None,
 ):
     service = IdentityProviderService(session)
     provider = await service.get_provider(provider_id)
@@ -116,6 +120,7 @@ async def update_identity_provider(
     provider_id: str,
     provider_data: IdentityProviderUpdate,
     session: AsyncSession = Depends(get_db),
+    group_context: GroupContextDep = None,
 ):
     service = IdentityProviderService(session)
     try:
@@ -142,6 +147,7 @@ async def update_identity_provider(
 async def delete_identity_provider(
     provider_id: str,
     session: AsyncSession = Depends(get_db),
+    group_context: GroupContextDep = None,
 ):
     service = IdentityProviderService(session)
     try:
@@ -170,6 +176,7 @@ async def toggle_identity_provider(
     provider_id: str,
     enabled: bool,
     session: AsyncSession = Depends(get_db),
+    group_context: GroupContextDep = None,
 ):
     service = IdentityProviderService(session)
     updated_provider = await service.toggle_provider_status(provider_id, enabled)
@@ -192,6 +199,7 @@ async def toggle_identity_provider(
 async def get_identity_provider_stats(
     provider_id: str,
     session: AsyncSession = Depends(get_db),
+    group_context: GroupContextDep = None,
 ):
     service = IdentityProviderService(session)
     stats = await service.get_provider_usage_stats(provider_id)

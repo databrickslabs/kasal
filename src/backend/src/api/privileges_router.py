@@ -7,7 +7,7 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.ext.asyncio import AsyncSession
 from pydantic import BaseModel, ConfigDict
 
-from src.core.dependencies import SessionDep
+from src.core.dependencies import SessionDep, GroupContextDep
 from src.dependencies.admin_auth import AdminUserDep
 from src.repositories.user_repository import PrivilegeRepository
 from src.models.user import Privilege
@@ -34,7 +34,8 @@ class PrivilegeResponse(BaseModel):
 @router.get("/", response_model=List[PrivilegeResponse])
 async def get_privileges(
     session: SessionDep,
-    admin_user: AdminUserDep
+    admin_user: AdminUserDep,
+    group_context: GroupContextDep
 ) -> List[PrivilegeResponse]:
     """
     Get all privileges.
@@ -68,7 +69,8 @@ async def get_privileges(
 async def get_privilege(
     privilege_id: str,
     session: SessionDep,
-    admin_user: AdminUserDep
+    admin_user: AdminUserDep,
+    group_context: GroupContextDep
 ) -> PrivilegeResponse:
     """
     Get a specific privilege by ID.

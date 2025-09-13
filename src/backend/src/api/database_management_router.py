@@ -8,7 +8,7 @@ import os
 from src.services.database_management_service import DatabaseManagementService
 from src.services.databricks_role_service import DatabricksRoleService
 from src.core.logger import LoggerManager
-from src.core.dependencies import SessionDep, get_group_context
+from src.core.dependencies import SessionDep, get_group_context, GroupContextDep
 from src.core.unit_of_work import UnitOfWork
 from src.utils.user_context import GroupContext
 from src.schemas.database_management import (
@@ -30,7 +30,8 @@ logger = LoggerManager.get_instance().api
 @router.post("/export", response_model=ExportResponse)
 async def export_database(
     request: ExportRequest,
-    raw_request: Request
+    raw_request: Request,
+    group_context: GroupContextDep
 ) -> ExportResponse:
     """
     Export database to a Databricks volume.
@@ -74,7 +75,8 @@ async def export_database(
 @router.post("/import", response_model=ImportResponse)
 async def import_database(
     request: ImportRequest,
-    raw_request: Request
+    raw_request: Request,
+    group_context: GroupContextDep
 ) -> ImportResponse:
     """
     Import database from a Databricks volume.
@@ -114,7 +116,8 @@ async def import_database(
 @router.post("/list-backups", response_model=ListBackupsResponse)
 async def list_backups(
     request: ListBackupsRequest,
-    raw_request: Request
+    raw_request: Request,
+    group_context: GroupContextDep
 ) -> ListBackupsResponse:
     """
     List all database backups in a Databricks volume.
@@ -151,7 +154,9 @@ async def list_backups(
 
 
 @router.get("/info", response_model=DatabaseInfoResponse)
-async def get_database_info() -> DatabaseInfoResponse:
+async def get_database_info(
+    group_context: GroupContextDep
+) -> DatabaseInfoResponse:
     """
     Get information about the current database.
     
@@ -177,7 +182,7 @@ async def get_database_info() -> DatabaseInfoResponse:
 @router.get("/debug-permissions")
 async def debug_permissions(
     session: SessionDep,
-    group_context: GroupContext = Depends(get_group_context)
+    group_context: GroupContextDep
 ) -> Dict[str, Any]:
     """Debug endpoint to check permission details."""
     try:
@@ -302,7 +307,7 @@ async def debug_permissions(
 @router.get("/debug-headers")
 async def debug_headers(
     request: Request,
-    group_context: GroupContext = Depends(get_group_context)
+    group_context: GroupContextDep
 ) -> Dict[str, Any]:
     """Debug endpoint to check what headers are being received."""
     headers_dict = dict(request.headers)
@@ -336,7 +341,7 @@ async def debug_headers(
 @router.get("/check-permission")
 async def check_database_management_permission(
     session: SessionDep,
-    group_context: GroupContext = Depends(get_group_context)
+    group_context: GroupContextDep
 ) -> Dict[str, Any]:
     """
     Check if the current user has permission to access Database Management.

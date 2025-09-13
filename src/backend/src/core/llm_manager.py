@@ -457,7 +457,7 @@ class LLMManager:
         return model_params
 
     @staticmethod
-    async def configure_crewai_llm(model_name: str) -> LLM:
+    async def configure_crewai_llm(model_name: str, temperature: Optional[float] = None) -> LLM:
         """
         Create and configure a CrewAI LLM instance with the correct provider prefix.
         
@@ -562,6 +562,11 @@ class LLMManager:
                 "timeout": 120,  # Longer timeout to prevent premature failures
             }
             
+            # Add temperature if specified
+            if temperature is not None:
+                llm_params["temperature"] = temperature
+                logger.info(f"Setting temperature to {temperature} for model {prefixed_model}")
+            
             # Add API key and base URL if available
             if api_key:
                 llm_params["api_key"] = api_key
@@ -613,6 +618,11 @@ class LLMManager:
             "timeout": timeout_value,  # Longer timeout for GPT-5 (300s), standard for others (120s)
         }
         
+        # Add temperature if specified
+        if temperature is not None:
+            llm_params["temperature"] = temperature
+            logger.info(f"Setting temperature to {temperature} for model {prefixed_model}")
+        
         # GPT-5 doesn't support certain parameters - enable drop_params
         if provider == ModelProvider.OPENAI and "gpt-5" in model_name_value.lower():
             # CrewAI's LLM will pass this to litellm
@@ -642,18 +652,19 @@ class LLMManager:
         return LLM(**llm_params)
 
     @staticmethod
-    async def get_llm(model_name: str) -> LLM:
+    async def get_llm(model_name: str, temperature: Optional[float] = None) -> LLM:
         """
         Create a CrewAI LLM instance for the specified model.
         
         Args:
             model_name: The model identifier to configure
+            temperature: Optional temperature override (0.0-1.0)
             
         Returns:
             LLM: CrewAI LLM instance
         """
         # Get standard LLM configuration
-        llm = await LLMManager.configure_crewai_llm(model_name)
+        llm = await LLMManager.configure_crewai_llm(model_name, temperature)
         return llm
 
     @staticmethod

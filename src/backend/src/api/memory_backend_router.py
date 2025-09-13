@@ -45,6 +45,7 @@ def get_memory_backend_service(uow: UnitOfWork = Depends(get_uow)) -> MemoryBack
 @router.get("/databricks/workspace-url")
 async def get_workspace_url(
     service: Annotated[MemoryBackendService, Depends(get_memory_backend_service)],
+    group_context: GroupContextDep,
 ) -> Dict[str, Any]:
     """
     Get the Databricks workspace URL from environment or configuration.

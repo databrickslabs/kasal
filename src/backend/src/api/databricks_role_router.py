@@ -5,7 +5,7 @@ from typing import Dict, Any
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from src.core.dependencies import SessionDep
+from src.core.dependencies import SessionDep, GroupContextDep
 from src.dependencies.admin_auth import AdminUserDep
 from src.services.databricks_role_service import DatabricksRoleService
 from src.core.logger import LoggerManager
@@ -22,7 +22,8 @@ router = APIRouter(
 @router.post("/sync", response_model=Dict[str, Any])
 async def sync_databricks_admin_roles(
     session: SessionDep,
-    admin_user: AdminUserDep
+    admin_user: AdminUserDep,
+    group_context: GroupContextDep
 ) -> Dict[str, Any]:
     """
     Manually trigger synchronization of admin roles based on Databricks app permissions.
@@ -64,7 +65,8 @@ async def sync_databricks_admin_roles(
 @router.get("/admin-emails", response_model=Dict[str, Any])
 async def get_databricks_admin_emails(
     session: SessionDep,
-    admin_user: AdminUserDep
+    admin_user: AdminUserDep,
+    group_context: GroupContextDep
 ) -> Dict[str, Any]:
     """
     Get the list of admin emails from Databricks app permissions or fallback.
@@ -108,7 +110,8 @@ async def get_databricks_admin_emails(
 async def check_user_admin_status(
     email: str,
     session: SessionDep,
-    admin_user: AdminUserDep
+    admin_user: AdminUserDep,
+    group_context: GroupContextDep
 ) -> Dict[str, Any]:
     """
     Check if a specific user email has admin access.

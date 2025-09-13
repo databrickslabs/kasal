@@ -301,13 +301,27 @@ class TestListSchedules:
         assert data[1]["id"] == 2
 
 
+
+class MockSchedule:
+    """Mock schedule for testing."""
+    def __init__(self):
+        self.id = 1
+        self.job_id = "job-123"
+        self.enabled = True
+        self.cron_expression = "0 * * * *"
+        self.agents_yaml = {}
+        self.tasks_yaml = {}
+        self.inputs = {}
+        self.model = "gpt-4"
+
+
 class TestGetSchedule:
     """Test cases for get schedule endpoint."""
     
     def test_get_schedule_success(self, client, mock_scheduler_service):
         """Test successful schedule retrieval."""
         schedule = MockScheduleResponse()
-        mock_scheduler_service.get_schedule_by_id.return_value = schedule
+        mock_scheduler_service.get_schedule_by_id_with_group_check.return_value = schedule
         
         response = client.get("/schedules/1")
         
@@ -315,11 +329,11 @@ class TestGetSchedule:
         data = response.json()
         assert data["id"] == 1
         assert data["name"] == "Test Schedule"
-        mock_scheduler_service.get_schedule_by_id.assert_called_once_with(1)
+        mock_scheduler_service.get_schedule_by_id_with_group_check.assert_called_once()
     
     def test_get_schedule_http_exception(self, client, mock_scheduler_service):
         """Test getting schedule with HTTP exception."""
-        mock_scheduler_service.get_schedule_by_id.side_effect = HTTPException(status_code=404, detail="Schedule not found")
+        mock_scheduler_service.get_schedule_by_id_with_group_check.side_effect = HTTPException(status_code=404, detail="Schedule not found")
         
         response = client.get("/schedules/999")
         
@@ -333,18 +347,18 @@ class TestUpdateSchedule:
     def test_update_schedule_success(self, client, mock_scheduler_service, sample_schedule_update):
         """Test successful schedule update."""
         updated_schedule = MockScheduleResponse(name="Updated Schedule")
-        mock_scheduler_service.update_schedule.return_value = updated_schedule
+        mock_scheduler_service.update_schedule_with_group_check.return_value = updated_schedule
         
         response = client.put("/schedules/1", json=sample_schedule_update.model_dump())
         
         assert response.status_code == 200
         data = response.json()
         assert data["name"] == "Updated Schedule"
-        mock_scheduler_service.update_schedule.assert_called_once_with(1, sample_schedule_update)
+        mock_scheduler_service.update_schedule_with_group_check.assert_called_once()
     
     def test_update_schedule_http_exception(self, client, mock_scheduler_service, sample_schedule_update):
         """Test updating schedule with HTTP exception."""
-        mock_scheduler_service.update_schedule.side_effect = HTTPException(status_code=404, detail="Schedule not found")
+        mock_scheduler_service.update_schedule_with_group_check.side_effect = HTTPException(status_code=404, detail="Schedule not found")
         
         response = client.put("/schedules/999", json=sample_schedule_update.model_dump())
         
@@ -357,18 +371,18 @@ class TestDeleteSchedule:
     
     def test_delete_schedule_success(self, client, mock_scheduler_service):
         """Test successful schedule deletion."""
-        mock_scheduler_service.delete_schedule.return_value = {"message": "Schedule deleted successfully"}
+        mock_scheduler_service.delete_schedule_with_group_check.return_value = {"message": "Schedule deleted successfully"}
         
         response = client.delete("/schedules/1")
         
         assert response.status_code == 200
         data = response.json()
         assert "deleted successfully" in data["message"]
-        mock_scheduler_service.delete_schedule.assert_called_once_with(1)
+        mock_scheduler_service.delete_schedule_with_group_check.assert_called_once()
     
     def test_delete_schedule_http_exception(self, client, mock_scheduler_service):
         """Test deleting schedule with HTTP exception."""
-        mock_scheduler_service.delete_schedule.side_effect = HTTPException(status_code=404, detail="Schedule not found")
+        mock_scheduler_service.delete_schedule_with_group_check.side_effect = HTTPException(status_code=404, detail="Schedule not found")
         
         response = client.delete("/schedules/999")
         
@@ -382,18 +396,18 @@ class TestToggleSchedule:
     def test_toggle_schedule_success(self, client, mock_scheduler_service):
         """Test successful schedule toggle."""
         toggled_schedule = MockScheduleResponse(is_active=False)
-        mock_scheduler_service.toggle_schedule.return_value = toggled_schedule
+        mock_scheduler_service.toggle_schedule_with_group_check.return_value = toggled_schedule
         
         response = client.post("/schedules/1/toggle")
         
         assert response.status_code == 200
         data = response.json()
         assert data["is_active"] is False
-        mock_scheduler_service.toggle_schedule.assert_called_once_with(1)
+        mock_scheduler_service.toggle_schedule_with_group_check.assert_called_once()
     
     def test_toggle_schedule_http_exception(self, client, mock_scheduler_service):
         """Test toggling schedule with HTTP exception."""
-        mock_scheduler_service.toggle_schedule.side_effect = HTTPException(status_code=404, detail="Schedule not found")
+        mock_scheduler_service.toggle_schedule_with_group_check.side_effect = HTTPException(status_code=404, detail="Schedule not found")
         
         response = client.post("/schedules/999/toggle")
         
@@ -420,7 +434,7 @@ class TestGetAllJobs:
         assert error_detail["loc"] == ["path", "schedule_id"]
         assert error_detail["input"] == "jobs"
     
-    def test_get_all_jobs_function_direct(self):
+    def test_get_all_jobs_function_direct(self, mock_group_context):
         """Test get_all_jobs function directly for success path."""
         from src.api.scheduler_router import get_all_jobs
         from unittest.mock import AsyncMock
@@ -428,18 +442,18 @@ class TestGetAllJobs:
         
         mock_service = AsyncMock()
         jobs = [MockSchedulerJobResponse(id=1), MockSchedulerJobResponse(id=2)]
-        mock_service.get_all_jobs.return_value = jobs
+        mock_service.get_all_jobs_for_group.return_value = jobs
         
         async def test_success():
-            result = await get_all_jobs(mock_service)
+            result = await get_all_jobs(mock_service, group_context=mock_group_context)
             assert len(result) == 2
             assert result[0].id == 1
             assert result[1].id == 2
-            mock_service.get_all_jobs.assert_called_once()
+            mock_service.get_all_jobs_for_group.assert_called_once()
         
         asyncio.run(test_success())
     
-    def test_get_all_jobs_exception_handling_lines_218_222(self):
+    def test_get_all_jobs_exception_handling_lines_218_222(self, mock_group_context):
         """Test the exception handling in get_all_jobs endpoint (lines 218-222).
         
         This tests the specific exception handling code path in the function.
@@ -452,16 +466,16 @@ class TestGetAllJobs:
         
         # Create a mock service that raises an exception
         mock_service = AsyncMock()
-        mock_service.get_all_jobs.side_effect = Exception("Database error")
+        mock_service.get_all_jobs_for_group.side_effect = Exception("Database error")
         
         # Test the function directly
         async def test_exception_path():
             with pytest.raises(HTTPException) as exc_info:
-                await get_all_jobs(mock_service)
+                await get_all_jobs(mock_service, group_context=mock_group_context)
             # The function should re-raise as HTTPException with status 500
             assert exc_info.value.status_code == 500
             assert "Database error" in str(exc_info.value.detail)
-            mock_service.get_all_jobs.assert_called_once()
+            mock_service.get_all_jobs_for_group.assert_called_once()
             
         asyncio.run(test_exception_path())
 
@@ -476,7 +490,7 @@ class TestCreateJob:
         with /{schedule_id} route (different HTTP method).
         """
         created_job = MockSchedulerJobResponse()
-        mock_scheduler_service.create_job.return_value = created_job
+        mock_scheduler_service.create_job_with_group.return_value = created_job
         
         response = client.post("/schedules/jobs", json=sample_job_create.model_dump())
         
@@ -484,18 +498,18 @@ class TestCreateJob:
         data = response.json()
         assert data["id"] == 1
         assert data["name"] == "Test Job"
-        mock_scheduler_service.create_job.assert_called_once_with(sample_job_create)
+        mock_scheduler_service.create_job_with_group.assert_called_once()
     
     def test_create_job_endpoint_exception(self, client, mock_scheduler_service, sample_job_create):
         """Test job creation endpoint with exception."""
-        mock_scheduler_service.create_job.side_effect = Exception("Database error")
+        mock_scheduler_service.create_job_with_group.side_effect = Exception("Database error")
         
         response = client.post("/schedules/jobs", json=sample_job_create.model_dump())
         
         assert response.status_code == 500
         assert "Database error" in response.json()["detail"]
     
-    def test_create_job_function_direct(self, sample_job_create):
+    def test_create_job_function_direct(self, sample_job_create, mock_group_context):
         """Test job creation function directly to achieve coverage."""
         from src.api.scheduler_router import create_job
         from unittest.mock import AsyncMock
@@ -503,16 +517,16 @@ class TestCreateJob:
         
         mock_service = AsyncMock()
         created_job = MockSchedulerJobResponse()
-        mock_service.create_job.return_value = created_job
+        mock_service.create_job_with_group.return_value = created_job
         
         async def test_success():
-            result = await create_job(sample_job_create, mock_service)
+            result = await create_job(sample_job_create, mock_service, group_context=mock_group_context)
             assert result.id == 1
-            mock_service.create_job.assert_called_once_with(sample_job_create)
+            mock_service.create_job_with_group.assert_called_once()
         
         asyncio.run(test_success())
     
-    def test_create_job_function_exception(self, sample_job_create):
+    def test_create_job_function_exception(self, sample_job_create, mock_group_context):
         """Test job creation function exception handling."""
         from src.api.scheduler_router import create_job
         from unittest.mock import AsyncMock
@@ -521,11 +535,11 @@ class TestCreateJob:
         import pytest
         
         mock_service = AsyncMock()
-        mock_service.create_job.side_effect = Exception("Database error")
+        mock_service.create_job_with_group.side_effect = Exception("Database error")
         
         async def test_exception():
             with pytest.raises(HTTPException) as exc_info:
-                await create_job(sample_job_create, mock_service)
+                await create_job(sample_job_create, mock_service, group_context=mock_group_context)
             assert exc_info.value.status_code == 500
             assert "Database error" in str(exc_info.value.detail)
         
@@ -542,25 +556,25 @@ class TestUpdateJob:
         """
         # Set up the mock to return a proper job object, not an AsyncMock
         updated_job = MockSchedulerJobResponse(name="Updated Job")
-        mock_scheduler_service.update_job.return_value = updated_job
+        mock_scheduler_service.update_job_with_group_check.return_value = updated_job
         
         response = client.put("/schedules/jobs/1", json=sample_job_update.model_dump())
         
         assert response.status_code == 200
         data = response.json()
         assert data["name"] == "Updated Job"
-        mock_scheduler_service.update_job.assert_called_once_with(1, sample_job_update)
+        mock_scheduler_service.update_job_with_group_check.assert_called_once()
     
     def test_update_job_endpoint_exception(self, client, mock_scheduler_service, sample_job_update):
         """Test job update endpoint with exception."""
-        mock_scheduler_service.update_job.side_effect = Exception("Database error")
+        mock_scheduler_service.update_job_with_group_check.side_effect = Exception("Database error")
         
         response = client.put("/schedules/jobs/1", json=sample_job_update.model_dump())
         
         assert response.status_code == 500
         assert "Database error" in response.json()["detail"]
     
-    def test_update_job_function_direct(self, sample_job_update):
+    def test_update_job_function_direct(self, sample_job_update, mock_group_context):
         """Test job update function directly to achieve coverage."""
         from src.api.scheduler_router import update_job
         from unittest.mock import AsyncMock
@@ -568,16 +582,16 @@ class TestUpdateJob:
         
         mock_service = AsyncMock()
         updated_job = MockSchedulerJobResponse(name="Updated Job")
-        mock_service.update_job.return_value = updated_job
+        mock_service.update_job_with_group_check.return_value = updated_job
         
         async def test_success():
-            result = await update_job(1, sample_job_update, mock_service)
+            result = await update_job(1, sample_job_update, mock_service, group_context=mock_group_context)
             assert result.name == "Updated Job"
-            mock_service.update_job.assert_called_once_with(1, sample_job_update)
+            mock_service.update_job_with_group_check.assert_called_once()
         
         asyncio.run(test_success())
     
-    def test_update_job_function_exception(self, sample_job_update):
+    def test_update_job_function_exception(self, sample_job_update, mock_group_context):
         """Test job update function exception handling."""
         from src.api.scheduler_router import update_job
         from unittest.mock import AsyncMock
@@ -586,11 +600,11 @@ class TestUpdateJob:
         import pytest
         
         mock_service = AsyncMock()
-        mock_service.update_job.side_effect = Exception("Database error")
+        mock_service.update_job_with_group_check.side_effect = Exception("Database error")
         
         async def test_exception():
             with pytest.raises(HTTPException) as exc_info:
-                await update_job(1, sample_job_update, mock_service)
+                await update_job(1, sample_job_update, mock_service, group_context=mock_group_context)
             assert exc_info.value.status_code == 500
             assert "Database error" in str(exc_info.value.detail)
         
@@ -649,7 +663,7 @@ class TestLoggingCoverage:
     def test_toggle_schedule_logging(self, client, mock_scheduler_service, mock_logger):
         """Test logging in toggle_schedule endpoint."""
         toggled_schedule = MockScheduleResponse(is_active=False)
-        mock_scheduler_service.toggle_schedule.return_value = toggled_schedule
+        mock_scheduler_service.toggle_schedule_with_group_check.return_value = toggled_schedule
         
         response = client.post("/schedules/1/toggle")
         
@@ -658,7 +672,7 @@ class TestLoggingCoverage:
         mock_logger.info.assert_any_call("Toggling schedule with ID 1")
         mock_logger.info.assert_any_call("Toggled schedule with ID 1, now disabled")
     
-    def test_get_all_jobs_error_logging(self, mock_logger):
+    def test_get_all_jobs_error_logging(self, mock_logger, mock_group_context):
         """Test error logging in get_all_jobs function."""
         from src.api.scheduler_router import get_all_jobs
         from unittest.mock import AsyncMock
@@ -667,16 +681,16 @@ class TestLoggingCoverage:
         import pytest
         
         mock_service = AsyncMock()
-        mock_service.get_all_jobs.side_effect = Exception("Database error")
+        mock_service.get_all_jobs_for_group.side_effect = Exception("Database error")
         
         async def test_error_logging():
             with pytest.raises(HTTPException):
-                await get_all_jobs(mock_service)
+                await get_all_jobs(mock_service, group_context=mock_group_context)
             mock_logger.error.assert_called_once_with("Error getting jobs: Database error")
         
         asyncio.run(test_error_logging())
     
-    def test_create_job_error_logging(self, sample_job_create, mock_logger):
+    def test_create_job_error_logging(self, sample_job_create, mock_logger, mock_group_context):
         """Test error logging in create_job function."""
         from src.api.scheduler_router import create_job
         from unittest.mock import AsyncMock
@@ -685,16 +699,16 @@ class TestLoggingCoverage:
         import pytest
         
         mock_service = AsyncMock()
-        mock_service.create_job.side_effect = Exception("Database error")
+        mock_service.create_job_with_group.side_effect = Exception("Database error")
         
         async def test_error_logging():
             with pytest.raises(HTTPException):
-                await create_job(sample_job_create, mock_service)
+                await create_job(sample_job_create, mock_service, group_context=mock_group_context)
             mock_logger.error.assert_called_once_with("Error creating job: Database error")
         
         asyncio.run(test_error_logging())
     
-    def test_update_job_error_logging(self, sample_job_update, mock_logger):
+    def test_update_job_error_logging(self, sample_job_update, mock_logger, mock_group_context):
         """Test error logging in update_job function."""
         from src.api.scheduler_router import update_job
         from unittest.mock import AsyncMock
@@ -703,11 +717,11 @@ class TestLoggingCoverage:
         import pytest
         
         mock_service = AsyncMock()
-        mock_service.update_job.side_effect = Exception("Database error")
+        mock_service.update_job_with_group_check.side_effect = Exception("Database error")
         
         async def test_error_logging():
             with pytest.raises(HTTPException):
-                await update_job(1, sample_job_update, mock_service)
+                await update_job(1, sample_job_update, mock_service, group_context=mock_group_context)
             mock_logger.error.assert_called_once_with("Error updating job: Database error")
         
         asyncio.run(test_error_logging())
@@ -715,7 +729,7 @@ class TestLoggingCoverage:
     def test_get_schedule_logging(self, client, mock_scheduler_service, mock_logger):
         """Test logging in get_schedule endpoint."""
         schedule = MockScheduleResponse()
-        mock_scheduler_service.get_schedule_by_id.return_value = schedule
+        mock_scheduler_service.get_schedule_by_id_with_group_check.return_value = schedule
         
         response = client.get("/schedules/1")
         
@@ -727,7 +741,7 @@ class TestLoggingCoverage:
     def test_update_schedule_logging(self, client, mock_scheduler_service, sample_schedule_update, mock_logger):
         """Test logging in update_schedule endpoint."""
         updated_schedule = MockScheduleResponse(name="Updated Schedule")
-        mock_scheduler_service.update_schedule.return_value = updated_schedule
+        mock_scheduler_service.update_schedule_with_group_check.return_value = updated_schedule
         
         response = client.put("/schedules/1", json=sample_schedule_update.model_dump())
         
@@ -738,7 +752,7 @@ class TestLoggingCoverage:
     
     def test_delete_schedule_logging(self, client, mock_scheduler_service, mock_logger):
         """Test logging in delete_schedule endpoint."""
-        mock_scheduler_service.delete_schedule.return_value = {"message": "Schedule deleted successfully"}
+        mock_scheduler_service.delete_schedule_with_group_check.return_value = {"message": "Schedule deleted successfully"}
         
         response = client.delete("/schedules/1")
         
@@ -769,7 +783,7 @@ class TestLoggingCoverage:
     
     def test_get_schedule_exception_warning_logging(self, client, mock_scheduler_service, mock_logger):
         """Test warning logging when HTTPException is raised in get_schedule."""
-        mock_scheduler_service.get_schedule_by_id.side_effect = HTTPException(status_code=404, detail="Schedule not found")
+        mock_scheduler_service.get_schedule_by_id_with_group_check.side_effect = HTTPException(status_code=404, detail="Schedule not found")
         
         response = client.get("/schedules/999")
         
@@ -779,7 +793,7 @@ class TestLoggingCoverage:
     
     def test_update_schedule_exception_warning_logging(self, client, mock_scheduler_service, sample_schedule_update, mock_logger):
         """Test warning logging when HTTPException is raised in update_schedule."""
-        mock_scheduler_service.update_schedule.side_effect = HTTPException(status_code=404, detail="Schedule not found")
+        mock_scheduler_service.update_schedule_with_group_check.side_effect = HTTPException(status_code=404, detail="Schedule not found")
         
         response = client.put("/schedules/999", json=sample_schedule_update.model_dump())
         
@@ -789,7 +803,7 @@ class TestLoggingCoverage:
     
     def test_delete_schedule_exception_warning_logging(self, client, mock_scheduler_service, mock_logger):
         """Test warning logging when HTTPException is raised in delete_schedule."""
-        mock_scheduler_service.delete_schedule.side_effect = HTTPException(status_code=404, detail="Schedule not found")
+        mock_scheduler_service.delete_schedule_with_group_check.side_effect = HTTPException(status_code=404, detail="Schedule not found")
         
         response = client.delete("/schedules/999")
         
@@ -799,7 +813,7 @@ class TestLoggingCoverage:
     
     def test_toggle_schedule_exception_warning_logging(self, client, mock_scheduler_service, mock_logger):
         """Test warning logging when HTTPException is raised in toggle_schedule."""
-        mock_scheduler_service.toggle_schedule.side_effect = HTTPException(status_code=404, detail="Schedule not found")
+        mock_scheduler_service.toggle_schedule_with_group_check.side_effect = HTTPException(status_code=404, detail="Schedule not found")
         
         response = client.post("/schedules/999/toggle")
         

@@ -2,7 +2,7 @@ from typing import List, Optional
 from fastapi import APIRouter, Depends, HTTPException, status, Query
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from src.core.dependencies import SessionDep
+from src.core.dependencies import SessionDep, GroupContextDep
 from src.dependencies.admin_auth import AdminUserDep
 from src.schemas.user import (
     RoleCreate, RoleUpdate, RoleInDB, RoleWithPrivileges,
@@ -22,6 +22,7 @@ router = APIRouter(
 async def read_roles(
     session: SessionDep,
     admin_user: AdminUserDep,
+    group_context: GroupContextDep,
     skip: int = 0,
     limit: int = 100,
 ):
@@ -34,6 +35,7 @@ async def create_role(
     role_data: RoleCreate,
     session: SessionDep,
     admin_user: AdminUserDep,
+    group_context: GroupContextDep,
 ):
     """Create a new role"""
     role_service = RoleService(session)
@@ -51,6 +53,7 @@ async def read_role(
     role_id: str,
     session: SessionDep,
     admin_user: AdminUserDep,
+    group_context: GroupContextDep,
 ):
     """Get a role by ID"""
     role_service = RoleService(session)
@@ -70,6 +73,7 @@ async def update_role(
     role_data: RoleUpdate,
     session: SessionDep,
     admin_user: AdminUserDep,
+    group_context: GroupContextDep,
 ):
     """Update a role"""
     role_service = RoleService(session)
@@ -93,6 +97,7 @@ async def delete_role(
     role_id: str,
     session: SessionDep,
     admin_user: AdminUserDep,
+    group_context: GroupContextDep,
 ):
     """Delete a role"""
     role_service = RoleService(session)
@@ -117,6 +122,7 @@ async def get_role_privileges(
     role_id: str,
     session: SessionDep,
     admin_user: AdminUserDep,
+    group_context: GroupContextDep,
 ):
     """Get privileges for a specific role"""
     role_service = RoleService(session)
@@ -129,6 +135,7 @@ async def assign_privilege_to_role(
     privilege_data: dict,
     session: SessionDep,
     admin_user: AdminUserDep,
+    group_context: GroupContextDep,
 ):
     """Assign a privilege to a role"""
     role_service = RoleService(session)
@@ -155,6 +162,7 @@ async def remove_privilege_from_role(
     privilege_id: str,
     session: SessionDep,
     admin_user: AdminUserDep,
+    group_context: GroupContextDep,
 ):
     """Remove a privilege from a role"""
     role_service = RoleService(session)
@@ -177,6 +185,7 @@ privilege_router = APIRouter(
 async def read_privileges(
     session: SessionDep,
     admin_user: AdminUserDep,
+    group_context: GroupContextDep,
     skip: int = 0,
     limit: int = 100,
 ):
@@ -189,6 +198,7 @@ async def create_privilege(
     privilege_data: PrivilegeCreate,
     session: SessionDep,
     admin_user: AdminUserDep,
+    group_context: GroupContextDep,
 ):
     """Create a new privilege"""
     privilege_service = PrivilegeService(session)
@@ -206,6 +216,7 @@ async def read_privilege(
     privilege_id: str,
     session: SessionDep,
     admin_user: AdminUserDep,
+    group_context: GroupContextDep,
 ):
     """Get a privilege by ID"""
     privilege_service = PrivilegeService(session)
@@ -225,6 +236,7 @@ async def update_privilege(
     privilege_data: PrivilegeUpdate,
     session: SessionDep,
     admin_user: AdminUserDep,
+    group_context: GroupContextDep,
 ):
     """Update a privilege"""
     privilege_service = PrivilegeService(session)
@@ -243,6 +255,7 @@ async def delete_privilege(
     privilege_id: str,
     session: SessionDep,
     admin_user: AdminUserDep,
+    group_context: GroupContextDep,
 ):
     """Delete a privilege"""
     privilege_service = PrivilegeService(session)

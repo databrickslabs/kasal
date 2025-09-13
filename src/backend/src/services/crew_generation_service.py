@@ -401,6 +401,7 @@ class CrewGenerationService:
         
         Args:
             request: The crew generation request with prompt, model, and tool information
+            group_context: Group context for multi-tenant isolation
         
         Returns:
             Dictionary containing the created agents and tasks
@@ -547,8 +548,8 @@ class CrewGenerationService:
                 for idx, task in enumerate(tasks_dict):
                     logger.info(f"TASK {idx+1}: '{task.get('name')}' - Agent: '{task.get('agent')}', Dependencies: {task.get('context', [])}")
                 
-                # Create entities in repository
-                result = await self.crew_generator_repository.create_crew_entities(crew_dict)
+                # Create entities in repository with group context
+                result = await self.crew_generator_repository.create_crew_entities(crew_dict, group_context)
                 
                 logger.info("CREATE CREW: Successfully created crew entities")
                 return result

@@ -81,6 +81,24 @@ class ExecutionLogsService:
             execution_id: ID of the execution to connect to
             group_context: Group context for filtering logs
         """
+        # First verify the execution belongs to the user's group before accepting connection
+        from src.repositories.execution_history_repository import execution_history_repository
+        
+        # Get group IDs from context for filtering
+        group_ids = group_context.group_ids if group_context and group_context.primary_group_id else None
+        
+        # Check if the execution exists and the user has access to it
+        execution = await execution_history_repository.get_execution_by_job_id(
+            execution_id,  # execution_id is actually the job_id
+            group_ids=group_ids
+        )
+        
+        if not execution:
+            # Either doesn't exist or user doesn't have access - reject connection
+            logger.warning(f"WebSocket connection rejected for execution {execution_id} - not found or access denied for group {group_context.primary_group_id if group_context else 'None'}")
+            await websocket.close(code=1008, reason="Execution not found or access denied")
+            return
+        
         await websocket.accept()
         async with self._lock:
             if execution_id not in self.active_connections:
@@ -240,15 +258,28 @@ class ExecutionLogsService:
         Returns:
             List of execution log responses for the group
         """
+        # First verify the execution belongs to the user's group
+        from src.repositories.execution_history_repository import execution_history_repository
+        
+        # Get group IDs from context for filtering
+        group_ids = group_context.group_ids if group_context and group_context.primary_group_id else None
+        
+        # Check if the execution exists and the user has access to it
+        execution = await execution_history_repository.get_execution_by_job_id(
+            execution_id,  # execution_id is actually the job_id
+            group_ids=group_ids
+        )
+        
+        if not execution:
+            # Either doesn't exist or user doesn't have access
+            logger.warning(f"Execution {execution_id} not found or access denied for group {group_context.primary_group_id if group_context else 'None'}")
+            return []  # Return empty list instead of raising error for consistency
+        
         if not group_context.primary_group_id:
-            # If no group context, fall back to non-group filtering for compatibility
-            # This allows logs to be visible in development environments or when group headers are missing
-            logger.warning(f"No group context provided for execution {execution_id}, falling back to non-group logs")
-            logs = await execution_logs_repository.get_by_execution_id_with_managed_session(
-                execution_id=execution_id,
-                limit=limit,
-                offset=offset
-            )
+            # If no group context but execution exists, this might be a single-tenant deployment
+            # Still check ownership for security
+            logger.warning(f"No group context provided for execution {execution_id}")
+            return []  # Deny access when no group context in multi-tenant mode
         else:
             # Use group-aware filtering when group context is available
             # Also include logs with NULL group_id for backward compatibility
