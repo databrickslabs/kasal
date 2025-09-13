@@ -27,7 +27,7 @@ class TestProcessKnowledgeSources:
             result = process_knowledge_sources(sources)
             
             assert result == sources
-            mock_logger.info.assert_any_call(f"Processing knowledge sources: {sources}")
+            mock_logger.info.assert_any_call(f"[CREW] Processing {len(sources)} knowledge sources: {sources}")
     
     def test_process_knowledge_sources_list_of_dicts_with_path(self):
         """Test processing list of dictionaries with 'path' key."""
@@ -42,8 +42,8 @@ class TestProcessKnowledgeSources:
             result = process_knowledge_sources(sources)
             
             assert result == expected_paths
-            mock_logger.info.assert_any_call(f"Processing knowledge sources: {sources}")
-            mock_logger.info.assert_any_call(f"Processed paths: {expected_paths}")
+            mock_logger.info.assert_any_call(f"[CREW] Processing {len(sources)} knowledge sources: {sources}")
+            mock_logger.info.assert_any_call(f"Processed 3 knowledge sources")
     
     def test_process_knowledge_sources_objects_with_path_attribute(self):
         """Test processing objects with 'path' attribute."""
@@ -63,7 +63,7 @@ class TestProcessKnowledgeSources:
             result = process_knowledge_sources(sources)
             
             assert result == expected_paths
-            mock_logger.info.assert_any_call(f"Processed paths: {expected_paths}")
+            mock_logger.info.assert_any_call(f"Processed 3 knowledge sources")
     
     def test_process_knowledge_sources_mixed_types(self):
         """Test processing mixed types of sources."""
@@ -82,7 +82,7 @@ class TestProcessKnowledgeSources:
             result = process_knowledge_sources(sources)
             
             assert result == expected_paths
-            mock_logger.info.assert_any_call(f"Processed paths: {expected_paths}")
+            mock_logger.info.assert_any_call(f"Processed 3 knowledge sources")
     
     def test_process_knowledge_sources_dict_without_path(self):
         """Test processing dictionary without 'path' key is ignored."""
@@ -97,6 +97,7 @@ class TestProcessKnowledgeSources:
             result = process_knowledge_sources(sources)
             
             assert result == expected_paths
+            mock_logger.info.assert_any_call(f"Processed 2 knowledge sources")
     
     def test_process_knowledge_sources_object_without_path(self):
         """Test processing object without 'path' attribute is ignored."""
@@ -115,6 +116,7 @@ class TestProcessKnowledgeSources:
             result = process_knowledge_sources(sources)
             
             assert result == expected_paths
+            mock_logger.info.assert_any_call(f"Processed 2 knowledge sources")
     
     def test_process_knowledge_sources_empty_path_in_dict(self):
         """Test processing dictionary with empty path."""
@@ -129,6 +131,7 @@ class TestProcessKnowledgeSources:
             result = process_knowledge_sources(sources)
             
             assert result == expected_paths
+            mock_logger.info.assert_any_call(f"Processed 3 knowledge sources")
     
     def test_process_knowledge_sources_none_path_in_dict(self):
         """Test processing dictionary with None path."""
@@ -143,6 +146,7 @@ class TestProcessKnowledgeSources:
             result = process_knowledge_sources(sources)
             
             assert result == expected_paths
+            mock_logger.info.assert_any_call(f"Processed 3 knowledge sources")
     
     def test_process_knowledge_sources_logging(self):
         """Test that appropriate logging occurs."""
@@ -152,8 +156,9 @@ class TestProcessKnowledgeSources:
             result = process_knowledge_sources(sources)
             
             # Should log the initial sources
-            mock_logger.info.assert_any_call(f"Processing knowledge sources: {sources}")
-            # For list of strings, should not log processed paths (returns as is)
+            mock_logger.info.assert_any_call(f"[CREW] Processing {len(sources)} knowledge sources: {sources}")
+            # Should log the summary
+            mock_logger.info.assert_any_call(f"Processed 2 knowledge sources")
             assert result == sources
     
     def test_process_knowledge_sources_single_string(self):
@@ -164,7 +169,8 @@ class TestProcessKnowledgeSources:
             result = process_knowledge_sources(sources)
             
             assert result == sources
-            mock_logger.info.assert_any_call(f"Processing knowledge sources: {sources}")
+            mock_logger.info.assert_any_call(f"[CREW] Processing {len(sources)} knowledge sources: {sources}")
+            mock_logger.info.assert_any_call(f"Processed 1 knowledge sources")
     
     def test_process_knowledge_sources_complex_nested_dict(self):
         """Test processing complex nested dictionary structures."""
@@ -184,6 +190,7 @@ class TestProcessKnowledgeSources:
             result = process_knowledge_sources(sources)
             
             assert result == expected_paths
+            mock_logger.info.assert_any_call(f"Processed 1 knowledge sources")
     
     def test_process_knowledge_sources_unicode_paths(self):
         """Test processing paths with unicode characters."""
@@ -198,6 +205,7 @@ class TestProcessKnowledgeSources:
             result = process_knowledge_sources(sources)
             
             assert result == expected_paths
+            mock_logger.info.assert_any_call(f"Processed 3 knowledge sources")
     
     def test_process_knowledge_sources_windows_paths(self):
         """Test processing Windows-style paths."""
@@ -212,6 +220,7 @@ class TestProcessKnowledgeSources:
             result = process_knowledge_sources(sources)
             
             assert result == expected_paths
+            mock_logger.info.assert_any_call(f"Processed 3 knowledge sources")
 
 
 class TestCreateAgent:
