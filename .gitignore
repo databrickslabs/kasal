@@ -77,7 +77,6 @@ backend/crewai-manager/backend/backendcrew/src/uploads/knowledge
 
 # Memory files
 backend/crewai-manager/backend/backendcrew/memory/*
-**/memory/
 **/*.bin
 
 # Output files
