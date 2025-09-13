@@ -121,7 +121,7 @@ class CrewGeneratorRepository:
                 logger.error(traceback.format_exc())
                 raise
             
-    async def create_crew_entities(self, crew_dict):
+    async def create_crew_entities(self, crew_dict, group_context=None):
         """
         Create agents and tasks for a crew.
         
@@ -133,6 +133,7 @@ class CrewGeneratorRepository:
         
         Args:
             crew_dict: Dictionary containing 'agents' and 'tasks' lists
+            group_context: Group context for multi-tenant isolation
             
         Returns:
             Dictionary with created 'agents' and 'tasks' in serializable format
@@ -143,8 +144,8 @@ class CrewGeneratorRepository:
         
         logger.info(f"Creating crew with {len(agents_data)} agents and {len(tasks_data)} tasks")
         
-        # Step 1: Create all agents first to get their IDs
-        created_agents = await self._create_agents(agents_data)
+        # Step 1: Create all agents first to get their IDs (with group context)
+        created_agents = await self._create_agents(agents_data, group_context)
         
         # Step 2: Create a mapping of agent names to their database IDs
         agent_name_to_id = {}
@@ -152,8 +153,8 @@ class CrewGeneratorRepository:
             agent_name_to_id[agent.name] = agent.id
             logger.info(f"AGENT MAPPING: '{agent.name}' -> ID: {agent.id}")
         
-        # Step 3: Create all tasks with proper agent_id assignments
-        created_tasks = await self._create_tasks(tasks_data, agent_name_to_id)
+        # Step 3: Create all tasks with proper agent_id assignments (with group context)
+        created_tasks = await self._create_tasks(tasks_data, agent_name_to_id, group_context)
         
         # Step 4: Update task dependencies
         await self._create_task_dependencies(created_tasks, tasks_data)
@@ -209,24 +210,30 @@ class CrewGeneratorRepository:
             'tasks': serialized_tasks
         }
 
-    async def _create_agents(self, agents_data):
+    async def _create_agents(self, agents_data, group_context=None):
         """
         Create agents in the database.
         
         Args:
             agents_data: List of agent data dictionaries
+            group_context: Group context for multi-tenant isolation
             
         Returns:
             List of created Agent models
         """
         logger.info(f"Creating {len(agents_data)} agents in database")
+        if group_context:
+            logger.info(f"Group context present - group_id: {group_context.primary_group_id}, email: {group_context.group_email}")
+        else:
+            logger.warning("No group context provided - agents will be created without group isolation")
+        
         created_agents = []
         
         for agent_data in agents_data:
             # Log the agent data for debugging
             logger.info(f"Creating agent: {self._safe_get_attr(agent_data, 'name')}")
             
-            # Create the agent
+            # Create the agent with group context
             agent = Agent(
                 id=str(uuid.uuid4()),
                 name=self._safe_get_attr(agent_data, 'name'),
@@ -246,7 +253,10 @@ class CrewGeneratorRepository:
                 max_retry_limit=self._safe_get_attr(agent_data, 'max_retry_limit', 2),
                 use_system_prompt=self._safe_get_attr(agent_data, 'use_system_prompt', True),
                 respect_context_window=self._safe_get_attr(agent_data, 'respect_context_window', True),
-                function_calling_llm=self._safe_get_attr(agent_data, 'function_calling_llm')
+                function_calling_llm=self._safe_get_attr(agent_data, 'function_calling_llm'),
+                # Add group context fields
+                group_id=group_context.primary_group_id if group_context else None,
+                created_by_email=group_context.group_email if group_context else None
             )
             
             # Store the agent in the database
@@ -256,13 +266,14 @@ class CrewGeneratorRepository:
             
         return created_agents
 
-    async def _create_tasks(self, tasks_data, agent_name_to_id):
+    async def _create_tasks(self, tasks_data, agent_name_to_id, group_context=None):
         """
         Create tasks in the database.
         
         Args:
             tasks_data: List of task data dictionaries
             agent_name_to_id: Dictionary mapping agent names to IDs
+            group_context: Group context for multi-tenant isolation
             
         Returns:
             List of created Task models
@@ -359,7 +370,7 @@ class CrewGeneratorRepository:
             elif not agent_id:
                 logger.warning(f"No agent assigned to task '{task_name}' and no agents available")
             
-            # Create the task with the correct agent_id
+            # Create the task with the correct agent_id and group context
             task = Task(
                 id=str(uuid.uuid4()),
                 name=task_name,
@@ -370,7 +381,10 @@ class CrewGeneratorRepository:
                 async_execution=self._safe_get_attr(task_data, 'async_execution', False),
                 output=self._safe_get_attr(task_data, 'output'),
                 human_input=self._safe_get_attr(task_data, 'human_input', False),
-                markdown=self._safe_get_attr(task_data, 'markdown', False)
+                markdown=self._safe_get_attr(task_data, 'markdown', False),
+                # Add group context fields
+                group_id=group_context.primary_group_id if group_context else None,
+                created_by_email=group_context.group_email if group_context else None
             )
             
             # Store the task in the database

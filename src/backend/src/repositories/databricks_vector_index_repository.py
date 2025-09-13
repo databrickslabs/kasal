@@ -470,19 +470,22 @@ class DatabricksVectorIndexRepository:
         index_name: str,
         endpoint_name: str,
         embedding_dimension: int,
-        user_token: Optional[str] = None
+        user_token: Optional[str] = None,
+        index_type: Optional[str] = None
     ) -> Dict[str, Any]:
         """
         Empty all vectors from a Direct Access index by deleting and recreating it.
         
         Since Direct Access indexes don't support bulk delete via the API,
         this method deletes the entire index and recreates it with the same configuration.
+        If the index doesn't exist, it creates a new one.
         
         Args:
             index_name: Full index name to empty
             endpoint_name: Endpoint hosting the index  
             embedding_dimension: Dimension of the index embeddings
             user_token: Optional user token for OBO authentication
+            index_type: Optional index type (short_term, long_term, entity, document) for schema
             
         Returns:
             Dict with operation result
@@ -509,11 +512,91 @@ class DatabricksVectorIndexRepository:
                 # Get index info
                 async with session.get(describe_url, headers=headers) as response:
                     if response.status != 200:
+                        # Index doesn't exist, create it instead
+                        logger.info(f"Index {index_name} not found, creating new index")
+                        
+                        # Determine index type from name if not provided
+                        if not index_type:
+                            if "short_term" in index_name or "short-term" in index_name:
+                                index_type = "short_term"
+                            elif "long_term" in index_name or "long-term" in index_name:
+                                index_type = "long_term"
+                            elif "entity" in index_name:
+                                index_type = "entity"
+                            elif "document" in index_name:
+                                index_type = "document"
+                            else:
+                                # Default to short_term if we can't determine
+                                index_type = "short_term"
+                        
+                        # Get schema from centralized definition
+                        from src.schemas.databricks_index_schemas import DatabricksIndexSchemas
+                        schema_def = DatabricksIndexSchemas.get_schema(index_type)
+                        
+                        if not schema_def:
+                            logger.error(f"Unknown index type: {index_type}")
+                            return {
+                                "success": False,
+                                "deleted_count": 0,
+                                "message": f"Cannot create index: unknown index type {index_type}",
+                                "error": "Unknown index type"
+                            }
+                        
+                        # Create the index
+                        create_payload = {
+                            "name": index_name,
+                            "endpoint_name": endpoint_name,
+                            "primary_key": "id",
+                            "index_type": "DIRECT_ACCESS",
+                            "direct_access_index_spec": {
+                                "embedding_vector_columns": [{
+                                    "name": "embedding",
+                                    "embedding_dimension": embedding_dimension
+                                }],
+                                "schema_json": json.dumps(schema_def)
+                            }
+                        }
+                        
+                        create_url = f"{self.workspace_url}/api/2.0/vector-search/indexes"
+                        
+                        async with session.post(create_url, headers=headers, json=create_payload) as response:
+                            response_text = await response.text()
+                            if response.status not in [200, 201]:
+                                return {
+                                    "success": False,
+                                    "deleted_count": 0,
+                                    "message": f"Failed to create index: {response_text[:200]}",
+                                    "error": "Creation failed"
+                                }
+                        
+                        logger.info(f"Successfully created new index {index_name}")
+                        
+                        # Wait for index to be ready
+                        max_attempts = 12  # 60 seconds total
+                        for attempt in range(max_attempts):
+                            await asyncio.sleep(5)
+                            
+                            async with session.get(describe_url, headers=headers) as response:
+                                if response.status == 200:
+                                    new_info = await response.json()
+                                    status = new_info.get("status", {})
+                                    if status.get("ready"):
+                                        logger.info(f"Index {index_name} is ready after {(attempt + 1) * 5} seconds")
+                                        return {
+                                            "success": True,
+                                            "deleted_count": 0,
+                                            "message": f"Successfully created new index {index_name}"
+                                        }
+                                    else:
+                                        state = status.get("detailed_state", "UNKNOWN")
+                                        logger.info(f"Index state: {state}, attempt {attempt + 1}/{max_attempts}")
+                        
+                        # If we get here, index was created but may not be fully ready
+                        logger.warning(f"Index {index_name} created but may not be fully ready yet")
                         return {
-                            "success": False,
+                            "success": True,
                             "deleted_count": 0,
-                            "message": f"Index {index_name} not found or not accessible",
-                            "error": "Index not found"
+                            "message": f"Index {index_name} created. It may take a moment to be fully ready."
                         }
                     
                     index_info = await response.json()
