@@ -274,8 +274,8 @@ class TestCrewAIEngineService:
             assert task.cancelled()
             mock_update.assert_called_once_with(
                 execution_id,
-                ExecutionStatus.CANCELLED.value,
-                "Execution cancelled by user"
+                ExecutionStatus.STOPPED.value,
+                "Execution stopped by user"
             )
             assert execution_id not in service._running_jobs
 
@@ -319,8 +319,7 @@ class TestCrewAIEngineService:
              patch('src.engines.crewai.tools.tool_factory.ToolFactory.create') as mock_tool_factory, \
              patch('src.engines.crewai.crew_preparation.CrewPreparation') as mock_crew_prep, \
              patch('src.engines.crewai.callbacks.logging_callbacks.AgentTraceEventListener') as mock_agent_trace, \
-             patch('src.engines.crewai.callbacks.logging_callbacks.TaskCompletionLogger') as mock_task_logger, \
-             patch('src.engines.crewai.callbacks.logging_callbacks.DetailedOutputLogger') as mock_output_logger, \
+             patch('src.engines.crewai.callbacks.logging_callbacks.TaskCompletionEventListener') as mock_task_logger, \
              patch('asyncio.create_task') as mock_create_task, \
              patch('src.engines.crewai.execution_runner.run_crew') as mock_run_crew:
             
@@ -350,7 +349,6 @@ class TestCrewAIEngineService:
             # Mock callbacks
             mock_agent_trace.return_value = MagicMock()
             mock_task_logger.return_value = MagicMock()
-            mock_output_logger.return_value = MagicMock()
             
             # Mock task creation
             mock_task = MagicMock()
@@ -739,8 +737,7 @@ class TestCrewAIEngineService:
              patch('src.engines.crewai.tools.tool_factory.ToolFactory.create') as mock_tool_factory, \
              patch('src.engines.crewai.crew_preparation.CrewPreparation') as mock_crew_prep, \
              patch('src.engines.crewai.callbacks.logging_callbacks.AgentTraceEventListener') as mock_agent_trace, \
-             patch('src.engines.crewai.callbacks.logging_callbacks.TaskCompletionLogger') as mock_task_logger, \
-             patch('src.engines.crewai.callbacks.logging_callbacks.DetailedOutputLogger') as mock_output_logger, \
+             patch('src.engines.crewai.callbacks.logging_callbacks.TaskCompletionEventListener') as mock_task_logger, \
              patch('asyncio.create_task') as mock_create_task:
             
             # Setup mocks for successful execution
@@ -769,7 +766,6 @@ class TestCrewAIEngineService:
             # Mock callbacks
             mock_agent_trace.return_value = MagicMock()
             mock_task_logger.return_value = MagicMock()
-            mock_output_logger.return_value = MagicMock()
             
             # Mock task creation
             mock_task = MagicMock()
