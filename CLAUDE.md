@@ -11,6 +11,11 @@ Claude reads context from multiple CLAUDE.md files:
 
 ## Important Project Rules
 
+### Dependencies
+- **Main requirements file is at `src/requirements.txt`** (not backend/requirements.txt)
+- Install dependencies: `pip install -r src/requirements.txt`
+- Key dependencies include: psutil (for process management), crewai, litellm, databricks-sdk
+
 ### Documentation Location
 - **ALWAYS create documentation in `src/docs/` directory**
 - Do not create docs in the root `docs/` folder
