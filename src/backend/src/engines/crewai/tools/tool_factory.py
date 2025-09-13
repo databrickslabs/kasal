@@ -672,6 +672,20 @@ class ToolFactory:
                 return tool_class(**tool_config_with_key)
             
             elif tool_name == "SerperDevTool":
+                # Log the incoming tool config for SerperDevTool
+                logger.info(f"SerperDevTool - incoming tool_config: {tool_config}")
+                
+                # Map frontend 'endpoint_type' to SerperDevTool's 'search_type' parameter
+                if 'endpoint_type' in tool_config and 'search_type' not in tool_config:
+                    endpoint_type = tool_config['endpoint_type']
+                    # Only map if it's a supported type (search or news)
+                    if endpoint_type in ['search', 'news']:
+                        tool_config['search_type'] = endpoint_type
+                        logger.info(f"SerperDevTool - Mapped endpoint_type '{endpoint_type}' to search_type")
+                    else:
+                        logger.warning(f"SerperDevTool - Unsupported endpoint_type '{endpoint_type}', defaulting to 'search'")
+                        tool_config['search_type'] = 'search'
+                
                 # Get API key from tool config
                 api_key = tool_config.get('serper_api_key', '')
                 
@@ -733,9 +747,18 @@ class ToolFactory:
                 if final_api_key:
                     tool_config_with_key['api_key'] = final_api_key
                 
+                # Remove frontend-specific fields that SerperDevTool doesn't recognize
+                fields_to_remove = ['endpoint_type', 'search_url', 'serper_api_key']
+                for field in fields_to_remove:
+                    tool_config_with_key.pop(field, None)
+                
                 # Add result_as_answer to tool configuration (only for tools that support it)
                 if tool_name != "LinkupSearchTool":
                     tool_config_with_key['result_as_answer'] = result_as_answer
+                
+                # Log the final config being passed to SerperDevTool
+                logger.info(f"SerperDevTool - final tool_config_with_key: {tool_config_with_key}")
+                logger.info(f"SerperDevTool - search_type in config: {tool_config_with_key.get('search_type', 'NOT SET')}")
                 
                 return tool_class(**tool_config_with_key)
             

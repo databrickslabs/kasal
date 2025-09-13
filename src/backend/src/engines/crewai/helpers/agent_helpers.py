@@ -15,38 +15,88 @@ from src.engines.crewai.helpers.tool_helpers import resolve_tool_ids_to_names
 # Get logger from the centralized logging system
 logger = LoggerManager.get_instance().crew
 
-def process_knowledge_sources(knowledge_sources: List[Any]) -> List[str]:
+def process_knowledge_sources(knowledge_sources: List[Any]) -> List[Any]:
     """
-    Process knowledge sources and return paths.
+    Process knowledge sources and return CrewAI-compatible knowledge source objects.
     
     Args:
         knowledge_sources: List of knowledge sources, which can be strings, 
-                          dictionaries with 'path' property, or objects with 'path' property
+                          dictionaries with metadata, or objects with 'path' property
                           
     Returns:
-        List of string paths
+        List of knowledge source objects compatible with CrewAI
     """
     if not knowledge_sources:
+        logger.info("[CREW] No knowledge sources to process")
         return knowledge_sources
     
-    logger.info(f"Processing knowledge sources: {knowledge_sources}")
+    logger.info(f"[CREW] Processing {len(knowledge_sources)} knowledge sources: {knowledge_sources}")
     
-    # If knowledge_sources is a list of strings (paths), return as is
-    if all(isinstance(source, str) for source in knowledge_sources):
-        return knowledge_sources
-        
-    # If knowledge_sources contains objects with a 'path' property, extract just the paths
-    paths = []
+    # Import knowledge source classes
+    from src.engines.crewai.knowledge.databricks_volume_knowledge_source import DatabricksVolumeKnowledgeSource
+    
+    processed_sources = []
+    
     for source in knowledge_sources:
-        if isinstance(source, dict) and 'path' in source:
-            paths.append(source['path'])
-        elif hasattr(source, 'path'):
-            paths.append(source.path)
-        elif isinstance(source, str):
-            paths.append(source)
+        try:
+            # Handle Databricks volume sources
+            if isinstance(source, dict) and source.get('type') == 'databricks_volume':
+                # Create DatabricksVolumeKnowledgeSource instance
+                metadata = source.get('metadata', {})
+                source_path = source.get('source', '')  # This is the FULL Databricks path
+                logger.info(f"[CREW] Creating DatabricksVolumeKnowledgeSource with full path: {source_path}, metadata: {metadata}")
+                
+                # The source_path is the complete path: /Volumes/catalog/schema/volume/path/to/file
+                # We need to extract the volume path and pass the full file path
+                
+                if source_path.startswith('/Volumes/'):
+                    # Extract catalog.schema.volume from the path
+                    path_parts = source_path[9:].split('/')  # Remove /Volumes/ prefix
+                    if len(path_parts) >= 3:
+                        # First 3 parts are catalog, schema, volume
+                        volume_path = '.'.join(path_parts[:3])
+                        
+                        logger.info(f"[CREW] Extracted volume_path: {volume_path} from full path: {source_path}")
+                        
+                        # Create the DatabricksVolumeKnowledgeSource
+                        # Pass the FULL path in file_paths so it can be downloaded directly
+                        databricks_source = DatabricksVolumeKnowledgeSource(
+                            volume_path=volume_path,
+                            execution_id=metadata.get('execution_id', ''),
+                            group_id=metadata.get('group_id', ''),
+                            file_paths=[source_path],  # Pass the FULL path here
+                            workspace_url=os.environ.get('DATABRICKS_HOST'),
+                            token=os.environ.get('DATABRICKS_TOKEN')
+                        )
+                        processed_sources.append(databricks_source)
+                        logger.info(f"[CREW] Created DatabricksVolumeKnowledgeSource for: {source_path}")
+                    else:
+                        logger.error(f"[CREW] Invalid Databricks volume path format: {source_path}")
+                        continue
+                else:
+                    logger.error(f"[CREW] Path doesn't start with /Volumes/: {source_path}")
+                    continue
+            
+            # Handle string paths (backwards compatibility)
+            elif isinstance(source, str):
+                processed_sources.append(source)
+            
+            # Handle dictionaries with 'path' property
+            elif isinstance(source, dict) and 'path' in source:
+                processed_sources.append(source['path'])
+            
+            # Handle objects with 'path' property
+            elif hasattr(source, 'path'):
+                processed_sources.append(source.path)
+            
+            else:
+                logger.warning(f"Unknown knowledge source format: {source}")
+                
+        except Exception as e:
+            logger.error(f"Error processing knowledge source {source}: {str(e)}")
     
-    logger.info(f"Processed paths: {paths}")
-    return paths
+    logger.info(f"Processed {len(processed_sources)} knowledge sources")
+    return processed_sources
 
 
 async def create_agent(
@@ -86,6 +136,9 @@ async def create_agent(
     
     # Process knowledge sources if present
     if 'knowledge_sources' in agent_config:
+        logger.info(f"[CREW] Agent {agent_key} has {len(agent_config.get('knowledge_sources', []))} knowledge sources")
+        if agent_config.get('knowledge_sources'):
+            logger.info(f"[CREW] Knowledge sources for {agent_key}: {agent_config['knowledge_sources']}")
         agent_config['knowledge_sources'] = process_knowledge_sources(agent_config['knowledge_sources'])
     
     # Handle LLM configuration
@@ -102,7 +155,15 @@ async def create_agent(
                 # Use LLMManager to configure the LLM with proper provider prefix
                 model_name = agent_config['llm']
                 logger.info(f"Configuring agent {agent_key} LLM using LLMManager for model: {model_name}")
-                llm = await LLMManager.configure_crewai_llm(model_name)
+                
+                # Check if agent has temperature override
+                temperature = None
+                if 'temperature' in agent_config and agent_config['temperature'] is not None:
+                    # Convert from 0-100 to 0.0-1.0 range
+                    temperature = agent_config['temperature'] / 100.0
+                    logger.info(f"Using temperature override {temperature} for agent {agent_key}")
+                
+                llm = await LLMManager.configure_crewai_llm(model_name, temperature)
                 logger.info(f"Successfully configured LLM for agent {agent_key} using model: {model_name}")
             elif isinstance(agent_config['llm'], dict):
                 # If a dictionary is provided with LLM parameters, use crewai LLM directly
@@ -113,8 +174,16 @@ async def create_agent(
                 # If a model name is specified, configure it through LLMManager
                 if 'model' in llm_config:
                     model_name = llm_config['model']
+                    
+                    # Check if agent has temperature override
+                    temperature = None
+                    if 'temperature' in agent_config and agent_config['temperature'] is not None:
+                        # Convert from 0-100 to 0.0-1.0 range
+                        temperature = agent_config['temperature'] / 100.0
+                        logger.info(f"Using temperature override {temperature} for agent {agent_key}")
+                    
                     # Get properly configured LLM for the model
-                    configured_llm = await LLMManager.configure_crewai_llm(model_name)
+                    configured_llm = await LLMManager.configure_crewai_llm(model_name, temperature)
                     
                     # Extract the configured parameters
                     if hasattr(configured_llm, 'model'):
@@ -325,7 +394,10 @@ async def create_agent(
     for param in additional_params:
         if param in agent_config and agent_config[param] is not None:
             agent_kwargs[param] = agent_config[param]
-            logger.info(f"Setting additional parameter '{param}' to {agent_config[param]} for agent {agent_key}")
+            if param == 'knowledge_sources':
+                logger.info(f"[CREW] Setting knowledge_sources for agent {agent_key}: {len(agent_config[param])} sources")
+            else:
+                logger.info(f"Setting additional parameter '{param}' to {agent_config[param]} for agent {agent_key}")
 
     # Handle prompt templates
     if 'system_template' in agent_config and agent_config['system_template']:

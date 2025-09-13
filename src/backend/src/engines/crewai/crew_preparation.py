@@ -325,6 +325,14 @@ class CrewPreparation:
                 agent_name = agent_config.get('name', agent_config.get('id', agent_config.get('role', f'agent_{i}')))
                 agent_id = agent_config.get('id', agent_name)
                 
+                # Log agent configuration to debug knowledge_sources
+                logger.info(f"[CrewPreparation] Processing agent {agent_name} with config keys: {list(agent_config.keys())}")
+                if 'knowledge_sources' in agent_config:
+                    ks = agent_config['knowledge_sources']
+                    logger.info(f"[CrewPreparation] Agent {agent_name} has {len(ks)} knowledge_sources: {ks}")
+                else:
+                    logger.info(f"[CrewPreparation] Agent {agent_name} has NO knowledge_sources")
+                
                 # Add MCP requirements from assigned tasks to agent config
                 agent_mcp_servers = agent_mcp_requirements.get(agent_id, [])
                 if agent_mcp_servers:
@@ -421,6 +429,9 @@ class CrewPreparation:
                 logger.info(f"Task '{task_name}' async_execution setting: {is_async}")
                     
                 # Create the task
+                # Get execution_name from config (can be run_name or execution_id)
+                execution_name = self.config.get('run_name') or self.config.get('inputs', {}).get('run_name') or self.config.get('execution_id')
+                
                 task = await create_task(
                     task_key=task_name,
                     task_config=task_config,
@@ -428,7 +439,8 @@ class CrewPreparation:
                     output_dir=self.config.get('output_dir'),
                     config=None,
                     tool_service=self.tool_service,
-                    tool_factory=self.tool_factory
+                    tool_factory=self.tool_factory,
+                    execution_name=execution_name
                 )
                 
                 self.tasks.append(task)
@@ -478,13 +490,49 @@ class CrewPreparation:
             # Get crew configuration
             crew_config = self.config.get('crew', {})
             
+            # Check if all agents have memory disabled BEFORE setting crew memory default
+            # This ensures crew memory respects individual agent settings
+            agents_with_memory_enabled = []
+            agents_with_memory_disabled = []
+            
+            for agent_config in self.config.get('agents', []):
+                agent_name = agent_config.get('name', agent_config.get('role', 'Unknown'))
+                # Check if memory is explicitly set in agent config
+                if 'memory' in agent_config:
+                    if agent_config['memory'] is False:
+                        agents_with_memory_disabled.append(agent_name)
+                        logger.info(f"Agent '{agent_name}' has memory explicitly disabled")
+                    else:
+                        agents_with_memory_enabled.append(agent_name)
+                        logger.info(f"Agent '{agent_name}' has memory enabled")
+                else:
+                    # If memory is not specified, it defaults to True in the agent
+                    agents_with_memory_enabled.append(agent_name)
+                    logger.info(f"Agent '{agent_name}' has memory enabled (default)")
+            
+            # Determine default crew memory based on agent settings
+            # If ALL agents have memory disabled, disable crew memory
+            # Otherwise, use the crew_config setting or default to True
+            if agents_with_memory_disabled and not agents_with_memory_enabled:
+                # All agents have memory disabled
+                default_crew_memory = False
+                logger.info("All agents have memory disabled - setting crew memory to False")
+            else:
+                # At least one agent has memory enabled (or uses default)
+                # Use crew_config setting if available, otherwise True
+                default_crew_memory = crew_config.get('memory', True)
+                if agents_with_memory_enabled:
+                    logger.info(f"At least one agent has memory enabled - using crew memory setting: {default_crew_memory}")
+                else:
+                    logger.info(f"No agent memory settings found - using crew memory default: {default_crew_memory}")
+            
             # Create the crew directly instead of calling an external function
             crew_kwargs = {
                 'agents': list(self.agents.values()),
                 'tasks': self.tasks,
                 'process': crew_config.get('process', 'sequential'),
                 'verbose': True,
-                'memory': crew_config.get('memory', True)
+                'memory': default_crew_memory
             }
             
             # Set default LLM for crew manager using the submitted model
@@ -782,41 +830,12 @@ class CrewPreparation:
             logger.info(f"Final embedder configuration: {crew_kwargs.get('embedder', 'None (default)')}")
             
             # Check if memory should be disabled for all agents in this crew
-            # This is done before fetching memory backend configuration to save resources
-            should_disable_memory_for_crew = False
+            # This check has already been done when setting default_crew_memory above,
+            # but we still need to set the flag for later logic
+            should_disable_memory_for_crew = not crew_kwargs.get('memory', True)
             
-            # Check if user explicitly requested to disable memory
-            if crew_kwargs.get('memory', True) is False:
-                logger.info("Memory explicitly disabled in crew configuration")
-                should_disable_memory_for_crew = True
-                crew_kwargs['memory'] = False
-            elif crew_kwargs.get('memory', False):
-                # Analyze all agents to see if any require memory
-                agents_needing_memory = []
-                agents_not_needing_memory = []
-                
-                for agent_config in self.config.get('agents', []):
-                    agent_name = agent_config.get('name', agent_config.get('role', 'Unknown'))
-                    if self._should_disable_memory_for_agent(agent_config):
-                        agents_not_needing_memory.append(agent_name)
-                    else:
-                        agents_needing_memory.append(agent_name)
-                
-                # Log the analysis results
-                if agents_needing_memory:
-                    logger.info(f"Agents that need memory: {agents_needing_memory}")
-                if agents_not_needing_memory:
-                    logger.info(f"Agents that don't need memory: {agents_not_needing_memory}")
-                
-                # If NO agents need memory, disable it for the entire crew
-                if not agents_needing_memory and agents_not_needing_memory:
-                    logger.info("All agents are stateless - disabling memory for the entire crew to improve performance")
-                    crew_kwargs['memory'] = False
-                    should_disable_memory_for_crew = True
-                    logger.info("Set should_disable_memory_for_crew=True to prevent memory backend creation")
-                elif not agents_needing_memory:
-                    # No agents defined or all agents have empty configs
-                    logger.warning("No agents with valid configurations found - keeping memory enabled by default")
+            if should_disable_memory_for_crew:
+                logger.info("Memory is disabled for this crew based on agent configurations")
             
             # Always fetch memory backend configuration from database
             # This ensures consistency regardless of whether the crew is executed via frontend or API
@@ -1252,6 +1271,52 @@ class CrewPreparation:
                         os.environ.pop("OPENAI_API_KEY", None)
             except Exception as e:
                 logger.warning(f"Error handling OpenAI API key for Databricks Apps: {e}")
+            
+            # Add knowledge sources if available
+            try:
+                from src.services.databricks_knowledge_service import DatabricksKnowledgeService
+                from src.repositories.databricks_config_repository import DatabricksConfigRepository
+                
+                # Get execution ID and group ID from config
+                execution_id = self.config.get('execution_id') or self.config.get('run_name', 'default')
+                group_id = self.config.get('group_id', 'default')
+                
+                # Check if Databricks knowledge volume is enabled
+                from src.core.unit_of_work import UnitOfWork
+                async with UnitOfWork() as uow:
+                    databricks_repo = DatabricksConfigRepository(uow.session)
+                    databricks_config = await databricks_repo.get_active_config(group_id=group_id)
+                
+                if databricks_config and databricks_config.knowledge_volume_enabled:
+                    logger.info(f"Checking for knowledge sources for execution {execution_id}")
+                    
+                    # Create knowledge service
+                    knowledge_service = DatabricksKnowledgeService()
+                    
+                    # Get volume configuration
+                    volume_config = {
+                        'volume_path': databricks_config.knowledge_volume_path or 'main.default.knowledge',
+                        'workspace_url': databricks_config.workspace_url,
+                        'file_format': 'auto',
+                        'chunk_size': databricks_config.knowledge_chunk_size or 1000,
+                        'chunk_overlap': databricks_config.knowledge_chunk_overlap or 200,
+                    }
+                    
+                    # Create knowledge source
+                    knowledge_source = knowledge_service.create_knowledge_source(
+                        execution_id=execution_id,
+                        group_id=group_id,
+                        volume_config=volume_config
+                    )
+                    
+                    # Add knowledge source to crew
+                    if knowledge_source:
+                        crew_kwargs['knowledge_sources'] = [knowledge_source]
+                        logger.info(f"Added Databricks volume knowledge source for execution {execution_id}")
+                    
+            except Exception as e:
+                logger.warning(f"Could not load knowledge sources: {e}")
+                # Continue without knowledge sources - not critical for execution
             
             self.crew = Crew(**crew_kwargs)
             

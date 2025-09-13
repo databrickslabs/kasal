@@ -489,9 +489,8 @@ class TestToolFactory:
             result = tool_factory.create_tool("SerperDevTool")
             
             assert result == mock_instance
-            # SerperDevTool implementation adds both serper_api_key and api_key
+            # SerperDevTool implementation removes serper_api_key and only uses api_key
             mock_serper_class.assert_called_once_with(
-                serper_api_key="test_serper_key",
                 api_key="test_serper_key",
                 result_as_answer=False
             )
@@ -1355,9 +1354,9 @@ class TestToolFactoryAdditionalCoverage:
             result = tool_factory.create_tool("SerperDevTool")
             
             assert result == mock_instance
-            # Should use serper_api_key and add api_key
+            # Should remove serper_api_key and only pass api_key
             call_kwargs = mock_serper_class.call_args[1]
-            assert call_kwargs["serper_api_key"] == "test_key"
+            assert "serper_api_key" not in call_kwargs
             assert call_kwargs["api_key"] == "test_key"
     
     def test_create_tool_perplexity_config_key_removal(self, tool_factory):

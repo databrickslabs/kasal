@@ -463,12 +463,30 @@ class GenieTool(BaseTool):
             try:
                 # Try to get headers using async method
                 import asyncio
-                loop = asyncio.new_event_loop()
-                asyncio.set_event_loop(loop)
-                headers = loop.run_until_complete(self._get_auth_headers())
-                loop.close()
+                try:
+                    # Check if there's already a running event loop (e.g., in Databricks Apps)
+                    loop = asyncio.get_running_loop()
+                    # We're in an async context, can't use run_until_complete
+                    # Fall back to sync headers immediately
+                    logger.info("Detected running event loop (Databricks Apps), using sync auth")
+                    if self._user_token:
+                        headers = {
+                            "Authorization": f"Bearer {self._user_token}",
+                            "Content-Type": "application/json"
+                        }
+                    elif self._token:
+                        headers = {
+                            "Authorization": f"Bearer {self._token}",
+                            "Content-Type": "application/json"
+                        }
+                except RuntimeError:
+                    # No running loop, safe to create a new one
+                    loop = asyncio.new_event_loop()
+                    asyncio.set_event_loop(loop)
+                    headers = loop.run_until_complete(self._get_auth_headers())
+                    loop.close()
             except Exception as e:
-                logger.debug(f"Async auth failed, falling back to sync: {e}")
+                logger.error(f"Async auth failed, falling back to sync: {e}")
                 # Fall back to simple PAT headers
                 if self._user_token:
                     headers = {
@@ -584,12 +602,30 @@ class GenieTool(BaseTool):
         headers = None
         try:
             import asyncio
-            loop = asyncio.new_event_loop()
-            asyncio.set_event_loop(loop)
-            headers = loop.run_until_complete(self._get_auth_headers())
-            loop.close()
+            try:
+                # Check if there's already a running event loop (e.g., in Databricks Apps)
+                loop = asyncio.get_running_loop()
+                # We're in an async context, can't use run_until_complete
+                # Fall back to sync headers immediately
+                logger.info("Detected running event loop (Databricks Apps), using sync auth")
+                if self._user_token:
+                    headers = {
+                        "Authorization": f"Bearer {self._user_token}",
+                        "Content-Type": "application/json"
+                    }
+                elif self._token:
+                    headers = {
+                        "Authorization": f"Bearer {self._token}",
+                        "Content-Type": "application/json"
+                    }
+            except RuntimeError:
+                # No running loop, safe to create a new one
+                loop = asyncio.new_event_loop()
+                asyncio.set_event_loop(loop)
+                headers = loop.run_until_complete(self._get_auth_headers())
+                loop.close()
         except Exception as e:
-            logger.debug(f"Async auth failed, falling back to sync: {e}")
+            logger.error(f"Async auth failed, falling back to sync: {e}")
             if self._user_token:
                 headers = {
                     "Authorization": f"Bearer {self._user_token}",

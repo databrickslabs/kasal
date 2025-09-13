@@ -792,7 +792,13 @@ class TestCrewPreparation:
              patch('src.utils.databricks_auth.is_databricks_apps_environment', return_value=False), \
              patch('src.core.llm_manager.LLMManager.get_llm', side_effect=Exception("Model not found")) as mock_get_llm, \
              patch('src.engines.crewai.crew_preparation.logger') as mock_logger, \
-             patch('src.services.api_keys_service.ApiKeysService.get_provider_api_key', return_value=None):
+             patch('src.services.api_keys_service.ApiKeysService.get_provider_api_key', return_value=None), \
+             patch('src.repositories.databricks_config_repository.DatabricksConfigRepository') as mock_databricks_repo:
+            
+            # Configure mock to return None for get_databricks_config
+            mock_databricks_instance = MagicMock()
+            mock_databricks_instance.get_databricks_config = AsyncMock(return_value=None)
+            mock_databricks_repo.return_value = mock_databricks_instance
             
             result = await crew_preparation._create_crew()
             
@@ -804,7 +810,7 @@ class TestCrewPreparation:
             mock_get_llm.assert_any_call("invalid-model")
             
             # Verify error was logged
-            mock_logger.warning.assert_called_with("Could not create planning LLM for model invalid-model: Model not found")
+            mock_logger.warning.assert_any_call("Could not create planning LLM for model invalid-model: Model not found")
             
             # Verify crew was created without planning_llm in kwargs
             call_kwargs = mock_crew_class.call_args[1]
@@ -825,7 +831,13 @@ class TestCrewPreparation:
              patch('src.utils.databricks_auth.is_databricks_apps_environment', return_value=False), \
              patch('src.core.llm_manager.LLMManager.get_llm', side_effect=Exception("Model not found")) as mock_get_llm, \
              patch('src.engines.crewai.crew_preparation.logger') as mock_logger, \
-             patch('src.services.api_keys_service.ApiKeysService.get_provider_api_key', return_value=None):
+             patch('src.services.api_keys_service.ApiKeysService.get_provider_api_key', return_value=None), \
+             patch('src.repositories.databricks_config_repository.DatabricksConfigRepository') as mock_databricks_repo:
+            
+            # Configure mock to return None for get_databricks_config
+            mock_databricks_instance = MagicMock()
+            mock_databricks_instance.get_databricks_config = AsyncMock(return_value=None)
+            mock_databricks_repo.return_value = mock_databricks_instance
             
             result = await crew_preparation._create_crew()
             
@@ -837,7 +849,7 @@ class TestCrewPreparation:
             mock_get_llm.assert_any_call("invalid-model")
             
             # Verify error was logged
-            mock_logger.warning.assert_called_with("Could not create reasoning LLM for model invalid-model: Model not found")
+            mock_logger.warning.assert_any_call("Could not create reasoning LLM for model invalid-model: Model not found")
             
             # Verify crew was created without reasoning_llm in kwargs
             call_kwargs = mock_crew_class.call_args[1]
