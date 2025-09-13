@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useRef } from 'react';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
 import {
   ReactFlowProvider as _ReactFlowProvider,
   Node as _Node,
@@ -143,7 +143,9 @@ const WorkflowDesigner: React.FC<WorkflowDesignerProps> = (): JSX.Element => {
     setIsAgentDialogOpen,
     handleAgentSelect,
     handleShowAgentForm,
-    fetchAgents
+    fetchAgents,
+    openInCreateMode: agentOpenInCreateMode,
+    openAgentDialog
   } = useAgentManager({ 
     nodes, 
     setNodes
@@ -156,7 +158,9 @@ const WorkflowDesigner: React.FC<WorkflowDesignerProps> = (): JSX.Element => {
     setIsTaskDialogOpen,
     handleTaskSelect,
     handleShowTaskForm,
-    fetchTasks
+    fetchTasks,
+    openInCreateMode: taskOpenInCreateMode,
+    openTaskDialog
   } = useTaskManager({ 
     nodes, 
     setNodes
@@ -237,6 +241,20 @@ const WorkflowDesigner: React.FC<WorkflowDesignerProps> = (): JSX.Element => {
   // Toggle execution history function
   const toggleExecutionHistory = React.useCallback(() => {
     setExecutionHistoryVisible(!showRunHistory);
+  }, [showRunHistory, setExecutionHistoryVisible]);
+
+  // Auto-open execution history when crew is executed
+  React.useEffect(() => {
+    const handleOpenExecutionHistory = () => {
+      if (!showRunHistory) {
+        setExecutionHistoryVisible(true);
+      }
+    };
+
+    window.addEventListener('openExecutionHistory', handleOpenExecutionHistory);
+    return () => {
+      window.removeEventListener('openExecutionHistory', handleOpenExecutionHistory);
+    };
   }, [showRunHistory, setExecutionHistoryVisible]);
 
   // Use the dialog manager
@@ -407,18 +425,16 @@ const WorkflowDesigner: React.FC<WorkflowDesignerProps> = (): JSX.Element => {
 
   // Debug logging for running tab
   React.useEffect(() => {
-    console.log('[WorkflowDesigner] runningTabId:', runningTabId, 'isExecuting:', isExecuting);
+    // Dependency tracking for running tab state
   }, [runningTabId, isExecuting]);
   
   // Add debug function once on mount
   React.useEffect(() => {
     if (typeof window !== 'undefined') {
       (window as Window & { clearStuckTabs?: () => void }).clearStuckTabs = () => {
-        console.log('[WorkflowDesigner] Manually clearing all stuck tabs');
         const state = useTabManagerStore.getState();
         state.tabs.forEach(tab => {
           if (tab.executionStatus === 'running') {
-            console.log('[WorkflowDesigner] Clearing stuck tab:', tab.id, tab.name);
             state.updateTabExecutionStatus(tab.id, 'completed');
           }
         });
@@ -457,7 +473,6 @@ const WorkflowDesigner: React.FC<WorkflowDesignerProps> = (): JSX.Element => {
   useEffect(() => {
     const handleJobViewed = (event: CustomEvent) => {
       const { jobId } = event.detail;
-      console.log('[WorkflowDesigner] Job viewed from execution history:', jobId);
       setLastViewedJobId(jobId);
     };
 
@@ -480,10 +495,13 @@ const WorkflowDesigner: React.FC<WorkflowDesignerProps> = (): JSX.Element => {
   useEffect(() => {
     const handleJobCreated = (event: CustomEvent) => {
       const { jobId } = event.detail;
-      setExecutingJobId(jobId);
       
-      // Clear any existing task states
-      clearTaskStates();
+      // Only clear task states if this is a different job
+      if (executingJobId !== jobId) {
+        clearTaskStates();
+      }
+      
+      setExecutingJobId(jobId);
       
       // Clear any existing polling interval
       if (taskStatusPollingInterval.current) {
@@ -499,7 +517,6 @@ const WorkflowDesigner: React.FC<WorkflowDesignerProps> = (): JSX.Element => {
       loadTaskStates(jobId);
       
       // Ensure polling is running to monitor job status
-      console.log('[WorkflowDesigner] Starting run status polling for job monitoring');
       startRunStatusPolling();
     };
 
@@ -507,48 +524,40 @@ const WorkflowDesigner: React.FC<WorkflowDesignerProps> = (): JSX.Element => {
     return () => {
       window.removeEventListener('jobCreated', handleJobCreated as EventListener);
     };
-  }, [startRunStatusPolling, loadTaskStates, clearTaskStates]);
+  }, [startRunStatusPolling, loadTaskStates, clearTaskStates, executingJobId]);
 
   // Listen for job completion events to clear running tab and update status
   useEffect(() => {
     const handleJobCompleted = (event: CustomEvent) => {
-      console.log('[WorkflowDesigner] Job completed event received:', event.detail);
-      console.log('[WorkflowDesigner] Current runningTabId:', runningTabId);
       
       // Stop task status polling
       if (taskStatusPollingInterval.current) {
-        console.log('[WorkflowDesigner] Stopping task status polling');
         clearInterval(taskStatusPollingInterval.current);
         taskStatusPollingInterval.current = null;
       }
       
-      // Clear task states after a short delay to show final states
+      // Clear task states after a longer delay to show final states
+      // Increased from 3 seconds to 10 seconds to give users time to see the final status
       setTimeout(() => {
         clearTaskStates();
-      }, 3000);
+      }, 10000);
       
       // Get the active tab to ensure we clear the right one
       const activeTab = getActiveTab();
-      console.log('[WorkflowDesigner] Active tab:', activeTab?.id, 'status:', activeTab?.executionStatus);
       
       // Also log all tabs to debug
       const tabManagerState = useTabManagerStore.getState();
-      console.log('[WorkflowDesigner] All tabs:', tabManagerState.tabs.map(t => ({ id: t.id, name: t.name, status: t.executionStatus })));
       
       if (runningTabId) {
-        console.log('[WorkflowDesigner] Clearing running tab:', runningTabId);
         tabManagerState.updateTabExecutionStatus(runningTabId, 'completed');
         setRunningTabId(null);
       } else if (activeTab?.executionStatus === 'running') {
         // Fallback: if no runningTabId but active tab is running, clear it
-        console.log('[WorkflowDesigner] Fallback: clearing active tab running status:', activeTab.id);
         tabManagerState.updateTabExecutionStatus(activeTab.id, 'completed');
       } else {
         // Extra fallback: check all tabs for running status
-        console.log('[WorkflowDesigner] No runningTabId or active tab running, checking all tabs...');
         tabManagerState.tabs.forEach(tab => {
           if (tab.executionStatus === 'running') {
-            console.log('[WorkflowDesigner] Found running tab:', tab.id, '- clearing it');
             tabManagerState.updateTabExecutionStatus(tab.id, 'completed');
           }
         });
@@ -564,43 +573,35 @@ const WorkflowDesigner: React.FC<WorkflowDesignerProps> = (): JSX.Element => {
     };
 
     const handleJobFailed = (event: CustomEvent) => {
-      console.log('[WorkflowDesigner] Job failed event received:', event.detail);
-      console.log('[WorkflowDesigner] Current runningTabId:', runningTabId);
       
       // Stop task status polling
       if (taskStatusPollingInterval.current) {
-        console.log('[WorkflowDesigner] Stopping task status polling');
         clearInterval(taskStatusPollingInterval.current);
         taskStatusPollingInterval.current = null;
       }
       
-      // Clear task states after a short delay to show final states
+      // Clear task states after a longer delay to show final states
+      // Increased from 3 seconds to 10 seconds to give users time to see the final status
       setTimeout(() => {
         clearTaskStates();
-      }, 3000);
+      }, 10000);
       
       // Get the active tab to ensure we clear the right one
       const activeTab = getActiveTab();
-      console.log('[WorkflowDesigner] Active tab:', activeTab?.id, 'status:', activeTab?.executionStatus);
       
       // Also log all tabs to debug
       const tabManagerState = useTabManagerStore.getState();
-      console.log('[WorkflowDesigner] All tabs:', tabManagerState.tabs.map(t => ({ id: t.id, name: t.name, status: t.executionStatus })));
       
       if (runningTabId) {
-        console.log('[WorkflowDesigner] Clearing running tab:', runningTabId);
         tabManagerState.updateTabExecutionStatus(runningTabId, 'failed');
         setRunningTabId(null);
       } else if (activeTab?.executionStatus === 'running') {
         // Fallback: if no runningTabId but active tab is running, clear it
-        console.log('[WorkflowDesigner] Fallback: clearing active tab running status:', activeTab.id);
         tabManagerState.updateTabExecutionStatus(activeTab.id, 'failed');
       } else {
         // Extra fallback: check all tabs for running status
-        console.log('[WorkflowDesigner] No runningTabId or active tab running, checking all tabs...');
         tabManagerState.tabs.forEach(tab => {
           if (tab.executionStatus === 'running') {
-            console.log('[WorkflowDesigner] Found running tab:', tab.id, '- marking as failed');
             tabManagerState.updateTabExecutionStatus(tab.id, 'failed');
           }
         });
@@ -619,7 +620,6 @@ const WorkflowDesigner: React.FC<WorkflowDesignerProps> = (): JSX.Element => {
     window.addEventListener('jobFailed', handleJobFailed as EventListener);
 
     // Debug: log when listeners are attached
-    console.log('[WorkflowDesigner] Job completion event listeners attached, runningTabId:', runningTabId);
 
     return () => {
       window.removeEventListener('jobCompleted', handleJobCompleted as EventListener);
@@ -635,20 +635,15 @@ const WorkflowDesigner: React.FC<WorkflowDesignerProps> = (): JSX.Element => {
 
   // Fallback: Monitor job status directly from runHistory
   useEffect(() => {
-    console.log('[WorkflowDesigner] Fallback monitor - executingJobId:', executingJobId, 'runHistory length:', runHistory.length);
     
     if (executingJobId && runHistory.length > 0) {
       const job = runHistory.find(run => run.job_id === executingJobId);
       if (job) {
-        console.log(`[WorkflowDesigner] Fallback check - Job ${executingJobId} status: ${job.status}`);
         
         if (job.status.toLowerCase() === 'completed' || job.status.toLowerCase() === 'failed') {
-          console.log(`[WorkflowDesigner] Fallback detected job ${executingJobId} ${job.status}, clearing running state`);
-          console.log('[WorkflowDesigner] Current runningTabId before clearing:', runningTabId);
           
           // Clear the running tab if it's still set
           if (runningTabId) {
-            console.log('[WorkflowDesigner] Fallback clearing tab:', runningTabId);
             updateTabExecutionStatus(runningTabId, job.status.toLowerCase() as 'completed' | 'failed');
             setRunningTabId(null);
           }
@@ -658,7 +653,6 @@ const WorkflowDesigner: React.FC<WorkflowDesignerProps> = (): JSX.Element => {
           const tabManagerState = useTabManagerStore.getState();
           tabManagerState.tabs.forEach(tab => {
             if (tab.executionStatus === 'running') {
-              console.log('[WorkflowDesigner] Fallback found stuck tab:', tab.id, '- clearing it');
               tabManagerState.updateTabExecutionStatus(tab.id, job.status.toLowerCase() as 'completed' | 'failed');
             }
           });
@@ -668,10 +662,9 @@ const WorkflowDesigner: React.FC<WorkflowDesignerProps> = (): JSX.Element => {
           
           // Manually dispatch the event in case it was missed
           // Skip dispatching - let the runStatus store handle it to avoid duplicates
-          console.log('[WorkflowDesigner] Fallback detected completion but NOT dispatching event to avoid duplicates');
         }
       } else {
-        console.log('[WorkflowDesigner] Fallback - job not found in runHistory for ID:', executingJobId);
+        // No execution status, continue normally
       }
     }
   }, [executingJobId, runHistory, runningTabId, updateTabExecutionStatus]);
@@ -679,14 +672,12 @@ const WorkflowDesigner: React.FC<WorkflowDesignerProps> = (): JSX.Element => {
   // Add event listener to force clear stuck execution state
   useEffect(() => {
     const handleForceClearExecution = () => {
-      console.log('[WorkflowDesigner] Force clearing execution state');
       
       // Clear any running tabs
       // Get tabs directly from store to avoid dependency issues
       const tabManagerState = useTabManagerStore.getState();
       tabManagerState.tabs.forEach(tab => {
         if (tab.executionStatus === 'running') {
-          console.log('[WorkflowDesigner] Force clearing running status for tab:', tab.id);
           tabManagerState.updateTabExecutionStatus(tab.id, 'completed');
         }
       });
@@ -831,8 +822,11 @@ const WorkflowDesigner: React.FC<WorkflowDesignerProps> = (): JSX.Element => {
   const {
     isCrewFlowDialogOpen,
     setIsCrewFlowDialogOpen,
-    openCrewOrFlowDialog
+    openCrewOrFlowDialog: _openCrewOrFlowDialog
   } = useCrewFlowDialogHandler();
+  
+  const [crewFlowDialogInitialTab, setCrewFlowDialogInitialTab] = useState(0);
+  const [crewFlowDialogShowOnlyTab, setCrewFlowDialogShowOnlyTab] = useState<number | undefined>(undefined);
 
   // Use flow selection dialog handler
   const {
@@ -869,7 +863,6 @@ const WorkflowDesigner: React.FC<WorkflowDesignerProps> = (): JSX.Element => {
   const handleRunTab = useCallback(async (tabId: string) => {
     const tab = tabs.find(t => t.id === tabId);
     if (tab) {
-      console.log('[WorkflowDesigner] Starting execution for tab:', tabId);
       // Set this tab as running
       setRunningTabId(tabId);
       updateTabExecutionStatus(tabId, 'running');
@@ -877,7 +870,6 @@ const WorkflowDesigner: React.FC<WorkflowDesignerProps> = (): JSX.Element => {
       try {
         // Execute the tab directly with its nodes and edges
         await executeTab(tabId, tab.nodes, tab.edges, tab.name);
-        console.log('[WorkflowDesigner] Execution started for tab:', tabId);
         // Don't clear running state here - let the job completion events handle it
       } catch (error) {
         // Clear running state on error
@@ -1141,7 +1133,6 @@ const WorkflowDesigner: React.FC<WorkflowDesignerProps> = (): JSX.Element => {
     // Wait for ReactFlow to be initialized and nodes to be loaded
     const applyInitialViewport = () => {
       if (!initialViewportApplied && crewFlowInstanceRef.current && nodes.length > 0) {
-        console.log('[WorkflowDesigner] Applying custom viewport on page load with', nodes.length, 'nodes');
         initialViewportApplied = true;
         // Apply UI-aware fit view
         handleUIAwareFitView();
@@ -1193,7 +1184,21 @@ const WorkflowDesigner: React.FC<WorkflowDesignerProps> = (): JSX.Element => {
           onRunTab={handleRunTab}
           isRunning={!!runningTabId}
           runningTabId={runningTabId}
-          onLoadCrew={() => setIsCrewFlowDialogOpen(true)}
+          onLoadCrew={() => {
+            setCrewFlowDialogInitialTab(0);
+            setCrewFlowDialogShowOnlyTab(0); // Only show Plans tab
+            setIsCrewFlowDialogOpen(true);
+          }}
+          onLoadAgents={() => {
+            setCrewFlowDialogInitialTab(1);
+            setCrewFlowDialogShowOnlyTab(1); // Only show Agents tab
+            setIsCrewFlowDialogOpen(true);
+          }}
+          onLoadTasks={() => {
+            setCrewFlowDialogInitialTab(2);
+            setCrewFlowDialogShowOnlyTab(2); // Only show Tasks tab
+            setIsCrewFlowDialogOpen(true);
+          }}
           disabled={isChatProcessing || isGeneratingConnections || !!runningTabId}
         />
         
@@ -1243,8 +1248,8 @@ const WorkflowDesigner: React.FC<WorkflowDesignerProps> = (): JSX.Element => {
               onOpenLogsDialog={() => dialogManager.setIsLogsDialogOpen(true)}
               onToggleChat={toggleChatPanel}
               isChatOpen={showChatPanel}
-              setIsAgentDialogOpen={setIsAgentDialogOpen}
-              setIsTaskDialogOpen={setIsTaskDialogOpen}
+              setIsAgentDialogOpen={() => openAgentDialog(true)}
+              setIsTaskDialogOpen={() => openTaskDialog(true)}
               setIsFlowDialogOpen={dialogManager.setIsFlowDialogOpen}
               onPanelDragStart={e => {
                 e.preventDefault();
@@ -1361,7 +1366,6 @@ const WorkflowDesigner: React.FC<WorkflowDesignerProps> = (): JSX.Element => {
                         // Set a safety timeout to clear running state after 5 minutes
                         const tabIdToTimeout = activeTab.id; // Capture the tab ID
                         runningTabTimeoutRef.current = setTimeout(() => {
-                          console.log('[WorkflowDesigner] Safety timeout: clearing stuck running state for tab:', tabIdToTimeout);
                           setRunningTabId((currentRunningTabId) => {
                             if (currentRunningTabId === tabIdToTimeout) {
                               return null;
@@ -1371,12 +1375,6 @@ const WorkflowDesigner: React.FC<WorkflowDesignerProps> = (): JSX.Element => {
                           updateTabExecutionStatus(tabIdToTimeout, 'completed');
                         }, 5 * 60 * 1000); // 5 minutes
                       }
-                      console.log('[WorkflowDesigner] Calling handleRunClick from chat with nodes:', nodes);
-                      console.log('[WorkflowDesigner] Node details:', nodes.map(n => ({
-                        id: n.id,
-                        type: n.type,
-                        data: n.data
-                      })));
                       // Make sure nodes are synced to the execution store
                       setCrewExecutionNodes(nodes);
                       setCrewExecutionEdges(edges);
@@ -1479,6 +1477,7 @@ const WorkflowDesigner: React.FC<WorkflowDesignerProps> = (): JSX.Element => {
           onShowAgentForm={handleShowAgentForm}
           fetchAgents={fetchAgents}
           showErrorMessage={showErrorMessage}
+          openInCreateMode={agentOpenInCreateMode}
         />
 
         <TaskDialog
@@ -1488,6 +1487,7 @@ const WorkflowDesigner: React.FC<WorkflowDesignerProps> = (): JSX.Element => {
           tasks={tasks}
           onShowTaskForm={handleShowTaskForm}
           fetchTasks={fetchTasks}
+          openInCreateMode={taskOpenInCreateMode}
         />
 
         <CrewPlanningDialog
@@ -1502,9 +1502,17 @@ const WorkflowDesigner: React.FC<WorkflowDesignerProps> = (): JSX.Element => {
 
         <CrewFlowSelectionDialog
           open={isCrewFlowDialogOpen}
-          onClose={() => setIsCrewFlowDialogOpen(false)}
+          onClose={() => {
+            setIsCrewFlowDialogOpen(false);
+            setCrewFlowDialogInitialTab(0); // Reset to default tab
+            setCrewFlowDialogShowOnlyTab(undefined); // Reset to show all tabs
+          }}
           onCrewSelect={handleCrewSelectWrapper}
           onFlowSelect={handleFlowSelect}
+          onAgentSelect={handleAgentSelect}
+          onTaskSelect={handleTaskSelect}
+          initialTab={crewFlowDialogInitialTab}
+          showOnlyTab={crewFlowDialogShowOnlyTab}
         />
 
         {/* Flow Selection Dialog */}
@@ -1513,6 +1521,8 @@ const WorkflowDesigner: React.FC<WorkflowDesignerProps> = (): JSX.Element => {
           onClose={() => setIsFlowDialogOpen(false)}
           onCrewSelect={handleCrewSelectWrapper}
           onFlowSelect={handleFlowSelect}
+          onAgentSelect={handleAgentSelect}
+          onTaskSelect={handleTaskSelect}
           initialTab={1} // Set to Flows tab
         />
 
@@ -1673,10 +1683,14 @@ const WorkflowDesigner: React.FC<WorkflowDesignerProps> = (): JSX.Element => {
           onOpenLogsDialog={() => dialogManager.setIsLogsDialogOpen(true)}
           onToggleChat={() => setChatPanelVisible(!showChatPanel)}
           isChatOpen={showChatPanel}
-          setIsAgentDialogOpen={setIsAgentDialogOpen}
-          setIsTaskDialogOpen={setIsTaskDialogOpen}
+          setIsAgentDialogOpen={() => openAgentDialog(true)}
+          setIsTaskDialogOpen={() => openTaskDialog(true)}
           setIsFlowDialogOpen={dialogManager.setIsFlowDialogOpen}
-          setIsCrewDialogOpen={openCrewOrFlowDialog}
+          setIsCrewDialogOpen={() => {
+            setCrewFlowDialogInitialTab(0);
+            setCrewFlowDialogShowOnlyTab(undefined); // Show all tabs for catalog
+            setIsCrewFlowDialogOpen(true);
+          }}
           onSaveCrewClick={() => {
             const event = new CustomEvent('openSaveCrewDialog');
             window.dispatchEvent(event);

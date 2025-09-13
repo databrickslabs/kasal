@@ -17,8 +17,36 @@ interface UILayoutStore extends UILayoutState {
   getUILayoutState: () => UILayoutState;
 }
 
+// Helper function to load persisted state from localStorage
+const loadPersistedState = () => {
+  try {
+    const stored = localStorage.getItem('ui-layout-storage');
+    if (stored) {
+      return JSON.parse(stored);
+    }
+  } catch (error) {
+    console.error('Failed to load persisted UI state:', error);
+  }
+  return {};
+};
+
+// Helper function to save state to localStorage
+const saveToLocalStorage = (state: Partial<UILayoutState>) => {
+  try {
+    const stored = localStorage.getItem('ui-layout-storage') || '{}';
+    const current = JSON.parse(stored);
+    const updated = { ...current, ...state };
+    localStorage.setItem('ui-layout-storage', JSON.stringify(updated));
+  } catch (error) {
+    console.error('Failed to save UI state:', error);
+  }
+};
+
+// Load initial persisted state
+const persistedState = loadPersistedState();
+
 export const useUILayoutStore = create<UILayoutStore>((set, get) => ({
-  // Default UI state
+  // Default UI state with persisted values
   screenWidth: typeof window !== 'undefined' ? window.innerWidth : 1200,
   screenHeight: typeof window !== 'undefined' ? window.innerHeight : 800,
   tabBarHeight: 48,
@@ -28,42 +56,56 @@ export const useUILayoutStore = create<UILayoutStore>((set, get) => ({
   leftSidebarExpandedWidth: 280,
   rightSidebarVisible: true,
   rightSidebarWidth: 48,
-  chatPanelVisible: true,
-  chatPanelCollapsed: false,
-  chatPanelWidth: 450,
+  chatPanelVisible: persistedState.chatPanelVisible !== undefined ? persistedState.chatPanelVisible : true,
+  chatPanelCollapsed: persistedState.chatPanelCollapsed !== undefined ? persistedState.chatPanelCollapsed : false,
+  chatPanelWidth: persistedState.chatPanelWidth || 450,
   chatPanelCollapsedWidth: 60,
-  executionHistoryVisible: false,
-  executionHistoryHeight: 60,
-  panelPosition: 50,
-  areFlowsVisible: true,
+  executionHistoryVisible: persistedState.executionHistoryVisible !== undefined ? persistedState.executionHistoryVisible : false,
+  executionHistoryHeight: persistedState.executionHistoryHeight || 60,
+  panelPosition: persistedState.panelPosition || 50,
+  areFlowsVisible: persistedState.areFlowsVisible !== undefined ? persistedState.areFlowsVisible : true,
 
   // Actions
   updateScreenDimensions: (width: number, height: number) =>
     set({ screenWidth: width, screenHeight: height }),
 
-  setChatPanelWidth: (width: number) =>
-    set({ chatPanelWidth: width }),
+  setChatPanelWidth: (width: number) => {
+    set({ chatPanelWidth: width });
+    saveToLocalStorage({ chatPanelWidth: width });
+  },
 
-  setChatPanelCollapsed: (collapsed: boolean) =>
-    set({ chatPanelCollapsed: collapsed }),
+  setChatPanelCollapsed: (collapsed: boolean) => {
+    set({ chatPanelCollapsed: collapsed });
+    saveToLocalStorage({ chatPanelCollapsed: collapsed });
+  },
 
-  setChatPanelVisible: (visible: boolean) =>
-    set({ chatPanelVisible: visible }),
+  setChatPanelVisible: (visible: boolean) => {
+    set({ chatPanelVisible: visible });
+    saveToLocalStorage({ chatPanelVisible: visible });
+  },
 
-  setExecutionHistoryHeight: (height: number) =>
-    set({ executionHistoryHeight: height }),
+  setExecutionHistoryHeight: (height: number) => {
+    set({ executionHistoryHeight: height });
+    saveToLocalStorage({ executionHistoryHeight: height });
+  },
 
-  setExecutionHistoryVisible: (visible: boolean) =>
-    set({ executionHistoryVisible: visible }),
+  setExecutionHistoryVisible: (visible: boolean) => {
+    set({ executionHistoryVisible: visible });
+    saveToLocalStorage({ executionHistoryVisible: visible });
+  },
 
   setLeftSidebarExpanded: (expanded: boolean) =>
     set({ leftSidebarExpanded: expanded }),
 
-  setPanelPosition: (position: number) =>
-    set({ panelPosition: position }),
+  setPanelPosition: (position: number) => {
+    set({ panelPosition: position });
+    saveToLocalStorage({ panelPosition: position });
+  },
 
-  setAreFlowsVisible: (visible: boolean) =>
-    set({ areFlowsVisible: visible }),
+  setAreFlowsVisible: (visible: boolean) => {
+    set({ areFlowsVisible: visible });
+    saveToLocalStorage({ areFlowsVisible: visible });
+  },
 
   // Computed getter that returns the current UI layout state
   getUILayoutState: (): UILayoutState => {

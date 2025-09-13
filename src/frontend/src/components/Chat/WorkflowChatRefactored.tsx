@@ -25,7 +25,6 @@ import RefreshIcon from '@mui/icons-material/Refresh';
 import CloseIcon from '@mui/icons-material/Close';
 import KeyboardArrowDownIcon from '@mui/icons-material/KeyboardArrowDown';
 import ChevronLeftIcon from '@mui/icons-material/ChevronLeft';
-import TerminalIcon from '@mui/icons-material/Terminal';
 import DispatcherService, { DispatchResult, ConfigureCrewResult } from '../../api/DispatcherService';
 import { useWorkflowStore } from '../../store/workflow';
 import { useCrewExecutionStore } from '../../store/crewExecution';
@@ -62,6 +61,7 @@ import { useExecutionMonitoring } from './hooks/useExecutionMonitoring';
 // Import components
 import { ChatMessageItem } from './components/ChatMessageItem';
 import { GroupedTraceMessages } from './components/GroupedTraceMessages';
+import { KnowledgeFileUpload } from './KnowledgeFileUpload';
 
 const WorkflowChat: React.FC<WorkflowChatProps> = ({
   onNodesGenerated,
@@ -130,7 +130,7 @@ const WorkflowChat: React.FC<WorkflowChatProps> = ({
   const {
     executingJobId,
     setExecutingJobId,
-    lastExecutionJobId,
+    lastExecutionJobId: _lastExecutionJobId,
     setLastExecutionJobId,
     executionStartTime: _executionStartTime,
   } = useExecutionMonitoring(sessionId, saveMessageToBackend, setMessages);
@@ -871,24 +871,6 @@ const WorkflowChat: React.FC<WorkflowChatProps> = ({
               <ChatIcon fontSize="small" />
             </IconButton>
           </Tooltip>
-          {onOpenLogs && (
-            <Tooltip title={executingJobId || lastExecutionJobId ? "Execution Logs" : "No execution logs available"}>
-              <span>
-                <IconButton 
-                  size="small" 
-                  onClick={() => {
-                    const jobId = executingJobId || lastExecutionJobId;
-                    if (jobId) {
-                      onOpenLogs(jobId);
-                    }
-                  }}
-                  disabled={!executingJobId && !lastExecutionJobId}
-                >
-                  <TerminalIcon fontSize="small" />
-                </IconButton>
-              </span>
-            </Tooltip>
-          )}
           <Tooltip title="Collapse Chat">
             <IconButton 
               size="small" 
@@ -1071,7 +1053,17 @@ const WorkflowChat: React.FC<WorkflowChatProps> = ({
             pb: 0, // Remove bottom padding
           }}>
             {(() => {
-              const filteredMessages = messages.filter(message => {
+              // First, deduplicate messages by ID
+              const seenIds = new Set<string>();
+              const deduplicatedMessages = messages.filter(message => {
+                if (seenIds.has(message.id)) {
+                  return false;
+                }
+                seenIds.add(message.id);
+                return true;
+              });
+              
+              const filteredMessages = deduplicatedMessages.filter(message => {
                 // Filter out execution start and completion messages
                 if (message.type === 'execution' && (
                   message.content.includes('🚀 Started execution:') ||
@@ -1107,8 +1099,10 @@ const WorkflowChat: React.FC<WorkflowChatProps> = ({
               return groupedMessages.map((item, index) => {
                 if (Array.isArray(item)) {
                   // It's a group of trace messages
+                  // Use first and last message IDs plus index for uniqueness
+                  const groupKey = `trace-group-${item[0].id}-${item[item.length - 1].id}-${index}`;
                   return (
-                    <React.Fragment key={`trace-group-${item[0].id}`}>
+                    <React.Fragment key={groupKey}>
                       <GroupedTraceMessages messages={item} onOpenLogs={onOpenLogs} />
                       {index < groupedMessages.length - 1 && <Divider component="li" sx={{ ml: 0 }} />}
                     </React.Fragment>
@@ -1164,13 +1158,93 @@ const WorkflowChat: React.FC<WorkflowChatProps> = ({
                 <Box
                   sx={{
                     position: 'absolute',
-                    right: 40,
+                    right: 35,
                     bottom: 8,
                     display: 'flex',
                     alignItems: 'center',
-                    gap: 1,
+                    gap: 0.25,
                   }}
                 >
+                  {/* Knowledge File Upload */}
+                  <Box sx={{ display: 'flex', alignItems: 'center' }}>
+                    <KnowledgeFileUpload
+                      executionId={sessionId || 'default'}
+                      groupId={localStorage.getItem('groupId') || 'default'}
+                      disabled={isLoading || !!executingJobId}
+                      onFilesUploaded={(files) => {
+                        console.log('Knowledge files uploaded:', files);
+                      }}
+                      onAgentsUpdated={(updatedAgents) => {
+                        console.log('[DEBUG] onAgentsUpdated called with agents:', updatedAgents.map(a => ({
+                          id: a.id,
+                          name: a.name,
+                          knowledge_sources: a.knowledge_sources
+                        })));
+                        
+                        // Update the canvas nodes with the updated agent data
+                        const updatedNodes = nodes.map(node => {
+                          if (node.type === 'agentNode') {
+                            console.log('[DEBUG] Checking node:', {
+                              nodeId: node.id,
+                              nodeDataId: node.data.id,
+                              nodeDataAgentId: node.data.agentId,
+                              nodeDataName: node.data.name
+                            });
+                            
+                            const updatedAgent = updatedAgents.find(a => {
+                              // Try multiple matching strategies
+                              const matches = 
+                                a.id === node.data.agentId ||  // Match by agentId
+                                a.id === node.data.id ||        // Match by id
+                                (a.id && `agent-${a.id}` === node.id) ||  // Match by node.id pattern
+                                `agent-${a.name}` === node.id;  // Match by name pattern
+                              
+                              if (matches) {
+                                console.log(`[DEBUG] Found match for node ${node.id} with agent ${a.name}`);
+                              }
+                              return matches;
+                            });
+                            
+                            if (updatedAgent) {
+                              console.log(`[DEBUG] Updating node ${node.id} with knowledge_sources:`, updatedAgent.knowledge_sources);
+                              return {
+                                ...node,
+                                data: {
+                                  ...node.data,
+                                  ...updatedAgent,  // Update all agent fields
+                                  agentId: updatedAgent.id,  // Ensure agentId is set
+                                  knowledge_sources: updatedAgent.knowledge_sources  // Explicitly set knowledge_sources
+                                }
+                              };
+                            }
+                          }
+                          return node;
+                        });
+                        setNodes(updatedNodes as FlowNode[]);
+                        console.log('Updated canvas nodes with knowledge sources:', updatedAgents.map(a => ({
+                          name: a.name,
+                          knowledge_sources: a.knowledge_sources?.length || 0
+                        })));
+                      }}
+                      // Pass only agents that are currently on the canvas
+                      availableAgents={nodes
+                        .filter(node => node.type === 'agentNode')
+                        .map(node => {
+                          console.log('[DEBUG] Available agent from node:', {
+                            nodeId: node.id,
+                            nodeData: node.data,
+                            agentId: node.data.agentId,
+                            id: node.data.id,
+                            name: node.data.name
+                          });
+                          return {
+                            ...node.data,
+                            id: node.data.agentId || node.data.id  // Ensure we have an ID
+                          };
+                        })}
+                      compact={true}
+                    />
+                  </Box>
                   {/* Model Selector */}
                   {setSelectedModel && (
                     <Box

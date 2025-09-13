@@ -20,11 +20,9 @@ export const useChatSession = (providedChatSessionId?: string) => {
   useEffect(() => {
     const initializeSession = () => {
       if (providedChatSessionId) {
-        console.log(`[WorkflowChat] Using provided chat session ID: ${providedChatSessionId}`);
         setSessionId(providedChatSessionId);
       } else {
         const newSessionId = ChatHistoryService.generateSessionId();
-        console.log(`[WorkflowChat] Generated new chat session ID: ${newSessionId}`);
         setSessionId(newSessionId);
       }
     };
@@ -74,7 +72,6 @@ export const useChatSession = (providedChatSessionId?: string) => {
       if (!sessionId) return;
       
       try {
-        console.log(`[WorkflowChat] Loading chat history for session: ${sessionId}`);
         setMessages([]);
         
         try {
@@ -82,12 +79,11 @@ export const useChatSession = (providedChatSessionId?: string) => {
           if (response.messages && response.messages.length > 0) {
             const loadedMessages = response.messages.map(convertBackendMessage);
             setMessages(loadedMessages);
-            console.log(`[WorkflowChat] Loaded ${loadedMessages.length} messages for session: ${sessionId}`);
           } else {
-            console.log(`[WorkflowChat] Initialized new/empty chat session: ${sessionId}`);
+            // No messages in session, continue with empty state
           }
         } catch (sessionError) {
-          console.log(`[WorkflowChat] Starting new chat session: ${sessionId}`);
+          // Session loading failed, continue with empty session
         }
       } catch (error) {
         console.error('Error loading chat history:', error);

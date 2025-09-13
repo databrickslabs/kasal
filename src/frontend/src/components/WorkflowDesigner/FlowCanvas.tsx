@@ -200,7 +200,9 @@ const FlowCanvas: React.FC<FlowCanvasProps> = ({
       window.dispatchEvent(event);
       showTemporaryNotification('Opening Flow selection dialog (press lf)');
     },
-    disabled: isRendering || hasError
+    disabled: isRendering || hasError,
+    instanceId: 'flow-canvas',  // Unique identifier for this instance
+    priority: 5  // Lower priority than crew canvas
   });
 
   // Filter to only show flow nodes - define this before using it

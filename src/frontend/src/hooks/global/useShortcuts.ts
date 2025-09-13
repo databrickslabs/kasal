@@ -5,6 +5,7 @@ import { useRunResult } from './useExecutionResult';
 import { useRunHistory } from './useExecutionHistory';
 import { useWorkflowStore } from '../../store/workflow';
 import { useCrewExecutionStore } from '../../store/crewExecution';
+import shortcutManager from '../../utils/shortcutManager';
 
 /**
  * Default shortcut configurations
@@ -80,6 +81,8 @@ interface UseShortcutsOptions {
   onOpenMCPConfigDialog?: () => void;
   disabled?: boolean;
   useWorkflowStore?: boolean;
+  instanceId?: string; // Unique identifier for this hook instance
+  priority?: number; // Priority for this instance (higher = more important)
 }
 
 /**
@@ -113,12 +116,18 @@ const useShortcuts = ({
   onOpenMaxRPMDialog,
   onOpenMCPConfigDialog,
   disabled = false,
-  useWorkflowStore: enableWorkflowStore = false
+  useWorkflowStore: enableWorkflowStore = false,
+  instanceId = 'default',
+  priority = 0
 }: UseShortcutsOptions) => {
   // Store the current key sequence
   const keySequence = useRef<string[]>([]);
   const sequenceTimer = useRef<NodeJS.Timeout | null>(null);
   const handlerRef = useRef<HandlerMap | null>(null);
+  const isActiveInstance = useRef<boolean>(false);
+  
+  // Sequence timeout duration in milliseconds
+  const SEQUENCE_TIMEOUT = 1000;
   
   const { showRunResult } = useRunResult();
   const { runs, fetchRuns } = useRunHistory();
@@ -227,7 +236,13 @@ const useShortcuts = ({
       'fitView': () => onFitView?.(),
       'openSaveCrew': () => onOpenSaveCrew?.(),
       'executeCrew': async () => {
+        console.log('Shortcut: executeCrew handler called', { 
+          hasOnExecuteCrew: !!onExecuteCrew, 
+          nodeCount: nodes?.length || 0, 
+          edgeCount: edges?.length || 0 
+        });
         if (onExecuteCrew) {
+          console.log('Shortcut: Calling provided onExecuteCrew');
           onExecuteCrew();
         } else if (nodes && edges) {
           console.log('Shortcut: Executing crew with stored nodes/edges');
@@ -320,32 +335,55 @@ const useShortcuts = ({
     handlerRef.current = handlers;
   }, [handlers]);
 
+  // Register/unregister with the shortcut manager
+  useEffect(() => {
+    // Register this instance with the manager
+    const shouldBeActive = shortcutManager.register(instanceId, priority);
+    isActiveInstance.current = shouldBeActive;
+    
+    console.log(`useShortcuts - Instance ${instanceId} registered with priority ${priority}, active: ${shouldBeActive}`);
+    console.log('useShortcuts - Registered shortcuts:', shortcuts.map(s => `${s.action}: [${s.keys.join(', ')}]`).join(', '));
+    
+    return () => {
+      // Unregister when unmounting
+      shortcutManager.unregister(instanceId);
+      console.log(`useShortcuts - Instance ${instanceId} unregistered`);
+    };
+  }, [instanceId, priority, shortcuts]);
+
   // Add and remove event listeners
   useEffect(() => {
-    console.log('useShortcuts - Setting up event listener');
     
     // Create stable references to the values used in the effect
     const currentDisabled = disabled;
     const currentShortcuts = shortcuts;
+    const currentInstanceId = instanceId;
     
     // console.log('useShortcuts - Render cycle dependencies:', {
     //   handlersKeys: Object.keys(handlerRef.current || {}),
     //   disabledValue: currentDisabled,
-    //   shortcutsCount: currentShortcuts.length
+    //   shortcutsCount: currentShortcuts.length,
+    //   instanceId: currentInstanceId
     // });
     
     const handleKeyDown = (event: KeyboardEvent) => {
-      // console.log('useShortcuts - Key event captured:', event.key);
+      console.log('useShortcuts - Key event captured:', event.key, 'by instance:', currentInstanceId);
+      
+      // Check if this instance is active
+      if (!shortcutManager.isActive(currentInstanceId)) {
+        console.log(`useShortcuts - Instance ${currentInstanceId} is not active, ignoring`);
+        return;
+      }
       
       if (currentDisabled) {
-        // console.log('useShortcuts - Shortcuts are disabled');
+        console.log('useShortcuts - Shortcuts are disabled');
         return;
       }
 
       // Check if a dialog is open
       const hasOpenDialog = document.querySelector('.MuiDialog-root') !== null;
       if (hasOpenDialog) {
-        // console.log('useShortcuts - Dialog is open, blocking shortcuts');
+        console.log('useShortcuts - Dialog is open, blocking shortcuts');
         return;
       }
 
@@ -408,32 +446,52 @@ const useShortcuts = ({
       );
       
       if (isShortcutKey) {
+        // Clear any existing timer
+        if (sequenceTimer.current) {
+          clearTimeout(sequenceTimer.current);
+          sequenceTimer.current = null;
+        }
+        
         // Add the key to the sequence
         const newKeySequence = [...keySequence.current, event.key.toLowerCase()];
-        // console.log('useShortcuts - New key sequence:', newKeySequence);
+        console.log('useShortcuts - New key sequence:', newKeySequence);
 
         // Check if the sequence matches any shortcut
         const matchedShortcut = currentShortcuts.find(shortcut => 
+          shortcut.keys.length === newKeySequence.length &&
           shortcut.keys.every((key, index) => 
             key.toLowerCase() === newKeySequence[index]
           )
         );
 
+        console.log('useShortcuts - Looking for match, found:', matchedShortcut?.action || 'none');
+
         if (matchedShortcut) {
-          // console.log('useShortcuts - Matched shortcut:', matchedShortcut);
+          console.log('useShortcuts - Matched shortcut:', matchedShortcut);
           // Execute the handler if it exists
           const handler = handlerRef.current ? handlerRef.current[matchedShortcut.action] : null;
           if (handler) {
-            // console.log('useShortcuts - Executing handler for:', matchedShortcut.action);
+            console.log('useShortcuts - Executing handler for:', matchedShortcut.action);
             handler();
             // Clear the sequence after executing the handler
             keySequence.current = [];
+            if (sequenceTimer.current) {
+              clearTimeout(sequenceTimer.current);
+              sequenceTimer.current = null;
+            }
           } else {
-            // console.log('useShortcuts - No handler found for:', matchedShortcut.action);
+            console.log('useShortcuts - No handler found for:', matchedShortcut.action);
           }
         } else {
           // Update the sequence
           keySequence.current = newKeySequence;
+          
+          // Set a timer to clear the sequence after SEQUENCE_TIMEOUT
+          sequenceTimer.current = setTimeout(() => {
+            // console.log('useShortcuts - Sequence timeout, clearing');
+            keySequence.current = [];
+            sequenceTimer.current = null;
+          }, SEQUENCE_TIMEOUT);
         }
 
         // Prevent default behavior for shortcut keys
@@ -442,25 +500,29 @@ const useShortcuts = ({
         // Clear the sequence if a non-shortcut key is pressed
         // console.log('useShortcuts - Non-shortcut key pressed, clearing sequence');
         keySequence.current = [];
+        if (sequenceTimer.current) {
+          clearTimeout(sequenceTimer.current);
+          sequenceTimer.current = null;
+        }
       }
     };
 
     window.addEventListener('keydown', handleKeyDown);
-    // console.log('useShortcuts - Event listener attached');
+    // console.log(`useShortcuts - Event listener attached for instance ${currentInstanceId}`);
     
     // Capture the current timer value
     const currentTimer = sequenceTimer.current;
     
     return () => {
-      // console.log('useShortcuts - Cleaning up event listener');
+      // console.log(`useShortcuts - Cleaning up event listener for instance ${currentInstanceId}`);
       window.removeEventListener('keydown', handleKeyDown);
       if (currentTimer) {
         clearTimeout(currentTimer);
       }
     };
-  // Only disabled and shortcuts are needed as dependencies
+  // Only disabled, shortcuts, and instanceId are needed as dependencies
   // handlers are accessed through handlerRef.current to avoid re-registering the event listener
-  }, [disabled, shortcuts]);
+  }, [disabled, shortcuts, instanceId]);
 
   // Add mount/unmount logging
   useEffect(() => {
