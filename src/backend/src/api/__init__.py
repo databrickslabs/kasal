@@ -4,6 +4,7 @@ from fastapi import APIRouter
 from src.api.agents_router import router as agents_router
 from src.api.crews_router import router as crews_router
 from src.api.databricks_router import router as databricks_router
+from src.api.databricks_knowledge_router import router as databricks_knowledge_router
 from src.api.flows_router import router as flows_router
 from src.api.healthcheck_router import router as healthcheck_router
 from src.api.logs_router import router as logs_router
@@ -14,7 +15,8 @@ from src.api.tasks_router import router as tasks_router
 from src.api.templates_router import router as templates_router
 from src.api.schemas_router import router as schemas_router
 from src.api.tools_router import router as tools_router
-from src.api.upload_router import router as upload_router
+# DISABLED: Local file uploads are not allowed - use Databricks volumes instead
+# from src.api.upload_router import router as upload_router
 from src.api.task_tracking_router import router as task_tracking_router
 from src.api.scheduler_router import router as scheduler_router
 from src.api.agent_generation_router import router as agent_generation_router
@@ -52,6 +54,7 @@ api_router = APIRouter()
 api_router.include_router(agents_router)
 api_router.include_router(crews_router)
 api_router.include_router(databricks_router)
+api_router.include_router(databricks_knowledge_router)
 api_router.include_router(flows_router)
 api_router.include_router(healthcheck_router)
 api_router.include_router(logs_router)
@@ -62,7 +65,8 @@ api_router.include_router(tasks_router)
 api_router.include_router(templates_router)
 api_router.include_router(schemas_router)
 api_router.include_router(tools_router)
-api_router.include_router(upload_router)
+# DISABLED: Local file uploads are not allowed - use Databricks volumes instead
+# api_router.include_router(upload_router)
 api_router.include_router(task_tracking_router)
 api_router.include_router(scheduler_router)
 api_router.include_router(agent_generation_router)
@@ -99,6 +103,7 @@ __all__ = [
     "agents_router",
     "crews_router",
     "databricks_router",
+    "databricks_knowledge_router",
     "flows_router",
     "healthcheck_router",
     "logs_router",
@@ -109,7 +114,7 @@ __all__ = [
     "templates_router",
     "schemas_router",
     "tools_router",
-    "upload_router",
+    # "upload_router",  # DISABLED: Local file uploads not allowed
     "task_tracking_router",
     "scheduler_router",
     "agent_generation_router",
