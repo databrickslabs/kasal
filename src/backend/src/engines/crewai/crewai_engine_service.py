@@ -257,6 +257,14 @@ class CrewAIEngineService(BaseEngineService):
                     
                     # Use the CrewPreparation class for crew setup with tool_service and tool_factory
                     # Pass user_token for OBO authentication in Databricks Apps
+                    
+                    # Debug log to check if knowledge_sources are still present
+                    logger.info(f"[CrewAIEngineService] DEBUG: Right before CrewPreparation creation for {execution_id}:")
+                    for idx, agent_config in enumerate(execution_config.get("agents", [])):
+                        agent_id = agent_config.get('id', f'agent_{idx}')
+                        ks = agent_config.get('knowledge_sources', [])
+                        logger.info(f"[CrewAIEngineService] Agent {agent_id} knowledge_sources: {ks}")
+                    
                     crew_preparation = CrewPreparation(execution_config, tool_service, tool_factory, user_token)
                     if not await crew_preparation.prepare():
                         logger.error(f"[CrewAIEngineService] Failed to prepare crew for {execution_id}")

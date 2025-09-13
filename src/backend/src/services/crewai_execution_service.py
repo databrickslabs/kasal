@@ -122,6 +122,12 @@ class CrewAIExecutionService:
                             if 'id' not in agent_config:
                                 agent_config['id'] = agent_id
                             
+                            # Log if knowledge_sources are present
+                            if 'knowledge_sources' in agent_config:
+                                crew_logger.info(f"Agent {agent_id} has {len(agent_config.get('knowledge_sources', []))} knowledge_sources from YAML")
+                                for idx, source in enumerate(agent_config.get('knowledge_sources', [])):
+                                    crew_logger.info(f"  Knowledge source {idx}: {source}")
+                            
                             # Try to fetch the agent from database to get tool_configs
                             # First try by name/role since YAML keys might not match database IDs
                             db_agent = None
