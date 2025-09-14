@@ -465,6 +465,11 @@ export const DatabricksOneClickSetup: React.FC = () => {
         updatePayload
       );
 
+      // Dispatch event to notify other components about memory backend configuration change
+      window.dispatchEvent(new CustomEvent('memory-backend-updated', {
+        detail: { config: response.data }
+      }));
+
       if (response.data) {
         console.log('Backend configuration updated successfully');
       }
@@ -882,6 +887,11 @@ export const DatabricksOneClickSetup: React.FC = () => {
           await apiClient.post(`/memory-backend/configs/${response.data.id}/set-default`);
         }
       }
+
+      // Dispatch event to notify other components about memory backend configuration change
+      window.dispatchEvent(new CustomEvent('memory-backend-updated', {
+        detail: { config: response.data }
+      }));
       
       if (response.data) {
         // Update store

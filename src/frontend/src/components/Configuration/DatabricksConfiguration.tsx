@@ -16,12 +16,15 @@ import {
   Select,
   MenuItem,
   Paper,
+  Tooltip,
 } from '@mui/material';
 import SaveIcon from '@mui/icons-material/Save';
 import CheckCircleOutlineIcon from '@mui/icons-material/CheckCircleOutline';
 import StorageIcon from '@mui/icons-material/Storage';
 import { useTranslation } from 'react-i18next';
 import { DatabricksService, DatabricksConfig, DatabricksTokenStatus, DatabricksConnectionStatus } from '../../api/DatabricksService';
+import { MemoryBackendService } from '../../api/MemoryBackendService';
+import { MemoryBackendType, isValidMemoryBackendConfig } from '../../types/memoryBackend';
 
 interface DatabricksConfigurationProps {
   onSaved?: () => void;
@@ -56,6 +59,31 @@ const DatabricksConfiguration: React.FC<DatabricksConfigurationProps> = ({ onSav
   });
   const [connectionStatus, setConnectionStatus] = useState<DatabricksConnectionStatus | null>(null);
   const [checkingConnection, setCheckingConnection] = useState(false);
+  const [isMemoryBackendConfigured, setIsMemoryBackendConfigured] = useState<boolean>(false);
+  const [memoryBackendType, setMemoryBackendType] = useState<MemoryBackendType | null>(null);
+
+  // Function to check memory backend configuration for knowledge sources
+  const checkMemoryBackendConfig = async () => {
+    try {
+      const memoryConfig = await MemoryBackendService.getConfig();
+      if (memoryConfig && isValidMemoryBackendConfig(memoryConfig)) {
+        // Knowledge sources ONLY work with Databricks Vector Search, not with ChromaDB
+        const isConfigured = memoryConfig.backend_type === MemoryBackendType.DATABRICKS &&
+          memoryConfig.databricks_config?.endpoint_name &&
+          memoryConfig.databricks_config?.short_term_index;
+
+        setIsMemoryBackendConfigured(!!isConfigured);
+        setMemoryBackendType(memoryConfig.backend_type);
+      } else {
+        setIsMemoryBackendConfigured(false);
+        setMemoryBackendType(null);
+      }
+    } catch (error) {
+      console.error('Error checking memory backend configuration:', error);
+      setIsMemoryBackendConfigured(false);
+      setMemoryBackendType(null);
+    }
+  };
 
   useEffect(() => {
     const loadConfig = async () => {
@@ -76,6 +104,7 @@ const DatabricksConfiguration: React.FC<DatabricksConfigurationProps> = ({ onSav
     };
 
     loadConfig();
+    checkMemoryBackendConfig();
   }, []);
 
   const handleSaveConfig = async () => {
@@ -107,7 +136,12 @@ const DatabricksConfiguration: React.FC<DatabricksConfigurationProps> = ({ onSav
       const databricksService = DatabricksService.getInstance();
       const savedConfig = await databricksService.setDatabricksConfig(config);
       setConfig(savedConfig);
-      
+
+      // Dispatch event to notify other components about configuration change
+      window.dispatchEvent(new CustomEvent('databricks-config-updated', {
+        detail: { config: savedConfig }
+      }));
+
       // Check token status after saving if Databricks is enabled
       if (savedConfig.enabled) {
         const status = await databricksService.checkPersonalTokenRequired();
@@ -419,33 +453,48 @@ const DatabricksConfiguration: React.FC<DatabricksConfigurationProps> = ({ onSav
         </Alert>
 
         <Stack spacing={2}>
-          <FormControlLabel
-            control={
-              <Switch
-                checked={config.knowledge_volume_enabled || false}
-                onChange={(e) => setConfig(prev => ({ ...prev, knowledge_volume_enabled: e.target.checked }))}
-                color="secondary"
-                disabled={!config.enabled}
-              />
+          <Tooltip
+            title={
+              !isMemoryBackendConfigured
+                ? `Knowledge sources require Databricks Vector Search memory backend configuration. ${memoryBackendType === MemoryBackendType.DEFAULT ? 'ChromaDB backend does not support knowledge sources.' : 'Vector Search backend is not properly configured.'}`
+                : ''
             }
-            label={
-              <Box>
-                <Typography variant="body1">
-                  {t('configuration.databricks.knowledge.enable', { defaultValue: 'Enable Knowledge Source Volume' })}
-                </Typography>
-                <Typography variant="caption" color="text.secondary">
-                  {t('configuration.databricks.knowledge.enableDescription', { defaultValue: 'Store and retrieve knowledge files from Databricks Volumes for RAG' })}
-                </Typography>
-              </Box>
-            }
-          />
+            placement="right"
+            arrow
+          >
+            <FormControlLabel
+              control={
+                <Switch
+                  checked={config.knowledge_volume_enabled || false}
+                  onChange={(e) => setConfig(prev => ({ ...prev, knowledge_volume_enabled: e.target.checked }))}
+                  color="secondary"
+                  disabled={!config.enabled || !isMemoryBackendConfigured}
+                />
+              }
+              label={
+                <Box>
+                  <Typography variant="body1" color={!isMemoryBackendConfigured ? 'text.disabled' : 'inherit'}>
+                    {t('configuration.databricks.knowledge.enable', { defaultValue: 'Enable Knowledge Source Volume' })}
+                  </Typography>
+                  <Typography variant="caption" color={!isMemoryBackendConfigured ? 'text.disabled' : 'text.secondary'}>
+                    {t('configuration.databricks.knowledge.enableDescription', { defaultValue: 'Store and retrieve knowledge files from Databricks Volumes for RAG' })}
+                  </Typography>
+                  {!isMemoryBackendConfigured && (
+                    <Typography variant="caption" color="warning.main" sx={{ display: 'block', mt: 0.5 }}>
+                      ⚠️ Requires memory backend configuration (Vector Search or default ChromaDB)
+                    </Typography>
+                  )}
+                </Box>
+              }
+            />
+          </Tooltip>
 
           <TextField
             label={t('configuration.databricks.knowledge.path', { defaultValue: 'Knowledge Volume Path' })}
             value={config.knowledge_volume_path || 'main.default.knowledge'}
             onChange={(e) => setConfig(prev => ({ ...prev, knowledge_volume_path: e.target.value }))}
             fullWidth
-            disabled={loading || !config.enabled || !config.knowledge_volume_enabled}
+            disabled={loading || !config.enabled || !config.knowledge_volume_enabled || !isMemoryBackendConfigured}
             size="small"
             helperText={t('configuration.databricks.knowledge.pathHelp', { 
               defaultValue: 'Format: catalog.schema.volume (e.g., main.default.knowledge)'
@@ -458,7 +507,7 @@ const DatabricksConfiguration: React.FC<DatabricksConfigurationProps> = ({ onSav
             value={config.knowledge_chunk_size || 1000}
             onChange={(e) => setConfig(prev => ({ ...prev, knowledge_chunk_size: parseInt(e.target.value) || 1000 }))}
             fullWidth
-            disabled={loading || !config.enabled || !config.knowledge_volume_enabled}
+            disabled={loading || !config.enabled || !config.knowledge_volume_enabled || !isMemoryBackendConfigured}
             size="small"
             type="number"
             helperText={t('configuration.databricks.knowledge.chunkSizeHelp', { 
@@ -471,7 +520,7 @@ const DatabricksConfiguration: React.FC<DatabricksConfigurationProps> = ({ onSav
             value={config.knowledge_chunk_overlap || 200}
             onChange={(e) => setConfig(prev => ({ ...prev, knowledge_chunk_overlap: parseInt(e.target.value) || 200 }))}
             fullWidth
-            disabled={loading || !config.enabled || !config.knowledge_volume_enabled}
+            disabled={loading || !config.enabled || !config.knowledge_volume_enabled || !isMemoryBackendConfigured}
             size="small"
             type="number"
             helperText={t('configuration.databricks.knowledge.chunkOverlapHelp', { 
