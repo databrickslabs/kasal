@@ -68,7 +68,17 @@ async def get_group_context(
         logger.debug(f"Created group context: primary_group_id={group_context.primary_group_id}, group_ids={group_context.group_ids}, email={group_context.group_email}")
         return group_context
     
-    # Fallback: No group context available (single-group mode)
+    # Fallback: No group context available
+    # For local development, use admin@admin.com as default
+    from src.config.settings import settings
+    if settings.DEBUG_MODE and not user_email:
+        logger.debug("Local development: using admin@admin.com as default user")
+        group_context = await GroupContext.from_email(
+            email="admin@admin.com",
+            access_token=None
+        )
+        return group_context
+
     logger.debug("No email header found, returning empty group context")
     return GroupContext()
 

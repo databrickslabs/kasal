@@ -143,21 +143,24 @@ class DatabricksIndexSchemas:
         "content": "string",
         "source": "string",
         "document_type": "string",  # Type of document (md, pdf, txt, etc.)
-        
+
         # Document structure
         "section": "string",  # Section within document
         "chunk_index": "int",  # Index of chunk within document
         "chunk_size": "int",  # Size of the chunk in characters
         "parent_document_id": "string",  # ID of parent document if chunked
-        
+
+        # Access control
+        "agent_ids": "string",  # JSON array of agent IDs that can access this document
+
         # Temporal tracking
         "created_at": "string",
         "updated_at": "string",
-        
+
         # Metadata
         "doc_metadata": "string",  # JSON string
         "group_id": "string",  # For proper tenant isolation
-        
+
         # Technical fields
         "embedding": "array<float>",
         "embedding_model": "string",  # Model used for embedding
@@ -168,7 +171,7 @@ class DatabricksIndexSchemas:
     DOCUMENT_SEARCH_COLUMNS = [
         "id", "title", "content", "source", "document_type",
         "section", "chunk_index", "chunk_size", "parent_document_id",
-        "created_at", "updated_at", "doc_metadata", "group_id",
+        "agent_ids", "created_at", "updated_at", "doc_metadata", "group_id",
         "embedding_model", "version"
     ]
     
