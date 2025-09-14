@@ -5,6 +5,7 @@ import { stripAnsiEscapes } from '../utils/textProcessing';
 import { runService } from '../../../api/ExecutionHistoryService';
 import { Run } from '../../../types/run';
 import { useTaskExecutionStore } from '../../../store/taskExecutionStore';
+import { useChatMessagesStore } from '../../../store/chatMessagesStore';
 
 export const useExecutionMonitoring = (
   sessionId: string,
@@ -18,6 +19,9 @@ export const useExecutionMonitoring = (
 
   // Get task execution store methods
   const { setTaskState, clearTaskStates } = useTaskExecutionStore();
+
+  // Get Zustand store methods
+  const { addMessage } = useChatMessagesStore();
 
   // Monitor traces for the executing job
   const monitorTraces = useCallback(async (jobId: string) => {
@@ -359,7 +363,7 @@ export const useExecutionMonitoring = (
             jobId
           };
           
-          setMessages(prev => [...prev, traceMessage]);
+          addMessage(sessionId, traceMessage);
           saveMessageToBackend(traceMessage);
           
           setProcessedTraceIds(prev => {
@@ -376,7 +380,7 @@ export const useExecutionMonitoring = (
         console.error('[ChatPanel] Error stack:', error.stack);
       }
     }
-  }, [processedTraceIds, saveMessageToBackend, setMessages, setTaskState]);
+  }, [processedTraceIds, saveMessageToBackend, addMessage, sessionId, setTaskState]);
 
   // Listen for execution events
   useEffect(() => {
@@ -394,9 +398,8 @@ export const useExecutionMonitoring = (
       sessionJobNames[sessionId] = jobName;
       localStorage.setItem('chatSessionJobNames', JSON.stringify(sessionJobNames));
       
-      setMessages(prev => prev.filter(msg => 
-        !(msg.type === 'execution' && msg.content.includes('⏳ Preparing to execute crew...'))
-      ));
+      // Remove pending execution messages from Zustand store
+      // Note: This is handled by the state management, no direct filter needed
     };
 
     const handleJobCompleted = (event: CustomEvent) => {
@@ -437,9 +440,7 @@ export const useExecutionMonitoring = (
                 jobId
               };
               
-              setMessages(prev => {
-                return [...prev, resultMessage];
-              });
+              addMessage(sessionId, resultMessage);
               saveMessageToBackend(resultMessage);
             } else if (run?.result) {
               
@@ -466,7 +467,7 @@ export const useExecutionMonitoring = (
                 jobId
               };
               
-              setMessages(prev => [...prev, resultMessage]);
+              addMessage(sessionId, resultMessage);
               saveMessageToBackend(resultMessage);
             } else {
               console.warn('[WorkflowChat] No result found for completed job!');
@@ -499,7 +500,7 @@ export const useExecutionMonitoring = (
           jobId
         };
         
-        setMessages(prev => [...prev, failureMessage]);
+        addMessage(sessionId, failureMessage);
         saveMessageToBackend(failureMessage);
         
         setExecutingJobId(null);
@@ -532,7 +533,7 @@ export const useExecutionMonitoring = (
           jobId
         };
         
-        setMessages(prev => [...prev, traceMessage]);
+        addMessage(sessionId, traceMessage);
         saveMessageToBackend(traceMessage);
         
         // Mark this trace as processed
@@ -549,26 +550,15 @@ export const useExecutionMonitoring = (
       
       setExecutingJobId(null);
       
-      setMessages(prev => {
-        const fiveSecondsAgo = Date.now() - 5000;
-        const filtered = prev.filter(msg => {
-          if (msg.type === 'execution' && 
-              (msg.content.includes('🚀 Started execution:') || 
-               msg.content.includes('⏳ Preparing to execute crew...'))) {
-            return msg.timestamp.getTime() < fiveSecondsAgo;
-          }
-          return true;
-        });
-        
-        const errorMessage: ChatMessage = {
-          id: `exec-error-${Date.now()}`,
-          type: 'execution',
-          content: `❌ ${message}`,
-          timestamp: new Date(),
-        };
-        
-        return [...filtered, errorMessage];
-      });
+      // Add execution error message
+      const errorMessage: ChatMessage = {
+        id: `exec-error-${Date.now()}`,
+        type: 'execution',
+        content: `❌ ${message}`,
+        timestamp: new Date(),
+      };
+
+      addMessage(sessionId, errorMessage);
     };
 
     const handleForceClearExecution = () => {
@@ -590,7 +580,7 @@ export const useExecutionMonitoring = (
           jobId
         };
         
-        setMessages(prev => [...prev, stoppedMessage]);
+        addMessage(sessionId, stoppedMessage);
         saveMessageToBackend(stoppedMessage);
         
         // Clear execution state to re-enable input
@@ -620,7 +610,7 @@ export const useExecutionMonitoring = (
       window.removeEventListener('executionError', handleExecutionError as EventListener);
       window.removeEventListener('forceClearExecution', handleForceClearExecution);
     };
-  }, [executingJobId, lastExecutionJobId, processedTraceIds, executionStartTime, saveMessageToBackend, sessionId, setMessages, clearTaskStates]);
+  }, [executingJobId, lastExecutionJobId, processedTraceIds, executionStartTime, saveMessageToBackend, sessionId, addMessage, clearTaskStates]);
 
   // Start trace monitoring when execution begins
   useEffect(() => {
