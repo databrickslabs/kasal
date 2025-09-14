@@ -140,19 +140,23 @@ class TestGetGroupContext:
         with patch('src.core.dependencies.GroupContext') as mock_group_context_class:
             mock_empty_context = MagicMock(spec=GroupContext)
             mock_group_context_class.return_value = mock_empty_context
-            
-            result = await get_group_context(
-                request=mock_request,
-                x_forwarded_email=None,
-                x_forwarded_access_token=None,
-                x_auth_request_email=None,
-                x_auth_request_user=None,
-                x_auth_request_access_token=None
-            )
-            
-            # Verify empty context is returned
-            mock_group_context_class.assert_called_once_with()
-            assert result == mock_empty_context
+
+            # Mock settings import inside the function to avoid admin@admin.com fallback
+            with patch('src.config.settings.settings') as mock_settings:
+                mock_settings.DEBUG_MODE = False
+
+                result = await get_group_context(
+                    request=mock_request,
+                    x_forwarded_email=None,
+                    x_forwarded_access_token=None,
+                    x_auth_request_email=None,
+                    x_auth_request_user=None,
+                    x_auth_request_access_token=None
+                )
+
+                # Verify empty context is returned
+                mock_group_context_class.assert_called_once_with()
+                assert result == mock_empty_context
     
     @pytest.mark.asyncio
     async def test_get_group_context_with_partial_headers(self, mock_request):
