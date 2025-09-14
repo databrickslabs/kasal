@@ -58,17 +58,23 @@ async def upload_knowledge_file(
 ) -> Dict[str, Any]:
     """
     Upload a file to Databricks Volume for knowledge source.
-    
+
     Args:
         execution_id: Execution ID for scoping the file
         request: FastAPI request object (for extracting user token)
         file: The uploaded file
         volume_config: JSON string containing volume configuration
         group_context: Group context for multi-tenant operations
-    
+
     Returns:
         Upload response with file path and metadata
     """
+    logger.info(f"[API] 🚀 UPLOAD REQUEST RECEIVED!")
+    logger.info(f"[API] Execution ID: {execution_id}")
+    logger.info(f"[API] File: {file.filename} ({file.content_type})")
+    logger.info(f"[API] Volume config: {volume_config}")
+    logger.info(f"[API] Group context: {group_context}")
+
     try:
         # Extract user token for OBO authentication
         from src.utils.databricks_auth import extract_user_token_from_request
@@ -139,39 +145,6 @@ async def browse_volume_files(
         logger.error(f"Error browsing volume files: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
-
-@router.post("/select-from-volume/{execution_id}")
-async def select_volume_file(
-    execution_id: str,
-    group_context: GroupContextDep,
-    service: Annotated[DatabricksKnowledgeService, Depends(get_databricks_knowledge_service)],
-    file_path: str = Form(...)
-) -> Dict[str, Any]:
-    """
-    Select an existing file from Databricks Volume for knowledge source.
-    
-    Args:
-        execution_id: Execution ID for scoping
-        file_path: Full path to the file in Databricks Volume
-        service: DatabricksKnowledgeService instance
-        group_context: Group context for multi-tenant operations
-    
-    Returns:
-        File metadata and registration confirmation
-    """
-    try:
-        # Register the selected file for this execution
-        result = await service.register_volume_file(
-            execution_id=execution_id,
-            file_path=file_path,
-            group_id=group_context.group_ids[0] if group_context and group_context.group_ids else "default"
-        )
-        
-        return result
-        
-    except Exception as e:
-        logger.error(f"Error selecting volume file: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
 
 
 @router.get("/list/{execution_id}")
