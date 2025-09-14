@@ -2,6 +2,16 @@
   "hooks": {
     "PreToolUse": [
       {
+        "matcher": "Read|Edit|MultiEdit|Write|Bash",
+        "condition": "!context.recentTools?.includes('mcp__knowledge-graph__aim_search_nodes') && !context.recentTools?.includes('mcp__knowledge-graph__aim_read_graph')",
+        "hooks": [
+          {
+            "type": "message",
+            "message": "🚫 BLOCKED: Must query knowledge graph first! Use aim_search_nodes() or aim_read_graph() before any file operations per CLAUDE.md requirements."
+          }
+        ]
+      },
+      {
         "matcher": "Bash",
         "condition": "args.command.includes('git push')",
         "hooks": [
@@ -30,8 +40,22 @@
         "matcher": "Write|Edit|MultiEdit",
         "hooks": [
           {
+            "type": "message",
+            "message": "📝 File modified. REQUIRED: Update knowledge graph with aim_add_observations() to document changes per CLAUDE.md requirements."
+          },
+          {
             "type": "command",
             "command": "echo '📝 File modified. Remember to review for best practices before committing.'"
+          }
+        ]
+      }
+    ],
+    "SessionStart": [
+      {
+        "hooks": [
+          {
+            "type": "message",
+            "message": "📚 Session started. MANDATORY: Load project context with aim_read_graph() before beginning any work per CLAUDE.md requirements."
           }
         ]
       }
