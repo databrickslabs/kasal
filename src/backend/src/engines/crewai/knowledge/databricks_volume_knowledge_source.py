@@ -37,6 +37,12 @@ class DatabricksVolumeKnowledgeSource(BaseKnowledgeSource):
     file_format: str = Field(default="auto", description="File format: auto, pdf, txt, json, csv")
     chunk_size: int = Field(default=1000, description="Size of text chunks")
     chunk_overlap: int = Field(default=200, description="Overlap between chunks")
+    execution_path: Optional[str] = Field(default=None, description="Execution-specific path in volume")
+    
+    class Config:
+        """Pydantic config to allow private attributes."""
+        arbitrary_types_allowed = True
+        extra = "allow"
     
     def __init__(self, **data):
         """Initialize the Databricks volume knowledge source."""

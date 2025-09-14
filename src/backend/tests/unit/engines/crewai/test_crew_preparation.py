@@ -177,7 +177,8 @@ class TestCrewPreparation:
                 agent_key="researcher",
                 agent_config=crew_preparation.config["agents"][0],
                 tool_service=crew_preparation.tool_service,
-                tool_factory=crew_preparation.tool_factory
+                tool_factory=crew_preparation.tool_factory,
+                config=crew_preparation.config
             )
     
     @pytest.mark.asyncio
