@@ -1,0 +1,2 @@
+{"type":"_aim","source":"mcp-knowledge-graph"}
+{"type":"entity","name":"KnowledgeSourceSearchIssue","entityType":"bug","observations":["Chunks save successfully to vector index but task search fails","Knowledge save: group_id=user_admin_admin_com works","Task search: No active Databricks backend found for knowledge search","Memory backend configuration lookup failing during task execution","Vector search returns 0 results when task tries to find knowledge chunks"]}
