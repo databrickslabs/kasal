@@ -17,14 +17,18 @@ logger = LoggerManager.get_instance().crew
 
 def process_knowledge_sources(knowledge_sources: List[Any]) -> List[Any]:
     """
-    Process knowledge sources and return CrewAI-compatible knowledge source objects.
+    Process knowledge sources and return CrewAI-compatible knowledge source paths.
+    
+    For now, we'll just extract the paths from Databricks volume sources and return
+    them as strings, which CrewAI can handle. The actual knowledge source objects
+    will be created by CrewAI internally.
     
     Args:
         knowledge_sources: List of knowledge sources, which can be strings, 
                           dictionaries with metadata, or objects with 'path' property
                           
     Returns:
-        List of knowledge source objects compatible with CrewAI
+        List of knowledge source paths as strings compatible with CrewAI
     """
     if not knowledge_sources:
         logger.info("[CREW] No knowledge sources to process")
@@ -32,68 +36,98 @@ def process_knowledge_sources(knowledge_sources: List[Any]) -> List[Any]:
     
     logger.info(f"[CREW] Processing {len(knowledge_sources)} knowledge sources: {knowledge_sources}")
     
-    # Import knowledge source classes
-    from src.engines.crewai.knowledge.databricks_volume_knowledge_source import DatabricksVolumeKnowledgeSource
-    
     processed_sources = []
     
     for source in knowledge_sources:
         try:
-            # Handle Databricks volume sources
-            if isinstance(source, dict) and source.get('type') == 'databricks_volume':
-                # Create DatabricksVolumeKnowledgeSource instance
-                metadata = source.get('metadata', {})
-                source_path = source.get('source', '')  # This is the FULL Databricks path
-                logger.info(f"[CREW] Creating DatabricksVolumeKnowledgeSource with full path: {source_path}, metadata: {metadata}")
-                
-                # The source_path is the complete path: /Volumes/catalog/schema/volume/path/to/file
-                # We need to extract the volume path and pass the full file path
-                
-                if source_path.startswith('/Volumes/'):
-                    # Extract catalog.schema.volume from the path
-                    path_parts = source_path[9:].split('/')  # Remove /Volumes/ prefix
-                    if len(path_parts) >= 3:
-                        # First 3 parts are catalog, schema, volume
-                        volume_path = '.'.join(path_parts[:3])
-                        
-                        logger.info(f"[CREW] Extracted volume_path: {volume_path} from full path: {source_path}")
-                        
-                        # Create the DatabricksVolumeKnowledgeSource
-                        # Pass the FULL path in file_paths so it can be downloaded directly
+            # Handle dictionaries
+            if isinstance(source, dict):
+                source_type = source.get('type')
+
+                # Handle Databricks volume sources specifically
+                if source_type == 'databricks_volume':
+                    try:
+                        # Import here to avoid circular imports
+                        from src.engines.crewai.knowledge.databricks_volume_knowledge_source import DatabricksVolumeKnowledgeSource
+                        import os
+
+                        # Extract required parameters
+                        source_path = source.get('source', source.get('source_path', source.get('path', '')))
+                        metadata = source.get('metadata', {})
+
+                        logger.info(f"[CREW] Creating DatabricksVolumeKnowledgeSource with full path: {source_path}, metadata: {metadata}")
+
+                        # Extract volume path from full path like /Volumes/users/test/knowledge/file.docx
+                        if source_path and source_path.startswith('/Volumes/'):
+                            # Parse /Volumes/catalog/schema/volume/path/to/file.ext
+                            path_parts = source_path.split('/')
+                            if len(path_parts) >= 5:  # ['', 'Volumes', 'catalog', 'schema', 'volume', ...]
+                                volume_path = f"{path_parts[2]}.{path_parts[3]}.{path_parts[4]}"
+                            else:
+                                logger.error(f"Invalid Databricks volume path format: {source_path}")
+                                continue
+                        else:
+                            logger.error(f"Invalid or missing source path for Databricks volume: {source_path}")
+                            continue
+
+                        # Create Databricks knowledge source
                         databricks_source = DatabricksVolumeKnowledgeSource(
                             volume_path=volume_path,
-                            execution_id=metadata.get('execution_id', ''),
-                            group_id=metadata.get('group_id', ''),
-                            file_paths=[source_path],  # Pass the FULL path here
+                            execution_id=metadata.get('execution_id', 'default'),
+                            group_id=metadata.get('group_id', 'default'),
+                            file_paths=[source_path],
                             workspace_url=os.environ.get('DATABRICKS_HOST'),
                             token=os.environ.get('DATABRICKS_TOKEN')
                         )
+
                         processed_sources.append(databricks_source)
-                        logger.info(f"[CREW] Created DatabricksVolumeKnowledgeSource for: {source_path}")
-                    else:
-                        logger.error(f"[CREW] Invalid Databricks volume path format: {source_path}")
                         continue
+
+                    except ImportError as e:
+                        logger.error(f"Failed to import DatabricksVolumeKnowledgeSource: {e}")
+                    except Exception as e:
+                        logger.error(f"Failed to create DatabricksVolumeKnowledgeSource: {e}")
+
+                # Handle regular dictionary sources (non-Databricks)
+                # Check for path keys, handling None values properly
+                if 'source' in source:
+                    source_path = source['source']
+                elif 'source_path' in source:
+                    source_path = source['source_path']
+                elif 'path' in source:
+                    source_path = source['path']
                 else:
-                    logger.error(f"[CREW] Path doesn't start with /Volumes/: {source_path}")
+                    source_path = None
+                    logger.warning(f"[CREW] Dict source without path field: {source}")
                     continue
+
+                # Include all paths, even None and empty strings
+                logger.info(f"[CREW] Extracted path from dict source: {source_path}")
+                processed_sources.append(source_path)
             
-            # Handle string paths (backwards compatibility)
+            # Handle string paths (already in the right format)
             elif isinstance(source, str):
                 processed_sources.append(source)
-            
-            # Handle dictionaries with 'path' property
-            elif isinstance(source, dict) and 'path' in source:
-                processed_sources.append(source['path'])
+                logger.info(f"[CREW] Using string source as-is: {source}")
             
             # Handle objects with 'path' property
             elif hasattr(source, 'path'):
                 processed_sources.append(source.path)
+                logger.info(f"[CREW] Extracted path from object: {source.path}")
+            
+            # Handle objects with 'source' property
+            elif hasattr(source, 'source'):
+                processed_sources.append(source.source)
+                logger.info(f"[CREW] Extracted source from object: {source.source}")
             
             else:
-                logger.warning(f"Unknown knowledge source format: {source}")
+                logger.warning(f"Unknown knowledge source format: {type(source)} - {source}")
                 
         except Exception as e:
             logger.error(f"Error processing knowledge source {source}: {str(e)}")
+            # On error, if it's a string, still add it
+            if isinstance(source, str):
+                processed_sources.append(source)
     
     logger.info(f"Processed {len(processed_sources)} knowledge sources")
     return processed_sources
@@ -137,9 +171,15 @@ async def create_agent(
     # Process knowledge sources if present
     if 'knowledge_sources' in agent_config:
         logger.info(f"[CREW] Agent {agent_key} has {len(agent_config.get('knowledge_sources', []))} knowledge sources")
+
         if agent_config.get('knowledge_sources'):
-            logger.info(f"[CREW] Knowledge sources for {agent_key}: {agent_config['knowledge_sources']}")
-        agent_config['knowledge_sources'] = process_knowledge_sources(agent_config['knowledge_sources'])
+            logger.info(f"[CREW] Knowledge sources config for {agent_key}: {agent_config['knowledge_sources']}")
+
+            # Process knowledge sources to extract paths for CrewAI
+            processed_sources = process_knowledge_sources(agent_config['knowledge_sources'])
+            agent_config = agent_config.copy()  # Don't modify original dict
+            agent_config['knowledge_sources'] = processed_sources
+            logger.info(f"[CREW] Processed knowledge sources for {agent_key}: {processed_sources}")
     
     # Handle LLM configuration
     llm = None
@@ -386,18 +426,16 @@ async def create_agent(
 
     # Add additional agent configuration parameters
     additional_params = [
-        'max_iter', 'max_rpm', 'memory', 'code_execution_mode', 
-        'knowledge_sources', 'max_context_window_size', 'max_tokens',
-        'reasoning', 'max_reasoning_attempts'
+        'max_iter', 'max_rpm', 'memory', 'code_execution_mode',
+        'max_context_window_size', 'max_tokens',
+        'reasoning', 'max_reasoning_attempts', 'knowledge_sources'
+        # Note: 'knowledge_sources' re-added for CrewAI compatibility
     ]
     
     for param in additional_params:
         if param in agent_config and agent_config[param] is not None:
             agent_kwargs[param] = agent_config[param]
-            if param == 'knowledge_sources':
-                logger.info(f"[CREW] Setting knowledge_sources for agent {agent_key}: {len(agent_config[param])} sources")
-            else:
-                logger.info(f"Setting additional parameter '{param}' to {agent_config[param]} for agent {agent_key}")
+            logger.info(f"Setting additional parameter '{param}' to {agent_config[param]} for agent {agent_key}")
 
     # Handle prompt templates
     if 'system_template' in agent_config and agent_config['system_template']:

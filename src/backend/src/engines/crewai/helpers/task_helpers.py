@@ -382,7 +382,167 @@ async def create_task(
         "max_retries": task_config.get("max_retries", 3),
         "markdown": task_config.get("markdown", False)
     }
-    
+
+    # KNOWLEDGE INTEGRATION FIX: Search vector index for relevant knowledge chunks
+    # that this specific agent has access to, based on task context
+    try:
+        # Get agent ID for access control filtering
+        agent_id = None
+        if hasattr(agent, 'id'):
+            agent_id = agent.id
+        elif hasattr(agent, '_agent_id'):
+            agent_id = agent._agent_id
+
+        # Try to get agent_id from config if not available directly
+        if not agent_id and hasattr(config, 'get'):
+            # Look for agent configurations that match this agent
+            for agent_config in config.get('agents', []):
+                config_agent_name = agent_config.get('name', agent_config.get('id', agent_config.get('role', '')))
+                if config_agent_name == agent_name:
+                    agent_id = agent_config.get('id')
+                    break
+
+        if agent_id:
+            logger.info(f"Task {task_key}: Found agent ID {agent_id} for access control")
+
+            # Search vector index for relevant knowledge chunks using agent access control
+            try:
+                # Import required components for vector search
+                from src.core.unit_of_work import UnitOfWork
+                from src.schemas.memory_backend import MemoryBackendType
+                import asyncio
+                import json
+
+                async def search_agent_knowledge():
+                    """Search for knowledge chunks this agent can access"""
+                    try:
+                        async with UnitOfWork() as uow:
+                            # Get group_id for this execution
+                            group_id = config.get('group_id', 'default') if hasattr(config, 'get') else 'default'
+
+                            # Get Databricks memory backend configuration
+                            backends = await uow.memory_backend_repository.get_by_group_id(group_id)
+                            databricks_backend = None
+                            for backend in backends:
+                                if backend.is_active and backend.backend_type == MemoryBackendType.DATABRICKS:
+                                    databricks_backend = backend
+                                    break
+
+                            if not databricks_backend or not databricks_backend.databricks_config:
+                                logger.warning(f"Task {task_key}: No active Databricks backend found for knowledge search")
+                                return []
+
+                            # Get document index configuration
+                            document_index = databricks_backend.databricks_config.document_index
+                            endpoint_name = (databricks_backend.databricks_config.document_endpoint_name or
+                                           databricks_backend.databricks_config.endpoint_name)
+
+                            if not document_index or not endpoint_name:
+                                logger.warning(f"Task {task_key}: Document index not configured for knowledge search")
+                                return []
+
+                            # Import vector storage for search
+                            from src.engines.crewai.memory.databricks_vector_storage import DatabricksVectorStorage
+
+                            # Create storage instance
+                            storage = DatabricksVectorStorage(
+                                index_name=document_index,
+                                endpoint_name=endpoint_name,
+                                workspace_url=databricks_backend.databricks_config.workspace_url,
+                                user_token=None,  # Will use service authentication
+                                group_id=group_id
+                            )
+
+                            # Create search query based on task description
+                            search_query = task_args.get("description", "")[:500]  # Limit query length
+                            if not search_query.strip():
+                                logger.warning(f"Task {task_key}: No task description available for knowledge search")
+                                return []
+
+                            # Search with agent access control filter
+                            filter_criteria = {
+                                "agent_ids": json.dumps([agent_id]),  # Filter by agent access
+                                "group_id": group_id  # Ensure group isolation
+                            }
+
+                            # Perform the search
+                            search_results = await storage.search(
+                                query=[search_query],
+                                limit=10,  # Get top 10 relevant chunks
+                                filter=filter_criteria,
+                                score_threshold=0.3  # Reasonable relevance threshold
+                            )
+
+                            logger.info(f"Task {task_key}: Vector search returned {len(search_results)} relevant knowledge chunks")
+                            return search_results
+
+                    except Exception as search_error:
+                        logger.error(f"Task {task_key}: Error during vector search: {search_error}")
+                        return []
+
+                # Execute the async search
+                try:
+                    # Check if we're in an async context
+                    loop = asyncio.get_running_loop()
+                    # Use ThreadPoolExecutor for nested async context
+                    import concurrent.futures
+
+                    def run_search():
+                        new_loop = asyncio.new_event_loop()
+                        asyncio.set_event_loop(new_loop)
+                        try:
+                            return new_loop.run_until_complete(search_agent_knowledge())
+                        finally:
+                            new_loop.close()
+
+                    with concurrent.futures.ThreadPoolExecutor() as executor:
+                        future = executor.submit(run_search)
+                        knowledge_results = future.result(timeout=30)  # 30 second timeout
+
+                except RuntimeError:
+                    # No event loop running, can use asyncio.run directly
+                    knowledge_results = asyncio.run(search_agent_knowledge())
+
+                # Process search results and add to task context
+                if knowledge_results:
+                    knowledge_content_chunks = []
+                    for idx, result in enumerate(knowledge_results):
+                        try:
+                            content = result.get('content', '')
+                            if content and isinstance(content, str):
+                                knowledge_content_chunks.append(f"Knowledge Chunk {idx+1}:\n{content}")
+                        except Exception as result_error:
+                            logger.error(f"Task {task_key}: Error processing search result {idx}: {result_error}")
+
+                    # Add knowledge context to task description if we found relevant content
+                    if knowledge_content_chunks:
+                        knowledge_context = "\n\n" + "="*80 + "\n"
+                        knowledge_context += "RELEVANT KNOWLEDGE (Agent-Filtered)\n"
+                        knowledge_context += "="*80 + "\n"
+                        knowledge_context += f"Based on the task context, the following {len(knowledge_content_chunks)} knowledge chunks are relevant:\n\n"
+                        knowledge_context += "\n\n".join(knowledge_content_chunks)
+                        knowledge_context += "\n" + "="*80 + "\n"
+                        knowledge_context += "END OF RELEVANT KNOWLEDGE\n"
+                        knowledge_context += "="*80 + "\n\n"
+
+                        # Prepend the knowledge context to the task description
+                        task_args["description"] = knowledge_context + task_args["description"]
+                        logger.info(f"Task {task_key}: Added agent-filtered knowledge context with {len(knowledge_content_chunks)} chunks to task description")
+                    else:
+                        logger.info(f"Task {task_key}: Vector search found results but no valid content chunks")
+                else:
+                    logger.info(f"Task {task_key}: No relevant knowledge chunks found for agent {agent_id}")
+
+            except Exception as vector_search_error:
+                logger.error(f"Task {task_key}: Error during vector knowledge search: {vector_search_error}", exc_info=True)
+
+        else:
+            logger.warning(f"Task {task_key}: Could not determine agent ID for knowledge access control")
+
+    except Exception as knowledge_error:
+        logger.error(f"Task {task_key}: Error processing agent knowledge with access control: {knowledge_error}", exc_info=True)
+        # Continue with task creation even if knowledge extraction fails
+
     # If markdown is enabled, append markdown instructions
     if task_args["markdown"]:
         task_args["description"] += "\n\nPlease format your response using markdown syntax."
