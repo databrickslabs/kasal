@@ -345,11 +345,62 @@ class CrewPreparation:
                     agent_key=agent_name,
                     agent_config=agent_config,
                     tool_service=self.tool_service,
-                    tool_factory=self.tool_factory
+                    tool_factory=self.tool_factory,
+                    config=self.config  # Pass the full config for execution_id and group_id
                 )
                 if not agent:
                     logger.error(f"Failed to create agent: {agent_name}")
                     return False
+                    
+                # Handle knowledge sources after agent creation to avoid serialization issues
+                if 'knowledge_sources' in agent_config and agent_config['knowledge_sources']:
+                    try:
+                        from src.engines.crewai.knowledge.knowledge_factory import KnowledgeSourceFactory
+                        
+                        # Get execution_id and group_id from config
+                        execution_id = self.config.get('execution_id', self.config.get('crew_id', 'default'))
+                        group_id = self.config.get('group_id', 'default')
+                        
+                        # Get embedder config from agent or crew
+                        embedder_config = None
+                        if 'embedder_config' in agent_config:
+                            embedder_config = agent_config['embedder_config']
+                            logger.info(f"Using embedder config from agent: {embedder_config}")
+                        elif hasattr(self, 'embedder_config'):
+                            embedder_config = self.embedder_config
+                            logger.info(f"Using embedder config from crew: {embedder_config}")
+                        
+                        # Create knowledge sources from configuration with agent access control
+                        knowledge_sources = KnowledgeSourceFactory.create_knowledge_sources(
+                            agent_config['knowledge_sources'],
+                            execution_id=execution_id,
+                            group_id=group_id,
+                            embedder_config=embedder_config,
+                            agent_id=agent_id  # Pass the Kasal Agent UUID for access control
+                        )
+                        
+                        if knowledge_sources:
+                            # Set knowledge_sources directly on the agent
+                            agent.knowledge_sources = knowledge_sources
+                            logger.info(f"Added {len(knowledge_sources)} knowledge sources to agent {agent_name}")
+                            
+                            # CRITICAL: Call add() on each knowledge source to trigger embedding
+                            for ks in knowledge_sources:
+                                if hasattr(ks, 'collection_name'):
+                                    logger.info(f"  - Collection: {ks.collection_name}")
+                                
+                                # Trigger the knowledge source processing
+                                if hasattr(ks, 'add'):
+                                    logger.info(f"[CrewPreparation] Calling add() on knowledge source: {ks.collection_name}")
+                                    try:
+                                        ks.add()  # This will load, chunk, and embed the content
+                                        logger.info(f"[CrewPreparation] ✅ Successfully processed knowledge source: {ks.collection_name}")
+                                    except Exception as add_error:
+                                        logger.error(f"[CrewPreparation] ❌ Error processing knowledge source {ks.collection_name}: {add_error}", exc_info=True)
+                                else:
+                                    logger.warning(f"[CrewPreparation] Knowledge source {ks} does not have add() method")
+                    except Exception as e:
+                        logger.error(f"Error adding knowledge sources to agent {agent_name}: {e}", exc_info=True)
                     
                 # Store the agent with the agent_name as key
                 self.agents[agent_name] = agent
@@ -766,6 +817,9 @@ class CrewPreparation:
                                 }
                             }
                             logger.info(f"Configured CrewAI custom embedder for Databricks with model: {model_name}")
+                            
+                            # Store embedder config for knowledge sources
+                            self.embedder_config = crew_kwargs['embedder']
                         else:
                             logger.warning("No Databricks API key found, falling back to default embedder")
                             
@@ -826,6 +880,9 @@ class CrewPreparation:
                     # Other providers - pass through config as-is
                     crew_kwargs['embedder'] = embedder_config
                     logger.info(f"Configured CrewAI embedder for {provider}: {crew_kwargs['embedder']}")
+                
+                # Store embedder config for knowledge sources
+                self.embedder_config = crew_kwargs.get('embedder')
                     
             logger.info(f"Final embedder configuration: {crew_kwargs.get('embedder', 'None (default)')}")
             
@@ -1285,11 +1342,16 @@ class CrewPreparation:
                 from src.core.unit_of_work import SyncUnitOfWork
                 from src.repositories.databricks_config_repository import DatabricksConfigRepository
                 
-                # Use synchronous UnitOfWork for non-async context
-                sync_uow = SyncUnitOfWork.get_instance()
-                sync_uow.initialize()
-                databricks_repo = sync_uow.databricks_config_repository
-                databricks_config = databricks_repo.get_active_config_sync(group_id=group_id)
+                databricks_config = None
+                try:
+                    # Use synchronous UnitOfWork for non-async context
+                    sync_uow = SyncUnitOfWork.get_instance()
+                    sync_uow.initialize()
+                    databricks_repo = sync_uow.databricks_config_repository
+                    databricks_config = databricks_repo.get_active_config_sync(group_id=group_id)
+                except Exception as db_error:
+                    logger.warning(f"Could not check Databricks config from database: {db_error}")
+                    # Continue without Databricks volume knowledge sources
                 
                 if databricks_config and databricks_config.knowledge_volume_enabled:
                     logger.info(f"Checking for knowledge sources for execution {execution_id}")
