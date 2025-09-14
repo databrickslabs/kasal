@@ -269,6 +269,31 @@ def run_crew_in_process(
             # Set subprocess mode flag for direct DB writes
             os.environ['CREW_SUBPROCESS_MODE'] = 'true'
             
+            # Get logger early for this function
+            import logging
+            async_logger = logging.getLogger('crew')
+            
+            # Ensure DATABRICKS_HOST is available in subprocess
+            if 'DATABRICKS_HOST' not in os.environ:
+                # Try to get it from settings
+                from src.config.settings import settings
+                if hasattr(settings, 'DATABRICKS_HOST') and settings.DATABRICKS_HOST:
+                    os.environ['DATABRICKS_HOST'] = settings.DATABRICKS_HOST
+                    async_logger.info(f"[SUBPROCESS] Set DATABRICKS_HOST from settings: {settings.DATABRICKS_HOST}")
+                else:
+                    # Try to get from database - need UnitOfWork context
+                    try:
+                        from src.core.unit_of_work import UnitOfWork
+                        from src.services.databricks_service import DatabricksService
+                        async with UnitOfWork() as temp_uow:
+                            databricks_service = await DatabricksService.from_unit_of_work(temp_uow)
+                            db_config = await databricks_service.get_databricks_config()
+                            if db_config and db_config.workspace_url:
+                                os.environ['DATABRICKS_HOST'] = db_config.workspace_url
+                                async_logger.info(f"[SUBPROCESS] Set DATABRICKS_HOST from database: {db_config.workspace_url}")
+                    except Exception as e:
+                        async_logger.warning(f"[SUBPROCESS] Could not get DATABRICKS_HOST from database: {e}")
+            
             # Create services using the Unit of Work pattern
             async with UnitOfWork() as uow:
                 # Create services from the UnitOfWork
@@ -280,8 +305,7 @@ def run_crew_in_process(
                 
                 # Log the JobConfiguration BEFORE crew preparation to ensure it's captured
                 import json
-                # Get logger inside the async function
-                async_logger = logging.getLogger('crew')
+                # async_logger already defined above - no need to redefine
                 
                 # Log configuration immediately
                 async_logger.info(f"[JOB_CONFIGURATION] ========== CONFIGURATION FOR {execution_id} ==========")
@@ -457,8 +481,7 @@ def run_crew_in_process(
                     
                     async_logger.info(f"[SUBPROCESS] Configured all loggers to write to crew.log for {execution_id}")
                     
-                    # Re-get the logger after adding handlers
-                    async_logger = logging.getLogger('crew')
+                    # async_logger already defined above - no need to redefine
                     
                     
                     task_completion_logger = TaskCompletionEventListener(job_id=execution_id)

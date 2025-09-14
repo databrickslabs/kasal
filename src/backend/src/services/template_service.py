@@ -545,6 +545,7 @@ class TemplateService:
     async def reset_templates_with_group(self, group_context: GroupContext) -> int:
         """
         Reset templates to default values for a specific group.
+        Uses upsert pattern to avoid constraint violations.
         
         Args:
             group_context: Group context with group IDs
@@ -552,15 +553,41 @@ class TemplateService:
         Returns:
             Number of templates reset
         """
-        # Delete all existing templates for the group
-        await self.delete_all_for_group_internal(group_context)
-        
-        # Create default templates for the group
         count = 0
+        
+        # Process each default template using upsert pattern
         for template_data in DEFAULT_TEMPLATES:
-            template_create = PromptTemplateCreate(**template_data)
-            await self.create_with_group(template_create, group_context)
-            count += 1
+            try:
+                # First, check if template already exists by name
+                existing_template = await self.find_by_name(template_data['name'])
+                
+                if existing_template:
+                    # Template exists - update it with new content and group assignment
+                    update_data = {
+                        'description': template_data['description'],
+                        'template': template_data['template'], 
+                        'is_active': template_data['is_active']
+                    }
+                    
+                    # Add group information if context is valid
+                    if group_context and group_context.is_valid():
+                        update_data['group_id'] = group_context.primary_group_id
+                        update_data['created_by_email'] = group_context.group_email
+                    
+                    await self.repository.update_template(existing_template.id, update_data)
+                    logger.debug(f"Updated existing template: {template_data['name']}")
+                    count += 1
+                else:
+                    # Template doesn't exist - create new one
+                    template_create = PromptTemplateCreate(**template_data)
+                    await self.create_with_group(template_create, group_context)
+                    logger.debug(f"Created new template: {template_data['name']}")
+                    count += 1
+                    
+            except Exception as e:
+                logger.error(f"Failed to reset template {template_data['name']}: {str(e)}")
+                # Continue with other templates rather than failing completely
+                continue
             
         return count
     

@@ -255,28 +255,20 @@ class CrewAIEngineService(BaseEngineService):
                     tool_factory = await ToolFactory.create(execution_config, api_keys_service, user_token)
                     logger.info(f"[CrewAIEngineService] Created ToolFactory for {execution_id} with user token: {bool(user_token)}")
                     
-                    # Use the CrewPreparation class for crew setup with tool_service and tool_factory
-                    # Pass user_token for OBO authentication in Databricks Apps
+                    # IMPORTANT: Do NOT prepare crew in main process when using subprocess execution
+                    # The subprocess will prepare its own crew with the full config including knowledge_sources
+                    # Preparing here would modify the config and remove knowledge_sources before subprocess gets them
                     
                     # Debug log to check if knowledge_sources are still present
-                    logger.info(f"[CrewAIEngineService] DEBUG: Right before CrewPreparation creation for {execution_id}:")
+                    logger.info(f"[CrewAIEngineService] DEBUG: Config before subprocess for {execution_id}:")
                     for idx, agent_config in enumerate(execution_config.get("agents", [])):
                         agent_id = agent_config.get('id', f'agent_{idx}')
                         ks = agent_config.get('knowledge_sources', [])
-                        logger.info(f"[CrewAIEngineService] Agent {agent_id} knowledge_sources: {ks}")
+                        logger.info(f"[CrewAIEngineService] Agent {agent_id} has {len(ks)} knowledge_sources: {ks}")
                     
-                    crew_preparation = CrewPreparation(execution_config, tool_service, tool_factory, user_token)
-                    if not await crew_preparation.prepare():
-                        logger.error(f"[CrewAIEngineService] Failed to prepare crew for {execution_id}")
-                        await self._update_execution_status(
-                            execution_id, 
-                            ExecutionStatus.FAILED.value,
-                            "Failed to prepare crew"
-                        )
-                        return execution_id
-                    
-                    # Get the prepared crew for use after UnitOfWork context
-                    crew = crew_preparation.crew
+                    # Skip crew preparation in main process - let subprocess handle it
+                    # This preserves the original config with knowledge_sources intact
+                    crew = None  # No crew object needed in main process for subprocess execution
             
             except Exception as e:
                 logger.error(f"[CrewAIEngineService] Error running CrewAI execution {execution_id}: {str(e)}", exc_info=True)
