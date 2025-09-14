@@ -47,18 +47,22 @@ export interface DatabricksMemoryConfig {
 
 export interface MemoryBackendConfig {
   backend_type: MemoryBackendType;
-  
+
   // Backend-specific configuration
   databricks_config?: DatabricksMemoryConfig;
-  
+
   // Common configuration
   enable_short_term?: boolean;
   enable_long_term?: boolean;
   enable_entity?: boolean;
-  
+
   // Advanced configuration
   enable_relationship_retrieval?: boolean;
-  
+
+  // Database persistence fields
+  is_default?: boolean;
+  is_active?: boolean;
+
   // Advanced options
   custom_config?: Record<string, unknown>;
 }
