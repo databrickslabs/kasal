@@ -28,6 +28,8 @@ import ChevronLeftIcon from '@mui/icons-material/ChevronLeft';
 import DispatcherService, { DispatchResult, ConfigureCrewResult } from '../../api/DispatcherService';
 import { useWorkflowStore } from '../../store/workflow';
 import { useCrewExecutionStore } from '../../store/crewExecution';
+import { useChatMessagesStore } from '../../store/chatMessagesStore';
+import { useKnowledgeConfigStore } from '../../store/knowledgeConfigStore';
 import { Node as FlowNode } from 'reactflow';
 import { ChatHistoryService } from '../../api/ChatHistoryService';
 import { ModelService } from '../../api/ModelService';
@@ -62,6 +64,9 @@ import { useExecutionMonitoring } from './hooks/useExecutionMonitoring';
 import { ChatMessageItem } from './components/ChatMessageItem';
 import { GroupedTraceMessages } from './components/GroupedTraceMessages';
 import { KnowledgeFileUpload } from './KnowledgeFileUpload';
+import { MemoryBackendService } from '../../api/MemoryBackendService';
+import { MemoryBackendType, isValidMemoryBackendConfig } from '../../types/memoryBackend';
+import { DatabricksService } from '../../api/DatabricksService';
 
 const WorkflowChat: React.FC<WorkflowChatProps> = ({
   onNodesGenerated,
@@ -90,6 +95,14 @@ const WorkflowChat: React.FC<WorkflowChatProps> = ({
   const [collectedVariables, setCollectedVariables] = useState<Record<string, string>>({});
   const [currentVariableIndex, setCurrentVariableIndex] = useState(0);
   const [pendingExecutionType, setPendingExecutionType] = useState<'crew' | 'flow'>('crew');
+
+  // Use Zustand store for knowledge configuration
+  const {
+    isMemoryBackendConfigured,
+    isKnowledgeSourceEnabled,
+    refreshConfiguration,
+    checkConfiguration,
+  } = useKnowledgeConfigStore();
   
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
@@ -110,10 +123,17 @@ const WorkflowChat: React.FC<WorkflowChatProps> = ({
     })
   );
 
-  // Use extracted hooks
+  // Use Zustand store for messages
   const {
-    messages,
-    setMessages,
+    addMessage,
+    addMessages,
+    setMessages: setZustandMessages,
+    getDeduplicatedMessages,
+    setCurrentSession,
+  } = useChatMessagesStore();
+
+  // Use extracted hooks (excluding messages which are now handled by Zustand)
+  const {
     sessionId,
     setSessionId: _setSessionId,
     chatSessions,
@@ -126,6 +146,27 @@ const WorkflowChat: React.FC<WorkflowChatProps> = ({
     loadSessionMessages,
     startNewChat,
   } = useChatSession(providedChatSessionId);
+
+  // Get messages from Zustand store
+  const messages = getDeduplicatedMessages(sessionId);
+
+  // Set current session in Zustand store when sessionId changes
+  useEffect(() => {
+    if (sessionId) {
+      setCurrentSession(sessionId);
+    }
+  }, [sessionId, setCurrentSession]);
+
+  // Create a Zustand-compatible setMessages function
+  const setMessages = (updater: React.SetStateAction<ChatMessage[]>) => {
+    if (typeof updater === 'function') {
+      const currentMessages = getDeduplicatedMessages(sessionId);
+      const newMessages = updater(currentMessages);
+      setZustandMessages(sessionId, newMessages);
+    } else {
+      setZustandMessages(sessionId, updater);
+    }
+  };
 
   const {
     executingJobId,
@@ -274,6 +315,11 @@ const WorkflowChat: React.FC<WorkflowChatProps> = ({
     };
     fetchModels();
   }, []);
+
+  // Initialize knowledge configuration on mount
+  useEffect(() => {
+    checkConfiguration();
+  }, [checkConfiguration]);
 
   // Create handlers using extracted utilities
   const handleAgentGenerated = createAgentGenerationHandler(
@@ -1053,15 +1099,8 @@ const WorkflowChat: React.FC<WorkflowChatProps> = ({
             pb: 0, // Remove bottom padding
           }}>
             {(() => {
-              // First, deduplicate messages by ID
-              const seenIds = new Set<string>();
-              const deduplicatedMessages = messages.filter(message => {
-                if (seenIds.has(message.id)) {
-                  return false;
-                }
-                seenIds.add(message.id);
-                return true;
-              });
+              // Messages are already deduplicated by Zustand store
+              const deduplicatedMessages = messages;
               
               const filteredMessages = deduplicatedMessages.filter(message => {
                 // Filter out execution start and completion messages
@@ -1170,7 +1209,7 @@ const WorkflowChat: React.FC<WorkflowChatProps> = ({
                     <KnowledgeFileUpload
                       executionId={sessionId || 'default'}
                       groupId={localStorage.getItem('groupId') || 'default'}
-                      disabled={isLoading || !!executingJobId}
+                      disabled={isLoading || !!executingJobId || !isMemoryBackendConfigured || !isKnowledgeSourceEnabled}
                       onFilesUploaded={(files) => {
                         console.log('Knowledge files uploaded:', files);
                       }}
@@ -1242,8 +1281,8 @@ const WorkflowChat: React.FC<WorkflowChatProps> = ({
                             id: node.data.agentId || node.data.id  // Ensure we have an ID
                           };
                         })}
-                      compact={true}
-                    />
+                          compact={true}
+                        />
                   </Box>
                   {/* Model Selector */}
                   {setSelectedModel && (

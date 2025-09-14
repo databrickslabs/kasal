@@ -13,6 +13,7 @@ import { ToolService } from '../../api/ToolService';
 import { Tool, KnowledgeSource } from '../../types/agent';
 import { Theme } from '@mui/material/styles';
 import { useTabDirtyState } from '../../hooks/workflow/useTabDirtyState';
+import { useAgentStore } from '../../store/agent';
 
 interface AgentNodeData {
   agentId: string;
@@ -50,7 +51,6 @@ interface AgentNodeData {
 const AgentNode: React.FC<{ data: AgentNodeData; id: string }> = ({ data, id }) => {
   const { setNodes, setEdges, getNodes, getEdges } = useReactFlow();
   const [isEditing, setIsEditing] = useState(false);
-  const [agentData, setAgentData] = useState<Agent | null>(null);
   const [tools, setTools] = useState<Tool[]>([]);
 
   // Local selection state
@@ -58,6 +58,21 @@ const AgentNode: React.FC<{ data: AgentNodeData; id: string }> = ({ data, id }) 
 
   // Tab dirty state management
   const { markCurrentTabDirty } = useTabDirtyState();
+
+  // Use agent store instead of local state
+  const { getAgent, updateAgent } = useAgentStore();
+  const [agentData, setAgentData] = useState<Agent | null>(null);
+
+  // Load agent data using store
+  useEffect(() => {
+    if (data.agentId) {
+      const loadAgentData = async () => {
+        const agent = await getAgent(data.agentId);
+        setAgentData(agent);
+      };
+      loadAgentData();
+    }
+  }, [data.agentId, getAgent]);
 
   useEffect(() => {
     loadTools();
@@ -128,10 +143,10 @@ const AgentNode: React.FC<{ data: AgentNodeData; id: string }> = ({ data, id }) 
         return;
       }
 
-      // Always fetch fresh data from backend to get latest knowledge sources
-      const response = await AgentService.getAgent(agentIdToUse as string | number);
+      // Use store to get agent data (will fetch if not cached)
+      const response = await getAgent(agentIdToUse as string);
       if (response) {
-        console.log(`Fetched agent ${response.name} with ${response.knowledge_sources?.length || 0} knowledge sources`);
+        console.log(`Got agent ${response.name} with ${response.knowledge_sources?.length || 0} knowledge sources`);
         setAgentData(response);
         setIsEditing(true);
       }
@@ -173,11 +188,12 @@ const AgentNode: React.FC<{ data: AgentNodeData; id: string }> = ({ data, id }) 
 
   const handleUpdateNode = useCallback(async (updatedAgent: Agent) => {
     try {
-      // Update the agentData state if it exists (for when edit dialog is open)
-      if (agentData) {
-        setAgentData(updatedAgent);
-      }
-      
+      // Update the store cache
+      updateAgent(updatedAgent.id?.toString() || data.agentId, updatedAgent);
+
+      // Update the local agentData state if it exists (for when edit dialog is open)
+      setAgentData(updatedAgent);
+
       setNodes(nodes => nodes.map(node => {
         if (node.id === id) {
           return {
@@ -217,24 +233,10 @@ const AgentNode: React.FC<{ data: AgentNodeData; id: string }> = ({ data, id }) 
     } catch (error) {
       console.error('Failed to update node:', error);
     }
-  }, [id, setNodes, agentData]);
+  }, [id, setNodes, updateAgent, data.agentId]);
 
-  useEffect(() => {
-    if (!isEditing && data.agentId) {
-      const refreshAgentData = async () => {
-        try {
-          const refreshedAgent = await AgentService.getAgent(data.agentId);
-          if (refreshedAgent) {
-            handleUpdateNode(refreshedAgent);
-          }
-        } catch (error) {
-          console.error('Failed to refresh agent data:', error);
-        }
-      };
-      
-      refreshAgentData();
-    }
-  }, [isEditing, data.agentId, handleUpdateNode]);
+  // Removed problematic useEffect that was causing infinite API calls
+  // Agent data is now managed by the store and fetched once on mount
 
   // Update agentData when node data changes (e.g., after knowledge sources are added)
   useEffect(() => {
