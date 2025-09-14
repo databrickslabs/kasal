@@ -6,6 +6,7 @@ This guide will help you set up and run the Kasal platform on your local machine
 
 - **Python 3.9 or higher** for the backend
 - **Node.js 16 or higher** for the frontend
+- **ModHeader browser extension** (or similar) for local development to set the `X-Forwarded-Email` header (required for OpenID authentication)
 
 ## Project Setup
 
@@ -78,6 +79,14 @@ Once the backend is running, you can access:
 
 - **Web Interface**: http://localhost:3000 (if frontend is running)
 - **Health Check**: http://localhost:8000/health
+
+### Local Development Authentication
+
+Kasal uses OpenID authentication. For local development, you must set the `X-Forwarded-Email` header in your requests:
+
+1. Install a browser extension like **ModHeader**
+2. Add header: `X-Forwarded-Email: your-email@example.com`
+3. This simulates the authentication layer used in production
 
 ## Project Structure
 

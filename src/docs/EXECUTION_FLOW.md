@@ -426,41 +426,155 @@ useEffect(() => {
 **Location**: `src/frontend/src/components/Jobs/ShowTraceTimeline.tsx`
 
 ```typescript
-const ShowTraceTimeline = ({ traces }) => {
-    // Group traces by agent and task
-    const groupedTraces = useMemo(() => {
-        return groupTracesByAgentAndTask(traces);
-    }, [traces]);
-    
+const ShowTraceTimeline = ({
+    open,
+    onClose,
+    runId,
+    run,
+    onViewResult,
+    onShowLogs
+}) => {
+    // Process traces into hierarchical structure
+    const processTraces = useCallback((rawTraces: Trace[]): ProcessedTraces => {
+        // Filter out Task Orchestrator events
+        const filteredTraces = rawTraces.filter(trace =>
+            trace.event_source !== 'Task Orchestrator' &&
+            trace.event_context !== 'task_management'
+        );
+
+        // Group by agent and task with timing information
+        const agents: GroupedTrace[] = [];
+
+        // Process agent groupings and task boundaries
+        // Extract task information from task_started events
+        // Map events to appropriate agents and tasks
+
+        return {
+            globalStart,
+            globalEnd,
+            totalDuration,
+            agents,
+            globalEvents: { start: [], end: [] }
+        };
+    }, []);
+
     return (
-        <Timeline>
-            {groupedTraces.map(agentGroup => (
-                <TimelineSection key={agentGroup.agent}>
-                    <AgentHeader>
-                        <AgentIcon />
-                        <AgentName>{agentGroup.agent}</AgentName>
-                        <Duration>{agentGroup.duration}s</Duration>
-                    </AgentHeader>
-                    
-                    {agentGroup.tasks.map(task => (
-                        <TaskSection key={task.id}>
-                            <TaskHeader>{task.description}</TaskHeader>
-                            
-                            {task.events.map(event => (
-                                <EventItem key={event.id}>
-                                    <EventType>{event.type}</EventType>
-                                    <EventContent>{event.content}</EventContent>
-                                    <EventTime>{event.timestamp}</EventTime>
-                                </EventItem>
-                            ))}
-                        </TaskSection>
-                    ))}
-                </TimelineSection>
-            ))}
-        </Timeline>
+        <Dialog open={open} onClose={onClose} maxWidth="lg" fullWidth>
+            <DialogTitle>
+                <Typography variant="h6">Execution Trace Timeline</Typography>
+                {/* Refresh controls and action buttons */}
+            </DialogTitle>
+
+            <DialogContent>
+                {/* Global start events */}
+                {processedTraces.globalEvents.start.map(event => (
+                    <ExecutionStartEvent key={event.id} event={event} />
+                ))}
+
+                {/* Agent timeline sections */}
+                {processedTraces.agents.map((agent, agentIdx) => (
+                    <AgentTimelineSection
+                        key={agentIdx}
+                        agent={agent}
+                        expanded={expandedAgents.has(agentIdx)}
+                        onToggle={() => toggleAgent(agentIdx)}
+                    >
+                        {/* Task sections within agent */}
+                        {agent.tasks.map((task, taskIdx) => (
+                            <TaskTimelineSection
+                                key={taskIdx}
+                                task={task}
+                                expanded={expandedTasks.has(taskKey)}
+                                onToggle={() => toggleTask(taskKey)}
+                            >
+                                {/* Individual events within task */}
+                                {task.events.map(event => (
+                                    <EventTimeline
+                                        key={event.id}
+                                        event={event}
+                                        clickable={hasEventOutput(event)}
+                                        onClick={() => handleEventClick(event)}
+                                    />
+                                ))}
+                            </TaskTimelineSection>
+                        ))}
+                    </AgentTimelineSection>
+                ))}
+
+                {/* Global end events */}
+                {processedTraces.globalEvents.end.map(event => (
+                    <ExecutionEndEvent key={event.id} event={event} />
+                ))}
+            </DialogContent>
+
+            {/* Event detail dialog for viewing outputs */}
+            <EventDetailDialog
+                event={selectedEvent}
+                onClose={() => setSelectedEvent(null)}
+            />
+        </Dialog>
     );
 };
 ```
+
+### Step 11: Enhanced Trace Timeline Features
+
+The new `ShowTraceTimeline` component provides several enhanced features for trace visualization:
+
+#### Real-time Updates
+```typescript
+// Auto-refresh every 5 seconds while execution is running
+useEffect(() => {
+    if (!open) return;
+
+    const isTerminalState = run?.status && [
+        'completed', 'failed', 'cancelled', 'stopped', 'error'
+    ].includes(run.status.toLowerCase());
+
+    if (isTerminalState) return; // Don't refresh if done
+
+    const refreshInterval = setInterval(() => {
+        fetchTraceData(false); // Refresh without resetting UI state
+    }, 5000);
+
+    return () => clearInterval(refreshInterval);
+}, [open, run?.status, fetchTraceData]);
+```
+
+#### Hierarchical Organization
+- **Global Events**: Crew start/end events
+- **Agent Sections**: Collapsible agent groups with duration tracking
+- **Task Sections**: Nested task groups within agents
+- **Event Items**: Individual trace events with type icons and timing
+
+#### Event Type Classification
+```typescript
+const getEventIcon = (type: string) => {
+    switch (type) {
+        case 'tool': return '🔧';
+        case 'llm': return '🤖';
+        case 'agent_start': return '▶️';
+        case 'agent_complete': return '✅';
+        case 'memory_operation': return '💾';
+        case 'knowledge_operation': return '📚';
+        case 'crew_started': return '🚀';
+        case 'crew_completed': return '🏁';
+        default: return '•';
+    }
+};
+```
+
+#### Interactive Event Details
+- Click events with output to view detailed information
+- Markdown rendering with syntax highlighting
+- Copy-to-clipboard functionality
+- Specialized formatting for memory and tool operations
+
+#### Integration with Execution UI
+- Log viewer integration (`ShowLogs` component)
+- Result viewer integration (`useRunResult` hook)
+- Status-aware refresh controls
+- Z-index management for nested dialogs
 
 ## Key Flow Components
 
@@ -676,9 +790,72 @@ TRACE_CALLBACKS=true
 MONITOR_QUEUES=true
 ```
 
+## Component Architecture Updates
+
+### Trace Timeline Evolution
+The execution trace display has evolved from a simple list to a sophisticated timeline:
+
+**Previous**: `ShowTrace.tsx` (deprecated)
+- Basic trace list display
+- Limited event type support
+- No hierarchical organization
+
+**Current**: `ShowTraceTimeline.tsx`
+- Real-time updates with auto-refresh
+- Hierarchical agent → task → event structure
+- Interactive event details with markdown rendering
+- Integration with logs and result viewers
+- Enhanced event type classification
+- Collapsible sections for better navigation
+
+### Key Interface Changes
+
+```typescript
+// New ShowTraceProps interface
+export interface ShowTraceProps {
+    open: boolean;
+    onClose: () => void;
+    runId: string;
+    run?: Run;                    // Enhanced run data
+    onViewResult?: (run: Run) => void;
+    onShowLogs?: (jobId: string) => void;
+}
+
+// Enhanced Trace interface
+export interface Trace {
+    id: string;
+    event_source: string;
+    event_context: string;
+    event_type: string;
+    task_id?: string;
+    created_at: string;
+    output: string | Record<string, unknown>;
+    extra_data?: Record<string, unknown>;
+    trace_metadata?: Record<string, unknown>; // New metadata field
+}
+```
+
+### Event Processing Pipeline
+
+1. **Filtering**: Remove Task Orchestrator noise
+2. **Grouping**: Organize by agent and task boundaries
+3. **Classification**: Categorize event types with icons
+4. **Timing**: Calculate durations and relative timestamps
+5. **Enrichment**: Extract meaningful data from metadata
+
+### Timeline Features
+
+- **Auto-refresh**: Updates every 5s during execution
+- **State preservation**: Maintains expanded sections during refresh
+- **Click-to-view**: Interactive event details with output
+- **Copy support**: One-click output copying
+- **Status awareness**: Disables refresh when execution completes
+- **Memory operations**: Specialized display for memory and tool events
+
 ## Related Documentation
 
 - [EVENT_TRACING.md](EVENT_TRACING.md) - Event capture details
 - [AGENT_TASK_LIFECYCLE.md](AGENT_TASK_LIFECYCLE.md) - Agent/task details
 - [TROUBLESHOOTING.md](TROUBLESHOOTING.md) - Common issues
 - [CREWAI_ENGINE.md](CREWAI_ENGINE.md) - Engine architecture
+- [UI_COMPONENTS.md](UI_COMPONENTS.md) - Frontend component architecture
