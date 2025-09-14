@@ -312,7 +312,18 @@ export class AgentService {
 
   static async deleteAgent(id: number | string): Promise<boolean> {
     try {
+      // Log knowledge source cleanup before deletion
+      try {
+        const agent = await this.getAgent(id);
+        if (agent?.knowledge_sources?.length) {
+          console.log(`[DEBUG] Agent ${agent.name} has ${agent.knowledge_sources.length} knowledge sources that will be cleaned up`);
+        }
+      } catch (err) {
+        console.log('[DEBUG] Could not check knowledge sources before deletion');
+      }
+
       await apiClient.delete(`/agents/${id}`);
+      console.log(`[DEBUG] Successfully deleted agent ${id} and associated knowledge sources`);
       return true;
     } catch (error) {
       console.error('Error deleting agent:', error);

@@ -228,17 +228,20 @@ describe('MemoryBackendService', () => {
       const mockConfig: MemoryBackendConfig = {
         backend_type: MemoryBackendType.DATABRICKS,
         enable_short_term: true,
+        is_default: true,
+        is_active: true,
         databricks_config: {
           workspace_url: 'https://example.databricks.com',
           endpoint_name: 'test-endpoint',
           short_term_index: 'short_index',
         },
       };
-      (apiClient.get as jest.Mock).mockResolvedValue({ data: mockConfig });
+      // Mock response as array since we're calling /configs endpoint
+      (apiClient.get as jest.Mock).mockResolvedValue({ data: [mockConfig] });
 
       const result = await MemoryBackendService.getConfig();
 
-      expect(apiClient.get).toHaveBeenCalledWith('/memory-backend/config');
+      expect(apiClient.get).toHaveBeenCalledWith('/memory-backend/configs');
       expect(result).toEqual(mockConfig);
     });
 
