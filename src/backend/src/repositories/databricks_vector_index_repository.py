@@ -9,6 +9,7 @@ import aiohttp
 import asyncio
 import json
 import os
+import ssl
 # No longer using VectorSearchClient - using REST API directly
 from src.core.logger import LoggerManager
 from src.schemas.databricks_vector_index import (
@@ -119,8 +120,13 @@ class DatabricksVectorIndexRepository:
             
             logger.info(f"Creating index {index_data.name} via REST API at {url}")
             
+            # Create SSL context that doesn't verify certificates for demo environments
+            ssl_context = ssl.create_default_context()
+            ssl_context.check_hostname = False
+            ssl_context.verify_mode = ssl.CERT_NONE
+            
             # Make the REST API call
-            async with aiohttp.ClientSession() as session:
+            async with aiohttp.ClientSession(connector=aiohttp.TCPConnector(ssl=ssl_context)) as session:
                 async with session.post(url, headers=headers, json=payload) as response:
                     response_text = await response.text()
                     
@@ -190,8 +196,13 @@ class DatabricksVectorIndexRepository:
             
             logger.info(f"Getting index {index_name} via REST API at {url}")
             
+            # Create SSL context that doesn't verify certificates for demo environments
+            ssl_context = ssl.create_default_context()
+            ssl_context.check_hostname = False
+            ssl_context.verify_mode = ssl.CERT_NONE
+            
             # Make the REST API call
-            async with aiohttp.ClientSession() as session:
+            async with aiohttp.ClientSession(connector=aiohttp.TCPConnector(ssl=ssl_context)) as session:
                 async with session.get(url, headers=headers) as response:
                     if response.status == 200:
                         data = await response.json()
@@ -325,8 +336,13 @@ class DatabricksVectorIndexRepository:
             
             logger.info(f"Listing indexes for endpoint {endpoint_name} via REST API")
             
+            # Create SSL context that doesn't verify certificates for demo environments
+            ssl_context = ssl.create_default_context()
+            ssl_context.check_hostname = False
+            ssl_context.verify_mode = ssl.CERT_NONE
+            
             # Make the REST API call
-            async with aiohttp.ClientSession() as session:
+            async with aiohttp.ClientSession(connector=aiohttp.TCPConnector(ssl=ssl_context)) as session:
                 async with session.get(url, headers=headers, params=params) as response:
                     if response.status == 200:
                         data = await response.json()
@@ -431,7 +447,12 @@ class DatabricksVectorIndexRepository:
             logger.info(f"Deleting index {index_name} via REST API at {url}")
             
             # Make the REST API call
-            async with aiohttp.ClientSession() as session:
+            # Create SSL context that doesn't verify certificates for demo environments
+            ssl_context = ssl.create_default_context()
+            ssl_context.check_hostname = False
+            ssl_context.verify_mode = ssl.CERT_NONE
+            
+            async with aiohttp.ClientSession(connector=aiohttp.TCPConnector(ssl=ssl_context)) as session:
                 async with session.delete(url, headers=headers) as response:
                     response_text = await response.text()
                     
@@ -505,7 +526,12 @@ class DatabricksVectorIndexRepository:
             # Step 1: Get current index configuration
             describe_url = f"{self.workspace_url}/api/2.0/vector-search/indexes/{encoded_index_name}"
             
-            async with aiohttp.ClientSession() as session:
+            # Create SSL context that doesn't verify certificates for demo environments
+            ssl_context = ssl.create_default_context()
+            ssl_context.check_hostname = False
+            ssl_context.verify_mode = ssl.CERT_NONE
+            
+            async with aiohttp.ClientSession(connector=aiohttp.TCPConnector(ssl=ssl_context)) as session:
                 # Get index info
                 async with session.get(describe_url, headers=headers) as response:
                     if response.status != 200:
@@ -673,7 +699,12 @@ class DatabricksVectorIndexRepository:
                 payload["filters"] = filters
             
             # Make the REST API call
-            async with aiohttp.ClientSession() as session:
+            # Create SSL context that doesn't verify certificates for demo environments
+            ssl_context = ssl.create_default_context()
+            ssl_context.check_hostname = False
+            ssl_context.verify_mode = ssl.CERT_NONE
+            
+            async with aiohttp.ClientSession(connector=aiohttp.TCPConnector(ssl=ssl_context)) as session:
                 async with session.post(url, headers=headers, json=payload) as response:
                     if response.status == 200:
                         results = await response.json()
@@ -901,7 +932,12 @@ class DatabricksVectorIndexRepository:
             logger.debug(f"Payload has 'inputs_json' key with JSON string of {len(records)} records")
             
             # Make the REST API call
-            async with aiohttp.ClientSession() as session:
+            # Create SSL context that doesn't verify certificates for demo environments
+            ssl_context = ssl.create_default_context()
+            ssl_context.check_hostname = False
+            ssl_context.verify_mode = ssl.CERT_NONE
+            
+            async with aiohttp.ClientSession(connector=aiohttp.TCPConnector(ssl=ssl_context)) as session:
                 # Log the complete structure for debugging
                 logger.info(f"Sending upsert request to: {url}")
                 logger.info(f"Payload keys: {list(payload.keys())}")
@@ -1027,7 +1063,12 @@ class DatabricksVectorIndexRepository:
             logger.info(f"Deleting {len(primary_keys)} records from {index_name}")
             
             # Make the REST API call
-            async with aiohttp.ClientSession() as session:
+            # Create SSL context that doesn't verify certificates for demo environments
+            ssl_context = ssl.create_default_context()
+            ssl_context.check_hostname = False
+            ssl_context.verify_mode = ssl.CERT_NONE
+            
+            async with aiohttp.ClientSession(connector=aiohttp.TCPConnector(ssl=ssl_context)) as session:
                 async with session.post(url, headers=headers, json=payload) as response:
                     if response.status in [200, 204]:
                         logger.info(f"Successfully deleted {len(primary_keys)} records from {index_name}")

@@ -6,6 +6,7 @@ following the clean architecture pattern.
 """
 from typing import Optional, List, Dict, Any
 import aiohttp
+import ssl
 # No longer using VectorSearchClient - using REST API directly
 from src.core.logger import LoggerManager
 from src.schemas.databricks_vector_endpoint import (
@@ -97,8 +98,13 @@ class DatabricksVectorEndpointRepository:
             
             logger.info(f"Creating endpoint {endpoint_data.name} via REST API")
             
+            # Create SSL context that doesn't verify certificates for demo environments
+            ssl_context = ssl.create_default_context()
+            ssl_context.check_hostname = False
+            ssl_context.verify_mode = ssl.CERT_NONE
+            
             # Make the REST API call
-            async with aiohttp.ClientSession() as session:
+            async with aiohttp.ClientSession(connector=aiohttp.TCPConnector(ssl=ssl_context)) as session:
                 async with session.post(url, headers=headers, json=payload) as response:
                     response_text = await response.text()
                     
@@ -168,7 +174,12 @@ class DatabricksVectorEndpointRepository:
             
             logger.info(f"Getting endpoint {endpoint_name} via REST API")
             
-            async with aiohttp.ClientSession() as session:
+            # Create SSL context that doesn't verify certificates for demo environments
+            ssl_context = ssl.create_default_context()
+            ssl_context.check_hostname = False
+            ssl_context.verify_mode = ssl.CERT_NONE
+            
+            async with aiohttp.ClientSession(connector=aiohttp.TCPConnector(ssl=ssl_context)) as session:
                 async with session.get(url, headers=headers) as response:
                     if response.status == 200:
                         data = await response.json()
@@ -242,8 +253,13 @@ class DatabricksVectorEndpointRepository:
             
             logger.info("Listing all endpoints via REST API")
             
+            # Create SSL context that doesn't verify certificates for demo environments
+            ssl_context = ssl.create_default_context()
+            ssl_context.check_hostname = False
+            ssl_context.verify_mode = ssl.CERT_NONE
+            
             # Make the REST API call
-            async with aiohttp.ClientSession() as session:
+            async with aiohttp.ClientSession(connector=aiohttp.TCPConnector(ssl=ssl_context)) as session:
                 async with session.get(url, headers=headers) as response:
                     if response.status == 200:
                         data = await response.json()
@@ -325,8 +341,13 @@ class DatabricksVectorEndpointRepository:
             
             logger.info(f"Deleting endpoint {endpoint_name} via REST API")
             
+            # Create SSL context that doesn't verify certificates for demo environments
+            ssl_context = ssl.create_default_context()
+            ssl_context.check_hostname = False
+            ssl_context.verify_mode = ssl.CERT_NONE
+            
             # Make the REST API call
-            async with aiohttp.ClientSession() as session:
+            async with aiohttp.ClientSession(connector=aiohttp.TCPConnector(ssl=ssl_context)) as session:
                 async with session.delete(url, headers=headers) as response:
                     if response.status in [200, 204]:
                         logger.info(f"Successfully deleted endpoint: {endpoint_name}")
