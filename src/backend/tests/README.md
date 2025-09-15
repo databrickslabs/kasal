@@ -230,17 +230,42 @@ open tests/coverage_html/index.html
 ## Continuous Integration
 
 The test suite is designed to run in CI/CD environments:
+```bash
+# For Mac users also install
+brew install libpq
+
+# Export the path variables
+echo 'export PATH="/opt/homebrew/opt/libpq/bin:$PATH"' >> ~/.zshrc
+source ~/.zshrc
+```
 
 ```bash
-# Install dependencies
-pip install -r requirements.txt
-pip install -r tests/requirements-test.txt
+# All of the following adviced in VS-Code in the Terminal
+# Create the proper virutal environment (within the root directory)
+python3 -m venv venv # ATTENTION: python >=3.10 needed (recommended 3.11)
 
-# Run tests with coverage
-python run_tests.py --coverage --type all
+# Activate your environment
+source venv/bin/activate
 
-# Check coverage threshold
-pytest --cov=src --cov-fail-under=80
+# Install dependencies (when in kasal-rool)
+pip install -r src/requirements.txt
+
+# Create your API keys and set them as environmental variables
+databricks configure # which will prompt you for a host & a token
+export DATABRICKS_HOST=your-host-url
+export DATABRICKS_TOKEN=your-dapi-token
+databricks auth describe --profile DEFAULT # To double check it wokred (otherwise set them: nano ~/.databrickscfg)
+
+# Terminal 1 (you are in src/backend)
+./run.sh sqlite  # SQLite for development
+
+# Terminal 2 (you are in src/frontend)
+cd src/frontend
+npm install
+npm start  # http://localhost:3000
+
+# Then go to settings in the WebUI & set some API-keys (OPEN_AI_TOKEN for instance & DBX-client)
+# Now all should work in the frontend & in the backend you will see various logs
 ```
 
 ## Troubleshooting

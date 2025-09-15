@@ -1,7 +1,8 @@
 # Core AI/LLM Dependencies
 crewai==0.165.1
-litellm==1.75.8  # Updated from 1.74.9 to support GPT-5 max_completion_tokens
+litellm==1.74.9 # Updated from 1.74.9 to support GPT-5 max_completion_tokens
 openai==1.75.0  # Note: GPT-5 requires max_completion_tokens instead of max_tokens
+asyncpg==0.30.0 # Note: needed to run_tests.py
 
 # Note: litellm 1.75.8+ includes native GPT-5 support with:
 # - Automatic max_tokens → max_completion_tokens conversion
