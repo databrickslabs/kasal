@@ -95,10 +95,10 @@ class ModelConfigRepository(BaseRepository[ModelConfig]):
                 
             # Update the model attributes
             model.enabled = enabled
-            
-            # Commit the changes
-            await self.session.commit()
-            
+
+            # Only flush, don't commit - let the session dependency handle it
+            await self.session.flush()
+
             # Return success
             return True
                 
@@ -120,10 +120,10 @@ class ModelConfigRepository(BaseRepository[ModelConfig]):
             # Use SQLAlchemy update with proper boolean values
             stmt = update(self.model).where(self.model.enabled == False).values(enabled=True)
             await self.session.execute(stmt)
-            
-            # Commit the changes
-            await self.session.commit()
-            
+
+            # Only flush, don't commit - let the session dependency handle it
+            await self.session.flush()
+
             # Return success
             return True
                 
@@ -145,10 +145,10 @@ class ModelConfigRepository(BaseRepository[ModelConfig]):
             # Use SQLAlchemy update with proper boolean values
             stmt = update(self.model).where(self.model.enabled == True).values(enabled=False)
             await self.session.execute(stmt)
-            
-            # Commit the changes
-            await self.session.commit()
-            
+
+            # Only flush, don't commit - let the session dependency handle it
+            await self.session.flush()
+
             # Return success
             return True
                 
@@ -218,43 +218,41 @@ class ModelConfigRepository(BaseRepository[ModelConfig]):
     async def delete_by_key(self, key: str) -> bool:
         """
         Delete a model configuration by key.
-        
+
         Args:
             key: Key of the model configuration to delete
-            
+
         Returns:
             True if model was found and deleted, False otherwise
         """
         import logging
+        from sqlalchemy import delete as sql_delete
         logger = logging.getLogger(__name__)
-        
+
         try:
-            logger.info(f"Attempting to delete model with key: {key}")
-            
+            logger.debug(f"Attempting to delete model with key: {key}")
+
             # Find the model first
             model = await self.find_by_key(key)
             if not model:
                 logger.warning(f"Model with key {key} not found for deletion")
                 return False
-            
+
             model_id = model.id
-            logger.info(f"Found model with key {key} (ID: {model_id}), proceeding with deletion")
-            
-            # Delete the model using session.delete() for proper cascade
-            await self.session.delete(model)
-            
-            # Explicitly flush and commit to ensure transaction is completed
+            logger.debug(f"Found model with key {key} (ID: {model_id}), proceeding with deletion")
+
+            # Use SQL DELETE statement instead of ORM delete
+            # This ensures the DELETE is actually executed
+            stmt = sql_delete(self.model).where(self.model.key == key)
+            result = await self.session.execute(stmt)
+            logger.debug(f"Executed SQL DELETE for model key={key}, rows affected: {result.rowcount}")
+
+            # Flush to ensure the delete is sent to the database
             await self.session.flush()
-            await self.session.commit()
-            
-            # Verify the model was deleted
-            verification = await self.find_by_key(key)
-            if verification:
-                logger.error(f"Model with key {key} still exists after deletion attempt")
-                return False
-                
+            logger.debug(f"Flushed session after SQL DELETE")
+
             logger.info(f"Successfully deleted model with key {key} (ID: {model_id})")
-            return True
+            return result.rowcount > 0
             
         except Exception as e:
             logger.error(f"Error deleting model with key {key}: {str(e)}")

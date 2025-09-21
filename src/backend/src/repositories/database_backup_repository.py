@@ -19,12 +19,14 @@ logger = LoggerManager.get_instance().system
 class DatabaseBackupRepository:
     """Repository for database backup operations with Databricks Unity Catalog volumes."""
     
-    def __init__(self, user_token: Optional[str] = None):
-        """Initialize the repository with volume repository.
-        
+    def __init__(self, session: AsyncSession, user_token: Optional[str] = None):
+        """Initialize the repository with session and volume repository.
+
         Args:
+            session: Database session from service layer
             user_token: Optional user token for OBO authentication
         """
+        self.session = session
         self.volume_repo = DatabricksVolumeRepository(user_token=user_token)
         self.user_token = user_token
     
@@ -113,32 +115,35 @@ class DatabaseBackupRepository:
     
     async def create_postgres_backup(
         self,
-        session: AsyncSession,
         catalog: str,
         schema: str,
         volume_name: str,
         backup_filename: str,
-        export_format: str = "sql"
+        export_format: str = "sql",
+        session: Optional[AsyncSession] = None
     ) -> Dict[str, Any]:
         """
         Create a backup of PostgreSQL database and upload to Databricks volume.
-        
+
         Args:
-            session: Database session
             catalog: Unity Catalog name
             schema: Schema name
             volume_name: Volume name
             backup_filename: Name for the backup file
             export_format: Export format ('sql' or 'sqlite')
-            
+            session: Optional database session (uses stored session if not provided)
+
         Returns:
             Backup creation result
         """
         try:
+            # Use provided session or stored session
+            db_session = session if session else self.session
+
             if export_format == "sqlite":
                 # Create a SQLite database from PostgreSQL data
                 return await self._create_postgres_to_sqlite_backup(
-                    session, catalog, schema, volume_name, backup_filename
+                    db_session, catalog, schema, volume_name, backup_filename
                 )
             # Build SQL dump content
             sql_content = []
@@ -157,7 +162,7 @@ class DatabaseBackupRepository:
             sql_content.append("")
             
             # Get all tables
-            result = await session.execute(
+            result = await db_session.execute(
                 text("SELECT tablename FROM pg_tables WHERE schemaname = 'public' ORDER BY tablename")
             )
             tables = [row[0] for row in result.fetchall()]
@@ -169,7 +174,7 @@ class DatabaseBackupRepository:
                 sql_content.append("")
                 
                 # Get table columns info for proper INSERT statements
-                col_result = await session.execute(
+                col_result = await db_session.execute(
                     text(f"""
                         SELECT column_name, data_type 
                         FROM information_schema.columns 
@@ -310,7 +315,7 @@ class DatabaseBackupRepository:
             
             for table_name in pg_tables:
                 # Get table columns info
-                col_result = await session.execute(
+                col_result = await db_session.execute(
                     text(f"""
                         SELECT column_name, data_type, is_nullable
                         FROM information_schema.columns 
@@ -532,26 +537,29 @@ class DatabaseBackupRepository:
     
     async def restore_postgres_backup(
         self,
-        session: AsyncSession,
         catalog: str,
         schema: str,
         volume_name: str,
-        backup_filename: str
+        backup_filename: str,
+        session: Optional[AsyncSession] = None
     ) -> Dict[str, Any]:
         """
         Restore a PostgreSQL database from a Databricks volume backup.
-        
+
         Args:
-            session: Database session
             catalog: Unity Catalog name
             schema: Schema name
             volume_name: Volume name
             backup_filename: Name of the backup file
-            
+            session: Optional database session (uses stored session if not provided)
+
         Returns:
             Restore operation result
         """
         try:
+            # Use provided session or stored session
+            db_session = session if session else self.session
+
             # Download backup from Databricks volume
             download_result = await self.volume_repo.download_file_from_volume(
                 catalog=catalog,
@@ -612,12 +620,12 @@ class DatabaseBackupRepository:
                                 restored_tables.add(table_match.lower())
                                 total_rows += 1
                             
-                            await session.execute(text(stmt))
+                            await db_session.execute(text(stmt))
                         except Exception as stmt_error:
                             logger.warning(f"Error executing statement: {stmt_error}")
                             # Continue with other statements
-                
-                await session.commit()
+
+                await db_session.commit()
                 
                 return {
                     "success": True,
@@ -641,19 +649,19 @@ class DatabaseBackupRepository:
                 restored_tables = []
                 for table_name, rows in backup_data["tables"].items():
                     # Clear table
-                    await session.execute(text(f"TRUNCATE TABLE {table_name} CASCADE"))
-                    
+                    await db_session.execute(text(f"TRUNCATE TABLE {table_name} CASCADE"))
+
                     # Insert rows
                     for row_data in rows:
                         columns = ', '.join(row_data.keys())
                         placeholders = ', '.join([f":{k}" for k in row_data.keys()])
                         insert_query = f"INSERT INTO {table_name} ({columns}) VALUES ({placeholders})"
-                        await session.execute(text(insert_query), row_data)
+                        await db_session.execute(text(insert_query), row_data)
                     
                     restored_tables.append(f"{table_name} ({len(rows)} rows)")
                     logger.info(f"Restored {len(rows)} rows to table {table_name}")
                 
-                await session.commit()
+                await db_session.commit()
                 
                 return {
                     "success": True,
@@ -664,7 +672,7 @@ class DatabaseBackupRepository:
             
         except Exception as e:
             logger.error(f"Error restoring PostgreSQL backup: {e}")
-            await session.rollback()
+            await db_session.rollback()
             return {
                 "success": False,
                 "error": str(e)
@@ -867,7 +875,10 @@ class DatabaseBackupRepository:
         """
         try:
             db_type = self.get_database_type()
-            
+
+            # Use provided session or stored session for PostgreSQL
+            db_session = session if session else self.session
+
             if db_type == 'sqlite':
                 if not db_path or not os.path.exists(db_path):
                     return {
@@ -925,7 +936,7 @@ class DatabaseBackupRepository:
                     "memory_backends": memory_backends
                 }
                 
-            elif db_type == 'postgres' and session:
+            elif db_type == 'postgres' and db_session:
                 # Get all tables
                 result = await session.execute(
                     text("SELECT tablename FROM pg_tables WHERE schemaname = 'public'")

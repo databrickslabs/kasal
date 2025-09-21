@@ -21,8 +21,7 @@ from src.schemas.databricks_vector_index import (
 )
 from src.repositories.databricks_auth_helper import DatabricksAuthHelper
 
-logger = LoggerManager.get_instance().system
-vector_search_logger = LoggerManager.get_instance().databricks_vector_search
+logger = LoggerManager.get_instance().databricks_vector_search
 
 
 class DatabricksVectorIndexRepository:
@@ -188,7 +187,7 @@ class DatabricksVectorIndexRepository:
                 "Content-Type": "application/json"
             }
             
-            logger.info(f"Getting index {index_name} via REST API at {url}")
+            logger.debug(f"Getting index {index_name} via REST API at {url}")
             
             # Make the REST API call
             async with aiohttp.ClientSession() as session:
@@ -200,11 +199,11 @@ class DatabricksVectorIndexRepository:
                         index_status = data.get("status", {})
                         
                         # Debug logging to see exact values from Databricks
-                        logger.info(f"Raw Databricks index data keys: {list(data.keys())}")
-                        logger.info(f"Raw index status: {index_status}")
-                        logger.info(f"Raw state value: {repr(index_status.get('state'))}")
-                        logger.info(f"Raw detailed_state value: {repr(index_status.get('detailed_state'))}")
-                        logger.info(f"Raw ready value: {repr(index_status.get('ready'))}")
+                        logger.debug(f"Raw Databricks index data keys: {list(data.keys())}")
+                        logger.debug(f"Raw index status: {index_status}")
+                        logger.debug(f"Raw state value: {repr(index_status.get('state'))}")
+                        logger.debug(f"Raw detailed_state value: {repr(index_status.get('detailed_state'))}")
+                        logger.debug(f"Raw ready value: {repr(index_status.get('ready'))}")
                         
                         # Parse state with proper handling
                         raw_state = index_status.get("state")
@@ -235,7 +234,7 @@ class DatabricksVectorIndexRepository:
                         raw_ready = index_status.get("ready", False)
                         ready = bool(raw_ready) if raw_ready is not None else False
                         
-                        logger.info(f"Parsed state: {state}, ready: {ready}")
+                        logger.debug(f"Parsed state: {state}, ready: {ready}")
                         
                         # Determine index type
                         # ALWAYS use DIRECT_ACCESS - no DELTA_SYNC allowed
@@ -323,7 +322,7 @@ class DatabricksVectorIndexRepository:
             # Add endpoint filter as query parameter
             params = {"endpoint_name": endpoint_name}
             
-            logger.info(f"Listing indexes for endpoint {endpoint_name} via REST API")
+            logger.debug(f"Listing indexes for endpoint {endpoint_name} via REST API")
             
             # Make the REST API call
             async with aiohttp.ClientSession() as session:
@@ -740,11 +739,11 @@ class DatabricksVectorIndexRepository:
             }
             
             # Log search parameters for debugging
-            vector_search_logger.info(f"[similarity_search] Index: {index_name}")
-            vector_search_logger.info(f"[similarity_search] Query vector dimension: {len(query_vector)}")
-            vector_search_logger.info(f"[similarity_search] Requested columns: {columns[:5]}..." if len(columns) > 5 else f"[similarity_search] Requested columns: {columns}")
-            vector_search_logger.info(f"[similarity_search] Num results requested: {num_results}")
-            vector_search_logger.info(f"[similarity_search] Filters: {filters}")
+            logger.debug(f"[similarity_search] Index: {index_name}")
+            logger.debug(f"[similarity_search] Query vector dimension: {len(query_vector)}")
+            logger.debug(f"[similarity_search] Requested columns: {columns[:5]}..." if len(columns) > 5 else f"[similarity_search] Requested columns: {columns}")
+            logger.debug(f"[similarity_search] Num results requested: {num_results}")
+            logger.debug(f"[similarity_search] Filters: {filters}")
             
             # Prepare the payload
             payload = {
@@ -764,11 +763,11 @@ class DatabricksVectorIndexRepository:
                         # Log detailed results
                         if results and 'result' in results:
                             data_array = results.get('result', {}).get('data_array', [])
-                            vector_search_logger.info(f"[similarity_search] Returned {len(data_array)} results")
+                            logger.debug(f"[similarity_search] Returned {len(data_array)} results")
                             if len(data_array) == 0 and filters:
-                                vector_search_logger.warning(f"[similarity_search] No results found with filters: {filters}")
+                                logger.warning(f"[similarity_search] No results found with filters: {filters}")
                                 # Try without filters to debug
-                                vector_search_logger.info("[similarity_search] Trying search without filters for debugging...")
+                                logger.debug("[similarity_search] Trying search without filters for debugging...")
                                 debug_payload = {
                                     "query_vector": query_vector,
                                     "columns": columns,
@@ -778,9 +777,9 @@ class DatabricksVectorIndexRepository:
                                     if debug_response.status == 200:
                                         debug_results = await debug_response.json()
                                         debug_data = debug_results.get('result', {}).get('data_array', [])
-                                        vector_search_logger.info(f"[similarity_search] Debug search without filters returned {len(debug_data)} results")
+                                        logger.debug(f"[similarity_search] Debug search without filters returned {len(debug_data)} results")
                         else:
-                            vector_search_logger.info(f"[similarity_search] Returned {len(results.get('result', {}).get('data_array', []))} results")
+                            logger.debug(f"[similarity_search] Returned {len(results.get('result', {}).get('data_array', []))} results")
                         
                         return {
                             "success": True,

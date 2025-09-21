@@ -349,14 +349,15 @@ class SyncTaskRepository:
         """
         return self.db.query(Task).all()
 
-# Factory function to get a repository instance without managing the session in the service
-def get_sync_task_repository() -> SyncTaskRepository:
+# Factory function to get a repository instance with provided session
+def get_sync_task_repository(db: Session) -> SyncTaskRepository:
     """
     Factory function to create and return a SyncTaskRepository instance.
-    This handles session creation internally.
-    
+
+    Args:
+        db: SQLAlchemy sync session
+
     Returns:
-        A SyncTaskRepository instance with an active session
+        A SyncTaskRepository instance with the provided session
     """
-    db = SessionLocal()
     return SyncTaskRepository(db) 

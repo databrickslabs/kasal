@@ -270,14 +270,15 @@ class SyncFlowRepository:
         self.db.commit()
 
 
-# Factory function to get a repository instance without managing the session in the service
-def get_sync_flow_repository() -> SyncFlowRepository:
+# Factory function to get a repository instance with provided session
+def get_sync_flow_repository(db: Session) -> SyncFlowRepository:
     """
     Factory function to create and return a SyncFlowRepository instance.
-    This handles session creation internally.
-    
+
+    Args:
+        db: SQLAlchemy sync session
+
     Returns:
-        A SyncFlowRepository instance with an active session
+        A SyncFlowRepository instance with the provided session
     """
-    db = SessionLocal()
     return SyncFlowRepository(db) 

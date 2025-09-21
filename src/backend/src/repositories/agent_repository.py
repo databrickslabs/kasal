@@ -6,7 +6,6 @@ from sqlalchemy.orm import Session
 
 from src.core.base_repository import BaseRepository
 from src.models.agent import Agent
-from src.db.session import SessionLocal
 
 
 class AgentRepository(BaseRepository[Agent]):
@@ -173,14 +172,4 @@ class SyncAgentRepository:
         """
         return self.db.query(Agent).all()
 
-# Factory function to get a repository instance without managing the session in the service
-def get_sync_agent_repository() -> SyncAgentRepository:
-    """
-    Factory function to create and return a SyncAgentRepository instance.
-    This handles session creation internally.
-    
-    Returns:
-        A SyncAgentRepository instance with an active session
-    """
-    db = SessionLocal()
-    return SyncAgentRepository(db) 
+ 

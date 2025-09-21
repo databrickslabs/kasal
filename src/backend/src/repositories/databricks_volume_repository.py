@@ -48,10 +48,10 @@ class DatabricksVolumeRepository:
             if not workspace_url:
                 # Try to get from Databricks config
                 from src.services.databricks_service import DatabricksService
-                from src.core.unit_of_work import UnitOfWork
+                from src.db.session import async_session_factory
                 try:
-                    async with UnitOfWork() as uow:
-                        service = await DatabricksService.from_unit_of_work(uow)
+                    async with async_session_factory() as session:
+                        service = DatabricksService(session)
                         config = await service.get_databricks_config()
                         if config and config.workspace_url:
                             workspace_url = config.workspace_url
@@ -107,20 +107,15 @@ class DatabricksVolumeRepository:
             # Priority 2: PAT from database
             try:
                 from src.services.api_keys_service import ApiKeysService
-                from src.core.unit_of_work import UnitOfWork
-                
+
                 pat_token = None
-                async with UnitOfWork() as uow:
-                    api_service = await ApiKeysService.from_unit_of_work(uow)
-                    
-                    for key_name in ["DATABRICKS_TOKEN", "DATABRICKS_API_KEY"]:
-                        api_key = await api_service.find_by_name(key_name)
-                        if api_key and api_key.encrypted_value:
-                            from src.utils.encryption_utils import EncryptionUtils
-                            pat_token = EncryptionUtils.decrypt_value(api_key.encrypted_value)
-                            if pat_token:
-                                logger.info(f"Found PAT token from database: {key_name}")
-                                break
+                for key_name in ["DATABRICKS_TOKEN", "DATABRICKS_API_KEY"]:
+                    # Use the class method that handles session internally
+                    decrypted_token = await ApiKeysService.get_api_key_value(key_name=key_name)
+                    if decrypted_token:
+                        pat_token = decrypted_token
+                        logger.info(f"Found PAT token from database: {key_name}")
+                        break
                 
                 if pat_token:
                     logger.info("Creating WorkspaceClient with PAT from database")
