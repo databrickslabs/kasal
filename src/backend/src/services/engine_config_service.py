@@ -18,27 +18,15 @@ logger = LoggerManager.get_instance().crew
 class EngineConfigService:
     """Service for engine configuration operations."""
     
-    def __init__(self, repository: EngineConfigRepository):
+    def __init__(self, session):
         """
-        Initialize the service with repository.
-        
+        Initialize the service with session.
+
         Args:
-            repository: EngineConfigRepository instance
+            session: Database session from FastAPI DI (from core.dependencies)
         """
-        self.repository = repository
+        self.repository = EngineConfigRepository(session)
     
-    @classmethod
-    async def from_unit_of_work(cls, uow):
-        """
-        Create a service instance from a UnitOfWork.
-        
-        Args:
-            uow: UnitOfWork instance
-            
-        Returns:
-            EngineConfigService: Service instance using the UnitOfWork's repository
-        """
-        return cls(repository=uow.engine_config_repository)
     
     async def find_all(self) -> List[EngineConfig]:
         """

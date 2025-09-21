@@ -8,7 +8,6 @@ from fastapi import HTTPException
 
 from src.repositories.databricks_config_repository import DatabricksConfigRepository
 from src.schemas.databricks_config import DatabricksConfigCreate, DatabricksConfigResponse
-from src.services.databricks_secrets_service import DatabricksSecretsService
 
 logger = logging.getLogger(__name__)
 
@@ -18,19 +17,28 @@ class DatabricksService:
     Service for Databricks integration operations.
     """
     
-    def __init__(self, databricks_repository: DatabricksConfigRepository, group_id: Optional[str] = None):
+    def __init__(self, session, group_id: Optional[str] = None):
         """
-        Initialize the service with a repository instance.
-        
+        Initialize the service with session.
+
         Args:
-            databricks_repository: Repository for database operations
+            session: Database session from FastAPI DI (from core.dependencies)
             group_id: Group ID for multi-tenant filtering
         """
-        self.repository = databricks_repository
+        self.session = session
+        self.repository = DatabricksConfigRepository(session)
         self.group_id = group_id
-        self.secrets_service = DatabricksSecretsService(databricks_repository)
-        # Set self in secrets_service to resolve circular dependency
-        self.secrets_service.set_databricks_service(self)
+        # Don't create secrets_service here to avoid circular dependency
+        self._secrets_service = None
+
+    @property
+    def secrets_service(self):
+        """Lazy load secrets_service to avoid circular dependency."""
+        if self._secrets_service is None:
+            # Import here to avoid circular imports at module level
+            from src.services.databricks_secrets_service import DatabricksSecretsService
+            self._secrets_service = DatabricksSecretsService(self.session)
+        return self._secrets_service
     
     async def set_databricks_config(self, config_in: DatabricksConfigCreate, created_by_email: Optional[str] = None) -> Dict:
         """
@@ -50,7 +58,6 @@ class DatabricksService:
                 "warehouse_id": config_in.warehouse_id,
                 "catalog": config_in.catalog,
                 "schema": config_in.db_schema,
-                "secret_scope": config_in.secret_scope,
                 "is_active": True,
                 "is_enabled": config_in.enabled,
                 "apps_enabled": config_in.apps_enabled,
@@ -80,7 +87,6 @@ class DatabricksService:
                     warehouse_id=new_config.warehouse_id,
                     catalog=new_config.catalog,
                     schema=new_config.schema,
-                    secret_scope=new_config.secret_scope,
                     enabled=new_config.is_enabled,
                     apps_enabled=new_config.apps_enabled,
                     # Volume configuration fields
@@ -99,18 +105,18 @@ class DatabricksService:
             logger.error(f"Error setting Databricks configuration: {e}")
             raise HTTPException(status_code=500, detail=f"Error setting Databricks configuration: {str(e)}")
     
-    async def get_databricks_config(self) -> DatabricksConfigResponse:
+    async def get_databricks_config(self) -> Optional[DatabricksConfigResponse]:
         """
         Get the current Databricks configuration for the group.
-        
+
         Returns:
-            Current Databricks configuration
+            Current Databricks configuration or None if not found
         """
         try:
             config = await self.repository.get_active_config(group_id=self.group_id)
-            
+
             if not config:
-                raise HTTPException(status_code=404, detail="Databricks configuration not found")
+                return None
             
             logger.info(f"Databricks config from DB: schema={config.schema}, catalog={config.catalog}")
             
@@ -119,7 +125,6 @@ class DatabricksService:
                 warehouse_id=config.warehouse_id,
                 catalog=config.catalog,
                 schema=config.schema,
-                secret_scope=config.secret_scope,
                 enabled=config.is_enabled,
                 apps_enabled=config.apps_enabled,
                 # Volume configuration fields
@@ -170,7 +175,7 @@ class DatabricksService:
                 }
             
             # Otherwise, check if all required fields are set
-            required_fields = ["warehouse_id", "catalog", "schema", "secret_scope"]
+            required_fields = ["warehouse_id", "catalog", "schema"]
             for field in required_fields:
                 value = getattr(config, field)
                 if not value:
@@ -371,20 +376,6 @@ class DatabricksService:
             logger.error(f"Error in setup_token_sync: {str(e)}")
             return False
 
-    @classmethod
-    async def from_unit_of_work(cls, uow):
-        """
-        Create a service instance from a UnitOfWork.
-        
-        Args:
-            uow: UnitOfWork instance
-            
-        Returns:
-            DatabricksService: Service instance using the UnitOfWork's repository
-        """
-        service = cls(databricks_repository=uow.databricks_config_repository)
-        # Note: API keys service should be set separately if needed
-        return service
     
     @classmethod
     def from_session(cls, session, api_keys_service=None):
@@ -453,7 +444,7 @@ class DatabricksService:
                 }
         
         # For standard Databricks integration, check required fields
-        required_fields = ["workspace_url", "warehouse_id", "catalog", "schema", "secret_scope"]
+        required_fields = ["workspace_url", "warehouse_id", "catalog", "schema"]
         missing_fields = []
         
         for field in required_fields:

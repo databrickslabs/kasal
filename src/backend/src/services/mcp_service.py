@@ -28,39 +28,16 @@ class MCPService:
     Acts as an intermediary between the API routers and the repository.
     """
     
-    def __init__(self, session=None, server_repository=None, settings_repository=None):
+    def __init__(self, session):
         """
-        Initialize service with database session or repositories.
-        
+        Initialize service with database session.
+
         Args:
-            session: SQLAlchemy async session (for backwards compatibility)
-            server_repository: MCPServerRepository instance (preferred way)
-            settings_repository: MCPSettingsRepository instance
+            session: SQLAlchemy async session from dependency injection
         """
-        if server_repository is not None and settings_repository is not None:
-            self.server_repository = server_repository
-            self.settings_repository = settings_repository
-        elif session is not None:
-            self.server_repository = MCPServerRepository(session)
-            self.settings_repository = MCPSettingsRepository(session)
-        else:
-            raise ValueError("Either session or repositories must be provided")
+        self.server_repository = MCPServerRepository(session)
+        self.settings_repository = MCPSettingsRepository(session)
     
-    @classmethod
-    async def from_unit_of_work(cls, uow):
-        """
-        Create a service instance from a UnitOfWork.
-        
-        Args:
-            uow: UnitOfWork instance
-            
-        Returns:
-            MCPService: Service instance using the UnitOfWork's repositories
-        """
-        return cls(
-            server_repository=uow.mcp_server_repository,
-            settings_repository=uow.mcp_settings_repository
-        )
     
     async def get_all_servers(self) -> MCPServerListResponse:
         """

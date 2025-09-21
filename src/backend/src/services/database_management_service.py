@@ -9,8 +9,9 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from src.core.logger import LoggerManager
 from src.config.settings import settings
 from src.repositories.database_backup_repository import DatabaseBackupRepository
-from src.services.databricks_role_service import DatabricksRoleService
-from src.db.session import async_session_factory
+# DatabricksRoleService import removed - no longer checking Can Manage permission
+# Future: Will implement admin group check
+# Session is now injected via dependency injection, not created here
 
 logger = LoggerManager.get_instance().system
 
@@ -18,37 +19,36 @@ logger = LoggerManager.get_instance().system
 class DatabaseManagementService:
     """Service for managing database export and import operations with Databricks volumes."""
     
-    def __init__(self, repository: Optional[DatabaseBackupRepository] = None, user_token: Optional[str] = None):
+    def __init__(self, session: AsyncSession, repository: Optional[DatabaseBackupRepository] = None, user_token: Optional[str] = None):
         """
-        Initialize the service with a repository.
-        
+        Initialize the service with a session and repository.
+
         Args:
+            session: Database session from dependency injection
             repository: Database backup repository instance
-            user_token: Optional user token for OBO authentication
+            user_token: Optional user token for OBO authentication (used in Databricks Apps)
         """
-        # For database operations, we prioritize Service Principal auth
-        # This is because Unity Catalog volume operations require proper scopes
-        # that are not available in OBO tokens
-        
-        # Check if we should use Service Principal instead of user token
-        import os
-        client_id = os.getenv("DATABRICKS_CLIENT_ID")
-        client_secret = os.getenv("DATABRICKS_CLIENT_SECRET")
-        
-        if client_id and client_secret:
-            # Service Principal is available - use it instead of user token
-            logger.info(f"Database Management: Service Principal AVAILABLE (client_id={client_id[:10]}...)")
-            logger.info("Database Management: FORCING Service Principal authentication (Unity Catalog volumes require SPN)")
-            logger.info(f"Database Management: Ignoring user token even if provided (was provided: {bool(user_token)})")
-            # Pass None as user_token to force Service Principal usage
-            self.repository = repository or DatabaseBackupRepository(user_token=None)
-            self.user_token = None  # Don't use user token even if provided
-        else:
-            # No Service Principal - fall back to user token
-            logger.warning("Database Management: NO Service Principal configured (DATABRICKS_CLIENT_ID not found)")
-            logger.info(f"Database Management: Falling back to user token (present: {bool(user_token)})")
-            self.repository = repository or DatabaseBackupRepository(user_token=user_token)
+        # Store the injected session
+        self.session = session
+
+        # Authentication strategy:
+        # - In Databricks Apps: Use OBO (On-Behalf-Of) authentication with user token
+        # - Outside Databricks Apps: Use PAT (Personal Access Token) authentication
+
+        is_databricks_apps = bool(os.getenv("DATABRICKS_APP_NAME"))
+
+        if is_databricks_apps:
+            # In Databricks Apps - use OBO authentication with user token
+            logger.info("Database Management: Running in Databricks Apps - using OBO authentication")
+            logger.info(f"Database Management: User token provided: {bool(user_token)}")
+            self.repository = repository or DatabaseBackupRepository(session=session, user_token=user_token)
             self.user_token = user_token
+        else:
+            # Outside Databricks Apps - use PAT authentication (no user token)
+            logger.info("Database Management: Not in Databricks Apps - using PAT authentication")
+            # Pass None as user_token to use PAT from environment or database
+            self.repository = repository or DatabaseBackupRepository(session=session, user_token=None)
+            self.user_token = None
     
     async def export_to_volume(
         self,
@@ -107,39 +107,38 @@ class DatabaseManagementService:
                 original_size_mb = db_size
                 
             elif db_type == 'postgres':
-                # Create or use provided session for PostgreSQL
+                # Determine file extension based on export format
+                if export_format == "sqlite":
+                    backup_filename = f"kasal_backup_{timestamp}.db"
+                    postgres_export_format = "sqlite"
+                else:  # Default to SQL
+                    backup_filename = f"kasal_backup_{timestamp}.sql"
+                    postgres_export_format = "sql"
+
+                # Use provided session or injected session for PostgreSQL
                 if session:
-                    owned_session = False
-                    db_session = session
-                else:
-                    owned_session = True
-                    db_session = async_session_factory()
-                
-                try:
-                    # Determine file extension based on export format
-                    if export_format == "sqlite":
-                        backup_filename = f"kasal_backup_{timestamp}.db"
-                        postgres_export_format = "sqlite"
-                    else:  # Default to SQL
-                        backup_filename = f"kasal_backup_{timestamp}.sql"
-                        postgres_export_format = "sql"
-                    
-                    # Use repository to create PostgreSQL backup
+                    # Use provided session parameter
                     backup_result = await self.repository.create_postgres_backup(
-                        session=db_session,
                         catalog=catalog,
                         schema=schema,
                         volume_name=volume_name,
                         backup_filename=backup_filename,
-                        export_format=postgres_export_format
+                        export_format=postgres_export_format,
+                        session=session
                     )
-                    
-                    # For PostgreSQL, we don't have an original file size
-                    original_size_mb = None
-                    
-                finally:
-                    if owned_session:
-                        await db_session.close()
+                else:
+                    # Use injected session from constructor
+                    backup_result = await self.repository.create_postgres_backup(
+                        catalog=catalog,
+                        schema=schema,
+                        volume_name=volume_name,
+                        backup_filename=backup_filename,
+                        export_format=postgres_export_format,
+                        session=self.session
+                    )
+
+                # For PostgreSQL, we don't have an original file size
+                original_size_mb = None
             else:
                 return {
                     "success": False,
@@ -289,26 +288,25 @@ class DatabaseManagementService:
                 )
                 
             elif db_type == 'postgres':
-                # Create or use provided session for PostgreSQL
+                # Use provided session or injected session for PostgreSQL
                 if session:
-                    owned_session = False
-                    db_session = session
-                else:
-                    owned_session = True
-                    db_session = async_session_factory()
-                
-                try:
-                    # Use repository to restore PostgreSQL backup
+                    # Use provided session parameter
                     restore_result = await self.repository.restore_postgres_backup(
-                        session=db_session,
                         catalog=catalog,
                         schema=schema,
                         volume_name=volume_name,
-                        backup_filename=backup_filename
+                        backup_filename=backup_filename,
+                        session=session
                     )
-                finally:
-                    if owned_session:
-                        await db_session.close()
+                else:
+                    # Use injected session from constructor
+                    restore_result = await self.repository.restore_postgres_backup(
+                        catalog=catalog,
+                        schema=schema,
+                        volume_name=volume_name,
+                        backup_filename=backup_filename,
+                        session=self.session
+                    )
             else:
                 return {
                     "success": False,
@@ -418,20 +416,11 @@ class DatabaseManagementService:
                 info_result = await self.repository.get_database_info(db_path=db_path)
                 
             elif db_type == 'postgres':
-                # Create or use provided session for PostgreSQL
-                if session:
-                    owned_session = False
-                    db_session = session
-                else:
-                    owned_session = True
-                    db_session = async_session_factory()
-                
-                try:
-                    # Use repository to get database info
-                    info_result = await self.repository.get_database_info(session=db_session)
-                finally:
-                    if owned_session:
-                        await db_session.close()
+                # Use provided session or injected session for PostgreSQL
+                db_session = session if session else self.session
+
+                # Use repository to get database info
+                info_result = await self.repository.get_database_info(session=db_session)
             else:
                 return {
                     "success": False,
@@ -481,15 +470,14 @@ class DatabaseManagementService:
     ) -> Dict[str, Any]:
         """
         Check if a user has permission to access Database Management features.
-        
-        Permission logic:
-        - If NOT in Databricks Apps environment: Everyone has access
-        - If in Databricks Apps: Only users with "Can Manage" permission have access
-        
+
+        Current logic: Always allow access for all users
+        Future: Will check if user belongs to admin group/role
+
         Args:
             user_email: Email of the user to check
             session: Optional database session
-            
+
         Returns:
             Permission status and environment info
         """
@@ -498,107 +486,14 @@ class DatabaseManagementService:
             databricks_app_name = os.getenv("DATABRICKS_APP_NAME")
             databricks_host = os.getenv("DATABRICKS_HOST")
             is_databricks_apps = bool(databricks_app_name and databricks_host)
-            
-            # Default: everyone has access if not in Databricks Apps
+
+            # For now, always grant access to all users
+            # TODO: In the future, check if user belongs to admin group
             has_permission = True
-            permission_reason = "Not in Databricks Apps environment - all users have access"
-            
-            # If in Databricks Apps, check for "Can Manage" permission
-            if is_databricks_apps:
-                logger.info(f"Checking Databricks 'Can Manage' permission for user {user_email}")
-                
-                try:
-                    # Direct approach - call the permissions API directly here
-                    # This is the same logic as in the debug endpoint which works
-                    import aiohttp
-                    
-                    # Check if we have service principal credentials
-                    client_id = os.getenv("DATABRICKS_CLIENT_ID")
-                    client_secret = os.getenv("DATABRICKS_CLIENT_SECRET")
-                    
-                    if client_id and client_secret:
-                        # Ensure the host has https:// protocol
-                        if not databricks_host.startswith(('http://', 'https://')):
-                            databricks_host = f"https://{databricks_host}"
-                        
-                        # Get OAuth token using service principal
-                        oauth_url = f"{databricks_host.rstrip('/')}/oidc/v1/token"
-                        
-                        async with aiohttp.ClientSession() as oauth_session:
-                            data = {
-                                "grant_type": "client_credentials",
-                                "client_id": client_id,
-                                "client_secret": client_secret,
-                                "scope": "all-apis"
-                            }
-                            
-                            async with oauth_session.post(oauth_url, data=data) as oauth_response:
-                                if oauth_response.status == 200:
-                                    oauth_data = await oauth_response.json()
-                                    access_token = oauth_data.get("access_token")
-                                    
-                                    if access_token:
-                                        # Now check permissions
-                                        url = f"{databricks_host.rstrip('/')}/api/2.0/permissions/apps/{databricks_app_name}"
-                                        headers = {
-                                            "Authorization": f"Bearer {access_token}",
-                                            "Content-Type": "application/json"
-                                        }
-                                        
-                                        async with aiohttp.ClientSession() as perm_session:
-                                            async with perm_session.get(url, headers=headers) as response:
-                                                if response.status == 200:
-                                                    perm_data = await response.json()
-                                                    
-                                                    # Extract users with CAN_MANAGE
-                                                    manage_users = []
-                                                    for acl_entry in perm_data.get("access_control_list", []):
-                                                        user_name = acl_entry.get("user_name")
-                                                        if user_name:
-                                                            permissions = acl_entry.get("all_permissions", [])
-                                                            for perm in permissions:
-                                                                if perm.get("permission_level") == "CAN_MANAGE":
-                                                                    manage_users.append(user_name)
-                                                                    break
-                                                    
-                                                    # Check if current user is in the list
-                                                    has_permission = user_email in manage_users
-                                                    permission_reason = (
-                                                        "User has 'Can Manage' permission in Databricks Apps" 
-                                                        if has_permission 
-                                                        else f"User does not have 'Can Manage' permission. Managers: {manage_users}"
-                                                    )
-                                                    logger.info(f"Permission check: user={user_email}, has_permission={has_permission}, managers={manage_users}")
-                                                else:
-                                                    has_permission = False
-                                                    permission_reason = f"Failed to fetch permissions: API returned {response.status}"
-                                    else:
-                                        has_permission = False
-                                        permission_reason = "Failed to get OAuth token"
-                                else:
-                                    has_permission = False
-                                    permission_reason = f"OAuth request failed with status {oauth_response.status}"
-                    else:
-                        # Fallback to using DatabricksRoleService if no service principal
-                        if not session:
-                            has_permission = False
-                            permission_reason = "No service principal credentials and no session available"
-                        else:
-                            databricks_role_service = DatabricksRoleService(session)
-                            manager_emails = await databricks_role_service.get_databricks_app_managers(user_token=user_token)
-                            has_permission = user_email in manager_emails
-                            permission_reason = (
-                                "User has 'Can Manage' permission in Databricks Apps" 
-                                if has_permission 
-                                else f"User does not have 'Can Manage' permission. Managers: {manager_emails}"
-                            )
-                    
-                except Exception as e:
-                    # If we can't determine permissions, default to no access in Apps
-                    logger.error(f"Error checking Databricks permissions: {e}")
-                    has_permission = False
-                    permission_reason = f"Could not verify 'Can Manage' permission: {str(e)}"
-            
+            permission_reason = "Database Management is available to all users (admin group check coming in future)"
+
+            logger.info(f"Database Management permission check for {user_email}: GRANTED (no restrictions currently)")
+
             return {
                 "has_permission": has_permission,
                 "is_databricks_apps": is_databricks_apps,
@@ -606,7 +501,14 @@ class DatabaseManagementService:
                 "user_email": user_email,
                 "reason": permission_reason
             }
-            
+
         except Exception as e:
             logger.error(f"Error checking database management permission: {e}")
-            raise
+            # Even on error, allow access for now
+            return {
+                "has_permission": True,
+                "is_databricks_apps": False,
+                "databricks_app_name": None,
+                "user_email": user_email,
+                "reason": "Permission check failed - defaulting to allow access"
+            }

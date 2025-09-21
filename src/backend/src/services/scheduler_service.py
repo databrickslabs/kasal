@@ -561,20 +561,15 @@ class SchedulerService:
                 if not os.getenv("DATABRICKS_API_KEY") and not os.getenv("DATABRICKS_TOKEN"):
                     try:
                         from src.services.api_keys_service import ApiKeysService
-                        from src.core.unit_of_work import UnitOfWork
-                        async with UnitOfWork() as uow:
-                            api_service = await ApiKeysService.from_unit_of_work(uow)
-                            
-                            # Try both common Databricks token names
-                            for key_name in ["DATABRICKS_API_KEY", "DATABRICKS_TOKEN"]:
-                                api_key = await api_service.find_by_name(key_name)
-                                if api_key and api_key.encrypted_value:
-                                    from src.utils.encryption_utils import EncryptionUtils
-                                    decrypted_token = EncryptionUtils.decrypt_value(api_key.encrypted_value)
-                                    if decrypted_token:
-                                        os.environ[key_name] = decrypted_token
-                                        logger_manager.scheduler.info(f"Loaded {key_name} from API key service for scheduled job")
-                                        break
+
+                        # Try both common Databricks token names
+                        for key_name in ["DATABRICKS_API_KEY", "DATABRICKS_TOKEN"]:
+                            # Use the class method that handles session internally
+                            decrypted_token = await ApiKeysService.get_api_key_value(key_name=key_name)
+                            if decrypted_token:
+                                os.environ[key_name] = decrypted_token
+                                logger_manager.scheduler.info(f"Loaded {key_name} from API key service for scheduled job")
+                                break
                     except Exception as e:
                         logger_manager.scheduler.warning(f"Could not load Databricks API key from service: {e}")
                 
@@ -582,9 +577,9 @@ class SchedulerService:
                 if not os.getenv("DATABRICKS_HOST"):
                     try:
                         from src.services.databricks_service import DatabricksService
-                        from src.core.unit_of_work import UnitOfWork
-                        async with UnitOfWork() as uow:
-                            databricks_service = await DatabricksService.from_unit_of_work(uow)
+                        from src.db.session import async_session_factory
+                        async with async_session_factory() as session:
+                            databricks_service = DatabricksService(session)
                             databricks_config = await databricks_service.get_databricks_config()
                             if databricks_config and databricks_config.workspace_url:
                                 os.environ["DATABRICKS_HOST"] = databricks_config.workspace_url
@@ -650,8 +645,8 @@ class SchedulerService:
                 # Get current time
                 now_utc = datetime.now(timezone.utc)
                 now_local = datetime.now().astimezone()
-                logger_manager.scheduler.info(f"Checking for due schedules at {now_local} (local) / {now_utc} (UTC)")
-                logger_manager.scheduler.info(f"Currently running tasks: {len(self._running_tasks)}")
+                logger_manager.scheduler.debug(f"Checking for due schedules at {now_local} (local) / {now_utc} (UTC)")
+                logger_manager.scheduler.debug(f"Currently running tasks: {len(self._running_tasks)}")
                 
                 # Find due schedules
                 async with async_session_factory() as session:
@@ -661,7 +656,7 @@ class SchedulerService:
                     all_schedules = await repo.find_all()
                     
                     # Log status of all schedules
-                    logger_manager.scheduler.info("Current schedules status:")
+                    logger_manager.scheduler.debug("Current schedules status:")
                     for schedule in all_schedules:
                         # Handle timezone-naive datetimes from database
                         if schedule.next_run_at and schedule.next_run_at.tzinfo is None:
@@ -692,7 +687,10 @@ class SchedulerService:
                         )
                     
                     # Start tasks for due schedules
-                    logger_manager.scheduler.info(f"Found {len(due_schedules)} schedules due to run")
+                    if len(due_schedules) > 0:
+                        logger_manager.scheduler.info(f"Found {len(due_schedules)} schedules due to run")
+                    else:
+                        logger_manager.scheduler.debug(f"Found {len(due_schedules)} schedules due to run")
                     
                     for schedule in due_schedules:
                         logger_manager.scheduler.info(f"Starting task for schedule {schedule.id} - {schedule.name}")
@@ -733,7 +731,7 @@ class SchedulerService:
                             logger_manager.scheduler.error(f"Task {task.get_name()} failed with error: {e}")
                 
                 # Sleep before next check
-                logger_manager.scheduler.info("Sleeping for 60 seconds before next check")
+                logger_manager.scheduler.debug("Sleeping for 60 seconds before next check")
                 await asyncio.sleep(60)
             except Exception as e:
                 logger_manager.scheduler.error(f"Error in schedule checker: {e}")

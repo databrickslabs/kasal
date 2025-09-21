@@ -21,12 +21,12 @@ from src.services.template_service import TemplateService
 from src.services.tool_service import ToolService
 from src.services.documentation_embedding_service import DocumentationEmbeddingService
 from src.schemas.crew import CrewGenerationRequest, CrewGenerationResponse
+from src.repositories.log_repository import LLMLogRepository
 from src.services.log_service import LLMLogService
 from src.core.llm_manager import LLMManager
 from src.models.agent import Agent
 from src.models.task import Task
 from src.repositories.crew_generator_repository import CrewGeneratorRepository
-from src.core.unit_of_work import UnitOfWork
 from src.utils.user_context import GroupContext
 
 # Configure logging
@@ -34,33 +34,21 @@ logger = logging.getLogger(__name__)
 
 class CrewGenerationService:
     """Service for crew generation operations."""
-    
-    def __init__(self, log_service: LLMLogService):
+
+    def __init__(self, session: Any):
         """
-        Initialize the service.
-        
+        Initialize the service with database session.
+
         Args:
-            log_service: Service for logging LLM interactions
+            session: Database session from dependency injection
         """
-        self.log_service = log_service
+        self.session = session
+        # Initialize log service with repository using the same session
+        self.log_service = LLMLogService(LLMLogRepository(session))
         self.tool_service = None  # Will be initialized when needed
-        # Initialize the crew generator repository directly
-        self.crew_generator_repository = CrewGeneratorRepository()
+        # Initialize the crew generator repository with session
+        self.crew_generator_repository = CrewGeneratorRepository(session)
         logger.info("Initialized CrewGeneratorRepository during service creation")
-    
-    @classmethod
-    def create(cls) -> 'CrewGenerationService':
-        """
-        Factory method to create a properly configured instance of the service.
-        
-        This method abstracts the creation of dependencies while maintaining
-        proper separation of concerns.
-        
-        Returns:
-            An instance of CrewGenerationService with all required dependencies
-        """
-        log_service = LLMLogService.create()
-        return cls(log_service=log_service)
     
     async def _log_llm_interaction(self, endpoint: str, prompt: str, response: str, model: str, 
                                   status: str = 'success', error_message: str = None, 
@@ -332,7 +320,7 @@ class CrewGenerationService:
         else:
             return default
 
-    async def _get_relevant_documentation(self, user_prompt: str, limit: int = 3) -> str:
+    async def _get_relevant_documentation(self, user_prompt: str, limit: int = 8) -> str:
         """
         Retrieve relevant documentation embeddings based on the user's prompt.
         
@@ -344,20 +332,32 @@ class CrewGenerationService:
             String containing relevant documentation formatted for context
         """
         try:
-            # Create embedding for the user's prompt
+            # Enhance the search query if specific tools are mentioned
+            search_query = user_prompt
+
+            # Check for specific tool mentions and enhance the query
+            if 'genie' in user_prompt.lower():
+                search_query += " Databricks Genie Tool best practices task description expected output"
+                logger.info("Enhanced search query with Genie-specific keywords")
+
+            if 'reveal' in user_prompt.lower() or 'presentation' in user_prompt.lower():
+                search_query += " Reveal.js presentation markdown slides best practices"
+                logger.info("Enhanced search query with Reveal.js keywords")
+
+            # Create embedding for the enhanced search query
             logger.info("Creating embedding for user prompt to find relevant documentation")
-            
+
             # Initialize the LLM manager
             llm_manager = LLMManager()
-            
+
             # Configure embedder (default to Databricks for consistency with crew configuration)
             embedder_config = {
                 'provider': 'databricks',
                 'config': {'model': 'databricks-gte-large-en'}
             }
-            
-            # Get the embedding for the user prompt with proper configuration
-            embedding_response = await llm_manager.get_embedding(user_prompt, embedder_config=embedder_config)
+
+            # Get the embedding for the enhanced search query
+            embedding_response = await llm_manager.get_embedding(search_query, embedder_config=embedder_config)
             if not embedding_response:
                 logger.warning("Failed to create embedding for user prompt")
                 return ""
@@ -366,29 +366,78 @@ class CrewGenerationService:
             query_embedding = embedding_response
             
             # Retrieve similar documentation based on the embedding
-            async with UnitOfWork() as uow:
-                logger.info(f"Searching for {limit} most relevant documentation chunks")
-                # Initialize the documentation service with the unit of work
-                doc_service = DocumentationEmbeddingService(uow)
-                similar_docs = await doc_service.search_similar_embeddings(
-                    query_embedding=query_embedding,
-                    limit=limit
-                )
-                
-                if not similar_docs or len(similar_docs) == 0:
-                    logger.warning("No relevant documentation found")
-                    return ""
-                
-                # Format the documentation for context
-                docs_context = "\n\n## CrewAI Relevant Documentation\n\n"
-                
-                for i, doc in enumerate(similar_docs):
-                    source = doc.source.split('/')[-1].capitalize() if doc.source else "Unknown"
+            logger.info(f"Searching for {limit} most relevant documentation chunks")
+            # Initialize the documentation service with the session
+            doc_service = DocumentationEmbeddingService(self.session)
+
+            # First, get general documentation
+            similar_docs = await doc_service.search_similar_embeddings(
+                query_embedding=query_embedding,
+                limit=limit
+            )
+
+            # If specific tools are mentioned, do an additional targeted search
+            tool_specific_docs = []
+            if 'genie' in user_prompt.lower():
+                # Create a very specific embedding for Genie
+                genie_query = "Databricks Genie Tool best practices task description expected output CrewAI"
+                genie_embedding = await LLMManager.get_embedding(genie_query, embedder_config=embedder_config)
+                if genie_embedding:
+                    genie_docs = await doc_service.search_similar_embeddings(
+                        query_embedding=genie_embedding,
+                        limit=3  # Get top 3 Genie-specific docs
+                    )
+                    tool_specific_docs.extend(genie_docs)
+                    logger.info(f"Found {len(genie_docs)} Genie-specific documentation chunks")
+
+            if 'reveal' in user_prompt.lower() or 'presentation' in user_prompt.lower():
+                # Create a specific embedding for Reveal.js
+                reveal_query = "Reveal.js presentation markdown slides best practices CrewAI tasks"
+                reveal_embedding = await LLMManager.get_embedding(reveal_query, embedder_config=embedder_config)
+                if reveal_embedding:
+                    reveal_docs = await doc_service.search_similar_embeddings(
+                        query_embedding=reveal_embedding,
+                        limit=3  # Get top 3 Reveal-specific docs
+                    )
+                    tool_specific_docs.extend(reveal_docs)
+                    logger.info(f"Found {len(reveal_docs)} Reveal.js-specific documentation chunks")
+
+            # Combine and deduplicate docs (tool-specific first, then general)
+            all_docs = []
+            seen_ids = set()
+
+            # Add tool-specific docs first (higher priority)
+            for doc in tool_specific_docs:
+                if doc.id not in seen_ids:
+                    all_docs.append(doc)
+                    seen_ids.add(doc.id)
+
+            # Then add general docs
+            for doc in similar_docs:
+                if doc.id not in seen_ids and len(all_docs) < limit:
+                    all_docs.append(doc)
+                    seen_ids.add(doc.id)
+
+            if not all_docs:
+                logger.warning("No relevant documentation found")
+                return ""
+
+            # Format the documentation for context
+            docs_context = "\n\n## CrewAI Relevant Documentation\n\n"
+
+            for i, doc in enumerate(all_docs):
+                source = doc.source.split('/')[-1].capitalize() if doc.source else "Unknown"
+                # Mark tool-specific docs
+                if 'genie' in doc.title.lower() or 'genie' in doc.source.lower():
+                    docs_context += f"### [GENIE TOOL] {doc.title}\n\n"
+                elif 'reveal' in doc.title.lower() or 'reveal' in doc.source.lower():
+                    docs_context += f"### [REVEAL.JS] {doc.title}\n\n"
+                else:
                     docs_context += f"### {source} - {doc.title}\n\n"
-                    docs_context += f"{doc.content}\n\n"
-                    
-                logger.info(f"Retrieved {len(similar_docs)} relevant documentation chunks")
-                return docs_context
+                docs_context += f"{doc.content}\n\n"
+
+            logger.info(f"Retrieved {len(all_docs)} relevant documentation chunks (including {len(tool_specific_docs)} tool-specific)")
+            return docs_context
                 
         except Exception as e:
             logger.error(f"Error retrieving documentation: {str(e)}")
@@ -409,150 +458,149 @@ class CrewGenerationService:
         try:
             logger.info("CREATE CREW: Starting crew generation process")
             
-            # Get tool details using the Unit of Work pattern to access the tool service
-            async with UnitOfWork() as uow:
-                # Create tool service from UnitOfWork
-                tool_service = await ToolService.from_unit_of_work(uow)
-                # Process tools to ensure we have complete tool information
-                tools_with_details = await self._get_tool_details(request.tools or [], tool_service)
-                
-                # Create a mapping from tool names to tool IDs for later use
-                tool_name_to_id_map = self._create_tool_name_to_id_map(tools_with_details)
-                logger.info(f"Tool name to ID mapping: {tool_name_to_id_map}")
-                
-                # Generate the crew using the LLM
-                model = request.model or os.getenv("CREW_MODEL", "databricks-llama-4-maverick")
-                
-                # Get and prepare the prompt template with tool descriptions
-                system_message = await self._prepare_prompt_template(tools_with_details)
-                logger.info("CREATE CREW: Prepared prompt template with detailed tool information")
-                
-                # Get relevant documentation based on the user's prompt
-                documentation_context = await self._get_relevant_documentation(request.prompt)
-                
-                # Prepare messages for the LLM
-                messages = [
-                    {"role": "system", "content": system_message}
-                ]
-                
-                # Add documentation context if available
-                if documentation_context:
-                    messages.append({
-                        "role": "system", 
-                        "content": "Here is some relevant documentation about CrewAI that may help you generate a better crew:\n\n" + documentation_context
-                    })
-                    logger.info("Added relevant documentation to enhance context")
-                
-                # Add the user's prompt
-                messages.append({"role": "user", "content": request.prompt})
-                
-                # Configure litellm using the LLMManager
-                model_params = await LLMManager.configure_litellm(model)
-                logger.info(f"CREATE CREW: Configured LiteLLM with model: {model}")
-                
-                # Generate completion with litellm
-                try:
-                    logger.info("CREATE CREW: Calling LLM API...")
-                    response = await litellm.acompletion(
-                        **model_params,
-                        messages=messages,
-                        temperature=0.7,
-                        max_tokens=4000
-                    )
-                    
-                    # Extract and parse the content
-                    content = response["choices"][0]["message"]["content"]
-                    logger.info(f"CREATE CREW: Extracted content from LLM response (length: {len(content)})")
-                    
-                    # Log the LLM interaction
-                    await self._log_llm_interaction(
-                        endpoint='generate-crew',
-                        prompt=f"System: {system_message}\nDocumentation: {documentation_context}\nUser: {request.prompt}",
-                        response=content,
-                        model=model,
-                        group_context=group_context
-                    )
-                    
-                    # Parse JSON setup
-                    logger.info("CREATE CREW: Parsing JSON response from LLM")
-                    crew_setup = robust_json_parser(content)
-                    logger.info(f"CREATE CREW: Successfully parsed JSON")
-                    
-                    # Process and validate LLM response with the tool name to ID mapping
-                    processed_setup = self._process_crew_setup(crew_setup, tools_with_details, tool_name_to_id_map)
-                    
-                except Exception as e:
-                    error_msg = f"Error generating crew: {str(e)}"
-                    logger.error(error_msg)
-                    raise ValueError(error_msg)
-                
-                # Log agent assignments before converting to dictionaries
-                logger.info("CREATE CREW: Current agent assignments:")
-                for task in processed_setup.get('tasks', []):
-                    task_name = task.get('name', 'Unknown')
-                    agent_name = task.get('agent')
-                    if not agent_name:
-                        agent_name = task.get('assigned_agent')
-                    
-                    if agent_name:
-                        logger.info(f"ASSIGNMENTS: Task '{task_name}' assigned to agent '{agent_name}'")
-                    else:
-                        logger.warning(f"ASSIGNMENTS: Task '{task_name}' HAS NO AGENT ASSIGNMENT")
-                
-                # Convert Pydantic models to dictionaries while preserving agent assignments
-                agents_dict = []
-                for agent in processed_setup.get('agents', []):
-                    # If it's a Pydantic model, convert to dict
-                    if hasattr(agent, 'model_dump'):
-                        agent_dict = agent.model_dump()
-                    else:
-                        agent_dict = agent.copy() if isinstance(agent, dict) else agent
-                    
-                    agents_dict.append(agent_dict)
-                
-                tasks_dict = []
-                for task in processed_setup.get('tasks', []):
-                    # If it's a Pydantic model, convert to dict
-                    if hasattr(task, 'model_dump'):
-                        task_dict = task.model_dump()
-                    else:
-                        task_dict = task.copy() if isinstance(task, dict) else task
-                    
-                    # IMPORTANT: Ensure agent assignments are preserved
-                    task_name = task_dict.get('name', 'Unknown')
-                    agent_name = task.get('agent')
-                    if not agent_name:
-                        agent_name = task.get('assigned_agent')
-                    
-                    if agent_name:
-                        # Make sure both fields are set in the dictionary
-                        task_dict['agent'] = agent_name
-                        task_dict['assigned_agent'] = agent_name
-                        logger.info(f"PRESERVE: Task '{task_name}' assignment to agent '{agent_name}' preserved in dictionary conversion")
-                    else:
-                        logger.warning(f"PRESERVE: Task '{task_name}' HAS NO AGENT ASSIGNMENT to preserve")
-                    
-                    tasks_dict.append(task_dict)
-                
-                # Create a new dictionary to send to repository
-                crew_dict = {
-                    'agents': agents_dict,
-                    'tasks': tasks_dict
-                }
-                
-                # Log the data being sent to repository
-                logger.info(f"CREATE CREW: Sending {len(agents_dict)} agents and {len(tasks_dict)} tasks to repository")
-                for idx, agent in enumerate(agents_dict):
-                    logger.info(f"AGENT {idx+1}: '{agent.get('name')}' - Role: '{agent.get('role')}', Tools: {agent.get('tools', [])}")
-                
-                for idx, task in enumerate(tasks_dict):
-                    logger.info(f"TASK {idx+1}: '{task.get('name')}' - Agent: '{task.get('agent')}', Dependencies: {task.get('context', [])}")
-                
-                # Create entities in repository with group context
-                result = await self.crew_generator_repository.create_crew_entities(crew_dict, group_context)
-                
-                logger.info("CREATE CREW: Successfully created crew entities")
-                return result
+            # Get tool details using the tool service with session
+            # Create tool service with session
+            tool_service = ToolService(self.session)
+            # Process tools to ensure we have complete tool information
+            tools_with_details = await self._get_tool_details(request.tools or [], tool_service)
+
+            # Create a mapping from tool names to tool IDs for later use
+            tool_name_to_id_map = self._create_tool_name_to_id_map(tools_with_details)
+            logger.info(f"Tool name to ID mapping: {tool_name_to_id_map}")
+
+            # Generate the crew using the LLM
+            model = request.model or os.getenv("CREW_MODEL", "databricks-llama-4-maverick")
+
+            # Get and prepare the prompt template with tool descriptions
+            system_message = await self._prepare_prompt_template(tools_with_details)
+            logger.info("CREATE CREW: Prepared prompt template with detailed tool information")
+
+            # Get relevant documentation based on the user's prompt
+            documentation_context = await self._get_relevant_documentation(request.prompt)
+
+            # Prepare messages for the LLM
+            messages = [
+                {"role": "system", "content": system_message}
+            ]
+
+            # Add documentation context if available
+            if documentation_context:
+                messages.append({
+                    "role": "system",
+                    "content": "Here is some relevant documentation about CrewAI that may help you generate a better crew:\n\n" + documentation_context
+                })
+                logger.info("Added relevant documentation to enhance context")
+
+            # Add the user's prompt
+            messages.append({"role": "user", "content": request.prompt})
+
+            # Configure litellm using the LLMManager
+            model_params = await LLMManager.configure_litellm(model)
+            logger.info(f"CREATE CREW: Configured LiteLLM with model: {model}")
+
+            # Generate completion with litellm
+            try:
+                logger.info("CREATE CREW: Calling LLM API...")
+                response = await litellm.acompletion(
+                    **model_params,
+                    messages=messages,
+                    temperature=0.7,
+                    max_tokens=4000
+                )
+
+                # Extract and parse the content
+                content = response["choices"][0]["message"]["content"]
+                logger.info(f"CREATE CREW: Extracted content from LLM response (length: {len(content)})")
+
+                # Log the LLM interaction
+                await self._log_llm_interaction(
+                    endpoint='generate-crew',
+                    prompt=f"System: {system_message}\nDocumentation: {documentation_context}\nUser: {request.prompt}",
+                    response=content,
+                    model=model,
+                    group_context=group_context
+                )
+
+                # Parse JSON setup
+                logger.info("CREATE CREW: Parsing JSON response from LLM")
+                crew_setup = robust_json_parser(content)
+                logger.info(f"CREATE CREW: Successfully parsed JSON")
+
+                # Process and validate LLM response with the tool name to ID mapping
+                processed_setup = self._process_crew_setup(crew_setup, tools_with_details, tool_name_to_id_map)
+
+            except Exception as e:
+                error_msg = f"Error generating crew: {str(e)}"
+                logger.error(error_msg)
+                raise ValueError(error_msg)
+
+            # Log agent assignments before converting to dictionaries
+            logger.info("CREATE CREW: Current agent assignments:")
+            for task in processed_setup.get('tasks', []):
+                task_name = task.get('name', 'Unknown')
+                agent_name = task.get('agent')
+                if not agent_name:
+                    agent_name = task.get('assigned_agent')
+
+                if agent_name:
+                    logger.info(f"ASSIGNMENTS: Task '{task_name}' assigned to agent '{agent_name}'")
+                else:
+                    logger.warning(f"ASSIGNMENTS: Task '{task_name}' HAS NO AGENT ASSIGNMENT")
+
+            # Convert Pydantic models to dictionaries while preserving agent assignments
+            agents_dict = []
+            for agent in processed_setup.get('agents', []):
+                # If it's a Pydantic model, convert to dict
+                if hasattr(agent, 'model_dump'):
+                    agent_dict = agent.model_dump()
+                else:
+                    agent_dict = agent.copy() if isinstance(agent, dict) else agent
+
+                agents_dict.append(agent_dict)
+
+            tasks_dict = []
+            for task in processed_setup.get('tasks', []):
+                # If it's a Pydantic model, convert to dict
+                if hasattr(task, 'model_dump'):
+                    task_dict = task.model_dump()
+                else:
+                    task_dict = task.copy() if isinstance(task, dict) else task
+
+                # IMPORTANT: Ensure agent assignments are preserved
+                task_name = task_dict.get('name', 'Unknown')
+                agent_name = task.get('agent')
+                if not agent_name:
+                    agent_name = task.get('assigned_agent')
+
+                if agent_name:
+                    # Make sure both fields are set in the dictionary
+                    task_dict['agent'] = agent_name
+                    task_dict['assigned_agent'] = agent_name
+                    logger.info(f"PRESERVE: Task '{task_name}' assignment to agent '{agent_name}' preserved in dictionary conversion")
+                else:
+                    logger.warning(f"PRESERVE: Task '{task_name}' HAS NO AGENT ASSIGNMENT to preserve")
+
+                tasks_dict.append(task_dict)
+
+            # Create a new dictionary to send to repository
+            crew_dict = {
+                'agents': agents_dict,
+                'tasks': tasks_dict
+            }
+
+            # Log the data being sent to repository
+            logger.info(f"CREATE CREW: Sending {len(agents_dict)} agents and {len(tasks_dict)} tasks to repository")
+            for idx, agent in enumerate(agents_dict):
+                logger.info(f"AGENT {idx+1}: '{agent.get('name')}' - Role: '{agent.get('role')}', Tools: {agent.get('tools', [])}")
+
+            for idx, task in enumerate(tasks_dict):
+                logger.info(f"TASK {idx+1}: '{task.get('name')}' - Agent: '{task.get('agent')}', Dependencies: {task.get('context', [])}")
+
+            # Create entities in repository with group context
+            result = await self.crew_generator_repository.create_crew_entities(crew_dict, group_context)
+
+            logger.info("CREATE CREW: Successfully created crew entities")
+            return result
         except Exception as e:
             logger.error(f"CREATE CREW: Error creating crew: {str(e)}")
             logger.error(f"CREATE CREW: Exception traceback: {traceback.format_exc()}")

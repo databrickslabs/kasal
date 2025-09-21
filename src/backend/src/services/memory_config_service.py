@@ -13,7 +13,7 @@ from src.schemas.memory_backend import (
     MemoryBackendType
 )
 from src.core.logger import LoggerManager
-from src.core.unit_of_work import UnitOfWork
+from src.repositories.memory_backend_repository import MemoryBackendRepository
 from src.utils.databricks_auth import is_databricks_apps_environment
 
 logger = LoggerManager.get_instance().system
@@ -22,14 +22,15 @@ logger = LoggerManager.get_instance().system
 class MemoryConfigService:
     """Service for managing memory backend configuration retrieval."""
     
-    def __init__(self, uow: UnitOfWork):
+    def __init__(self, session: Any):
         """
         Initialize the service.
-        
+
         Args:
-            uow: Unit of Work instance
+            session: Database session from dependency injection
         """
-        self.uow = uow
+        self.session = session
+        self.repository = MemoryBackendRepository(session)
     
     async def get_active_config(self, group_id: str = None) -> Optional[MemoryBackendConfig]:
         """
@@ -45,8 +46,7 @@ class MemoryConfigService:
         Returns:
             Active memory backend configuration or None
         """
-        # Don't re-enter the UnitOfWork context - it's already active
-        repo = self.uow.memory_backend_repository
+        repo = self.repository
         
         # If group_id is provided, get the latest active configuration for that group
         if group_id:

@@ -10,8 +10,6 @@ import logging
 import aiohttp
 import base64
 from typing import List, Optional, Dict, Tuple, Any
-from sqlalchemy.orm import Session
-from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.core.base_service import BaseService
 from src.repositories.databricks_config_repository import DatabricksConfigRepository
@@ -22,17 +20,27 @@ logger = logging.getLogger(__name__)
 
 class DatabricksSecretsService(BaseService):
     """Service for managing Databricks secrets."""
-    
-    def __init__(self, databricks_repository: DatabricksConfigRepository):
+
+    def __init__(self, session: Any):
         """
-        Initialize the service with a repository instance.
-        
+        Initialize the service with session.
+
         Args:
-            databricks_repository: Repository for Databricks configuration
+            session: Database session from dependency injection
         """
-        self.databricks_repository = databricks_repository
+        self.session = session
+        self.databricks_repository = DatabricksConfigRepository(session)
         self.api_keys_service = None
-        self.databricks_service = None  # Will be set later
+        self._databricks_service = None  # Will be created lazily
+
+    @property
+    def databricks_service(self):
+        """Lazy load databricks_service to avoid circular dependency."""
+        if self._databricks_service is None:
+            # Import here to avoid circular imports at module level
+            from src.services.databricks_service import DatabricksService
+            self._databricks_service = DatabricksService(self.session)
+        return self._databricks_service
     
     def set_databricks_service(self, databricks_service):
         """
@@ -371,7 +379,7 @@ class DatabricksSecretsService(BaseService):
         return await self.set_databricks_secret_value(scope, "DATABRICKS_TOKEN", token)
 
     @classmethod
-    async def setup_provider_api_key(cls, db: AsyncSession, key_name: str) -> bool:
+    async def setup_provider_api_key(cls, db: Any, key_name: str) -> bool:
         """
         Set up an API key for a provider from database.
         
@@ -421,7 +429,7 @@ class DatabricksSecretsService(BaseService):
             return False
             
     @staticmethod
-    def _setup_provider_api_key_sync(db: Session, key_name: str) -> bool:
+    def _setup_provider_api_key_sync(db: Any, key_name: str) -> bool:
         """
         Set up an API key for any provider from the database (synchronous).
         

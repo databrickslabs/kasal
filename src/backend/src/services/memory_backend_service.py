@@ -7,14 +7,13 @@ from typing import List, Optional, Dict, Any, Tuple
 
 from src.models.memory_backend import MemoryBackend
 from src.schemas.memory_backend import (
-    MemoryBackendConfig, 
+    MemoryBackendConfig,
     MemoryBackendCreate,
     MemoryBackendUpdate,
     DatabricksMemoryConfig,
     MemoryBackendType
 )
 from src.core.logger import LoggerManager
-from src.core.unit_of_work import UnitOfWork
 
 # Import specialized services
 from src.services.memory_backend_base_service import MemoryBackendBaseService
@@ -40,21 +39,21 @@ class MemoryBackendService:
     - Verification -> DatabricksVectorSearchVerificationService
     """
     
-    def __init__(self, uow: UnitOfWork):
+    def __init__(self, session: Any):
         """
         Initialize the service with all sub-services.
-        
+
         Args:
-            uow: Unit of Work instance
+            session: Database session from dependency injection
         """
-        self.uow = uow
-        
-        # Initialize sub-services
-        self._base_service = MemoryBackendBaseService(uow)
-        self._config_service = MemoryConfigService(uow)
-        self._connection_service = DatabricksConnectionService(uow)
+        self.session = session
+
+        # Initialize sub-services with injected session
+        self._base_service = MemoryBackendBaseService(session)
+        self._config_service = MemoryConfigService(session)
+        self._connection_service = DatabricksConnectionService(session)
         self._index_service = DatabricksIndexService()
-        self._setup_service = DatabricksVectorSearchSetupService(uow)
+        self._setup_service = DatabricksVectorSearchSetupService(session)
         self._verification_service = DatabricksVectorSearchVerificationService()
     
     # ===== Base CRUD Operations (delegated to MemoryBackendBaseService) =====
@@ -70,6 +69,12 @@ class MemoryBackendService:
     async def get_memory_backends(self, group_id: str) -> List[MemoryBackend]:
         """Get all memory backend configurations for a group."""
         return await self._base_service.get_memory_backends(group_id)
+
+    async def get_all(self) -> List[MemoryBackend]:
+        """Get all memory backend configurations across all groups."""
+        from src.repositories.memory_backend_repository import MemoryBackendRepository
+        repository = MemoryBackendRepository(self.session)
+        return await repository.get_all()
     
     async def get_memory_backend(self, group_id: str, backend_id: str) -> Optional[MemoryBackend]:
         """Get a specific memory backend configuration."""

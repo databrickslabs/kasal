@@ -24,10 +24,14 @@ logger = logging.getLogger(__name__)
 
 class ConnectionService:
     """Service for generating connections between agents and tasks."""
-    
-    def __init__(self):
-        """Initialize the service."""
-        pass
+
+    def __init__(self, session=None):
+        """Initialize the service.
+
+        Args:
+            session: Database session for accessing templates (optional for backward compatibility)
+        """
+        self.session = session
     
     async def _log_llm_interaction(self, endpoint: str, prompt: str, response: str, model: str, 
                                  status: str = 'success', error_message: str = None) -> None:
@@ -164,8 +168,16 @@ class ConnectionService:
         logger.info(f"Number of agents: {len(request.agents)}, Number of tasks: {len(request.tasks)}")
         
         try:
-            # Get the prompt template
-            system_message = await TemplateService.get_template_content("generate_connections")
+            # Get the prompt template using proper dependency injection
+            if self.session:
+                from src.repositories.template_repository import TemplateRepository
+                template_repository = TemplateRepository(self.session)
+                template_service = TemplateService(template_repository)
+                system_message = await template_service.get_template_content("generate_connections")
+            else:
+                # Fallback for backward compatibility when no session is provided
+                system_message = await TemplateService.get_template_content("generate_connections")
+
             if not system_message:
                 raise ValueError("Required prompt template 'generate_connections' not found")
             

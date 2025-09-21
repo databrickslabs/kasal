@@ -1,12 +1,10 @@
-from typing import List, Optional
+from typing import List, Optional, Any
 import logging
-
 
 from src.repositories.template_repository import TemplateRepository
 from src.models.template import PromptTemplate
 from src.schemas.template import PromptTemplateCreate, PromptTemplateUpdate
 from src.seeds.prompt_templates import DEFAULT_TEMPLATES
-from src.core.unit_of_work import UnitOfWork
 from src.utils.user_context import GroupContext
 
 
@@ -18,59 +16,42 @@ class TemplateService:
     """
     Service for PromptTemplate with business logic.
     Handles prompt template management and operations.
+    Uses dependency injection for better testability and modularity.
     """
-    
-    def __init__(self, repository: TemplateRepository):
+
+    def __init__(self, session: Any):
         """
-        Initialize the service with repository.
-        
+        Initialize the service with session.
+        Uses dependency injection pattern for clean architecture.
+
         Args:
-            repository: Repository for data access
+            session: Database session from dependency injection
         """
-        self.repository = repository
+        self.session = session
+        self.repository = TemplateRepository(session)
     
-    @classmethod
-    def create(cls) -> 'TemplateService':
-        """
-        Factory method to create a properly configured instance of the service.
-        
-        This method abstracts the creation of dependencies while maintaining
-        proper separation of concerns.
-        
-        Returns:
-            An instance of TemplateService with all required dependencies
-        """
-        from src.db.session import SessionLocal
-        session = SessionLocal()
-        repository = TemplateRepository(session)
-        return cls(repository=repository)
+    # Removed factory method - using dependency injection instead
     
-    @classmethod
-    async def find_all_templates(cls) -> List[PromptTemplate]:
+    async def find_all_templates(self) -> List[PromptTemplate]:
         """
-        Find all prompt templates using UnitOfWork pattern.
-        
+        Find all prompt templates.
+
         Returns:
             List of prompt templates
         """
-        async with UnitOfWork() as uow:
-            service = cls(uow.template_repository)
-            return await service.find_all()
+        return await self.find_all()
     
-    @classmethod
-    async def find_all_templates_for_group(cls, group_context: GroupContext) -> List[PromptTemplate]:
+    async def find_all_templates_for_group(self, group_context: GroupContext) -> List[PromptTemplate]:
         """
         Find all prompt templates for a specific group.
-        
+
         Args:
             group_context: Group context with group IDs
-            
+
         Returns:
             List of prompt templates for the group
         """
-        async with UnitOfWork() as uow:
-            service = cls(uow.template_repository)
-            return await service.find_by_group(group_context)
+        return await self.find_by_group(group_context)
             
     async def find_all(self) -> List[PromptTemplate]:
         """
@@ -101,36 +82,30 @@ class TemplateService:
             if template.group_id in group_context.group_ids
         ]
     
-    @classmethod
-    async def get_template_by_id(cls, id: int) -> Optional[PromptTemplate]:
+    async def get_template_by_id(self, id: int) -> Optional[PromptTemplate]:
         """
-        Get a prompt template by ID using UnitOfWork pattern.
-        
+        Get a prompt template by ID.
+
         Args:
             id: ID of the template to get
-            
+
         Returns:
             PromptTemplate if found, else None
         """
-        async with UnitOfWork() as uow:
-            service = cls(uow.template_repository)
-            return await service.get(id)
+        return await self.get(id)
     
-    @classmethod
-    async def get_template_with_group_check(cls, id: int, group_context: GroupContext) -> Optional[PromptTemplate]:
+    async def get_template_with_group_check(self, id: int, group_context: GroupContext) -> Optional[PromptTemplate]:
         """
         Get a template by ID with group verification.
-        
+
         Args:
             id: ID of the template to get
             group_context: Group context with group IDs
-            
+
         Returns:
             PromptTemplate if found and authorized, else None
         """
-        async with UnitOfWork() as uow:
-            service = cls(uow.template_repository)
-            return await service.get_with_group_check(id, group_context)
+        return await self.get_with_group_check(id, group_context)
     
     async def get(self, id: int) -> Optional[PromptTemplate]:
         """
@@ -161,36 +136,30 @@ class TemplateService:
                 return None  # Return None to trigger 404, not 403
         return template
     
-    @classmethod
-    async def find_template_by_name(cls, name: str) -> Optional[PromptTemplate]:
+    async def find_template_by_name(self, name: str) -> Optional[PromptTemplate]:
         """
-        Find a prompt template by name using UnitOfWork pattern.
-        
+        Find a prompt template by name.
+
         Args:
             name: Name to search for
-            
+
         Returns:
             PromptTemplate if found, else None
         """
-        async with UnitOfWork() as uow:
-            service = cls(uow.template_repository)
-            return await service.find_by_name(name)
+        return await self.find_by_name(name)
     
-    @classmethod
-    async def find_template_by_name_with_group(cls, name: str, group_context: GroupContext) -> Optional[PromptTemplate]:
+    async def find_template_by_name_with_group(self, name: str, group_context: GroupContext) -> Optional[PromptTemplate]:
         """
         Find a template by name with group verification.
-        
+
         Args:
             name: Name to search for
             group_context: Group context with group IDs
-            
+
         Returns:
             PromptTemplate if found and authorized, else None
         """
-        async with UnitOfWork() as uow:
-            service = cls(uow.template_repository)
-            return await service.find_by_name_with_group_check(name, group_context)
+        return await self.find_by_name_with_group_check(name, group_context)
     
     async def find_by_name(self, name: str) -> Optional[PromptTemplate]:
         """
@@ -221,40 +190,34 @@ class TemplateService:
                 return None  # Return None to trigger 404, not 403
         return template
     
-    @classmethod
-    async def create_new_template(cls, template_data: PromptTemplateCreate) -> PromptTemplate:
+    async def create_new_template(self, template_data: PromptTemplateCreate) -> PromptTemplate:
         """
-        Create a new prompt template using UnitOfWork pattern.
-        
+        Create a new prompt template.
+
         Args:
             template_data: Data for the new template
-            
+
         Returns:
             Created PromptTemplate
         """
-        async with UnitOfWork() as uow:
-            service = cls(uow.template_repository)
-            template = await service.create_template(template_data)
-            await uow.commit()
-            return template
+        template = await self.create_template(template_data)
+        # Repository handles flush, session handles commit
+        return template
     
-    @classmethod
-    async def create_template_with_group(cls, template_data: PromptTemplateCreate, group_context: GroupContext) -> PromptTemplate:
+    async def create_template_with_group(self, template_data: PromptTemplateCreate, group_context: GroupContext) -> PromptTemplate:
         """
         Create a new template with group assignment.
-        
+
         Args:
             template_data: Data for the new template
             group_context: Group context with group IDs
-            
+
         Returns:
             Created PromptTemplate
         """
-        async with UnitOfWork() as uow:
-            service = cls(uow.template_repository)
-            template = await service.create_with_group(template_data, group_context)
-            await uow.commit()
-            return template
+        template = await self.create_with_group(template_data, group_context)
+        # Repository handles flush, session handles commit
+        return template
     
     async def create_template(self, template_data: PromptTemplateCreate) -> PromptTemplate:
         """
@@ -289,44 +252,9 @@ class TemplateService:
         
         return await self.repository.create(template_dict)
     
-    @classmethod
-    async def update_existing_template(cls, id: int, template_data: PromptTemplateUpdate) -> Optional[PromptTemplate]:
-        """
-        Update an existing prompt template using UnitOfWork pattern.
-        
-        Args:
-            id: ID of the template to update
-            template_data: Updated data for the template
-            
-        Returns:
-            Updated PromptTemplate if found, else None
-        """
-        async with UnitOfWork() as uow:
-            service = cls(uow.template_repository)
-            template = await service.update_template(id, template_data)
-            if template:
-                await uow.commit()
-            return template
+    # Removed UoW-based class method - use instance method instead
     
-    @classmethod
-    async def update_template_with_group_check(cls, id: int, template_data: PromptTemplateUpdate, group_context: GroupContext) -> Optional[PromptTemplate]:
-        """
-        Update a template with group verification.
-        
-        Args:
-            id: ID of the template to update
-            template_data: Updated data for the template
-            group_context: Group context with group IDs
-            
-        Returns:
-            Updated PromptTemplate if found and authorized, else None
-        """
-        async with UnitOfWork() as uow:
-            service = cls(uow.template_repository)
-            template = await service.update_with_group_check(id, template_data, group_context)
-            if template:
-                await uow.commit()
-            return template
+    # Removed UoW-based class method - use instance method instead
     
     async def update_template(self, id: int, template_data: PromptTemplateUpdate) -> Optional[PromptTemplate]:
         """
@@ -362,42 +290,9 @@ class TemplateService:
         update_data = template_data.model_dump(exclude_unset=True)
         return await self.repository.update_template(id, update_data)
     
-    @classmethod
-    async def delete_template_by_id(cls, id: int) -> bool:
-        """
-        Delete a prompt template using UnitOfWork pattern.
-        
-        Args:
-            id: ID of the template to delete
-            
-        Returns:
-            True if deleted, False if not found
-        """
-        async with UnitOfWork() as uow:
-            service = cls(uow.template_repository)
-            deleted = await service.delete_template(id)
-            if deleted:
-                await uow.commit()
-            return deleted
+    # Removed UoW-based class method - use instance method instead
     
-    @classmethod
-    async def delete_template_with_group_check(cls, id: int, group_context: GroupContext) -> bool:
-        """
-        Delete a template with group verification.
-        
-        Args:
-            id: ID of the template to delete
-            group_context: Group context with group IDs
-            
-        Returns:
-            True if deleted, False if not found or not authorized
-        """
-        async with UnitOfWork() as uow:
-            service = cls(uow.template_repository)
-            deleted = await service.delete_with_group_check(id, group_context)
-            if deleted:
-                await uow.commit()
-            return deleted
+    # Removed UoW-based class method - use instance method instead
     
     async def delete_template(self, id: int) -> bool:
         """
@@ -429,36 +324,9 @@ class TemplateService:
         
         return await self.repository.delete(id)
     
-    @classmethod
-    async def delete_all_templates_service(cls) -> int:
-        """
-        Delete all prompt templates using UnitOfWork pattern.
-        
-        Returns:
-            Number of templates deleted
-        """
-        async with UnitOfWork() as uow:
-            service = cls(uow.template_repository)
-            count = await service.delete_all_templates()
-            await uow.commit()
-            return count
+    # Removed UoW-based class method - use instance method instead
     
-    @classmethod
-    async def delete_all_for_group(cls, group_context: GroupContext) -> int:
-        """
-        Delete all templates for a specific group.
-        
-        Args:
-            group_context: Group context with group IDs
-            
-        Returns:
-            Number of templates deleted
-        """
-        async with UnitOfWork() as uow:
-            service = cls(uow.template_repository)
-            count = await service.delete_all_for_group_internal(group_context)
-            await uow.commit()
-            return count
+    # Removed UoW-based class method - use instance method instead
     
     async def delete_all_templates(self) -> int:
         """
@@ -493,36 +361,9 @@ class TemplateService:
         
         return count
     
-    @classmethod
-    async def reset_templates_service(cls) -> int:
-        """
-        Reset templates to default values using UnitOfWork pattern.
-        
-        Returns:
-            Number of templates reset
-        """
-        async with UnitOfWork() as uow:
-            service = cls(uow.template_repository)
-            count = await service.reset_templates()
-            await uow.commit()
-            return count
+    # Removed UoW-based class method - use instance method instead
     
-    @classmethod
-    async def reset_templates_for_group(cls, group_context: GroupContext) -> int:
-        """
-        Reset templates to default values for a specific group.
-        
-        Args:
-            group_context: Group context with group IDs
-            
-        Returns:
-            Number of templates reset
-        """
-        async with UnitOfWork() as uow:
-            service = cls(uow.template_repository)
-            count = await service.reset_templates_with_group(group_context)
-            await uow.commit()
-            return count
+    # Removed UoW-based class method - use instance method instead
     
     async def reset_templates(self) -> int:
         """
@@ -591,31 +432,48 @@ class TemplateService:
             
         return count
     
-    @classmethod
-    async def get_template_content(cls, name: str, default_template: str = None) -> str:
+    async def _get_template_content_instance(self, name: str, default_template: str = None) -> str:
         """
-        Get the content of a template by name.
-        
+        Get the content of a template by name (instance method).
+
         Args:
             name: Name of the template
             default_template: Default template to use if not found
-            
+
         Returns:
             Template content
         """
         try:
-            async with UnitOfWork() as uow:
-                service = cls(uow.template_repository)
-                template = await service.find_by_name(name)
-                if template:
-                    return template.template
-                elif default_template:
-                    return default_template
-                else:
-                    logger.warning(f"No template found for name: {name}")
-                    return ""
+            template = await self.find_by_name(name)
+            if template:
+                return template.template
+            elif default_template:
+                return default_template
+            else:
+                logger.warning(f"No template found for name: {name}")
+                return ""
         except Exception as e:
             logger.error(f"Error getting template content: {str(e)}")
             if default_template:
                 return default_template
-            return "" 
+            return ""
+
+    @staticmethod
+    async def get_template_content(name: str, default_template: str = None) -> str:
+        """
+        Static method for backward compatibility.
+        Other services call this directly without instantiating the service.
+
+        Args:
+            name: Name of the template
+            default_template: Default template to use if not found
+
+        Returns:
+            Template content
+        """
+        # Import here to avoid circular imports
+        from src.db.database_router import get_smart_db_session
+
+        async for session in get_smart_db_session():
+            service = TemplateService(session)
+            return await service._get_template_content_instance(name, default_template) 

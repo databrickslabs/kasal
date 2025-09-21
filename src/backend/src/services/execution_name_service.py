@@ -30,17 +30,20 @@ class ExecutionNameService:
         self.log_service = log_service
     
     @classmethod
-    def create(cls) -> 'ExecutionNameService':
+    def create(cls, session) -> 'ExecutionNameService':
         """
         Factory method to create a properly configured instance of the service.
-        
+
         This method abstracts the creation of dependencies while maintaining
         proper separation of concerns.
-        
+
+        Args:
+            session: Database session for repository operations
+
         Returns:
             An instance of ExecutionNameService with all required dependencies
         """
-        log_service = LLMLogService.create()
+        log_service = LLMLogService.create(session)
         return cls(log_service=log_service)
     
     async def _log_llm_interaction(self, endpoint: str, prompt: str, response: str, model: str) -> None:

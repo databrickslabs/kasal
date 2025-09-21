@@ -12,7 +12,7 @@ from src.schemas.databricks_vector_endpoint import EndpointState
 from src.schemas.databricks_vector_index import IndexState
 from src.core.logger import LoggerManager
 
-logger = LoggerManager.get_instance().system
+logger = LoggerManager.get_instance().databricks_vector_search
 
 
 class DatabricksVectorSearchVerificationService:
@@ -85,7 +85,7 @@ class DatabricksVectorSearchVerificationService:
                     
                     if endpoint_response.success and endpoint_response.endpoint:
                         endpoint = endpoint_response.endpoint
-                        logger.info(f"Endpoint {endpoint_name} exists with state {endpoint.state}")
+                        logger.debug(f"Endpoint {endpoint_name} exists with state {endpoint.state}")
                         
                         result["endpoints"][endpoint_name] = {
                             "exists": True,

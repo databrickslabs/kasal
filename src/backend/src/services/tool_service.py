@@ -13,35 +13,21 @@ class ToolService:
     """
     Service for Tool business logic and error handling.
     Acts as an intermediary between the API routers and the repository.
+    Uses dependency injection for better testability and modularity.
     """
-    
-    def __init__(self, session=None, repository=None):
+
+    def __init__(self, session):
         """
-        Initialize service with database session or repository.
-        
+        Initialize service with session.
+        Uses dependency injection pattern for clean architecture.
+
         Args:
-            session: SQLAlchemy async session (for backwards compatibility)
-            repository: ToolRepository instance (preferred way)
+            session: Database session from FastAPI DI
         """
-        if repository is not None:
-            self.repository = repository
-        elif session is not None:
-            self.repository = ToolRepository(session)
-        else:
-            raise ValueError("Either session or repository must be provided")
-    
-    @classmethod
-    async def from_unit_of_work(cls, uow):
-        """
-        Create a service instance from a UnitOfWork.
-        
-        Args:
-            uow: UnitOfWork instance
-            
-        Returns:
-            ToolService: Service instance using the UnitOfWork's repository
-        """
-        return cls(repository=uow.tool_repository)
+        from src.repositories.tool_repository import ToolRepository
+        self.repository = ToolRepository(session)
+
+    # Removed factory method - using dependency injection instead
     
     async def get_all_tools(self) -> ToolListResponse:
         """
@@ -348,7 +334,7 @@ class ToolService:
         
         # Check group authorization
         if group_context and group_context.group_ids:
-            if tool.group_id not in group_context.group_ids:
+            if tool.group_id is not None and tool.group_id not in group_context.group_ids:
                 logger.warning(f"Tool with ID {tool_id} not authorized for group")
                 raise HTTPException(
                     status_code=status.HTTP_404_NOT_FOUND,  # Return 404 not 403 to avoid information leakage
@@ -425,7 +411,7 @@ class ToolService:
         
         # Check group authorization
         if group_context and group_context.group_ids:
-            if tool.group_id not in group_context.group_ids:
+            if tool.group_id is not None and tool.group_id not in group_context.group_ids:
                 logger.warning(f"Tool with ID {tool_id} not authorized for group")
                 raise HTTPException(
                     status_code=status.HTTP_404_NOT_FOUND,  # Return 404 not 403 to avoid information leakage
@@ -553,7 +539,7 @@ class ToolService:
                 )
             
             # For group-specific tools, check authorization
-            if tool.group_id not in group_context.group_ids:
+            if tool.group_id is not None and tool.group_id not in group_context.group_ids:
                 logger.warning(f"Tool with ID {tool_id} not authorized for group")
                 raise HTTPException(
                     status_code=status.HTTP_404_NOT_FOUND,  # Return 404 not 403 to avoid information leakage
