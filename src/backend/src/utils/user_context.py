@@ -45,34 +45,38 @@ _group_context: ContextVar[Optional['GroupContext']] = ContextVar('group_context
 @dataclass
 class GroupContext:
     """Hybrid group context for multi-tenant data isolation and access control.
-    
+
     This class manages group-based data isolation with support for both individual
     and collaborative access modes. It provides the foundation for multi-tenant
     data segregation throughout the application.
-    
+
     Supports two isolation modes:
         1. Individual mode: Users not in any groups get their own private group
            for complete data isolation
         2. Group mode: Users in groups can access data from all their assigned
            groups, enabling team collaboration
-    
+
     Attributes:
         group_ids: List of all group IDs the user belongs to
         group_email: User's email address for identification
         email_domain: Domain extracted from email for organization mapping
         user_id: Optional user identifier from authentication system
         access_token: Databricks or OAuth access token for API calls
-    
+        user_role: User's role in the primary group (admin, editor, operator)
+        highest_role: User's highest role across ALL groups (for authorization)
+        current_user: The User model instance with permission fields
+
     Properties:
         primary_group_id: Returns the first group ID for creating new data
-    
+
     Example:
         >>> context = await GroupContext.from_email(
         ...     email="alice@acme-corp.com",
         ...     access_token="Bearer token_123"
         ... )
         >>> print(context.primary_group_id)  # "acme_corp" or "user_alice_acme_corp_com"
-    
+        >>> print(context.user_role)  # "editor"
+
     Note:
         The context is designed to be immutable once created and should be
         passed through the execution pipeline for consistent isolation.
@@ -82,6 +86,9 @@ class GroupContext:
     email_domain: Optional[str] = None    # e.g., "acme-corp.com"
     user_id: Optional[str] = None         # User ID if available
     access_token: Optional[str] = None    # Databricks access token
+    user_role: Optional[str] = None       # User's role in primary group (admin/editor/operator)
+    highest_role: Optional[str] = None    # User's highest role across ALL groups (for authorization)
+    current_user: Optional[Any] = None    # User model instance with permission fields
     
     @property
     def primary_group_id(self) -> Optional[str]:
@@ -102,38 +109,91 @@ class GroupContext:
             'email_domain': self.email_domain,
             'user_id': self.user_id,
             'access_token': self.access_token,
+            'user_role': self.user_role,  # Include user role
+            'highest_role': self.highest_role,  # Include highest role across all groups
             'primary_group_id': self.primary_group_id,  # Include computed property
-            'group_id': self.primary_group_id  # Alias for backward compatibility
+            'group_id': self.primary_group_id,  # Alias for backward compatibility
+            # Note: current_user is not included as it's not JSON serializable
+            'is_system_admin': getattr(self.current_user, 'is_system_admin', False) if self.current_user else False,
+            'is_personal_workspace_manager': getattr(self.current_user, 'is_personal_workspace_manager', False) if self.current_user else False
         }
     
     @classmethod
-    async def from_email(cls, email: str, access_token: str = None, user_id: str = None) -> 'GroupContext':
-        """Create GroupContext from user email with hybrid individual/group-based groups."""
+    async def from_email(cls, email: str, access_token: str = None, user_id: str = None, group_id: str = None) -> 'GroupContext':
+        """Create GroupContext from user email with hybrid individual/group-based groups.
+
+        Args:
+            email: User's email address
+            access_token: Optional access token
+            user_id: Optional user ID
+            group_id: Optional specific group ID to use (from group_id header)
+        """
         if not email or "@" not in email:
             return cls()
-        
+
         email_domain = email.split("@")[1]
-        
+
         # Get user's group memberships from group management system
         try:
-            user_group_ids = await cls._get_user_group_memberships(email)
-            
-            if not user_group_ids or len(user_group_ids) == 0:
+            user, user_groups_with_roles = await cls._get_user_group_memberships_with_roles(email)
+
+            if not user_groups_with_roles or len(user_groups_with_roles) == 0:
                 # User is NOT in any groups - use individual groups
                 # Create a unique group ID based on the user's email (sanitized)
                 individual_group_id = cls.generate_individual_group_id(email)
                 logger.info(f"User {email} not in any groups, using individual group: {individual_group_id}")
                 user_group_ids = [individual_group_id]
+                user_role = None  # No role for individual workspace
+                highest_role = None  # No highest role when not in any groups
             else:
                 # User IS in groups - use group-based groups
-                logger.info(f"User {email} belongs to groups: {user_group_ids}")
-            
+                user_group_ids = []
+                roles_by_group = {}
+                for group, role in user_groups_with_roles:
+                    user_group_ids.append(group.id)
+                    roles_by_group[group.id] = role
+
+                # Determine user's highest role across ALL groups (for authorization)
+                highest_role = None
+                if any(role == "admin" for group, role in user_groups_with_roles):
+                    highest_role = "admin"
+                elif any(role == "editor" for group, role in user_groups_with_roles):
+                    highest_role = "editor"
+                elif any(role == "operator" for group, role in user_groups_with_roles):
+                    highest_role = "operator"
+                else:
+                    highest_role = user_groups_with_roles[0][1] if user_groups_with_roles else None
+
+                # If a specific group_id was provided, use its role
+                if group_id and group_id in roles_by_group:
+                    user_role = roles_by_group[group_id]
+                    # Put the selected group first in the list
+                    user_group_ids = [group_id] + [gid for gid in user_group_ids if gid != group_id]
+                elif group_id and group_id.startswith("user_"):
+                    # Personal workspace selected (e.g., user_admin_admin_com)
+                    # For personal workspaces, inherit the highest role for authorization
+                    # but keep data isolated to personal workspace
+                    user_role = highest_role  # Use highest role for authorization
+
+                    # Add the personal workspace as primary for data filtering
+                    # This ensures data isolation to personal workspace
+                    user_group_ids = [group_id] + user_group_ids
+                    logger.info(f"Personal workspace {group_id} selected for {email}, using highest role: {user_role}")
+                else:
+                    # Use the role from the first group
+                    user_role = user_groups_with_roles[0][1] if user_groups_with_roles else None
+
+                logger.info(f"User {email} belongs to groups: {user_group_ids} with role: {user_role}, highest role: {highest_role}")
+
             return cls(
                 group_ids=user_group_ids,
                 group_email=email,
                 email_domain=email_domain,
-                user_id=user_id,
-                access_token=access_token
+                user_id=user_id if user_id else (user.id if user else None),
+                access_token=access_token,
+                user_role=user_role,
+                highest_role=highest_role,
+                current_user=user  # Include the user object with permission fields
             )
         except Exception as e:
             # Fallback to individual groups if group lookup fails
@@ -144,7 +204,10 @@ class GroupContext:
                 group_email=email,
                 email_domain=email_domain,
                 user_id=user_id,
-                access_token=access_token
+                access_token=access_token,
+                user_role=None,
+                highest_role=None,
+                current_user=None  # No user object in fallback case
             )
     
     @staticmethod
@@ -179,26 +242,89 @@ class GroupContext:
     async def _get_user_group_memberships(email: str) -> list:
         """
         Get list of group IDs that the user belongs to.
-        
+        Auto-creates the user if they don't exist (proxy authentication).
+
         Args:
             email: User email address
-            
+
         Returns:
             List of group IDs the user is a member of
         """
         try:
             # Import here to avoid circular imports
             from src.services.group_service import GroupService
+            from src.services.user_service import UserService
             from src.db.session import async_session_factory
-            
+
             async with async_session_factory() as session:
+                # Get or create the user
+                user_service = UserService(session)
+                user = await user_service.get_or_create_user_by_email(email)
+
+                if not user:
+                    logger.error(f"Failed to get or create user for email: {email}")
+                    return []
+
+                # Commit the session to ensure user and any groups are saved
+                await session.commit()
+
                 group_service = GroupService(session)
                 user_groups = await group_service.get_user_group_memberships(email)
+
+                # Commit any pending changes
+                await session.commit()
+
                 return [group.id for group in user_groups]
-                
+
         except Exception as e:
             logger.error(f"Error getting user group memberships for {email}: {e}")
             return []
+
+    @staticmethod
+    async def _get_user_group_memberships_with_roles(email: str) -> tuple:
+        """
+        Get list of groups and roles that the user belongs to, along with the user object.
+        Auto-creates the user if they don't exist (proxy authentication).
+
+        Args:
+            email: User email address
+
+        Returns:
+            Tuple of (user, groups_with_roles) where groups_with_roles is a list of tuples containing (group, role)
+        """
+        try:
+            # Import here to avoid circular imports
+            from src.services.group_service import GroupService
+            from src.services.user_service import UserService
+            from src.db.session import async_session_factory
+
+            async with async_session_factory() as session:
+                # Get or create the user
+                logger.info(f"[USER CONTEXT DEBUG] Creating UserService and calling get_or_create_user_by_email for {email}")
+                user_service = UserService(session)
+                user = await user_service.get_or_create_user_by_email(email)
+                logger.info(f"[USER CONTEXT DEBUG] get_or_create_user_by_email returned user: {user.email if user else 'None'}, is_system_admin: {user.is_system_admin if user else 'N/A'}")
+
+                if not user:
+                    logger.error(f"Failed to get or create user for email: {email}")
+                    return None, []
+
+                # Commit the session to ensure user and any groups are saved
+                await session.commit()
+                logger.info(f"[USER CONTEXT DEBUG] Session committed for user {user.email}")
+
+                group_service = GroupService(session)
+                # This returns list of tuples: (group, role)
+                groups_with_roles = await group_service.get_user_groups_with_roles(user.id)
+
+                # Commit any pending changes
+                await session.commit()
+
+                return user, groups_with_roles
+
+        except Exception as e:
+            logger.error(f"Error getting user group memberships with roles for {email}: {e}")
+            return None, []
 
 
 class UserContext:
@@ -489,10 +615,10 @@ async def _is_databricks_apps_enabled() -> bool:
     """
     try:
         from src.services.databricks_service import DatabricksService
-        from src.core.unit_of_work import UnitOfWork
-        
-        async with UnitOfWork() as uow:
-            service = await DatabricksService.from_unit_of_work(uow)
+        from src.db.session import async_session_factory
+
+        async with async_session_factory() as session:
+            service = DatabricksService(session)
             config = await service.get_databricks_config()
             
             if config and hasattr(config, 'apps_enabled'):

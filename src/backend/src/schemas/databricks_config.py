@@ -9,7 +9,6 @@ class DatabricksConfigBase(BaseModel):
     warehouse_id: str = ""
     catalog: str = ""
     db_schema: str = Field("", alias="schema")
-    secret_scope: str = ""
     enabled: bool = True
     apps_enabled: bool = False
     
@@ -33,7 +32,7 @@ class DatabricksConfigCreate(DatabricksConfigBase):
     def required_fields(self) -> List[str]:
         """Get list of required fields based on configuration"""
         if self.enabled and not self.apps_enabled:
-            return ["warehouse_id", "catalog", "db_schema", "secret_scope"]
+            return ["warehouse_id", "catalog", "db_schema"]
         return []
     
     @model_validator(mode='after')
@@ -48,19 +47,19 @@ class DatabricksConfigCreate(DatabricksConfigBase):
             return self
 
         # Check required fields
-        required_fields = ["warehouse_id", "catalog", "db_schema", "secret_scope"]
+        required_fields = ["warehouse_id", "catalog", "db_schema"]
         empty_fields = []
-        
+
         for field in required_fields:
             # Handle the schema field
             if field == "db_schema":
                 value = self.db_schema
             else:
                 value = getattr(self, field, "")
-                
+
             if not value:
                 empty_fields.append(field)
-        
+
         if empty_fields:
             raise ValueError(f"Invalid configuration: {', '.join(empty_fields)} must be non-empty when Databricks is enabled and apps are disabled")
             
@@ -73,7 +72,6 @@ class DatabricksConfigUpdate(DatabricksConfigBase):
     warehouse_id: Optional[str] = None
     catalog: Optional[str] = None
     db_schema: Optional[str] = Field(None, alias="schema")
-    secret_scope: Optional[str] = None
     enabled: Optional[bool] = None
     apps_enabled: Optional[bool] = None
     

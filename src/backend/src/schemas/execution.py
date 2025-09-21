@@ -140,6 +140,7 @@ class ExecutionResponse(BaseModel):
     execution_outputs: Optional[Dict[str, Any]] = Field(None, description="Output data from the execution")
     execution_config: Optional[Dict[str, Any]] = Field(None, description="Configuration used for the execution")
     group_email: Optional[str] = Field(None, description="Email of the user who submitted the execution")
+    group_id: Optional[str] = Field(None, description="Group ID the execution belongs to")
     inputs: Optional[Dict[str, Any]] = Field(None, description="Complete inputs including agents_yaml and tasks_yaml")
     agents_yaml: Optional[str] = Field(None, description="Agents configuration as JSON string")
     tasks_yaml: Optional[str] = Field(None, description="Tasks configuration as JSON string")
