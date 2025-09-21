@@ -340,7 +340,7 @@ class TestGroupUserBase:
     def test_group_user_base_defaults(self):
         """Test GroupUserBase with default values."""
         user_base = GroupUserBase()
-        assert user_base.role == GroupUserRole.USER
+        assert user_base.role == GroupUserRole.OPERATOR
         assert user_base.status == GroupUserStatus.ACTIVE
     
     def test_group_user_base_explicit_values(self):
@@ -370,18 +370,18 @@ class TestGroupUserCreateRequest:
         """Test GroupUserCreateRequest with valid data."""
         create_data = {
             "user_email": "user@company.com",
-            "role": GroupUserRole.USER
+            "role": GroupUserRole.OPERATOR
         }
         create_request = GroupUserCreateRequest(**create_data)
         assert create_request.user_email == "user@company.com"
-        assert create_request.role == GroupUserRole.USER
+        assert create_request.role == GroupUserRole.OPERATOR
     
     def test_group_user_create_request_default_role(self):
         """Test GroupUserCreateRequest with default role."""
         create_data = {"user_email": "default@company.com"}
         create_request = GroupUserCreateRequest(**create_data)
         assert create_request.user_email == "default@company.com"
-        assert create_request.role == GroupUserRole.USER  # Default
+        assert create_request.role == GroupUserRole.OPERATOR  # Default
     
     def test_group_user_create_request_admin_role(self):
         """Test GroupUserCreateRequest with admin role."""
@@ -472,7 +472,7 @@ class TestGroupUserResponse:
             "group_id": "group-456",
             "user_id": "user-789",
             "email": "user@company.com",
-            "role": GroupUserRole.USER,
+            "role": GroupUserRole.OPERATOR,
             "status": GroupUserStatus.ACTIVE,
             "joined_at": now,
             "auto_created": False,
@@ -484,7 +484,7 @@ class TestGroupUserResponse:
         assert response.group_id == "group-456"
         assert response.user_id == "user-789"
         assert response.email == "user@company.com"
-        assert response.role == GroupUserRole.USER
+        assert response.role == GroupUserRole.OPERATOR
         assert response.status == GroupUserStatus.ACTIVE
         assert response.joined_at == now
         assert response.auto_created is False
@@ -521,7 +521,7 @@ class TestGroupUserResponse:
         assert hasattr(response, 'updated_at')
         
         # Should behave like base class with defaults
-        assert response.role == GroupUserRole.USER  # Default from base
+        assert response.role == GroupUserRole.OPERATOR  # Default from base
         assert response.status == GroupUserStatus.ACTIVE  # Default from base
     
     def test_group_user_response_config(self):
@@ -638,7 +638,7 @@ class TestSchemaIntegration:
         # Add user to group
         add_user_data = {
             "user_email": "developer@company.com",
-            "role": GroupUserRole.USER
+            "role": GroupUserRole.OPERATOR
         }
         add_request = GroupUserCreateRequest(**add_user_data)
         
@@ -671,8 +671,8 @@ class TestSchemaIntegration:
         
         # Verify workflow
         assert add_request.user_email == "developer@company.com"
-        assert add_request.role == GroupUserRole.USER
-        assert user_response.role == GroupUserRole.USER
+        assert add_request.role == GroupUserRole.OPERATOR
+        assert user_response.role == GroupUserRole.OPERATOR
         assert user_response.status == GroupUserStatus.ACTIVE
         assert promote_request.role == GroupUserRole.ADMIN
         assert updated_response.role == GroupUserRole.ADMIN  # Promoted

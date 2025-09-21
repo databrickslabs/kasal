@@ -10,7 +10,9 @@ from datetime import datetime, timezone, timedelta
 from unittest.mock import MagicMock
 
 from src.models.user import (
-    User, UserProfile, RefreshToken, generate_uuid
+    User, UserProfile, RefreshToken, ExternalIdentity,
+    Role, Privilege, RolePrivilege, UserRole, IdentityProvider,
+    DatabricksRole, generate_uuid
 )
 from src.models.enums import UserRole as UserRoleEnum, UserStatus, IdentityProviderType
 
@@ -227,13 +229,11 @@ class TestRefreshToken:
         assert columns['token'].unique is True
 
 
-# ExternalIdentity model removed - simplified auth system
-"""
 class TestExternalIdentity:
-    \"\"\"Test cases for ExternalIdentity model.\"\"\"
+    """Test cases for ExternalIdentity model."""
 
     def test_external_identity_creation(self):
-        \"\"\"Test basic ExternalIdentity model creation.\"\"\"
+        """Test basic ExternalIdentity model creation."""
         # Arrange
         user_id = "user-external"
         provider = "google"
@@ -259,7 +259,7 @@ class TestExternalIdentity:
         assert external_identity.last_login is None
 
     def test_external_identity_minimal(self):
-        \"\"\"Test ExternalIdentity with minimal required fields.\"\"\"
+        """Test ExternalIdentity with minimal required fields."""
         # Arrange & Act
         external_identity = ExternalIdentity(
             user_id="user-min",
@@ -272,7 +272,7 @@ class TestExternalIdentity:
         assert external_identity.profile_data is None
 
     def test_external_identity_with_last_login(self):
-        \"\"\"Test ExternalIdentity with last login timestamp.\"\"\"
+        """Test ExternalIdentity with last login timestamp."""
         # Arrange
         last_login = datetime.now(timezone.utc)
         
@@ -288,12 +288,12 @@ class TestExternalIdentity:
         assert external_identity.last_login == last_login
 
     def test_external_identity_table_name(self):
-        \"\"\"Test that the table name is correctly set.\"\"\"
+        """Test that the table name is correctly set."""
         # Act & Assert
         assert ExternalIdentity.__tablename__ == "external_identities"
 
     def test_external_identity_unique_constraint(self):
-        \"\"\"Test that the unique constraint exists for provider and provider_user_id.\"\"\"
+        """Test that the unique constraint exists for provider and provider_user_id."""
         # Act
         constraints = ExternalIdentity.__table_args__
         
@@ -303,15 +303,13 @@ class TestExternalIdentity:
         assert constraint.name == 'uq_external_identity_provider_user'
         assert 'provider' in [col.name for col in constraint.columns]
         assert 'provider_user_id' in [col.name for col in constraint.columns]
-"""
 
-# Complex RBAC models removed - using simplified group-based roles
-"""
+
 class TestRole:
-    \"\"\"Test cases for Role model.\"\"\"
+    """Test cases for Role model."""
 
     def test_role_creation(self):
-        \"\"\"Test basic Role model creation.\"\"\"
+        """Test basic Role model creation."""
         # Arrange
         name = "Project Manager"
         description = "Can manage projects and assign tasks"
@@ -327,7 +325,7 @@ class TestRole:
         assert role.description == description
 
     def test_role_minimal(self):
-        \"\"\"Test Role with minimal required fields.\"\"\"
+        """Test Role with minimal required fields."""
         # Arrange & Act
         role = Role(name="Basic User")
         
@@ -336,12 +334,12 @@ class TestRole:
         assert role.description is None
 
     def test_role_table_name(self):
-        \"\"\"Test that the table name is correctly set.\"\"\"
+        """Test that the table name is correctly set."""
         # Act & Assert
         assert Role.__tablename__ == "roles"
 
     def test_role_unique_name(self):
-        \"\"\"Test that name has unique constraint.\"\"\"
+        """Test that name has unique constraint."""
         # Act
         columns = Role.__table__.columns
         
@@ -349,7 +347,7 @@ class TestRole:
         assert columns['name'].unique is True
 
     def test_role_relationships(self):
-        \"\"\"Test that Role model has the expected relationships.\"\"\"
+        """Test that Role model has the expected relationships."""
         # Act
         relationships = Role.__mapper__.relationships
         
@@ -359,10 +357,10 @@ class TestRole:
 
 
 class TestPrivilege:
-    \"\"\"Test cases for Privilege model.\"\"\"
+    """Test cases for Privilege model."""
 
     def test_privilege_creation(self):
-        \"\"\"Test basic Privilege model creation.\"\"\"
+        """Test basic Privilege model creation."""
         # Arrange
         name = "users:read"
         description = "Can read user information"
@@ -378,7 +376,7 @@ class TestPrivilege:
         assert privilege.description == description
 
     def test_privilege_resource_action_format(self):
-        \"\"\"Test Privilege with resource:action format names.\"\"\"
+        """Test Privilege with resource:action format names."""
         # Arrange
         privileges = [
             "users:create",
@@ -399,12 +397,12 @@ class TestPrivilege:
             assert ":" in privilege.name  # Should follow resource:action format
 
     def test_privilege_table_name(self):
-        \"\"\"Test that the table name is correctly set.\"\"\"
+        """Test that the table name is correctly set."""
         # Act & Assert
         assert Privilege.__tablename__ == "privileges"
 
     def test_privilege_unique_name(self):
-        \"\"\"Test that name has unique constraint.\"\"\"
+        """Test that name has unique constraint."""
         # Act
         columns = Privilege.__table__.columns
         
@@ -413,10 +411,10 @@ class TestPrivilege:
 
 
 class TestRolePrivilege:
-    \"\"\"Test cases for RolePrivilege model.\"\"\"
+    """Test cases for RolePrivilege model."""
 
     def test_role_privilege_creation(self):
-        \"\"\"Test basic RolePrivilege model creation.\"\"\"
+        """Test basic RolePrivilege model creation."""
         # Arrange
         role_id = "role-123"
         privilege_id = "privilege-456"
@@ -432,12 +430,12 @@ class TestRolePrivilege:
         assert role_privilege.privilege_id == privilege_id
 
     def test_role_privilege_table_name(self):
-        \"\"\"Test that the table name is correctly set.\"\"\"
+        """Test that the table name is correctly set."""
         # Act & Assert
         assert RolePrivilege.__tablename__ == "role_privileges"
 
     def test_role_privilege_unique_constraint(self):
-        \"\"\"Test that the unique constraint exists for role_id and privilege_id.\"\"\"
+        """Test that the unique constraint exists for role_id and privilege_id."""
         # Act
         constraints = RolePrivilege.__table_args__
         
@@ -450,10 +448,10 @@ class TestRolePrivilege:
 
 
 class TestUserRole:
-    \"\"\"Test cases for UserRole model.\"\"\"
+    """Test cases for UserRole model."""
 
     def test_user_role_creation(self):
-        \"\"\"Test basic UserRole model creation.\"\"\"
+        """Test basic UserRole model creation."""
         # Arrange
         user_id = "user-789"
         role_id = "role-abc"
@@ -472,7 +470,7 @@ class TestUserRole:
         assert user_role.assigned_by == assigned_by
 
     def test_user_role_minimal(self):
-        \"\"\"Test UserRole with minimal required fields.\"\"\"
+        """Test UserRole with minimal required fields."""
         # Arrange & Act
         user_role = UserRole(
             user_id="user-min",
@@ -483,12 +481,12 @@ class TestUserRole:
         assert user_role.assigned_by is None
 
     def test_user_role_table_name(self):
-        \"\"\"Test that the table name is correctly set.\"\"\"
+        """Test that the table name is correctly set."""
         # Act & Assert
         assert UserRole.__tablename__ == "user_roles"
 
     def test_user_role_unique_constraint(self):
-        \"\"\"Test that the unique constraint exists for user_id and role_id.\"\"\"
+        """Test that the unique constraint exists for user_id and role_id."""
         # Act
         constraints = UserRole.__table_args__
         
@@ -501,10 +499,10 @@ class TestUserRole:
 
 
 class TestIdentityProvider:
-    \"\"\"Test cases for IdentityProvider model.\"\"\"
+    """Test cases for IdentityProvider model."""
 
     def test_identity_provider_creation(self):
-        \"\"\"Test basic IdentityProvider model creation.\"\"\"
+        """Test basic IdentityProvider model creation."""
         # Arrange
         name = "Google OAuth"
         provider_type = IdentityProviderType.OAUTH
@@ -526,7 +524,7 @@ class TestIdentityProvider:
         assert IdentityProvider.__table__.columns['is_default'].default.arg is False
 
     def test_identity_provider_all_types(self):
-        \"\"\"Test IdentityProvider with all provider types.\"\"\"
+        """Test IdentityProvider with all provider types."""
         # Test all provider types
         for provider_type in IdentityProviderType:
             identity_provider = IdentityProvider(
@@ -537,7 +535,7 @@ class TestIdentityProvider:
             assert identity_provider.type == provider_type
 
     def test_identity_provider_default(self):
-        \"\"\"Test IdentityProvider as default provider.\"\"\"
+        """Test IdentityProvider as default provider."""
         # Arrange & Act
         identity_provider = IdentityProvider(
             name="Default OIDC",
@@ -550,7 +548,7 @@ class TestIdentityProvider:
         assert identity_provider.is_default is True
 
     def test_identity_provider_disabled(self):
-        \"\"\"Test IdentityProvider in disabled state.\"\"\"
+        """Test IdentityProvider in disabled state."""
         # Arrange & Act
         identity_provider = IdentityProvider(
             name="Disabled SAML",
@@ -563,21 +561,21 @@ class TestIdentityProvider:
         assert identity_provider.enabled is False
 
     def test_identity_provider_table_name(self):
-        \"\"\"Test that the table name is correctly set.\"\"\"
+        """Test that the table name is correctly set."""
         # Act & Assert
         assert IdentityProvider.__tablename__ == "identity_providers"
 
 
 class TestDatabricksRoleAlias:
-    \"\"\"Test cases for DatabricksRole alias.\"\"\"
+    """Test cases for DatabricksRole alias."""
 
     def test_databricks_role_alias(self):
-        \"\"\"Test that DatabricksRole is an alias for Role.\"\"\"
+        """Test that DatabricksRole is an alias for Role."""
         # Act & Assert
         assert DatabricksRole is Role
 
     def test_databricks_role_functionality(self):
-        \"\"\"Test that DatabricksRole alias works the same as Role.\"\"\"
+        """Test that DatabricksRole alias works the same as Role."""
         # Arrange
         name = "Databricks Admin"
         description = "Administrator role for Databricks"
@@ -598,8 +596,6 @@ class TestDatabricksRoleAlias:
         assert type(role_via_alias) == type(role_via_class)
         assert isinstance(role_via_alias, Role)
 
-
-"""
 
 class TestGenerateUuidFunction:
     """Test cases for generate_uuid function."""
@@ -683,10 +679,117 @@ class TestUserModelsIntegration:
         assert token1.user_id == token2.user_id == user_id
         assert token1.token != token2.token
 
-    # ExternalIdentity model removed - simplified auth system
-    # def test_user_with_external_identities(self):
+    def test_user_with_external_identities(self):
+        """Test User with multiple ExternalIdentity relationships."""
+        # Arrange
+        user_id = "external-user"
+        
+        # Act
+        user = User(
+            username="social_user",
+            email="social@example.com",
+            hashed_password="password"
+        )
+        
+        google_identity = ExternalIdentity(
+            user_id=user_id,
+            provider="google",
+            provider_user_id="google_123",
+            email="social@gmail.com"
+        )
+        
+        github_identity = ExternalIdentity(
+            user_id=user_id,
+            provider="github",
+            provider_user_id="github_456",
+            email="social@users.noreply.github.com"
+        )
+        
+        # Assert
+        assert google_identity.user_id == github_identity.user_id == user_id
+        assert google_identity.provider != github_identity.provider
 
-    # Complex RBAC models removed - using simplified group-based roles
-    # def test_role_privilege_assignment_scenario(self):
+    def test_role_privilege_assignment_scenario(self):
+        """Test role and privilege assignment scenario."""
+        # Arrange
+        role_id = "admin-role"
+        user_id = "admin-user"
+        
+        # Act - Create role
+        admin_role = Role(
+            name="Administrator",
+            description="Full system administrator"
+        )
+        
+        # Create privileges
+        user_read_priv = Privilege(
+            name="users:read",
+            description="Read user information"
+        )
+        
+        user_write_priv = Privilege(
+            name="users:write", 
+            description="Create and update users"
+        )
+        
+        # Assign privileges to role
+        role_priv1 = RolePrivilege(
+            role_id=role_id,
+            privilege_id="priv-1"
+        )
+        
+        role_priv2 = RolePrivilege(
+            role_id=role_id,
+            privilege_id="priv-2"
+        )
+        
+        # Assign role to user
+        user_role = UserRole(
+            user_id=user_id,
+            role_id=role_id,
+            assigned_by="system@company.com"
+        )
+        
+        # Assert
+        assert admin_role.name == "Administrator"
+        assert user_read_priv.name == "users:read"
+        assert user_write_priv.name == "users:write"
+        assert role_priv1.role_id == role_priv2.role_id == role_id
+        assert user_role.user_id == user_id
+        assert user_role.role_id == role_id
 
-    # def test_identity_provider_configurations(self):
+    def test_identity_provider_configurations(self):
+        """Test different identity provider configurations."""
+        # Google OAuth
+        google_provider = IdentityProvider(
+            name="Google OAuth 2.0",
+            type=IdentityProviderType.OAUTH,
+            config='{"client_id": "google_id", "scopes": ["email", "profile"]}',
+            enabled=True,
+            is_default=True
+        )
+        
+        # Microsoft OIDC
+        microsoft_provider = IdentityProvider(
+            name="Microsoft Azure AD",
+            type=IdentityProviderType.OIDC,
+            config='{"issuer": "https://login.microsoftonline.com/tenant", "client_id": "ms_client"}',
+            enabled=True
+        )
+        
+        # SAML Provider
+        saml_provider = IdentityProvider(
+            name="Corporate SAML",
+            type=IdentityProviderType.SAML,
+            config='{"sso_url": "https://saml.corp.com", "certificate": "cert_data"}',
+            enabled=False
+        )
+        
+        # Assert
+        assert google_provider.is_default is True
+        # Note: SQLAlchemy defaults are applied when saved to database
+        assert microsoft_provider.is_default is True or microsoft_provider.is_default is None
+        assert saml_provider.enabled is False
+        assert google_provider.type == IdentityProviderType.OAUTH
+        assert microsoft_provider.type == IdentityProviderType.OIDC
+        assert saml_provider.type == IdentityProviderType.SAML

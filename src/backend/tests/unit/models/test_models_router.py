@@ -58,12 +58,39 @@ def mock_model_config_service():
 
 @pytest.fixture
 def mock_group_context():
-    """Create a mock group context."""
+    """Create a mock group context with admin role."""
     context = GroupContext(
         group_ids=["group-123"],
         group_email="test@example.com",
         email_domain="example.com",
-        user_id="user-123"
+        user_id="user-123",
+        user_role="admin"  # Default to admin for most tests
+    )
+    return context
+
+
+@pytest.fixture
+def mock_group_context_editor():
+    """Create a mock group context with editor role."""
+    context = GroupContext(
+        group_ids=["group-123"],
+        group_email="editor@example.com",
+        email_domain="example.com",
+        user_id="user-456",
+        user_role="editor"
+    )
+    return context
+
+
+@pytest.fixture
+def mock_group_context_operator():
+    """Create a mock group context with operator role."""
+    context = GroupContext(
+        group_ids=["group-123"],
+        group_email="operator@example.com",
+        email_domain="example.com",
+        user_id="user-789",
+        user_role="operator"
     )
     return context
 
@@ -382,11 +409,45 @@ class TestCreateModel:
     def test_create_model_service_error(self, client, mock_model_config_service, sample_model_create):
         """Test creating model with service error."""
         mock_model_config_service.create_model_config.side_effect = Exception("Database error")
-        
+
         response = client.post("/models", json=sample_model_create.model_dump())
-        
+
         assert response.status_code == 500
         assert "Database error" in response.json()["detail"]
+
+    def test_create_model_forbidden_editor(self, app, mock_model_config_service, mock_group_context_editor, sample_model_create):
+        """Test that editors cannot create model configurations."""
+        from fastapi.testclient import TestClient
+        from src.core.dependencies import get_group_context
+
+        # Override group context with editor role
+        async def override_get_group_context():
+            return mock_group_context_editor
+
+        app.dependency_overrides[get_group_context] = override_get_group_context
+        client = TestClient(app)
+
+        response = client.post("/models", json=sample_model_create.model_dump())
+
+        assert response.status_code == 403
+        assert "Only admins can create model configurations" in response.json()["detail"]
+
+    def test_create_model_forbidden_operator(self, app, mock_model_config_service, mock_group_context_operator, sample_model_create):
+        """Test that operators cannot create model configurations."""
+        from fastapi.testclient import TestClient
+        from src.core.dependencies import get_group_context
+
+        # Override group context with operator role
+        async def override_get_group_context():
+            return mock_group_context_operator
+
+        app.dependency_overrides[get_group_context] = override_get_group_context
+        client = TestClient(app)
+
+        response = client.post("/models", json=sample_model_create.model_dump())
+
+        assert response.status_code == 403
+        assert "Only admins can create model configurations" in response.json()["detail"]
 
 
 class TestUpdateModel:
@@ -428,11 +489,43 @@ class TestUpdateModel:
     def test_update_model_service_error(self, client, mock_model_config_service, sample_model_update):
         """Test updating model with service error."""
         mock_model_config_service.update_model_config.side_effect = Exception("Database error")
-        
+
         response = client.put("/models/gpt-4-turbo", json=sample_model_update.model_dump())
-        
+
         assert response.status_code == 500
         assert "Database error" in response.json()["detail"]
+
+    def test_update_model_forbidden_editor(self, app, mock_model_config_service, mock_group_context_editor, sample_model_update):
+        """Test that editors cannot update model configurations."""
+        from fastapi.testclient import TestClient
+        from src.core.dependencies import get_group_context
+
+        async def override_get_group_context():
+            return mock_group_context_editor
+
+        app.dependency_overrides[get_group_context] = override_get_group_context
+        client = TestClient(app)
+
+        response = client.put("/models/gpt-4-turbo", json=sample_model_update.model_dump())
+
+        assert response.status_code == 403
+        assert "Only admins can update model configurations" in response.json()["detail"]
+
+    def test_update_model_forbidden_operator(self, app, mock_model_config_service, mock_group_context_operator, sample_model_update):
+        """Test that operators cannot update model configurations."""
+        from fastapi.testclient import TestClient
+        from src.core.dependencies import get_group_context
+
+        async def override_get_group_context():
+            return mock_group_context_operator
+
+        app.dependency_overrides[get_group_context] = override_get_group_context
+        client = TestClient(app)
+
+        response = client.put("/models/gpt-4-turbo", json=sample_model_update.model_dump())
+
+        assert response.status_code == 403
+        assert "Only admins can update model configurations" in response.json()["detail"]
 
 
 class TestToggleModel:

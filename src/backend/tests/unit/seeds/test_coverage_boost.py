@@ -7,7 +7,7 @@ import asyncio
 from unittest.mock import Mock, patch, AsyncMock
 from sqlalchemy.exc import IntegrityError
 
-from src.seeds import seed_runner, documentation, model_configs, prompt_templates, roles, schemas, tools
+from src.seeds import seed_runner, documentation, model_configs, prompt_templates, schemas, tools
 
 
 class TestCoverageBoost:

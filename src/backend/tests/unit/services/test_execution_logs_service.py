@@ -16,7 +16,6 @@ from fastapi import WebSocket
 
 from src.services.execution_logs_service import (
     ExecutionLogsService,
-    execution_logs_service,
     logs_writer_loop,
     start_logs_writer,
     stop_logs_writer,
@@ -60,7 +59,8 @@ def group_context():
 @pytest.fixture
 def execution_logs_service_instance():
     """Create a fresh ExecutionLogsService instance for testing."""
-    return ExecutionLogsService()
+    mock_session = AsyncMock()
+    return ExecutionLogsService(session=mock_session)
 
 
 class TestExecutionLogsService:

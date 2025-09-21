@@ -75,12 +75,39 @@ def mock_flow_service():
 
 @pytest.fixture
 def mock_group_context():
-    """Create a mock group context."""
+    """Create a mock group context with admin role."""
     context = GroupContext(
         group_ids=["group-123"],
         group_email="test@example.com",
         email_domain="example.com",
-        user_id="user-123"
+        user_id="user-123",
+        user_role="admin"  # Default to admin for most tests
+    )
+    return context
+
+
+@pytest.fixture
+def mock_group_context_editor():
+    """Create a mock group context with editor role."""
+    context = GroupContext(
+        group_ids=["group-123"],
+        group_email="editor@example.com",
+        email_domain="example.com",
+        user_id="user-456",
+        user_role="editor"
+    )
+    return context
+
+
+@pytest.fixture
+def mock_group_context_operator():
+    """Create a mock group context with operator role."""
+    context = GroupContext(
+        group_ids=["group-123"],
+        group_email="operator@example.com",
+        email_domain="example.com",
+        user_id="user-789",
+        user_role="operator"
     )
     return context
 
@@ -740,6 +767,253 @@ class TestGenerateExecutionName:
         
         assert response.status_code == 429
         assert "Rate limited" in response.json()["detail"]
+
+
+class TestStopExecution:
+    """Test cases for stop execution endpoint."""
+
+    @patch('src.api.executions_router.select')
+    @patch('src.api.executions_router.ExecutionService')
+    def test_stop_execution_success_admin(self, mock_execution_service_class, mock_select, client, mock_group_context, mock_db_session):
+        """Test successful execution stop by admin."""
+        from src.schemas.execution import StopExecutionRequest
+        from unittest.mock import MagicMock
+
+        # Mock the database execution query
+        mock_execution = MagicMock()
+        mock_execution.job_id = "exec-123"
+        mock_execution.status = "RUNNING"
+        mock_execution.result = None
+
+        mock_result = MagicMock()
+        mock_result.scalar_one_or_none.return_value = mock_execution
+        mock_db_session.execute.return_value = mock_result
+
+        # Mock the select statement
+        mock_select.return_value.where.return_value = MagicMock()
+
+        # Mock the execution service
+        mock_service_instance = AsyncMock()
+        mock_execution_service_class.return_value = mock_service_instance
+        mock_service_instance.stop_execution.return_value = {
+            "execution_id": "exec-123",
+            "status": "stopped",
+            "message": "Execution stopped successfully"
+        }
+
+        request_data = {"stop_type": "graceful", "reason": "Testing stop"}
+        response = client.post("/executions/exec-123/stop", json=request_data)
+
+        assert response.status_code == 200
+        data = response.json()
+        assert data["execution_id"] == "exec-123"
+        assert data["status"] == "stopped"
+
+    @patch('src.api.executions_router.select')
+    @patch('src.api.executions_router.ExecutionService')
+    def test_stop_execution_success_editor(self, mock_execution_service_class, mock_select, app, mock_group_context_editor, mock_db_session):
+        """Test successful execution stop by editor."""
+        from fastapi.testclient import TestClient
+        from src.core.dependencies import get_group_context
+        from unittest.mock import MagicMock
+
+        # Override group context with editor role
+        async def override_get_group_context():
+            return mock_group_context_editor
+
+        app.dependency_overrides[get_group_context] = override_get_group_context
+        client = TestClient(app)
+
+        # Mock the database execution query
+        mock_execution = MagicMock()
+        mock_execution.job_id = "exec-123"
+        mock_execution.status = "RUNNING"
+        mock_execution.result = None
+
+        mock_result = MagicMock()
+        mock_result.scalar_one_or_none.return_value = mock_execution
+        mock_db_session.execute.return_value = mock_result
+
+        # Mock the select statement
+        mock_select.return_value.where.return_value = MagicMock()
+
+        # Mock the execution service
+        mock_service_instance = AsyncMock()
+        mock_execution_service_class.return_value = mock_service_instance
+        mock_service_instance.stop_execution.return_value = {
+            "execution_id": "exec-123",
+            "status": "stopped",
+            "message": "Execution stopped successfully"
+        }
+
+        request_data = {"stop_type": "graceful", "reason": "Testing stop"}
+        response = client.post("/executions/exec-123/stop", json=request_data)
+
+        assert response.status_code == 200
+        data = response.json()
+        assert data["execution_id"] == "exec-123"
+
+    @patch('src.api.executions_router.select')
+    @patch('src.api.executions_router.ExecutionService')
+    def test_stop_execution_forbidden_operator(self, mock_execution_service_class, mock_select, app, mock_group_context_operator, mock_db_session):
+        """Test that operators cannot stop executions."""
+        from fastapi.testclient import TestClient
+        from src.core.dependencies import get_group_context
+
+        # Override group context with operator role
+        async def override_get_group_context():
+            return mock_group_context_operator
+
+        app.dependency_overrides[get_group_context] = override_get_group_context
+        client = TestClient(app)
+
+        # Note: We don't need to mock the database here because the permission check happens first
+        request_data = {"stop_type": "graceful", "reason": "Testing stop"}
+        response = client.post("/executions/exec-123/stop", json=request_data)
+
+        assert response.status_code == 403
+        assert "Only admins and editors can stop executions" in response.json()["detail"]
+
+    @patch('src.api.executions_router.select')
+    @patch('src.api.executions_router.ExecutionService')
+    def test_stop_execution_not_found(self, mock_execution_service_class, mock_select, client, mock_group_context, mock_db_session):
+        """Test stopping non-existent execution."""
+        from unittest.mock import MagicMock
+
+        # Mock the database to return None (no execution found)
+        mock_result = MagicMock()
+        mock_result.scalar_one_or_none.return_value = None
+        mock_db_session.execute.return_value = mock_result
+
+        # Mock the select statement
+        mock_select.return_value.where.return_value = MagicMock()
+
+        request_data = {"stop_type": "graceful", "reason": "Testing stop"}
+        response = client.post("/executions/nonexistent/stop", json=request_data)
+
+        assert response.status_code == 404
+        assert "Execution nonexistent not found" in response.json()["detail"]
+
+
+class TestForceStopExecution:
+    """Test cases for force stop execution endpoint."""
+
+    @patch('src.api.executions_router.select')
+    @patch('src.api.executions_router.ExecutionService')
+    def test_force_stop_execution_success_admin(self, mock_execution_service_class, mock_select, client, mock_group_context, mock_db_session):
+        """Test successful force stop by admin."""
+        from unittest.mock import MagicMock
+
+        # Mock the database execution query
+        mock_execution = MagicMock()
+        mock_execution.job_id = "exec-123"
+        mock_execution.status = "RUNNING"
+        mock_execution.result = None
+
+        mock_result = MagicMock()
+        mock_result.scalar_one_or_none.return_value = mock_execution
+        mock_db_session.execute.return_value = mock_result
+
+        # Mock the select statement
+        mock_select.return_value.where.return_value = MagicMock()
+
+        # Mock the execution service
+        mock_service_instance = AsyncMock()
+        mock_execution_service_class.return_value = mock_service_instance
+        mock_service_instance.stop_execution.return_value = {
+            "execution_id": "exec-123",
+            "status": "terminated",
+            "message": "Execution forcefully terminated"
+        }
+
+        response = client.post("/executions/exec-123/force-stop")
+
+        assert response.status_code == 200
+        data = response.json()
+        assert data["execution_id"] == "exec-123"
+        assert data["status"] == "terminated"
+
+    @patch('src.api.executions_router.select')
+    @patch('src.api.executions_router.ExecutionService')
+    def test_force_stop_execution_success_editor(self, mock_execution_service_class, mock_select, app, mock_group_context_editor, mock_db_session):
+        """Test successful force stop by editor."""
+        from fastapi.testclient import TestClient
+        from src.core.dependencies import get_group_context
+        from unittest.mock import MagicMock
+
+        # Override group context with editor role
+        async def override_get_group_context():
+            return mock_group_context_editor
+
+        app.dependency_overrides[get_group_context] = override_get_group_context
+        client = TestClient(app)
+
+        # Mock the database execution query
+        mock_execution = MagicMock()
+        mock_execution.job_id = "exec-123"
+        mock_execution.status = "RUNNING"
+        mock_execution.result = None
+
+        mock_result = MagicMock()
+        mock_result.scalar_one_or_none.return_value = mock_execution
+        mock_db_session.execute.return_value = mock_result
+
+        # Mock the select statement
+        mock_select.return_value.where.return_value = MagicMock()
+
+        # Mock the execution service
+        mock_service_instance = AsyncMock()
+        mock_execution_service_class.return_value = mock_service_instance
+        mock_service_instance.stop_execution.return_value = {
+            "execution_id": "exec-123",
+            "status": "terminated",
+            "message": "Execution forcefully terminated"
+        }
+
+        response = client.post("/executions/exec-123/force-stop")
+
+        assert response.status_code == 200
+        data = response.json()
+        assert data["execution_id"] == "exec-123"
+
+    @patch('src.api.executions_router.select')
+    @patch('src.api.executions_router.ExecutionService')
+    def test_force_stop_execution_forbidden_operator(self, mock_execution_service_class, mock_select, app, mock_group_context_operator, mock_db_session):
+        """Test that operators cannot force stop executions."""
+        from fastapi.testclient import TestClient
+        from src.core.dependencies import get_group_context
+
+        # Override group context with operator role
+        async def override_get_group_context():
+            return mock_group_context_operator
+
+        app.dependency_overrides[get_group_context] = override_get_group_context
+        client = TestClient(app)
+
+        # Note: We don't need to mock the database here because the permission check happens first
+        response = client.post("/executions/exec-123/force-stop")
+
+        assert response.status_code == 403
+        assert "Only admins and editors can stop executions" in response.json()["detail"]
+
+    @patch('src.api.executions_router.select')
+    @patch('src.api.executions_router.ExecutionService')
+    def test_force_stop_execution_not_found(self, mock_execution_service_class, mock_select, client, mock_group_context, mock_db_session):
+        """Test force stopping non-existent execution."""
+        from unittest.mock import MagicMock
+
+        # Mock the database to return None (no execution found)
+        mock_result = MagicMock()
+        mock_result.scalar_one_or_none.return_value = None
+        mock_db_session.execute.return_value = mock_result
+
+        # Mock the select statement
+        mock_select.return_value.where.return_value = MagicMock()
+
+        response = client.post("/executions/nonexistent/force-stop")
+
+        assert response.status_code == 404
+        assert "Execution nonexistent not found" in response.json()["detail"]
 
 
 class TestCreateExecutionErrorPaths:

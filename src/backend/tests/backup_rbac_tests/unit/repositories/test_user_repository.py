@@ -10,10 +10,13 @@ from unittest.mock import AsyncMock, MagicMock, patch
 from datetime import datetime, UTC
 
 from src.repositories.user_repository import (
-    UserRepository, UserProfileRepository, RefreshTokenRepository
+    UserRepository, UserProfileRepository, RefreshTokenRepository,
+    ExternalIdentityRepository, RoleRepository, PrivilegeRepository,
+    RolePrivilegeRepository, UserRoleRepository, IdentityProviderRepository
 )
 from src.models.user import (
-    User, UserProfile, RefreshToken
+    User, UserProfile, RefreshToken, ExternalIdentity,
+    Role, Privilege, RolePrivilege, UserRole, IdentityProvider
 )
 from src.schemas.user import UserCreate, UserUpdate
 

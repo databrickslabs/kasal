@@ -47,10 +47,10 @@ def mock_group_context():
         def __init__(self):
             self.primary_group_id = "group-1"
             self.group_email = "test@example.com"
-            self.email_domain = "example.com"
             self.user_id = "user-123"
             self.access_token = "test-token"
-    
+            self.user_role = "admin"  # Add user_role attribute
+
     return MockGroupContext()
 
 
@@ -100,7 +100,6 @@ class TestGroupRouter:
             {
                 "id": "group-1",
                 "name": "Group 1",
-                "email_domain": "group1.com",
                 "status": GroupStatus.ACTIVE,
                 "description": "Test group 1",
                 "auto_created": False,
@@ -112,7 +111,6 @@ class TestGroupRouter:
             {
                 "id": "group-2",
                 "name": "Group 2",
-                "email_domain": "group2.com",
                 "status": GroupStatus.ACTIVE,
                 "description": "Test group 2",
                 "auto_created": True,
@@ -166,7 +164,6 @@ class TestGroupRouter:
         mock_group = MagicMock()
         mock_group.id = "group-3"
         mock_group.name = "New Group"
-        mock_group.email_domain = "newgroup.com"
         mock_group.status = GroupStatus.ACTIVE
         mock_group.description = "A new test group"
         mock_group.auto_created = False
@@ -179,7 +176,6 @@ class TestGroupRouter:
         
         group_data = {
             "name": "New Group",
-            "email_domain": "newgroup.com",
             "description": "A new test group"
         }
         
@@ -188,7 +184,6 @@ class TestGroupRouter:
         assert response.status_code == 201
         data = response.json()
         assert data["name"] == "New Group"
-        assert data["email_domain"] == "newgroup.com"
         assert data["user_count"] == 0
     
     @patch('src.api.group_router.GroupService')
@@ -200,7 +195,6 @@ class TestGroupRouter:
         
         group_data = {
             "name": "New Group",
-            "email_domain": "invalid-domain",
             "description": "A new test group"
         }
         
@@ -218,7 +212,6 @@ class TestGroupRouter:
         
         group_data = {
             "name": "New Group",
-            "email_domain": "newgroup.com",
             "description": "A new test group"
         }
         
@@ -236,7 +229,6 @@ class TestGroupRouter:
         mock_group = MagicMock()
         mock_group.id = "group-1"
         mock_group.name = "Test Group"
-        mock_group.email_domain = "test.com"
         mock_group.status = GroupStatus.ACTIVE
         mock_group.description = "Test description"
         mock_group.auto_created = False
@@ -288,7 +280,6 @@ class TestGroupRouter:
         mock_group = MagicMock()
         mock_group.id = "group-1"
         mock_group.name = "Updated Group"
-        mock_group.email_domain = "updated.com"
         mock_group.status = GroupStatus.ACTIVE
         mock_group.description = "Updated description"
         mock_group.auto_created = False
@@ -391,7 +382,7 @@ class TestGroupRouter:
                 "group_id": "group-1",
                 "user_id": "user-1",
                 "email": "user1@example.com",
-                "role": GroupUserRole.USER,
+                "role": GroupUserRole.OPERATOR,
                 "status": GroupUserStatus.ACTIVE,
                 "joined_at": datetime.utcnow(),
                 "auto_created": False,
@@ -490,7 +481,7 @@ class TestGroupRouter:
         
         user_data = {
             "user_email": "user@example.com",
-            "role": "user"
+            "role": "operator"
         }
         
         response = client.post("/groups/nonexistent/users", json=user_data)
@@ -510,7 +501,7 @@ class TestGroupRouter:
         
         user_data = {
             "user_email": "user@example.com",
-            "role": "user"
+            "role": "operator"
         }
         
         response = client.post("/groups/group-1/users", json=user_data)
@@ -530,7 +521,7 @@ class TestGroupRouter:
         
         user_data = {
             "user_email": "user@example.com",
-            "role": "user"
+            "role": "operator"
         }
         
         response = client.post("/groups/group-1/users", json=user_data)
@@ -544,7 +535,8 @@ class TestGroupRouter:
         """Test successful group user update."""
         mock_service = AsyncMock()
         mock_service_class.return_value = mock_service
-        
+        mock_service.session = mock_db_session  # Add session to mock service
+
         mock_group_user = MagicMock()
         mock_group_user.id = "gu-1"
         mock_group_user.group_id = "group-1"
@@ -580,7 +572,8 @@ class TestGroupRouter:
         """Test group user update when user not found in database."""
         mock_service = AsyncMock()
         mock_service_class.return_value = mock_service
-        
+        mock_service.session = mock_db_session  # Add session to mock service
+
         mock_group_user = MagicMock()
         mock_group_user.id = "gu-1"
         mock_group_user.group_id = "group-1"
@@ -701,7 +694,7 @@ class TestGroupRouter:
             # Test the function directly
             async def run_test():
                 result = await get_group_stats(
-                    session=mock_db_session,
+                    service=mock_service,
                     admin_user=MockAdminUser(),
                     group_context=mock_group_context
                 )
@@ -735,7 +728,7 @@ class TestGroupRouter:
             async def run_test():
                 try:
                     await get_group_stats(
-                        session=mock_db_session,
+                        service=mock_service,
                         admin_user=MockAdminUser(),
                         group_context=mock_group_context
                     )
@@ -754,7 +747,6 @@ class TestGroupRouter:
         data = response.json()
         assert data["group_id"] == "group-1"
         assert data["group_email"] == "test@example.com"
-        assert data["email_domain"] == "example.com"
         assert data["user_id"] == "user-123"
         assert data["access_token_present"] is True
         assert "test@example.com" in data["message"]

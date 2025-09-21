@@ -3,9 +3,15 @@ from unittest.mock import MagicMock, patch, AsyncMock
 from typing import List, Any
 import uuid
 
-from src.engines.crewai.helpers.agent_helpers import process_knowledge_sources, create_agent
+from src.engines.crewai.helpers.agent_helpers import create_agent
+# NOTE: process_knowledge_sources removed - knowledge search is now handled via DatabricksKnowledgeSearchTool
 
 
+# NOTE: TestProcessKnowledgeSources removed - knowledge search is now handled via DatabricksKnowledgeSearchTool
+# The DatabricksKnowledgeSearchTool provides explicit control over when knowledge is searched
+# instead of automatic knowledge source processing
+
+'''
 class TestProcessKnowledgeSources:
     """Test suite for process_knowledge_sources function."""
     
@@ -221,6 +227,7 @@ class TestProcessKnowledgeSources:
             
             assert result == expected_paths
             mock_logger.info.assert_any_call(f"Processed 3 knowledge sources")
+'''  # End of commented out TestProcessKnowledgeSources
 
 
 class TestCreateAgent:
@@ -789,7 +796,7 @@ class TestCreateAgent:
             mock_llm = MagicMock()
             mock_llm_manager.configure_crewai_llm = AsyncMock(return_value=mock_llm)
             
-            mock_resolve.return_value = ["tool1", "tool2"]
+            mock_resolve.return_value = []  # Empty because no tool factory
             
             # Mock UnitOfWork
             mock_uow_instance = AsyncMock()

@@ -12,7 +12,7 @@ from typing import List
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, delete
 
-from src.repositories.agent_repository import AgentRepository, SyncAgentRepository, get_sync_agent_repository
+from src.repositories.agent_repository import AgentRepository, SyncAgentRepository
 from src.models.agent import Agent
 
 
@@ -431,21 +431,6 @@ class TestSyncAgentRepositoryFindAll:
         
         assert result == []
 
-
-class TestGetSyncAgentRepository:
-    """Test cases for get_sync_agent_repository factory function."""
-    
-    def test_get_sync_agent_repository_success(self):
-        """Test successful factory function call."""
-        with patch('src.repositories.agent_repository.SessionLocal') as mock_session_local:
-            mock_session = MagicMock()
-            mock_session_local.return_value = mock_session
-            
-            result = get_sync_agent_repository()
-            
-            assert isinstance(result, SyncAgentRepository)
-            assert result.db == mock_session
-            mock_session_local.assert_called_once()
 
 
 class TestAgentRepositoryIntegration:
