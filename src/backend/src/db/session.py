@@ -8,13 +8,12 @@ import asyncio
 import time
 from functools import wraps
 
-from sqlalchemy import create_engine, text, event
+from sqlalchemy import text, event
 from sqlalchemy.ext.asyncio import (
     AsyncSession,
     async_sessionmaker,
     create_async_engine,
 )
-from sqlalchemy.orm import sessionmaker
 from sqlalchemy.exc import OperationalError
 
 from src.config.settings import settings
@@ -128,8 +127,9 @@ use_nullpool = os.environ.get("USE_NULLPOOL", "false").lower() == "true"
 def get_isolation_level(database_uri: str) -> str:
     """Get appropriate isolation level based on database type."""
     if database_uri.startswith('sqlite'):
-        # SQLite supports: READ UNCOMMITTED, SERIALIZABLE, AUTOCOMMIT
-        return "SERIALIZABLE"
+        # SQLite with SQLAlchemy: Use None for autocommit behavior with async
+        # This allows SQLite to handle transactions automatically
+        return None
     else:
         # PostgreSQL supports: READ COMMITTED, READ UNCOMMITTED, REPEATABLE READ, SERIALIZABLE
         return "READ COMMITTED"
@@ -139,8 +139,8 @@ def get_sqlite_connect_args(database_uri: str) -> dict:
     if database_uri.startswith('sqlite'):
         return {
             "check_same_thread": False,  # Allow SQLite to be used across threads
-            "timeout": 30,  # 30 second timeout for locked database
-            "isolation_level": None,  # Use autocommit mode to reduce lock time
+            "timeout": 60,  # Increase to 60 seconds for heavy operations
+            # Note: isolation_level is set at engine level, not in connect_args for SQLite
         }
     return {}
 
@@ -148,53 +148,72 @@ isolation_level = get_isolation_level(str(settings.DATABASE_URI))
 connect_args = get_sqlite_connect_args(str(settings.DATABASE_URI))
 
 # Create async engine for the database
-# Force NullPool for SQLite to prevent locking issues
-if str(settings.DATABASE_URI).startswith('sqlite') or use_nullpool:
-    logger.info("Using NullPool for SQLite to prevent database locking issues")
+# Use StaticPool for SQLite to reuse single connection (better for SQLite)
+if str(settings.DATABASE_URI).startswith('sqlite'):
+    logger.info("Using StaticPool for SQLite to reuse single connection")
     engine = create_async_engine(
         str(settings.DATABASE_URI),
-        echo=False,  # Disable SQL logging for better performance
+        echo=False,  # Disable SQL logging for performance
         future=True,
-        poolclass=NullPool,  # Disable connection pooling to prevent locking conflicts
-        # Set isolation level based on database type
-        isolation_level=isolation_level,
-        echo_pool=False,  # Disable pool logging for better performance
-        connect_args=connect_args,  # SQLite-specific connection arguments
+        poolclass=StaticPool,  # Single connection reuse for SQLite
+        # Don't set isolation_level for SQLite - let it use default
+        connect_args={
+            **connect_args,
+            "check_same_thread": False,  # Allow cross-thread usage
+        },
     )
+elif use_nullpool:
+    logger.info("Using NullPool as requested")
+    engine_opts = {
+        "echo": False,
+        "future": True,
+        "poolclass": NullPool,
+        "connect_args": connect_args,
+    }
+    # Only set isolation_level for non-SQLite databases
+    if not str(settings.DATABASE_URI).startswith('sqlite'):
+        engine_opts["isolation_level"] = isolation_level
+    engine = create_async_engine(str(settings.DATABASE_URI), **engine_opts)
 else:
     # Use the default async pool (AsyncAdaptedQueuePool is automatically used)
-    engine = create_async_engine(
-        str(settings.DATABASE_URI),
-        echo=False,  # Disable SQL logging for better performance
-        future=True,
-        pool_pre_ping=True,
-        pool_size=5,
-        max_overflow=10,
-        # Set isolation level based on database type
-        isolation_level=isolation_level,
-        echo_pool=False,  # Disable pool logging for better performance
-        connect_args=connect_args,  # SQLite-specific connection arguments
-    )
+    engine_opts = {
+        "echo": False,  # Disable SQL logging for better performance
+        "future": True,
+        "pool_pre_ping": True,
+        "pool_size": 5,
+        "max_overflow": 10,
+        "echo_pool": False,  # Disable pool logging for better performance
+        "connect_args": connect_args,  # SQLite-specific connection arguments
+    }
+    # Only set isolation_level for non-SQLite databases
+    if not str(settings.DATABASE_URI).startswith('sqlite'):
+        engine_opts["isolation_level"] = isolation_level
+    engine = create_async_engine(str(settings.DATABASE_URI), **engine_opts)
 
 # Configure SQLite for better concurrent access
 def configure_sqlite(dbapi_connection, connection_record):
     """Configure SQLite connection for better performance and concurrency."""
     if str(settings.DATABASE_URI).startswith('sqlite'):
         try:
-            # Enable WAL mode for better concurrent access
-            dbapi_connection.execute("PRAGMA journal_mode=WAL")
-            # Set busy timeout - CRITICAL for handling locks
-            dbapi_connection.execute("PRAGMA busy_timeout=30000")
+            # Set busy timeout - CRITICAL for handling locks (20 seconds based on best practices)
+            dbapi_connection.execute("PRAGMA busy_timeout=20000")
             # Enable foreign keys
             dbapi_connection.execute("PRAGMA foreign_keys=ON")
-            # Optimize for concurrent access
+            # Use WAL mode for better concurrency - MOST IMPORTANT optimization
+            dbapi_connection.execute("PRAGMA journal_mode=WAL")
+            # Optimize for faster writes with NORMAL synchronous (safe with WAL)
             dbapi_connection.execute("PRAGMA synchronous=NORMAL")
-            dbapi_connection.execute("PRAGMA cache_size=10000")
-            dbapi_connection.execute("PRAGMA temp_store=memory")
-            # Additional concurrency settings
+            # Increase cache for better performance
+            dbapi_connection.execute("PRAGMA cache_size=-64000")  # 64MB cache
+            # Store temp tables in memory to reduce disk I/O
+            dbapi_connection.execute("PRAGMA temp_store=MEMORY")
+            # Enable memory-mapped I/O for better performance
+            dbapi_connection.execute("PRAGMA mmap_size=268435456")  # 256MB mmap
+            # Auto checkpoint at 1000 pages to balance performance and WAL size
             dbapi_connection.execute("PRAGMA wal_autocheckpoint=1000")
-            dbapi_connection.execute("PRAGMA wal_checkpoint_timeout=5000")
-            logger.info("SQLite connection configured with WAL mode and 30s timeout")
+            # Optimize page size for better performance
+            dbapi_connection.execute("PRAGMA page_size=4096")
+            logger.info("SQLite configured with WAL mode and optimizations")
         except Exception as e:
             logger.error(f"Failed to configure SQLite connection: {e}")
 
@@ -204,58 +223,19 @@ if str(settings.DATABASE_URI).startswith('sqlite'):
     event.listen(engine.sync_engine, "connect", configure_sqlite)
     logger.info("Applied SQLite configuration event listener to async engine")
 
-# Create sync engine for backwards compatibility if needed
-# Since asyncpg is async-only and cannot be used for sync operations,
-# we'll use SQLite for sync operations when using PostgreSQL+asyncpg for async
-if str(settings.SYNC_DATABASE_URI).startswith("postgresql+asyncpg://"):
-    # asyncpg cannot be used for sync operations, use SQLite instead
-    logger.info("Using SQLite for sync operations since asyncpg is async-only")
-    sync_sqlite_uri = f"sqlite:///{settings.SQLITE_DB_PATH}"
-    sync_engine = create_engine(
-        sync_sqlite_uri,
-        echo=False,
-        future=True,
-        poolclass=NullPool,  # Use NullPool for SQLite
-        connect_args=connect_args,
-    )
-else:
-    # For other database configurations, use the configured sync URI
-    # For SQLite sync operations, also use NullPool
-    if str(settings.SYNC_DATABASE_URI).startswith('sqlite'):
-        sync_engine = create_engine(
-            str(settings.SYNC_DATABASE_URI),
-            echo=False,
-            future=True,
-            poolclass=NullPool,  # Use NullPool for SQLite
-            connect_args=connect_args,
-        )
-    else:
-        sync_engine = create_engine(
-            str(settings.SYNC_DATABASE_URI),
-            echo=False,
-            future=True,
-            connect_args=connect_args,
-        )
+# Sync engine removed - everything is async now
+# All database operations must use async sessions
 
-# Apply SQLite configuration to sync engine as well
-if str(settings.SYNC_DATABASE_URI).startswith('sqlite') or str(settings.SYNC_DATABASE_URI).startswith("postgresql+asyncpg://"):
-    event.listen(sync_engine, "connect", configure_sqlite)
-    logger.info("Applied SQLite configuration event listener to sync engine")
-
-# Create async session factory
+# Create async session factory with optimized settings for SQLite
 async_session_factory = async_sessionmaker(
     engine,
     expire_on_commit=False,
-    autoflush=True,  # Enable autoflush to ensure changes are flushed to DB before queries
+    autoflush=False,  # Disable autoflush to prevent SQLite locking issues
+    autocommit=False,  # Explicit transaction control
 )
 
-# Create sync session factory for backward compatibility
-SessionLocal = sessionmaker(
-    bind=sync_engine,
-    expire_on_commit=False,
-    autocommit=False,
-    autoflush=False
-)
+# SessionLocal removed - use async_session_factory instead
+# All database operations must be async
 
 # Database initialization
 async def init_db() -> None:
@@ -388,11 +368,14 @@ async def init_db() -> None:
         if not tables_exist:
             # Use a fresh engine for initialization with settings optimized for table creation
             init_engine_opts = {
-                "isolation_level": "AUTOCOMMIT",  # Use AUTOCOMMIT for table creation
                 "echo": False,  # Disable detailed logging for better performance
                 "future": True,
             }
-            
+
+            # For SQLite, don't set isolation_level to avoid errors
+            if not str(settings.DATABASE_URI).startswith('sqlite'):
+                init_engine_opts["isolation_level"] = "AUTOCOMMIT"  # Use AUTOCOMMIT for table creation
+
             # Create a dedicated engine just for initialization
             engine_for_init = create_async_engine(
                 str(settings.DATABASE_URI),
@@ -481,7 +464,9 @@ async def get_db() -> AsyncGenerator[AsyncSession, None]:
                     # Rollback on any exception
                     await session.rollback()
                     raise
-                # Session will auto-close when exiting the async context manager
+                finally:
+                    # Ensure session is properly closed
+                    await session.close()
         except OperationalError as e:
             if "database is locked" in str(e).lower() and attempt < max_retries - 1:
                 wait_time = 0.1 * (2.0 ** attempt)
@@ -490,11 +475,5 @@ async def get_db() -> AsyncGenerator[AsyncSession, None]:
                 continue
             raise
 
-# Keep the sync version for backward compatibility
-def get_sync_db() -> Generator[SessionLocal, None, None]:
-    """Synchronous database session for backward compatibility"""
-    db = SessionLocal()
-    try:
-        yield db
-    finally:
-        db.close() 
+# get_sync_db removed - use get_db() instead
+# All database operations must be async 

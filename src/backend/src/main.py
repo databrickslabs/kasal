@@ -69,7 +69,7 @@ async def lifespan(app: FastAPI):
     # pylint: disable=unused-import,import-outside-toplevel
     import src.db.all_models  # noqa
     from src.db.session import init_db
-    
+
     # Initialize database first - this creates both the file and tables
     system_logger.info("Initializing database during lifespan...")
     try:
@@ -77,6 +77,19 @@ async def lifespan(app: FastAPI):
         system_logger.info("Database initialization complete")
     except Exception as e:
         system_logger.error(f"Database initialization failed: {str(e)}")
+
+    # Start embedding queue service for SQLite to batch operations (non-blocking)
+    embedding_queue_started = False
+    if str(settings.DATABASE_URI).startswith('sqlite'):
+        try:
+            from src.services.embedding_queue_service import embedding_queue
+            # Start the queue service in the background without blocking
+            import asyncio
+            asyncio.create_task(embedding_queue.start())
+            embedding_queue_started = True
+            system_logger.info("Embedding queue service started in background for SQLite batch processing")
+        except Exception as e:
+            system_logger.error(f"Failed to start embedding queue service: {e}")
     
     # Now check if database exists and tables are initialized
     scheduler = None
@@ -210,7 +223,19 @@ async def lifespan(app: FastAPI):
                     system_logger.info(f"Cleaned up {cleaned_jobs} running jobs during shutdown")
             except Exception as e:
                 system_logger.error(f"Error cleaning up jobs during shutdown: {e}")
-        
+
+        # Stop embedding queue service if it was started
+        if 'embedding_queue_started' in locals() and embedding_queue_started:
+            system_logger.info("Stopping embedding queue service...")
+            try:
+                from src.services.embedding_queue_service import embedding_queue
+                # Flush any remaining items before stopping
+                await embedding_queue._flush_queue()
+                await embedding_queue.stop()
+                system_logger.info("Embedding queue service stopped successfully.")
+            except Exception as e:
+                system_logger.error(f"Error stopping embedding queue service: {e}")
+
         # Shutdown scheduler if it was started
         if scheduler:
             system_logger.info("Shutting down scheduler...")

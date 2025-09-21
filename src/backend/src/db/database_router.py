@@ -27,8 +27,9 @@ async def get_lakebase_config_from_db() -> Optional[Dict[str, Any]]:
         Lakebase configuration dictionary or None if not found
     """
     try:
-        # Use regular database session to read config
-        async with async_session_factory() as session:
+        # Use direct session factory to avoid circular dependency
+        from src.db.session import get_db
+        async for session in get_db():
             from src.models.database_config import LakebaseConfig
 
             # Query for Lakebase configuration
@@ -43,6 +44,7 @@ async def get_lakebase_config_from_db() -> Optional[Dict[str, Any]]:
 
             # No configuration found means Lakebase is disabled
             return None
+            # Note: The async for loop will automatically close the session
     except Exception as e:
         logger.debug(f"Could not read Lakebase config from database: {e}")
         return None
@@ -59,15 +61,22 @@ async def is_lakebase_enabled() -> bool:
     if os.environ.get("DISABLE_LAKEBASE", "").lower() == "true":
         return False
 
-    # Get configuration from database
-    config = await get_lakebase_config_from_db()
+    # For fresh deployments or when database tables don't exist yet,
+    # default to regular database to avoid circular dependency
+    try:
+        # Get configuration from database
+        config = await get_lakebase_config_from_db()
 
-    if config:
-        return (
-            config.get("enabled", False) and
-            config.get("endpoint") and
-            config.get("migration_completed", False)
-        )
+        if config:
+            return (
+                config.get("enabled", False) and
+                config.get("endpoint") and
+                config.get("migration_completed", False)
+            )
+    except Exception as e:
+        # If we can't read the database config (e.g., tables don't exist yet),
+        # default to regular database
+        logger.debug(f"Cannot read Lakebase config from database, using regular DB: {e}")
 
     return False
 
@@ -121,19 +130,12 @@ async def get_smart_db_session() -> AsyncGenerator[AsyncSession, None]:
             # logger.debug(f"[DB ROUTER] Created session {id(session)}")
             yield session
             # Commit the transaction if no exception occurred
-            # logger.debug(f"[DB ROUTER] Committing session {id(session)}")
-            # Check if there are any pending changes
-            # if session.dirty or session.deleted or session.new:
-            #     logger.debug(f"[DB ROUTER] Session has changes - dirty: {len(session.dirty)}, deleted: {len(session.deleted)}, new: {len(session.new)}")
             await session.commit()
-            # logger.debug(f"[DB ROUTER] Session {id(session)} committed successfully")
         except Exception as e:
             # Rollback on any exception
             logger.error(f"[DB ROUTER] Rolling back session {id(session)} due to exception: {e}")
             await session.rollback()
             raise
-        # Session will auto-close when exiting the async context manager
-
-
-# Alias for backward compatibility
-get_db = get_smart_db_session
+        finally:
+            # Ensure session is closed even if not explicitly committed/rolled back
+            await session.close()
