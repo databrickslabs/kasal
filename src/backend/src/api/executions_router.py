@@ -230,11 +230,11 @@ async def list_executions(
     if not group_context.group_ids:
         logger.warning("No group_ids in context - this will return no results")
 
-    # Create service instance and use the list_executions method with group and user filtering
+    # Create service instance and use the list_executions method with group filtering only
     service = ExecutionService(session=db)
     executions_list = await service.list_executions(
         group_ids=group_context.group_ids,
-        user_email=group_context.group_email,  # Add user-level filtering
+        user_email=None,  # Don't filter by user - show all executions in user's groups
         limit=limit,
         offset=offset
     )
