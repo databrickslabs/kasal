@@ -51,7 +51,6 @@ def mock_group_context():
     return GroupContext(
         group_ids=["group-123"],
         group_email="test@company.com",
-        email_domain="company.com",
         user_id="test@company.com"
     )
 
@@ -586,7 +585,6 @@ class TestChatHistoryRouter:
         mock_group_context = GroupContext(
             group_ids=["group-123"],
             group_email=None,  # This should trigger unknown_user fallback
-            email_domain="company.com",
             user_id=None
         )
         
@@ -619,7 +617,6 @@ class TestChatHistoryRouter:
         mock_group_context = GroupContext(
             group_ids=["group-123"],
             group_email=None,  # This should trigger unknown_user fallback
-            email_domain="company.com",
             user_id=None
         )
         

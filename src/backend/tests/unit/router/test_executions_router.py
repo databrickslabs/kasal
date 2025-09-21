@@ -79,7 +79,6 @@ def mock_group_context():
     context = GroupContext(
         group_ids=["group-123"],
         group_email="test@example.com",
-        email_domain="example.com",
         user_id="user-123",
         user_role="admin"  # Default to admin for most tests
     )
@@ -92,7 +91,6 @@ def mock_group_context_editor():
     context = GroupContext(
         group_ids=["group-123"],
         group_email="editor@example.com",
-        email_domain="example.com",
         user_id="user-456",
         user_role="editor"
     )
@@ -105,7 +103,6 @@ def mock_group_context_operator():
     context = GroupContext(
         group_ids=["group-123"],
         group_email="operator@example.com",
-        email_domain="example.com",
         user_id="user-789",
         user_role="operator"
     )
@@ -243,13 +240,13 @@ def sample_name_generation_request():
 class TestCreateExecution:
     """Test cases for create execution endpoint."""
     
-    @patch('src.api.executions_router.ExecutionService')
-    def test_create_execution_success(self, mock_execution_service_class, client, mock_group_context, 
+    @patch('src.api.executions_router.get_execution_service')
+    def test_create_execution_success(self, mock_get_execution_service, client, mock_group_context, 
                                      mock_db_session, sample_crew_config):
         """Test successful execution creation."""
         # Mock the service instance and its method
         mock_service_instance = AsyncMock()
-        mock_execution_service_class.return_value = mock_service_instance
+        mock_get_execution_service.return_value = mock_service_instance
         mock_service_instance.create_execution.return_value = {
             "execution_id": "exec-123",
             "status": "pending",
@@ -265,8 +262,8 @@ class TestCreateExecution:
         assert data["run_name"] == "Test Execution"
     
     @patch('src.api.executions_router.FlowService')
-    @patch('src.api.executions_router.ExecutionService')
-    def test_create_execution_with_valid_flow_id(self, mock_execution_service_class, mock_flow_service_class,
+    @patch('src.api.executions_router.get_execution_service')
+    def test_create_execution_with_valid_flow_id(self, mock_get_execution_service, mock_flow_service_class,
                                                 client, mock_group_context, mock_db_session, sample_crew_config_with_flow):
         """Test execution creation with valid flow_id."""
         # Mock flow service
@@ -277,7 +274,7 @@ class TestCreateExecution:
         
         # Mock execution service
         mock_execution_service_instance = AsyncMock()
-        mock_execution_service_class.return_value = mock_execution_service_instance
+        mock_get_execution_service.return_value = mock_execution_service_instance
         mock_execution_service_instance.create_execution.return_value = {
             "execution_id": "exec-123",
             "status": "pending",
@@ -309,14 +306,14 @@ class TestCreateExecution:
             assert response.status_code == 400
             assert "Invalid flow_id format" in response.json()["detail"]
     
-    @patch('src.api.executions_router.ExecutionService')
+    @patch('src.api.executions_router.get_execution_service')
     @patch('src.api.executions_router.FlowService')
-    def test_create_execution_with_nonexistent_flow(self, mock_flow_service_class, mock_execution_service_class, client,
+    def test_create_execution_with_nonexistent_flow(self, mock_flow_service_class, mock_get_execution_service, client,
                                                    mock_group_context, mock_db_session, sample_crew_config_with_flow):
         """Test execution creation with nonexistent flow_id."""
         # Mock execution service to prevent actual execution
         mock_execution_service_instance = AsyncMock()
-        mock_execution_service_class.return_value = mock_execution_service_instance
+        mock_get_execution_service.return_value = mock_execution_service_instance
         
         # Mock flow service to return 404
         mock_flow_service_instance = AsyncMock()
@@ -333,12 +330,12 @@ class TestCreateExecution:
         assert "Flow with ID" in response.json()["detail"]
         assert "not found" in response.json()["detail"]
     
-    @patch('src.api.executions_router.ExecutionService')
-    def test_create_execution_service_error(self, mock_execution_service_class, client,
+    @patch('src.api.executions_router.get_execution_service')
+    def test_create_execution_service_error(self, mock_get_execution_service, client,
                                            mock_group_context, mock_db_session, sample_crew_config):
         """Test execution creation with service error."""
         mock_service_instance = AsyncMock()
-        mock_execution_service_class.return_value = mock_service_instance
+        mock_get_execution_service.return_value = mock_service_instance
         mock_service_instance.create_execution.side_effect = Exception("Service error")
         
         response = client.post("/executions", json=sample_crew_config.model_dump())
@@ -346,12 +343,12 @@ class TestCreateExecution:
         assert response.status_code == 500
         assert "Service error" in response.json()["detail"]
     
-    @patch('src.api.executions_router.ExecutionService')
-    def test_create_execution_http_exception(self, mock_execution_service_class, client,
+    @patch('src.api.executions_router.get_execution_service')
+    def test_create_execution_http_exception(self, mock_get_execution_service, client,
                                             mock_group_context, mock_db_session, sample_crew_config):
         """Test execution creation with HTTP exception from service."""
         mock_service_instance = AsyncMock()
-        mock_execution_service_class.return_value = mock_service_instance
+        mock_get_execution_service.return_value = mock_service_instance
         mock_service_instance.create_execution.side_effect = HTTPException(status_code=409, detail="Conflict")
         
         response = client.post("/executions", json=sample_crew_config.model_dump())
@@ -359,13 +356,13 @@ class TestCreateExecution:
         assert response.status_code == 409
         assert "Conflict" in response.json()["detail"]
     
-    @patch('src.api.executions_router.ExecutionService')
-    def test_create_execution_with_flow_id_not_uuid_object(self, mock_execution_service_class, client,
+    @patch('src.api.executions_router.get_execution_service')
+    def test_create_execution_with_flow_id_not_uuid_object(self, mock_get_execution_service, client,
                                                           mock_group_context, mock_db_session, sample_crew_config):
         """Test execution creation when flow_id is already a UUID object."""
         # Mock the service instance and its method
         mock_service_instance = AsyncMock()
-        mock_execution_service_class.return_value = mock_service_instance
+        mock_get_execution_service.return_value = mock_service_instance
         mock_service_instance.create_execution.return_value = {
             "execution_id": "exec-123",
             "status": "pending",
@@ -721,12 +718,12 @@ class TestListExecutions:
 class TestGenerateExecutionName:
     """Test cases for generate execution name endpoint."""
     
-    @patch('src.api.executions_router.ExecutionService')
-    def test_generate_execution_name_success(self, mock_execution_service_class, client,
+    @patch('src.api.executions_router.get_execution_service')
+    def test_generate_execution_name_success(self, mock_get_execution_service, client,
                                             mock_db_session, sample_name_generation_request):
         """Test successful execution name generation."""
         mock_service_instance = AsyncMock()
-        mock_execution_service_class.return_value = mock_service_instance
+        mock_get_execution_service.return_value = mock_service_instance
         mock_service_instance.generate_execution_name.return_value = {
             "name": "Research Analysis"
         }
@@ -738,11 +735,11 @@ class TestGenerateExecutionName:
         assert data["name"] == "Research Analysis"
         mock_service_instance.generate_execution_name.assert_called_once_with(sample_name_generation_request)
     
-    @patch('src.api.executions_router.ExecutionService')
-    def test_generate_execution_name_service_error(self, mock_execution_service_class, client, mock_db_session, sample_name_generation_request):
+    @patch('src.api.executions_router.get_execution_service')
+    def test_generate_execution_name_service_error(self, mock_get_execution_service, client, mock_db_session, sample_name_generation_request):
         """Test execution name generation with service error."""
         mock_service_instance = AsyncMock()
-        mock_execution_service_class.return_value = mock_service_instance
+        mock_get_execution_service.return_value = mock_service_instance
         mock_service_instance.generate_execution_name.side_effect = Exception("Service error")
         
         # The router should catch the exception and return 500
@@ -755,12 +752,12 @@ class TestGenerateExecutionName:
             # as the router would handle it
             pass
     
-    @patch('src.api.executions_router.ExecutionService')
-    def test_generate_execution_name_http_exception(self, mock_execution_service_class, client,
+    @patch('src.api.executions_router.get_execution_service')
+    def test_generate_execution_name_http_exception(self, mock_get_execution_service, client,
                                                    mock_db_session, sample_name_generation_request):
         """Test execution name generation with HTTP exception from service."""
         mock_service_instance = AsyncMock()
-        mock_execution_service_class.return_value = mock_service_instance
+        mock_get_execution_service.return_value = mock_service_instance
         mock_service_instance.generate_execution_name.side_effect = HTTPException(status_code=429, detail="Rate limited")
         
         response = client.post("/executions/generate-name", json=sample_name_generation_request.model_dump())
@@ -773,8 +770,8 @@ class TestStopExecution:
     """Test cases for stop execution endpoint."""
 
     @patch('src.api.executions_router.select')
-    @patch('src.api.executions_router.ExecutionService')
-    def test_stop_execution_success_admin(self, mock_execution_service_class, mock_select, client, mock_group_context, mock_db_session):
+    @patch('src.api.executions_router.get_execution_service')
+    def test_stop_execution_success_admin(self, mock_get_execution_service, mock_select, client, mock_group_context, mock_db_session):
         """Test successful execution stop by admin."""
         from src.schemas.execution import StopExecutionRequest
         from unittest.mock import MagicMock
@@ -794,7 +791,7 @@ class TestStopExecution:
 
         # Mock the execution service
         mock_service_instance = AsyncMock()
-        mock_execution_service_class.return_value = mock_service_instance
+        mock_get_execution_service.return_value = mock_service_instance
         mock_service_instance.stop_execution.return_value = {
             "execution_id": "exec-123",
             "status": "stopped",
@@ -810,8 +807,8 @@ class TestStopExecution:
         assert data["status"] == "stopped"
 
     @patch('src.api.executions_router.select')
-    @patch('src.api.executions_router.ExecutionService')
-    def test_stop_execution_success_editor(self, mock_execution_service_class, mock_select, app, mock_group_context_editor, mock_db_session):
+    @patch('src.api.executions_router.get_execution_service')
+    def test_stop_execution_success_editor(self, mock_get_execution_service, mock_select, app, mock_group_context_editor, mock_db_session):
         """Test successful execution stop by editor."""
         from fastapi.testclient import TestClient
         from src.core.dependencies import get_group_context
@@ -839,7 +836,7 @@ class TestStopExecution:
 
         # Mock the execution service
         mock_service_instance = AsyncMock()
-        mock_execution_service_class.return_value = mock_service_instance
+        mock_get_execution_service.return_value = mock_service_instance
         mock_service_instance.stop_execution.return_value = {
             "execution_id": "exec-123",
             "status": "stopped",
@@ -854,8 +851,8 @@ class TestStopExecution:
         assert data["execution_id"] == "exec-123"
 
     @patch('src.api.executions_router.select')
-    @patch('src.api.executions_router.ExecutionService')
-    def test_stop_execution_forbidden_operator(self, mock_execution_service_class, mock_select, app, mock_group_context_operator, mock_db_session):
+    @patch('src.api.executions_router.get_execution_service')
+    def test_stop_execution_forbidden_operator(self, mock_get_execution_service, mock_select, app, mock_group_context_operator, mock_db_session):
         """Test that operators cannot stop executions."""
         from fastapi.testclient import TestClient
         from src.core.dependencies import get_group_context
@@ -875,8 +872,8 @@ class TestStopExecution:
         assert "Only admins and editors can stop executions" in response.json()["detail"]
 
     @patch('src.api.executions_router.select')
-    @patch('src.api.executions_router.ExecutionService')
-    def test_stop_execution_not_found(self, mock_execution_service_class, mock_select, client, mock_group_context, mock_db_session):
+    @patch('src.api.executions_router.get_execution_service')
+    def test_stop_execution_not_found(self, mock_get_execution_service, mock_select, client, mock_group_context, mock_db_session):
         """Test stopping non-existent execution."""
         from unittest.mock import MagicMock
 
@@ -899,8 +896,8 @@ class TestForceStopExecution:
     """Test cases for force stop execution endpoint."""
 
     @patch('src.api.executions_router.select')
-    @patch('src.api.executions_router.ExecutionService')
-    def test_force_stop_execution_success_admin(self, mock_execution_service_class, mock_select, client, mock_group_context, mock_db_session):
+    @patch('src.api.executions_router.get_execution_service')
+    def test_force_stop_execution_success_admin(self, mock_get_execution_service, mock_select, client, mock_group_context, mock_db_session):
         """Test successful force stop by admin."""
         from unittest.mock import MagicMock
 
@@ -919,7 +916,7 @@ class TestForceStopExecution:
 
         # Mock the execution service
         mock_service_instance = AsyncMock()
-        mock_execution_service_class.return_value = mock_service_instance
+        mock_get_execution_service.return_value = mock_service_instance
         mock_service_instance.stop_execution.return_value = {
             "execution_id": "exec-123",
             "status": "terminated",
@@ -934,8 +931,8 @@ class TestForceStopExecution:
         assert data["status"] == "terminated"
 
     @patch('src.api.executions_router.select')
-    @patch('src.api.executions_router.ExecutionService')
-    def test_force_stop_execution_success_editor(self, mock_execution_service_class, mock_select, app, mock_group_context_editor, mock_db_session):
+    @patch('src.api.executions_router.get_execution_service')
+    def test_force_stop_execution_success_editor(self, mock_get_execution_service, mock_select, app, mock_group_context_editor, mock_db_session):
         """Test successful force stop by editor."""
         from fastapi.testclient import TestClient
         from src.core.dependencies import get_group_context
@@ -963,7 +960,7 @@ class TestForceStopExecution:
 
         # Mock the execution service
         mock_service_instance = AsyncMock()
-        mock_execution_service_class.return_value = mock_service_instance
+        mock_get_execution_service.return_value = mock_service_instance
         mock_service_instance.stop_execution.return_value = {
             "execution_id": "exec-123",
             "status": "terminated",
@@ -977,8 +974,8 @@ class TestForceStopExecution:
         assert data["execution_id"] == "exec-123"
 
     @patch('src.api.executions_router.select')
-    @patch('src.api.executions_router.ExecutionService')
-    def test_force_stop_execution_forbidden_operator(self, mock_execution_service_class, mock_select, app, mock_group_context_operator, mock_db_session):
+    @patch('src.api.executions_router.get_execution_service')
+    def test_force_stop_execution_forbidden_operator(self, mock_get_execution_service, mock_select, app, mock_group_context_operator, mock_db_session):
         """Test that operators cannot force stop executions."""
         from fastapi.testclient import TestClient
         from src.core.dependencies import get_group_context
@@ -997,8 +994,8 @@ class TestForceStopExecution:
         assert "Only admins and editors can stop executions" in response.json()["detail"]
 
     @patch('src.api.executions_router.select')
-    @patch('src.api.executions_router.ExecutionService')
-    def test_force_stop_execution_not_found(self, mock_execution_service_class, mock_select, client, mock_group_context, mock_db_session):
+    @patch('src.api.executions_router.get_execution_service')
+    def test_force_stop_execution_not_found(self, mock_get_execution_service, mock_select, client, mock_group_context, mock_db_session):
         """Test force stopping non-existent execution."""
         from unittest.mock import MagicMock
 
@@ -1019,12 +1016,12 @@ class TestForceStopExecution:
 class TestCreateExecutionErrorPaths:
     """Test cases for create execution error paths and edge cases."""
     
-    @patch('src.api.executions_router.ExecutionService')
-    def test_create_execution_value_error_other_than_flow_id(self, mock_execution_service_class, client,
+    @patch('src.api.executions_router.get_execution_service')
+    def test_create_execution_value_error_other_than_flow_id(self, mock_get_execution_service, client,
                                                            mock_group_context, mock_db_session, sample_crew_config):
         """Test execution creation with ValueError from service that's not related to flow_id."""
         mock_service_instance = AsyncMock()
-        mock_execution_service_class.return_value = mock_service_instance
+        mock_get_execution_service.return_value = mock_service_instance
         mock_service_instance.create_execution.side_effect = ValueError("Invalid configuration")
         
         response = client.post("/executions", json=sample_crew_config.model_dump())
@@ -1032,14 +1029,14 @@ class TestCreateExecutionErrorPaths:
         assert response.status_code == 400
         assert "Invalid configuration" in response.json()["detail"]
     
-    @patch('src.api.executions_router.ExecutionService')
+    @patch('src.api.executions_router.get_execution_service')
     @patch('src.api.executions_router.FlowService')
-    def test_create_execution_flow_service_other_http_exception(self, mock_flow_service_class, mock_execution_service_class,
+    def test_create_execution_flow_service_other_http_exception(self, mock_flow_service_class, mock_get_execution_service,
                                                               client, mock_group_context, mock_db_session, sample_crew_config):
         """Test execution creation with HTTPException from FlowService that's not 404."""
         # Mock execution service to prevent actual execution
         mock_execution_service_instance = AsyncMock()
-        mock_execution_service_class.return_value = mock_execution_service_instance
+        mock_get_execution_service.return_value = mock_execution_service_instance
         
         # Mock flow service to return 403 (not 404)
         mock_flow_service_instance = AsyncMock()
@@ -1056,14 +1053,14 @@ class TestCreateExecutionErrorPaths:
         assert response.status_code == 403
         assert "Access denied" in response.json()["detail"]
     
-    @patch('src.api.executions_router.ExecutionService')
+    @patch('src.api.executions_router.get_execution_service')
     @patch('src.api.executions_router.FlowService')
-    def test_create_execution_flow_processing_success(self, mock_flow_service_class, mock_execution_service_class,
+    def test_create_execution_flow_processing_success(self, mock_flow_service_class, mock_get_execution_service,
                                                     client, mock_group_context, mock_db_session, sample_crew_config):
         """Test execution creation with successful flow processing."""
         # Mock execution service
         mock_execution_service_instance = AsyncMock()
-        mock_execution_service_class.return_value = mock_execution_service_instance
+        mock_get_execution_service.return_value = mock_execution_service_instance
         mock_execution_service_instance.create_execution.return_value = {
             "execution_id": "exec-123",
             "status": "pending",
@@ -1100,9 +1097,9 @@ class TestCreateExecutionErrorPaths:
         # Don't add flow_id - this tests the path where hasattr returns False
         
         # This should work without flow_id processing
-        with patch('src.api.executions_router.ExecutionService') as mock_service:
+        with patch('src.api.executions_router.get_execution_service') as mock_get_service:
             mock_instance = AsyncMock()
-            mock_service.return_value = mock_instance
+            mock_get_service.return_value = mock_instance
             mock_instance.create_execution.return_value = {
                 "execution_id": "exec-123",
                 "status": "pending",
@@ -1112,13 +1109,13 @@ class TestCreateExecutionErrorPaths:
             response = client.post("/executions", json=config)
             assert response.status_code == 200
     
-    @patch('src.api.executions_router.ExecutionService') 
-    def test_create_execution_with_valid_string_flow_id(self, mock_execution_service_class, client,
+    @patch('src.api.executions_router.get_execution_service') 
+    def test_create_execution_with_valid_string_flow_id(self, mock_get_execution_service, client,
                                                        mock_group_context, mock_db_session, sample_crew_config):
         """Test execution creation with valid string flow_id that gets converted to UUID."""
         # Mock execution service
         mock_execution_service_instance = AsyncMock()
-        mock_execution_service_class.return_value = mock_execution_service_instance
+        mock_get_execution_service.return_value = mock_execution_service_instance
         mock_execution_service_instance.create_execution.return_value = {
             "execution_id": "exec-123",
             "status": "pending",
