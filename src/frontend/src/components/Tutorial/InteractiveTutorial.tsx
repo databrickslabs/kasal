@@ -1,5 +1,30 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import Joyride, { CallBackProps, Step } from 'react-joyride';
+import {
+  Dialog,
+  DialogTitle,
+  DialogContent,
+  Box,
+  Card,
+  CardContent,
+  Typography,
+  Button,
+  Chip,
+  Fade,
+  IconButton,
+  Stack,
+  Avatar,
+} from '@mui/material';
+import {
+  AdminPanelSettings as AdminIcon,
+  Edit as EditorIcon,
+  PlayCircle as OperatorIcon,
+  Close as CloseIcon,
+  School as SchoolIcon,
+  Settings as SettingsIcon,
+  Build as BuildIcon,
+  PlayArrow as PlayIcon,
+} from '@mui/icons-material';
 
 // Define STATUS constants since they're not exported properly
 const STATUS = {
@@ -78,92 +103,59 @@ const InteractiveTutorial: React.FC<TutorialProps> = ({ isOpen, onClose }) => {
   const [run, setRun] = useState(false);
   const [selectedRole, setSelectedRole] = useState<string | null>(null);
   const [showRoleSelection, setShowRoleSelection] = useState(true);
+  const [showSelectionDialog, setShowSelectionDialog] = useState(false);
 
-  // Introduction step with role selection
-  const introductionSteps: Step[] = [
+  // Tutorial role options
+  const tutorialRoles = [
     {
-      target: '[data-tour="workflow-designer"]',
-      content: (
-        <div>
-          <h3 style={{ marginTop: 0 }}>🎯 Choose Your Tutorial</h3>
-          <p>Select the tutorial that matches your role to get the most relevant guidance:</p>
-          <div style={{ display: 'flex', flexDirection: 'column', gap: '12px', marginTop: '16px' }}>
-            <button
-              onClick={() => {
-                setSelectedRole('admin');
-                setShowRoleSelection(false);
-                setRun(false);
-                setTimeout(() => setRun(true), 100);
-              }}
-              style={{
-                padding: '12px',
-                border: '1px solid #1976d2',
-                borderRadius: '4px',
-                background: selectedRole === 'admin' ? '#1976d2' : 'white',
-                color: selectedRole === 'admin' ? 'white' : '#1976d2',
-                cursor: 'pointer',
-                textAlign: 'left',
-              }}
-            >
-              <strong>👨‍💼 Admin Tutorial</strong>
-              <div style={{ fontSize: '12px', marginTop: '4px', opacity: 0.9 }}>
-                System configuration, database setup, user management, and platform administration
-              </div>
-            </button>
-            <button
-              onClick={() => {
-                setSelectedRole('editor');
-                setShowRoleSelection(false);
-                setRun(false);
-                setTimeout(() => setRun(true), 100);
-              }}
-              style={{
-                padding: '12px',
-                border: '1px solid #1976d2',
-                borderRadius: '4px',
-                background: selectedRole === 'editor' ? '#1976d2' : 'white',
-                color: selectedRole === 'editor' ? 'white' : '#1976d2',
-                cursor: 'pointer',
-                textAlign: 'left',
-              }}
-            >
-              <strong>✏️ Editor Tutorial</strong>
-              <div style={{ fontSize: '12px', marginTop: '4px', opacity: 0.9 }}>
-                Creating agents and tasks, building workflows, and executing AI crews
-              </div>
-            </button>
-            <button
-              onClick={() => {
-                setSelectedRole('operator');
-                setShowRoleSelection(false);
-                setRun(false);
-                setTimeout(() => setRun(true), 100);
-              }}
-              style={{
-                padding: '12px',
-                border: '1px solid #1976d2',
-                borderRadius: '4px',
-                background: selectedRole === 'operator' ? '#1976d2' : 'white',
-                color: selectedRole === 'operator' ? 'white' : '#1976d2',
-                cursor: 'pointer',
-                textAlign: 'left',
-              }}
-            >
-              <strong>🎮 Operator Tutorial</strong>
-              <div style={{ fontSize: '12px', marginTop: '4px', opacity: 0.9 }}>
-                Running workflows from catalog, monitoring execution, and managing results
-              </div>
-            </button>
-          </div>
-          <p style={{ fontSize: '12px', marginTop: '16px', fontStyle: 'italic', opacity: 0.8 }}>
-            Your current role is: <strong>{userRole}</strong>
-          </p>
-        </div>
-      ),
-      placement: 'center',
-      disableBeacon: true,
+      id: 'admin',
+      title: 'Admin Tutorial',
+      icon: <AdminIcon />,
+      color: '#f44336',
+      description: 'System configuration and platform management',
+      features: [
+        'Database configuration',
+        'Memory backend setup',
+        'User & group management',
+        'API key management',
+      ],
+    },
+    {
+      id: 'editor',
+      title: 'Editor Tutorial',
+      icon: <EditorIcon />,
+      color: '#2196f3',
+      description: 'Create and build AI workflows',
+      features: [
+        'Create agents & tasks',
+        'Build workflows',
+        'Execute crews',
+        'Monitor execution',
+      ],
+    },
+    {
+      id: 'operator',
+      title: 'Operator Tutorial',
+      icon: <OperatorIcon />,
+      color: '#4caf50',
+      description: 'Run and monitor workflows',
+      features: [
+        'Browse catalog',
+        'Execute workflows',
+        'View trace & logs',
+        'Manage results',
+      ],
     },
   ];
+
+  const handleRoleSelect = (role: string) => {
+    setSelectedRole(role);
+    setShowRoleSelection(false);
+    setShowSelectionDialog(false);
+    setTimeout(() => {
+      setRun(true);
+    }, 300);
+  };
 
   // Admin-specific steps - Focus on Configuration
   const adminSteps: Step[] = [
@@ -320,13 +312,8 @@ const InteractiveTutorial: React.FC<TutorialProps> = ({ isOpen, onClose }) => {
     },
   ];
 
-  // Get steps based on selected role or show introduction
+  // Get steps based on selected role
   const steps = useMemo(() => {
-    // If showing role selection, return introduction steps
-    if (showRoleSelection) {
-      return introductionSteps;
-    }
-
     // Use selected role if chosen, otherwise use user's actual role
     const roleToUse = selectedRole || userRole;
 
@@ -341,19 +328,29 @@ const InteractiveTutorial: React.FC<TutorialProps> = ({ isOpen, onClose }) => {
         return editorSteps; // Default to editor steps
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [selectedRole, userRole, showRoleSelection]);
+  }, [selectedRole, userRole]);
 
   // Start the tour when component mounts and isOpen is true
   useEffect(() => {
     if (isOpen) {
       console.log('[InteractiveTutorial] Opening with role:', userRole);
-      console.log('[InteractiveTutorial] Using steps:', steps.length, 'steps');
-      // Small delay to ensure DOM elements are rendered
-      setTimeout(() => {
-        setRun(true);
-      }, 500);
+
+      if (showRoleSelection) {
+        // Show the selection dialog
+        setShowSelectionDialog(true);
+      } else {
+        // Start the tour directly if role is already selected
+        console.log('[InteractiveTutorial] Using steps:', steps.length, 'steps');
+        setTimeout(() => {
+          setRun(true);
+        }, 500);
+      }
+    } else {
+      // Reset when closing
+      setShowSelectionDialog(false);
+      setRun(false);
     }
-  }, [isOpen, userRole, steps.length]);
+  }, [isOpen, userRole, steps.length, showRoleSelection]);
 
   const handleJoyrideCallback = (data: CallBackProps) => {
     const { status, action } = data;
@@ -378,18 +375,171 @@ const InteractiveTutorial: React.FC<TutorialProps> = ({ isOpen, onClose }) => {
   if (!isOpen) return null;
 
   return (
-    <Joyride
-      steps={steps}
-      run={run}
-      continuous
-      showProgress
-      showSkipButton
-      styles={getJoyrideStyles(isDarkMode)}
-      callback={handleJoyrideCallback}
-      disableCloseOnEsc={false}
-      disableOverlayClose={false}
-      hideCloseButton={false}
-    />
+    <>
+      {/* Role Selection Dialog */}
+      <Dialog
+        open={showSelectionDialog}
+        onClose={() => {
+          setShowSelectionDialog(false);
+          onClose();
+        }}
+        maxWidth="md"
+        fullWidth
+        PaperProps={{
+          sx: {
+            borderRadius: 3,
+            background: isDarkMode
+              ? 'linear-gradient(135deg, #1e1e1e 0%, #2d2d2d 100%)'
+              : 'linear-gradient(135deg, #ffffff 0%, #f5f5f5 100%)',
+          },
+        }}
+      >
+        <DialogTitle sx={{
+          display: 'flex',
+          alignItems: 'center',
+          gap: 2,
+          borderBottom: 1,
+          borderColor: 'divider',
+          pb: 2,
+        }}>
+          <Avatar sx={{ bgcolor: 'primary.main', width: 48, height: 48 }}>
+            <SchoolIcon />
+          </Avatar>
+          <Box flex={1}>
+            <Typography variant="h5" fontWeight="bold">
+              Choose Your Learning Path
+            </Typography>
+            <Typography variant="body2" color="text.secondary">
+              Select the tutorial that matches your role and learning goals
+            </Typography>
+          </Box>
+          <IconButton
+            onClick={() => {
+              setShowSelectionDialog(false);
+              onClose();
+            }}
+            sx={{ alignSelf: 'flex-start' }}
+          >
+            <CloseIcon />
+          </IconButton>
+        </DialogTitle>
+
+        <DialogContent sx={{ p: 3 }}>
+          <Stack spacing={3}>
+            {tutorialRoles.map((role) => (
+              <Fade in={true} timeout={500} key={role.id}>
+                <Card
+                  sx={{
+                    cursor: 'pointer',
+                    transition: 'all 0.3s ease',
+                    border: 2,
+                    borderColor: selectedRole === role.id ? role.color : 'transparent',
+                    '&:hover': {
+                      transform: 'translateY(-4px)',
+                      boxShadow: 6,
+                      borderColor: role.color,
+                    },
+                  }}
+                  onClick={() => handleRoleSelect(role.id)}
+                >
+                  <CardContent sx={{ p: 3 }}>
+                    <Stack direction="row" spacing={3} alignItems="center">
+                      <Avatar
+                        sx={{
+                          bgcolor: `${role.color}20`,
+                          color: role.color,
+                          width: 64,
+                          height: 64,
+                        }}
+                      >
+                        {role.icon}
+                      </Avatar>
+
+                      <Box flex={1}>
+                        <Stack direction="row" alignItems="center" gap={2} mb={1}>
+                          <Typography variant="h6" fontWeight="bold">
+                            {role.title}
+                          </Typography>
+                          {userRole === role.id && (
+                            <Chip
+                              label="Your Role"
+                              size="small"
+                              color="primary"
+                              variant="filled"
+                            />
+                          )}
+                        </Stack>
+
+                        <Typography variant="body2" color="text.secondary" mb={2}>
+                          {role.description}
+                        </Typography>
+
+                        <Stack direction="row" flexWrap="wrap" gap={1}>
+                          {role.features.map((feature, index) => (
+                            <Chip
+                              key={index}
+                              label={feature}
+                              size="small"
+                              variant="outlined"
+                              sx={{
+                                borderColor: `${role.color}40`,
+                                color: role.color,
+                                fontSize: '0.75rem',
+                              }}
+                            />
+                          ))}
+                        </Stack>
+                      </Box>
+
+                      <Button
+                        variant="contained"
+                        size="large"
+                        sx={{
+                          bgcolor: role.color,
+                          minWidth: 120,
+                          '&:hover': {
+                            bgcolor: role.color,
+                            filter: 'brightness(0.9)',
+                          }
+                        }}
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          handleRoleSelect(role.id);
+                        }}
+                      >
+                        Start
+                      </Button>
+                    </Stack>
+                  </CardContent>
+                </Card>
+              </Fade>
+            ))}
+          </Stack>
+
+          <Box mt={3} p={2} bgcolor="action.hover" borderRadius={2}>
+            <Typography variant="body2" color="text.secondary" align="center">
+              💡 <strong>Tip:</strong> You can restart the tutorial anytime by clicking the help button in the sidebar
+            </Typography>
+          </Box>
+        </DialogContent>
+      </Dialog>
+
+      {/* Joyride Tutorial */}
+      {!showSelectionDialog && (
+        <Joyride
+          steps={steps}
+          run={run}
+          continuous
+          showProgress
+          showSkipButton
+          styles={getJoyrideStyles(isDarkMode)}
+          callback={handleJoyrideCallback}
+          disableCloseOnEsc={false}
+          disableOverlayClose={false}
+          hideCloseButton={false}
+        />
+      )}
+    </>
   );
 };
 

@@ -107,17 +107,15 @@ class TestCurrentUserEndpoints:
             "email": "current@example.com",
             "role": UserRole.REGULAR,
             "status": UserStatus.ACTIVE,
+            "is_system_admin": False,
+            "is_personal_workspace_manager": False,
+            "display_name": "Current User",
             "created_at": datetime.now(),
             "updated_at": datetime.now(),
-            "profile": {
-                "id": "profile-123",
-                "user_id": "current-user-123",
-                "full_name": "Current User",
-                "bio": "Test bio"
-            }
+            "last_login": None
         }
         
-        mock_user_service.get_user_with_profile.return_value = user_with_profile
+        mock_user_service.get_user_complete.return_value = user_with_profile
         
         with patch('src.api.users_router.UserService', return_value=mock_user_service):
             response = client.get("/users/me")
