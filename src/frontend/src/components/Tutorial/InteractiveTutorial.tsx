@@ -21,9 +21,6 @@ import {
   PlayCircle as OperatorIcon,
   Close as CloseIcon,
   School as SchoolIcon,
-  Settings as SettingsIcon,
-  Build as BuildIcon,
-  PlayArrow as PlayIcon,
 } from '@mui/icons-material';
 
 // Define STATUS constants since they're not exported properly
@@ -161,38 +158,68 @@ const InteractiveTutorial: React.FC<TutorialProps> = ({ isOpen, onClose }) => {
   const adminSteps: Step[] = [
     {
       target: '[data-tour="workflow-designer"]',
-      content: '👋 Welcome Admin! This tutorial will guide you through system configuration and management. As an admin, you have full control over the platform settings, user management, and system resources.',
+      content: 'Welcome Admin! This tutorial will guide you through system configuration and management. As an admin, you have full control over the platform settings, user management, and system resources. Let\'s start by opening the Configuration panel.',
       placement: 'center',
       disableBeacon: true,
     },
     {
       target: '[data-tour="configuration-button"]',
-      content: '⚙️ Configuration Center: This is your main control panel. Here you can:\n• Configure database connections\n• Set up memory backends\n• Manage API keys and model providers\n• Control user access and groups\n• Set system-wide preferences',
+      content: 'Click here to open the Configuration Center. This is your main control panel where you manage all system settings.',
+      placement: 'right',
+    },
+    {
+      target: '[data-tour="workspace-section"]',
+      content: 'Workspace Overview: This is the first section you see. Here you can:\n• View system status and health\n• See active users and groups\n• Monitor resource usage\n• Check system configuration\n• View platform statistics',
+      placement: 'right',
+    },
+    {
+      target: '[data-tour="database-section"]',
+      content: 'Database Configuration: Manage your database connections:\n• Configure primary database\n• Set up backup databases\n• Manage connection pools\n• Configure data retention policies',
+      placement: 'right',
+    },
+    {
+      target: '[data-tour="memory-section"]',
+      content: 'Memory Backend: Configure how AI agents store and retrieve memory:\n• Vector database setup\n• Memory retention settings\n• Embedding configurations\n• Memory search optimization',
+      placement: 'right',
+    },
+    {
+      target: '[data-tour="users-section"]',
+      content: 'User Management: Control who can access the platform:\n• Add/remove users\n• Assign roles (Admin, Editor, Operator)\n• Manage permissions\n• View user activity',
+      placement: 'right',
+    },
+    {
+      target: '[data-tour="groups-section"]',
+      content: 'Group Management: Organize users and resources:\n• Create workspace groups\n• Assign users to groups\n• Set group permissions\n• Manage group resources',
+      placement: 'right',
+    },
+    {
+      target: '[data-tour="api-keys-section"]',
+      content: 'API Keys: Manage external service integrations:\n• Configure LLM providers (OpenAI, Anthropic, etc.)\n• Set up API rate limits\n• Manage access tokens\n• Monitor API usage',
       placement: 'right',
     },
     {
       target: '[data-tour="left-sidebar"]',
-      content: '🎛️ System Controls: The left sidebar gives you quick access to runtime features, process types, and model configurations. You can switch between Sequential and Hierarchical processing modes here.',
+      content: 'System Controls: The left sidebar gives you quick access to runtime features, process types, and model configurations. You can switch between Sequential and Hierarchical processing modes here.',
       placement: 'right',
     },
     {
       target: '[data-tour="runtime-features"]',
-      content: '🚀 Advanced Features: Configure how AI agents work:\n• Planning: Enable agents to plan before executing\n• Reasoning: Allow agents to explain their decisions\n• Process Type: Choose Sequential (one-by-one) or Hierarchical (manager delegates)',
+      content: 'Advanced Features: Configure how AI agents work:\n• Planning: Enable agents to plan before executing\n• Reasoning: Allow agents to explain their decisions\n• Process Type: Choose Sequential (one-by-one) or Hierarchical (manager delegates)',
       placement: 'right',
     },
     {
       target: '[data-tour="chat-toggle"]',
-      content: '💬 Admin Chat Commands: You can use special admin commands:\n• "configure database" - Database settings\n• "setup memory" - Memory backend configuration\n• "manage users" - User administration\n• "system status" - Check system health',
+      content: 'Admin Chat Commands: You can use special admin commands:\n• "configure database" - Database settings\n• "setup memory" - Memory backend configuration\n• "manage users" - User administration\n• "system status" - Check system health',
       placement: 'left',
     },
     {
       target: '[data-tour="save-button"]',
-      content: '📁 Template Management: As an admin, you can save workflows as global templates that all users can access. This helps standardize processes across your organization.',
+      content: 'Template Management: As an admin, you can save workflows as global templates that all users can access. This helps standardize processes across your organization.',
       placement: 'bottom',
     },
     {
       target: '[data-tour="open-workflow"]',
-      content: '📚 Catalog Access: View and manage all workflows in the system catalog. You can edit permissions, archive old workflows, and monitor usage.',
+      content: 'Catalog Access: View and manage all workflows in the system catalog. You can edit permissions, archive old workflows, and monitor usage.',
       placement: 'bottom',
     },
   ];
@@ -201,53 +228,53 @@ const InteractiveTutorial: React.FC<TutorialProps> = ({ isOpen, onClose }) => {
   const editorSteps: Step[] = [
     {
       target: '[data-tour="workflow-designer"]',
-      content: '👋 Welcome Editor! This tutorial will teach you how to create AI agents and tasks, then execute them. You have two ways to build workflows: using the chat panel (AI-assisted) or the right sidebar (manual control).',
+      content: 'Welcome Editor! This tutorial will teach you how to create AI agents and tasks, then execute them. You have two ways to build workflows: using the chat panel (AI-assisted) or the right sidebar (manual control).',
       placement: 'center',
       disableBeacon: true,
     },
     {
       target: '[data-tour="chat-toggle"]',
-      content: '💬 Chat Panel - The Easy Way: This is your AI assistant for creating workflows. Use these commands:\n• "create agent: [name]" - Creates an AI agent\n• "create task: [description]" - Creates a task\n• "create plan" - Generates a complete workflow\n• "execute crew" or "ec" - Runs your workflow',
+      content: 'Chat Panel - The Easy Way: This is your AI assistant for creating workflows. Use these commands:\n• "create agent: [name]" - Creates an AI agent\n• "create task: [description]" - Creates a task\n• "create plan" - Generates a complete workflow\n• "execute crew" or "ec" - Runs your workflow',
       placement: 'left',
     },
     {
       target: '[data-tour="chat-panel"]',
-      content: '📝 Important Rule: Every agent MUST have at least one task assigned to it, otherwise the execution will fail. Think of it as: agents are workers, tasks are their assignments. No assignments = no work!',
+      content: 'Important Rule: Every agent MUST have at least one task assigned to it, otherwise the execution will fail. Think of it as: agents are workers, tasks are their assignments. No assignments = no work!',
       placement: 'left',
     },
     {
       target: '[data-tour="right-sidebar"]',
-      content: '🎨 Right Sidebar - Manual Control: If you prefer full control, use the right sidebar to:\n• Add agents manually\n• Add tasks manually\n• Configure each component in detail\n• Set up connections precisely',
+      content: 'Right Sidebar - Manual Control: If you prefer full control, use the right sidebar to:\n• Add agents manually\n• Add tasks manually\n• Configure each component in detail\n• Set up connections precisely',
       placement: 'left',
     },
     {
       target: '[data-tour="canvas-area"]',
-      content: '🖼️ Canvas Area: Your workflow visualizes here. You can:\n• Right-click to add components\n• Drag to connect agents to tasks\n• Double-click to edit\n• See the flow of work visually',
+      content: 'Canvas Area: Your workflow visualizes here. You can:\n• Right-click to add components\n• Drag to connect agents to tasks\n• Double-click to edit\n• See the flow of work visually',
       placement: 'center',
     },
     {
       target: '[data-tour="agent-node"]',
-      content: '🤖 Agents: These are your AI workers. Each agent needs:\n• A role (what they are)\n• A goal (what they achieve)\n• Tools (what they can use)\n• At least ONE task (critical!)',
+      content: 'Agents: These are your AI workers. Each agent needs:\n• A role (what they are)\n• A goal (what they achieve)\n• Tools (what they can use)\n• At least ONE task (critical!)',
       placement: 'auto',
     },
     {
       target: '[data-tour="task-node"]',
-      content: '📋 Tasks: These define the work. Each task needs:\n• A clear description\n• Expected output\n• An assigned agent\nRemember: Unassigned tasks will cause execution to fail!',
+      content: 'Tasks: These define the work. Each task needs:\n• A clear description\n• Expected output\n• An assigned agent\nRemember: Unassigned tasks will cause execution to fail!',
       placement: 'auto',
     },
     {
       target: '[data-tour="execute-button"]',
-      content: '▶️ Execute Button: Once all agents have tasks, click here OR type "execute crew" in chat. The execution will fail if any agent lacks a task!',
+      content: 'Execute Button: Once all agents have tasks, click here OR type "execute crew" in chat. The execution will fail if any agent lacks a task!',
       placement: 'bottom',
     },
     {
       target: '[data-tour="trace-button"]',
-      content: '📊 View Trace: After execution starts, click here to monitor progress. You\'ll see:\n• Which agent is working\n• Task completion status\n• Real-time logs\n• Any errors or issues',
+      content: 'View Trace: After execution starts, click here to monitor progress. You\'ll see:\n• Which agent is working\n• Task completion status\n• Real-time logs\n• Any errors or issues',
       placement: 'bottom',
     },
     {
       target: '[data-tour="save-button"]',
-      content: '💾 Save Workflow: Once your workflow runs successfully, save it as a template for reuse. Give it a clear name and description.',
+      content: 'Save Workflow: Once your workflow runs successfully, save it as a template for reuse. Give it a clear name and description.',
       placement: 'bottom',
     },
   ];
@@ -256,58 +283,58 @@ const InteractiveTutorial: React.FC<TutorialProps> = ({ isOpen, onClose }) => {
   const operatorSteps: Step[] = [
     {
       target: '[data-tour="workflow-designer"]',
-      content: '👋 Welcome Operator! This tutorial will show you how to run pre-built workflows from the catalog. As an operator, your role is to execute and monitor AI workflows created by editors.',
+      content: 'Welcome Operator! This tutorial will show you how to run pre-built workflows from the catalog. As an operator, your role is to execute and monitor AI workflows created by editors.',
       placement: 'center',
       disableBeacon: true,
     },
     {
       target: '[data-tour="open-workflow"]',
-      content: '📚 Open from Catalog: Click here to browse available workflows. The catalog contains pre-built, tested workflows that are ready to run. Look for workflows marked as "Production Ready".',
+      content: 'Open from Catalog: Click here to browse available workflows. The catalog contains pre-built, tested workflows that are ready to run. Look for workflows marked as "Production Ready".',
       placement: 'bottom',
     },
     {
       target: '[data-tour="catalog-dialog"]',
-      content: '🔍 Catalog Browser: In the catalog, you can:\n• Search workflows by name or description\n• Filter by category or tags\n• View workflow details and requirements\n• Check execution history and success rates',
+      content: 'Catalog Browser: In the catalog, you can:\n• Search workflows by name or description\n• Filter by category or tags\n• View workflow details and requirements\n• Check execution history and success rates',
       placement: 'center',
     },
     {
       target: '[data-tour="canvas-area"]',
-      content: '👁️ Workflow Visualization: Once loaded, you\'ll see:\n• All agents (AI workers) in the workflow\n• All tasks and their connections\n• Required inputs highlighted in yellow\n• Execution flow with arrows',
+      content: 'Workflow Visualization: Once loaded, you\'ll see:\n• All agents (AI workers) in the workflow\n• All tasks and their connections\n• Required inputs highlighted in yellow\n• Execution flow with arrows',
       placement: 'center',
     },
     {
       target: '[data-tour="chat-toggle"]',
-      content: '💬 Quick Execution: You can also use chat commands:\n• "open [workflow name]" - Load a workflow\n• "execute crew" or "ec" - Run the loaded workflow\n• "status" - Check execution status\n• "stop" - Halt execution if needed',
+      content: 'Quick Execution: You can also use chat commands:\n• "open [workflow name]" - Load a workflow\n• "execute crew" or "ec" - Run the loaded workflow\n• "status" - Check execution status\n• "stop" - Halt execution if needed',
       placement: 'left',
     },
     {
       target: '[data-tour="execute-button"]',
-      content: '▶️ Execute Workflow: Before clicking:\n1. Check all agents have tasks (green checkmarks)\n2. Fill any required input fields\n3. Verify the selected model is available\n4. Click to start execution',
+      content: 'Execute Workflow: Before clicking:\n1. Check all agents have tasks (green checkmarks)\n2. Fill any required input fields\n3. Verify the selected model is available\n4. Click to start execution',
       placement: 'bottom',
     },
     {
       target: '[data-tour="trace-button"]',
-      content: '📊 Monitor Execution: Click "View Trace" to see:\n• Live progress of each agent\n• Task completion percentages\n• Real-time logs and outputs\n• Any errors or warnings\n• Estimated time remaining',
+      content: 'Monitor Execution: Click "View Trace" to see:\n• Live progress of each agent\n• Task completion percentages\n• Real-time logs and outputs\n• Any errors or warnings\n• Estimated time remaining',
       placement: 'bottom',
     },
     {
       target: '[data-tour="execution-panel"]',
-      content: '📈 Execution Panel: This shows:\n• Current agent activity\n• Completed vs pending tasks\n• Resource usage\n• Performance metrics\nGreen = Success, Yellow = In Progress, Red = Error',
+      content: 'Execution Panel: This shows:\n• Current agent activity\n• Completed vs pending tasks\n• Resource usage\n• Performance metrics\nGreen = Success, Yellow = In Progress, Red = Error',
       placement: 'left',
     },
     {
       target: '[data-tour="logs-button"]',
-      content: '📜 View Logs: Access detailed logs to:\n• See exactly what each agent did\n• Debug any issues\n• Export logs for reporting\n• Share results with team',
+      content: 'View Logs: Access detailed logs to:\n• See exactly what each agent did\n• Debug any issues\n• Export logs for reporting\n• Share results with team',
       placement: 'left',
     },
     {
       target: '[data-tour="history-tab"]',
-      content: '📅 Execution History: Review past runs to:\n• Download outputs and reports\n• Compare execution times\n• Identify patterns in failures\n• Generate performance reports',
+      content: 'Execution History: Review past runs to:\n• Download outputs and reports\n• Compare execution times\n• Identify patterns in failures\n• Generate performance reports',
       placement: 'top',
     },
     {
       target: '[data-tour="stop-button"]',
-      content: '🛑 Emergency Stop: If something goes wrong, you can stop execution immediately. The system will save partial results and log the reason for stopping.',
+      content: 'Emergency Stop: If something goes wrong, you can stop execution immediately. The system will save partial results and log the reason for stopping.',
       placement: 'bottom',
     },
   ];
@@ -518,7 +545,7 @@ const InteractiveTutorial: React.FC<TutorialProps> = ({ isOpen, onClose }) => {
 
           <Box mt={3} p={2} bgcolor="action.hover" borderRadius={2}>
             <Typography variant="body2" color="text.secondary" align="center">
-              💡 <strong>Tip:</strong> You can restart the tutorial anytime by clicking the help button in the sidebar
+              <strong>Tip:</strong> You can restart the tutorial anytime by clicking the help button in the sidebar
             </Typography>
           </Box>
         </DialogContent>

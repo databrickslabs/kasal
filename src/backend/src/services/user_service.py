@@ -160,8 +160,14 @@ class UserService:
                 return user
             # Create new user (OAuth proxy authentication - no password needed)
 
-            # Generate username from email
+            # Generate username from email (replace invalid characters)
             username_base = email.split("@")[0]
+            # Replace dots and other invalid characters with underscores
+            username_base = username_base.replace(".", "_").replace("-", "_")
+            # Remove any other invalid characters (keep only letters, numbers, underscores)
+            import re
+            username_base = re.sub(r'[^a-zA-Z0-9_]', '_', username_base)
+
             username = username_base
             i = 1
 

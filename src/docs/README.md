@@ -1,180 +1,154 @@
 # Kasal Documentation Hub
 
-> **Choose your path** - Technical depth or business value
+**Enterprise AI Agent Orchestration Platform**
 
 ---
 
-## Quick Navigation
+## Quick Start
 
-### By Role
+Choose your documentation based on your role:
 
-<div style="display: grid; grid-template-columns: 1fr 1fr; gap: 20px; margin: 20px 0;">
-
-<div style="background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); padding: 20px; border-radius: 10px;">
+## Business Documentation
 
 ### [Business User Guide](./BUSINESS_USER_GUIDE.md)
-**For Leaders & Managers**
-- ROI Calculator
-- Success Stories
-- 15-Minute Setup
-- No Code Required
+**For Leaders, Managers, and Business Users**
 
-</div>
+Get started with Kasal without any technical knowledge. Learn how to create AI workflows, calculate ROI, and manage your AI workforce.
 
-<div style="background: linear-gradient(135deg, #00A1C9 0%, #005F8C 100%); padding: 20px; border-radius: 10px;">
+**Key Topics:**
+- ROI Calculator and Cost Analysis
+- Success Stories and Case Studies
+- 15-Minute Quick Setup Guide
+- Managing AI Workflows Without Code
+
+---
+
+## Technical Documentation
 
 ### [Developer Guide](./DEVELOPER_GUIDE.md)
-**For Engineers**
-- Quick Start Code
-- API Reference
-- Testing Strategy
-- Production Deploy
+**For Software Engineers and Developers**
 
-</div>
+Build and integrate with Kasal's powerful AI orchestration platform. From quick starts to advanced implementations.
 
-<div style="background: linear-gradient(135deg, #FF3621 0%, #CC1700 100%); padding: 20px; border-radius: 10px;">
-
-### [Architecture Guide](./ARCHITECTURE_GUIDE.md)
-**For Architects**
-- System Design
-- Security Model
-- Scaling Strategy
-- Integration Patterns
-
-</div>
-
-<div style="background: linear-gradient(135deg, #48C774 0%, #357A5B 100%); padding: 20px; border-radius: 10px;">
+**Key Topics:**
+- 30-Second Quick Start with Code Examples
+- API Integration and SDK Usage
+- Testing Strategies and Best Practices
+- Production Deployment Guides
 
 ### [API Reference](./API_REFERENCE.md)
-**For Integrators**
-- REST Endpoints
-- WebSocket Events
-- SDKs & Libraries
-- Rate Limits
+**For API Integrators and Backend Engineers**
 
-</div>
+Complete REST API documentation with examples, WebSocket events, and SDK libraries.
 
-</div>
+**Key Topics:**
+- RESTful Endpoints Documentation
+- WebSocket Real-time Events
+- Authentication and Authorization
+- Rate Limits and Error Handling
 
 ---
 
-## Quick Links
+## Architecture Documentation
 
-### Get Started in 30 Seconds
+### [Solution Architecture Guide](./ARCHITECTURE_GUIDE.md)
+**For Solution Architects and Technical Leaders**
+
+Understand Kasal's architecture, design patterns, and enterprise integration strategies.
+
+**Key Topics:**
+- System Design and Components
+- Security Model and Compliance
+- Scaling Strategies and Performance
+- Integration Patterns and Best Practices
+
+---
+
+## Getting Started in 30 Seconds
+
 ```bash
-# Clone, install, run
-git clone https://github.com/youorg/kasal
+# Clone the repository
+git clone https://github.com/databrickslabs/kasal
+
+# Install dependencies
 cd kasal && pip install -r src/requirements.txt
+
+# Start the backend
 cd src/backend && ./run.sh
+
+# In another terminal, start the frontend
+cd src/frontend && npm install && npm start
 ```
 
-### Most Popular
-- [5-Minute Demo](https://kasal.ai/demo)
-- [API Playground](https://api.kasal.ai/docs)
-- [Discord Community](https://discord.gg/kasal)
-- [Video Tutorials](https://kasal.ai/videos)
+Access the application at `http://localhost:3000`
 
 ---
 
-## Documentation Map
+## Key Features
 
-### Core Concepts
-| Topic | Business | Developer | Architect |
-|-------|----------|-----------|-----------|
-| **Getting Started** | [Quick Start](./BUSINESS_USER_GUIDE.md#quick-start) | [Installation](./DEVELOPER_GUIDE.md#install--run) | [Overview](./ARCHITECTURE_GUIDE.md#system-overview) |
-| **AI Agents** | [Use Cases](./BUSINESS_USER_GUIDE.md#quick-start) | [Agent Code](./DEVELOPER_GUIDE.md#agents) | [AI Layer](./ARCHITECTURE_GUIDE.md#component-architecture) |
-| **Workflows** | [Templates](./BUSINESS_USER_GUIDE.md#quick-start) | [Crew Setup](./DEVELOPER_GUIDE.md#crews) | [Orchestration](./ARCHITECTURE_GUIDE.md#component-architecture) |
-| **Security** | [Compliance](./BUSINESS_USER_GUIDE.md#common-questions) | [Auth Flow](./DEVELOPER_GUIDE.md#security) | [Security Model](./ARCHITECTURE_GUIDE.md#security-architecture) |
-| **Integration** | [One-Click](./BUSINESS_USER_GUIDE.md#step-3-connect-your-tools) | [APIs](./API_REFERENCE.md) | [Patterns](./ARCHITECTURE_GUIDE.md#integration-architecture) |
-
-### Advanced Topics
-| Topic | Documentation | Audience |
-|-------|--------------|----------|
-| **Scaling** | [Performance Architecture](./ARCHITECTURE_GUIDE.md#performance-architecture) | Architects |
-| **Memory Backends** | [Custom Memory](./DEVELOPER_GUIDE.md#advanced-topics) | Developers |
-| **Monitoring** | [Observability](./ARCHITECTURE_GUIDE.md#monitoring--observability) | DevOps |
-| **Disaster Recovery** | [DR Strategy](./ARCHITECTURE_GUIDE.md#disaster-recovery) | Operations |
+| Feature | Description |
+|---------|-------------|
+| **AI Agent Orchestration** | Create and manage teams of AI agents working together |
+| **Visual Workflow Designer** | Drag-and-drop interface for creating complex workflows |
+| **Enterprise Security** | SOC2 compliant with role-based access control |
+| **Databricks Integration** | Native integration with Databricks platform |
+| **Scalable Architecture** | Microservices-ready, horizontally scalable design |
+| **Multi-Model Support** | Support for GPT-4, Claude, Databricks models, and more |
 
 ---
 
-## Learning Paths
+## Documentation Structure
 
-### Path 1: Business Leader
-1. [ROI Calculator](./BUSINESS_USER_GUIDE.md#roi-calculator)
-2. [Success Metrics](./BUSINESS_USER_GUIDE.md#success-metrics)
-3. [Control Center](./BUSINESS_USER_GUIDE.md#control-center)
-4. [Pricing](./BUSINESS_USER_GUIDE.md#common-questions)
-
-### Path 2: Developer
-1. [Quick Start](./DEVELOPER_GUIDE.md#quick-start)
-2. [Core Concepts](./DEVELOPER_GUIDE.md#core-concepts)
-3. [Testing](./DEVELOPER_GUIDE.md#testing)
-4. [Deployment](./DEVELOPER_GUIDE.md#deployment)
-
-### Path 3: Solution Architect
-1. [Architecture](./ARCHITECTURE_GUIDE.md#high-level-architecture)
-2. [Security](./ARCHITECTURE_GUIDE.md#security-architecture)
-3. [Data Model](./ARCHITECTURE_GUIDE.md#data-architecture)
-4. [Scaling](./ARCHITECTURE_GUIDE.md#performance-architecture)
+```
+docs/
+├── README.md                    # This file - Documentation hub
+├── BUSINESS_USER_GUIDE.md       # Business user documentation
+├── DEVELOPER_GUIDE.md           # Developer documentation
+├── ARCHITECTURE_GUIDE.md        # Architecture documentation
+├── API_REFERENCE.md             # API reference
+└── archive/                     # Legacy documentation
+    ├── technical/               # Technical deep-dives
+    ├── security/                # Security documentation
+    └── guides/                  # Various guides
+```
 
 ---
 
-## Search Topics
+## Technology Stack
 
-**Popular searches**: authentication, api keys, webhooks, rate limits, docker, kubernetes, databricks, memory, agents, tools, execution, monitoring, backup
-
----
-
-## Support Channels
-
-### Get Help
-- **In-App Chat**: 24/7 support
-- **Email**: support@kasal.ai
-- **Tickets**: [support.kasal.ai](https://support.kasal.ai)
-- **GitHub**: [github.com/kasal/kasal](https://github.com/kasal/kasal)
-
-### Community
-- **Discord**: [discord.gg/kasal](https://discord.gg/kasal)
-- **Twitter**: [@kasalai](https://twitter.com/kasalai)
-- **YouTube**: [youtube.com/@kasalai](https://youtube.com/@kasalai)
+- **Backend**: FastAPI, SQLAlchemy 2.0, Python 3.9+
+- **Frontend**: React 18, TypeScript, Material-UI
+- **AI Engine**: CrewAI, LangChain
+- **Database**: PostgreSQL / SQLite
+- **Authentication**: JWT + Databricks OAuth
 
 ---
 
-## Brand Guidelines
+## Support and Resources
 
-### Colors
-- **Primary**: #FF3621 (Vibrant Red-Orange)
-- **Secondary**: #00A1C9 (Bright Cyan)
-- **Success**: #48C774 (Green)
-- **Warning**: #FFB86C (Orange)
-- **Dark**: #1E1E1E (Background)
+### Getting Help
 
-### Voice
-- **Professional** but approachable
-- **Concise** over verbose
-- **Visual** over text-heavy
-- **Action-oriented** language
+- **GitHub Issues**: [github.com/databrickslabs/kasal/issues](https://github.com/databrickslabs/kasal/issues)
+- **Email**: Contact your Databricks support team
+- **Documentation**: You're already here!
 
----
+### Contributing
 
-## Documentation Updates
+We welcome contributions! Please see our [Contributing Guide](https://github.com/databrickslabs/kasal/blob/main/CONTRIBUTING.md) for details.
 
-| Version | Date | Changes |
-|---------|------|---------|
-| v2.0 | Jan 2025 | Complete redesign with personas |
-| v1.5 | Dec 2024 | Added API reference |
-| v1.0 | Nov 2024 | Initial documentation |
+### License
+
+This project is licensed under the Apache License 2.0 - see the [LICENSE](https://github.com/databrickslabs/kasal/blob/main/LICENSE) file for details.
 
 ---
 
-## Contributing
+## Version Information
 
-Found an issue? Want to improve docs?
-1. Fork the repo
-2. Make changes
-3. Submit PR
-4. Get credit!
+- **Current Version**: 2.0.0
+- **Documentation Updated**: January 2025
+- **Minimum Python Version**: 3.9
+- **Minimum Node Version**: 16.0
 
 ---
 
-*Documentation that respects your time*
+*Built by Databricks Labs*
