@@ -84,6 +84,9 @@ interface CrewCanvasProps {
   // Execution history visibility
   showRunHistory?: boolean;
   executionHistoryHeight?: number;
+  // Tutorial and configuration
+  onOpenTutorial?: () => void;
+  onOpenConfiguration?: () => void;
 }
 
 
@@ -111,8 +114,11 @@ const CrewCanvas: React.FC<CrewCanvasProps> = ({
   setIsTaskDialogOpen,
   setIsFlowDialogOpen,
   showRunHistory,
-  executionHistoryHeight = 200
+  executionHistoryHeight = 200,
+  onOpenTutorial,
+  onOpenConfiguration
 }) => {
+  console.log('[CrewCanvas] Props received - onOpenTutorial:', onOpenTutorial, 'onOpenConfiguration:', onOpenConfiguration);
   const [isRendering, setIsRendering] = useState(true);
   const containerRef = useRef<HTMLDivElement>(null);
   const reactFlowInstanceRef = useRef<ReactFlowInstance | null>(null);
@@ -184,7 +190,11 @@ const CrewCanvas: React.FC<CrewCanvasProps> = ({
     setSelectedTools: _setJobTrackerSelectedTools
   } = useJobManagementStore();
 
-  const { selectedModel: _selectedModel } = useCrewExecutionStore();
+  const {
+    selectedModel: _selectedModel,
+    processType,
+    setProcessType
+  } = useCrewExecutionStore();
   const { handleExecuteCrew, isExecuting: _isExecuting } = useCrewExecution();
 
   const {
@@ -387,19 +397,22 @@ const CrewCanvas: React.FC<CrewCanvasProps> = ({
             const delay = 100 * attempt;
             
             setTimeout(() => {
-              try {
-                instance.fitView({
-                  padding: 0.2,
-                  includeHiddenNodes: false,
-                  duration: 800
-                });
-              } catch (error) {
-                // Log error and retry if needed
-                console.warn(`fitView attempt ${attempt} failed:`, error);
-                if (attempt < maxAttempts) {
-                  attemptFitView(attempt + 1, maxAttempts);
+              // Use requestAnimationFrame to avoid ResizeObserver loops
+              window.requestAnimationFrame(() => {
+                try {
+                  instance.fitView({
+                    padding: 0.2,
+                    includeHiddenNodes: false,
+                    duration: 800
+                  });
+                } catch (error) {
+                  // Log error and retry if needed
+                  console.warn(`fitView attempt ${attempt} failed:`, error);
+                  if (attempt < maxAttempts) {
+                    attemptFitView(attempt + 1, maxAttempts);
+                  }
                 }
-              }
+              });
             }, delay);
           }
         } catch (error) {
@@ -641,6 +654,7 @@ const CrewCanvas: React.FC<CrewCanvasProps> = ({
       ) : (
         <ReactFlow
           key="crew-canvas"
+          data-tour="canvas-area"
           nodes={nodesWithDimensions}
           edges={crewEdges}
           onNodesChange={handleNodesChange}
@@ -654,7 +668,8 @@ const CrewCanvas: React.FC<CrewCanvasProps> = ({
           nodeTypes={nodeTypes}
           edgeTypes={edgeTypes}
           connectionMode={ConnectionMode.Loose}
-          fitView
+          // Removed automatic fitView to prevent ResizeObserver loops
+          // fitView is handled manually in handleInit and via controls
           attributionPosition="bottom-left"
           minZoom={0.1}
           maxZoom={4}
@@ -708,8 +723,11 @@ const CrewCanvas: React.FC<CrewCanvasProps> = ({
             setReasoningEnabled={setReasoningEnabled}
             schemaDetectionEnabled={schemaDetectionEnabled}
             setSchemaDetectionEnabled={setSchemaDetectionEnabled}
-
+            processType={processType}
+            setProcessType={setProcessType}
             showRunHistory={showRunHistory}
+            setIsConfigurationDialogOpen={onOpenConfiguration}
+            onOpenTutorial={onOpenTutorial}
           />
 
           <RightSidebar

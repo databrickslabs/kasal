@@ -39,7 +39,12 @@ export const useDialogManager = (
   const [isLogsDialogOpen, setIsLogsDialogOpen] = useState(false);
   const [isConfigurationDialogOpen, setIsConfigurationDialogOpen] = useState(false);
   const [isFlowDialogOpen, setIsFlowDialogOpen] = useState(false);
-  const [isTutorialOpen, setIsTutorialOpen] = useState(!hasSeenTutorial);
+  const [isTutorialOpen, setIsTutorialOpen] = useState(false);
+
+  // Debug logging
+  useEffect(() => {
+    console.log('[DialogManager] isTutorialOpen state changed:', isTutorialOpen);
+  }, [isTutorialOpen]);
   
   // Check URL for configuration parameters on component mount
   useEffect(() => {
@@ -69,6 +74,7 @@ export const useDialogManager = (
 
   // Handle closing tutorial
   const handleCloseTutorial = useCallback(() => {
+    console.log('[DialogManager] handleCloseTutorial called');
     setIsTutorialOpen(false);
     setHasSeenTutorial(true);
   }, [setHasSeenTutorial]);

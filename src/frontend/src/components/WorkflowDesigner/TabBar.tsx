@@ -36,6 +36,7 @@ import {
 } from '@mui/icons-material';
 import { useTabManagerStore } from '../../store/tabManager';
 import { useThemeManager } from '../../hooks/workflow/useThemeManager';
+import GroupSelector from '../Common/GroupSelector';
 
 interface TabBarProps {
   onRunTab?: (tabId: string) => void;
@@ -357,10 +358,12 @@ const TabBar: React.FC<TabBarProps> = ({
           display: 'flex',
           alignItems: 'center',
           minHeight: '48px',
+          height: '48px',  // Fixed height to prevent shifts
           paddingLeft: 1,
           paddingRight: 1,
           position: 'relative',
-          zIndex: 1001 // Above the toolbar
+          zIndex: 1001, // Above the toolbar
+          overflow: 'hidden'  // Prevent overflow from causing layout shifts
         }}
       >
         <Box sx={{ display: 'flex', alignItems: 'center', flex: 1 }}>
@@ -530,6 +533,19 @@ const TabBar: React.FC<TabBarProps> = ({
               </IconButton>
             </span>
           </Tooltip>
+        </Box>
+
+        {/* Workspace Selector - positioned on the right */}
+        <Box sx={{
+          display: 'flex',
+          alignItems: 'center',
+          pl: 0.25,
+          pr: 0.75,  // Add more padding on the right to align with sidebar separator
+          flexShrink: 0,  // Prevent the box from shrinking
+          width: 'auto',
+          transition: 'none'  // Disable any transitions that might cause flickering
+        }}>
+          <GroupSelector />
         </Box>
       </Box>
 

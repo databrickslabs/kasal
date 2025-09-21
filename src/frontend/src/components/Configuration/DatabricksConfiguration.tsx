@@ -25,6 +25,8 @@ import { useTranslation } from 'react-i18next';
 import { DatabricksService, DatabricksConfig, DatabricksTokenStatus, DatabricksConnectionStatus } from '../../api/DatabricksService';
 import { MemoryBackendService } from '../../api/MemoryBackendService';
 import { MemoryBackendType, isValidMemoryBackendConfig } from '../../types/memoryBackend';
+import { useKnowledgeConfigStore } from '../../store/knowledgeConfigStore';
+import { ToolService } from '../../api/ToolService';
 
 interface DatabricksConfigurationProps {
   onSaved?: () => void;
@@ -97,6 +99,33 @@ const DatabricksConfiguration: React.FC<DatabricksConfigurationProps> = ({ onSav
             const status = await databricksService.checkPersonalTokenRequired();
             setTokenStatus(status);
           }
+
+          // Sync tool state on load
+          const DATABRICKS_KNOWLEDGE_SEARCH_TOOL_ID = 36;
+          try {
+            const tools = await ToolService.listTools();
+            const knowledgeTool = tools.find(t => t.id === DATABRICKS_KNOWLEDGE_SEARCH_TOOL_ID);
+
+            if (knowledgeTool) {
+              // Check memory backend configuration
+              const memoryConfig = await MemoryBackendService.getConfig();
+              const isMemoryConfigured = memoryConfig &&
+                isValidMemoryBackendConfig(memoryConfig) &&
+                memoryConfig.backend_type === MemoryBackendType.DATABRICKS &&
+                memoryConfig.databricks_config?.endpoint_name &&
+                memoryConfig.databricks_config?.short_term_index;
+
+              const shouldBeEnabled = savedConfig.enabled && savedConfig.knowledge_volume_enabled && isMemoryConfigured;
+
+              // Only toggle if state doesn't match
+              if (knowledgeTool.enabled !== shouldBeEnabled) {
+                await ToolService.toggleToolEnabled(DATABRICKS_KNOWLEDGE_SEARCH_TOOL_ID);
+                console.log(`Initial sync: DatabricksKnowledgeSearchTool ${shouldBeEnabled ? 'enabled' : 'disabled'}`);
+              }
+            }
+          } catch (toolError) {
+            console.error('Failed to sync tool state on load:', toolError);
+          }
         }
       } catch (error) {
         console.error('Error loading configuration:', error);
@@ -137,6 +166,33 @@ const DatabricksConfiguration: React.FC<DatabricksConfigurationProps> = ({ onSav
       const savedConfig = await databricksService.setDatabricksConfig(config);
       setConfig(savedConfig);
 
+      // Sync DatabricksKnowledgeSearchTool enabled state with knowledge_volume_enabled
+      // Tool ID 36 is DatabricksKnowledgeSearchTool
+      const DATABRICKS_KNOWLEDGE_SEARCH_TOOL_ID = 36;
+
+      try {
+        // Get current tool state
+        const tools = await ToolService.listTools();
+        const knowledgeTool = tools.find(t => t.id === DATABRICKS_KNOWLEDGE_SEARCH_TOOL_ID);
+
+        if (knowledgeTool) {
+          const shouldBeEnabled = savedConfig.enabled && savedConfig.knowledge_volume_enabled && isMemoryBackendConfigured;
+
+          // Only toggle if state doesn't match
+          if (knowledgeTool.enabled !== shouldBeEnabled) {
+            await ToolService.toggleToolEnabled(DATABRICKS_KNOWLEDGE_SEARCH_TOOL_ID);
+            console.log(`DatabricksKnowledgeSearchTool ${shouldBeEnabled ? 'enabled' : 'disabled'} based on knowledge volume configuration`);
+          }
+        }
+      } catch (toolError) {
+        console.error('Failed to sync DatabricksKnowledgeSearchTool state:', toolError);
+        // Don't fail the entire save operation if tool sync fails
+      }
+
+      // Refresh knowledge configuration store
+      const { refreshConfiguration } = useKnowledgeConfigStore.getState();
+      refreshConfiguration();
+
       // Dispatch event to notify other components about configuration change
       window.dispatchEvent(new CustomEvent('databricks-config-updated', {
         detail: { config: savedConfig }
@@ -149,13 +205,13 @@ const DatabricksConfiguration: React.FC<DatabricksConfigurationProps> = ({ onSav
       } else {
         setTokenStatus(null);
       }
-      
+
       setNotification({
         open: true,
         message: t('configuration.databricks.saved', { defaultValue: 'Databricks configuration saved successfully' }),
         severity: 'success',
       });
-      
+
       if (onSaved) {
         onSaved();
       }

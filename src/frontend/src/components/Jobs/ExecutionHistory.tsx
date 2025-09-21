@@ -28,6 +28,7 @@ import ArrowDownwardIcon from '@mui/icons-material/ArrowDownward';
 import PreviewIcon from '@mui/icons-material/Preview';
 import VisibilityIcon from '@mui/icons-material/Visibility';
 import ScheduleIcon from '@mui/icons-material/Schedule';
+import AccessTimeIcon from '@mui/icons-material/AccessTime';
 import { Run, calculateDurationFromTraces } from '../../api/ExecutionHistoryService';
 import { ScheduleService } from '../../api/ScheduleService';
 import ShowTraceTimeline from './ShowTraceTimeline';
@@ -39,15 +40,13 @@ import type { LogMessage, LogEntry } from '../../api/ExecutionLogs';
 import { useTranslation } from 'react-i18next';
 import { toast } from 'react-hot-toast';
 import { useRunResult } from '../../hooks/global/useExecutionResult';
-import { useUserPreferencesStore } from '../../store/userPreferencesStore';
-import UIPreferenceDialog from '../Settings/UIPreferenceDialog';
-import SettingsIcon from '@mui/icons-material/Settings';
 import { useRunHistory } from '../../hooks/global/useExecutionHistory';
 import { useRunStatusStore } from '../../store/runStatus';
 import RunActions from './ExecutionActions';
 import RunDialogs from './RunDialogs';
 import { AgentYaml, TaskYaml } from '../../types/crew';
 import { useTaskExecutionStore } from '../../store/taskExecutionStore';
+import { usePermissions } from '../../hooks/usePermissions';
 import ExecutionStatusBadge from '../ExecutionStatusBadge';
 
 export interface RunHistoryRef {
@@ -106,18 +105,29 @@ const DurationCell: React.FC<{ run: Run }> = ({ run }) => {
     );
   }
 
+  // Format duration with icon
+  if (duration === '-') {
+    return <span style={{ color: '#999', fontSize: '0.75rem' }}>-</span>;
+  }
+
   return (
     <Chip
-      label={duration}
+      label={
+        <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5 }}>
+          <AccessTimeIcon sx={{ fontSize: '0.75rem' }} />
+          <span>{duration}</span>
+        </Box>
+      }
       size="small"
       variant="outlined"
       sx={{
-        height: '18px',
-        '& .MuiChip-label': { px: 0.75, fontSize: '0.7rem' },
-        borderColor: (theme: Theme) => 
-          run.status === 'completed' ? theme.palette.success.main :
-          run.status === 'failed' ? theme.palette.error.main :
-          theme.palette.grey[400]
+        height: '20px',
+        '& .MuiChip-label': {
+          px: 0.5,
+          fontSize: '0.7rem',
+          fontWeight: 500
+        },
+        borderColor: (theme: Theme) => theme.palette.grey[400]
       }}
     />
   );
@@ -141,7 +151,7 @@ interface RunHistoryProps {
 const RunHistory = forwardRef<RunHistoryRef, RunHistoryProps>(({ executionHistoryHeight = 200, onExecutionCountChange }, ref) => {
   const { t } = useTranslation();
   const { showRunResult, selectedRun, isOpen, closeRunResult } = useRunResult();
-  const { hasSeenUIPreferenceDialog } = useUserPreferencesStore();
+  const { userRole } = usePermissions();
   const {
     runs,
     searchQuery,
@@ -185,7 +195,6 @@ const RunHistory = forwardRef<RunHistoryRef, RunHistoryProps>(({ executionHistor
   const [cronExpression, setCronExpression] = useState('0 0 * * *');
   const [anchorEl, setAnchorEl] = useState<HTMLButtonElement | null>(null);
   const searchInputRef = useRef<HTMLInputElement>(null);
-  const [showPreferenceDialog, setShowPreferenceDialog] = useState(false);
   const scheduleNameInputRef = useRef<HTMLInputElement>(null);
   const [deleteRunDialogOpen, setDeleteRunDialogOpen] = useState(false);
   const [runToDelete, setRunToDelete] = useState<Run | null>(null);
@@ -470,14 +479,6 @@ const RunHistory = forwardRef<RunHistoryRef, RunHistoryProps>(({ executionHistor
     };
   }, []);
 
-  // Show preference dialog if user hasn't seen it
-  useEffect(() => {
-    if (!hasSeenUIPreferenceDialog) {
-      // Small delay to let the component render first
-      const timer = setTimeout(() => setShowPreferenceDialog(true), 500);
-      return () => clearTimeout(timer);
-    }
-  }, [hasSeenUIPreferenceDialog]);
 
   const handleScheduleJob = async () => {
     if (!selectedRunForSchedule || !scheduleName || !cronExpression) {
@@ -795,7 +796,13 @@ const RunHistory = forwardRef<RunHistoryRef, RunHistoryProps>(({ executionHistor
                           horizontal: 'left',
                         }}
                       >
-                        <Box sx={{ p: 1.5 }}>
+                        <Box
+                          sx={{ p: 1.5 }}
+                          onKeyDown={(e) => {
+                            // Prevent popover from closing on keyboard events
+                            e.stopPropagation();
+                          }}
+                        >
                           <TextField
                             inputRef={searchInputRef}
                             size="small"
@@ -803,6 +810,14 @@ const RunHistory = forwardRef<RunHistoryRef, RunHistoryProps>(({ executionHistor
                             variant="outlined"
                             value={searchQuery}
                             onChange={handleSearchChange}
+                            onKeyDown={(e) => {
+                              // Stop propagation to prevent any parent handlers from interfering
+                              e.stopPropagation();
+                              // Allow ESC key to close the popover
+                              if (e.key === 'Escape') {
+                                handleFilterClose();
+                              }
+                            }}
                             InputProps={{
                               startAdornment: (
                                 <InputAdornment position="start">
@@ -816,7 +831,7 @@ const RunHistory = forwardRef<RunHistoryRef, RunHistoryProps>(({ executionHistor
                       </Popover>
                     </Box>
                   </TableCell>
-                  <TableCell 
+                  <TableCell
                     sx={{ py: 0.25, fontSize: '0.8125rem', cursor: 'pointer', backgroundColor: theme => theme.palette.background.paper }}
                     onClick={() => handleSort('status')}
                   >
@@ -826,12 +841,12 @@ const RunHistory = forwardRef<RunHistoryRef, RunHistoryProps>(({ executionHistor
                     </Box>
                   </TableCell>
                   <TableCell sx={{ py: 0.25, fontSize: '0.8125rem', backgroundColor: theme => theme.palette.background.paper, textAlign: 'center' }}>
-                    Schedule Execution
+                    Agents/Tasks
                   </TableCell>
                   <TableCell sx={{ py: 0.25, fontSize: '0.8125rem', backgroundColor: theme => theme.palette.background.paper }}>
                     Submitter
                   </TableCell>
-                  <TableCell 
+                  <TableCell
                     sx={{ py: 0.25, fontSize: '0.8125rem', cursor: 'pointer', backgroundColor: theme => theme.palette.background.paper }}
                     onClick={() => handleSort('created_at')}
                   >
@@ -849,6 +864,9 @@ const RunHistory = forwardRef<RunHistoryRef, RunHistoryProps>(({ executionHistor
                   <TableCell sx={{ py: 0.25, fontSize: '0.8125rem', backgroundColor: theme => theme.palette.background.paper, textAlign: 'center' }}>
                     Trace
                   </TableCell>
+                  <TableCell sx={{ py: 0.25, fontSize: '0.8125rem', backgroundColor: theme => theme.palette.background.paper, textAlign: 'center' }}>
+                    Schedule Execution
+                  </TableCell>
                   <TableCell sx={{ py: 0.25, fontSize: '0.8125rem', width: '120px', backgroundColor: theme => theme.palette.background.paper }}>
                     <Box sx={{ 
                       display: 'flex', 
@@ -862,46 +880,31 @@ const RunHistory = forwardRef<RunHistoryRef, RunHistoryProps>(({ executionHistor
                     }}>
                       <Box>{t('runHistory.columns.actions')}</Box>
                       <Box sx={{ display: 'flex', gap: 0.5 }}>
-                        <Tooltip title="UI Preferences">
-                          <IconButton
-                            className="settings-button"
-                            size="small"
-                            onClick={() => setShowPreferenceDialog(true)}
-                            sx={{ 
-                              height: '20px', 
-                              width: '20px',
-                              p: 0.25,
-                              opacity: 0,
-                              visibility: 'hidden',
-                              transition: 'opacity 0.2s ease-in-out, visibility 0.2s ease-in-out'
-                            }}
-                          >
-                            <SettingsIcon sx={{ fontSize: '0.875rem' }} />
-                          </IconButton>
-                        </Tooltip>
-                        <Tooltip title={t('runHistory.deleteAllRuns')}>
-                          <IconButton
-                            className="delete-all-button"
-                            size="small"
-                            color="error"
-                            onClick={() => setDeleteDialogOpen(true)}
-                            disabled={runs.length === 0}
-                            sx={{ 
-                              height: '20px', 
-                              width: '20px',
-                              p: 0.25,
-                              opacity: 0,
-                              visibility: 'hidden',
-                              transition: 'opacity 0.2s ease-in-out, visibility 0.2s ease-in-out',
-                              '&.Mui-disabled': {
+                        {userRole !== 'operator' && (
+                          <Tooltip title={t('runHistory.deleteAllRuns')}>
+                            <IconButton
+                              className="delete-all-button"
+                              size="small"
+                              color="error"
+                              onClick={() => setDeleteDialogOpen(true)}
+                              disabled={runs.length === 0}
+                              sx={{
+                                height: '20px',
+                                width: '20px',
+                                p: 0.25,
                                 opacity: 0,
-                                visibility: 'hidden'
-                              }
-                            }}
-                          >
-                            <DeleteIcon sx={{ fontSize: '0.875rem' }} />
-                          </IconButton>
-                        </Tooltip>
+                                visibility: 'hidden',
+                                transition: 'opacity 0.2s ease-in-out, visibility 0.2s ease-in-out',
+                                '&.Mui-disabled': {
+                                  opacity: 0,
+                                  visibility: 'hidden'
+                                }
+                              }}
+                            >
+                              <DeleteIcon sx={{ fontSize: '0.875rem' }} />
+                            </IconButton>
+                          </Tooltip>
+                        )}
                       </Box>
                     </Box>
                   </TableCell>
@@ -910,7 +913,7 @@ const RunHistory = forwardRef<RunHistoryRef, RunHistoryProps>(({ executionHistor
               <TableBody>
                 {displayedRuns.length === 0 ? (
                   <TableRow>
-                    <TableCell colSpan={9} align="center" sx={{ py: 1, fontSize: '0.8125rem' }}>
+                    <TableCell colSpan={10} align="center" sx={{ py: 1, fontSize: '0.8125rem' }}>
                       {searchQuery ? t('runHistory.noSearchResults') : t('runHistory.noRuns')}
                     </TableCell>
                   </TableRow>
@@ -927,26 +930,74 @@ const RunHistory = forwardRef<RunHistoryRef, RunHistoryProps>(({ executionHistor
                       }}
                     >
                       <TableCell>{
-                        run.run_name?.startsWith('"') && run.run_name?.endsWith('"') 
-                          ? run.run_name.slice(1, -1) 
+                        run.run_name?.startsWith('"') && run.run_name?.endsWith('"')
+                          ? run.run_name.slice(1, -1)
                           : run.run_name
                       }</TableCell>
                       <TableCell>
-                        <ExecutionStatusBadge 
+                        <ExecutionStatusBadge
                           status={run.status}
                           size="small"
                         />
                       </TableCell>
                       <TableCell align="center">
-                        <Tooltip title={t('runHistory.actions.schedule')}>
-                          <IconButton
-                            size="small"
-                            onClick={() => handleOpenScheduleDialog(run)}
-                            color="primary"
-                          >
-                            <ScheduleIcon fontSize="small" />
-                          </IconButton>
-                        </Tooltip>
+                        {(() => {
+                          let agentCount = 0;
+                          let taskCount = 0;
+                          let hasData = false;
+
+                          try {
+                            // Try to get agents count from inputs first
+                            if (run.inputs?.agents_yaml && typeof run.inputs.agents_yaml === 'object') {
+                              agentCount = Object.keys(run.inputs.agents_yaml).length;
+                              hasData = true;
+                            } else if (run.agents_yaml) {
+                              // Fallback to parsing agents_yaml string
+                              const agents = typeof run.agents_yaml === 'string'
+                                ? JSON.parse(run.agents_yaml)
+                                : run.agents_yaml;
+                              agentCount = Object.keys(agents).length;
+                              hasData = true;
+                            }
+
+                            // Try to get tasks count from inputs first
+                            if (run.inputs?.tasks_yaml && typeof run.inputs.tasks_yaml === 'object') {
+                              taskCount = Object.keys(run.inputs.tasks_yaml).length;
+                              hasData = true;
+                            } else if (run.tasks_yaml) {
+                              // Fallback to parsing tasks_yaml string
+                              const tasks = typeof run.tasks_yaml === 'string'
+                                ? JSON.parse(run.tasks_yaml)
+                                : run.tasks_yaml;
+                              taskCount = Object.keys(tasks).length;
+                              hasData = true;
+                            }
+                          } catch (e) {
+                            // If parsing fails, hasData stays false
+                          }
+
+                          if (hasData && (agentCount > 0 || taskCount > 0)) {
+                            return (
+                              <Chip
+                                label={`${agentCount}/${taskCount}`}
+                                size="small"
+                                variant="outlined"
+                                sx={{
+                                  height: '20px',
+                                  minWidth: '45px',
+                                  '& .MuiChip-label': {
+                                    px: 0.75,
+                                    fontSize: '0.75rem',
+                                    fontWeight: 600
+                                  },
+                                  borderColor: (theme: Theme) => theme.palette.divider
+                                }}
+                              />
+                            );
+                          }
+
+                          return <span style={{ color: '#999', fontSize: '0.75rem' }}>-</span>;
+                        })()}
                       </TableCell>
                       <TableCell>{run.group_email || '-'}</TableCell>
                       <TableCell>{new Date(run.created_at).toLocaleString()}</TableCell>
@@ -975,6 +1026,17 @@ const RunHistory = forwardRef<RunHistoryRef, RunHistoryProps>(({ executionHistor
                             color="primary"
                           >
                             <VisibilityIcon fontSize="small" />
+                          </IconButton>
+                        </Tooltip>
+                      </TableCell>
+                      <TableCell align="center">
+                        <Tooltip title={t('runHistory.actions.schedule')}>
+                          <IconButton
+                            size="small"
+                            onClick={() => handleOpenScheduleDialog(run)}
+                            color="primary"
+                          >
+                            <ScheduleIcon fontSize="small" />
                           </IconButton>
                         </Tooltip>
                       </TableCell>
@@ -1070,12 +1132,6 @@ const RunHistory = forwardRef<RunHistoryRef, RunHistoryProps>(({ executionHistor
             onClose={closeRunResult}
             result={memoizedResult}
             run={selectedRun || undefined}
-          />
-          
-          {/* UI Preference Dialog */}
-          <UIPreferenceDialog 
-            open={showPreferenceDialog}
-            onClose={() => setShowPreferenceDialog(false)}
           />
         </CardContent>
       </Card>

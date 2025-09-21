@@ -21,10 +21,6 @@ import {
   CardHeader,
   Grid,
   Tooltip,
-  Stepper,
-  Step,
-  StepLabel,
-  StepContent,
   Paper,
   Divider,
   Avatar,
@@ -41,26 +37,33 @@ import {
   DialogContentText,
 } from '@mui/material';
 import { GroupService, Group, GroupUser, CreateGroupRequest, AssignUserRequest } from '../../api/GroupService';
+import { UserService, User } from '../../api/UserService';
 import {
   Add as AddIcon,
   Group as GroupIcon,
   Person as PersonIcon,
-  Business as BusinessIcon,
   Groups as GroupsIcon,
   PersonAdd as PersonAddIcon,
-  Info as InfoIcon,
   Search as SearchIcon,
   MoreVert as MoreVertIcon,
   Security as SecurityIcon,
   AdminPanelSettings as AdminIcon,
-  Visibility as ViewIcon,
-  ManageAccounts as ManagerIcon,
+  Edit as EditIcon,
   Delete as DeleteIcon,
   Warning as WarningIcon,
+  Lock as LockIcon,
+  Workspaces as WorkspacesIcon,
 } from '@mui/icons-material';
+import { usePermissionStore } from '../../store/permissions';
 
 
 const GroupManagement: React.FC = () => {
+  // Check permissions
+  const { userRole, isLoading: permissionsLoading } = usePermissionStore(state => ({
+    userRole: state.userRole,
+    isLoading: state.isLoading
+  }));
+
   const [groups, setGroups] = useState<Group[]>([]);
   const [selectedGroup, setSelectedGroup] = useState<Group | null>(null);
   const [groupUsers, setGroupUsers] = useState<GroupUser[]>([]);
@@ -70,7 +73,7 @@ const GroupManagement: React.FC = () => {
   const [groupToDelete, setGroupToDelete] = useState<Group | null>(null);
   const [loading, setLoading] = useState(false);
   const [searchTerm, setSearchTerm] = useState('');
-  const [viewMode, setViewMode] = useState<'overview' | 'groups' | 'users'>('overview');
+  const [_viewMode, _setViewMode] = useState<'groups' | 'users'>('groups');
   const [menuAnchorEl, setMenuAnchorEl] = useState<null | HTMLElement>(null);
   const [selectedMenuGroup, setSelectedMenuGroup] = useState<Group | null>(null);
   const [userMenuAnchorEl, setUserMenuAnchorEl] = useState<null | HTMLElement>(null);
@@ -82,23 +85,26 @@ const GroupManagement: React.FC = () => {
     message: '',
     severity: 'success' as 'success' | 'error' | 'warning',
   });
+  const [editingUserId, setEditingUserId] = useState<string | null>(null);
+  const [editingUserRole, setEditingUserRole] = useState<'admin' | 'editor' | 'operator'>('operator');
+  const [availableUsers, setAvailableUsers] = useState<User[]>([]);
+  const [loadingUsers, setLoadingUsers] = useState(false);
 
   // Form states
   const [newGroup, setNewGroup] = useState<CreateGroupRequest>({
     name: '',
-    email_domain: '',
     description: '',
   });
   const [newUserAssignment, setNewUserAssignment] = useState<AssignUserRequest>({
     user_email: '',
-    role: 'user',
+    role: 'operator',
   });
+  const [selectedUserIds, setSelectedUserIds] = useState<string[]>([]);
 
   // Computed values
   const totalUsers = groups.reduce((sum, group) => sum + (group.user_count || 0), 0);
-  const filteredGroups = groups.filter(group => 
-    group.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
-    group.email_domain.toLowerCase().includes(searchTerm.toLowerCase())
+  const filteredGroups = groups.filter(group =>
+    group.name.toLowerCase().includes(searchTerm.toLowerCase())
   );
 
   const loadGroups = useCallback(async () => {
@@ -108,8 +114,8 @@ const GroupManagement: React.FC = () => {
       const groupsData = await groupService.getGroups();
       setGroups(groupsData);
     } catch (error) {
-      console.error('Error loading groups:', error);
-      showNotification('Failed to load groups', 'error');
+      console.error('Error loading workspaces:', error);
+      showNotification('Failed to load workspaces', 'error');
     } finally {
       setLoading(false);
     }
@@ -119,29 +125,45 @@ const GroupManagement: React.FC = () => {
     loadGroups();
   }, [loadGroups]);
 
-  // Auto-switch to groups view when groups exist
-  useEffect(() => {
-    if (groups.length > 0 && viewMode === 'overview') {
-      setViewMode('groups');
+  const loadAvailableUsers = useCallback(async () => {
+    setLoadingUsers(true);
+    try {
+      const userService = UserService.getInstance();
+      const usersData = await userService.getUsers();
+      setAvailableUsers(usersData);
+    } catch (error) {
+      console.error('Error loading users:', error);
+      showNotification('Failed to load users', 'error');
+    } finally {
+      setLoadingUsers(false);
     }
-  }, [groups.length, viewMode]);
+  }, []);
+
+  // Load users when the assign user dialog opens
+  useEffect(() => {
+    if (assignUserDialogOpen) {
+      loadAvailableUsers();
+    }
+  }, [assignUserDialogOpen, loadAvailableUsers]);
+
 
   const loadGroupUsers = async (groupId: string) => {
     setLoading(true);
     try {
       const groupService = GroupService.getInstance();
       const usersData = await groupService.getGroupUsers(groupId);
+      console.log('Loaded users for group', groupId, ':', usersData);
       setGroupUsers(usersData);
     } catch (error) {
-      console.error('Error loading group users:', error);
-      showNotification('Failed to load group users', 'error');
+      console.error('Error loading workspace members:', error);
+      showNotification('Failed to load team members', 'error');
     } finally {
       setLoading(false);
     }
   };
 
   const handleCreateGroup = async () => {
-    if (!newGroup.name || !newGroup.email_domain) {
+    if (!newGroup.name) {
       showNotification('Please fill in all required fields', 'warning');
       return;
     }
@@ -152,35 +174,70 @@ const GroupManagement: React.FC = () => {
       await groupService.createGroup(newGroup);
       
       setCreateDialogOpen(false);
-      setNewGroup({ name: '', email_domain: '', description: '' });
-      showNotification('Group created successfully', 'success');
+      setNewGroup({ name: '', description: '' });
+      showNotification('Workspace created successfully', 'success');
       loadGroups();
     } catch (error) {
-      console.error('Error creating group:', error);
-      showNotification('Failed to create group', 'error');
+      console.error('Error creating workspace:', error);
+      showNotification('Failed to create workspace', 'error');
     } finally {
       setLoading(false);
     }
   };
 
   const handleAssignUser = async () => {
-    if (!newUserAssignment.user_email || !selectedGroup) {
-      showNotification('Please fill in all required fields', 'warning');
+    if (!selectedUserIds.length || !selectedGroup) {
+      showNotification('Please select at least one user and role', 'warning');
       return;
     }
 
     setLoading(true);
     try {
       const groupService = GroupService.getInstance();
-      await groupService.assignUserToGroup(selectedGroup.id, newUserAssignment);
-      
+      let successCount = 0;
+      let errorCount = 0;
+
+      // Process each selected user
+      for (const userId of selectedUserIds) {
+        try {
+          // Find the user's email
+          const selectedUser = availableUsers.find(user => user.id === userId);
+          if (!selectedUser) {
+            console.error(`User with ID ${userId} not found`);
+            errorCount++;
+            continue;
+          }
+
+          const userAssignment = {
+            user_email: selectedUser.email,
+            role: newUserAssignment.role
+          };
+
+          await groupService.assignUserToGroup(selectedGroup.id, userAssignment);
+          successCount++;
+        } catch (error) {
+          console.error(`Error assigning user ${userId}:`, error);
+          errorCount++;
+        }
+      }
+
       setAssignUserDialogOpen(false);
-      setNewUserAssignment({ user_email: '', role: 'user' });
-      showNotification('User assigned successfully', 'success');
+      setNewUserAssignment({ user_email: '', role: 'operator' });
+      setSelectedUserIds([]);
+
+      // Show appropriate notification based on results
+      if (errorCount === 0) {
+        showNotification(`${successCount} member${successCount > 1 ? 's' : ''} added successfully`, 'success');
+      } else if (successCount === 0) {
+        showNotification('Failed to add any members', 'error');
+      } else {
+        showNotification(`${successCount} member${successCount > 1 ? 's' : ''} added, ${errorCount} failed`, 'warning');
+      }
+
       loadGroupUsers(selectedGroup.id);
     } catch (error) {
-      console.error('Error assigning user:', error);
-      showNotification('Failed to assign user', 'error');
+      console.error('Error in bulk user assignment:', error);
+      showNotification('Failed to add members', 'error');
     } finally {
       setLoading(false);
     }
@@ -201,11 +258,11 @@ const GroupManagement: React.FC = () => {
         setSelectedGroup(null);
         setGroupUsers([]);
       }
-      showNotification('Group deleted successfully', 'success');
+      showNotification('Workspace deleted successfully', 'success');
       loadGroups();
     } catch (error) {
-      console.error('Error deleting group:', error);
-      showNotification('Failed to delete group', 'error');
+      console.error('Error deleting workspace:', error);
+      showNotification('Failed to delete workspace', 'error');
     } finally {
       setLoading(false);
     }
@@ -252,17 +309,45 @@ const GroupManagement: React.FC = () => {
     try {
       const groupService = GroupService.getInstance();
       await groupService.removeUserFromGroup(selectedGroup.id, userToRemove.id);
-      
+
       setRemoveUserDialogOpen(false);
       setUserToRemove(null);
-      showNotification('User removed from group successfully', 'success');
+      showNotification('Member removed successfully', 'success');
       loadGroupUsers(selectedGroup.id);
     } catch (error) {
-      console.error('Error removing user from group:', error);
-      showNotification('Failed to remove user from group', 'error');
+      console.error('Error removing member from workspace:', error);
+      showNotification('Failed to remove member', 'error');
     } finally {
       setLoading(false);
     }
+  };
+
+  const handleUpdateUserRole = async (userId: string, newRole: 'admin' | 'editor' | 'operator') => {
+    if (!selectedGroup) return;
+
+    setLoading(true);
+    try {
+      const groupService = GroupService.getInstance();
+      await groupService.updateGroupUser(selectedGroup.id, userId, { role: newRole });
+
+      showNotification(`Member role updated to ${newRole}`, 'success');
+      setEditingUserId(null);
+      await loadGroupUsers(selectedGroup.id);
+    } catch (error) {
+      console.error('Error updating user role:', error);
+      showNotification('Failed to update member role', 'error');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const startEditingRole = (userId: string, currentRole: 'admin' | 'editor' | 'operator') => {
+    setEditingUserId(userId);
+    setEditingUserRole(currentRole);
+  };
+
+  const cancelEditingRole = () => {
+    setEditingUserId(null);
   };
 
   const showNotification = (message: string, severity: 'success' | 'error' | 'warning') => {
@@ -289,12 +374,10 @@ const GroupManagement: React.FC = () => {
     switch (role) {
       case 'admin':
         return <AdminIcon fontSize="small" />;
-      case 'manager':
-        return <ManagerIcon fontSize="small" />;
-      case 'user':
+      case 'editor':
+        return <EditIcon fontSize="small" />;
+      case 'operator':
         return <PersonIcon fontSize="small" />;
-      case 'viewer':
-        return <ViewIcon fontSize="small" />;
       default:
         return <PersonIcon fontSize="small" />;
     }
@@ -303,17 +386,43 @@ const GroupManagement: React.FC = () => {
   const getRoleDescription = (role: string) => {
     switch (role) {
       case 'admin':
-        return 'Full administrative access';
-      case 'manager':
-        return 'Can manage workflows and users';
-      case 'user':
-        return 'Can create and execute workflows';
-      case 'viewer':
-        return 'Read-only access';
+        return 'Full system control';
+      case 'editor':
+        return 'Can build and modify workflows';
+      case 'operator':
+        return 'Can execute workflows and monitor';
       default:
         return 'Standard access';
     }
   };
+
+  // Show loading state while permissions are being checked
+  if (permissionsLoading) {
+    return (
+      <Box sx={{ p: 3, textAlign: 'center' }}>
+        <LinearProgress sx={{ mb: 2 }} />
+        <Typography color="text.secondary">Checking permissions...</Typography>
+      </Box>
+    );
+  }
+
+  // Only allow admin users to access this component
+  if (userRole !== 'admin') {
+    return (
+      <Box sx={{ p: 3, textAlign: 'center' }}>
+        <Avatar sx={{ bgcolor: 'error.light', mx: 'auto', mb: 2, width: 60, height: 60 }}>
+          <LockIcon fontSize="large" />
+        </Avatar>
+        <Typography variant="h6" gutterBottom>Access Denied</Typography>
+        <Typography variant="body2" color="text.secondary">
+          You do not have permission to manage workspaces.
+        </Typography>
+        <Typography variant="body2" color="text.secondary" sx={{ mt: 1 }}>
+          Only administrators can manage workspaces and team members.
+        </Typography>
+      </Box>
+    );
+  }
 
   return (
     <><Box>
@@ -322,14 +431,14 @@ const GroupManagement: React.FC = () => {
         <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', mb: 2 }}>
           <Box sx={{ display: 'flex', alignItems: 'center' }}>
             <Avatar sx={{ bgcolor: 'primary.main', mr: 2 }}>
-              <GroupsIcon />
+              <WorkspacesIcon />
             </Avatar>
             <Box>
               <Typography variant="h5" fontWeight="600" color="text.primary">
-                Group Management
+                Workspaces
               </Typography>
               <Typography variant="body2" color="text.secondary">
-                Organize users into groups for secure data isolation • {groups.length} groups • {totalUsers} users
+                Create team workspaces for collaboration • {groups.length} workspaces • {totalUsers} members
               </Typography>
             </Box>
           </Box>
@@ -358,7 +467,7 @@ const GroupManagement: React.FC = () => {
               <TextField
                 fullWidth
                 size="small"
-                placeholder="Search groups by name or domain..."
+                placeholder="Search workspaces by name..."
                 value={searchTerm}
                 onChange={(e) => setSearchTerm(e.target.value)}
                 InputProps={{
@@ -367,24 +476,7 @@ const GroupManagement: React.FC = () => {
               />
             </Grid>
             <Grid item xs={12} md={6}>
-              <Box sx={{ display: 'flex', gap: 1, justifyContent: 'flex-end' }}>
-                <Button
-                  variant={viewMode === 'overview' ? 'contained' : 'outlined'}
-                  size="small"
-                  onClick={() => setViewMode('overview')}
-                  startIcon={<InfoIcon />}
-                >
-                  Overview
-                </Button>
-                <Button
-                  variant={viewMode === 'groups' ? 'contained' : 'outlined'}
-                  size="small"
-                  onClick={() => setViewMode('groups')}
-                  startIcon={<GroupsIcon />}
-                >
-                  Groups ({filteredGroups.length})
-                </Button>
-              </Box>
+              {/* View mode buttons removed - always show workspaces */}
             </Grid>
           </Grid>
         </CardContent>
@@ -397,78 +489,27 @@ const GroupManagement: React.FC = () => {
         sx={{ mb: 3, borderRadius: 2 }}
       >
         <Typography variant="body2">
-          <strong>Secure Group-Based Access:</strong> Each group provides isolated data access. 
-          Users can belong to multiple groups and will see data from all their assigned groups.
+          <strong>Secure Workspaces:</strong> Each workspace provides isolated data and workflows.
+          Users can belong to multiple workspaces and switch between them easily.
         </Typography>
       </Alert>
 
-      {/* Main Content Area */}
-      {viewMode === 'overview' && (
-        <Card>
-          <CardHeader
-            title={
-              <Box sx={{ display: 'flex', alignItems: 'center' }}>
-                <GroupsIcon sx={{ mr: 1 }} />
-                Getting Started with Groups
-              </Box>
-            }
-            subheader="Follow these steps to set up your first group"
-          />
-          <CardContent>
-            <Stepper orientation="vertical">
-              <Step active>
-                <StepLabel>Create Your First Group</StepLabel>
-                <StepContent>
-                  <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
-                    Click the + button to create a new group. Give it a meaningful name and domain identifier.
-                  </Typography>
-                  <Button
-                    variant="contained"
-                    startIcon={<AddIcon />}
-                    onClick={() => setCreateDialogOpen(true)}
-                    size="small"
-                  >
-                    Create Group
-                  </Button>
-                </StepContent>
-              </Step>
-              <Step>
-                <StepLabel>Assign Users to Groups</StepLabel>
-                <StepContent>
-                  <Typography variant="body2" color="text.secondary">
-                    Add users by their email addresses and assign appropriate roles (Admin, Manager, User, or Viewer).
-                  </Typography>
-                </StepContent>
-              </Step>
-              <Step>
-                <StepLabel>Data Isolation in Action</StepLabel>
-                <StepContent>
-                  <Typography variant="body2" color="text.secondary">
-                    Users will automatically see only data from groups they belong to. No additional configuration needed.
-                  </Typography>
-                </StepContent>
-              </Step>
-            </Stepper>
-          </CardContent>
-        </Card>
-      )}
-
-      {viewMode === 'groups' && (
+      {/* Main Content Area - Always show workspaces */}
         <Grid container spacing={3}>
-          {/* Groups List */}
+          {/* Workspaces List */}
           <Grid item xs={12} lg={8}>
             <Card>
               <CardHeader
                 title={
                   <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-                    <Typography variant="h6">Groups ({filteredGroups.length})</Typography>
+                    <Typography variant="h6">Workspaces ({filteredGroups.length})</Typography>
                     <Button
                       variant="outlined"
                       size="small"
                       startIcon={<AddIcon />}
                       onClick={() => setCreateDialogOpen(true)}
                     >
-                      New Group
+                      New Workspace
                     </Button>
                   </Box>
                 }
@@ -493,7 +534,7 @@ const GroupManagement: React.FC = () => {
                         startIcon={<AddIcon />}
                         onClick={() => setCreateDialogOpen(true)}
                       >
-                        Create First Group
+                        Create First Workspace
                       </Button>
                     )}
                   </Box>
@@ -515,7 +556,7 @@ const GroupManagement: React.FC = () => {
                       >
                         <ListItemAvatar>
                           <Avatar sx={{ bgcolor: group.status === 'active' ? 'success.main' : 'grey.400' }}>
-                            <BusinessIcon />
+                            <GroupIcon />
                           </Avatar>
                         </ListItemAvatar>
                         <ListItemText
@@ -535,14 +576,9 @@ const GroupManagement: React.FC = () => {
                             </Box>
                           }
                           secondary={
-                            <Box>
-                              <Typography variant="body2" color="text.secondary">
-                                Domain: {group.email_domain}
-                              </Typography>
-                              <Typography variant="body2" color="text.secondary">
-                                {group.user_count || 0} users • Created {new Date(group.created_at || Date.now()).toLocaleDateString()}
-                              </Typography>
-                            </Box>
+                            <Typography variant="body2" color="text.secondary">
+                              {group.user_count || 0} users • Created {new Date(group.created_at || Date.now()).toLocaleDateString()}
+                            </Typography>
                           }
                         />
                         <ListItemSecondaryAction>
@@ -584,7 +620,7 @@ const GroupManagement: React.FC = () => {
                   <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
                     <PersonIcon />
                     <Typography variant="h6">
-                      {selectedGroup ? `${selectedGroup.name} Users` : 'Select a Group'}
+                      {selectedGroup ? `${selectedGroup.name} Members` : 'Select a Workspace'}
                     </Typography>
                   </Box>
                 }
@@ -610,9 +646,6 @@ const GroupManagement: React.FC = () => {
                   <Box sx={{ p: 2, bgcolor: 'grey.50' }}>
                     <Typography variant="subtitle2" color="primary" gutterBottom>
                       Group Information
-                    </Typography>
-                    <Typography variant="body2" color="text.secondary">
-                      <strong>Domain:</strong> {selectedGroup.email_domain}
                     </Typography>
                     <Typography variant="body2" color="text.secondary">
                       <strong>Total Users:</strong> {selectedGroup.user_count || 0}
@@ -654,13 +687,58 @@ const GroupManagement: React.FC = () => {
                               secondary={
                                 <Box>
                                   <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5, mt: 0.5 }}>
-                                    <Chip
-                                      icon={getRoleIcon(user.role)}
-                                      label={user.role}
-                                      size="small"
-                                      color={getRoleColor(user.role)}
-                                      sx={{ height: 20 }}
-                                    />
+                                    {editingUserId === (user.user_id || user.id) ? (
+                                      <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+                                        <FormControl size="small" sx={{ minWidth: 120 }}>
+                                          <Select
+                                            value={editingUserRole}
+                                            onChange={(e) => setEditingUserRole(e.target.value as 'admin' | 'editor' | 'operator')}
+                                            sx={{ height: 28 }}
+                                          >
+                                            <MenuItem value="admin">Admin</MenuItem>
+                                            <MenuItem value="editor">Editor</MenuItem>
+                                            <MenuItem value="operator">Operator</MenuItem>
+                                          </Select>
+                                        </FormControl>
+                                        <Button
+                                          size="small"
+                                          variant="contained"
+                                          onClick={() => handleUpdateUserRole(user.user_id || user.id, editingUserRole)}
+                                          disabled={loading}
+                                          sx={{ height: 28, minWidth: 50 }}
+                                        >
+                                          Save
+                                        </Button>
+                                        <Button
+                                          size="small"
+                                          variant="outlined"
+                                          onClick={cancelEditingRole}
+                                          disabled={loading}
+                                          sx={{ height: 28, minWidth: 50 }}
+                                        >
+                                          Cancel
+                                        </Button>
+                                      </Box>
+                                    ) : (
+                                      <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5 }}>
+                                        <Chip
+                                          icon={getRoleIcon(user.role)}
+                                          label={user.role}
+                                          size="small"
+                                          color={getRoleColor(user.role)}
+                                          sx={{ height: 20 }}
+                                        />
+                                        <Tooltip title="Edit Role">
+                                          <IconButton
+                                            size="small"
+                                            onClick={() => startEditingRole(user.user_id || user.id, user.role)}
+                                            sx={{ padding: '2px' }}
+                                          >
+                                            <EditIcon sx={{ fontSize: 16 }} />
+                                          </IconButton>
+                                        </Tooltip>
+                                      </Box>
+                                    )}
                                   </Box>
                                   <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mt: 0.5 }}>
                                     {getRoleDescription(user.role)}
@@ -688,19 +766,18 @@ const GroupManagement: React.FC = () => {
                 </Box>
               ) : (
                 <Box sx={{ textAlign: 'center', py: 6 }}>
-                  <GroupIcon sx={{ fontSize: 64, color: 'text.secondary', mb: 2 }} />
+                  <WorkspacesIcon sx={{ fontSize: 64, color: 'text.secondary', mb: 2 }} />
                   <Typography variant="h6" color="text.secondary" gutterBottom>
-                    Select a Group
+                    Select a Workspace
                   </Typography>
                   <Typography variant="body2" color="text.secondary">
-                    Click on a group from the list to view and manage its users
+                    Click on a workspace to view and manage team members
                   </Typography>
                 </Box>
               )}
             </Card>
           </Grid>
         </Grid>
-      )}
 
       {/* Actions Menu */}
       <Menu
@@ -722,7 +799,7 @@ const GroupManagement: React.FC = () => {
             sx={{ color: 'error.main' }}
           >
             <DeleteIcon sx={{ mr: 1 }} fontSize="small" />
-            Delete Group
+            Delete Workspace
           </MenuItem>
         </MenuList>
       </Menu>
@@ -747,7 +824,7 @@ const GroupManagement: React.FC = () => {
             sx={{ color: 'error.main' }}
           >
             <PersonIcon sx={{ mr: 1 }} fontSize="small" />
-            Remove from Group
+            Remove from Workspace
           </MenuItem>
         </MenuList>
       </Menu>
@@ -866,7 +943,7 @@ const GroupManagement: React.FC = () => {
         </DialogActions>
       </Dialog>
 
-      {/* Create Group Dialog */}
+      {/* Create Workspace Dialog */}
       <Dialog 
         open={createDialogOpen} 
         onClose={() => setCreateDialogOpen(false)}
@@ -879,46 +956,32 @@ const GroupManagement: React.FC = () => {
         <DialogTitle>
           <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
             <Avatar sx={{ bgcolor: 'primary.main' }}>
-              <GroupsIcon />
+              <WorkspacesIcon />
             </Avatar>
             <Box>
-              <Typography variant="h6">Create New Group</Typography>
+              <Typography variant="h6">Create New Workspace</Typography>
               <Typography variant="body2" color="text.secondary">
-                Set up a new group for secure data isolation
+                Set up a collaborative workspace for your team
               </Typography>
             </Box>
           </Box>
         </DialogTitle>
         <DialogContent>
           <Alert severity="info" sx={{ mb: 3, mt: 1 }}>
-            Groups provide isolated data access. Users can belong to multiple groups and will see data from all their assigned groups.
+            Workspaces provide secure, isolated environments for teams. Members can belong to multiple workspaces.
           </Alert>
           
           <Grid container spacing={3}>
-            <Grid item xs={12} md={6}>
+            <Grid item xs={12}>
               <TextField
                 fullWidth
-                label="Group Name"
+                label="Workspace Name"
                 value={newGroup.name}
                 onChange={(e) => setNewGroup({ ...newGroup, name: e.target.value })}
-                placeholder="e.g., Team Alpha, Marketing Department"
+                placeholder="e.g., Product Team, Marketing, Engineering"
                 required
                 InputProps={{
                   startAdornment: <GroupIcon sx={{ mr: 1, color: 'text.secondary' }} />
-                }}
-              />
-            </Grid>
-            <Grid item xs={12} md={6}>
-              <TextField
-                fullWidth
-                label="Domain Identifier"
-                value={newGroup.email_domain}
-                onChange={(e) => setNewGroup({ ...newGroup, email_domain: e.target.value })}
-                placeholder="e.g., team-alpha, marketing"
-                required
-                helperText="Unique identifier for this group"
-                InputProps={{
-                  startAdornment: <BusinessIcon sx={{ mr: 1, color: 'text.secondary' }} />
                 }}
               />
             </Grid>
@@ -930,8 +993,8 @@ const GroupManagement: React.FC = () => {
                 onChange={(e) => setNewGroup({ ...newGroup, description: e.target.value })}
                 multiline
                 rows={3}
-                placeholder="Describe the purpose of this group..."
-                helperText="Help other admins understand what this group is for"
+                placeholder="Describe the purpose of this workspace..."
+                helperText="Help others understand this workspace's purpose"
               />
             </Grid>
           </Grid>
@@ -947,10 +1010,10 @@ const GroupManagement: React.FC = () => {
           <Button 
             onClick={handleCreateGroup} 
             variant="contained"
-            disabled={loading || !newGroup.name || !newGroup.email_domain}
+            disabled={loading || !newGroup.name}
             startIcon={loading ? undefined : <AddIcon />}
           >
-            {loading ? 'Creating...' : 'Create Group'}
+            {loading ? 'Creating...' : 'Create Workspace'}
           </Button>
         </DialogActions>
       </Dialog>
@@ -971,33 +1034,84 @@ const GroupManagement: React.FC = () => {
               <PersonAddIcon />
             </Avatar>
             <Box>
-              <Typography variant="h6">Add User to {selectedGroup?.name}</Typography>
+              <Typography variant="h6">Add Members to {selectedGroup?.name}</Typography>
               <Typography variant="body2" color="text.secondary">
-                Assign a user and set their role permissions
+                Select multiple team members and set their permissions
               </Typography>
             </Box>
           </Box>
         </DialogTitle>
         <DialogContent>
           <Alert severity="info" sx={{ mb: 3, mt: 1 }}>
-            Users will gain access to data and workflows within this group based on their assigned role.
+            Team members will gain access to this workspace&apos;s data and workflows based on their role.
           </Alert>
-          
+
+          <Alert severity="warning" sx={{ mb: 3 }}>
+            <Typography variant="body2">
+              <strong>Note:</strong> Users must log in to Kasal at least once to appear in this list.
+              If you don&apos;t see the user you&apos;re looking for, ask them to visit the application first.
+            </Typography>
+          </Alert>
+
           <Grid container spacing={3}>
             <Grid item xs={12}>
-              <TextField
-                fullWidth
-                label="User Email Address"
-                value={newUserAssignment.user_email}
-                onChange={(e) => setNewUserAssignment({ ...newUserAssignment, user_email: e.target.value })}
-                placeholder="user@company.com"
-                required
-                type="email"
-                InputProps={{
-                  startAdornment: <PersonIcon sx={{ mr: 1, color: 'text.secondary' }} />
-                }}
-                helperText="Enter the email address of the user you want to add"
-              />
+              <FormControl fullWidth required>
+                <InputLabel>Select Users</InputLabel>
+                <Select
+                  multiple
+                  value={selectedUserIds}
+                  label="Select Users"
+                  onChange={(e) => setSelectedUserIds(typeof e.target.value === 'string' ? e.target.value.split(',') : e.target.value)}
+                  disabled={loadingUsers}
+                  renderValue={(selected) => (
+                    <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 0.5 }}>
+                      {selected.map((userId) => {
+                        const user = availableUsers.find(u => u.id === userId);
+                        return (
+                          <Chip
+                            key={userId}
+                            label={user?.email || userId}
+                            size="small"
+                            onDelete={() => {
+                              setSelectedUserIds(selectedUserIds.filter(id => id !== userId));
+                            }}
+                            deleteIcon={<DeleteIcon />}
+                          />
+                        );
+                      })}
+                    </Box>
+                  )}
+                >
+                  {loadingUsers ? (
+                    <MenuItem disabled>
+                      <Typography color="text.secondary">Loading users...</Typography>
+                    </MenuItem>
+                  ) : availableUsers.length === 0 ? (
+                    <MenuItem disabled>
+                      <Typography color="text.secondary">No users found - ask team members to log in first</Typography>
+                    </MenuItem>
+                  ) : (
+                    availableUsers
+                      .filter(user => !groupUsers.some(gu => gu.email === user.email))
+                      .map((user) => (
+                        <MenuItem key={user.id} value={user.id}>
+                          <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, width: '100%' }}>
+                            <PersonIcon fontSize="small" />
+                            <Box>
+                              <Typography variant="body2">{user.email}</Typography>
+                              <Typography variant="caption" color="text.secondary">
+                                Last login: {user.last_login ? new Date(user.last_login).toLocaleDateString() : 'Never'}
+                              </Typography>
+                            </Box>
+                          </Box>
+                        </MenuItem>
+                      ))
+                  )}
+                </Select>
+                <Typography variant="caption" color="text.secondary" sx={{ mt: 1, display: 'block' }}>
+                  Hold Ctrl/Cmd to select multiple users. Only users who have logged in to Kasal will appear in this list.
+                </Typography>
+              </FormControl>
             </Grid>
             <Grid item xs={12}>
               <FormControl fullWidth required>
@@ -1005,33 +1119,24 @@ const GroupManagement: React.FC = () => {
                 <Select
                   value={newUserAssignment.role}
                   label="Role & Permissions"
-                  onChange={(e) => setNewUserAssignment({ ...newUserAssignment, role: e.target.value as 'admin' | 'manager' | 'user' | 'viewer' })}
+                  onChange={(e) => setNewUserAssignment({ ...newUserAssignment, role: e.target.value as 'admin' | 'editor' | 'operator' })}
                   startAdornment={getRoleIcon(newUserAssignment.role)}
                 >
-                  <MenuItem value="viewer">
-                    <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, width: '100%' }}>
-                      <ViewIcon fontSize="small" />
-                      <Box>
-                        <Typography variant="body2" fontWeight="medium">Viewer</Typography>
-                        <Typography variant="caption" color="text.secondary">Read-only access to workflows and data</Typography>
-                      </Box>
-                    </Box>
-                  </MenuItem>
-                  <MenuItem value="user">
+                  <MenuItem value="operator">
                     <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, width: '100%' }}>
                       <PersonIcon fontSize="small" />
                       <Box>
-                        <Typography variant="body2" fontWeight="medium">User</Typography>
-                        <Typography variant="caption" color="text.secondary">Can create and execute workflows</Typography>
+                        <Typography variant="body2" fontWeight="medium">Operator</Typography>
+                        <Typography variant="caption" color="text.secondary">Execute workflows and monitor execution</Typography>
                       </Box>
                     </Box>
                   </MenuItem>
-                  <MenuItem value="manager">
+                  <MenuItem value="editor">
                     <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, width: '100%' }}>
-                      <ManagerIcon fontSize="small" />
+                      <EditIcon fontSize="small" />
                       <Box>
-                        <Typography variant="body2" fontWeight="medium">Manager</Typography>
-                        <Typography variant="caption" color="text.secondary">Can manage workflows and other users</Typography>
+                        <Typography variant="body2" fontWeight="medium">Editor</Typography>
+                        <Typography variant="caption" color="text.secondary">Build and modify AI agent workflows</Typography>
                       </Box>
                     </Box>
                   </MenuItem>
@@ -1040,7 +1145,7 @@ const GroupManagement: React.FC = () => {
                       <AdminIcon fontSize="small" />
                       <Box>
                         <Typography variant="body2" fontWeight="medium">Admin</Typography>
-                        <Typography variant="caption" color="text.secondary">Full administrative access</Typography>
+                        <Typography variant="caption" color="text.secondary">Full system control and configuration</Typography>
                       </Box>
                     </Box>
                   </MenuItem>
@@ -1067,13 +1172,13 @@ const GroupManagement: React.FC = () => {
           >
             Cancel
           </Button>
-          <Button 
-            onClick={handleAssignUser} 
+          <Button
+            onClick={handleAssignUser}
             variant="contained"
-            disabled={loading || !newUserAssignment.user_email}
+            disabled={loading || !selectedUserIds.length}
             startIcon={loading ? undefined : <PersonAddIcon />}
           >
-            {loading ? 'Adding...' : 'Add User'}
+            {loading ? 'Adding...' : `Add ${selectedUserIds.length} Member${selectedUserIds.length !== 1 ? 's' : ''}`}
           </Button>
         </DialogActions>
       </Dialog>

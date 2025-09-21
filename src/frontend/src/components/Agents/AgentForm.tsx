@@ -26,6 +26,7 @@ import {
   IconButton,
   InputAdornment,
   Alert,
+  Tooltip,
 } from '@mui/material';
 import ExpandMoreIcon from '@mui/icons-material/ExpandMore';
 import HelpOutlineIcon from '@mui/icons-material/HelpOutline';
@@ -40,6 +41,8 @@ import { PerplexityConfig, SerperConfig } from '../../types/config';
 
 import { GenerateService } from '../../api/GenerateService';
 import { DefaultMemoryBackendService } from '../../api/DefaultMemoryBackendService';
+import { DatabricksService } from '../../api/DatabricksService';
+import { useAgentStore } from '../../store/agent';
 import { GenieSpaceSelector } from '../Common/GenieSpaceSelector';
 import { PerplexityConfigSelector } from '../Common/PerplexityConfigSelector';
 import { SerperConfigSelector } from '../Common/SerperConfigSelector';
@@ -64,6 +67,7 @@ type AgentFormData = Omit<Agent, 'id' | 'created_at'> & {
 };
 
 const AgentForm: React.FC<AgentFormProps> = ({ initialData, onCancel, onAgentSaved, tools, isCreateMode }) => {
+  const { updateAgent } = useAgentStore();
   const [models, setModels] = useState<Models>(DEFAULT_FALLBACK_MODEL);
   const [loadingModels, setLoadingModels] = useState(true);
   const [expandedGoal, setExpandedGoal] = useState<boolean>(false);
@@ -71,7 +75,7 @@ const AgentForm: React.FC<AgentFormProps> = ({ initialData, onCancel, onAgentSav
   const [expandedSystemTemplate, setExpandedSystemTemplate] = useState<boolean>(false);
   const [expandedPromptTemplate, setExpandedPromptTemplate] = useState<boolean>(false);
   const [expandedResponseTemplate, setExpandedResponseTemplate] = useState<boolean>(false);
-  const [selectedGenieSpace, setSelectedGenieSpace] = useState<string>('');
+  const [selectedGenieSpace, setSelectedGenieSpace] = useState<{ id: string; name: string } | null>(null);
   const [perplexityConfig, setPerplexityConfig] = useState<PerplexityConfig>({});
   const [serperConfig, setSerperConfig] = useState<SerperConfig>({});
   const [selectedMcpServers, setSelectedMcpServers] = useState<string[]>([]);
@@ -138,8 +142,12 @@ const AgentForm: React.FC<AgentFormProps> = ({ initialData, onCancel, onAgentSav
       const genieConfig = initialData.tool_configs.GenieTool as Record<string, unknown>;
       if (genieConfig) {
         const spaceId = genieConfig.spaceId || genieConfig.space_id;
+        const spaceName = genieConfig.spaceName || genieConfig.space_name || spaceId; // Fallback to ID if name not stored
         if (spaceId && typeof spaceId === 'string') {
-          setSelectedGenieSpace(spaceId);
+          setSelectedGenieSpace({
+            id: spaceId as string,
+            name: spaceName as string
+          });
         }
       }
       
@@ -227,7 +235,8 @@ const AgentForm: React.FC<AgentFormProps> = ({ initialData, onCancel, onAgentSav
       updatedToolConfigs = {
         ...updatedToolConfigs,
         GenieTool: {
-          spaceId: selectedGenieSpace
+          spaceId: selectedGenieSpace.id,
+          spaceName: selectedGenieSpace.name
         }
       };
     } else if (!selectedGenieSpace) {
@@ -329,6 +338,10 @@ const AgentForm: React.FC<AgentFormProps> = ({ initialData, onCancel, onAgentSav
       }
 
       if (savedAgent && onAgentSaved) {
+        // Update the Zustand store to ensure consistency
+        if (savedAgent.id) {
+          updateAgent(savedAgent.id, savedAgent);
+        }
         onAgentSaved(savedAgent);
       }
     } catch (error) {
@@ -351,14 +364,28 @@ const AgentForm: React.FC<AgentFormProps> = ({ initialData, onCancel, onAgentSav
 
   const handleToolsChange = (event: SelectChangeEvent<string[]>) => {
     // Get the selected values from the event
-    const selectedValues = Array.isArray(event.target.value) 
-      ? event.target.value 
+    const selectedValues = Array.isArray(event.target.value)
+      ? event.target.value
       : [event.target.value];
     
     
     // Create a new set of tools, ensuring all IDs are strings
     const newTools = selectedValues.map(id => String(id));
-    
+
+    // Check if DatabricksKnowledgeSearchTool (ID 36) was removed
+    const hadKnowledgeTool = formData.tools.some(
+      id => String(id) === '36' || String(id) === 'DatabricksKnowledgeSearchTool'
+    );
+    const hasKnowledgeTool = newTools.some(
+      id => String(id) === '36' || String(id) === 'DatabricksKnowledgeSearchTool'
+    );
+
+    if (hadKnowledgeTool && !hasKnowledgeTool) {
+      console.log('[AgentForm] DatabricksKnowledgeSearchTool was unchecked - clearing knowledge sources');
+      // Clear knowledge sources when tool is removed
+      handleInputChange('knowledge_sources', []);
+    }
+
     // Check if any tools appear to be duplicated (different format but same ID)
     // This helps detect potential issues
     const toolCounts = new Map<string, number>();
@@ -378,9 +405,15 @@ const AgentForm: React.FC<AgentFormProps> = ({ initialData, onCancel, onAgentSav
     
     // Ensure uniqueness
     const uniqueTools = Array.from(new Set(newTools));
-    
+
     // Update the form data
     handleInputChange('tools', uniqueTools);
+
+    // Sync with Zustand store if editing existing agent
+    // This ensures the AgentNode displays the correct attachment icon
+    if (initialData?.id) {
+      updateAgent(initialData.id, { tools: uniqueTools });
+    }
   };
 
   const handleGenerateTemplates = async () => {
@@ -408,6 +441,15 @@ const AgentForm: React.FC<AgentFormProps> = ({ initialData, onCancel, onAgentSav
   };
 
   const canGenerateTemplates = Boolean(formData.role && formData.goal && formData.backstory);
+
+  const handleRemoveTool = (toolIdToRemove: string) => {
+    // Create a new array without the removed tool
+    const newTools = formData.tools.filter(id => String(id) !== String(toolIdToRemove));
+
+    // Use the existing handleToolsChange to ensure all logic is applied
+    // including checking for DatabricksKnowledgeSearchTool removal
+    handleToolsChange({ target: { value: newTools } } as SelectChangeEvent<string[]>);
+  };
 
 
 
@@ -449,6 +491,47 @@ const AgentForm: React.FC<AgentFormProps> = ({ initialData, onCancel, onAgentSav
 
   const handleCloseResponseTemplateDialog = () => {
     setExpandedResponseTemplate(false);
+  };
+
+  const handleGenieSpaceClick = async (event: React.MouseEvent) => {
+    // Prevent any bubbling that might interfere
+    event.stopPropagation();
+
+    if (!selectedGenieSpace) {
+      console.warn('No Genie space selected');
+      return;
+    }
+
+    try {
+      console.log('Fetching Databricks configuration...');
+      const databricksService = DatabricksService.getInstance();
+      const config = await databricksService.getDatabricksConfig();
+      console.log('Databricks config:', config);
+
+      if (config && config.workspace_url) {
+        // Ensure the URL has https:// and remove trailing slash if present
+        let workspaceUrl = config.workspace_url.startsWith('https://')
+          ? config.workspace_url
+          : `https://${config.workspace_url}`;
+
+        // Remove trailing slash to avoid double slashes
+        workspaceUrl = workspaceUrl.replace(/\/$/, '');
+
+        // Construct the Genie room URL
+        // Format: https://{workspace}/genie/rooms/{space_id}/monitoring
+        const genieUrl = `${workspaceUrl}/genie/rooms/${selectedGenieSpace.id}/monitoring`;
+
+        console.log('Opening Genie URL:', genieUrl);
+        // Open in new tab
+        window.open(genieUrl, '_blank', 'noopener,noreferrer');
+      } else {
+        console.warn('Databricks workspace URL not configured');
+        alert('Databricks workspace URL is not configured. Please configure it in Settings > Configuration > Databricks.');
+      }
+    } catch (error) {
+      console.error('Error opening Genie space:', error);
+      alert('Error opening Genie space. Please check the console for details.');
+    }
   };
 
   return (
@@ -677,11 +760,26 @@ const AgentForm: React.FC<AgentFormProps> = ({ initialData, onCancel, onAgentSav
                     {(selected as string[]).map((toolId, index) => {
                       // Ensure tool ID comparison works with both string and numeric IDs
                       const tool = tools.find(t => String(t.id) === String(toolId));
+                      // If it's DatabricksKnowledgeSearchTool (not in DB), show friendly name
+                      const label = tool ? tool.title :
+                                   (String(toolId) === 'DatabricksKnowledgeSearchTool' ? 'Knowledge Search' : String(toolId));
                       return (
-                        <Chip 
+                        <Chip
                           key={`selected-tool-${toolId}-${index}`}
-                          label={tool ? tool.title : `Tool ${index + 1}`}
+                          label={label}
                           size="small"
+                          onDelete={() => {
+                            handleRemoveTool(toolId);
+                          }}
+                          onMouseDown={(event: React.MouseEvent) => {
+                            event.stopPropagation(); // Prevent dropdown from opening when clicking delete icon
+                          }}
+                          deleteIcon={
+                            <DeleteIcon
+                              fontSize="small"
+                              sx={{ fontSize: '16px !important' }}
+                            />
+                          }
                         />
                       );
                     })}
@@ -703,39 +801,66 @@ const AgentForm: React.FC<AgentFormProps> = ({ initialData, onCancel, onAgentSav
               </Select>
             </FormControl>
 
-            {/* Genie Space Selector - Show only when GenieTool is selected */}
+            {/* Genie Space Display - Show only when GenieTool is selected */}
             {formData.tools.some(toolId => {
               const tool = tools.find(t => String(t.id) === String(toolId));
               return tool?.title === 'GenieTool';
             }) && (
               <Box sx={{ mt: 2 }}>
-                <GenieSpaceSelector
-                  value={selectedGenieSpace}
-                  onChange={(value) => {
-                    setSelectedGenieSpace(value as string || '');
-                    // Update tool configs when space changes
-                    if (value) {
-                      setToolConfigs(prev => ({
-                        ...prev,
-                        GenieTool: {
-                          spaceId: value as string
+                <Typography variant="subtitle2" sx={{ mb: 1 }}>Genie Space</Typography>
+                {selectedGenieSpace ? (
+                  <Tooltip title={`Space ID: ${selectedGenieSpace.id} - Click to open in Databricks`} arrow>
+                    <Chip
+                      label={selectedGenieSpace.name}
+                      size="medium"
+                      color="primary"
+                      variant="outlined"
+                      onClick={handleGenieSpaceClick}
+                      onDelete={() => {
+                        setSelectedGenieSpace(null);
+                        // Remove GenieTool config when space is removed
+                        setToolConfigs(prev => {
+                          const newConfigs = { ...prev };
+                          delete newConfigs.GenieTool;
+                          return newConfigs;
+                        });
+                      }}
+                      deleteIcon={<DeleteIcon fontSize="small" />}
+                      sx={{
+                        cursor: 'pointer',
+                        '&:hover': {
+                          backgroundColor: 'rgba(25, 118, 210, 0.08)',
                         }
-                      }));
-                    } else {
-                      // Remove GenieTool config if no space selected
-                      setToolConfigs(prev => {
-                        const newConfigs = { ...prev };
-                        delete newConfigs.GenieTool;
-                        return newConfigs;
-                      });
-                    }
-                  }}
-                  label="Genie Space"
-                  placeholder="Search for Genie spaces..."
-                  helperText="Select the Genie space to use with this agent"
-                  required
-                  fullWidth
-                />
+                      }}
+                    />
+                  </Tooltip>
+                ) : (
+                  <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+                    <GenieSpaceSelector
+                      value=""
+                      onChange={(value, spaceName) => {
+                        if (value) {
+                          setSelectedGenieSpace({
+                            id: value as string,
+                            name: spaceName || value as string  // Use the name if provided, otherwise fallback to ID
+                          });
+                          // Update tool configs when space is selected
+                          setToolConfigs(prev => ({
+                            ...prev,
+                            GenieTool: {
+                              spaceId: value as string,
+                              spaceName: spaceName || value as string
+                            }
+                          }));
+                        }
+                      }}
+                      label=""
+                      placeholder="Select a Genie space..."
+                      helperText=""
+                      fullWidth
+                    />
+                  </Box>
+                )}
               </Box>
             )}
 

@@ -34,10 +34,11 @@ import {
   Folder as FolderIcon,
 } from '@mui/icons-material';
 import { DatabricksService, DatabricksConfig } from '../../api/DatabricksService';
+import { AgentService, Agent } from '../../api/AgentService';
 import { apiClient } from '../../config/api/ApiConfig';
 import { AxiosProgressEvent } from 'axios';
-import { KnowledgeSourceCleanup } from '../../utils/KnowledgeSourceCleanup';
 import { useKnowledgeConfigStore } from '../../store/knowledgeConfigStore';
+import { useAgentStore } from '../../store/agent';
 
 interface UploadedFile {
   id: string;
@@ -100,7 +101,7 @@ export const KnowledgeFileUpload: React.FC<KnowledgeFileUploadProps> = ({
     verbose: boolean;
     allow_delegation: boolean;
     cache: boolean;
-    knowledge_sources?: any[];
+    // knowledge_sources removed - using DatabricksKnowledgeSearchTool instead
   }
   const [availableAgents, setAvailableAgents] = useState<AgentOption[]>(providedAgents || []);
   const [selectedAgents, setSelectedAgents] = useState<string[]>([]);
@@ -191,7 +192,6 @@ export const KnowledgeFileUpload: React.FC<KnowledgeFileUploadProps> = ({
       chunk_overlap: databricksConfig.knowledge_chunk_overlap || 200,
       create_date_dirs: true,
       max_file_size_mb: 50,
-      selected_agents: selectedAgents, // Add selected agents to volume config
     };
 
     // Upload each file
@@ -204,6 +204,15 @@ export const KnowledgeFileUpload: React.FC<KnowledgeFileUploadProps> = ({
         const formData = new FormData();
         formData.append('file', file);
         formData.append('volume_config', JSON.stringify(volumeConfig));
+        formData.append('agent_ids', JSON.stringify(selectedAgents)); // Send agent IDs as separate field
+
+        console.log('🚀 [UPLOAD DEBUG] Preparing upload:', {
+          filename: file.name,
+          selectedAgents,
+          selectedAgentsJson: JSON.stringify(selectedAgents),
+          volumeConfig,
+          executionId
+        });
 
         // Upload file
         const response = await apiClient.post(
@@ -229,7 +238,11 @@ export const KnowledgeFileUpload: React.FC<KnowledgeFileUploadProps> = ({
           }
         );
 
-        console.log('Upload response:', response.data);
+        console.log('✅ [UPLOAD DEBUG] Upload response:', {
+          responseData: response.data,
+          sentAgentIds: JSON.stringify(selectedAgents),
+          filename: file.name
+        });
 
         // If agents are selected, update their knowledge sources
         if (selectedAgents.length > 0 && response.data.path) {
@@ -275,52 +288,55 @@ export const KnowledgeFileUpload: React.FC<KnowledgeFileUploadProps> = ({
     }
   };
 
+  const { updateAgent } = useAgentStore();
+
   const updateAgentKnowledgeSources = async (filePath: string, fileName: string) => {
     try {
       // Dynamic import to avoid circular dependencies
       const { AgentService } = await import('../../api/AgentService');
-      
+
       console.log('[DEBUG] updateAgentKnowledgeSources called:', {
         selectedAgents,
         availableAgents: availableAgents.map(a => ({ id: a.id, name: a.name })),
         filePath,
         fileName
       });
-      
+
       // Collect updated agents to pass back to parent
       const updatedAgents: any[] = [];
-      
+
       // Update each selected agent with the new knowledge source
       for (const agentId of selectedAgents) {
         console.log(`[DEBUG] Processing agent ID: ${agentId}`);
         const agent = availableAgents.find(a => (a.id || `agent-${a.name}`) === agentId);
         if (agent) {
-          console.log(`[DEBUG] Found agent:`, { id: agent.id, name: agent.name, existingKnowledgeSources: agent.knowledge_sources });
-          
-          const knowledgeSource = {
-            type: 'databricks_volume',
-            source: filePath,
-            metadata: {
-              filename: fileName,
-              execution_id: executionId,
-              group_id: groupId,
-              uploaded_at: new Date().toISOString(),
-            }
-          };
-          
-          const updatedAgent = {
-            ...agent,
-            knowledge_sources: [...(agent.knowledge_sources || []), knowledgeSource]
-          };
-          
-          console.log(`[DEBUG] Updated agent with knowledge source:`, { 
-            agentName: updatedAgent.name, 
-            knowledgeSourcesCount: updatedAgent.knowledge_sources?.length 
+          console.log(`[DEBUG] Found agent:`, { id: agent.id, name: agent.name, existingTools: agent.tools });
+
+          // Add DatabricksKnowledgeSearchTool to the agent's tools if not already present
+          const toolName = 'DatabricksKnowledgeSearchTool';
+          const currentTools = agent.tools || [];
+
+          let updatedAgent = agent;
+          if (!currentTools.includes(toolName)) {
+            updatedAgent = {
+              ...agent,
+              tools: [...currentTools, toolName]
+            };
+            console.log(`[DEBUG] Added ${toolName} to agent ${agent.name}'s tools`);
+          } else {
+            console.log(`[DEBUG] Agent ${agent.name} already has ${toolName} in tools`);
+            updatedAgent = agent; // Keep the agent unchanged
+          }
+
+          console.log(`[DEBUG] Updated agent with knowledge search tool:`, {
+            agentName: updatedAgent.name,
+            toolsCount: updatedAgent.tools?.length,
+            tools: updatedAgent.tools
           });
-          
+
           // Add to collection of updated agents - ALWAYS add, even if no ID
           updatedAgents.push(updatedAgent);
-          
+
           // Remove id and created_at for update
           const { id, created_at, ...agentData } = updatedAgent as any;
           // Only update if we have a valid agent ID
@@ -330,24 +346,71 @@ export const KnowledgeFileUpload: React.FC<KnowledgeFileUploadProps> = ({
               // Update the agent in the collection with the saved version
               updatedAgents[updatedAgents.length - 1] = savedAgent;
               console.log(`[DEBUG] Successfully persisted agent ${agent.name} with knowledge source to backend`);
+
+              // Update the Zustand store to ensure consistency
+              if (savedAgent.id) {
+                updateAgent(savedAgent.id, savedAgent);
+              }
             }
           } else {
-            console.warn(`[DEBUG] Agent ${agent.name} has no ID, knowledge sources will be in memory only until agent is saved`);
+            console.warn(`[DEBUG] Agent ${agent.name} has no ID, tool configuration will be in memory only until agent is saved`);
+            // Still update the local availableAgents array for in-memory agents
+            const agentIndex = availableAgents.findIndex(a => a.name === agent.name);
+            if (agentIndex !== -1) {
+              availableAgents[agentIndex] = updatedAgent;
+            }
           }
         }
       }
-      
+
       // Notify parent component about updated agents
       if (onAgentsUpdated && updatedAgents.length > 0) {
         onAgentsUpdated(updatedAgents);
       }
     } catch (err) {
-      console.error('Failed to update agent knowledge sources:', err);
+      console.error('Failed to update agent tools:', err);
     }
   };
 
-  const handleRemoveFile = (fileId: string) => {
-    setFiles((prev) => prev.filter((f) => f.id !== fileId));
+  const handleRemoveFile = async (fileId: string) => {
+    // Remove file from local state
+    setFiles((prev) => {
+      const newFiles = prev.filter((f) => f.id !== fileId);
+
+      // If no files left, remove DatabricksKnowledgeSearchTool from selected agents
+      if (newFiles.length === 0) {
+        console.log('[Knowledge] No files left, removing DatabricksKnowledgeSearchTool from agents');
+
+        // Remove tool from all selected agents
+        selectedAgents.forEach(async (agentId) => {
+          const agent = availableAgents.find(a => (a.id || `agent-${a.name}`) === agentId);
+          if (agent) {
+            // Remove both ID 36 and 'DatabricksKnowledgeSearchTool' from tools
+            const updatedTools = (agent.tools || []).filter(
+              toolId => String(toolId) !== '36' && String(toolId) !== 'DatabricksKnowledgeSearchTool'
+            );
+
+            // Update agent if it has an ID
+            if (agent.id) {
+              const updatedAgent = { ...agent, tools: updatedTools };
+              try {
+                const savedAgent = await AgentService.updateAgentFull(agent.id, updatedAgent as Agent);
+                console.log(`[Knowledge] Removed DatabricksKnowledgeSearchTool from agent ${agent.name}`);
+
+                // Update the Zustand store
+                if (savedAgent && savedAgent.id) {
+                  updateAgent(savedAgent.id, savedAgent);
+                }
+              } catch (err) {
+                console.error(`Failed to remove tool from agent ${agent.name}:`, err);
+              }
+            }
+          }
+        });
+      }
+
+      return newFiles;
+    });
   };
 
   const handleOpenDialog = () => {
@@ -361,39 +424,79 @@ export const KnowledgeFileUpload: React.FC<KnowledgeFileUploadProps> = ({
   const toggleAgentSelection = async (agentId: string) => {
     const agent = availableAgents.find(a => (a.id || `agent-${a.name}`) === agentId);
 
+    console.log('🎯 [AGENT DEBUG] Agent selection toggled:', {
+      agentId,
+      agentName: agent?.name,
+      currentSelectedAgents: selectedAgents
+    });
+
     setSelectedAgents(prev => {
       const isCurrentlySelected = prev.includes(agentId);
 
       if (isCurrentlySelected) {
+        console.log('➖ [AGENT DEBUG] Deselecting agent:', agentId);
         // Agent is being deselected - remove knowledge sources from this execution
         if (agent) {
           removeKnowledgeSourcesFromAgent(agent);
         }
-        return prev.filter(id => id !== agentId);
+        const newSelection = prev.filter(id => id !== agentId);
+        console.log('🔄 [AGENT DEBUG] New agent selection after deselect:', newSelection);
+        return newSelection;
       } else {
-        return [...prev, agentId];
+        console.log('➕ [AGENT DEBUG] Selecting agent:', agentId);
+        const newSelection = [...prev, agentId];
+        console.log('🔄 [AGENT DEBUG] New agent selection after select:', newSelection);
+        return newSelection;
       }
     });
   };
 
   const removeKnowledgeSourcesFromAgent = async (agent: any) => {
-    if (!agent.id) return;
+    console.log('[DEBUG] Removing DatabricksKnowledgeSearchTool from deselected agent:', agent.name);
 
-    console.log('[DEBUG] Removing knowledge sources from deselected agent:', agent.name);
+    // Remove the tool from the agent's tools array
+    const toolName = 'DatabricksKnowledgeSearchTool';
+    const currentTools = agent.tools || [];
 
-    const success = await KnowledgeSourceCleanup.removeExecutionKnowledgeSources(agent.id, executionId);
+    if (currentTools.includes(toolName)) {
+      const updatedTools = currentTools.filter((t: string) => t !== toolName);
+      const updatedAgent = {
+        ...agent,
+        tools: updatedTools
+      };
 
-    if (success && onAgentsUpdated) {
-      // Get updated agent data to notify parent component
       try {
-        const { AgentService } = await import('../../api/AgentService');
-        const updatedAgent = await AgentService.getAgent(agent.id);
-        if (updatedAgent) {
-          KnowledgeSourceCleanup.notifyAgentUpdate(updatedAgent, onAgentsUpdated);
+        if (agent.id) {
+          const { AgentService } = await import('../../api/AgentService');
+          const { id, created_at, ...agentData } = updatedAgent as any;
+          const savedAgent = await AgentService.updateAgentFull(agent.id, agentData as any);
+
+          if (savedAgent) {
+            // Update Zustand store
+            if (savedAgent.id) {
+              updateAgent(savedAgent.id, savedAgent);
+            }
+
+            if (onAgentsUpdated) {
+              onAgentsUpdated([savedAgent]);
+            }
+            console.log(`[DEBUG] Successfully removed ${toolName} from agent ${agent.name}`);
+          }
+        } else {
+          // For in-memory agents, update the local availableAgents array
+          const agentIndex = availableAgents.findIndex(a => a.name === agent.name);
+          if (agentIndex !== -1) {
+            availableAgents[agentIndex] = updatedAgent;
+            if (onAgentsUpdated) {
+              onAgentsUpdated([updatedAgent]);
+            }
+          }
         }
       } catch (err) {
-        console.error('Failed to get updated agent data:', err);
+        console.error('Failed to update agent:', err);
       }
+    } else {
+      console.log(`[DEBUG] Agent ${agent.name} does not have ${toolName} in tools`);
     }
   };
 
@@ -522,12 +625,26 @@ export const KnowledgeFileUpload: React.FC<KnowledgeFileUploadProps> = ({
         // Register the file from volume
         const formData = new FormData();
         formData.append('file_path', filePath);
+        formData.append('selected_agents', JSON.stringify(selectedAgents)); // Send agent IDs for volume selection
+
+        console.log('📁 [VOLUME DEBUG] Selecting volume file:', {
+          filePath,
+          selectedAgents,
+          selectedAgentsJson: JSON.stringify(selectedAgents),
+          executionId
+        });
         
         const response = await apiClient.post(
           `/databricks/knowledge/select-from-volume/${executionId}`,
           formData
         );
-        
+
+        console.log('✅ [VOLUME DEBUG] Volume selection response:', {
+          responseData: response.data,
+          sentSelectedAgents: JSON.stringify(selectedAgents),
+          filePath
+        });
+
         // Update file status
         setFiles((prev) =>
           prev.map((f) =>
@@ -707,14 +824,28 @@ export const KnowledgeFileUpload: React.FC<KnowledgeFileUploadProps> = ({
                     {availableAgents.map((agent) => {
                       const agentId = agent.id || `agent-${agent.name}`;
                       const isSelected = selectedAgents.includes(agentId);
+                      const hasKnowledgeTool = agent.tools?.includes('DatabricksKnowledgeSearchTool');
+
                       return (
                         <Chip
                           key={agentId}
-                          label={agent.name}
+                          label={
+                            <span>
+                              {agent.name}
+                              {hasKnowledgeTool && (
+                                <span style={{ marginLeft: '4px', fontSize: '0.9em' }}>
+                                  📚
+                                </span>
+                              )}
+                            </span>
+                          }
                           onClick={() => toggleAgentSelection(agentId)}
                           color={isSelected ? 'primary' : 'default'}
                           variant={isSelected ? 'filled' : 'outlined'}
                           clickable
+                          title={hasKnowledgeTool ?
+                            `${agent.name} - Has Knowledge Search capability` :
+                            `${agent.name} - Click to add Knowledge Search capability`}
                           sx={{
                             py: 1,
                             px: 0.5,

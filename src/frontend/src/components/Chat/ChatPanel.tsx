@@ -45,8 +45,9 @@ const ChatPanel: React.FC<ChatPanelProps> = ({
   if (isCollapsed) {
     // Collapsed state - show only icon and expand button
     return (
-      <Paper 
-        sx={{ 
+      <Paper
+        data-tour="chat-toggle"
+        sx={{
           width: 60,
           height: '100%', 
           display: 'flex', 
@@ -100,7 +101,8 @@ const ChatPanel: React.FC<ChatPanelProps> = ({
 
   // Expanded state - full chat panel
   return (
-    <Paper 
+    <Paper
+      data-tour="chat-panel"
       sx={{ 
         height: '100%', 
         width: '100%',

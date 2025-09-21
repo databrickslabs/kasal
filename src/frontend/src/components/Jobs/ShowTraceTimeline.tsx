@@ -826,13 +826,16 @@ const ShowTraceTimeline: React.FC<ShowTraceProps> = ({
                   </span>
                 </Tooltip>
                 <Tooltip title={t('runHistory.actions.viewLogs')}>
-                  <IconButton
-                    size="small"
-                    onClick={handleOpenLogs}
-                    color="primary"
-                  >
-                    <TerminalIcon fontSize="small" />
-                  </IconButton>
+                  <span>
+                    <IconButton
+                      size="small"
+                      onClick={handleOpenLogs}
+                      color="primary"
+                      disabled={['running', 'pending', 'queued', 'in_progress'].includes(run?.status?.toLowerCase() || '')}
+                    >
+                      <TerminalIcon fontSize="small" />
+                    </IconButton>
+                  </span>
                 </Tooltip>
                 <Divider orientation="vertical" flexItem sx={{ mx: 1 }} />
               </>

@@ -239,6 +239,7 @@ const WorkflowToolbar: React.FC<WorkflowToolbarProps> = ({
                 onClick={handleExecuteClick}
                 disabled={isExecuting}
                 size="small"
+                data-tour="execute-button"
                 sx={{ 
                   border: '1px solid #2E3B55',
                   borderRadius: 1,
@@ -285,7 +286,7 @@ const WorkflowToolbar: React.FC<WorkflowToolbarProps> = ({
               p: 1,
               '&:hover': { backgroundColor: 'action.hover' }
             }}
-            data-tour="load-crew"
+            data-tour="open-workflow"
           >
             <MenuBookIcon sx={{ fontSize: 20 }} />
           </IconButton>
@@ -302,7 +303,7 @@ const WorkflowToolbar: React.FC<WorkflowToolbarProps> = ({
                 p: 1,
                 '&:hover': { backgroundColor: 'action.hover' }
               }}
-              data-tour="save-crew"
+              data-tour="save-button"
               onClick={() => {
                 // Trigger the save crew dialog via an event
                 const event = new CustomEvent('openSaveCrewDialog');

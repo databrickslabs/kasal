@@ -29,11 +29,13 @@ import EngineeringIcon from '@mui/icons-material/Engineering';
 import CloseIcon from '@mui/icons-material/Close';
 import MemoryIcon from '@mui/icons-material/Memory';
 import StorageIcon from '@mui/icons-material/Storage';
-// import SecurityIcon from '@mui/icons-material/Security';
+import WorkspacesIcon from '@mui/icons-material/Workspaces';
 import { useTranslation } from 'react-i18next';
 import { LanguageService } from '../../api/LanguageService';
 import { ThemeConfig as _ThemeConfig } from '../../api/ThemeService';
 import { useThemeStore } from '../../store/theme';
+import { usePermissionStore } from '../../store/permissions';
+import { useUserStore } from '../../store/user';
 import ModelConfiguration from './Models';
 import APIKeys from './APIKeys/APIKeys';
 import ObjectManagement from './ObjectManagement';
@@ -44,11 +46,11 @@ import MCPConfiguration from './MCP/MCPConfiguration';
 import EnginesConfiguration from './Engines';
 import { DatabricksOneClickSetup } from '../MemoryBackend';
 import DatabaseManagement from './DatabaseManagement';
-// import SecurityManagement from './SecurityManagement';
+import GroupManagement from './GroupManagement';
+import WorkspaceOverview from './WorkspaceOverview';
+import UserPermissionManagement from './UserPermissionManagement';
 import { LANGUAGES } from '../../config/i18n/config';
-import DatabaseManagementService from '../../api/DatabaseManagementService';
 import DatabricksEnvironmentService from '../../api/DatabricksEnvironmentService';
-import { getDatabaseManagementPermission } from '../../app/__tests__/App';
 
 interface ConfigurationProps {
   onClose?: () => void;
@@ -91,93 +93,210 @@ function Configuration({ onClose }: ConfigurationProps): JSX.Element {
   const { t } = useTranslation();
   const [currentLanguage, setCurrentLanguage] = useState<string>('en');
   const { currentTheme, changeTheme } = useThemeStore();
+
+  // Get permission state from store and selected group ID
+  const {
+    userRole,
+    isLoading: permissionsLoading,
+    loadPermissions,
+    isSystemAdmin: storeIsSystemAdmin,
+    isPersonalWorkspaceManager
+  } = usePermissionStore(state => ({
+    userRole: state.userRole,
+    isLoading: state.isLoading,
+    loadPermissions: state.loadPermissions,
+    isSystemAdmin: state.isSystemAdmin,
+    isPersonalWorkspaceManager: state.isPersonalWorkspaceManager
+  }));
+
+  // Get current user to watch for changes
+  const currentUser = useUserStore(state => state.currentUser);
+
+  // Get selected group ID to determine workspace context
+  const selectedGroupId = localStorage.getItem('selectedGroupId');
+  const isPersonalWorkspace = selectedGroupId && selectedGroupId.startsWith('user_');
+
+  // Check if permissions have been loaded at least once
+  // System admins should always have access, others need their role loaded
+  const permissionsReady = !permissionsLoading && (
+    storeIsSystemAdmin || // System admins always ready
+    isPersonalWorkspaceManager || // Personal workspace managers always ready
+    userRole !== null // Others need group role loaded
+  );
+
+  // Check if user has admin permissions
+  // Workspace admin: Either admin role in current workspace OR owner of personal workspace OR personal workspace manager in personal workspace
+  const isWorkspaceAdmin = storeIsSystemAdmin || (permissionsReady && (
+    userRole === 'admin' ||
+    (isPersonalWorkspace && isPersonalWorkspaceManager)
+  ));
+  const isSystemAdmin = storeIsSystemAdmin; // System admin status is not dependent on group permissions
+  const isAdmin = permissionsReady && userRole === 'admin';
+  const isOperator = permissionsReady && userRole === 'operator';
+  const isEditor = permissionsReady && userRole === 'editor';
+
+  // Debug logging
+  useEffect(() => {
+    console.log('Configuration - Permissions loading:', permissionsLoading);
+    console.log('Configuration - Permissions ready:', permissionsReady);
+    console.log('Configuration - User role:', userRole);
+    console.log('Configuration - Store isSystemAdmin:', storeIsSystemAdmin);
+    console.log('Configuration - Store isPersonalWorkspaceManager:', isPersonalWorkspaceManager);
+    console.log('Configuration - Selected group ID:', selectedGroupId);
+    console.log('Configuration - Is personal workspace:', isPersonalWorkspace);
+    console.log('Configuration - Is workspace admin:', isWorkspaceAdmin);
+    console.log('Configuration - Is system admin (computed):', isSystemAdmin);
+    console.log('Configuration - Is admin:', isAdmin);
+    console.log('Configuration - Is operator:', isOperator);
+    console.log('Configuration - Is editor:', isEditor);
+  }, [permissionsReady, userRole, isAdmin, isOperator, isEditor, isWorkspaceAdmin, isSystemAdmin, isPersonalWorkspace, selectedGroupId, permissionsLoading, storeIsSystemAdmin, isPersonalWorkspaceManager]);
+
   const [notification, setNotification] = useState({
     open: false,
     message: '',
     severity: 'success' as 'success' | 'error',
   });
   const [activeSection, setActiveSection] = useState(0);
-  // Initialize with cached permission if available, otherwise default to false
-  const cachedPermission = getDatabaseManagementPermission();
-  const [showDatabaseManagement, setShowDatabaseManagement] = useState(
-    cachedPermission.checked ? cachedPermission.hasPermission : false
-  );
+  // Always show Database Management now (no permission check needed)
+  // Future: Will check for admin group membership
+  const [showDatabaseManagement, setShowDatabaseManagement] = useState(true);
   const [isDatabricksApps, setIsDatabricksApps] = useState(false);
 
   // Build navigation items dynamically based on permissions
-  const baseNavItems: NavItem[] = [
-    {
+  const navItems: NavItem[] = React.useMemo(() => {
+    let currentIndex = 0;
+    const baseNavItems: NavItem[] = [];
+
+    // General section - always visible
+    baseNavItems.push({
       label: t('configuration.general.title', { defaultValue: 'General' }),
       icon: <TranslateIcon fontSize="small" />,
-      index: 0
-    },
-    // {
-    //   label: t('configuration.security.tab', { defaultValue: 'Security' }),
-    //   icon: <SecurityIcon fontSize="small" />,
-    //   index: 1
-    // },
-    {
-      label: t('configuration.engines.tab', { defaultValue: 'Engines' }),
-      icon: <EngineeringIcon fontSize="small" />,
-      index: 1
-    },
-    {
-      label: t('configuration.mcpServers.tab', { defaultValue: 'MCP Servers' }),
-      icon: <CloudIcon fontSize="small" />,
-      index: 2
-    },
-    {
-      label: t('configuration.memoryBackend.tab', { defaultValue: 'Memory Backend' }),
-      icon: <MemoryIcon fontSize="small" />,
-      index: 3
-    },
-    {
-      label: t('configuration.models.tab', { defaultValue: 'Models' }),
-      icon: <ModelIcon fontSize="small" />,
-      index: 4
-    },
-    // Only show Databricks tab if NOT in Databricks Apps environment
-    ...(isDatabricksApps ? [] : [{
-      label: t('configuration.databricks.tab', { defaultValue: 'Databricks' }),
-      icon: <CloudIcon fontSize="small" />,
-      index: 5
-    }]),
+      index: currentIndex++
+    });
 
-    {
-      label: t('configuration.apiKeys.tab', { defaultValue: 'API Keys' }),
-      icon: <KeyIcon fontSize="small" />,
-      index: isDatabricksApps ? 5 : 6
-    },
-    {
-      label: t('configuration.tools.tab', { defaultValue: 'Tools' }),
-      icon: <BuildIcon fontSize="small" />,
-      index: isDatabricksApps ? 6 : 7
-    },
-    {
-      label: t('configuration.objects.tab', { defaultValue: 'Object Management' }),
-      icon: <CodeIcon fontSize="small" />,
-      index: isDatabricksApps ? 7 : 8
-    },
-    {
-      label: t('configuration.prompts.tab', { defaultValue: 'Prompts' }),
-      icon: <TextFormatIcon fontSize="small" />,
-      index: isDatabricksApps ? 8 : 9
-    },
-  ];
+    // System admin-only sections (manage entire system)
+    if (isSystemAdmin) {
+      // Workspaces - system admins can manage all workspaces
+      baseNavItems.push({
+        label: t('configuration.workspaces.tab', { defaultValue: 'Workspaces' }),
+        icon: <WorkspacesIcon fontSize="small" />,
+        index: currentIndex++
+      });
 
-  // Conditionally add Database Management based on permission
-  // This needs to be reactive - recalculate when showDatabaseManagement or isDatabricksApps changes
-  const navItems: NavItem[] = React.useMemo(() => {
-    const items = [...baseNavItems];
-    if (showDatabaseManagement) {
-      items.push({
-        label: t('configuration.database.tab', { defaultValue: 'Database Management' }),
-        icon: <StorageIcon fontSize="small" />,
-        index: isDatabricksApps ? 9 : 10
+      // Engines - system-wide configuration
+      baseNavItems.push({
+        label: t('configuration.engines.tab', { defaultValue: 'Engines' }),
+        icon: <EngineeringIcon fontSize="small" />,
+        index: currentIndex++
+      });
+
+      // Models - system-wide models
+      baseNavItems.push({
+        label: t('configuration.models.tab', { defaultValue: 'Models' }),
+        icon: <ModelIcon fontSize="small" />,
+        index: currentIndex++
+      });
+
+      // Tools - system-wide tools
+      baseNavItems.push({
+        label: t('configuration.tools.tab', { defaultValue: 'Tools' }),
+        icon: <BuildIcon fontSize="small" />,
+        index: currentIndex++
+      });
+
+      // User Permission Management - system admins only
+      baseNavItems.push({
+        label: t('configuration.userPermissions.tab', { defaultValue: 'User Permissions' }),
+        icon: <SettingsIcon fontSize="small" />,
+        index: currentIndex++
+      });
+
+      // Database Management - system-wide
+      if (showDatabaseManagement) {
+        baseNavItems.push({
+          label: t('configuration.database.tab', { defaultValue: 'Database Management' }),
+          icon: <StorageIcon fontSize="small" />,
+          index: currentIndex++
+        });
+      }
+    }
+
+    // Workspace admin sections (configure workspace-specific settings)
+    if (isWorkspaceAdmin) {
+      // Workspace Overview - summary of workspace configuration
+      baseNavItems.push({
+        label: t('configuration.workspaceOverview.tab', { defaultValue: 'Workspace Overview' }),
+        icon: <WorkspacesIcon fontSize="small" />,
+        index: currentIndex++
+      });
+
+      // Databricks configuration for workspace (if not in Databricks Apps)
+      if (!isDatabricksApps) {
+        baseNavItems.push({
+          label: t('configuration.databricks.tab', { defaultValue: 'Databricks' }),
+          icon: <CloudIcon fontSize="small" />,
+          index: currentIndex++
+        });
+      }
+
+      // Memory Backend - workspace admins can configure
+      baseNavItems.push({
+        label: t('configuration.memoryBackend.tab', { defaultValue: 'Memory Backend' }),
+        icon: <MemoryIcon fontSize="small" />,
+        index: currentIndex++
+      });
+
+      // MCP Servers - workspace admins can configure
+      baseNavItems.push({
+        label: t('configuration.mcpServers.tab', { defaultValue: 'MCP Servers' }),
+        icon: <CloudIcon fontSize="small" />,
+        index: currentIndex++
       });
     }
-    return items;
-  }, [showDatabaseManagement, isDatabricksApps, t, baseNavItems]); // Recalculate when permission or environment changes
+
+    // Sections visible to editors and admins (but not operators)
+    if (!isOperator) {
+      // API Keys - editors can manage their own keys
+      baseNavItems.push({
+        label: t('configuration.apiKeys.tab', { defaultValue: 'API Keys' }),
+        icon: <KeyIcon fontSize="small" />,
+        index: currentIndex++
+      });
+
+      // Object Management - editors can manage objects
+      baseNavItems.push({
+        label: t('configuration.objects.tab', { defaultValue: 'Object Management' }),
+        icon: <CodeIcon fontSize="small" />,
+        index: currentIndex++
+      });
+
+      // Prompt Instructions - editors can configure prompts
+      baseNavItems.push({
+        label: t('configuration.prompts.tab', { defaultValue: 'Prompt Instructions' }),
+        icon: <TextFormatIcon fontSize="small" />,
+        index: currentIndex++
+      });
+    }
+
+    return baseNavItems;
+  }, [showDatabaseManagement, isDatabricksApps, t, isSystemAdmin, isWorkspaceAdmin, isOperator]); // Recalculate when permission or environment changes
+
+  // Ensure permissions are loaded on mount
+  useEffect(() => {
+    // Load permissions immediately if not ready
+    if (!permissionsReady && !permissionsLoading) {
+      console.log('Configuration - Loading permissions');
+      loadPermissions();
+    }
+  }, [permissionsReady, permissionsLoading, loadPermissions]);
+
+  // Reload permissions when user changes (e.g., user fetch completes)
+  useEffect(() => {
+    if (currentUser && currentUser.email) {
+      console.log('Configuration - User changed, reloading permissions for:', currentUser.email);
+      loadPermissions();
+    }
+  }, [currentUser, loadPermissions]);
 
   useEffect(() => {
     const loadConfig = async () => {
@@ -186,37 +305,18 @@ function Configuration({ onClose }: ConfigurationProps): JSX.Element {
         const languageService = LanguageService.getInstance();
         const currentLang = await languageService.getCurrentLanguage();
         setCurrentLanguage(currentLang);
-        
+
         // Check if we're in Databricks Apps environment
         const envInfo = await DatabricksEnvironmentService.getEnvironmentInfo();
         setIsDatabricksApps(envInfo.is_databricks_apps);
         if (envInfo.is_databricks_apps) {
           console.log('Running in Databricks Apps environment - Databricks configuration tab hidden');
         }
-        
-        // Check Database Management permission (only if not already cached)
-        const cached = getDatabaseManagementPermission();
-        if (cached.checked) {
-          // Use cached value - no need to call API again
-          setShowDatabaseManagement(cached.hasPermission);
-          if (!cached.hasPermission) {
-            console.log('Database Management hidden (cached):', cached.hasPermission);
-          }
-        } else {
-          // Not cached yet, make the API call
-          try {
-            const permissionResult = await DatabaseManagementService.checkPermission();
-            setShowDatabaseManagement(permissionResult.has_permission);
-            
-            if (!permissionResult.has_permission) {
-              console.log('Database Management hidden:', permissionResult.reason);
-            }
-          } catch (permError) {
-            // If permission check fails, default to true for backward compatibility
-            console.error('Failed to check database management permission:', permError);
-            setShowDatabaseManagement(true);
-          }
-        }
+
+        // Database Management is now always visible
+        // Future: Will check for admin group membership
+        setShowDatabaseManagement(true);
+        console.log('Database Management enabled for all users');
       } catch (error) {
         console.error('Error loading configuration:', error);
       }
@@ -301,13 +401,26 @@ function Configuration({ onClose }: ConfigurationProps): JSX.Element {
         )}
       </Box>
 
-      <Box sx={{ 
-        display: 'flex', 
-        flexDirection: 'row',
-        gap: 2,
-        height: 'calc(100% - 60px)',
-        overflow: 'hidden'
-      }}>
+      {/* Show loading state while permissions are being determined */}
+      {!permissionsReady ? (
+        <Box sx={{
+          display: 'flex',
+          justifyContent: 'center',
+          alignItems: 'center',
+          height: 'calc(100% - 60px)'
+        }}>
+          <Typography variant="body1" color="text.secondary">
+            Loading permissions...
+          </Typography>
+        </Box>
+      ) : (
+        <Box sx={{
+          display: 'flex',
+          flexDirection: 'row',
+          gap: 2,
+          height: 'calc(100% - 60px)',
+          overflow: 'hidden'
+        }}>
         {/* Left Sidebar Navigation */}
         <Paper 
           sx={{ 
@@ -355,116 +468,195 @@ function Configuration({ onClose }: ConfigurationProps): JSX.Element {
           overflow: 'auto',
           height: '100%'
         }}>
-          <ContentPanel value={activeSection} index={0}>
-            {/* Language Settings */}
-            <Box sx={{ mb: 3 }}>
-              <Box sx={{ 
-                display: 'flex', 
-                alignItems: 'center', 
-                mb: 1.5
-              }}>
-                <TranslateIcon sx={{ mr: 1, color: 'primary.main', fontSize: '1.2rem' }} />
-                <Typography variant="subtitle1" fontWeight="medium">{t('configuration.language.title')}</Typography>
-              </Box>
-              
-              <FormControl fullWidth size="small">
-                <InputLabel id="language-select-label">
-                  {t('configuration.language.select')}
-                </InputLabel>
-                <Select
-                  labelId="language-select-label"
-                  value={currentLanguage}
-                  onChange={handleLanguageChange}
-                  label={t('configuration.language.select')}
-                  size="small"
-                >
-                  {Object.entries(LANGUAGES).map(([code, { nativeName }]) => (
-                    <MenuItem key={code} value={code}>
-                      {nativeName}
-                    </MenuItem>
-                  ))}
-                </Select>
-              </FormControl>
-            </Box>
-            
-            {/* Theme Settings */}
-            <Box sx={{ mb: 3 }}>
-              <Box sx={{ 
-                display: 'flex', 
-                alignItems: 'center', 
-                mb: 1.5
-              }}>
-                <DarkModeIcon sx={{ mr: 1, color: 'primary.main', fontSize: '1.2rem' }} />
-                <Typography variant="subtitle1" fontWeight="medium">{t('configuration.theme.title')}</Typography>
-              </Box>
-              
-              <FormControl fullWidth size="small">
-                <InputLabel>{t('configuration.theme.select')}</InputLabel>
-                <Select
-                  value={currentTheme}
-                  onChange={handleThemeChange}
-                  label={t('configuration.theme.select')}
-                >
-                  <MenuItem value="professional">Professional (Blue)</MenuItem>
-                  <MenuItem value="calmEarth">Calm Earth (Green)</MenuItem>
-                  <MenuItem value="deepOcean">Deep Ocean (Dark)</MenuItem>
-                  <MenuItem value="vibrantCreative">Vibrant Creative (Purple)</MenuItem>
-                </Select>
-              </FormControl>
-            </Box>
-          </ContentPanel>
+          {/* Render content panels dynamically based on navigation items */}
+          {navItems.map((item) => {
+            // General Settings
+            if (item.label === t('configuration.general.title', { defaultValue: 'General' })) {
+              return (
+                <ContentPanel key={item.index} value={activeSection} index={item.index}>
+                  {/* Language Settings */}
+                  <Box sx={{ mb: 3 }}>
+                    <Box sx={{
+                      display: 'flex',
+                      alignItems: 'center',
+                      mb: 1.5
+                    }}>
+                      <TranslateIcon sx={{ mr: 1, color: 'primary.main', fontSize: '1.2rem' }} />
+                      <Typography variant="subtitle1" fontWeight="medium">{t('configuration.language.title')}</Typography>
+                    </Box>
 
-          {/* <ContentPanel value={activeSection} index={1}>
-            <SecurityManagement />
-          </ContentPanel> */}
+                    <FormControl fullWidth size="small">
+                      <InputLabel id="language-select-label">
+                        {t('configuration.language.select')}
+                      </InputLabel>
+                      <Select
+                        labelId="language-select-label"
+                        value={currentLanguage}
+                        onChange={handleLanguageChange}
+                        label={t('configuration.language.select')}
+                        size="small"
+                      >
+                        {Object.entries(LANGUAGES).map(([code, { nativeName }]) => (
+                          <MenuItem key={code} value={code}>
+                            {nativeName}
+                          </MenuItem>
+                        ))}
+                      </Select>
+                    </FormControl>
+                  </Box>
 
-          <ContentPanel value={activeSection} index={1}>
-            <EnginesConfiguration />
-          </ContentPanel>
+                  {/* Theme Settings */}
+                  <Box sx={{ mb: 3 }}>
+                    <Box sx={{
+                      display: 'flex',
+                      alignItems: 'center',
+                      mb: 1.5
+                    }}>
+                      <DarkModeIcon sx={{ mr: 1, color: 'primary.main', fontSize: '1.2rem' }} />
+                      <Typography variant="subtitle1" fontWeight="medium">{t('configuration.theme.title')}</Typography>
+                    </Box>
 
-          <ContentPanel value={activeSection} index={2}>
-            <MCPConfiguration />
-          </ContentPanel>
-          
-          <ContentPanel value={activeSection} index={3}>
-            <DatabricksOneClickSetup />
-          </ContentPanel>
-          
-          <ContentPanel value={activeSection} index={4}>
-            <ModelConfiguration />
-          </ContentPanel>
+                    <FormControl fullWidth size="small">
+                      <InputLabel>{t('configuration.theme.select')}</InputLabel>
+                      <Select
+                        value={currentTheme}
+                        onChange={handleThemeChange}
+                        label={t('configuration.theme.select')}
+                      >
+                        <MenuItem value="professional">Professional (Blue)</MenuItem>
+                        <MenuItem value="calmEarth">Calm Earth (Green)</MenuItem>
+                        <MenuItem value="deepOcean">Deep Ocean (Dark)</MenuItem>
+                        <MenuItem value="vibrantCreative">Vibrant Creative (Purple)</MenuItem>
+                      </Select>
+                    </FormControl>
+                  </Box>
+                </ContentPanel>
+              );
+            }
 
-          {/* Only show Databricks Configuration if NOT in Databricks Apps */}
-          {!isDatabricksApps && (
-            <ContentPanel value={activeSection} index={5}>
-              <DatabricksConfiguration onSaved={onClose} />
-            </ContentPanel>
-          )}
+            // Workspace Overview (Workspace Admins)
+            if (item.label === t('configuration.workspaceOverview.tab', { defaultValue: 'Workspace Overview' })) {
+              return (
+                <ContentPanel key={item.index} value={activeSection} index={item.index}>
+                  <WorkspaceOverview />
+                </ContentPanel>
+              );
+            }
 
-          <ContentPanel value={activeSection} index={isDatabricksApps ? 5 : 6}>
-            <APIKeys />
-          </ContentPanel>
+            // Workspaces (System Admin only)
+            if (item.label === t('configuration.workspaces.tab', { defaultValue: 'Workspaces' })) {
+              return (
+                <ContentPanel key={item.index} value={activeSection} index={item.index}>
+                  <GroupManagement />
+                </ContentPanel>
+              );
+            }
 
-          <ContentPanel value={activeSection} index={isDatabricksApps ? 6 : 7}>
-            <ToolForm />
-          </ContentPanel>
+            // Engines (Admin only)
+            if (item.label === t('configuration.engines.tab', { defaultValue: 'Engines' })) {
+              return (
+                <ContentPanel key={item.index} value={activeSection} index={item.index}>
+                  <EnginesConfiguration />
+                </ContentPanel>
+              );
+            }
 
-          <ContentPanel value={activeSection} index={isDatabricksApps ? 7 : 8}>
-            <ObjectManagement />
-          </ContentPanel>
+            // Models (Admin only)
+            if (item.label === t('configuration.models.tab', { defaultValue: 'Models' })) {
+              return (
+                <ContentPanel key={item.index} value={activeSection} index={item.index}>
+                  <ModelConfiguration />
+                </ContentPanel>
+              );
+            }
 
-          <ContentPanel value={activeSection} index={isDatabricksApps ? 8 : 9}>
-            <PromptConfiguration />
-          </ContentPanel>
+            // Tools (Admin only)
+            if (item.label === t('configuration.tools.tab', { defaultValue: 'Tools' })) {
+              return (
+                <ContentPanel key={item.index} value={activeSection} index={item.index}>
+                  <ToolForm />
+                </ContentPanel>
+              );
+            }
 
-          {showDatabaseManagement && (
-            <ContentPanel value={activeSection} index={isDatabricksApps ? 9 : 10}>
-              <DatabaseManagement />
-            </ContentPanel>
-          )}
+            // User Permission Management (System Admin only)
+            if (item.label === t('configuration.userPermissions.tab', { defaultValue: 'User Permissions' })) {
+              return (
+                <ContentPanel key={item.index} value={activeSection} index={item.index}>
+                  <UserPermissionManagement />
+                </ContentPanel>
+              );
+            }
+
+            // Database Management (Admin only)
+            if (item.label === t('configuration.database.tab', { defaultValue: 'Database Management' })) {
+              return (
+                <ContentPanel key={item.index} value={activeSection} index={item.index}>
+                  <DatabaseManagement />
+                </ContentPanel>
+              );
+            }
+
+            // MCP Servers
+            if (item.label === t('configuration.mcpServers.tab', { defaultValue: 'MCP Servers' })) {
+              return (
+                <ContentPanel key={item.index} value={activeSection} index={item.index}>
+                  <MCPConfiguration />
+                </ContentPanel>
+              );
+            }
+
+            // Memory Backend
+            if (item.label === t('configuration.memoryBackend.tab', { defaultValue: 'Memory Backend' })) {
+              return (
+                <ContentPanel key={item.index} value={activeSection} index={item.index}>
+                  <DatabricksOneClickSetup />
+                </ContentPanel>
+              );
+            }
+
+            // Databricks
+            if (item.label === t('configuration.databricks.tab', { defaultValue: 'Databricks' })) {
+              return (
+                <ContentPanel key={item.index} value={activeSection} index={item.index}>
+                  <DatabricksConfiguration onSaved={onClose} />
+                </ContentPanel>
+              );
+            }
+
+            // API Keys
+            if (item.label === t('configuration.apiKeys.tab', { defaultValue: 'API Keys' })) {
+              return (
+                <ContentPanel key={item.index} value={activeSection} index={item.index}>
+                  <APIKeys />
+                </ContentPanel>
+              );
+            }
+
+            // Object Management
+            if (item.label === t('configuration.objects.tab', { defaultValue: 'Object Management' })) {
+              return (
+                <ContentPanel key={item.index} value={activeSection} index={item.index}>
+                  <ObjectManagement />
+                </ContentPanel>
+              );
+            }
+
+            // Prompt Instructions
+            if (item.label === t('configuration.prompts.tab', { defaultValue: 'Prompt Instructions' })) {
+              return (
+                <ContentPanel key={item.index} value={activeSection} index={item.index}>
+                  <PromptConfiguration />
+                </ContentPanel>
+              );
+            }
+
+            return null;
+          })}
 
         </Box>
       </Box>
+      )}
 
       <Snackbar
         open={notification.open}

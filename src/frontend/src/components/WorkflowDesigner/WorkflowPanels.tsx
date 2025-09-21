@@ -38,6 +38,8 @@ interface WorkflowPanelsProps {
   setIsAgentDialogOpen: (open: boolean) => void;
   setIsTaskDialogOpen: (open: boolean) => void;
   setIsFlowDialogOpen: (open: boolean) => void;
+  onOpenTutorial?: () => void;
+  onOpenConfiguration?: () => void;
 }
 
 const WorkflowPanels: React.FC<WorkflowPanelsProps> = ({
@@ -69,7 +71,9 @@ const WorkflowPanels: React.FC<WorkflowPanelsProps> = ({
   isChatOpen,
   setIsAgentDialogOpen,
   setIsTaskDialogOpen,
-  setIsFlowDialogOpen
+  setIsFlowDialogOpen,
+  onOpenTutorial,
+  onOpenConfiguration
 }) => {
   const { crewAIFlowEnabled } = useFlowConfigStore();
   if (areFlowsVisible && crewAIFlowEnabled) {
@@ -122,6 +126,8 @@ const WorkflowPanels: React.FC<WorkflowPanelsProps> = ({
             setIsTaskDialogOpen={setIsTaskDialogOpen}
             setIsFlowDialogOpen={setIsFlowDialogOpen}
             showRunHistory={showRunHistory}
+            onOpenTutorial={onOpenTutorial}
+            onOpenConfiguration={onOpenConfiguration}
           />
         </Box>
         
@@ -232,6 +238,8 @@ const WorkflowPanels: React.FC<WorkflowPanelsProps> = ({
           setIsTaskDialogOpen={setIsTaskDialogOpen}
           setIsFlowDialogOpen={setIsFlowDialogOpen}
           showRunHistory={showRunHistory}
+          onOpenTutorial={onOpenTutorial}
+          onOpenConfiguration={onOpenConfiguration}
         />
       </Box>
     </Box>
