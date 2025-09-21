@@ -48,6 +48,7 @@ tools_data = [
     (31, "PerplexityTool", "A powerful search and question-answering tool that leverages the Perplexity AI platform to provide detailed, accurate answers to complex queries. It combines web search capabilities with advanced language processing to generate comprehensive responses with references and citations. Ideal for research tasks, fact-checking, gathering detailed information on specialized topics, and obtaining nuanced explanations of complex subjects.", "search"),
     (34, "SpiderTool", "An advanced web crawling and content extraction tool designed to systematically navigate through websites, extract content, and return structured information. It features customizable parameters for crawl depth, response formatting, caching, and stealth mode operation, making it ideal for comprehensive web research, content aggregation, and building knowledge bases from web content.", "web"),
     (35, "GenieTool", "A sophisticated database querying tool that enables natural language access to database tables and content. It translates plain language questions into optimized database queries, allowing non-technical users to retrieve complex information from databases without SQL knowledge. Perfect for data analysis, business intelligence applications, and providing database access within conversational interfaces.", "database"),
+    (36, "DatabricksKnowledgeSearchTool", "A powerful knowledge search tool that enables semantic search across documents uploaded to Databricks Vector Search. It provides RAG (Retrieval-Augmented Generation) capabilities by searching through indexed documents based on vector similarity. This tool allows agents to access and retrieve relevant information from uploaded knowledge files including PDFs, Word documents, text files, and other document formats. Essential for building context-aware AI applications with access to custom knowledge bases.", "search"),
     (39, "FileWriterTool", "A robust file creation and modification tool designed for cross-platform compatibility. It enables writing content to files with configurable parameters for directory paths, encoding formats, and overwrite behavior. Ideal for generating reports, creating data exports, saving processing results, and any workflow requiring persistent storage of information as files.", "file"),
     (40, "AIMindTool", "A sophisticated AI-powered reasoning tool that enhances problem-solving capabilities through advanced cognitive modeling. It employs structured thinking frameworks to break down complex problems, evaluate multiple approaches, and generate comprehensive solutions with explanations. Especially valuable for strategic planning, decision analysis, hypothesis testing, and solving multifaceted problems requiring nuanced thinking.", "ai"),
     (41, "ApifyActorsTool", "A powerful integration tool that connects with the Apify platform to leverage its ecosystem of web scraping and automation actors. It provides access to hundreds of specialized scrapers and automation workflows for various websites and data sources. Particularly useful for large-scale data collection, market monitoring, content aggregation, and automating interactions with websites that require specialized handling.", "web"),
@@ -419,6 +420,7 @@ async def seed_async():
                         icon=icon,
                         config=get_tool_configs().get(str(tool_id), {}),
                         enabled=(tool_id in [31, 35, 67, 70]),  # Enable PerplexityTool, GenieTool, DatabricksCustomTool, and DatabricksJobsTool
+                        group_id=None,  # Global tools available to all groups
                         created_at=datetime.now().replace(tzinfo=None),
                         updated_at=datetime.now().replace(tzinfo=None)
                     )
@@ -436,6 +438,7 @@ async def seed_async():
                         existing_tool.icon = icon
                         existing_tool.config = get_tool_configs().get(str(tool_id), {})
                         existing_tool.enabled = (tool_id in [31, 35, 67, 70])  # Enable PerplexityTool, GenieTool, DatabricksCustomTool, and DatabricksJobsTool
+                        existing_tool.group_id = None  # Ensure global tools are available to all groups
                         existing_tool.updated_at = datetime.now().replace(tzinfo=None)
                         tools_updated += 1
                 
@@ -477,6 +480,7 @@ def seed_sync():
                         icon=icon,
                         config=get_tool_configs().get(str(tool_id), {}),
                         enabled=(tool_id in [31, 35, 67, 70]),  # Enable PerplexityTool, GenieTool, DatabricksCustomTool, and DatabricksJobsTool
+                        group_id=None,  # Global tools available to all groups
                         created_at=datetime.now().replace(tzinfo=None),
                         updated_at=datetime.now().replace(tzinfo=None)
                     )
