@@ -35,11 +35,18 @@ All data in Kasal is scoped to groups for multi-tenant isolation:
 
 ## Permission Model
 
-Access control is simplified through group membership:
+Access control uses a simplified three-tier role system within groups:
 
-- All authenticated Databricks users can access Kasal
-- Data access is controlled through group-based filtering
-- No complex role-based permissions required
+### Role-Based Access
+- **Admin**: Full group control (user management, system configuration)
+- **Editor**: Workflow development (create/modify agents, tasks, crews)
+- **Operator**: Execution access (run workflows, view results)
+
+### Group-Scoped Permissions
+- Users are assigned roles within specific groups
+- Role permissions are enforced through API endpoint decorators
+- Data access is automatically filtered by group context
+- No complex privilege mappings or inheritance chains
 
 ## Implementation
 
