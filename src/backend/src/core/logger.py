@@ -34,6 +34,9 @@ class LoggerManager:
             self._databricks_short_term_logger = None
             self._databricks_long_term_logger = None
             self._databricks_entity_logger = None
+            self._documentation_embedding_logger = None
+            self._knowledge_source_logger = None
+            self._database_logger = None
             self._log_dir = None
             self._initialized = True
     
@@ -107,6 +110,18 @@ class LoggerManager:
             'databricks_entity': logging.Formatter(
                 '[DATABRICKS_ENTITY] %(asctime)s - %(levelname)s - %(message)s',
                 datefmt='%Y-%m-%d %H:%M:%S'
+            ),
+            'documentation_embedding': logging.Formatter(
+                '[DOC_EMBEDDING] %(asctime)s - %(levelname)s - %(message)s',
+                datefmt='%Y-%m-%d %H:%M:%S'
+            ),
+            'knowledge_source': logging.Formatter(
+                '[KNOWLEDGE_SOURCE] %(asctime)s - %(levelname)s - [%(funcName)s:%(lineno)d] - %(message)s',
+                datefmt='%Y-%m-%d %H:%M:%S.%f'
+            ),
+            'database': logging.Formatter(
+                '[DB] %(asctime)s - %(levelname)s - %(message)s',
+                datefmt='%Y-%m-%d %H:%M:%S.%f'
             )
         }
         
@@ -122,17 +137,20 @@ class LoggerManager:
         
         # Initialize each logger
         self._crew_logger = self._setup_logger('crew', formatters['crew'])
-        self._system_logger = self._setup_logger('system', formatters['system'])
-        self._llm_logger = self._setup_logger('llm', formatters['llm'])
+        self._system_logger = self._setup_logger('system', formatters['system'], suppress_stdout=True)
+        self._llm_logger = self._setup_logger('llm', formatters['llm'], suppress_stdout=True)
         self._scheduler_logger = self._setup_logger('scheduler', formatters['scheduler'])
         self._api_logger = self._setup_logger('api', formatters['api'])
         self._access_logger = self._setup_logger('access', formatters['access'], suppress_stdout=True)
         self._guardrails_logger = self._setup_logger('guardrails', formatters['guardrails'])
-        self._databricks_vector_search_logger = self._setup_logger('databricks_vector_search', formatters['databricks_vector_search'])
-        self._databricks_short_term_logger = self._setup_logger('databricks_short_term', formatters['databricks_short_term'])
-        self._databricks_long_term_logger = self._setup_logger('databricks_long_term', formatters['databricks_long_term'])
-        self._databricks_entity_logger = self._setup_logger('databricks_entity', formatters['databricks_entity'])
-        
+        self._databricks_vector_search_logger = self._setup_logger('databricks_vector_search', formatters['databricks_vector_search'], suppress_stdout=True)
+        self._databricks_short_term_logger = self._setup_logger('databricks_short_term', formatters['databricks_short_term'], suppress_stdout=True)
+        self._databricks_long_term_logger = self._setup_logger('databricks_long_term', formatters['databricks_long_term'], suppress_stdout=True)
+        self._databricks_entity_logger = self._setup_logger('databricks_entity', formatters['databricks_entity'], suppress_stdout=True)
+        self._documentation_embedding_logger = self._setup_logger('documentation_embedding', formatters['documentation_embedding'], suppress_stdout=True)
+        self._knowledge_source_logger = self._setup_logger('knowledge_source', formatters['knowledge_source'], debug_level=True, suppress_stdout=True)
+        self._database_logger = self._setup_logger('database', formatters['database'], debug_level=True)
+
         # Configure uvicorn access logging after all loggers are initialized
         self._configure_uvicorn_logging()
         
@@ -197,10 +215,10 @@ class LoggerManager:
             logger.handlers = []
             logger.propagate = False
     
-    def _setup_logger(self, name: str, formatter: logging.Formatter, suppress_stdout=False) -> logging.Logger:
+    def _setup_logger(self, name: str, formatter: logging.Formatter, suppress_stdout=False, debug_level=False) -> logging.Logger:
         """Set up a specific logger with both file and console handlers."""
         logger = logging.getLogger(name)
-        logger.setLevel(logging.INFO)
+        logger.setLevel(logging.DEBUG if debug_level else logging.INFO)
         logger.propagate = False
         logger.handlers = []  # Clear any existing handlers
         
@@ -380,4 +398,25 @@ class LoggerManager:
         """Get the Databricks entity memory logger."""
         if not self._databricks_entity_logger:
             self.initialize()
-        return self._databricks_entity_logger 
+        return self._databricks_entity_logger
+
+    @property
+    def documentation_embedding(self) -> logging.Logger:
+        """Get the documentation embedding service logger."""
+        if not self._documentation_embedding_logger:
+            self.initialize()
+        return self._documentation_embedding_logger
+
+    @property
+    def knowledge_source(self) -> logging.Logger:
+        """Get the knowledge source logger for debugging knowledge retrieval."""
+        if not self._knowledge_source_logger:
+            self.initialize()
+        return self._knowledge_source_logger
+
+    @property
+    def database(self) -> logging.Logger:
+        """Get the database logger for SQL and transaction debugging."""
+        if not self._database_logger:
+            self.initialize()
+        return self._database_logger 
