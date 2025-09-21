@@ -7,7 +7,7 @@ from datetime import datetime
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from src.db.session import async_session_factory, SessionLocal
+from src.db.session import async_session_factory
 from src.models.tool import Tool
 
 # Configure logging
