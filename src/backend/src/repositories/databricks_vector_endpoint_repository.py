@@ -18,7 +18,7 @@ from src.schemas.databricks_vector_endpoint import (
 )
 from src.repositories.databricks_auth_helper import DatabricksAuthHelper
 
-logger = LoggerManager.get_instance().system
+logger = LoggerManager.get_instance().databricks_vector_search
 
 
 class DatabricksVectorEndpointRepository:
@@ -166,7 +166,7 @@ class DatabricksVectorEndpointRepository:
                 "Content-Type": "application/json"
             }
             
-            logger.info(f"Getting endpoint {endpoint_name} via REST API")
+            logger.debug(f"Getting endpoint {endpoint_name} via REST API")
             
             async with aiohttp.ClientSession() as session:
                 async with session.get(url, headers=headers) as response:

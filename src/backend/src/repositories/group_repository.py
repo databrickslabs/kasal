@@ -19,12 +19,6 @@ class GroupRepository(BaseRepository[Group]):
     def __init__(self, session: AsyncSession):
         super().__init__(Group, session)
     
-    async def get_by_email_domain(self, email_domain: str) -> Optional[Group]:
-        """Get a group by email domain"""
-        query = select(self.model).where(self.model.email_domain == email_domain)
-        result = await self.session.execute(query)
-        return result.scalars().first()
-    
     async def get_with_users(self, group_id: str) -> Optional[Group]:
         """Get a group with its users loaded"""
         query = select(self.model).options(
@@ -47,7 +41,6 @@ class GroupRepository(BaseRepository[Group]):
             group_dict = {
                 'id': group.id,
                 'name': group.name,
-                'email_domain': group.email_domain,
                 'status': group.status,
                 'description': group.description,
                 'auto_created': group.auto_created,
@@ -143,7 +136,8 @@ class GroupUserRepository(BaseRepository[GroupUser]):
             )
         )
         result = await self.session.execute(query)
-        await self.session.commit()
+        # Don't commit here - let the session dependency handle it
+        await self.session.flush()
         return result.rowcount > 0
     
     async def update_user_role(self, group_id: str, user_id: str, role: str) -> Optional[GroupUser]:
@@ -154,10 +148,11 @@ class GroupUserRepository(BaseRepository[GroupUser]):
                 self.model.user_id == user_id
             )
         ).values(role=role)
-        
+
         await self.session.execute(query)
-        await self.session.commit()
-        
+        # Don't commit here - let the session dependency handle it
+        await self.session.flush()
+
         # Return updated GroupUser
         return await self.get_by_group_and_user(group_id, user_id)
     
@@ -174,7 +169,6 @@ class GroupUserRepository(BaseRepository[GroupUser]):
             membership = {
                 'group_id': group.id,
                 'group_name': group.name,
-                'group_email_domain': group.email_domain,
                 'role': group_user.role,
                 'status': group_user.status,
                 'joined_at': group_user.joined_at,

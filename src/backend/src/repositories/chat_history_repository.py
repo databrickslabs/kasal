@@ -4,7 +4,6 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.core.base_repository import BaseRepository
 from src.models.chat_history import ChatHistory
-from src.db.session import async_session_factory
 
 
 class ChatHistoryRepository(BaseRepository[ChatHistory]):

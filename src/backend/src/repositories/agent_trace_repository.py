@@ -116,11 +116,10 @@ class AgentTraceRepository:
             Created ExecutionTrace record if successful, None otherwise
         """
         try:
-            # If no db is provided, create a new session
+            # If no db is provided, raise an error
             if self.db is None:
-                logger.info(f"No db session provided, creating a new one for job_id: {job_id}")
-                db = SessionLocal()
-                close_session = True
+                logger.error(f"No db session provided for job_id: {job_id}")
+                raise ValueError("Database session is required")
             else:
                 db = self.db
                 close_session = False

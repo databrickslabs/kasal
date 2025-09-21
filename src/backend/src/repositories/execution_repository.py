@@ -29,34 +29,63 @@ class ExecutionRepository(BaseRepository[ExecutionHistory]):
         super().__init__(ExecutionHistory, session)
     
     async def get_execution_history(
-        self, 
-        limit: int = 50, 
+        self,
+        limit: int = 50,
         offset: int = 0,
         group_ids: List[str] = None,
-        status_filter: List[str] = None
+        status_filter: List[str] = None,
+        user_email: str = None
     ) -> Tuple[List[ExecutionHistory], int]:
         """
-        Get paginated execution history with group and status filtering.
-        
+        Get paginated execution history with group and user filtering.
+
         Args:
             limit: Maximum number of items to return
             offset: Number of items to skip
             group_ids: List of group IDs for filtering
             status_filter: List of status values to filter by
-            
+            user_email: User email for user-level filtering
+
         Returns:
             Tuple of (list of executions, total count)
         """
         # Build base filter with group filtering
         base_filter = True
-        if group_ids and len(group_ids) > 0:
-            base_filter = ExecutionHistory.group_id.in_(group_ids)
+        if group_ids is not None:
+            # STRICT GROUP ISOLATION: Only include executions with matching group_id
+            # CRITICAL: Exclude ALL NULL group_id records to prevent data leakage
+            # If group_ids is empty list, return no results (no group access)
+            if len(group_ids) == 0:
+                # Empty group list means no access to any groups
+                base_filter = False  # This will return no results
+            else:
+                base_filter = (ExecutionHistory.group_id.in_(group_ids)) & (ExecutionHistory.group_id != None)
+        else:
+            # SECURITY: If no group context provided, deny access
+            # This prevents unauthorized access when group context is missing
+            logging.getLogger(__name__).warning("No group_ids provided to get_execution_history - denying access")
+            base_filter = False  # Return no results when no group context
+
+        # Add user-level filtering if email is provided
+        if user_email:
+            # Only show executions created by this specific user
+            user_filter = ExecutionHistory.group_email == user_email
+            if base_filter is True:
+                base_filter = user_filter
+            elif base_filter is False:
+                # If base_filter is False, keep it False regardless of user condition
+                pass
+            else:
+                base_filter = base_filter & user_filter
         
         # Add status filtering
         if status_filter and len(status_filter) > 0:
             status_condition = ExecutionHistory.status.in_(status_filter)
             if base_filter is True:
                 base_filter = status_condition
+            elif base_filter is False:
+                # If base_filter is False, keep it False regardless of status condition
+                pass
             else:
                 base_filter = base_filter & status_condition
         
@@ -79,18 +108,19 @@ class ExecutionRepository(BaseRepository[ExecutionHistory]):
     async def get_execution_by_job_id(self, job_id: str, group_ids: List[str] = None) -> Optional[ExecutionHistory]:
         """
         Get a specific execution by job_id with group filtering.
-        
+
         Args:
             job_id: Job ID of the execution
             group_ids: List of group IDs for filtering
-            
+
         Returns:
             Execution object if found, None otherwise
         """
         # Build base filter
         base_filter = ExecutionHistory.job_id == job_id
         if group_ids and len(group_ids) > 0:
-            base_filter = base_filter & ExecutionHistory.group_id.in_(group_ids)
+            # CRITICAL: Must have a non-NULL group_id AND be in the allowed groups
+            base_filter = base_filter & ExecutionHistory.group_id.in_(group_ids) & (ExecutionHistory.group_id != None)
         
         stmt = select(ExecutionHistory).where(base_filter)
         result = await self.session.execute(stmt)

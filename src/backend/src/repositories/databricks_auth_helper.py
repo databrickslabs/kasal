@@ -103,23 +103,17 @@ class DatabricksAuthHelper:
             try:
                 # Import inside to avoid any loop context issues
                 from src.services.api_keys_service import ApiKeysService
-                from src.core.unit_of_work import UnitOfWork
-                from src.utils.encryption_utils import EncryptionUtils
                 
                 async def _fetch():
                     """Async function to fetch PAT."""
                     try:
-                        async with UnitOfWork() as uow:
-                            api_service = await ApiKeysService.from_unit_of_work(uow)
-                            
-                            # Try both common Databricks token names
-                            for key_name in ["DATABRICKS_TOKEN", "DATABRICKS_API_KEY"]:
-                                api_key = await api_service.find_by_name(key_name)
-                                if api_key and api_key.encrypted_value:
-                                    pat_token = EncryptionUtils.decrypt_value(api_key.encrypted_value)
-                                    if pat_token:
-                                        logger.info(f"Found Databricks API key in database: {key_name}")
-                                        return pat_token
+                        # Try both common Databricks token names
+                        for key_name in ["DATABRICKS_TOKEN", "DATABRICKS_API_KEY"]:
+                            # Use the class method that handles session internally
+                            pat_token = await ApiKeysService.get_api_key_value(key_name=key_name)
+                            if pat_token:
+                                logger.info(f"Found Databricks API key in database: {key_name}")
+                                return pat_token
                         return None
                     except Exception as db_error:
                         logger.debug(f"Database fetch error: {db_error}")
