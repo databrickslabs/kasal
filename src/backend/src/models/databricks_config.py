@@ -14,7 +14,6 @@ class DatabricksConfig(Base):
     warehouse_id = Column(String, nullable=False)
     catalog = Column(String, nullable=False)
     schema = Column(String, nullable=False)
-    secret_scope = Column(String, nullable=False)
     is_active = Column(Boolean, default=True)  # To track the currently active configuration
     is_enabled = Column(Boolean, default=True)  # To enable/disable Databricks integration
     apps_enabled = Column(Boolean, default=False)  # To enable/disable Databricks apps

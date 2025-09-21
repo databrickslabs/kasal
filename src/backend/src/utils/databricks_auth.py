@@ -50,15 +50,12 @@ class DatabricksAuth:
             if not self._use_databricks_apps or not self._workspace_host:
                 try:
                     # Get databricks configuration from database
-                    # Use a fresh UnitOfWork to avoid event loop issues
                     from src.services.databricks_service import DatabricksService
-                    from src.core.unit_of_work import UnitOfWork
-                    
-                    # Create a new UnitOfWork with proper async context
-                    uow = UnitOfWork()
-                    try:
-                        await uow.__aenter__()
-                        service = await DatabricksService.from_unit_of_work(uow)
+                    from src.db.session import get_db
+
+                    # Get a session directly
+                    async for session in get_db():
+                        service = DatabricksService(session)
                         
                         # Get workspace config
                         try:
@@ -77,9 +74,7 @@ class DatabricksAuth:
                             
                         except Exception as e:
                             logger.warning(f"Failed to get databricks config from database: {e}")
-                    finally:
-                        # Make sure to properly close the UnitOfWork
-                        await uow.__aexit__(None, None, None)
+                        break  # Exit the async generator after first iteration
                             
                 except Exception as e:
                     logger.warning(f"Could not load database configuration: {e}")
@@ -104,14 +99,12 @@ class DatabricksAuth:
             if not self._use_databricks_apps and not self._api_token:
                 try:
                     from src.services.api_keys_service import ApiKeysService
-                    from src.core.unit_of_work import UnitOfWork
-                    
-                    # Create a new UnitOfWork for API key retrieval
-                    api_uow = UnitOfWork()
-                    try:
-                        await api_uow.__aenter__()
-                        api_service = await ApiKeysService.from_unit_of_work(api_uow)
-                    
+                    from src.db.session import async_session_factory
+
+                    # Create a new session for API key retrieval
+                    async with async_session_factory() as session:
+                        api_service = ApiKeysService(session)
+
                         # Try to get DATABRICKS_TOKEN or DATABRICKS_API_KEY
                         for key_name in ["DATABRICKS_TOKEN", "DATABRICKS_API_KEY"]:
                             api_key = await api_service.find_by_name(key_name)
@@ -120,7 +113,7 @@ class DatabricksAuth:
                                 self._api_token = EncryptionUtils.decrypt_value(api_key.encrypted_value)
                                 logger.info(f"Loaded API token from {key_name}")
                                 break
-                    
+
                         if not self._api_token:
                             # Try environment variables as fallback
                             self._api_token = os.environ.get("DATABRICKS_TOKEN") or os.environ.get("DATABRICKS_API_KEY")
@@ -128,9 +121,6 @@ class DatabricksAuth:
                                 logger.info("Using API token from environment variables")
                             else:
                                 logger.warning("No Databricks API token found - authentication may fail")
-                    finally:
-                        # Make sure to properly close the UnitOfWork
-                        await api_uow.__aexit__(None, None, None)
                             
                 except Exception as e:
                     logger.error(f"Failed to get API token: {e}")
@@ -663,6 +653,54 @@ async def get_mcp_access_token() -> Tuple[Optional[str], Optional[str]]:
         return None, f"Failed to parse CLI output: {e}"
     except Exception as e:
         logger.error(f"Error getting MCP token from CLI: {e}")
+        return None, str(e)
+
+
+async def get_current_databricks_user(user_token: Optional[str] = None) -> Tuple[Optional[str], Optional[str]]:
+    """
+    Get the current Databricks user identity (email or service principal ID).
+    This centralizes the logic for determining the authenticated user.
+
+    Args:
+        user_token: Optional user access token for OBO authentication
+
+    Returns:
+        Tuple[Optional[str], Optional[str]]: (user_identity, error_message)
+        The user_identity will be the email for users or application_id for service principals
+    """
+    try:
+        # Get or create a workspace client with appropriate authentication
+        workspace_client = await get_workspace_client(user_token)
+        if not workspace_client:
+            return None, "Failed to create workspace client"
+
+        # Get current user identity
+        try:
+            current_user = workspace_client.current_user.me()
+            if current_user:
+                # For regular users, use user_name (email)
+                if hasattr(current_user, 'user_name') and current_user.user_name:
+                    logger.info(f"Identified Databricks user: {current_user.user_name}")
+                    return current_user.user_name, None
+                # For service principals, use application_id
+                elif hasattr(current_user, 'application_id') and current_user.application_id:
+                    logger.info(f"Identified Databricks service principal: {current_user.application_id}")
+                    return current_user.application_id, None
+                # For display name fallback
+                elif hasattr(current_user, 'display_name') and current_user.display_name:
+                    logger.info(f"Using display name as identity: {current_user.display_name}")
+                    return current_user.display_name, None
+                else:
+                    return None, "Could not determine user identity from current_user object"
+            else:
+                return None, "current_user.me() returned None"
+
+        except Exception as e:
+            logger.error(f"Error getting current user identity: {e}")
+            return None, f"Failed to get current user: {str(e)}"
+
+    except Exception as e:
+        logger.error(f"Error in get_current_databricks_user: {e}")
         return None, str(e)
 
 

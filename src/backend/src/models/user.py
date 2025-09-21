@@ -16,31 +16,23 @@ class User(Base):
     id = Column(String, primary_key=True, default=generate_uuid)
     username = Column(String, unique=True, index=True, nullable=False)
     email = Column(String, unique=True, index=True, nullable=False)
-    hashed_password = Column(String, nullable=False)
+    display_name = Column(String, nullable=True)  # Moved from UserProfile
+    # hashed_password removed - using OAuth proxy authentication
     role = Column(SQLAlchemyEnum(UserRole, name="user_role_enum"), default=UserRole.REGULAR)
     status = Column(SQLAlchemyEnum(UserStatus, name="user_status_enum"), default=UserStatus.ACTIVE)
+
+    # New user-level permission fields
+    is_system_admin = Column(Boolean, default=False, nullable=False)
+    is_personal_workspace_manager = Column(Boolean, default=False, nullable=False)
+
     created_at = Column(DateTime(timezone=True), default=datetime.now(timezone.utc))
     updated_at = Column(DateTime(timezone=True), default=datetime.now(timezone.utc), onupdate=datetime.now(timezone.utc))
     last_login = Column(DateTime(timezone=True), nullable=True)
 
     # Relationships
-    profile = relationship("UserProfile", back_populates="user", uselist=False, cascade="all, delete-orphan")
     refresh_tokens = relationship("RefreshToken", back_populates="user", cascade="all, delete-orphan")
-    external_identities = relationship("ExternalIdentity", back_populates="user", cascade="all, delete-orphan")
-    user_roles = relationship("UserRole", back_populates="user", cascade="all, delete-orphan")
-
-
-class UserProfile(Base):
-    __tablename__ = "user_profiles"
-
-    id = Column(String, primary_key=True, default=generate_uuid)
-    user_id = Column(String, ForeignKey("users.id", ondelete="CASCADE"), unique=True)
-    display_name = Column(String, nullable=True)
-    avatar_url = Column(String, nullable=True)
-    preferences = Column(String, nullable=True)  # JSON string of preferences
-    
-    # Relationships
-    user = relationship("User", back_populates="profile")
+    # Complex auth relationships removed - using simplified group-based roles
+    # UserProfile removed - display_name moved to User model
 
 
 class RefreshToken(Base):
@@ -57,101 +49,13 @@ class RefreshToken(Base):
     user = relationship("User", back_populates="refresh_tokens")
 
 
-class ExternalIdentity(Base):
-    __tablename__ = "external_identities"
-
-    id = Column(String, primary_key=True, default=generate_uuid)
-    user_id = Column(String, ForeignKey("users.id", ondelete="CASCADE"))
-    provider = Column(String, nullable=False)  # OAuth provider name
-    provider_user_id = Column(String, nullable=False)  # User ID in the external system
-    email = Column(String, nullable=True)
-    profile_data = Column(String, nullable=True)  # JSON string of profile data
-    created_at = Column(DateTime(timezone=True), default=datetime.now(timezone.utc))
-    last_login = Column(DateTime(timezone=True), nullable=True)
-    
-    # Relationships
-    user = relationship("User", back_populates="external_identities")
-    
-    __table_args__ = (
-        # Unique constraint to prevent duplicate provider identity
-        sa.UniqueConstraint('provider', 'provider_user_id', name='uq_external_identity_provider_user'),
-    )
+# ExternalIdentity model removed - simplified auth system
 
 
-class Role(Base):
-    __tablename__ = "roles"
-
-    id = Column(String, primary_key=True, default=generate_uuid)
-    name = Column(String, nullable=False, unique=True)
-    description = Column(String, nullable=True)
-    created_at = Column(DateTime(timezone=True), default=datetime.now(timezone.utc))
-    updated_at = Column(DateTime(timezone=True), default=datetime.now(timezone.utc), onupdate=datetime.now(timezone.utc))
-    
-    # Relationships
-    role_privileges = relationship("RolePrivilege", back_populates="role", cascade="all, delete-orphan")
-    user_roles = relationship("UserRole", back_populates="role", cascade="all, delete-orphan")
+# Complex RBAC models removed - using simplified group-based roles instead
 
 
-class Privilege(Base):
-    __tablename__ = "privileges"
-
-    id = Column(String, primary_key=True, default=generate_uuid)
-    name = Column(String, nullable=False, unique=True)  # Format: "resource:action"
-    description = Column(String, nullable=True)
-    created_at = Column(DateTime, default=datetime.utcnow)
-    
-    # Relationships
-    role_privileges = relationship("RolePrivilege", back_populates="privilege", cascade="all, delete-orphan")
+# IdentityProvider model removed - simplified auth system
 
 
-class RolePrivilege(Base):
-    __tablename__ = "role_privileges"
-
-    id = Column(String, primary_key=True, default=generate_uuid)
-    role_id = Column(String, ForeignKey("roles.id", ondelete="CASCADE"))
-    privilege_id = Column(String, ForeignKey("privileges.id", ondelete="CASCADE"))
-    
-    # Relationships
-    role = relationship("Role", back_populates="role_privileges")
-    privilege = relationship("Privilege", back_populates="role_privileges")
-    
-    __table_args__ = (
-        # Unique constraint to prevent duplicate role-privilege pairs
-        UniqueConstraint('role_id', 'privilege_id', name='uq_role_privilege'),
-    )
-
-
-class UserRole(Base):
-    __tablename__ = "user_roles"
-
-    id = Column(String, primary_key=True, default=generate_uuid)
-    user_id = Column(String, ForeignKey("users.id", ondelete="CASCADE"))
-    role_id = Column(String, ForeignKey("roles.id", ondelete="CASCADE"))
-    assigned_at = Column(DateTime(timezone=True), default=datetime.now(timezone.utc))
-    assigned_by = Column(String, nullable=True)  # Email of admin who assigned the role
-    
-    # Relationships
-    user = relationship("User", back_populates="user_roles")
-    role = relationship("Role", back_populates="user_roles")
-    
-    __table_args__ = (
-        # Unique constraint to prevent duplicate user-role pairs
-        UniqueConstraint('user_id', 'role_id', name='uq_user_role'),
-    )
-
-
-class IdentityProvider(Base):
-    __tablename__ = "identity_providers"
-
-    id = Column(String, primary_key=True, default=generate_uuid)
-    name = Column(String, nullable=False)
-    type = Column(SQLAlchemyEnum(IdentityProviderType, name="identity_provider_type_enum"), nullable=False)
-    config = Column(String, nullable=False)  # JSON configuration
-    enabled = Column(Boolean, default=True)
-    is_default = Column(Boolean, default=False)
-    created_at = Column(DateTime(timezone=True), default=datetime.now(timezone.utc))
-    updated_at = Column(DateTime(timezone=True), default=datetime.now(timezone.utc), onupdate=datetime.now(timezone.utc))
-
-
-# Backward compatibility alias
-DatabricksRole = Role
+# All complex RBAC models removed - using simplified group-based roles
