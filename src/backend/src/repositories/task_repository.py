@@ -2,11 +2,11 @@ from typing import List, Optional, Type
 
 from sqlalchemy import select, delete
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy.orm import Session
+# Session import removed - use AsyncSession only
 
 from src.core.base_repository import BaseRepository
 from src.models.task import Task
-from src.db.session import SessionLocal
+# SessionLocal removed - use async_session_factory instead
 
 
 class TaskRepository(BaseRepository[Task]):
@@ -288,76 +288,5 @@ class TaskRepository(BaseRepository[Task]):
         await self.session.execute(stmt)
         await self.session.flush()
 
-
-class SyncTaskRepository:
-    """
-    Synchronous repository for Task model with custom query methods.
-    Used by services that require synchronous DB operations.
-    """
-    
-    def __init__(self, db: Session):
-        """
-        Initialize the repository with session.
-        
-        Args:
-            db: SQLAlchemy synchronous session
-        """
-        self.db = db
-    
-    def find_by_id(self, task_id: int) -> Optional[Task]:
-        """
-        Find a task by ID.
-        
-        Args:
-            task_id: ID of the task to find
-            
-        Returns:
-            Task if found, else None
-        """
-        return self.db.query(Task).filter(Task.id == task_id).first()
-    
-    def find_by_name(self, name: str) -> Optional[Task]:
-        """
-        Find a task by name.
-        
-        Args:
-            name: Name to search for
-            
-        Returns:
-            Task if found, else None
-        """
-        return self.db.query(Task).filter(Task.name == name).first()
-    
-    def find_by_agent_id(self, agent_id: int) -> List[Task]:
-        """
-        Find all tasks for a specific agent.
-        
-        Args:
-            agent_id: ID of the agent
-            
-        Returns:
-            List of tasks associated with the agent
-        """
-        return self.db.query(Task).filter(Task.agent_id == agent_id).all()
-    
-    def find_all(self) -> List[Task]:
-        """
-        Find all tasks.
-        
-        Returns:
-            List of all tasks
-        """
-        return self.db.query(Task).all()
-
-# Factory function to get a repository instance with provided session
-def get_sync_task_repository(db: Session) -> SyncTaskRepository:
-    """
-    Factory function to create and return a SyncTaskRepository instance.
-
-    Args:
-        db: SQLAlchemy sync session
-
-    Returns:
-        A SyncTaskRepository instance with the provided session
-    """
-    return SyncTaskRepository(db) 
+# SyncTaskRepository and get_sync_task_repository removed
+# All database operations must be async - use TaskRepository instead 

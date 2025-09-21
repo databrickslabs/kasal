@@ -2,11 +2,11 @@ from typing import List, Optional, Union
 import uuid
 from sqlalchemy import select, text
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy.orm import Session
+# Session import removed - use AsyncSession only
 
 from src.core.base_repository import BaseRepository
 from src.models.flow import Flow
-from src.db.session import SessionLocal
+# SessionLocal removed - use async_session_factory instead
 
 
 class FlowRepository(BaseRepository[Flow]):
@@ -184,101 +184,5 @@ class FlowRepository(BaseRepository[Flow]):
             logger.error(f"Error during delete_all operation: {str(e)}")
             raise
 
-
-class SyncFlowRepository:
-    """
-    Synchronous repository for Flow model with custom query methods.
-    Used by services that require synchronous DB operations.
-    """
-    
-    def __init__(self, db: Session):
-        """
-        Initialize the repository with session.
-        
-        Args:
-            db: SQLAlchemy synchronous session
-        """
-        self.db = db
-    
-    def find_by_id(self, flow_id: Union[uuid.UUID, str]) -> Optional[Flow]:
-        """
-        Find a flow by ID.
-        
-        Args:
-            flow_id: UUID of the flow to find
-            
-        Returns:
-            Flow if found, else None
-        """
-        # Convert string to UUID if needed
-        if isinstance(flow_id, str):
-            try:
-                flow_id = uuid.UUID(flow_id)
-            except ValueError:
-                return None
-                
-        return self.db.query(Flow).filter(Flow.id == flow_id).first()
-    
-    def find_by_name(self, name: str) -> Optional[Flow]:
-        """
-        Find a flow by name.
-        
-        Args:
-            name: Name to search for
-            
-        Returns:
-            Flow if found, else None
-        """
-        return self.db.query(Flow).filter(Flow.name == name).first()
-    
-    def find_by_crew_id(self, crew_id: Union[uuid.UUID, str]) -> List[Flow]:
-        """
-        Find all flows for a specific crew.
-        
-        Args:
-            crew_id: ID of the crew (UUID)
-            
-        Returns:
-            List of flows associated with the crew
-        """
-        # Convert string to UUID if needed
-        if isinstance(crew_id, str):
-            try:
-                crew_id = uuid.UUID(crew_id)
-            except ValueError:
-                return []
-                
-        return self.db.query(Flow).filter(Flow.crew_id == crew_id).all()
-    
-    def find_all(self) -> List[Flow]:
-        """
-        Find all flows.
-        
-        Returns:
-            List of all flows
-        """
-        return self.db.query(Flow).all()
-    
-    def delete_all(self) -> None:
-        """
-        Delete all flows.
-        
-        Returns:
-            None
-        """
-        self.db.query(Flow).delete()
-        self.db.commit()
-
-
-# Factory function to get a repository instance with provided session
-def get_sync_flow_repository(db: Session) -> SyncFlowRepository:
-    """
-    Factory function to create and return a SyncFlowRepository instance.
-
-    Args:
-        db: SQLAlchemy sync session
-
-    Returns:
-        A SyncFlowRepository instance with the provided session
-    """
-    return SyncFlowRepository(db) 
+# SyncFlowRepository removed - use async FlowRepository instead
+# All database operations must be async 
