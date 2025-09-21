@@ -15,7 +15,7 @@ from datetime import datetime, UTC
 from pydantic import BaseModel, Field
 
 from src.core.logger import LoggerManager
-from src.repositories.flow_repository import SyncFlowRepository
+from src.repositories.flow_repository import FlowRepository
 from crewai import Agent, Task, Crew
 from crewai import Process
 from crewai.flow.flow import Flow as CrewAIFlow
@@ -94,13 +94,13 @@ class BackendFlow:
     def repositories(self, value):
         self._repositories = value
 
-    def load_flow(self, repository: Optional[SyncFlowRepository] = None) -> Dict:
+    def load_flow(self, repository: Optional[FlowRepository] = None) -> Dict:
         """
-        Load flow data from the database using repository if provided, 
+        Load flow data from the database using repository if provided,
         otherwise get one from the factory.
-        
+
         Args:
-            repository: Optional SyncFlowRepository instance
+            repository: Optional FlowRepository instance
             
         Returns:
             Dictionary containing flow data
