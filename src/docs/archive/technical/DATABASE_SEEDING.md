@@ -68,11 +68,16 @@ Populates the `roles` and `privileges` tables with default RBAC configuration.
 
 ### 6. Documentation Seeder
 
-Populates the `documentation_embedding` table with vectorized documentation for AI agent reference.
+Creates embeddings of CrewAI documentation to help AI agents generate better workflows.
 
 - **Module**: `backend/src/seeds/documentation.py`
 - **Command**: `python -m src.seeds.seed_runner --documentation`
-- **Data**: Embedded documentation chunks for context-aware agent assistance
+- **When it runs**:
+  - **Local development**: Always runs (SQLite or localhost PostgreSQL)
+  - **With Databricks**: Runs and stores in Vector Search
+  - **Production without Databricks**: Skipped automatically
+- **What it does**: Downloads CrewAI docs, creates embeddings, stores for AI context
+- **Impact**: Improves quality of generated agents and tasks
 
 ## Running Seeders
 
