@@ -4,14 +4,18 @@ import logging
 from pathlib import Path
 from datetime import datetime, timezone
 import sys
+import asyncio
+import time
+from functools import wraps
 
-from sqlalchemy import create_engine, text
+from sqlalchemy import create_engine, text, event
 from sqlalchemy.ext.asyncio import (
     AsyncSession,
     async_sessionmaker,
     create_async_engine,
 )
 from sqlalchemy.orm import sessionmaker
+from sqlalchemy.exc import OperationalError
 
 from src.config.settings import settings
 from src.db.base import Base
@@ -29,6 +33,55 @@ if not logger_manager._initialized or not logger_manager._log_dir:
 
 # Get a logger from the LoggerManager system
 logger = logging.getLogger(__name__)
+
+# Database retry decorator for handling SQLite locks
+def retry_db_operation(max_retries: int = 3, delay: float = 0.1, backoff: float = 2.0):
+    """Decorator to retry database operations when SQLite is locked."""
+    def decorator(func):
+        @wraps(func)
+        async def async_wrapper(*args, **kwargs):
+            last_exception = None
+            for attempt in range(max_retries):
+                try:
+                    return await func(*args, **kwargs)
+                except OperationalError as e:
+                    last_exception = e
+                    if "database is locked" in str(e).lower() and attempt < max_retries - 1:
+                        wait_time = delay * (backoff ** attempt)
+                        logger.warning(f"Database locked, retrying in {wait_time:.2f}s (attempt {attempt + 1}/{max_retries})")
+                        await asyncio.sleep(wait_time)
+                        continue
+                    raise
+                except Exception as e:
+                    # For non-lock related errors, don't retry
+                    raise
+            raise last_exception
+
+        @wraps(func)
+        def sync_wrapper(*args, **kwargs):
+            last_exception = None
+            for attempt in range(max_retries):
+                try:
+                    return func(*args, **kwargs)
+                except OperationalError as e:
+                    last_exception = e
+                    if "database is locked" in str(e).lower() and attempt < max_retries - 1:
+                        wait_time = delay * (backoff ** attempt)
+                        logger.warning(f"Database locked, retrying in {wait_time:.2f}s (attempt {attempt + 1}/{max_retries})")
+                        time.sleep(wait_time)
+                        continue
+                    raise
+                except Exception as e:
+                    # For non-lock related errors, don't retry
+                    raise
+            raise last_exception
+
+        # Return the appropriate wrapper based on whether the function is async
+        if asyncio.iscoroutinefunction(func):
+            return async_wrapper
+        else:
+            return sync_wrapper
+    return decorator
 
 # Create a SQLAlchemy logger using the LoggerManager
 class SQLAlchemyLogger:
@@ -64,32 +117,92 @@ class SQLAlchemyLogger:
 sql_logger = SQLAlchemyLogger()
 
 # Import pool classes
-from sqlalchemy.pool import NullPool, AsyncAdaptedQueuePool
+from sqlalchemy.pool import NullPool, AsyncAdaptedQueuePool, StaticPool
 
 # Determine if we should use NullPool for event loop isolation
 # This is necessary when running in environments with multiple event loops
 # such as with CrewAI memory backends or during testing
 use_nullpool = os.environ.get("USE_NULLPOOL", "false").lower() == "true"
 
+# Determine isolation level based on database type
+def get_isolation_level(database_uri: str) -> str:
+    """Get appropriate isolation level based on database type."""
+    if database_uri.startswith('sqlite'):
+        # SQLite supports: READ UNCOMMITTED, SERIALIZABLE, AUTOCOMMIT
+        return "SERIALIZABLE"
+    else:
+        # PostgreSQL supports: READ COMMITTED, READ UNCOMMITTED, REPEATABLE READ, SERIALIZABLE
+        return "READ COMMITTED"
+
+def get_sqlite_connect_args(database_uri: str) -> dict:
+    """Get SQLite-specific connection arguments for better concurrent access."""
+    if database_uri.startswith('sqlite'):
+        return {
+            "check_same_thread": False,  # Allow SQLite to be used across threads
+            "timeout": 30,  # 30 second timeout for locked database
+            "isolation_level": None,  # Use autocommit mode to reduce lock time
+        }
+    return {}
+
+isolation_level = get_isolation_level(str(settings.DATABASE_URI))
+connect_args = get_sqlite_connect_args(str(settings.DATABASE_URI))
+
 # Create async engine for the database
-if use_nullpool:
-    logger.info("Using NullPool to prevent connection reuse across event loops")
+# Force NullPool for SQLite to prevent locking issues
+if str(settings.DATABASE_URI).startswith('sqlite') or use_nullpool:
+    logger.info("Using NullPool for SQLite to prevent database locking issues")
     engine = create_async_engine(
         str(settings.DATABASE_URI),
-        echo=False,  # Setting to False to disable SQL echoing to stdout
+        echo=False,  # Disable SQL logging for better performance
         future=True,
-        poolclass=NullPool,  # Disable connection pooling to prevent event loop conflicts
+        poolclass=NullPool,  # Disable connection pooling to prevent locking conflicts
+        # Set isolation level based on database type
+        isolation_level=isolation_level,
+        echo_pool=False,  # Disable pool logging for better performance
+        connect_args=connect_args,  # SQLite-specific connection arguments
     )
 else:
     # Use the default async pool (AsyncAdaptedQueuePool is automatically used)
     engine = create_async_engine(
         str(settings.DATABASE_URI),
-        echo=False,  # Setting to False to disable SQL echoing to stdout
+        echo=False,  # Disable SQL logging for better performance
         future=True,
         pool_pre_ping=True,
         pool_size=5,
         max_overflow=10,
+        # Set isolation level based on database type
+        isolation_level=isolation_level,
+        echo_pool=False,  # Disable pool logging for better performance
+        connect_args=connect_args,  # SQLite-specific connection arguments
     )
+
+# Configure SQLite for better concurrent access
+def configure_sqlite(dbapi_connection, connection_record):
+    """Configure SQLite connection for better performance and concurrency."""
+    if str(settings.DATABASE_URI).startswith('sqlite'):
+        try:
+            # Enable WAL mode for better concurrent access
+            dbapi_connection.execute("PRAGMA journal_mode=WAL")
+            # Set busy timeout - CRITICAL for handling locks
+            dbapi_connection.execute("PRAGMA busy_timeout=30000")
+            # Enable foreign keys
+            dbapi_connection.execute("PRAGMA foreign_keys=ON")
+            # Optimize for concurrent access
+            dbapi_connection.execute("PRAGMA synchronous=NORMAL")
+            dbapi_connection.execute("PRAGMA cache_size=10000")
+            dbapi_connection.execute("PRAGMA temp_store=memory")
+            # Additional concurrency settings
+            dbapi_connection.execute("PRAGMA wal_autocheckpoint=1000")
+            dbapi_connection.execute("PRAGMA wal_checkpoint_timeout=5000")
+            logger.info("SQLite connection configured with WAL mode and 30s timeout")
+        except Exception as e:
+            logger.error(f"Failed to configure SQLite connection: {e}")
+
+# Apply SQLite configuration to both engines
+if str(settings.DATABASE_URI).startswith('sqlite'):
+    # For async engine, we need to listen to the sync_engine property
+    event.listen(engine.sync_engine, "connect", configure_sqlite)
+    logger.info("Applied SQLite configuration event listener to async engine")
 
 # Create sync engine for backwards compatibility if needed
 # Since asyncpg is async-only and cannot be used for sync operations,
@@ -102,20 +215,38 @@ if str(settings.SYNC_DATABASE_URI).startswith("postgresql+asyncpg://"):
         sync_sqlite_uri,
         echo=False,
         future=True,
+        poolclass=NullPool,  # Use NullPool for SQLite
+        connect_args=connect_args,
     )
 else:
     # For other database configurations, use the configured sync URI
-    sync_engine = create_engine(
-        str(settings.SYNC_DATABASE_URI),
-        echo=False,
-        future=True,
-    )
+    # For SQLite sync operations, also use NullPool
+    if str(settings.SYNC_DATABASE_URI).startswith('sqlite'):
+        sync_engine = create_engine(
+            str(settings.SYNC_DATABASE_URI),
+            echo=False,
+            future=True,
+            poolclass=NullPool,  # Use NullPool for SQLite
+            connect_args=connect_args,
+        )
+    else:
+        sync_engine = create_engine(
+            str(settings.SYNC_DATABASE_URI),
+            echo=False,
+            future=True,
+            connect_args=connect_args,
+        )
+
+# Apply SQLite configuration to sync engine as well
+if str(settings.SYNC_DATABASE_URI).startswith('sqlite') or str(settings.SYNC_DATABASE_URI).startswith("postgresql+asyncpg://"):
+    event.listen(sync_engine, "connect", configure_sqlite)
+    logger.info("Applied SQLite configuration event listener to sync engine")
 
 # Create async session factory
 async_session_factory = async_sessionmaker(
     engine,
     expire_on_commit=False,
-    autoflush=False,
+    autoflush=True,  # Enable autoflush to ensure changes are flushed to DB before queries
 )
 
 # Create sync session factory for backward compatibility
@@ -258,7 +389,7 @@ async def init_db() -> None:
             # Use a fresh engine for initialization with settings optimized for table creation
             init_engine_opts = {
                 "isolation_level": "AUTOCOMMIT",  # Use AUTOCOMMIT for table creation
-                "echo": True,  # Enable detailed logging for debugging
+                "echo": False,  # Disable detailed logging for better performance
                 "future": True,
             }
             
@@ -321,20 +452,43 @@ async def init_db() -> None:
 
 async def get_db() -> AsyncGenerator[AsyncSession, None]:
     """
-    Dependency function that yields db sessions.
-    
+    Dependency function that yields db sessions with retry logic for SQLite locks.
+
     Yields:
         AsyncSession: SQLAlchemy async session
     """
-    async with async_session_factory() as session:
+    max_retries = 3
+    for attempt in range(max_retries):
         try:
-            yield session
-            await session.commit()
-        except Exception:
-            await session.rollback()
+            # async_session_factory is a sessionmaker, call it to get a session
+            # Using async with ensures proper cleanup
+            async with async_session_factory() as session:
+                try:
+                    yield session
+                    # Commit the transaction if no exception occurred
+                    await session.commit()
+                    return  # Success, exit retry loop
+                except OperationalError as e:
+                    # Rollback on any exception
+                    await session.rollback()
+                    if "database is locked" in str(e).lower() and attempt < max_retries - 1:
+                        wait_time = 0.1 * (2.0 ** attempt)
+                        logger.warning(f"Database locked in session, retrying in {wait_time:.2f}s (attempt {attempt + 1}/{max_retries})")
+                        await asyncio.sleep(wait_time)
+                        continue
+                    raise
+                except Exception:
+                    # Rollback on any exception
+                    await session.rollback()
+                    raise
+                # Session will auto-close when exiting the async context manager
+        except OperationalError as e:
+            if "database is locked" in str(e).lower() and attempt < max_retries - 1:
+                wait_time = 0.1 * (2.0 ** attempt)
+                logger.warning(f"Database locked creating session, retrying in {wait_time:.2f}s (attempt {attempt + 1}/{max_retries})")
+                await asyncio.sleep(wait_time)
+                continue
             raise
-        finally:
-            await session.close()
 
 # Keep the sync version for backward compatibility
 def get_sync_db() -> Generator[SessionLocal, None, None]:

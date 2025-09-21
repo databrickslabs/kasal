@@ -8,7 +8,7 @@ different LLM providers through litellm.
 import logging
 import os
 import json
-from typing import Dict, Any, List, Optional
+from typing import Dict, Any, List, Optional, Union
 import time
 
 from crewai import LLM
@@ -38,6 +38,10 @@ os.environ["LITELLM_LOG_FILE"] = log_file_path  # Configure LiteLLM to write log
 # Configure standard Python logger to also write to the llm.log file
 logger = logging.getLogger(__name__)
 logger.setLevel(logging.DEBUG)
+
+# Import LoggerManager for documentation embedding logger
+from src.core.logger import LoggerManager
+embedding_logger = LoggerManager.get_instance().documentation_embedding
 
 # Set drop_params to True to automatically drop unsupported parameters
 # This is especially useful for GPT-5 and other new models that may have different parameter support
@@ -267,15 +271,193 @@ litellm.modify_params = True  # This helps with Anthropic API compatibility
 litellm.num_retries = 5  # Global retries setting
 litellm.retry_on = ["429", "timeout", "rate_limit_error"]  # Retry on these error types
 
-# Add the file logger to litellm callbacks
-litellm.success_callback = [litellm_file_logger]
-litellm.failure_callback = [litellm_file_logger]
+# Configure MLflow integration for Databricks observability
+_mlflow_configured = False
+_use_mlflow = os.getenv("KASAL_USE_MLFLOW", "true").lower() in ("true", "1", "yes")
+
+def _configure_databricks_mlflow():
+    """Configure MLflow using existing Databricks authentication system"""
+    global _mlflow_configured
+
+    if _mlflow_configured or not _use_mlflow:
+        return
+
+    try:
+        import mlflow
+        from src.utils.databricks_auth import setup_environment_variables
+
+        # Use existing authentication system - this sets DATABRICKS_HOST and DATABRICKS_TOKEN
+        # using the same OBO/PAT logic as other Databricks services
+        if setup_environment_variables():
+            workspace_host = os.getenv("DATABRICKS_HOST", "")
+            if workspace_host:
+                # MLflow will automatically use DATABRICKS_HOST and DATABRICKS_TOKEN environment variables
+                tracking_uri = "databricks"  # Simple form - uses environment variables
+                mlflow.set_tracking_uri(tracking_uri)
+
+                # Set up experiment for LLM operations
+                experiment_name = os.getenv("MLFLOW_EXPERIMENT_NAME", "/Shared/kasal-llm-operations")
+                try:
+                    mlflow.set_experiment(experiment_name)
+                    logger.info(f"MLflow experiment set to: {experiment_name}")
+                except Exception as e:
+                    logger.warning(f"Could not set MLflow experiment '{experiment_name}': {e}")
+                    # Continue with default experiment
+
+                # Enable comprehensive MLflow autolog for both LiteLLM and CrewAI
+                # This dual approach ensures maximum coverage of LLM calls
+
+                # 1. Enable LiteLLM autolog (captures underlying LLM calls)
+                mlflow.litellm.autolog()
+                logger.info("✅ MLflow LiteLLM autolog enabled")
+
+                # 2. Enable CrewAI autolog (captures CrewAI workflow structure)
+                try:
+                    mlflow.crewai.autolog()
+                    logger.info("✅ MLflow CrewAI autolog enabled")
+                except AttributeError:
+                    logger.warning("⚠️ MLflow CrewAI autolog not available (older MLflow version or integration issues)")
+                except Exception as e:
+                    logger.warning(f"⚠️ Failed to enable CrewAI autolog: {e}")
+
+                # Note: CrewAI uses LiteLLM internally, so LiteLLM autolog should capture
+                # the underlying calls even when using CrewAI's LLM wrapper
+
+                _mlflow_configured = True
+                logger.info(f"Databricks MLflow configured successfully using existing authentication")
+
+            else:
+                logger.info("No Databricks workspace available for MLflow")
+        else:
+            logger.info("Databricks authentication not available for MLflow")
+
+    except ImportError:
+        logger.info("MLflow not available - install with 'pip install mlflow' for Databricks observability")
+    except Exception as e:
+        logger.warning(f"Failed to configure Databricks MLflow: {e}")
+
+# Attempt to configure MLflow on module initialization
+_configure_databricks_mlflow()
+
+# Configure litellm callbacks - use MLflow if available, otherwise file logger
+if _mlflow_configured and _use_mlflow:
+    # MLflow autolog will handle callbacks automatically
+    logger.info("Using MLflow for LLM observability")
+    # Still keep file logger as secondary logging
+    litellm.success_callback = [litellm_file_logger]
+    litellm.failure_callback = [litellm_file_logger]
+else:
+    # Use file logger as primary logging
+    litellm.success_callback = [litellm_file_logger]
+    litellm.failure_callback = [litellm_file_logger]
+    logger.info("Using file-based logging for LLM observability")
 
 # Configure logging
 logger.info(f"Configured LiteLLM to write logs to: {log_file_path}")
 
+# Enhanced LLM Wrapper for MLflow Integration
+class MLflowTrackedLLM:
+    """
+    Wrapper around CrewAI LLM that ensures all calls are tracked in MLflow.
+    This addresses the issue where CrewAI's LLM wrapper doesn't trigger MLflow autolog.
+    """
+
+    def __init__(self, llm_instance, model_name: str):
+        self.llm = llm_instance
+        self.model_name = model_name
+        self._ensure_mlflow_configured()
+
+    def _ensure_mlflow_configured(self):
+        """Ensure MLflow is configured when LLM is used"""
+        global _mlflow_configured
+        if not _mlflow_configured:
+            _configure_databricks_mlflow()
+
+    def _log_llm_call(self, method_name: str, input_data, output_data, duration: float):
+        """Manually log LLM call to MLflow if autolog didn't capture it"""
+        try:
+            import mlflow
+            import time
+
+            # Only log if we have an active MLflow session
+            if _mlflow_configured and _use_mlflow:
+                # Try to get the current run, or create one if needed
+                run = mlflow.active_run()
+                if not run:
+                    # Start a run for this LLM call
+                    mlflow.start_run(run_name=f"crewai_llm_{self.model_name}")
+                    run = mlflow.active_run()
+
+                if run:
+                    # Log the LLM call details
+                    mlflow.log_metric(f"llm_call_duration_{method_name}", duration)
+                    mlflow.log_param(f"llm_model", self.model_name)
+                    mlflow.log_param(f"llm_method", method_name)
+
+                    # Log input/output lengths for tracking
+                    if isinstance(input_data, str):
+                        mlflow.log_metric(f"input_length_{method_name}", len(input_data))
+                    if isinstance(output_data, str):
+                        mlflow.log_metric(f"output_length_{method_name}", len(output_data))
+                    elif hasattr(output_data, 'content'):
+                        mlflow.log_metric(f"output_length_{method_name}", len(str(output_data.content)))
+
+                    logger.info(f"✅ MLflow logged CrewAI LLM call: {method_name} for {self.model_name}")
+
+        except Exception as e:
+            logger.warning(f"Failed to log LLM call to MLflow: {e}")
+
+    def invoke(self, input_data, **kwargs):
+        """Tracked version of LLM invoke"""
+        import time
+        start_time = time.time()
+
+        try:
+            result = self.llm.invoke(input_data, **kwargs)
+            duration = time.time() - start_time
+            self._log_llm_call("invoke", input_data, result, duration)
+            return result
+        except Exception as e:
+            duration = time.time() - start_time
+            self._log_llm_call("invoke_error", input_data, str(e), duration)
+            raise
+
+    async def ainvoke(self, input_data, **kwargs):
+        """Tracked version of LLM ainvoke"""
+        import time
+        start_time = time.time()
+
+        try:
+            result = await self.llm.ainvoke(input_data, **kwargs)
+            duration = time.time() - start_time
+            self._log_llm_call("ainvoke", input_data, result, duration)
+            return result
+        except Exception as e:
+            duration = time.time() - start_time
+            self._log_llm_call("ainvoke_error", input_data, str(e), duration)
+            raise
+
+    def __call__(self, input_data, **kwargs):
+        """Tracked version of LLM __call__"""
+        import time
+        start_time = time.time()
+
+        try:
+            result = self.llm(input_data, **kwargs)
+            duration = time.time() - start_time
+            self._log_llm_call("call", input_data, result, duration)
+            return result
+        except Exception as e:
+            duration = time.time() - start_time
+            self._log_llm_call("call_error", input_data, str(e), duration)
+            raise
+
+    def __getattr__(self, name):
+        """Delegate all other attributes to the wrapped LLM"""
+        return getattr(self.llm, name)
+
 # Export functions for external use
-__all__ = ['LLMManager', 'DatabricksGPTOSSHandler', 'DatabricksGPTOSSLLM']
+__all__ = ['LLMManager', 'DatabricksGPTOSSHandler', 'DatabricksGPTOSSLLM', 'MLflowTrackedLLM']
 
 class LLMManager:
     """Manager for LLM configurations and interactions."""
@@ -301,8 +483,10 @@ class LLMManager:
             Exception: For other configuration errors
         """
         # Get model configuration from database using ModelConfigService
-        async with UnitOfWork() as uow:
-            model_config_service = await ModelConfigService.from_unit_of_work(uow)
+        from src.db.session import async_session_factory
+
+        async with async_session_factory() as session:
+            model_config_service = ModelConfigService(session)
             model_config_dict = await model_config_service.get_model_config(model)
             
         # Check if model configuration was found
@@ -403,9 +587,10 @@ class LLMManager:
                 model_params["api_base"] = os.getenv("DATABRICKS_ENDPOINT", "")
                 if not model_params["api_base"]:
                     from src.services.databricks_service import DatabricksService
+                    from src.db.session import async_session_factory
                     try:
-                        async with UnitOfWork() as uow:
-                            databricks_service = await DatabricksService.from_unit_of_work(uow)
+                        async with async_session_factory() as session:
+                            databricks_service = DatabricksService(session)
                             config = await databricks_service.get_databricks_config()
                             if config and config.workspace_url:
                                 workspace_url = config.workspace_url
@@ -472,8 +657,9 @@ class LLMManager:
             Exception: For other configuration errors
         """
         # Get model configuration using ModelConfigService
-        async with UnitOfWork() as uow:
-            model_config_service = await ModelConfigService.from_unit_of_work(uow)
+        from src.db.session import async_session_factory
+        async with async_session_factory() as session:
+            model_config_service = ModelConfigService(session)
             model_config_dict = await model_config_service.get_model_config(model_name)
         
         # Check if model configuration was found
@@ -542,8 +728,9 @@ class LLMManager:
                 if not api_base:
                     try:
                         from src.services.databricks_service import DatabricksService
-                        async with UnitOfWork() as uow:
-                            databricks_service = await DatabricksService.from_unit_of_work(uow)
+                        from src.db.session import async_session_factory
+                        async with async_session_factory() as session:
+                            databricks_service = DatabricksService(session)
                             config = await databricks_service.get_databricks_config()
                             if config and config.workspace_url:
                                 workspace_url = config.workspace_url
@@ -652,20 +839,25 @@ class LLMManager:
         return LLM(**llm_params)
 
     @staticmethod
-    async def get_llm(model_name: str, temperature: Optional[float] = None) -> LLM:
+    async def get_llm(model_name: str, temperature: Optional[float] = None) -> MLflowTrackedLLM:
         """
-        Create a CrewAI LLM instance for the specified model.
-        
+        Create a CrewAI LLM instance for the specified model with MLflow tracking.
+
         Args:
             model_name: The model identifier to configure
             temperature: Optional temperature override (0.0-1.0)
-            
+
         Returns:
-            LLM: CrewAI LLM instance
+            MLflowTrackedLLM: CrewAI LLM instance wrapped with MLflow tracking
         """
         # Get standard LLM configuration
         llm = await LLMManager.configure_crewai_llm(model_name, temperature)
-        return llm
+
+        # Wrap with MLflow tracking to ensure all calls are captured
+        tracked_llm = MLflowTrackedLLM(llm, model_name)
+        logger.info(f"🎯 Created MLflow-tracked LLM for model: {model_name}")
+
+        return tracked_llm
 
     @staticmethod
     async def get_embedding(text: str, model: str = "databricks-gte-large-en", embedder_config: Optional[Dict[str, Any]] = None) -> Optional[List[float]]:
@@ -701,14 +893,14 @@ class LLMManager:
                 # If circuit is open, check if it should be reset
                 if failure_count >= LLMManager._embedding_failure_threshold:
                     if current_time - last_failure_time < LLMManager._circuit_reset_time:
-                        logger.warning(f"Circuit breaker OPEN for {provider} embeddings. Failing fast.")
+                        embedding_logger.warning(f"Circuit breaker OPEN for {provider} embeddings. Failing fast.")
                         return None
                     else:
                         # Reset circuit after timeout
-                        logger.info(f"Resetting circuit breaker for {provider} embeddings")
+                        embedding_logger.info(f"Resetting circuit breaker for {provider} embeddings")
                         LLMManager._embedding_failures[provider] = {'count': 0, 'last_failure': 0}
             
-            logger.info(f"Creating embedding using provider: {provider}, model: {embedding_model}")
+            embedding_logger.info(f"Creating embedding using provider: {provider}, model: {embedding_model}")
             
             # Handle different embedding providers
             if provider == 'databricks' or 'databricks' in embedding_model:
@@ -717,10 +909,10 @@ class LLMManager:
                     from src.utils.databricks_auth import is_databricks_apps_environment, get_databricks_auth_headers
                     
                     # First try: OBO authentication if available
-                    logger.info("Attempting enhanced Databricks authentication for embeddings")
+                    embedding_logger.info("Attempting enhanced Databricks authentication for embeddings")
                     headers_result, error = await get_databricks_auth_headers()
                     if headers_result and not error:
-                        logger.info("Using enhanced Databricks authentication (OAuth/OBO) for embeddings")
+                        embedding_logger.info("Using enhanced Databricks authentication (OAuth/OBO) for embeddings")
                         headers = headers_result
                         api_key = None  # OAuth handled by headers
                     else:
@@ -728,14 +920,14 @@ class LLMManager:
                         # Second try: API key from service
                         api_key = await ApiKeysService.get_provider_api_key("DATABRICKS")
                         if api_key:
-                            logger.info("Using API key from service for embeddings")
+                            embedding_logger.info("Using API key from service for embeddings")
                             headers = None
                         else:
                             # Third try: Client credentials from environment
                             client_id = os.getenv("DATABRICKS_CLIENT_ID")
                             client_secret = os.getenv("DATABRICKS_CLIENT_SECRET")
                             if client_id and client_secret:
-                                logger.info("Using client credentials for embeddings")
+                                embedding_logger.info("Using client credentials for embeddings")
                                 # Let the enhanced auth handle client credentials
                                 headers_result, error = await get_databricks_auth_headers()
                                 if headers_result and not error:
@@ -745,7 +937,7 @@ class LLMManager:
                                     # Fourth try: Environment variable DATABRICKS_TOKEN
                                     api_key = os.getenv("DATABRICKS_TOKEN") or os.getenv("DATABRICKS_API_KEY")
                                     if api_key:
-                                        logger.info("Using DATABRICKS_TOKEN from environment for embeddings")
+                                        embedding_logger.info("Using DATABRICKS_TOKEN from environment for embeddings")
                                         headers = None
                                     else:
                                         logger.error("No Databricks authentication method available")
@@ -754,21 +946,21 @@ class LLMManager:
                                 # Fourth try: Environment variable DATABRICKS_TOKEN
                                 api_key = os.getenv("DATABRICKS_TOKEN") or os.getenv("DATABRICKS_API_KEY")
                                 if api_key:
-                                    logger.info("Using DATABRICKS_TOKEN from environment for embeddings")
+                                    embedding_logger.info("Using DATABRICKS_TOKEN from environment for embeddings")
                                     headers = None
                                 else:
                                     logger.error("No Databricks authentication method available")
                                     return None
                         
                 except ImportError:
-                    logger.warning("Enhanced Databricks auth not available for embeddings, using fallback methods")
+                    embedding_logger.warning("Enhanced Databricks auth not available for embeddings, using fallback methods")
                     # Try API key service first
                     api_key = await ApiKeysService.get_provider_api_key("DATABRICKS")
                     if not api_key:
                         # Fall back to environment variable
                         api_key = os.getenv("DATABRICKS_TOKEN") or os.getenv("DATABRICKS_API_KEY")
                         if api_key:
-                            logger.info("Using DATABRICKS_TOKEN from environment for embeddings (no enhanced auth)")
+                            embedding_logger.info("Using DATABRICKS_TOKEN from environment for embeddings (no enhanced auth)")
                     headers = None
                 
                 # Get workspace URL from environment first, then database
@@ -776,22 +968,23 @@ class LLMManager:
                 if workspace_url:
                     # Use centralized URL utility for consistent handling
                     api_base = DatabricksURLUtils.construct_serving_endpoints_url(workspace_url)
-                    logger.info(f"Using Databricks workspace URL from environment for embeddings: {workspace_url}")
+                    embedding_logger.info(f"Using Databricks workspace URL from environment for embeddings: {workspace_url}")
                 else:
                     # Fallback to database configuration
                     api_base = None
                     from src.services.databricks_service import DatabricksService
+                    from src.db.session import async_session_factory
                     try:
-                        async with UnitOfWork() as uow:
-                            databricks_service = await DatabricksService.from_unit_of_work(uow)
+                        async with async_session_factory() as session:
+                            databricks_service = DatabricksService(session)
                             config = await databricks_service.get_databricks_config()
                             if config and config.workspace_url:
                                 workspace_url = config.workspace_url
                                 # Use centralized URL utility for consistent handling
                                 api_base = DatabricksURLUtils.construct_serving_endpoints_url(workspace_url)
-                                logger.info(f"Using workspace URL from database for embeddings: {workspace_url}")
+                                embedding_logger.info(f"Using workspace URL from database for embeddings: {workspace_url}")
                     except Exception as e:
-                        logger.error(f"Error getting Databricks workspace URL for embeddings: {e}")
+                        embedding_logger.error(f"Error getting Databricks workspace URL for embeddings: {e}")
                 
                 # Check if we have either OAuth headers or API key + base URL
                 if not ((headers and api_base) or (api_key and api_base)):
@@ -833,18 +1026,18 @@ class LLMManager:
                                 # Databricks embedding API returns embeddings in 'data' field
                                 if 'data' in result and len(result['data']) > 0:
                                     embedding = result['data'][0].get('embedding', result['data'][0])
-                                    logger.info(f"Successfully created embedding with {len(embedding)} dimensions using direct Databricks API")
+                                    embedding_logger.info(f"Successfully created embedding with {len(embedding)} dimensions using direct Databricks API")
                                     return embedding
                                 else:
-                                    logger.warning("No embedding data found in Databricks response")
+                                    embedding_logger.warning("No embedding data found in Databricks response")
                                     return None
                             else:
                                 error_text = await response.text()
-                                logger.error(f"Databricks embedding API error {response.status}: {error_text}")
+                                embedding_logger.error(f"Databricks embedding API error {response.status}: {error_text}")
                                 return None
                                 
                 except Exception as e:
-                    logger.error(f"Error calling Databricks embedding API directly: {str(e)}")
+                    embedding_logger.error(f"Error calling Databricks embedding API directly: {str(e)}")
                     return None
                 
             elif provider == 'ollama':
@@ -866,7 +1059,7 @@ class LLMManager:
                 api_key = await ApiKeysService.get_provider_api_key(ModelProvider.GEMINI)
                 
                 if not api_key:
-                    logger.warning("No Google API key found for creating embeddings")
+                    embedding_logger.warning("No Google API key found for creating embeddings")
                     return None
                 
                 # Ensure model has gemini prefix for embeddings
@@ -884,7 +1077,7 @@ class LLMManager:
                 api_key = await ApiKeysService.get_provider_api_key(ModelProvider.OPENAI)
                 
                 if not api_key:
-                    logger.warning("No OpenAI API key found for creating embeddings")
+                    embedding_logger.warning("No OpenAI API key found for creating embeddings")
                     return None
                     
                 # Create the embedding using litellm
@@ -897,13 +1090,13 @@ class LLMManager:
             # Extract the embedding vector
             if response and "data" in response and len(response["data"]) > 0:
                 embedding = response["data"][0]["embedding"]
-                logger.info(f"Successfully created embedding with {len(embedding)} dimensions using {provider}")
+                embedding_logger.info(f"Successfully created embedding with {len(embedding)} dimensions using {provider}")
                 # Reset failure count on success
                 if provider in LLMManager._embedding_failures:
                     LLMManager._embedding_failures[provider] = {'count': 0, 'last_failure': 0}
                 return embedding
             else:
-                logger.warning("Failed to get embedding from response")
+                embedding_logger.warning("Failed to get embedding from response")
                 # Track failure
                 if provider not in LLMManager._embedding_failures:
                     LLMManager._embedding_failures[provider] = {'count': 0, 'last_failure': 0}
@@ -912,7 +1105,7 @@ class LLMManager:
                 return None
                 
         except Exception as e:
-            logger.error(f"Error creating embedding: {str(e)}")
+            embedding_logger.error(f"Error creating embedding: {str(e)}")
             # Track failure for circuit breaker
             if provider not in LLMManager._embedding_failures:
                 LLMManager._embedding_failures[provider] = {'count': 0, 'last_failure': 0}
@@ -922,6 +1115,6 @@ class LLMManager:
             # Log circuit breaker status
             failure_count = LLMManager._embedding_failures[provider]['count']
             if failure_count >= LLMManager._embedding_failure_threshold:
-                logger.error(f"Circuit breaker tripped for {provider} embeddings after {failure_count} failures")
+                embedding_logger.error(f"Circuit breaker tripped for {provider} embeddings after {failure_count} failures")
             
             return None

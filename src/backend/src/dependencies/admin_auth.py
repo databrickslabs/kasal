@@ -7,7 +7,6 @@ from fastapi import Depends, HTTPException, status, Header
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.core.dependencies import SessionDep, GroupContextDep
-from src.services.databricks_role_service import DatabricksRoleService
 from src.repositories.user_repository import UserRepository
 from src.models.user import User
 from src.models.enums import UserRole, UserStatus
@@ -27,60 +26,58 @@ async def _create_user_from_forwarded_email(session: AsyncSession, email: str) -
     Returns:
         Created User object or None
     """
-    from src.models.user import Role, UserRole as UserRoleAssignment, ExternalIdentity
     from sqlalchemy import select
     from datetime import datetime
-    import uuid
+    import re
     import logging
-    
+
     logger = logging.getLogger(__name__)
     is_local_dev = os.getenv("ENVIRONMENT", "development").lower() in ("development", "dev", "local")
-    
+
     try:
         # Check if user already exists
         result = await session.execute(
             select(User).filter(User.email == email)
         )
         existing_user = result.scalars().first()
-        
+
         if existing_user:
             logger.info(f"User {email} already exists from X-Forwarded-Email")
             # Update last login
             existing_user.last_login = datetime.utcnow()
             await session.commit()
             return existing_user
-        
+
         # Extract username from email and sanitize it
         base_username = email.split("@")[0]
         # Replace invalid characters with underscores (only allow letters, numbers, underscores, hyphens)
-        import re
         sanitized_username = re.sub(r'[^a-zA-Z0-9_-]', '_', base_username)
         username = sanitized_username
-        
+
         # Check if username already exists and make it unique
         result = await session.execute(
             select(User).filter(User.username == username)
         )
         existing_username = result.scalars().first()
-        
+
         if existing_username:
             # Create unique username by appending part of email domain
             domain_part = re.sub(r'[^a-zA-Z0-9_-]', '_', email.split("@")[1].split(".")[0])
             username = f"{sanitized_username}_{domain_part}"
             logger.info(f"Username {sanitized_username} exists, using {username}")
-        
+
         # Determine user role based on configuration
         default_role = UserRole.REGULAR  # Default for production
         if is_local_dev:
             # In development, check if this is a known admin email
             admin_emails = os.getenv("ADMIN_EMAILS", "").split(",")
             admin_patterns = ["admin@localhost", "admin@", "testadmin@"]
-            
-            if (email in admin_emails or 
+
+            if (email in admin_emails or
                 any(pattern in email for pattern in admin_patterns)):
                 default_role = UserRole.ADMIN
                 logger.info(f"Assigning admin role to {email} in development")
-        
+
         # Create user
         user = User(
             username=username,
@@ -89,51 +86,14 @@ async def _create_user_from_forwarded_email(session: AsyncSession, email: str) -
             role=default_role,
             status=UserStatus.ACTIVE
         )
-        
+
         session.add(user)
-        await session.flush()  # Get the user ID
-        logger.info(f"Created user {email} from X-Forwarded-Email with username {username}")
-        
-        # Create external identity to track source
-        external_identity = ExternalIdentity(
-            id=str(uuid.uuid4()),
-            user_id=user.id,
-            provider="x-forwarded-email",
-            provider_user_id=email,
-            email=email,
-            profile_data='{"source": "X-Forwarded-Email", "auto_created": true}',
-            created_at=datetime.utcnow(),
-            last_login=datetime.utcnow()
-        )
-        session.add(external_identity)
-        logger.info(f"Created external identity record for {email} with provider 'x-forwarded-email'")
-        
-        # If user should be admin, assign admin role via RBAC
-        if default_role == UserRole.ADMIN:
-            result = await session.execute(
-                select(Role).filter(Role.name == 'admin')
-            )
-            admin_role = result.scalars().first()
-            
-            if admin_role:
-                user_role_assignment = UserRoleAssignment(
-                    id=str(uuid.uuid4()),
-                    user_id=user.id,
-                    role_id=admin_role.id,
-                    assigned_at=datetime.utcnow(),
-                    assigned_by='auto_assignment_from_forwarded_email'
-                )
-                session.add(user_role_assignment)
-                logger.info(f"Assigned admin role to user {email} via RBAC")
-            else:
-                logger.warning("Admin role not found in RBAC system for auto-assignment")
-        
         await session.commit()
         await session.refresh(user)
-        
-        logger.info(f"Successfully created and configured user {email} from X-Forwarded-Email")
+
+        logger.info(f"Successfully created user {email} from X-Forwarded-Email with username {username}")
         return user
-        
+
     except Exception as e:
         await session.rollback()
         logger.error(f"Failed to create user from X-Forwarded-Email {email}: {e}")
@@ -148,20 +108,30 @@ async def get_current_user_from_email(
 ) -> Optional[User]:
     """
     Get the current user based on the X-Forwarded-Email header.
-    
+    Uses UserService to ensure first user admin setup logic is triggered.
+
     Args:
         session: Database session
         group_context: Group context containing user email
-        
+
     Returns:
         User object if found, None otherwise
     """
+    import logging
+    logger = logging.getLogger(__name__)
+    logger.info(f"[AUTH DEBUG] get_current_user_from_email called with email: {group_context.group_email if group_context.group_email else 'None'}")
+
     if not group_context.group_email:
+        logger.info("[AUTH DEBUG] No group email found in context")
         return None
-    
-    user_repository = UserRepository(User, session)
-    user = await user_repository.get_by_email(group_context.group_email)
-    
+
+    # Use UserService instead of UserRepository to trigger first user setup logic
+    from src.services.user_service import UserService
+    logger.info(f"[AUTH DEBUG] Creating UserService and calling get_or_create_user_by_email for {group_context.group_email}")
+    user_service = UserService(session)
+    user = await user_service.get_or_create_user_by_email(group_context.group_email)
+    logger.info(f"[AUTH DEBUG] get_or_create_user_by_email returned user: {user.email if user else 'None'}")
+
     return user
 
 
@@ -172,23 +142,29 @@ async def require_authenticated_user(
     """
     Dependency to ensure user is authenticated via X-Forwarded-Email header.
     Automatically creates users from X-Forwarded-Email if they don't exist.
-    
+
     Args:
         session: Database session
         group_context: Group context containing user email
-        
+
     Returns:
         User object
-        
+
     Raises:
         HTTPException: If user is not authenticated or not found
     """
+    import logging
+    logger = logging.getLogger(__name__)
+    logger.info(f"[AUTH DEBUG] require_authenticated_user called with email: {group_context.group_email if group_context.group_email else 'None'}")
+
     if not group_context.group_email:
+        logger.info("[AUTH DEBUG] No group email in require_authenticated_user - returning 401")
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Authentication required. X-Forwarded-Email header not found."
         )
-    
+
+    logger.info(f"[AUTH DEBUG] About to call get_current_user_from_email in require_authenticated_user")
     user = await get_current_user_from_email(session, group_context)
     
     if not user:
@@ -230,63 +206,52 @@ async def get_admin_user(
     group_context: GroupContextDep
 ) -> User:
     """
-    Dependency to ensure the current user has admin privileges using RBAC.
-    
+    Dependency to ensure the current user has admin privileges based on group roles.
+
     Args:
         session: Database session
-        group_context: Group context containing user email
-        
+        group_context: Group context containing user email and roles
+
     Returns:
         User object if user has admin privileges
-        
+
     Raises:
         HTTPException: If user doesn't have admin privileges
     """
     # First ensure user is authenticated
     user = await require_authenticated_user(session, group_context)
-    
-    # Check if user has admin role using RBAC
-    databricks_role_service = DatabricksRoleService(session)
-    has_admin_role = await databricks_role_service.check_user_admin_access(user.id)
-    
-    if not has_admin_role:
+
+    # Check user permissions using two-tier system:
+    # 1. System Admin (user-level) - has access to everything
+    # 2. Group Admin (group-level) - has access within their groups
+    has_admin_privileges = False
+
+    # First check: System Admin permission (user-level)
+    if user.is_system_admin:
+        has_admin_privileges = True
+    else:
+        # Second check: Group Admin role (group-level)
+        # Use highest_role if available (user has admin in ANY group)
+        # Otherwise check user_role for the current selected group
+        if hasattr(group_context, 'highest_role') and group_context.highest_role:
+            has_admin_privileges = group_context.highest_role.lower() == "admin"
+        elif group_context.user_role:
+            has_admin_privileges = group_context.user_role.lower() == "admin"
+
+    if not has_admin_privileges:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Insufficient privileges. Admin role required."
         )
-    
+
     return user
 
 
-async def get_admin_user_with_privileges(
-    session: SessionDep,
-    group_context: GroupContextDep
-) -> tuple[User, list[str]]:
-    """
-    Dependency to get the current admin user and their privileges.
-    
-    Args:
-        session: Database session
-        group_context: Group context containing user email
-        
-    Returns:
-        Tuple of (User object, list of privilege names)
-        
-    Raises:
-        HTTPException: If user doesn't have admin privileges
-    """
-    # First ensure user is authenticated and has admin role
-    user = await get_admin_user(session, group_context)
-    
-    # Get user's privileges
-    databricks_role_service = DatabricksRoleService(session)
-    privileges = await databricks_role_service.get_user_privileges(user.id)
-    
-    return user, privileges
+# Complex privilege system removed - using simplified decorator-based permissions
+# Admins are identified by role, permissions checked via @require_roles() decorators
 
 
 # Type aliases for dependency injection
 AuthenticatedUserDep = Annotated[User, Depends(require_authenticated_user)]
 GeneralUserDep = Annotated[User, Depends(get_authenticated_user)]  # General auth for any endpoint
 AdminUserDep = Annotated[User, Depends(get_admin_user)]
-AdminUserPrivilegesDep = Annotated[tuple[User, list[str]], Depends(get_admin_user_with_privileges)]

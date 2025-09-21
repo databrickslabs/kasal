@@ -30,14 +30,17 @@ from src.models.mcp_settings import MCPSettings
 from src.models.group import Group, GroupUser
 from src.models.chat_history import ChatHistory
 
-# User and RBAC models
-from src.models.user import User, UserProfile, RefreshToken, ExternalIdentity, Role, Privilege, RolePrivilege, UserRole, IdentityProvider
+# User models (simplified auth)
+from src.models.user import User, RefreshToken
 
 # Billing models
 from src.models.billing import LLMUsageBilling, BillingPeriod, BillingAlert
 
 # Documentation models
 from src.models.documentation_embedding import DocumentationEmbedding
+
+# Database configuration models
+from src.models.database_config import LakebaseConfig
 
 # Add additional models here as your application grows
 # from src.models.order import Order
@@ -73,20 +76,15 @@ __all__ = [
     "Group",
     "GroupUser",
     "ChatHistory",
-    # User and RBAC models
+    # User models (simplified auth)
     "User",
-    "UserProfile", 
     "RefreshToken",
-    "ExternalIdentity",
-    "Role",
-    "Privilege",
-    "RolePrivilege",
-    "UserRole",
-    "IdentityProvider",
     # Billing models
     "LLMUsageBilling",
     "BillingPeriod", 
     "BillingAlert",
     # Documentation models
-    "DocumentationEmbedding"
+    "DocumentationEmbedding",
+    # Database configuration models
+    "LakebaseConfig"
 ] 
