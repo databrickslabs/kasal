@@ -9,13 +9,31 @@ from typing import List, Dict, Annotated
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect, HTTPException, Query, Depends
 
 from src.core.logger import LoggerManager
-from src.services.execution_logs_service import execution_logs_service
+from src.services.execution_logs_service import ExecutionLogsService
 from src.schemas.execution_logs import ExecutionLogResponse, ExecutionLogsResponse
-from src.core.dependencies import GroupContextDep
+from src.core.dependencies import GroupContextDep, SessionDep
 from src.utils.user_context import GroupContext
 
 # Get logger from the centralized logging system
 logger = LoggerManager.get_instance().system
+
+async def get_execution_logs_service(session: SessionDep) -> ExecutionLogsService:
+    """
+    Dependency provider for ExecutionLogsService.
+
+    Creates service with properly injected session following the pattern:
+    Router → Service → Repository → DB
+
+    Args:
+        session: Database session from FastAPI DI
+
+    Returns:
+        ExecutionLogsService instance with injected session
+    """
+    return ExecutionLogsService(session)
+
+# Type alias for cleaner function signatures
+ExecutionLogsServiceDep = Annotated[ExecutionLogsService, Depends(get_execution_logs_service)]
 
 # Create router for WebSocket endpoints
 logs_router = APIRouter(
@@ -75,6 +93,7 @@ async def websocket_execution_logs(websocket: WebSocket, execution_id: str):
 @logs_router.get("/executions/{execution_id}", response_model=List[ExecutionLogResponse])
 async def get_execution_logs(
     execution_id: str,
+    service: ExecutionLogsServiceDep,
     group_context: GroupContextDep,
     limit: int = Query(1000, ge=1, le=10000),
     offset: int = Query(0, ge=0),
@@ -95,7 +114,7 @@ async def get_execution_logs(
         List of execution logs with their timestamps
     """
     try:
-        logs = await execution_logs_service.get_execution_logs_by_group(execution_id, group_context, limit, offset)
+        logs = await service.get_execution_logs_by_group(execution_id, group_context, limit, offset)
         return logs
     except Exception as e:
         logger.error(f"Error fetching execution logs: {e}")
@@ -104,6 +123,7 @@ async def get_execution_logs(
 @runs_router.get("/{run_id}/outputs", response_model=ExecutionLogsResponse)
 async def get_run_logs(
     run_id: str,
+    service: ExecutionLogsServiceDep,
     group_context: GroupContextDep,
     limit: int = Query(1000, ge=1, le=10000),
     offset: int = Query(0, ge=0),
@@ -124,7 +144,7 @@ async def get_run_logs(
         Dictionary with a list of run logs with their timestamps
     """
     try:
-        logs = await execution_logs_service.get_execution_logs_by_group(run_id, group_context, limit, offset)
+        logs = await service.get_execution_logs_by_group(run_id, group_context, limit, offset)
         return ExecutionLogsResponse(logs=logs)
     except Exception as e:
         logger.error(f"Error fetching run logs: {e}")
@@ -135,13 +155,14 @@ async def get_run_logs(
 @router.get("/{execution_id}", response_model=List[ExecutionLogResponse])
 async def get_execution_logs_main(
     execution_id: str,
+    service: ExecutionLogsServiceDep,
     group_context: GroupContextDep,
     limit: int = Query(1000, ge=1, le=10000),
     offset: int = Query(0, ge=0),
 ):
     """Get execution logs via main router."""
     try:
-        logs = await execution_logs_service.get_execution_logs_by_group(execution_id, group_context, limit, offset)
+        logs = await service.get_execution_logs_by_group(execution_id, group_context, limit, offset)
         return logs
     except Exception as e:
         logger.error(f"Error fetching execution logs: {e}")

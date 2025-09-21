@@ -10,7 +10,7 @@ from typing import Dict, Any
 
 from src.schemas.dispatcher import DispatcherRequest, DispatcherResponse
 from src.services.dispatcher_service import DispatcherService
-from src.core.dependencies import GroupContextDep
+from src.core.dependencies import GroupContextDep, SessionDep
 
 router = APIRouter(
     prefix="/dispatcher",
@@ -20,27 +20,29 @@ router = APIRouter(
 @router.post("/dispatch", response_model=Dict[str, Any])
 async def dispatch_request(
     request: DispatcherRequest,
-    group_context: GroupContextDep
+    group_context: GroupContextDep,
+    session: SessionDep
 ) -> Dict[str, Any]:
     """
     Dispatch a natural language request to the appropriate generation service.
-    
+
     Args:
         request: Dispatcher request with user message and options
         group_context: Group context from headers
-        
+        session: Database session from FastAPI DI
+
     Returns:
         Dictionary containing the intent detection result and generation response
     """
     try:
-        # Create service instance
-        dispatcher_service = DispatcherService.create()
-        
+        # Create service instance with injected session
+        dispatcher_service = DispatcherService.create(session)
+
         # Process request with tenant context
         result = await dispatcher_service.dispatch(request, group_context)
-        
+
         return result
-        
+
     except Exception as e:
         raise HTTPException(
             status_code=500,
@@ -51,26 +53,28 @@ async def dispatch_request(
 @router.post("/detect-intent", response_model=DispatcherResponse)
 async def detect_intent_only(
     request: DispatcherRequest,
-    group_context: GroupContextDep
+    group_context: GroupContextDep,
+    session: SessionDep
 ) -> DispatcherResponse:
     """
     Detect intent from a natural language message without executing generation.
-    
+
     This endpoint only performs intent detection without calling the generation services.
     Useful for previewing what action would be taken.
-    
+
     Args:
         request: The dispatcher request containing the user's message
-        
+        session: Database session from FastAPI DI
+
     Returns:
         DispatcherResponse with intent detection results
-        
+
     Raises:
         HTTPException: If there's an error in processing
     """
     try:
-        # Create service instance
-        dispatcher_service = DispatcherService.create()
+        # Create service instance with injected session
+        dispatcher_service = DispatcherService.create(session)
         
         # Only detect intent without dispatching
         intent_result = await dispatcher_service._detect_intent(request.message, request.model or "databricks-llama-4-maverick")

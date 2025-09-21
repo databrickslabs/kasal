@@ -4,7 +4,7 @@ from fastapi import APIRouter, Depends, HTTPException, status
 import logging
 
 from src.core.dependencies import SessionDep, GroupContextDep
-from src.core.unit_of_work import UnitOfWork
+from src.core.permissions import check_role_in_context
 from src.models.engine_config import EngineConfig
 from src.schemas.engine_config import (
     EngineConfigCreate,
@@ -27,14 +27,28 @@ router = APIRouter(
 logger = logging.getLogger(__name__)
 
 # Dependency to get EngineConfigService
-async def get_engine_config_service() -> EngineConfigService:
-    async with UnitOfWork() as uow:
-        return await EngineConfigService.from_unit_of_work(uow)
+def get_engine_config_service(session: SessionDep) -> EngineConfigService:
+    """
+    Dependency provider for EngineConfigService.
+
+    Creates service with session following the pattern:
+    Router → Service → Repository → DB
+
+    Args:
+        session: Database session from FastAPI DI (from core.dependencies)
+
+    Returns:
+        EngineConfigService instance with session
+    """
+    return EngineConfigService(session)
+
+# Type alias for cleaner function signatures
+EngineConfigServiceDep = Annotated[EngineConfigService, Depends(get_engine_config_service)]
 
 
 @router.get("", response_model=EngineConfigListResponse)
 async def get_engine_configs(
-    service: Annotated[EngineConfigService, Depends(get_engine_config_service)],
+    service: EngineConfigServiceDep,
     group_context: GroupContextDep,
 ):
     """
@@ -60,7 +74,7 @@ async def get_engine_configs(
 
 @router.get("/enabled", response_model=EngineConfigListResponse)
 async def get_enabled_engine_configs(
-    service: Annotated[EngineConfigService, Depends(get_engine_config_service)],
+    service: EngineConfigServiceDep,
     group_context: GroupContextDep,
 ):
     """
@@ -87,7 +101,7 @@ async def get_enabled_engine_configs(
 @router.get("/engine/{engine_name}", response_model=EngineConfigResponse)
 async def get_engine_config(
     engine_name: str,
-    service: Annotated[EngineConfigService, Depends(get_engine_config_service)],
+    service: EngineConfigServiceDep,
     group_context: GroupContextDep,
 ):
     """
@@ -126,7 +140,7 @@ async def get_engine_config(
 async def get_engine_config_by_key(
     engine_name: str,
     config_key: str,
-    service: Annotated[EngineConfigService, Depends(get_engine_config_service)],
+    service: EngineConfigServiceDep,
     group_context: GroupContextDep,
 ):
     """
@@ -165,7 +179,7 @@ async def get_engine_config_by_key(
 @router.get("/type/{engine_type}", response_model=EngineConfigListResponse)
 async def get_engine_configs_by_type(
     engine_type: str,
-    service: Annotated[EngineConfigService, Depends(get_engine_config_service)],
+    service: EngineConfigServiceDep,
     group_context: GroupContextDep,
 ):
     """
@@ -193,22 +207,30 @@ async def get_engine_configs_by_type(
 @router.post("", response_model=EngineConfigResponse, status_code=status.HTTP_201_CREATED)
 async def create_engine_config(
     config: EngineConfigCreate,
-    service: Annotated[EngineConfigService, Depends(get_engine_config_service)],
+    service: EngineConfigServiceDep,
     group_context: GroupContextDep,
 ):
     """
     Create a new engine configuration.
-    
+    Only Admins can create engine configurations.
+
     Args:
         config: Engine configuration data
         service: EngineConfig service injected by dependency
-        
+
     Returns:
         Created engine configuration
-        
+
     Raises:
         HTTPException: If engine configuration with the same name already exists
     """
+    # Check permissions - only admins can create engine configurations
+    if not check_role_in_context(group_context, ["admin"]):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Only admins can create engine configurations"
+        )
+
     try:
         logger.info(f"API call: POST /engine-config - Creating engine config {config.engine_name}")
         
@@ -232,23 +254,31 @@ async def create_engine_config(
 async def update_engine_config(
     engine_name: str,
     config: EngineConfigUpdate,
-    service: Annotated[EngineConfigService, Depends(get_engine_config_service)],
+    service: EngineConfigServiceDep,
     group_context: GroupContextDep,
 ):
     """
     Update an existing engine configuration.
-    
+    Only Admins can update engine configurations.
+
     Args:
         engine_name: Name of the engine configuration to update
         config: Updated engine configuration data
         service: EngineConfig service injected by dependency
-        
+
     Returns:
         Updated engine configuration
-        
+
     Raises:
         HTTPException: If engine configuration not found
     """
+    # Check permissions - only admins can update engine configurations
+    if not check_role_in_context(group_context, ["admin"]):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Only admins can update engine configurations"
+        )
+
     try:
         logger.info(f"API call: PUT /engine-config/engine/{engine_name}")
         
@@ -273,23 +303,31 @@ async def update_engine_config(
 async def toggle_engine_config(
     engine_name: str,
     toggle_data: EngineConfigToggleUpdate,
-    service: Annotated[EngineConfigService, Depends(get_engine_config_service)],
+    service: EngineConfigServiceDep,
     group_context: GroupContextDep,
 ):
     """
     Toggle the enabled status of an engine configuration.
-    
+    Only Admins can toggle engine configurations.
+
     Args:
         engine_name: Name of the engine configuration to toggle
         toggle_data: Toggle data containing new enabled status
         service: EngineConfig service injected by dependency
-        
+
     Returns:
         Updated engine configuration
-        
+
     Raises:
         HTTPException: If engine configuration not found
     """
+    # Check permissions - only admins can toggle engine configurations
+    if not check_role_in_context(group_context, ["admin"]):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Only admins can toggle engine configurations"
+        )
+
     try:
         logger.info(f"API call: PATCH /engine-config/engine/{engine_name}/toggle - enabled={toggle_data.enabled}")
         
@@ -315,24 +353,32 @@ async def update_config_value(
     engine_name: str,
     config_key: str,
     value_data: EngineConfigValueUpdate,
-    service: Annotated[EngineConfigService, Depends(get_engine_config_service)],
+    service: EngineConfigServiceDep,
     group_context: GroupContextDep,
 ):
     """
     Update the configuration value for a specific engine and key.
-    
+    Only Admins can update engine configuration values.
+
     Args:
         engine_name: Name of the engine
         config_key: Configuration key
         value_data: New configuration value
         service: EngineConfig service injected by dependency
-        
+
     Returns:
         Updated engine configuration
-        
+
     Raises:
         HTTPException: If engine configuration not found
     """
+    # Check permissions - only admins can update engine configuration values
+    if not check_role_in_context(group_context, ["admin"]):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Only admins can update engine configuration values"
+        )
+
     try:
         logger.info(f"API call: PATCH /engine-config/engine/{engine_name}/config/{config_key}/value")
         
@@ -355,7 +401,7 @@ async def update_config_value(
 
 @router.get("/crewai/flow-enabled")
 async def get_crewai_flow_enabled(
-    service: Annotated[EngineConfigService, Depends(get_engine_config_service)],
+    service: EngineConfigServiceDep,
     group_context: GroupContextDep,
 ):
     """
@@ -382,7 +428,7 @@ async def get_crewai_flow_enabled(
 @router.patch("/crewai/flow-enabled")
 async def set_crewai_flow_enabled(
     config_data: CrewAIFlowConfigUpdate,
-    service: Annotated[EngineConfigService, Depends(get_engine_config_service)],
+    service: EngineConfigServiceDep,
     group_context: GroupContextDep,
 ):
     """
@@ -417,19 +463,27 @@ async def set_crewai_flow_enabled(
 @router.delete("/engine/{engine_name}", status_code=status.HTTP_204_NO_CONTENT)
 async def delete_engine_config(
     engine_name: str,
-    service: Annotated[EngineConfigService, Depends(get_engine_config_service)],
+    service: EngineConfigServiceDep,
     group_context: GroupContextDep,
 ):
     """
     Delete an engine configuration.
-    
+    Only Admins can delete engine configurations.
+
     Args:
         engine_name: Name of the engine configuration to delete
         service: EngineConfig service injected by dependency
-        
+
     Raises:
         HTTPException: If engine configuration not found
     """
+    # Check permissions - only admins can delete engine configurations
+    if not check_role_in_context(group_context, ["admin"]):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Only admins can delete engine configurations"
+        )
+
     try:
         logger.info(f"API call: DELETE /engine-config/engine/{engine_name}")
         

@@ -7,14 +7,34 @@ with proper validation and error handling.
 
 import logging
 import json
-from fastapi import APIRouter, HTTPException
-from src.core.dependencies import GroupContextDep
+from typing import Annotated
+from fastapi import APIRouter, HTTPException, Depends
+from src.core.dependencies import SessionDep, GroupContextDep
 
 from src.schemas.template_generation import TemplateGenerationRequest, TemplateGenerationResponse
 from src.services.template_generation_service import TemplateGenerationService
 
 # Configure logging
 logger = logging.getLogger(__name__)
+
+# Dependency to get TemplateGenerationService
+def get_template_generation_service(session: SessionDep) -> TemplateGenerationService:
+    """
+    Dependency provider for TemplateGenerationService.
+
+    Creates service with session following the pattern:
+    Router → Service → Repository → DB
+
+    Args:
+        session: Database session from FastAPI DI (from core.dependencies)
+
+    Returns:
+        TemplateGenerationService instance with session
+    """
+    return TemplateGenerationService(session)
+
+# Type alias for cleaner function signatures
+TemplateGenerationServiceDep = Annotated[TemplateGenerationService, Depends(get_template_generation_service)]
 
 # Create router
 router = APIRouter(
@@ -26,6 +46,7 @@ router = APIRouter(
 @router.post("/generate-templates", response_model=TemplateGenerationResponse)
 async def generate_templates(
     request: TemplateGenerationRequest,
+    service: TemplateGenerationServiceDep,
     group_context: GroupContextDep = None
 ):
     """
@@ -35,12 +56,9 @@ async def generate_templates(
     tailored to the agent's specifications using an LLM.
     """
     try:
-        # Create service using factory method
-        template_generation_service = TemplateGenerationService.create()
-        
         # Generate templates
         logger.info(f"Generating templates for agent role: {request.role}")
-        templates_response = await template_generation_service.generate_templates(request)
+        templates_response = await service.generate_templates(request)
         
         logger.info(f"Successfully generated templates for agent role: {request.role}")
         return templates_response

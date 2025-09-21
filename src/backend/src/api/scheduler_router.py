@@ -5,10 +5,9 @@ from fastapi import APIRouter, Depends, HTTPException, BackgroundTasks, status, 
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.schemas.schedule import ScheduleCreate, ScheduleCreateFromExecution, ScheduleUpdate, ScheduleResponse, ScheduleListResponse, ToggleResponse
-from src.db.session import get_db
 from src.services.scheduler_service import SchedulerService
 from src.utils.user_context import GroupContext
-from src.core.dependencies import GroupContextDep
+from src.core.dependencies import GroupContextDep, SessionDep
 from src.schemas.scheduler import (
     SchedulerJobSchema,
     SchedulerJobCreate,
@@ -26,15 +25,29 @@ router = APIRouter(
 # Set up logger
 logger = logging.getLogger(__name__)
 
-# Create service dependency
-async def get_scheduler_service(db: AsyncSession = Depends(get_db)) -> SchedulerService:
-    return SchedulerService(db)
+async def get_scheduler_service(session: SessionDep) -> SchedulerService:
+    """
+    Dependency provider for SchedulerService.
+
+    Creates service with properly injected session following the pattern:
+    Router → Service → Repository → DB
+
+    Args:
+        session: Database session from FastAPI DI
+
+    Returns:
+        SchedulerService instance with injected dependencies
+    """
+    return SchedulerService(session)
+
+# Type alias for cleaner function signatures
+SchedulerServiceDep = Annotated[SchedulerService, Depends(get_scheduler_service)]
 
 
 @router.post("", response_model=ScheduleResponse, status_code=status.HTTP_201_CREATED)
 async def create_schedule(
     schedule: ScheduleCreate,
-    service: Annotated[SchedulerService, Depends(get_scheduler_service)],
+    service: SchedulerServiceDep,
     group_context: GroupContextDep
 ) -> ScheduleResponse:
     """
@@ -61,7 +74,7 @@ async def create_schedule(
 @router.post("/from-execution", response_model=ScheduleResponse, status_code=status.HTTP_201_CREATED)
 async def create_schedule_from_execution(
     schedule: ScheduleCreateFromExecution,
-    service: Annotated[SchedulerService, Depends(get_scheduler_service)],
+    service: SchedulerServiceDep,
     group_context: GroupContextDep
 ) -> ScheduleResponse:
     """
@@ -88,7 +101,7 @@ async def create_schedule_from_execution(
 
 @router.get("", response_model=List[ScheduleResponse])
 async def list_schedules(
-    service: Annotated[SchedulerService, Depends(get_scheduler_service)],
+    service: SchedulerServiceDep,
     group_context: GroupContextDep
 ) -> List[ScheduleResponse]:
     """
@@ -106,7 +119,7 @@ async def list_schedules(
 @router.get("/{schedule_id}", response_model=ScheduleResponse)
 async def get_schedule(
     schedule_id: Annotated[int, Path(title="The ID of the schedule to get")],
-    service: Annotated[SchedulerService, Depends(get_scheduler_service)],
+    service: SchedulerServiceDep,
     group_context: GroupContextDep
 ) -> ScheduleResponse:
     """
@@ -132,7 +145,7 @@ async def get_schedule(
 async def update_schedule(
     schedule_id: Annotated[int, Path(title="The ID of the schedule to update")],
     schedule_update: ScheduleUpdate,
-    service: Annotated[SchedulerService, Depends(get_scheduler_service)],
+    service: SchedulerServiceDep,
     group_context: GroupContextDep
 ) -> ScheduleResponse:
     """
@@ -158,7 +171,7 @@ async def update_schedule(
 @router.delete("/{schedule_id}", status_code=status.HTTP_200_OK)
 async def delete_schedule(
     schedule_id: Annotated[int, Path(title="The ID of the schedule to delete")],
-    service: Annotated[SchedulerService, Depends(get_scheduler_service)],
+    service: SchedulerServiceDep,
     group_context: GroupContextDep
 ) -> Dict[str, str]:
     """
@@ -183,7 +196,7 @@ async def delete_schedule(
 @router.post("/{schedule_id}/toggle", response_model=ToggleResponse)
 async def toggle_schedule(
     schedule_id: Annotated[int, Path(title="The ID of the schedule to toggle")],
-    service: Annotated[SchedulerService, Depends(get_scheduler_service)],
+    service: SchedulerServiceDep,
     group_context: GroupContextDep
 ) -> ToggleResponse:
     """
@@ -211,7 +224,7 @@ async def toggle_schedule(
 
 @router.get("/jobs", response_model=List[SchedulerJobResponse])
 async def get_all_jobs(
-    service: Annotated[SchedulerService, Depends(get_scheduler_service)],
+    service: SchedulerServiceDep,
     group_context: GroupContextDep
 ) -> List[SchedulerJobResponse]:
     """
@@ -233,7 +246,7 @@ async def get_all_jobs(
 @router.post("/jobs", response_model=SchedulerJobResponse)
 async def create_job(
     job: SchedulerJobCreate,
-    service: Annotated[SchedulerService, Depends(get_scheduler_service)],
+    service: SchedulerServiceDep,
     group_context: GroupContextDep
 ) -> SchedulerJobResponse:
     """
@@ -259,7 +272,7 @@ async def create_job(
 async def update_job(
     job_id: int,
     job: SchedulerJobUpdate,
-    service: Annotated[SchedulerService, Depends(get_scheduler_service)],
+    service: SchedulerServiceDep,
     group_context: GroupContextDep
 ) -> SchedulerJobResponse:
     """
