@@ -13,6 +13,7 @@ from src.utils.model_config import get_model_config
 from src.core.logger import LoggerManager
 from src.services.api_keys_service import ApiKeysService
 from src.repositories.model_config_repository import ModelConfigRepository
+from sqlalchemy.ext.asyncio import AsyncSession
 from src.models.model_config import ModelConfig
 from src.utils.user_context import GroupContext
 
@@ -21,27 +22,15 @@ logger = LoggerManager.get_instance().crew
 class ModelConfigService:
     """Service for model configuration operations."""
     
-    def __init__(self, repository: ModelConfigRepository):
+    def __init__(self, session: AsyncSession):
         """
-        Initialize the service with repository.
-        
+        Initialize the service with session.
+
         Args:
-            repository: ModelConfigRepository instance
+            session: Database session
         """
-        self.repository = repository
+        self.repository = ModelConfigRepository(session)
     
-    @classmethod
-    async def from_unit_of_work(cls, uow):
-        """
-        Create a service instance from a UnitOfWork.
-        
-        Args:
-            uow: UnitOfWork instance
-            
-        Returns:
-            ModelConfigService: Service instance using the UnitOfWork's repository
-        """
-        return cls(repository=uow.model_config_repository)
     
     async def find_all(self) -> List[ModelConfig]:
         """

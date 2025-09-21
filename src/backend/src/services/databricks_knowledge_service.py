@@ -19,6 +19,7 @@ except ImportError:
     WorkspaceClient = None
     FileInfo = None
 
+from sqlalchemy.ext.asyncio import AsyncSession
 from src.repositories.databricks_config_repository import DatabricksConfigRepository
 
 logger = logging.getLogger(__name__)
@@ -26,17 +27,18 @@ logger = logging.getLogger(__name__)
 
 class DatabricksKnowledgeService:
     """Service for managing knowledge files in Databricks Volumes."""
-    
-    def __init__(self, databricks_repository: DatabricksConfigRepository, group_id: str, created_by_email: Optional[str] = None):
+
+    def __init__(self, session: AsyncSession, group_id: str, created_by_email: Optional[str] = None):
         """
         Initialize the Databricks Knowledge Service.
-        
+
         Args:
-            databricks_repository: Repository for database operations
+            session: Database session
             group_id: Group ID for tenant isolation
             created_by_email: Email of the user
         """
-        self.repository = databricks_repository
+        self.session = session
+        self.repository = DatabricksConfigRepository(session)
         self.group_id = group_id
         self.created_by_email = created_by_email
     
@@ -46,46 +48,43 @@ class DatabricksKnowledgeService:
         execution_id: str,
         group_id: str,
         volume_config: Dict[str, Any],
+        agent_ids: Optional[List[str]] = None,
         user_token: Optional[str] = None
     ) -> Dict[str, Any]:
-        print("🔥 DEBUG: upload_knowledge_file method called!")
-        print(f"🔥 DEBUG: file={file.filename}, execution_id={execution_id}, group_id={group_id}")
-
-        import logging
-        system_logger = logging.getLogger("SYSTEM")
-        system_logger.info(f"🔥 DEBUG: upload_knowledge_file called for {file.filename}")
-
         """
         Upload a file to Databricks Volume for knowledge source.
-        
+
         Args:
             file: The uploaded file
             execution_id: Execution ID for scoping
             group_id: Group ID for tenant isolation
             volume_config: Volume configuration
+            agent_ids: Optional list of agent IDs that can access this knowledge source
             user_token: Optional user token for OBO authentication
-            
+
         Returns:
             Upload response with file path and metadata
         """
         import base64
         import aiohttp
-        
-        print("🔥 DEBUG: upload_knowledge_file method called!")
-        print(f"🔥 DEBUG: file={file.filename}, execution_id={execution_id}, group_id={group_id}")
-        # Also write to system log to track execution
-        import logging
-        system_logger = logging.getLogger("SYSTEM") 
-        system_logger.info(f"🔥 DEBUG: upload_knowledge_file called for {file.filename}")
-        system_logger.info(f"🔥 DEBUG: execution_id={execution_id}, group_id={group_id}")
+
         logger.info("="*60)
         logger.info("STARTING KNOWLEDGE FILE UPLOAD")
+
+        # CRITICAL DEBUG: Log what agent_ids we receive in the service
+        logger.info(f"[SERVICE] 🔍 AGENT_IDS RECEIVED: {agent_ids} (type: {type(agent_ids)}, length: {len(agent_ids) if agent_ids else 0})")
+
+        if agent_ids:
+            logger.info(f"[SERVICE] ✅ Agent IDs detected: {agent_ids}")
+        else:
+            logger.warning(f"[SERVICE] ⚠️ No agent_ids provided - this will result in null agent_ids in vector index!")
+
         logger.info(f"File: {file.filename}")
         logger.info(f"Execution ID: {execution_id}")
         logger.info(f"Group ID: {group_id}")
         logger.info(f"Volume Config: {volume_config}")
         logger.info("="*60)
-        
+
         try:
             # Get Databricks configuration
             config = await self.repository.get_active_config(group_id=group_id)
@@ -104,14 +103,14 @@ class DatabricksKnowledgeService:
                 logger.info(f"Found Databricks config - workspace_url: {config.workspace_url}")
                 logger.info(f"Found Databricks config - volume_enabled: {config.knowledge_volume_enabled}")
                 logger.info(f"Found Databricks config - volume_path: {config.knowledge_volume_path}")
-            
+
             # Construct volume path
             volume_path = volume_config.get('volume_path', 'main.default.knowledge')
             if hasattr(config, 'knowledge_volume_path') and config.knowledge_volume_path:
                 volume_path = config.knowledge_volume_path
-            
+
             logger.info(f"Using volume path: {volume_path}")
-            
+
             # Parse volume path (format: catalog.schema.volume)
             parts = volume_path.split('.')
             if len(parts) != 3:
@@ -121,13 +120,13 @@ class DatabricksKnowledgeService:
             else:
                 catalog, schema, volume = parts
                 logger.info(f"Parsed volume path - Catalog: {catalog}, Schema: {schema}, Volume: {volume}")
-            
+
             # Create date directory if configured
             date_dir = ""
             if volume_config.get('create_date_dirs', True):
                 date_dir = datetime.now().strftime('%Y-%m-%d')
                 logger.info(f"Creating date directory: {date_dir}")
-            
+
             # Construct full path - ensure it starts with /Volumes
             # Don't add 'knowledge' subdirectory since the volume itself is already 'knowledge'
             file_path = f"/Volumes/{catalog}/{schema}/{volume}/{group_id}/{execution_id}"
@@ -135,24 +134,24 @@ class DatabricksKnowledgeService:
                 file_path = f"{file_path}/{date_dir}"
             file_path = f"{file_path}/{file.filename}"
             file_path = file_path.replace('//', '/')  # Clean up double slashes
-            
+
             logger.info("="*60)
             logger.info(f"FULL UPLOAD PATH: {file_path}")
             logger.info("="*60)
-            
+
             # Read file content
             content = await file.read()
             file_size = len(content)
             logger.info(f"File size: {file_size} bytes ({file_size/1024:.2f} KB)")
-            
+
             # Get workspace URL first (needed for authentication)
             workspace_url = getattr(config, 'workspace_url', os.getenv('DATABRICKS_HOST'))
             logger.info(f"Workspace URL: {workspace_url}")
-            
+
             # Get Databricks token using proper authentication hierarchy
             # Use DatabricksAuthHelper to get token following proper hierarchy
             from src.repositories.databricks_auth_helper import DatabricksAuthHelper
-            
+
             try:
                 # This will try:
                 # 1. OBO with user token (if provided)
@@ -165,11 +164,11 @@ class DatabricksKnowledgeService:
                 logger.info("Successfully obtained Databricks authentication token")
             except Exception as auth_error:
                 logger.warning(f"Primary auth failed: {auth_error}")
-                
+
                 # Fallback: Try OAuth with client credentials if available
                 client_id = os.getenv('DATABRICKS_CLIENT_ID')
                 client_secret = os.getenv('DATABRICKS_CLIENT_SECRET')
-                
+
                 if client_id and client_secret:
                     logger.info("Attempting OAuth authentication with client credentials")
                     try:
@@ -193,16 +192,21 @@ class DatabricksKnowledgeService:
                 else:
                     logger.debug("No OAuth credentials available")
                     token = None
-            
+
             if token:
                 logger.info("Databricks token found (length: %d)", len(token))
             else:
                 logger.warning("No Databricks token found - will simulate upload")
-            
+
+            # Track upload success and method used
+            upload_successful = False
+            upload_method = "none"
+            selected_agents = volume_config.get('selected_agents', [])
+
             # If we have a token and workspace URL, try actual upload
-            
             if token and workspace_url and workspace_url != 'https://example.databricks.com':
                 logger.info("Attempting REAL upload to Databricks")
+
                 try:
                     # Try using Databricks SDK if available
                     if WorkspaceClient:
@@ -211,227 +215,157 @@ class DatabricksKnowledgeService:
                             host=workspace_url,
                             token=token
                         )
-                        
+
                         # Upload using SDK - same as DatabricksVolumeCallback
                         try:
                             logger.info(f"Calling workspace_client.files.upload()")
                             logger.info(f"  - file_path: {file_path}")
                             logger.info(f"  - content size: {len(content)} bytes")
                             logger.info(f"  - overwrite: True")
-                            
+
                             workspace_client.files.upload(
                                 file_path=file_path,
                                 contents=content,
                                 overwrite=True
                             )
-                            
+
                             logger.info("="*60)
                             logger.info("SUCCESS! File uploaded via SDK to Databricks")
                             logger.info(f"File location: {file_path}")
                             logger.info("You should see this file in your Databricks workspace at:")
                             logger.info(f"  {workspace_url}/browse/files{file_path}")
                             logger.info("="*60)
-                            
-                            # Extract selected agents from volume config
-                            selected_agents = volume_config.get('selected_agents', [])
-                            logger.info(f"Selected agents for knowledge access: {selected_agents}")
 
-                            # IMMEDIATE EMBEDDING: Process and embed the uploaded file right away (SDK path)
-                            logger.info(f"[UPLOAD] About to start immediate embedding for file: {file_path}")
-                            logger.info(f"[UPLOAD] Embedding params - execution_id: {execution_id}, group_id: {group_id}")
+                            upload_successful = True
+                            upload_method = "sdk"
 
-                            try:
-                                embedding_result = await self._embed_uploaded_file(
-                                    file_path=file_path,
-                                    execution_id=execution_id,
-                                    group_id=group_id,
-                                    user_token=user_token
-                                )
-                            except Exception as embed_error:
-                                logger.error(f"[UPLOAD] EMBEDDING FAILED: {embed_error}", exc_info=True)
-                                embedding_result = {"status": "error", "message": f"Embedding failed: {embed_error}"}
-
-                            logger.info(f"[UPLOAD] Immediate embedding completed with result: {embedding_result}")
-
-                            return {
-                                "status": "success",
-                                "path": file_path,
-                                "filename": file.filename,
-                                "size": file_size,
-                                "execution_id": execution_id,
-                                "group_id": group_id,
-                                "uploaded_at": datetime.now().isoformat(),
-                                "selected_agents": selected_agents,
-                                "embedding_result": embedding_result,  # Add embedding status to SDK path too
-                                "volume_info": {
-                                    "catalog": catalog,
-                                    "schema": schema,
-                                    "volume": volume,
-                                    "full_path": file_path
-                                },
-                                "message": f"File {file.filename} uploaded successfully to Databricks Volume"
-                            }
                         except Exception as sdk_error:
                             logger.error(f"SDK upload failed: {sdk_error}")
                             logger.info("Falling back to DBFS API method")
-                            # Fall through to DBFS API method
                     else:
                         logger.warning("Databricks SDK not available, using DBFS API")
-                    
-                    # Fallback: Use DBFS API (same as DatabricksVolumeCallback fallback)
-                    logger.info("Attempting upload via DBFS API")
-                    async with aiohttp.ClientSession() as session:
-                        # Convert content to base64
-                        content_b64 = base64.b64encode(content).decode('utf-8')
-                        logger.info(f"Encoded content to base64 (length: {len(content_b64)})")
-                        
-                        headers = {
-                            "Authorization": f"Bearer {token}",
-                            "Content-Type": "application/json"
-                        }
-                        
-                        # Step 1: Create file handle
-                        create_url = f"{workspace_url}/api/2.0/fs/files/create"
-                        create_data = {
-                            "path": file_path,
-                            "overwrite": True
-                        }
-                        
-                        logger.info(f"Step 1: Creating file handle at {create_url}")
-                        logger.info(f"  Request data: {create_data}")
-                        
-                        async with session.put(create_url, json=create_data, headers=headers) as response:
-                            if response.status != 200:
-                                error_text = await response.text()
-                                logger.error(f"Failed to create file handle: Status {response.status}")
-                                logger.error(f"Error response: {error_text}")
-                                raise Exception(f"Failed to create file: {error_text}")
-                            
-                            result = await response.json()
-                            handle = result.get("handle")
-                            logger.info(f"File handle created successfully: {handle}")
-                        
-                        # Step 2: Add content block
-                        add_block_url = f"{workspace_url}/api/2.0/fs/files/add-block"
-                        upload_data = {
-                            "handle": handle,
-                            "data": content_b64
-                        }
-                        
-                        logger.info(f"Step 2: Uploading content to {add_block_url}")
-                        logger.info(f"  Handle: {handle}")
-                        
-                        async with session.post(add_block_url, json=upload_data, headers=headers) as response:
-                            if response.status != 200:
-                                error_text = await response.text()
-                                logger.error(f"Failed to upload content: Status {response.status}")
-                                logger.error(f"Error response: {error_text}")
-                                raise Exception(f"Failed to upload content: {error_text}")
-                        
-                        logger.info("Content uploaded successfully")
-                        
-                        # Step 3: Close file
-                        close_url = f"{workspace_url}/api/2.0/fs/files/close"
-                        close_data = {"handle": handle}
-                        
-                        logger.info(f"Step 3: Closing file at {close_url}")
-                        
-                        async with session.post(close_url, json=close_data, headers=headers) as response:
-                            if response.status != 200:
-                                error_text = await response.text()
-                                logger.error(f"Failed to close file: Status {response.status}")
-                                logger.error(f"Error response: {error_text}")
-                                raise Exception(f"Failed to close file: {error_text}")
-                        
-                        logger.info("="*60)
-                        logger.info("SUCCESS! File uploaded via DBFS API to Databricks")
-                        logger.info(f"File location: {file_path}")
-                        logger.info("You should see this file in your Databricks workspace at:")
-                        logger.info(f"  {workspace_url}/browse/files{file_path}")
-                        logger.info("="*60)
-                        
-                        # Extract selected agents from volume config
-                        selected_agents = volume_config.get('selected_agents', [])
-                        logger.info(f"Selected agents for knowledge access: {selected_agents}")
-                        
-                        # IMMEDIATE EMBEDDING: Process and embed the uploaded file right away
-                        logger.info(f"[UPLOAD] About to start immediate embedding for file: {file_path}")
-                        logger.info(f"[UPLOAD] Embedding params - execution_id: {execution_id}, group_id: {group_id}")
 
-                        try:
-                            embedding_result = await self._embed_uploaded_file(
-                                file_path=file_path,
-                                execution_id=execution_id,
-                                group_id=group_id,
-                                user_token=user_token
-                            )
-                        except Exception as embed_error:
-                            logger.error(f"[UPLOAD] EMBEDDING FAILED: {embed_error}", exc_info=True)
-                            embedding_result = {"status": "error", "message": f"Embedding failed: {embed_error}"}
+                    # Fallback: Use DBFS API if SDK failed or not available
+                    if not upload_successful:
+                        logger.info("Attempting upload via DBFS API")
+                        async with aiohttp.ClientSession() as session:
+                            # Convert content to base64
+                            content_b64 = base64.b64encode(content).decode('utf-8')
+                            logger.info(f"Encoded content to base64 (length: {len(content_b64)})")
 
-                        logger.info(f"[UPLOAD] Immediate embedding completed with result: {embedding_result}")
+                            headers = {
+                                "Authorization": f"Bearer {token}",
+                                "Content-Type": "application/json"
+                            }
 
-                        return {
-                            "status": "success",
-                            "path": file_path,
-                            "filename": file.filename,
-                            "size": file_size,
-                            "execution_id": execution_id,
-                            "group_id": group_id,
-                            "uploaded_at": datetime.now().isoformat(),
-                            "selected_agents": selected_agents,
-                            "embedding_result": embedding_result,  # Add embedding status
-                            "volume_info": {
-                                "catalog": catalog,
-                                "schema": schema,
-                                "volume": volume,
-                                "full_path": file_path
-                            },
-                            "message": f"File {file.filename} uploaded successfully to Databricks Volume"
-                        }
-                        
+                            # Step 1: Create file handle
+                            create_url = f"{workspace_url}/api/2.0/fs/files/create"
+                            create_data = {
+                                "path": file_path,
+                                "overwrite": True
+                            }
+
+                            logger.info(f"Step 1: Creating file handle at {create_url}")
+                            logger.info(f"  Request data: {create_data}")
+
+                            async with session.put(create_url, json=create_data, headers=headers) as response:
+                                if response.status != 200:
+                                    error_text = await response.text()
+                                    logger.error(f"Failed to create file handle: Status {response.status}")
+                                    logger.error(f"Error response: {error_text}")
+                                    raise Exception(f"Failed to create file: {error_text}")
+
+                                result = await response.json()
+                                handle = result.get("handle")
+                                logger.info(f"File handle created successfully: {handle}")
+
+                            # Step 2: Add content block
+                            add_block_url = f"{workspace_url}/api/2.0/fs/files/add-block"
+                            upload_data = {
+                                "handle": handle,
+                                "data": content_b64
+                            }
+
+                            logger.info(f"Step 2: Uploading content to {add_block_url}")
+                            logger.info(f"  Handle: {handle}")
+
+                            async with session.post(add_block_url, json=upload_data, headers=headers) as response:
+                                if response.status != 200:
+                                    error_text = await response.text()
+                                    logger.error(f"Failed to upload content: Status {response.status}")
+                                    logger.error(f"Error response: {error_text}")
+                                    raise Exception(f"Failed to upload content: {error_text}")
+
+                            logger.info("Content uploaded successfully")
+
+                            # Step 3: Close file
+                            close_url = f"{workspace_url}/api/2.0/fs/files/close"
+                            close_data = {"handle": handle}
+
+                            logger.info(f"Step 3: Closing file at {close_url}")
+
+                            async with session.post(close_url, json=close_data, headers=headers) as response:
+                                if response.status != 200:
+                                    error_text = await response.text()
+                                    logger.error(f"Failed to close file: Status {response.status}")
+                                    logger.error(f"Error response: {error_text}")
+                                    raise Exception(f"Failed to close file: {error_text}")
+
+                            logger.info("="*60)
+                            logger.info("SUCCESS! File uploaded via DBFS API to Databricks")
+                            logger.info(f"File location: {file_path}")
+                            logger.info("You should see this file in your Databricks workspace at:")
+                            logger.info(f"  {workspace_url}/browse/files{file_path}")
+                            logger.info("="*60)
+
+                            upload_successful = True
+                            upload_method = "dbfs_api"
+
                 except Exception as e:
                     logger.error(f"Failed to upload to Databricks: {e}", exc_info=True)
                     logger.warning("Falling back to simulation mode")
-            else:
+
+            # Set simulation mode if upload not successful
+            if not upload_successful:
                 logger.warning("Missing credentials or using example URL - will simulate upload")
                 logger.warning(f"  Token available: {bool(token)}")
                 logger.warning(f"  Workspace URL: {workspace_url}")
                 logger.warning(f"  Is example URL: {workspace_url == 'https://example.databricks.com'}")
-            
-            # Fallback: Simulate successful upload if actual upload fails or not configured
-            logger.info("="*60)
-            logger.info("SIMULATED UPLOAD (not actually uploaded to Databricks)")
-            logger.info(f"Would upload to: {file_path}")
-            logger.info(f"File: {file.filename}, Size: {file_size} bytes")
-            logger.info("To enable REAL uploads:")
-            logger.info("  1. Set DATABRICKS_TOKEN environment variable")
-            logger.info("  2. Set DATABRICKS_HOST environment variable")
-            logger.info("  3. Or configure in Databricks settings page")
-            logger.info("="*60)
-            
-            # Extract selected agents from volume config
-            selected_agents = volume_config.get('selected_agents', [])
+
+                logger.info("="*60)
+                logger.info("SIMULATED UPLOAD (not actually uploaded to Databricks)")
+                logger.info(f"Would upload to: {file_path}")
+                logger.info(f"File: {file.filename}, Size: {file_size} bytes")
+                logger.info("To enable REAL uploads:")
+                logger.info("  1. Set DATABRICKS_TOKEN environment variable")
+                logger.info("  2. Set DATABRICKS_HOST environment variable")
+                logger.info("  3. Or configure in Databricks settings page")
+                logger.info("="*60)
+
+                upload_method = "simulated"
+
             logger.info(f"Selected agents for knowledge access: {selected_agents}")
-            
-            # IMMEDIATE EMBEDDING: Even for simulated uploads, try to embed if Vector Search is configured
-            logger.info(f"[SIMULATED UPLOAD] About to start immediate embedding for file: {file_path}")
-            logger.info(f"[SIMULATED UPLOAD] Embedding params - execution_id: {execution_id}, group_id: {group_id}")
+
+            # SINGLE EMBEDDING EXECUTION: Process and embed the uploaded file once, regardless of upload method
+            logger.info(f"[UPLOAD] Starting single embedding for file: {file_path}")
+            logger.info(f"[UPLOAD] Upload method: {upload_method}")
+            logger.info(f"[UPLOAD] Embedding params - execution_id: {execution_id}, group_id: {group_id}")
 
             try:
                 embedding_result = await self._embed_uploaded_file(
                     file_path=file_path,
                     execution_id=execution_id,
                     group_id=group_id,
+                    agent_ids=agent_ids,
                     user_token=user_token
                 )
             except Exception as embed_error:
-                logger.error(f"[SIMULATED UPLOAD] EMBEDDING FAILED: {embed_error}", exc_info=True)
+                logger.error(f"[UPLOAD] EMBEDDING FAILED: {embed_error}", exc_info=True)
                 embedding_result = {"status": "error", "message": f"Embedding failed: {embed_error}"}
 
-            logger.info(f"[SIMULATED UPLOAD] Immediate embedding completed with result: {embedding_result}")
+            logger.info(f"[UPLOAD] Single embedding completed with result: {embedding_result}")
 
-            # Return success response (simulated)
+            # Return unified response regardless of upload method
             response = {
                 "status": "success",
                 "path": file_path,
@@ -440,21 +374,22 @@ class DatabricksKnowledgeService:
                 "execution_id": execution_id,
                 "group_id": group_id,
                 "uploaded_at": datetime.now().isoformat(),
-                "embedding_result": embedding_result,  # Add embedding status for simulated uploads too
                 "selected_agents": selected_agents,
+                "embedding_result": embedding_result,
+                "upload_method": upload_method,
                 "volume_info": {
                     "catalog": catalog,
                     "schema": schema,
                     "volume": volume,
                     "full_path": file_path
                 },
-                "message": f"File {file.filename} uploaded successfully (simulated)",
-                "simulated": True
+                "message": f"File {file.filename} uploaded successfully via {upload_method}",
+                "simulated": not upload_successful
             }
-            
-            logger.info(f"Returning response: {response}")
+
+            logger.info(f"Returning unified response: {response}")
             return response
-            
+
         except Exception as e:
             logger.error("="*60)
             logger.error(f"ERROR in upload_knowledge_file: {str(e)}")
@@ -1116,6 +1051,7 @@ class DatabricksKnowledgeService:
         file_path: str,
         execution_id: str,
         group_id: str,
+        agent_ids: Optional[List[str]] = None,
         user_token: Optional[str] = None
     ) -> Dict[str, Any]:
         """
@@ -1125,6 +1061,7 @@ class DatabricksKnowledgeService:
             file_path: Full path to the file in Databricks Volume
             execution_id: Execution ID for scoping
             group_id: Group ID for multi-tenant filtering
+            agent_ids: Optional list of agent IDs that can access this knowledge source
             user_token: Optional user token for OBO authentication
 
         Returns:
@@ -1133,6 +1070,14 @@ class DatabricksKnowledgeService:
         try:
             print(f"🔥 DEBUG: _embed_uploaded_file called for {file_path}")
             logger.info(f"[EMBEDDING] Starting immediate embedding for file: {file_path}")
+
+            # CRITICAL DEBUG: Log the agent_ids parameter we received
+            logger.info(f"[EMBEDDING] 🔍 AGENT_IDS RECEIVED IN EMBED FUNCTION: {agent_ids}")
+            logger.info(f"[EMBEDDING] 🔍 Agent IDs type: {type(agent_ids)}, length: {len(agent_ids) if agent_ids else 0}")
+            if agent_ids:
+                logger.info(f"[EMBEDDING] ✅ Agent IDs detected in embedding: {agent_ids}")
+            else:
+                logger.warning(f"[EMBEDDING] ⚠️ NO AGENT_IDS in embedding function - this is the problem!")
 
             # 1. Read file content (simulate if file doesn't exist locally)
             print(f"🔥 DEBUG: About to call _read_file_content for {file_path}")
@@ -1176,12 +1121,26 @@ class DatabricksKnowledgeService:
                         'file_path': file_path,
                         'filename': file_path.split('/')[-1],
                         'created_at': datetime.utcnow().isoformat(),
+                        'type': 'knowledge_source',  # IMPORTANT: Sets document_type to "knowledge_source" for crew execution compatibility
                         'content_type': 'knowledge_file'
                     }
 
                     # Generate embedding for the chunk (vector storage will handle this)
+                    # Convert agent_ids to JSON string for storage (same as crew knowledge source)
+                    import json
+                    agent_ids_json = json.dumps(agent_ids) if agent_ids else json.dumps([])
+                    logger.info(f"[EMBEDDING] Chunk {i}: agent_ids={agent_ids}, json={agent_ids_json}")
+
+                    # CRITICAL DEBUG: Show what we're passing to vector storage
+                    logger.info(f"[EMBEDDING] 🔍 CHUNK {i} DATA BEING SENT TO VECTOR STORAGE:")
+                    logger.info(f"[EMBEDDING]   - agent_ids: {agent_ids}")
+                    logger.info(f"[EMBEDDING]   - agent_ids_json: {agent_ids_json}")
+                    logger.info(f"[EMBEDDING]   - group_id: {group_id}")
+
                     data = {
                         'content': chunk,
+                        'agent_ids': agent_ids_json,  # JSON array of agent IDs for access control
+                        'group_id': group_id,  # Top-level field for document schema
                         'metadata': metadata,
                         'context': {
                             'query_text': f"Knowledge file: {file_path.split('/')[-1]}",
@@ -1372,3 +1331,193 @@ class DatabricksKnowledgeService:
         except Exception as e:
             logger.error(f"[VECTOR_STORAGE] Error creating vector storage: {e}", exc_info=True)
             return None
+
+    async def search_knowledge(
+        self,
+        query: str,
+        group_id: str,
+        execution_id: Optional[str] = None,
+        file_paths: Optional[List[str]] = None,
+        limit: int = 5,
+        user_token: Optional[str] = None
+    ) -> List[Dict[str, Any]]:
+        """
+        Search for knowledge in the Databricks Vector Index.
+
+        This is an engine-agnostic method that can be used by any AI engine.
+
+        Args:
+            query: The search query
+            group_id: Group ID for tenant isolation
+            execution_id: Optional execution ID for scoping
+            file_paths: Optional list of file paths to filter search
+            limit: Maximum number of results to return
+            user_token: Optional user token for OBO authentication
+
+        Returns:
+            List of search results with content and metadata
+        """
+        logger.info("="*60)
+        logger.info("[SEARCH DEBUG] KNOWLEDGE SEARCH STARTED")
+        logger.info(f"[SEARCH DEBUG] Query: '{query}'")
+        logger.info(f"[SEARCH DEBUG] Group ID: '{group_id}'")
+        logger.info(f"[SEARCH DEBUG] Execution ID: '{execution_id}'")
+        logger.info(f"[SEARCH DEBUG] File paths filter: {file_paths}")
+        logger.info(f"[SEARCH DEBUG] Limit: {limit}")
+        logger.info(f"[SEARCH DEBUG] User token provided: {bool(user_token)}")
+        logger.info("="*60)
+
+        try:
+            # Get Databricks configuration
+            logger.info("[SEARCH DEBUG] Getting Databricks configuration...")
+            config = await self.repository.get_active_config(group_id=group_id)
+            if not config:
+                logger.warning("[SEARCH DEBUG] No Databricks config found, returning empty results")
+                return []
+
+            logger.info(f"[SEARCH DEBUG] Config found:")
+            logger.info(f"  - workspace_url: {getattr(config, 'workspace_url', 'NOT SET')}")
+            logger.info(f"  - document_index: {getattr(config, 'document_index', 'NOT SET')}")
+            logger.info(f"  - knowledge_volume_enabled: {getattr(config, 'knowledge_volume_enabled', 'NOT SET')}")
+            logger.info(f"  - knowledge_volume_path: {getattr(config, 'knowledge_volume_path', 'NOT SET')}")
+
+            # Use the document index for knowledge search
+            document_index = getattr(config, 'document_index', None)
+            if not document_index:
+                logger.error("[SEARCH DEBUG] No document index configured in Databricks config!")
+                logger.error("[SEARCH DEBUG] Please configure a document index in Databricks settings")
+                return []
+
+            logger.info(f"[SEARCH DEBUG] Using document index: '{document_index}'")
+
+            # Import here to avoid circular dependencies
+            from src.repositories.databricks_vector_index_repository import DatabricksVectorIndexRepository
+            from src.schemas.databricks_schemas import DatabricksIndexSchemas
+
+            # Get the schema for document memory type
+            logger.info("[SEARCH DEBUG] Getting schema for document memory type...")
+            schema_fields = DatabricksIndexSchemas.get_schema("document")
+            search_columns = DatabricksIndexSchemas.get_search_columns("document")
+            logger.info(f"[SEARCH DEBUG] Schema fields: {list(schema_fields.keys())}")
+            logger.info(f"[SEARCH DEBUG] Search columns: {search_columns}")
+
+            # Create the repository
+            logger.info("[SEARCH DEBUG] Creating DatabricksVectorIndexRepository...")
+            index_repo = DatabricksVectorIndexRepository(
+                index_name=document_index,
+                memory_type="document",
+                user_token=user_token
+            )
+            logger.info("[SEARCH DEBUG] Repository created successfully")
+
+            # Build filters based on group_id and optional parameters
+            logger.info("[SEARCH DEBUG] Building search filters...")
+            filters = {
+                "group_id": group_id
+            }
+            logger.info(f"[SEARCH DEBUG] Base filter - group_id: '{group_id}'")
+
+            # NOTE: Execution ID filtering is optional for knowledge search
+            # We typically want to search across ALL documents for a group, not just current execution
+            if execution_id:
+                logger.info(f"[SEARCH DEBUG] execution_id provided: '{execution_id}'")
+                logger.info("[SEARCH DEBUG] Note: This will filter to ONLY documents from this specific execution")
+                logger.info("[SEARCH DEBUG] To search all knowledge documents, don't pass execution_id")
+                filters["execution_id"] = execution_id
+            else:
+                logger.info("[SEARCH DEBUG] ✅ No execution_id filter - searching across ALL documents for this group")
+
+            if file_paths:
+                logger.info(f"[SEARCH DEBUG] Adding file_paths filter: {file_paths}")
+                filters["source"] = {"$in": file_paths}
+            else:
+                logger.info("[SEARCH DEBUG] No file_paths filter - will search all documents")
+
+            logger.info(f"[SEARCH DEBUG] Final search filters: {filters}")
+
+            # Perform the search
+            logger.info("[SEARCH DEBUG] Calling similarity_search with:")
+            logger.info(f"  - query_text: '{query}'")
+            logger.info(f"  - columns: {search_columns}")
+            logger.info(f"  - filters: {filters}")
+            logger.info(f"  - num_results: {limit}")
+
+            try:
+                search_results = await index_repo.similarity_search(
+                    query_text=query,
+                    columns=search_columns,
+                    filters=filters,
+                    num_results=limit
+                )
+                logger.info(f"[SEARCH DEBUG] ✅ Search completed, got {len(search_results) if search_results else 0} results")
+            except Exception as search_error:
+                logger.error(f"[SEARCH DEBUG] ❌ Search failed with error: {search_error}", exc_info=True)
+                return []
+
+            if not search_results:
+                logger.warning("[SEARCH DEBUG] ⚠️ No results found!")
+                logger.warning("[SEARCH DEBUG] Possible reasons:")
+                logger.warning("  1. ❌ Execution ID mismatch (most likely!)")
+                logger.warning("  2. Group ID doesn't match documents")
+                logger.warning("  3. Documents not properly indexed")
+                logger.warning("  4. Vector index is empty or not accessible")
+                logger.warning("[SEARCH DEBUG] 💡 TIP: Remove execution_id filter from the tool call!")
+                return []
+
+            # Get column positions for parsing results
+            positions = DatabricksIndexSchemas.get_column_positions("document")
+            logger.info(f"[SEARCH DEBUG] Column positions: {positions}")
+
+            # Format results for return
+            formatted_results = []
+            logger.info(f"[SEARCH DEBUG] Formatting {len(search_results)} results...")
+
+            for idx, result in enumerate(search_results):
+                try:
+                    logger.info(f"[SEARCH DEBUG] Processing result {idx + 1}:")
+                    logger.info(f"  - Raw result type: {type(result)}")
+                    logger.info(f"  - Raw result length: {len(result) if hasattr(result, '__len__') else 'N/A'}")
+
+                    # Parse result based on schema positions
+                    content = result[positions['content']] if 'content' in positions else ""
+                    source = result[positions['source']] if 'source' in positions else ""
+                    title = result[positions['title']] if 'title' in positions else ""
+                    chunk_index = result[positions['chunk_index']] if 'chunk_index' in positions else 0
+
+                    logger.info(f"  - Content preview: {content[:100]}..." if content else "  - No content")
+                    logger.info(f"  - Source: {source}")
+                    logger.info(f"  - Title: {title}")
+
+                    # Get similarity score if available
+                    score = result[-1] if len(result) > len(positions) else 0.0
+
+                    formatted_result = {
+                        "content": content,
+                        "metadata": {
+                            "source": source,
+                            "title": title,
+                            "chunk_index": chunk_index,
+                            "score": score,
+                            "group_id": group_id,
+                            "execution_id": execution_id
+                        }
+                    }
+
+                    formatted_results.append(formatted_result)
+
+                    # Log the result for debugging
+                    logger.info(f"[SEARCH DEBUG] Result {len(formatted_results)}:")
+                    logger.info(f"  - Source: {source}")
+                    logger.info(f"  - Score: {score:.4f}")
+                    logger.info(f"  - Content preview: {content[:200]}..." if content else "  - No content")
+
+                except Exception as e:
+                    logger.error(f"Error formatting result: {e}")
+                    continue
+
+            logger.info(f"Returning {len(formatted_results)} formatted results")
+            return formatted_results
+
+        except Exception as e:
+            logger.error(f"Error searching knowledge: {e}", exc_info=True)
+            return []

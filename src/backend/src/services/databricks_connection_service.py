@@ -11,7 +11,6 @@ from src.repositories.databricks_auth_helper import DatabricksAuthHelper
 from src.repositories.databricks_vector_endpoint_repository import DatabricksVectorEndpointRepository
 from src.repositories.databricks_vector_index_repository import DatabricksVectorIndexRepository
 from src.core.logger import LoggerManager
-from src.core.unit_of_work import UnitOfWork
 
 logger = LoggerManager.get_instance().system
 
@@ -19,14 +18,14 @@ logger = LoggerManager.get_instance().system
 class DatabricksConnectionService:
     """Service for managing Databricks connections and authentication."""
     
-    def __init__(self, uow: UnitOfWork = None):
+    def __init__(self, session: Any = None):
         """
         Initialize the service.
-        
+
         Args:
-            uow: Unit of Work instance (optional for connection testing)
+            session: Database session from dependency injection (optional for connection testing)
         """
-        self.uow = uow
+        self.session = session
     
     async def test_databricks_connection(
         self,

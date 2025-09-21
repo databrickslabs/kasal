@@ -4,20 +4,23 @@ import traceback
 import uuid
 from datetime import datetime
 
+from sqlalchemy.ext.asyncio import AsyncSession
+
 from src.models.documentation_embedding import DocumentationEmbedding
 from src.schemas.documentation_embedding import DocumentationEmbeddingCreate
 from src.schemas.memory_backend import MemoryBackendType
 from src.core.logger import LoggerManager
+from src.repositories.memory_backend_repository import MemoryBackendRepository
 
 # Configure logging
-logger = LoggerManager.get_instance().system
+logger = LoggerManager.get_instance().documentation_embedding
 
 class DocumentationEmbeddingService:
     """Service for handling documentation embedding operations."""
-    
-    def __init__(self, uow=None):
-        """Initialize service with optional unit of work."""
-        self.uow = uow
+
+    def __init__(self, session: Optional[AsyncSession] = None):
+        """Initialize service with optional database session."""
+        self.session = session
         self._databricks_storage = None
         self._memory_config = None
         self._checked_config = False
@@ -32,15 +35,18 @@ class DocumentationEmbeddingService:
         
         try:
             # Documentation is global, so find ANY active Databricks configuration
-            from src.core.unit_of_work import UnitOfWork
             from src.schemas.memory_backend import MemoryBackendConfig
-            
-            # Use the injected unit of work or create a new one
-            if self.uow:
-                all_backends = await self.uow.memory_backend_repository.get_all()
+            from src.models.memory_backend import MemoryBackend
+
+            # Use the injected session or get a new one
+            if self.session:
+                repository = MemoryBackendRepository(self.session)
+                all_backends = await repository.get_all()
             else:
-                async with UnitOfWork() as uow:
-                    all_backends = await uow.memory_backend_repository.get_all()
+                from src.db.session import async_session_factory
+                async with async_session_factory() as session:
+                    repository = MemoryBackendRepository(session)
+                    all_backends = await repository.get_all()
             
             # Filter active Databricks backends and sort by created_at descending
             databricks_backends = [
@@ -198,18 +204,27 @@ class DocumentationEmbeddingService:
             return None
     
     async def create_documentation_embedding(
-        self, 
+        self,
         doc_embedding: DocumentationEmbeddingCreate,
         user_token: Optional[str] = None
     ) -> DocumentationEmbedding:
         """Create a new documentation embedding.
-        
+
         Args:
             doc_embedding: The documentation embedding to create
             user_token: Optional user access token for OBO authentication
         """
         # Check if we should use Databricks
         databricks_storage = await self._get_databricks_storage(user_token=user_token)
+
+        # Determine if we're in local development mode (SQLite or local PostgreSQL)
+        import os
+        database_type = os.getenv("DATABASE_TYPE", "postgres").lower()
+        is_local_dev = (
+            database_type == "sqlite" or
+            (database_type == "postgres" and os.getenv("POSTGRES_SERVER", "localhost") == "localhost")
+        )
+
         if databricks_storage:
             try:
                 # Create a unique ID for the document
@@ -288,13 +303,33 @@ class DocumentationEmbeddingService:
                 logger.error(f"Traceback: {traceback.format_exc()}")
                 # Re-raise the exception for other errors
                 raise
-        
-        # Use traditional database storage through repository only if Databricks is not configured
-        if not self.uow:
-            raise ValueError("UnitOfWork is required for database operations")
-        
+
+        # Only use database storage in local development (SQLite or local PostgreSQL)
+        # Skip database storage entirely when:
+        # 1. Databricks/Lakebase is configured (even if it failed above)
+        # 2. Production PostgreSQL is being used
+        if not is_local_dev:
+            # In production or with Databricks configured, don't store in database
+            logger.info("Skipping database storage (not in local development mode)")
+            # Return a placeholder object to indicate the operation was handled
+            return DocumentationEmbedding(
+                id="skip-db-" + str(uuid.uuid4()),
+                source=doc_embedding.source,
+                title=doc_embedding.title,
+                content=doc_embedding.content,
+                doc_metadata=doc_embedding.doc_metadata or {},
+                embedding=doc_embedding.embedding,
+                created_at=datetime.utcnow(),
+                updated_at=datetime.utcnow()
+            )
+
+        # Use traditional database storage through repository only in local development
+        if not self.session:
+            raise ValueError("Session is required for database operations")
+
         # Create the embedding in the database
-        repository = self.uow.documentation_embedding_repository
+        from src.repositories.documentation_embedding_repository import DocumentationEmbeddingRepository
+        repository = DocumentationEmbeddingRepository(self.session)
         return await repository.create(doc_embedding)
     
     async def get_documentation_embedding(
@@ -302,9 +337,10 @@ class DocumentationEmbeddingService:
         embedding_id: int
     ) -> Optional[DocumentationEmbedding]:
         """Get a specific documentation embedding by ID."""
-        if not self.uow:
-            raise ValueError("UnitOfWork is required for database operations")
-        repository = self.uow.documentation_embedding_repository
+        if not self.session:
+            raise ValueError("Session is required for database operations")
+        from src.repositories.documentation_embedding_repository import DocumentationEmbeddingRepository
+        repository = DocumentationEmbeddingRepository(self.session)
         return await repository.get_by_id(embedding_id)
     
     async def get_documentation_embeddings(
@@ -313,9 +349,10 @@ class DocumentationEmbeddingService:
         limit: int = 100
     ) -> List[DocumentationEmbedding]:
         """Get a list of documentation embeddings with pagination."""
-        if not self.uow:
-            raise ValueError("UnitOfWork is required for database operations")
-        repository = self.uow.documentation_embedding_repository
+        if not self.session:
+            raise ValueError("Session is required for database operations")
+        from src.repositories.documentation_embedding_repository import DocumentationEmbeddingRepository
+        repository = DocumentationEmbeddingRepository(self.session)
         return await repository.get_all(skip, limit)
     
     async def update_documentation_embedding(
@@ -324,9 +361,10 @@ class DocumentationEmbeddingService:
         update_data: Dict[str, Any]
     ) -> Optional[DocumentationEmbedding]:
         """Update a documentation embedding by ID."""
-        if not self.uow:
-            raise ValueError("UnitOfWork is required for database operations")
-        repository = self.uow.documentation_embedding_repository
+        if not self.session:
+            raise ValueError("Session is required for database operations")
+        from src.repositories.documentation_embedding_repository import DocumentationEmbeddingRepository
+        repository = DocumentationEmbeddingRepository(self.session)
         return await repository.update(embedding_id, update_data)
     
     async def delete_documentation_embedding(
@@ -334,9 +372,10 @@ class DocumentationEmbeddingService:
         embedding_id: int
     ) -> bool:
         """Delete a documentation embedding by ID."""
-        if not self.uow:
-            raise ValueError("UnitOfWork is required for database operations")
-        repository = self.uow.documentation_embedding_repository
+        if not self.session:
+            raise ValueError("Session is required for database operations")
+        from src.repositories.documentation_embedding_repository import DocumentationEmbeddingRepository
+        repository = DocumentationEmbeddingRepository(self.session)
         return await repository.delete(embedding_id)
     
     async def search_similar_embeddings(
@@ -366,10 +405,11 @@ class DocumentationEmbeddingService:
             databricks_storage = await self._get_databricks_storage()
             if databricks_storage:
                 try:
-                    # Search in Databricks
-                    results = databricks_storage.search(
-                        query=query_embedding,
-                        limit=limit
+                    # Search in Databricks - call with correct method signature
+                    # DatabricksVectorStorage.search expects (query_embedding, k, filters)
+                    results = await databricks_storage.search(
+                        query_embedding,  # First positional argument
+                        k=limit  # Named argument for number of results
                     )
                     
                     # Convert results to DocumentationEmbedding objects
@@ -398,20 +438,16 @@ class DocumentationEmbeddingService:
                     # Fall back to database search
             
             # Traditional database search
-            if not self.uow:
-                logger.warning("No UnitOfWork provided to search_similar_embeddings")
+            if not self.session:
+                logger.warning("No session provided to search_similar_embeddings")
                 return []
-            
-            logger.debug(f"UnitOfWork type: {type(self.uow)}")
-            logger.debug(f"UnitOfWork attributes: {dir(self.uow)}")
-            
+
+            logger.debug(f"Session type: {type(self.session)}")
+
             # Use the repository method for similarity search
-            repository = self.uow.documentation_embedding_repository
-            if not repository:
-                logger.error("DocumentationEmbeddingRepository not initialized in UnitOfWork")
-                logger.error(f"Available repositories: {[attr for attr in dir(self.uow) if 'repository' in attr]}")
-                return []
-                
+            from src.repositories.documentation_embedding_repository import DocumentationEmbeddingRepository
+            repository = DocumentationEmbeddingRepository(self.session)
+
             logger.info("Using repository for similarity search")
             return await repository.search_similar(query_embedding, limit)
                 
@@ -427,9 +463,10 @@ class DocumentationEmbeddingService:
         limit: int = 100
     ) -> List[DocumentationEmbedding]:
         """Search for documentation embeddings by source."""
-        if not self.uow:
-            raise ValueError("UnitOfWork is required for database operations")
-        repository = self.uow.documentation_embedding_repository
+        if not self.session:
+            raise ValueError("Session is required for database operations")
+        from src.repositories.documentation_embedding_repository import DocumentationEmbeddingRepository
+        repository = DocumentationEmbeddingRepository(self.session)
         return await repository.search_by_source(source, skip, limit)
     
     async def search_by_title(
@@ -439,9 +476,10 @@ class DocumentationEmbeddingService:
         limit: int = 100
     ) -> List[DocumentationEmbedding]:
         """Search for documentation embeddings by title."""
-        if not self.uow:
-            raise ValueError("UnitOfWork is required for database operations")
-        repository = self.uow.documentation_embedding_repository
+        if not self.session:
+            raise ValueError("Session is required for database operations")
+        from src.repositories.documentation_embedding_repository import DocumentationEmbeddingRepository
+        repository = DocumentationEmbeddingRepository(self.session)
         return await repository.search_by_title(title, skip, limit)
     
     async def get_recent_embeddings(
@@ -449,7 +487,8 @@ class DocumentationEmbeddingService:
         limit: int = 10
     ) -> List[DocumentationEmbedding]:
         """Get most recently created documentation embeddings."""
-        if not self.uow:
-            raise ValueError("UnitOfWork is required for database operations")
-        repository = self.uow.documentation_embedding_repository
+        if not self.session:
+            raise ValueError("Session is required for database operations")
+        from src.repositories.documentation_embedding_repository import DocumentationEmbeddingRepository
+        repository = DocumentationEmbeddingRepository(self.session)
         return await repository.get_recent(limit) 

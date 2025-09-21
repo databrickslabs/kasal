@@ -24,28 +24,19 @@ logger = logging.getLogger(__name__)
 class ApiKeysService(BaseService):
     """Service for managing API keys."""
     
-    def __init__(self, session=None, repository=None, group_id: Optional[str] = None):
+    def __init__(self, session: AsyncSession, group_id: Optional[str] = None):
         """
-        Initialize the service with session or repository.
-        
+        Initialize the service with session.
+
         Args:
-            session: SQLAlchemy session (can be async or sync, for backwards compatibility)
-            repository: ApiKeyRepository instance (preferred way)
+            session: Database session from FastAPI DI
             group_id: Group ID for multi-tenant filtering
         """
-        if repository is not None:
-            self.repository = repository
-            self.session = None  # No session needed when repository is provided
-            self.is_async = True  # Assume always async with repository
-        elif session is not None:
-            self.session = session
-            self.repository = ApiKeyRepository(session)
-            self.is_async = not isinstance(session, Session)
-        else:
-            raise ValueError("Either session or repository must be provided")
-        
+        self.repository = ApiKeyRepository(session)
         self.encryption_utils = EncryptionUtils()
         self.group_id = group_id
+        self.session = None  # For compatibility with older code
+        self.is_async = True  # Always async now
     
     async def find_by_name(self, name: str) -> Optional[ApiKey]:
         """
@@ -219,10 +210,10 @@ class ApiKeysService(BaseService):
             key_name = db
             db = None
         
-        # Create a service instance using UnitOfWork pattern
-        from src.core.unit_of_work import UnitOfWork
-        async with UnitOfWork() as uow:
-            service = await cls.from_unit_of_work(uow)
+        # Create a service instance using session factory
+        from src.db.session import async_session_factory
+        async with async_session_factory() as session:
+            service = cls(session)
             
             # Find the API key
             api_key = await service.find_by_name(key_name)
@@ -307,17 +298,15 @@ class ApiKeysService(BaseService):
             True if key was found and set up successfully, False otherwise
         """
         try:
-            # Create a service instance using UnitOfWork pattern
-            from src.core.unit_of_work import UnitOfWork
-            async with UnitOfWork() as uow:
-                value = await cls.get_provider_api_key("openai")
-                if value:
-                    os.environ["OPENAI_API_KEY"] = value
-                    logger.info("OpenAI API key set up successfully")
-                    return True
-                else:
-                    logger.warning("OpenAI API key not found in database")
-                    return False
+            # Use the class method that handles session internally
+            value = await cls.get_provider_api_key("openai")
+            if value:
+                os.environ["OPENAI_API_KEY"] = value
+                logger.info("OpenAI API key set up successfully")
+                return True
+            else:
+                logger.warning("OpenAI API key not found in database")
+                return False
         except Exception as e:
             logger.error(f"Error setting up OpenAI API key: {str(e)}")
             return False
@@ -334,17 +323,15 @@ class ApiKeysService(BaseService):
             True if key was found and set up successfully, False otherwise
         """
         try:
-            # Create a service instance using UnitOfWork pattern
-            from src.core.unit_of_work import UnitOfWork
-            async with UnitOfWork() as uow:
-                value = await cls.get_provider_api_key("anthropic")
-                if value:
-                    os.environ["ANTHROPIC_API_KEY"] = value
-                    logger.info("Anthropic API key set up successfully")
-                    return True
-                else:
-                    logger.warning("Anthropic API key not found in database")
-                    return False
+            # Use the class method that handles session internally
+            value = await cls.get_provider_api_key("anthropic")
+            if value:
+                os.environ["ANTHROPIC_API_KEY"] = value
+                logger.info("Anthropic API key set up successfully")
+                return True
+            else:
+                logger.warning("Anthropic API key not found in database")
+                return False
         except Exception as e:
             logger.error(f"Error setting up Anthropic API key: {str(e)}")
             return False
@@ -361,17 +348,15 @@ class ApiKeysService(BaseService):
             True if key was found and set up successfully, False otherwise
         """
         try:
-            # Create a service instance using UnitOfWork pattern
-            from src.core.unit_of_work import UnitOfWork
-            async with UnitOfWork() as uow:
-                value = await cls.get_provider_api_key("deepseek")
-                if value:
-                    os.environ["DEEPSEEK_API_KEY"] = value
-                    logger.info("DeepSeek API key set up successfully")
-                    return True
-                else:
-                    logger.warning("DeepSeek API key not found in database")
-                    return False
+            # Use the class method that handles session internally
+            value = await cls.get_provider_api_key("deepseek")
+            if value:
+                os.environ["DEEPSEEK_API_KEY"] = value
+                logger.info("DeepSeek API key set up successfully")
+                return True
+            else:
+                logger.warning("DeepSeek API key not found in database")
+                return False
         except Exception as e:
             logger.error(f"Error setting up DeepSeek API key: {str(e)}")
             return False
@@ -388,17 +373,15 @@ class ApiKeysService(BaseService):
             True if key was found and set up successfully, False otherwise
         """
         try:
-            # Create a service instance using UnitOfWork pattern
-            from src.core.unit_of_work import UnitOfWork
-            async with UnitOfWork() as uow:
-                value = await cls.get_provider_api_key("gemini")
-                if value:
-                    os.environ["GEMINI_API_KEY"] = value
-                    logger.info("Gemini API key set up successfully")
-                    return True
-                else:
-                    logger.warning("Gemini API key not found in database")
-                    return False
+            # Use the class method that handles session internally
+            value = await cls.get_provider_api_key("gemini")
+            if value:
+                os.environ["GEMINI_API_KEY"] = value
+                logger.info("Gemini API key set up successfully")
+                return True
+            else:
+                logger.warning("Gemini API key not found in database")
+                return False
         except Exception as e:
             logger.error(f"Error setting up Gemini API key: {str(e)}")
             return False
@@ -426,35 +409,22 @@ class ApiKeysService(BaseService):
             await cls.setup_gemini_api_key()
     
     @classmethod
-    async def from_unit_of_work(cls, uow):
-        """
-        Create a service instance from a UnitOfWork.
-        
-        Args:
-            uow: UnitOfWork instance
-            
-        Returns:
-            ApiKeysService: Service instance using the UnitOfWork's repository
-        """
-        return cls(repository=uow.api_key_repository)
-    
-    @classmethod
     async def get_provider_api_key(cls, provider: str) -> Optional[str]:
         """
         Get API key for a specific provider using the repository pattern.
         This method handles encryption/decryption and doesn't require a db session.
-        
+
         Args:
             provider: Provider name (e.g., 'openai', 'anthropic', 'deepseek')
-            
+
         Returns:
             Decrypted API key if found, None otherwise
         """
         try:
-            # Create a service instance using UnitOfWork pattern
-            from src.core.unit_of_work import UnitOfWork
-            async with UnitOfWork() as uow:
-                service = await cls.from_unit_of_work(uow)
+            # Create a service instance using session factory
+            from src.db.session import async_session_factory
+            async with async_session_factory() as session:
+                service = cls(session)
                 
                 # Find the API key by name (provider name with _API_KEY suffix)
                 key_name = f"{provider.upper()}_API_KEY"

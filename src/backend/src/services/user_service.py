@@ -1,11 +1,14 @@
 from typing import List, Optional, Dict, Any
 from sqlalchemy.ext.asyncio import AsyncSession
 import json
+import logging
 
-from src.models.user import User, UserProfile, ExternalIdentity
-from src.repositories.user_repository import UserRepository, UserProfileRepository, ExternalIdentityRepository
-from src.schemas.user import UserUpdate, UserProfileUpdate, UserRole
-from src.services.auth_service import get_password_hash
+from src.models.user import User
+from src.repositories.user_repository import UserRepository
+from src.schemas.user import UserUpdate, UserRole, UserPermissionUpdate
+# Removed password hash import - using OAuth proxy authentication
+
+logger = logging.getLogger(__name__)
 
 class UserService:
     """Service for user management operations"""
@@ -13,8 +16,8 @@ class UserService:
     def __init__(self, session: AsyncSession):
         self.session = session
         self.user_repo = UserRepository(User, session)
-        self.profile_repo = UserProfileRepository(UserProfile, session)
-        self.external_identity_repo = ExternalIdentityRepository(ExternalIdentity, session)
+        # UserProfileRepository removed - display_name moved to User model
+        # External identity repository removed - using simplified auth
     
     async def get_user(self, user_id: str) -> Optional[User]:
         """Get a user by ID"""
@@ -56,169 +59,204 @@ class UserService:
             
             return unique_users[:limit]
         
-        # Regular filtering
-        return await self.user_repo.list_with_filters(skip=skip, limit=limit, filters=filters)
+        # Regular filtering - use simple list method since list_with_filters doesn't exist
+        return await self.user_repo.list(skip=skip, limit=limit)
     
-    async def get_user_with_profile(self, user_id: str) -> Optional[Dict[str, Any]]:
-        """Get a user with their profile"""
-        user = await self.user_repo.get(user_id)
-        if not user:
-            return None
-        
-        profile = await self.profile_repo.get_by_user_id(user_id)
-        
-        # Convert to dict and add profile
-        user_dict = {
-            "id": user.id,
-            "username": user.username,
-            "email": user.email,
-            "role": user.role,
-            "status": user.status,
-            "created_at": user.created_at,
-            "updated_at": user.updated_at,
-            "last_login": user.last_login,
-            "profile": profile
-        }
-        
-        return user_dict
+    async def get_user_complete(self, user_id: str) -> Optional[User]:
+        """Get a user with complete information"""
+        return await self.user_repo.get(user_id)
     
-    async def get_user_complete(self, user_id: str) -> Optional[Dict[str, Any]]:
-        """Get a user with all related information"""
-        user_with_profile = await self.get_user_with_profile(user_id)
-        if not user_with_profile:
-            return None
-        
-        # Add external identities
-        external_identities = await self.external_identity_repo.get_all_by_user_id(user_id)
-        
-        # Process each external identity to convert profile_data JSON string to dict
-        processed_identities = []
-        for identity in external_identities:
-            identity_dict = {
-                "id": identity.id,
-                "user_id": identity.user_id,
-                "provider": identity.provider,
-                "provider_user_id": identity.provider_user_id,
-                "email": identity.email,
-                "created_at": identity.created_at,
-                "last_login": identity.last_login,
-            }
-            
-            # Parse profile_data JSON if it exists
-            if identity.profile_data:
-                try:
-                    identity_dict["profile_data"] = json.loads(identity.profile_data)
-                except json.JSONDecodeError:
-                    identity_dict["profile_data"] = None
-            else:
-                identity_dict["profile_data"] = None
-                
-            processed_identities.append(identity_dict)
-            
-        user_with_profile["external_identities"] = processed_identities
-        
-        return user_with_profile
-    
-    async def get_user_external_identities(self, user_id: str) -> List[ExternalIdentity]:
-        """Get all external identities for a user"""
-        return await self.external_identity_repo.get_all_by_user_id(user_id)
-    
-    async def update_user(self, user_id: str, user_update: UserUpdate) -> Optional[Dict[str, Any]]:
+    async def update_user(self, user_id: str, user_update: UserUpdate) -> Optional[User]:
         """Update a user"""
         # Check if user exists
         user = await self.user_repo.get(user_id)
         if not user:
             return None
-        
+
         # Prepare update data
         update_data = user_update.model_dump(exclude_unset=True, exclude_none=True)
-        
+
         # Check if username is being updated and is unique
         if "username" in update_data:
             existing_user = await self.user_repo.get_by_username(update_data["username"])
             if existing_user and existing_user.id != user_id:
                 raise ValueError("Username already taken")
-                
+
         # Check if email is being updated and is unique
         if "email" in update_data:
             existing_user = await self.user_repo.get_by_email(update_data["email"])
             if existing_user and existing_user.id != user_id:
                 raise ValueError("Email already registered")
-        
+
         # Update user
         await self.user_repo.update(user_id, update_data)
-        
-        # Return updated user with profile
-        return await self.get_user_with_profile(user_id)
+
+        # Return updated user
+        return await self.user_repo.get(user_id)
     
-    async def update_user_profile(self, user_id: str, profile_update: UserProfileUpdate) -> Optional[Dict[str, Any]]:
-        """Update a user's profile"""
+    async def update_user_permissions(self, user_id: str, permission_update: UserPermissionUpdate) -> Optional[User]:
+        """Update user permissions (system admin only)"""
         # Check if user exists
         user = await self.user_repo.get(user_id)
         if not user:
             return None
-        
-        # Get existing profile or create if not exists
-        profile = await self.profile_repo.get_by_user_id(user_id)
-        
-        update_data = profile_update.model_dump(exclude_unset=True, exclude_none=True)
-        
-        if profile:
-            # Update existing profile
-            await self.profile_repo.update(profile.id, update_data)
-        else:
-            # Create new profile
-            update_data["user_id"] = user_id
-            await self.profile_repo.create(update_data)
-        
-        # Return updated user with profile
-        return await self.get_user_with_profile(user_id)
+
+        # Prepare update data
+        update_data = permission_update.model_dump(exclude_unset=True, exclude_none=True)
+
+        # Update user permissions
+        await self.user_repo.update(user_id, update_data)
+
+        # Return updated user
+        return await self.user_repo.get(user_id)
+
+    # update_user_profile removed - display_name is now part of User model
     
-    async def update_password(self, user_id: str, new_password: str) -> bool:
-        """Update a user's password"""
-        user = await self.user_repo.get(user_id)
-        if not user:
-            return False
-        
-        # Hash the new password
-        hashed_password = get_password_hash(new_password)
-        
-        # Update user
-        await self.user_repo.update(user_id, {"hashed_password": hashed_password})
-        
-        return True
+    # Password update removed - using OAuth proxy authentication only
     
     async def assign_role(self, user_id: str, role: str) -> Optional[User]:
         """Assign a role to a user"""
         user = await self.user_repo.get(user_id)
         if not user:
             return None
-        
+
         # Update user's role
         await self.user_repo.update(user_id, {"role": role})
-        
+
         # Return updated user
         return await self.user_repo.get(user_id)
+
+    async def get_or_create_user_by_email(self, email: str) -> Optional[User]:
+        """
+        Get or create a user by email address.
+        This is used for proxy-based authentication where users are auto-created.
+
+        Args:
+            email: User's email address
+
+        Returns:
+            User: The existing or newly created user
+        """
+        logger.info(f"get_or_create_user_by_email called for email: {email}")
+        # Check if user exists
+        user = await self.user_repo.get_by_email(email)
+
+        if user:
+            # User exists, update last login
+            await self.user_repo.update_last_login(user.id)
+            logger.debug(f"Existing user found: {email}")
+
+            # Check if this existing user should be granted admin privileges (if no system admins exist)
+            await self._handle_first_user_admin_setup(user, is_new_user=False)
+        else:
+            # Create new user (OAuth proxy authentication - no password needed)
+
+            # Generate username from email
+            username_base = email.split("@")[0]
+            username = username_base
+            i = 1
+
+            # Ensure unique username
+            while await self.user_repo.get_by_username(username):
+                username = f"{username_base}{i}"
+                i += 1
+
+            # Create user with regular role initially (no password needed for OAuth proxy)
+            from src.schemas.user import UserRole
+            user_data = {
+                "username": username,
+                "email": email,
+                "display_name": username,  # Set display_name directly
+                "role": UserRole.REGULAR
+            }
+
+            user = await self.user_repo.create(user_data)
+            # No separate profile creation needed - display_name is now part of User
+
+            logger.info(f"Created new user via proxy auth: {email}")
+
+            # Check if this is the first user and needs admin setup
+            await self._handle_first_user_admin_setup(user, is_new_user=True)
+
+        return user
+
+    async def _handle_first_user_admin_setup(self, user: User, is_new_user: bool = False) -> None:
+        """
+        Check if this is the first user in the system.
+        If so, grant them system admin permissions.
+
+        Args:
+            user: The user to potentially grant admin privileges to
+            is_new_user: Whether this user was just created (vs existing user login)
+        """
+        logger.info(f"_handle_first_user_admin_setup called for user {user.email}, is_new_user={is_new_user}")
+        try:
+            # If this is an existing user, check if they already have admin privileges
+            if not is_new_user:
+                if user.is_system_admin:
+                    logger.debug(f"User {user.email} already has system admin privileges")
+                    return
+
+                # Check if any system admins exist
+                from sqlalchemy import select, func
+                query = select(func.count(self.user_repo.model.id)).where(
+                    self.user_repo.model.is_system_admin == True
+                )
+                result = await self.session.execute(query)
+                admin_count = result.scalar() or 0
+
+                if admin_count == 0:
+                    logger.info(f"No system admins exist. Granting system admin privileges to existing user {user.email}")
+
+                    # Grant system admin permission
+                    await self.user_repo.update(user.id, {
+                        "is_system_admin": True,
+                        "is_personal_workspace_manager": True  # System admins also get personal workspace access
+                    })
+
+                    logger.info(f"Granted system admin privileges to existing user {user.email}")
+                return
+
+            # For new users, check if this is the first user in the system
+            total_users = await self.user_repo.count()
+
+            # If this is the only user (count = 1 after creation), make them system admin
+            if total_users == 1:
+                logger.info(f"First user in system detected. Granting system admin privileges to {user.email}")
+
+                # Grant system admin permission
+                await self.user_repo.update(user.id, {
+                    "is_system_admin": True,
+                    "is_personal_workspace_manager": True  # System admins also get personal workspace access
+                })
+
+                logger.info(f"Granted system admin privileges to {user.email}")
+
+        except Exception as e:
+            # Log the error but don't fail user creation
+            logger.error(f"Error during first user admin setup: {e}")
+            # Don't raise the exception - allow user creation to continue
     
     async def delete_user(self, user_id: str) -> bool:
         """Delete a user"""
         user = await self.user_repo.get(user_id)
         if not user:
             return False
-        
-        # Delete user (cascading delete will handle related entities)
+
+        # First, remove user from all groups (to avoid foreign key constraint violations)
+        from src.services.group_service import GroupService
+        group_service = GroupService(self.session)
+
+        # Get all groups the user belongs to
+        user_groups = await group_service.get_user_groups(user_id)
+
+        # Remove user from each group
+        for group in user_groups:
+            await group_service.remove_user_from_group(group.id, user_id)
+
+        # Now delete the user
         await self.user_repo.delete(user_id)
-        
+
         return True
     
-    async def remove_external_identity(self, user_id: str, provider: str) -> bool:
-        """Remove an external identity from a user"""
-        # Get the identity
-        identity = await self.external_identity_repo.get_by_user_id_and_provider(user_id, provider)
-        if not identity:
-            return False
-        
-        # Delete the identity
-        await self.external_identity_repo.delete(identity.id)
-        
-        return True 
+    # External identity methods removed - using simplified auth system 

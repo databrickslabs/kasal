@@ -81,28 +81,32 @@ class DispatcherService:
         'choose', 'pick', 'adjust', 'tune', 'customize', 'personalize'
     }
     
-    def __init__(self, log_service: LLMLogService):
+    def __init__(self, log_service: LLMLogService, session):
         """
         Initialize the service.
-        
+
         Args:
             log_service: Service for logging LLM interactions
+            session: Database session for generation services
         """
         self.log_service = log_service
-        self.agent_service = AgentGenerationService.create()
-        self.task_service = TaskGenerationService.create()
-        self.crew_service = CrewGenerationService.create()
+        self.agent_service = AgentGenerationService(session)
+        self.task_service = TaskGenerationService(session)
+        self.crew_service = CrewGenerationService(session)
     
     @classmethod
-    def create(cls) -> 'DispatcherService':
+    def create(cls, session) -> 'DispatcherService':
         """
         Factory method to create a properly configured instance of the service.
-        
+
+        Args:
+            session: Database session for repository operations
+
         Returns:
             An instance of DispatcherService with all required dependencies
         """
-        log_service = LLMLogService.create()
-        return cls(log_service=log_service)
+        log_service = LLMLogService.create(session)
+        return cls(log_service=log_service, session=session)
     
     async def _log_llm_interaction(self, endpoint: str, prompt: str, response: str, model: str, 
                                   status: str = 'success', error_message: Optional[str] = None,

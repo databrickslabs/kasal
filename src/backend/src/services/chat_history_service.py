@@ -16,37 +16,16 @@ class ChatHistoryService(BaseService[ChatHistory, ChatHistoryCreate]):
     Follows Kasal's service patterns for multi-group deployments.
     """
     
-    def __init__(
-        self,
-        session: AsyncSession,
-        repository_class: Type[ChatHistoryRepository] = ChatHistoryRepository,
-        model_class: Type[ChatHistory] = ChatHistory
-    ):
+    def __init__(self, session):
         """
-        Initialize the service with session and optional repository and model classes.
-        
+        Initialize the service with session.
+
         Args:
-            session: Database session for operations
-            repository_class: Repository class to use for data access (optional)
-            model_class: Model class associated with this service (optional)
+            session: Database session from FastAPI DI (from core.dependencies)
         """
         super().__init__(session)
-        self.repository_class = repository_class
-        self.model_class = model_class
-        self.repository = repository_class(session)
+        self.repository = ChatHistoryRepository(session)
     
-    @classmethod
-    def create(cls, session: AsyncSession) -> 'ChatHistoryService':
-        """
-        Factory method to create a properly configured ChatHistoryService instance.
-        
-        Args:
-            session: Database session for operations
-            
-        Returns:
-            An instance of ChatHistoryService
-        """
-        return cls(session=session)
 
     async def save_message(
         self, 

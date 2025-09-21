@@ -77,17 +77,25 @@ class ExecutionService:
     # Initialize the thread pool executor
     _thread_pool = concurrent.futures.ThreadPoolExecutor(max_workers=10)
     
-    def __init__(self):
+    def __init__(self, session=None):
         """Initialize the ExecutionService with required dependencies.
-        
+
+        Args:
+            session: Optional database session for repository operations.
+                     If provided, repositories will use this session instead
+                     of creating their own.
+
         Sets up the execution name service for generating descriptive names
         and the CrewAI execution service for handling CrewAI-specific operations.
-        
+
         Note:
             Uses factory methods to ensure proper configuration of dependent services.
         """
+        # Store the session for repository operations
+        self.session = session
+
         # Use factory method to create properly configured ExecutionNameService
-        self.execution_name_service = ExecutionNameService.create()
+        self.execution_name_service = ExecutionNameService.create(session)
         # Create a CrewAIExecutionService instance for all execution operations
         self.crewai_execution_service = CrewAIExecutionService()
     
@@ -297,7 +305,8 @@ class ExecutionService:
         execution_id: str,
         config: CrewConfig,
         execution_type: str = "crew",
-        group_context: GroupContext = None
+        group_context: GroupContext = None,
+        session = None
     ) -> Dict[str, Any]:
         """
         Run a crew execution with the provided configuration.
@@ -386,7 +395,8 @@ class ExecutionService:
                 result = await crew_execution_service.run_crew_execution(
                     execution_id=execution_id,
                     config=config,
-                    group_context=group_context
+                    group_context=group_context,
+                    session=session
                 )
                 exec_logger.info(f"[run_crew_execution] Successfully initiated crew execution via CrewAIExecutionService for job_id: {execution_id}. Result: {result}")
                 return result # Return result from run_crew_execution
@@ -422,34 +432,47 @@ class ExecutionService:
             
             raise # Re-raise the original exception
     
-    @staticmethod
-    async def list_executions(group_ids: List[str] = None) -> List[Dict[str, Any]]:
+    async def list_executions(self, group_ids: List[str] = None, user_email: str = None, limit: int = 50, offset: int = 0) -> List[Dict[str, Any]]:
         """
-        List executions from both database and in-memory storage with group filtering.
-        
+        List executions from both database and in-memory storage with group and user filtering.
+
         Args:
             group_ids: List of group IDs for filtering
-        
+            user_email: User email for user-level filtering
+            limit: Maximum number of executions to return
+            offset: Number of executions to skip
+
         Returns:
             List of execution data dictionaries
         """
         try:
             # Get executions from database using ExecutionRepository
-            from src.db.session import async_session_factory
             from src.repositories.execution_repository import ExecutionRepository
-            
-            logger.info("Attempting to connect to database for listing executions")
-            
-            async with async_session_factory() as db:
-                repo = ExecutionRepository(db)
-                # Get executions with group filtering using the correct repository method
-                db_executions_list, _ = await repo.get_execution_history(
-                    limit=1000,  # Get more records for compatibility with the old behavior
-                    offset=0,
-                    group_ids=group_ids
+
+            logger.info(f"[list_executions] Starting database query - group_ids: {group_ids}, user_email: {user_email}")
+
+            if self.session:
+                logger.info(f"[list_executions] Using injected database session: {self.session}")
+                repo = ExecutionRepository(self.session)
+                logger.info(f"[list_executions] Created repository: {repo}")
+
+                # Get executions with group and user filtering using the correct repository method
+                logger.info(f"[list_executions] Calling repo.get_execution_history with group_ids={group_ids}")
+                db_executions_list, total_count = await repo.get_execution_history(
+                    limit=limit,
+                    offset=offset,
+                    group_ids=group_ids,
+                    user_email=user_email
                 )
+                logger.info(f"[list_executions] Repository returned {len(db_executions_list)} items, total_count={total_count}")
                 
-                logger.info(f"Successfully retrieved {len(db_executions_list)} executions from database")
+                logger.info(f"[list_executions] Database returned {len(db_executions_list)} executions for group_ids: {group_ids}")
+
+                # Debug what we got
+                if db_executions_list:
+                    logger.info(f"[list_executions] First execution: job_id={db_executions_list[0].job_id}, group_id={db_executions_list[0].group_id}, run_name={db_executions_list[0].run_name}")
+                else:
+                    logger.warning(f"[list_executions] No executions found for group_ids: {group_ids}")
                 
                 # Convert to list of dicts, including inputs with agents_yaml and tasks_yaml
                 import json
@@ -463,6 +486,7 @@ class ExecutionService:
                         "result": e.result,
                         "error": e.error,
                         "group_email": e.group_email,
+                        "group_id": e.group_id,  # CRITICAL: Include group_id for frontend security filtering
                         "inputs": e.inputs  # Include the inputs field
                     }
                     
@@ -474,7 +498,10 @@ class ExecutionService:
                             exec_dict['tasks_yaml'] = json.dumps(e.inputs['tasks_yaml']) if isinstance(e.inputs['tasks_yaml'], dict) else e.inputs.get('tasks_yaml', '')
                     
                     db_executions.append(exec_dict)
-            
+            else:
+                logger.error(f"[list_executions] No database session available")
+                db_executions = []
+
             # Get in-memory executions that might not be in the database yet
             memory_executions = {}
             for execution_id, execution_data in ExecutionService.executions.items():
@@ -498,6 +525,9 @@ class ExecutionService:
             logger.error(f"Error type: {type(e).__name__}")
             import traceback
             logger.error(f"Full traceback: {traceback.format_exc()}")
+
+            # CRITICAL: Re-raise the exception so we can see what's happening
+            raise
             
             # Check database configuration
             from src.config.settings import settings
@@ -614,8 +644,7 @@ class ExecutionService:
         except Exception as e:
             exec_logger.error(f"Error updating execution status: {str(e)}")
     
-    @staticmethod
-    async def get_execution_status(execution_id: str, group_ids: List[str] = None) -> Dict[str, Any]:
+    async def get_execution_status(self, execution_id: str, group_ids: List[str] = None) -> Dict[str, Any]:
         """
         Get the current status of an execution from the database with group filtering.
         
@@ -628,8 +657,16 @@ class ExecutionService:
         """
         try:
             # Use ExecutionHistoryRepository to get execution with group filtering
-            from src.repositories.execution_history_repository import execution_history_repository
-            execution = await execution_history_repository.get_execution_by_job_id(execution_id, group_ids=group_ids)
+            from src.repositories.execution_history_repository import ExecutionHistoryRepository
+
+            # Create repository with session if available
+            if self.session:
+                repository = ExecutionHistoryRepository(self.session)
+                execution = await repository.get_execution_by_job_id(execution_id, group_ids=group_ids)
+            else:
+                # Log error if no session available
+                exec_logger.error(f"No database session available for getting execution status")
+                return None
             
             if not execution:
                 # Check in-memory for very early states if needed
@@ -844,10 +881,11 @@ class ExecutionService:
                     try:
                         task_logger.debug(f"[run_execution_task] Calling ExecutionService.run_crew_execution for execution_id: {execution_id}")
                         await ExecutionService.run_crew_execution(
-                            execution_id=execution_id, 
-                            config=config, 
+                            execution_id=execution_id,
+                            config=config,
                             execution_type=execution_type,
-                            group_context=group_context
+                            group_context=group_context,
+                            session=self.session
                         )
                         task_logger.info(f"[run_execution_task] ExecutionService.run_crew_execution completed for execution_id: {execution_id}")
                     except Exception as task_error:
@@ -875,7 +913,8 @@ class ExecutionService:
                     execution_id=execution_id,
                     config=config,
                     execution_type=execution_type,
-                    group_context=group_context
+                    group_context=group_context,
+                    session=self.session
                 ))
                 # Store the task reference so we can cancel it later
                 if execution_id in ExecutionService.executions:
@@ -902,7 +941,7 @@ class ExecutionService:
             )
     
     @staticmethod
-    async def _run_in_background(execution_id: str, config: CrewConfig, execution_type: str = "crew", group_context: GroupContext = None):
+    async def _run_in_background(execution_id: str, config: CrewConfig, execution_type: str = "crew", group_context: GroupContext = None, session = None):
         """
         Run an execution in the background using a new database session.
         This is used when FastAPI's background_tasks is not available.
@@ -918,10 +957,11 @@ class ExecutionService:
         try:
             task_logger.debug(f"[_run_in_background] Calling ExecutionService.run_crew_execution for execution_id: {execution_id}")
             await ExecutionService.run_crew_execution(
-                execution_id=execution_id, 
-                config=config, 
+                execution_id=execution_id,
+                config=config,
                 execution_type=execution_type,
-                group_context=group_context
+                group_context=group_context,
+                session=session
             )
             task_logger.info(f"[_run_in_background] ExecutionService.run_crew_execution completed for execution_id: {execution_id}")
         except Exception as e:

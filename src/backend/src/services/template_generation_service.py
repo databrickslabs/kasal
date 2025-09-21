@@ -19,7 +19,6 @@ from src.services.log_service import LLMLogService
 from src.utils.prompt_utils import robust_json_parser
 from src.core.llm_manager import LLMManager
 from src.services.model_config_service import ModelConfigService
-from src.core.unit_of_work import UnitOfWork
 
 # Configure logging
 logger = logging.getLogger(__name__)
@@ -27,28 +26,16 @@ logger = logging.getLogger(__name__)
 class TemplateGenerationService:
     """Service for template generation operations."""
     
-    def __init__(self, log_service: LLMLogService):
+    def __init__(self, session):
         """
-        Initialize the service.
-        
+        Initialize the service with session.
+
         Args:
-            log_service: Service for logging LLM interactions
+            session: Database session from FastAPI DI (from core.dependencies)
         """
-        self.log_service = log_service
+        self.session = session
+        self.log_service = LLMLogService(session)
     
-    @classmethod
-    def create(cls) -> 'TemplateGenerationService':
-        """
-        Factory method to create a properly configured instance of the service.
-        
-        This method abstracts the creation of dependencies while maintaining
-        proper separation of concerns.
-        
-        Returns:
-            An instance of TemplateGenerationService with all required dependencies
-        """
-        log_service = LLMLogService.create()
-        return cls(log_service=log_service)
     
     async def _log_llm_interaction(self, endpoint: str, prompt: str, response: str, model: str, 
                                   status: str = 'success', error_message: Optional[str] = None) -> None:
@@ -94,9 +81,8 @@ class TemplateGenerationService:
         """
         try:
             # Get model configuration from database using ModelConfigService
-            async with UnitOfWork() as uow:
-                model_config_service = await ModelConfigService.from_unit_of_work(uow)
-                model_config = await model_config_service.get_model_config(request.model)
+            model_config_service = ModelConfigService(self.session)
+            model_config = await model_config_service.get_model_config(request.model)
             
             # Check if model configuration was found
             if not model_config:
@@ -105,7 +91,8 @@ class TemplateGenerationService:
             logger.info(f"Using model for template generation: {model_config['name']}")
             
             # Get prompt template from database
-            system_message = await TemplateService.get_template_content("generate_templates")
+            template_service = TemplateService(self.session)
+            system_message = await template_service.get_template_content("generate_templates")
             
             # Check if we have a prompt template
             if not system_message:

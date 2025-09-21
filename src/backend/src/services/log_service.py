@@ -23,18 +23,21 @@ class LLMLogService:
         self.repository = repository
     
     @classmethod
-    def create(cls) -> 'LLMLogService':
+    def create(cls, session: AsyncSession) -> 'LLMLogService':
         """
         Factory method to create a properly configured instance of the service.
-        
+
         This method abstracts the creation of dependencies while maintaining
         proper separation of concerns.
-        
+
+        Args:
+            session: Database session to use for repository operations
+
         Returns:
             An instance of LLMLogService with all required dependencies
         """
         from src.repositories.log_repository import LLMLogRepository
-        return cls(repository=LLMLogRepository())
+        return cls(repository=LLMLogRepository(session))
     
     async def get_logs_paginated(
         self, 

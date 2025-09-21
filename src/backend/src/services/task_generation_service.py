@@ -10,12 +10,17 @@ import os
 from typing import Optional
 import re
 import json
+import traceback
 import litellm
+
+from typing import Any
 
 from src.schemas.model_provider import ModelProvider
 from src.schemas.task_generation import TaskGenerationRequest, TaskGenerationResponse
 from src.services.template_service import TemplateService
+from src.services.documentation_embedding_service import DocumentationEmbeddingService
 from src.utils.prompt_utils import robust_json_parser
+from src.repositories.log_repository import LLMLogRepository
 from src.services.log_service import LLMLogService
 from src.core.llm_manager import LLMManager
 from src.schemas.task import TaskCreate
@@ -29,36 +34,24 @@ DEFAULT_TASK_MODEL = os.getenv("DEFAULT_TASK_MODEL", "databricks-llama-4-maveric
 
 class TaskGenerationService:
     """Service for task generation operations."""
-    
-    def __init__(self, log_service: LLMLogService):
+
+    def __init__(self, session: Any):
         """
-        Initialize the service.
-        
+        Initialize the service with database session.
+
         Args:
-            log_service: Service for logging LLM interactions
+            session: Database session from dependency injection
         """
-        self.log_service = log_service
+        self.session = session
+        # Initialize log service with repository using the same session
+        self.log_service = LLMLogService(LLMLogRepository(session))
     
-    @classmethod
-    def create(cls) -> 'TaskGenerationService':
-        """
-        Factory method to create a properly configured instance of the service.
-        
-        This method abstracts the creation of dependencies while maintaining
-        proper separation of concerns.
-        
-        Returns:
-            An instance of TaskGenerationService with all required dependencies
-        """
-        log_service = LLMLogService.create()
-        return cls(log_service=log_service)
-    
-    async def _log_llm_interaction(self, endpoint: str, prompt: str, response: str, model: str, 
+    async def _log_llm_interaction(self, endpoint: str, prompt: str, response: str, model: str,
                                   status: str = 'success', error_message: Optional[str] = None,
                                   group_context: Optional[GroupContext] = None):
         """
         Log LLM interaction using the log service.
-        
+
         Args:
             endpoint: API endpoint name
             prompt: Input prompt
@@ -81,6 +74,74 @@ class TaskGenerationService:
             logger.info(f"Logged {endpoint} interaction to database")
         except Exception as e:
             logger.error(f"Failed to log LLM interaction: {str(e)}")
+
+    async def _get_relevant_documentation(self, user_prompt: str, agent_context: Optional[str] = None, limit: int = 5) -> str:
+        """
+        Retrieve relevant documentation embeddings based on the task generation request.
+        Specifically looks for task templates and best practices.
+
+        Args:
+            user_prompt: The user's prompt for task generation
+            agent_context: Optional agent context (role, goal) to enhance search
+            limit: Maximum number of documentation chunks to retrieve (default 5 for tasks)
+
+        Returns:
+            String containing relevant documentation formatted for context
+        """
+        try:
+            # Build enhanced query including agent context if available
+            search_query = user_prompt
+            if agent_context:
+                search_query = f"{user_prompt}\n\nAgent context: {agent_context}"
+
+            # Add keywords to find task-specific best practices
+            search_query += "\n\nTask description expected output best practices template example"
+
+            logger.info("Creating embedding for task generation query to find relevant documentation")
+
+            # Configure embedder (default to Databricks for consistency)
+            embedder_config = {
+                'provider': 'databricks',
+                'config': {'model': 'databricks-gte-large-en'}
+            }
+
+            # Get the embedding for the search query
+            embedding_response = await LLMManager.get_embedding(search_query, embedder_config=embedder_config)
+            if not embedding_response:
+                logger.warning("Failed to create embedding for task generation query")
+                return ""
+
+            query_embedding = embedding_response
+
+            # Retrieve similar documentation based on the embedding
+            logger.info(f"Searching for {limit} most relevant documentation chunks for task generation")
+            doc_service = DocumentationEmbeddingService(self.session)
+            similar_docs = await doc_service.search_similar_embeddings(
+                query_embedding=query_embedding,
+                limit=limit
+            )
+
+            if not similar_docs or len(similar_docs) == 0:
+                logger.warning("No relevant documentation found for task generation")
+                return ""
+
+            # Format the documentation for context, emphasizing task patterns
+            docs_context = "\n\n## Task Generation Best Practices and Examples\n\n"
+
+            for i, doc in enumerate(similar_docs):
+                # Prioritize best practices and template documentation
+                if 'best_practices' in doc.source or 'task' in doc.title.lower():
+                    docs_context = f"### {doc.title}\n\n{doc.content}\n\n" + docs_context
+                else:
+                    docs_context += f"### {doc.title}\n\n{doc.content}\n\n"
+
+            logger.info(f"Retrieved {len(similar_docs)} relevant documentation chunks for task generation")
+            return docs_context
+
+        except Exception as e:
+            logger.error(f"Error retrieving documentation for task generation: {str(e)}")
+            logger.error(traceback.format_exc())
+            return ""
     
     async def generate_task(self, request: TaskGenerationRequest, group_context: Optional[GroupContext] = None) -> TaskGenerationResponse:
         """
@@ -109,10 +170,12 @@ class TaskGenerationService:
             raise ValueError("Required prompt template 'generate_task' not found in database")
         
         logger.info("Using prompt template for generate_task from database")
-        
-        # Add agent context if provided
+
+        # Build agent context string if agent is provided
+        agent_context_str = None
         if request.agent:
             agent = request.agent
+            agent_context_str = f"Agent: {agent.name}, Role: {agent.role}, Goal: {agent.goal}"
             base_message += f"\n\nCreate a task specifically for an agent with the following profile:\n"
             base_message += f"Name: {agent.name}\n"
             base_message += f"Role: {agent.role}\n"
@@ -120,11 +183,24 @@ class TaskGenerationService:
             base_message += f"Backstory: {agent.backstory}\n"
             base_message += "\nEnsure the task aligns with this agent's expertise and goals."
 
+        # Get relevant documentation based on the task request
+        documentation_context = await self._get_relevant_documentation(request.text, agent_context_str)
+
         # Prepare messages for LLM
         messages = [
-            {"role": "system", "content": base_message},
-            {"role": "user", "content": request.text}
+            {"role": "system", "content": base_message}
         ]
+
+        # Add documentation context if available
+        if documentation_context:
+            messages.append({
+                "role": "system",
+                "content": "Here is relevant documentation about task creation best practices and examples:\n\n" + documentation_context
+            })
+            logger.info("Added relevant documentation to enhance task generation context")
+
+        # Add the user's prompt
+        messages.append({"role": "user", "content": request.text})
         
         try:
             # Configure litellm using the LLMManager

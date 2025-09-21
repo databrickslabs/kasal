@@ -364,23 +364,23 @@ class TaskTrackingService:
         }
 
 # Dependency for FastAPI
-async def get_task_tracking_service() -> TaskTrackingService:
+from src.core.dependencies import SessionDep
+
+async def get_task_tracking_service(session: SessionDep) -> TaskTrackingService:
     """
     Dependency to get a TaskTrackingService instance.
-    Repository handles session management internally.
-    
+
+    Args:
+        session: Database session from FastAPI DI
+
     Returns:
         TaskTrackingService instance
     """
-    # Create repository that manages its own session
-    repository = TaskTrackingRepository()
-    
+    # Create repository with injected session
+    repository = TaskTrackingRepository(session)
+
     # Create service with repository
     service = TaskTrackingService(repository)
-    
-    # Yield service for FastAPI dependency injection
-    try:
-        yield service
-    finally:
-        # Any cleanup if needed
-        pass 
+
+    # Return service for FastAPI dependency injection
+    return service 
