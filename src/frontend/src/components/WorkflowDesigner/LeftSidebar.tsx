@@ -14,7 +14,8 @@ import {
   Select,
   MenuItem,
   CircularProgress,
-  SelectChangeEvent
+  SelectChangeEvent,
+  Badge
 } from '@mui/material';
 import {
   CleaningServices as ClearIcon,
@@ -26,6 +27,8 @@ import {
   Tune as TuneIcon,
 
   Settings as SettingsIcon,
+  InfoOutlined as InfoOutlinedIcon,
+  HelpOutline as HelpOutlineIcon,
 } from '@mui/icons-material';
 
 import { ShortcutConfig } from '../../types/shortcuts';
@@ -33,6 +36,8 @@ import { useShortcutsStore } from '../../store/shortcuts';
 import { Models } from '../../types/models';
 import { ModelService } from '../../api/ModelService';
 import { useCrewExecutionStore } from '../../store/crewExecution';
+import { usePermissionStore } from '../../store/permissions';
+import { useWorkflowStore } from '../../store/workflow';
 
 // Default fallback model when API is down
 const DEFAULT_FALLBACK_MODEL = {
@@ -60,6 +65,8 @@ interface LeftSidebarProps {
   setReasoningEnabled: (enabled: boolean) => void;
   schemaDetectionEnabled: boolean;
   setSchemaDetectionEnabled: (enabled: boolean) => void;
+  processType?: 'sequential' | 'hierarchical';
+  setProcessType?: (type: 'sequential' | 'hierarchical') => void;
 
   // New prop for configuration
   setIsConfigurationDialogOpen?: (open: boolean) => void;
@@ -68,6 +75,8 @@ interface LeftSidebarProps {
   // Execution history visibility
   showRunHistory?: boolean;
   executionHistoryHeight?: number;
+  // Tutorial dialog prop
+  onOpenTutorial?: () => void;
 }
 
 const LeftSidebar: React.FC<LeftSidebarProps> = ({
@@ -84,10 +93,13 @@ const LeftSidebar: React.FC<LeftSidebarProps> = ({
   setReasoningEnabled,
   schemaDetectionEnabled,
   setSchemaDetectionEnabled,
+  processType = 'sequential',
+  setProcessType,
   setIsConfigurationDialogOpen,
   onOpenLogsDialog,
   showRunHistory,
-  executionHistoryHeight = 200
+  executionHistoryHeight = 200,
+  onOpenTutorial
 }) => {
   const theme = useTheme();
   const [activeSection, setActiveSection] = useState<string | null>(null);
@@ -95,14 +107,29 @@ const LeftSidebar: React.FC<LeftSidebarProps> = ({
   const [isLoadingModels, setIsLoadingModels] = useState(true);
   const [planningModel, setPlanningModel] = useState<string>('');
   const [reasoningModel, setReasoningModel] = useState<string>('');
-  
-  const { 
+  const [managerModel, setManagerModel] = useState<string>('');
+
+  const {
     setPlanningLLM,
     setReasoningLLM,
+    setProcessType: setStoreProcessType,
+    setManagerLLM,
+    processType: storeProcessType,
+    managerLLM: storeManagerLLM,
   } = useCrewExecutionStore();
+
+  // Debug logging
+  console.log('[LeftSidebar] Current store processType:', storeProcessType);
 
   // Get active shortcuts from store
   const { shortcuts } = useShortcutsStore();
+
+  // Get user permissions
+  const { userRole } = usePermissionStore();
+  const isOperator = userRole === 'operator';
+
+  // Get tutorial status
+  const { hasSeenTutorial } = useWorkflowStore();
 
   // Fetch models on component mount
   useEffect(() => {
@@ -126,6 +153,18 @@ const LeftSidebar: React.FC<LeftSidebarProps> = ({
           setReasoningModel(firstModel);
           setReasoningLLM(firstModel);
         }
+
+        // Initialize manager model when models are loaded
+        if (response && Object.keys(response).length > 0) {
+          // Use store value if available, otherwise set first model
+          if (storeManagerLLM && response[storeManagerLLM]) {
+            setManagerModel(storeManagerLLM);
+          } else if (!managerModel) {
+            const firstModel = Object.keys(response)[0];
+            setManagerModel(firstModel);
+            setManagerLLM(firstModel);
+          }
+        }
       } catch (error) {
         console.error('Error fetching models:', error);
       } finally {
@@ -134,7 +173,7 @@ const LeftSidebar: React.FC<LeftSidebarProps> = ({
     };
     
     fetchModels();
-  }, [planningModel, setPlanningLLM, reasoningModel, setReasoningLLM]);
+  }, [planningModel, setPlanningLLM, reasoningModel, setReasoningLLM, managerModel, setManagerLLM, storeManagerLLM]);
 
   const handlePlanningModelChange = useCallback((event: SelectChangeEvent) => {
     const value = event.target.value;
@@ -147,6 +186,22 @@ const LeftSidebar: React.FC<LeftSidebarProps> = ({
     setReasoningModel(value);
     setReasoningLLM(value);
   }, [setReasoningLLM]);
+
+  const handleManagerModelChange = useCallback((event: SelectChangeEvent) => {
+    const value = event.target.value;
+    setManagerModel(value);
+    setManagerLLM(value);
+  }, [setManagerLLM]);
+
+  const handleProcessTypeChange = useCallback((event: SelectChangeEvent) => {
+    const value = event.target.value as 'sequential' | 'hierarchical';
+    console.log('[LeftSidebar] Changing process type to:', value);
+    setStoreProcessType(value);
+    // Also call the prop setter if it exists for backward compatibility
+    if (setProcessType) {
+      setProcessType(value);
+    }
+  }, [setProcessType, setStoreProcessType]);
 
 
 
@@ -200,13 +255,23 @@ const LeftSidebar: React.FC<LeftSidebarProps> = ({
       id: 'configuration',
       icon: <SettingsIcon />,
       tooltip: 'Configuration',
-      content: null // No expandable content, handled by direct click
+      content: null, // No expandable content, handled by direct click
+      dataTour: 'configuration-button'
+    },
+    {
+      id: 'help',
+      icon: <HelpOutlineIcon />,
+      tooltip: 'Start Tutorial / Help',
+      content: null, // No expandable content, handled by direct click
+      dataTour: 'help-button'
     },
 
-    {
+    // Only show runtime-features for non-operators
+    ...(!isOperator ? [{
       id: 'runtime-features',
       icon: <TuneIcon />,
       tooltip: 'Runtime Features',
+      dataTour: 'runtime-features',
       content: (
         <Box
           sx={{
@@ -215,21 +280,112 @@ const LeftSidebar: React.FC<LeftSidebarProps> = ({
             p: 1,
           }}
         >
-          {/* Planning Section */}
+          {/* Process Type Section */}
           <Box sx={{ mb: 2 }}>
-            <Typography 
-              variant="subtitle2" 
-              sx={{ 
-                color: theme.palette.primary.main, 
-                mb: 1,
-                fontWeight: 600,
-                textTransform: 'uppercase',
-                letterSpacing: '0.5px',
-                fontSize: '0.7rem'
+            <Box sx={{ display: 'flex', alignItems: 'center', mb: 1 }}>
+              <Typography
+                variant="subtitle2"
+                sx={{
+                  color: theme.palette.primary.main,
+                  fontWeight: 600,
+                  textTransform: 'uppercase',
+                  letterSpacing: '0.5px',
+                  fontSize: '0.7rem'
+                }}
+              >
+                Process Type
+              </Typography>
+              <Tooltip title="Determines how agents collaborate. Sequential: agents work one after another in a fixed order. Hierarchical: a manager agent dynamically delegates tasks to specialized agents. Use Hierarchical for complex workflows requiring adaptive task distribution and parallel execution." placement="right">
+                <InfoOutlinedIcon sx={{ ml: 0.5, fontSize: 14, color: theme.palette.primary.main, cursor: 'help' }} />
+              </Tooltip>
+            </Box>
+            <Divider sx={{ mb: 1 }} />
+
+            <Box
+              sx={{
+                display: 'flex',
+                flexDirection: 'column',
+                gap: 1,
+                py: 0.5,
+                px: 0.5,
+                borderRadius: 1,
               }}
             >
-              Planning
-            </Typography>
+              <FormControl size="small" fullWidth>
+                <InputLabel sx={{ fontSize: '0.75rem' }}>Execution Process</InputLabel>
+                <Select
+                  value={storeProcessType}
+                  onChange={handleProcessTypeChange}
+                  label="Execution Process"
+                  sx={{ fontSize: '0.75rem' }}
+                >
+                  <MenuItem value="sequential" sx={{ fontSize: '0.75rem' }}>
+                    Sequential - Linear task execution
+                  </MenuItem>
+                  <MenuItem value="hierarchical" sx={{ fontSize: '0.75rem' }}>
+                    Hierarchical - Manager-based delegation
+                  </MenuItem>
+                </Select>
+              </FormControl>
+
+              {(storeProcessType || processType) === 'hierarchical' && (
+                <FormControl size="small" fullWidth sx={{ mt: 1 }}>
+                  <InputLabel sx={{ fontSize: '0.75rem' }}>Manager LLM</InputLabel>
+                  <Select
+                    value={managerModel}
+                    onChange={handleManagerModelChange}
+                    label="Manager LLM"
+                    disabled={isLoadingModels}
+                    sx={{ fontSize: '0.75rem' }}
+                    renderValue={(selected: string) => {
+                      const model = models[selected];
+                      return model ? model.name : selected;
+                    }}
+                  >
+                    {isLoadingModels ? (
+                      <MenuItem value="">
+                        <CircularProgress size={16} />
+                      </MenuItem>
+                    ) : Object.keys(models).length === 0 ? (
+                      <MenuItem value="">No models available</MenuItem>
+                    ) : (
+                      Object.entries(models).map(([key, model]) => (
+                        <MenuItem key={key} value={key} sx={{ fontSize: '0.75rem' }}>
+                          <span>{model.name}</span>
+                        </MenuItem>
+                      ))
+                    )}
+                  </Select>
+                </FormControl>
+              )}
+
+              {(storeProcessType || processType) === 'hierarchical' && (
+                <Typography variant="caption" sx={{ color: 'text.secondary', fontSize: '0.65rem', mt: 0.5 }}>
+                  Manager coordinates task delegation to agents
+                </Typography>
+              )}
+            </Box>
+          </Box>
+
+          {/* Planning Section */}
+          <Box sx={{ mb: 2 }}>
+            <Box sx={{ display: 'flex', alignItems: 'center', mb: 1 }}>
+              <Typography
+                variant="subtitle2"
+                sx={{
+                  color: theme.palette.primary.main,
+                  fontWeight: 600,
+                  textTransform: 'uppercase',
+                  letterSpacing: '0.5px',
+                  fontSize: '0.7rem'
+                }}
+              >
+                Planning
+              </Typography>
+              <Tooltip title="Crew-level strategic planning before task execution. ENABLE for: complex multi-step workflows, task dependencies requiring orchestration, projects needing autonomous task decomposition. DISABLE for: simple well-defined tasks, speed-critical operations, deterministic workflows with fixed sequences. Adds 5-10min overhead but improves task coordination." placement="right">
+                <InfoOutlinedIcon sx={{ ml: 0.5, fontSize: 14, color: theme.palette.primary.main, cursor: 'help' }} />
+              </Tooltip>
+            </Box>
             <Divider sx={{ mb: 1 }} />
             
             <Box
@@ -288,19 +444,23 @@ const LeftSidebar: React.FC<LeftSidebarProps> = ({
 
           {/* Reasoning Section */}
           <Box sx={{ mb: 2 }}>
-            <Typography 
-              variant="subtitle2" 
-              sx={{ 
-                color: theme.palette.primary.main, 
-                mb: 1,
-                fontWeight: 600,
-                textTransform: 'uppercase',
-                letterSpacing: '0.5px',
-                fontSize: '0.7rem'
-              }}
-            >
-              Reasoning
-            </Typography>
+            <Box sx={{ display: 'flex', alignItems: 'center', mb: 1 }}>
+              <Typography
+                variant="subtitle2"
+                sx={{
+                  color: theme.palette.primary.main,
+                  fontWeight: 600,
+                  textTransform: 'uppercase',
+                  letterSpacing: '0.5px',
+                  fontSize: '0.7rem'
+                }}
+              >
+                Reasoning
+              </Typography>
+              <Tooltip title="Agent-level reflection and planning before each task. ENABLE for: complex tasks needing breakdown, problems requiring methodical analysis, identifying challenges upfront, quality over speed. DISABLE for: simple straightforward tasks, time-critical operations, well-defined procedures, repetitive tasks. Each reasoning iteration adds overhead and potential error risk. Max attempts limits refinement cycles." placement="right">
+                <InfoOutlinedIcon sx={{ ml: 0.5, fontSize: 14, color: theme.palette.primary.main, cursor: 'help' }} />
+              </Tooltip>
+            </Box>
             <Divider sx={{ mb: 1 }} />
             
             <Box
@@ -398,7 +558,7 @@ const LeftSidebar: React.FC<LeftSidebarProps> = ({
           </Box>
         </Box>
       )
-    },
+    }] : []),
     {
       id: 'shortcuts',
       icon: <KeyboardIcon />,
@@ -504,11 +664,22 @@ const LeftSidebar: React.FC<LeftSidebarProps> = ({
       setIsConfigurationDialogOpen && setIsConfigurationDialogOpen(true);
       return;
     }
+    if (sectionId === 'help') {
+      // Open tutorial dialog
+      console.log('[LeftSidebar] Help button clicked, onOpenTutorial:', onOpenTutorial);
+      if (onOpenTutorial) {
+        onOpenTutorial();
+      } else {
+        console.warn('[LeftSidebar] onOpenTutorial prop is not provided');
+      }
+      return;
+    }
     setActiveSection(activeSection === sectionId ? null : sectionId);
   };
 
   return (
     <Box
+      data-tour="left-sidebar"
       sx={{
         position: 'absolute',
         top: '48px', // Account for TabBar height
@@ -538,11 +709,36 @@ const LeftSidebar: React.FC<LeftSidebarProps> = ({
           >
             {sidebarItems.map((item) => (
               <React.Fragment key={item.id}>
-                <Tooltip title={item.tooltip} placement="right">
-                  <IconButton
+                <Tooltip
+                  title={
+                    item.id === 'help' && !hasSeenTutorial
+                      ? '🎯 Click to start your personalized tutorial!'
+                      : item.tooltip
+                  }
+                  placement="right"
+                  arrow={item.id === 'help' && !hasSeenTutorial}
+                >
+                  <Badge
+                    badgeContent={item.id === 'help' && !hasSeenTutorial ? '!' : null}
+                    color="primary"
+                    variant="dot"
+                    invisible={item.id !== 'help' || hasSeenTutorial}
+                    sx={{
+                      '& .MuiBadge-dot': {
+                        animation: 'pulse 2s infinite',
+                        '@keyframes pulse': {
+                          '0%': { transform: 'scale(1)' },
+                          '50%': { transform: 'scale(1.2)' },
+                          '100%': { transform: 'scale(1)' }
+                        }
+                      }
+                    }}
+                  >
+                    <IconButton
+                    data-tour={item.dataTour}
                     onMouseEnter={() => {
-                      // Don't set active section for configuration since it opens a dialog
-                      if (item.id !== 'configuration') {
+                      // Don't set active section for configuration or help since they open dialogs
+                      if (item.id !== 'configuration' && item.id !== 'help') {
                         setActiveSection(item.id);
                       }
                     }}
@@ -551,26 +747,38 @@ const LeftSidebar: React.FC<LeftSidebarProps> = ({
                       width: 40,
                       height: 40,
                       mb: 1,
-                      color: 'text.secondary',
-                      backgroundColor: activeSection === item.id 
+                      color: item.id === 'help'
+                        ? (!hasSeenTutorial ? theme.palette.primary.main : theme.palette.info.main)
+                        : 'text.secondary',
+                      animation: item.id === 'help' && !hasSeenTutorial
+                        ? 'pulse 2s infinite'
+                        : 'none',
+                      '@keyframes pulse': {
+                        '0%': { boxShadow: '0 0 0 0 rgba(25, 118, 210, 0.4)' },
+                        '70%': { boxShadow: '0 0 0 8px rgba(25, 118, 210, 0)' },
+                        '100%': { boxShadow: '0 0 0 0 rgba(25, 118, 210, 0)' }
+                      },
+                      backgroundColor: activeSection === item.id
                         ? 'action.selected'
                         : 'transparent',
-                      borderLeft: activeSection === item.id 
+                      borderLeft: activeSection === item.id
                         ? `2px solid ${theme.palette.primary.main}`
                         : '2px solid transparent',
                       borderRadius: 0,
                       transition: 'all 0.2s ease-in-out',
                       '&:hover': {
                         backgroundColor: 'action.hover',
-                        color: 'text.primary'
+                        color: item.id === 'help' ? theme.palette.info.dark : 'text.primary',
+                        transform: item.id === 'help' ? 'scale(1.1)' : 'none'
                       }
                     }}
                   >
-                    {item.icon}
-                  </IconButton>
+                      {item.icon}
+                    </IconButton>
+                  </Badge>
                 </Tooltip>
-                {/* Add separator after Configuration */}
-                {item.id === 'configuration' && (
+                {/* Add separator after help button */}
+                {item.id === 'help' && (
                   <Box
                     sx={{
                       width: '80%',

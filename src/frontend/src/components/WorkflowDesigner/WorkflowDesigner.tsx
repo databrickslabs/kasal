@@ -45,7 +45,7 @@ import CrewPlanningDialog from '../Planning/CrewPlanningDialog';
 import { CrewDialog as _CrewDialog } from '../Crew';
 import ScheduleDialog from '../Schedule/ScheduleDialog';
 import JobsPanel from '../Jobs/JobsPanel';
-import Tutorial from '../Tutorial/Tutorial';
+import InteractiveTutorial from '../Tutorial/InteractiveTutorial';
 import APIKeys from '../Configuration/APIKeys/APIKeys';
 import Logs from '../Jobs/LLMLogs';
 import ShowLogs from '../Jobs/ShowLogs';
@@ -1173,11 +1173,11 @@ const WorkflowDesigner: React.FC<WorkflowDesignerProps> = (): JSX.Element => {
         display: 'flex',
         flexDirection: 'column',
         overflow: 'hidden' // Prevent scrolling
-      }}>
-        {/* Only render the Tutorial component when needed to avoid unmounting issues */}
-        {dialogManager.isTutorialOpen && (
-          <Tutorial isOpen={dialogManager.isTutorialOpen} onClose={dialogManager.handleCloseTutorial} />
-        )}
+      }}
+      data-tour="workflow-designer"
+    >
+        {/* Interactive walkthrough tutorial */}
+        <InteractiveTutorial isOpen={dialogManager.isTutorialOpen} onClose={dialogManager.handleCloseTutorial} />
         
         {/* Tab Bar */}
         <TabBar 
@@ -1251,6 +1251,11 @@ const WorkflowDesigner: React.FC<WorkflowDesignerProps> = (): JSX.Element => {
               setIsAgentDialogOpen={() => openAgentDialog(true)}
               setIsTaskDialogOpen={() => openTaskDialog(true)}
               setIsFlowDialogOpen={dialogManager.setIsFlowDialogOpen}
+              onOpenTutorial={() => {
+                console.log('[WorkflowDesigner] Opening tutorial, dialogManager:', dialogManager);
+                dialogManager.setIsTutorialOpen(true);
+              }}
+              onOpenConfiguration={() => dialogManager.setIsConfigurationDialogOpen(true)}
               onPanelDragStart={e => {
                 e.preventDefault();
                 
@@ -1884,6 +1889,10 @@ const WorkflowDesigner: React.FC<WorkflowDesignerProps> = (): JSX.Element => {
           onOpenLogsDialog={() => dialogManager.setIsLogsDialogOpen(true)}
           showRunHistory={showRunHistory}
           executionHistoryHeight={executionHistoryHeight}
+          onOpenTutorial={() => {
+            console.log('[WorkflowDesigner] Opening tutorial from LeftSidebar');
+            dialogManager.setIsTutorialOpen(true);
+          }}
         />
       </Box>
     </div>

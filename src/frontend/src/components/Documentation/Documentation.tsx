@@ -33,49 +33,28 @@ interface DocSection {
 
 const docSections: DocSection[] = [
   {
-    label: 'Getting Started',
+    label: 'Overview',
     items: [
-      { label: 'Installation', file: 'GETTING_STARTED' },
-      { label: 'Best Practices', file: 'BEST_PRACTICES' },
+      { label: 'Documentation Hub', file: 'README' },
+    ],
+  },
+  {
+    label: 'Business',
+    items: [
+      { label: 'Business User Guide', file: 'BUSINESS_USER_GUIDE' },
+    ],
+  },
+  {
+    label: 'Development',
+    items: [
+      { label: 'Developer Guide', file: 'DEVELOPER_GUIDE' },
+      { label: 'API Reference', file: 'API_REFERENCE' },
     ],
   },
   {
     label: 'Architecture',
     items: [
-      { label: 'Overview', file: 'ARCHITECTURE' },
-      { label: 'Authorization', file: 'AUTHORIZATION' },
-      { label: 'Security Model', file: 'SECURITY_MODEL' },
-      { label: 'Database Migrations', file: 'DATABASE_MIGRATIONS' },
-      { label: 'Database Seeding', file: 'DATABASE_SEEDING' },
-      { label: 'Models', file: 'MODELS' },
-      { label: 'Schemas', file: 'SCHEMAS' },
-      { label: 'Schema Structure', file: 'SCHEMAS_STRUCTURE' },
-    ],
-  },
-  {
-    label: 'Backend Features',
-    items: [
-      { label: 'CrewAI Engine', file: 'CREWAI_ENGINE' },
-      { label: 'LLM Manager', file: 'LLM_MANAGER' },
-      { label: 'Memory Backend', file: 'MEMORY_BACKEND_FEATURE' },
-      { label: 'Databricks Vector Search', file: 'DATABRICKS_VECTOR_SEARCH' },
-      { label: 'Embeddings', file: 'EMBEDDINGS' },
-      { label: 'Logging', file: 'LOGGING' },
-      { label: 'Tasks', file: 'TASKS' },
-      { label: 'Agents', file: 'AGENTS' },
-    ],
-  },
-  {
-    label: 'API & Usage',
-    items: [
-      { label: 'REST API', file: 'API' },
-      { label: 'Shortcuts', file: 'SHORTCUTS' },
-    ],
-  },
-  {
-    label: 'Deployment',
-    items: [
-      { label: 'Deployment Guide', file: 'DEPLOYMENT_GUIDE' },
+      { label: 'Solution Architecture', file: 'ARCHITECTURE_GUIDE' },
     ],
   },
 ];

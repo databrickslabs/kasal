@@ -8,9 +8,9 @@ import {
   CircularProgress,
   List,
   ListItem,
+  ListItemButton,
   ListItemText,
   Divider,
-  ListItemButton,
   Tooltip,
   Stack,
   Menu,
@@ -21,8 +21,8 @@ import SmartToyIcon from '@mui/icons-material/SmartToy';
 import ChatIcon from '@mui/icons-material/Chat';
 import AddIcon from '@mui/icons-material/Add';
 import DeleteIcon from '@mui/icons-material/Delete';
-import RefreshIcon from '@mui/icons-material/Refresh';
 import CloseIcon from '@mui/icons-material/Close';
+import RefreshIcon from '@mui/icons-material/Refresh';
 import KeyboardArrowDownIcon from '@mui/icons-material/KeyboardArrowDown';
 import ChevronLeftIcon from '@mui/icons-material/ChevronLeft';
 import DispatcherService, { DispatchResult, ConfigureCrewResult } from '../../api/DispatcherService';
@@ -64,9 +64,6 @@ import { useExecutionMonitoring } from './hooks/useExecutionMonitoring';
 import { ChatMessageItem } from './components/ChatMessageItem';
 import { GroupedTraceMessages } from './components/GroupedTraceMessages';
 import { KnowledgeFileUpload } from './KnowledgeFileUpload';
-import { MemoryBackendService } from '../../api/MemoryBackendService';
-import { MemoryBackendType, isValidMemoryBackendConfig } from '../../types/memoryBackend';
-import { DatabricksService } from '../../api/DatabricksService';
 
 const WorkflowChat: React.FC<WorkflowChatProps> = ({
   onNodesGenerated,
@@ -100,7 +97,6 @@ const WorkflowChat: React.FC<WorkflowChatProps> = ({
   const {
     isMemoryBackendConfigured,
     isKnowledgeSourceEnabled,
-    refreshConfiguration,
     checkConfiguration,
   } = useKnowledgeConfigStore();
   
@@ -125,8 +121,6 @@ const WorkflowChat: React.FC<WorkflowChatProps> = ({
 
   // Use Zustand store for messages
   const {
-    addMessage,
-    addMessages,
     setMessages: setZustandMessages,
     getDeduplicatedMessages,
     setCurrentSession,
@@ -1246,12 +1240,14 @@ const WorkflowChat: React.FC<WorkflowChatProps> = ({
                             
                             if (updatedAgent) {
                               console.log(`[DEBUG] Updating node ${node.id} with knowledge_sources:`, updatedAgent.knowledge_sources);
+                              console.log(`[DEBUG] Updating node ${node.id} with tools:`, updatedAgent.tools);
                               return {
                                 ...node,
                                 data: {
                                   ...node.data,
                                   ...updatedAgent,  // Update all agent fields
                                   agentId: updatedAgent.id,  // Ensure agentId is set
+                                  tools: updatedAgent.tools,  // Explicitly set tools array
                                   knowledge_sources: updatedAgent.knowledge_sources  // Explicitly set knowledge_sources
                                 }
                               };

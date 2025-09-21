@@ -51,7 +51,7 @@ const PromptConfiguration: React.FC = () => {
       console.error('Error loading prompts:', error);
       setNotification({
         open: true,
-        message: 'Failed to load prompt templates',
+        message: 'Failed to load prompt instructions',
         severity: 'error',
       });
     } finally {
@@ -121,17 +121,17 @@ const PromptConfiguration: React.FC = () => {
       
       setNotification({
         open: true,
-        message: `Successfully reset ${result.reset_count} prompt templates to default values`,
+        message: `Successfully reset ${result.reset_count} prompt instructions to default values`,
         severity: 'success',
       });
       
       // Reload the prompts
       await loadPrompts();
     } catch (error) {
-      console.error('Error resetting prompt templates:', error);
+      console.error('Error resetting prompt instructions:', error);
       setNotification({
         open: true,
-        message: 'Failed to reset prompt templates',
+        message: 'Failed to reset prompt instructions',
         severity: 'error',
       });
       setLoading(false);
@@ -149,10 +149,10 @@ const PromptConfiguration: React.FC = () => {
   return (
     <Box>
       <Typography variant="h6" gutterBottom>
-        {t('configuration.prompts.title', { defaultValue: 'Prompt Templates' })}
+        {t('configuration.prompts.title', { defaultValue: 'Prompt Instructions' })}
       </Typography>
       <Typography variant="body2" color="textSecondary" paragraph>
-        {t('configuration.prompts.description', { defaultValue: 'Edit the system prompt templates used by Kasal agents.' })}
+        {t('configuration.prompts.description', { defaultValue: 'Edit the system prompt instructions used by Kasal agents.' })}
       </Typography>
 
       <Box display="flex" justifyContent="flex-end" mb={2}>
@@ -187,7 +187,7 @@ const PromptConfiguration: React.FC = () => {
           ))}
           {prompts.length === 0 && (
             <ListItem>
-              <ListItemText primary="No prompt templates found" />
+              <ListItemText primary="No prompt instructions found" />
             </ListItem>
           )}
         </List>
@@ -258,12 +258,12 @@ const PromptConfiguration: React.FC = () => {
         onClose={() => setResetConfirmOpen(false)}
       >
         <DialogTitle>
-          {t('configuration.prompts.resetConfirmTitle', { defaultValue: 'Reset Prompt Templates' })}
+          {t('configuration.prompts.resetConfirmTitle', { defaultValue: 'Reset Prompt Instructions' })}
         </DialogTitle>
         <DialogContent>
           <Typography>
             {t('configuration.prompts.resetConfirmMessage', { 
-              defaultValue: 'Are you sure you want to reset all prompt templates to their default values? This action cannot be undone.' 
+              defaultValue: 'Are you sure you want to reset all prompt instructions to their default values? This action cannot be undone.' 
             })}
           </Typography>
         </DialogContent>

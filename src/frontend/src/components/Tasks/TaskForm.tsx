@@ -23,14 +23,17 @@ import {
   DialogActions,
   IconButton,
   InputAdornment,
+  Tooltip,
 } from '@mui/material';
 import { type Task } from '../../api/TaskService';
 import ExpandMoreIcon from '@mui/icons-material/ExpandMore';
 import OpenInFullIcon from '@mui/icons-material/OpenInFull';
 import CloseIcon from '@mui/icons-material/Close';
+import DeleteIcon from '@mui/icons-material/Delete';
 import HelpOutlineIcon from '@mui/icons-material/HelpOutline';
 import { TaskAdvancedConfig } from './TaskAdvancedConfig';
 import { TaskService } from '../../api/TaskService';
+import { DatabricksService } from '../../api/DatabricksService';
 import useStableResize from '../../hooks/global/useStableResize';
 import { GenieSpaceSelector } from '../Common/GenieSpaceSelector';
 import { PerplexityConfigSelector } from '../Common/PerplexityConfigSelector';
@@ -110,7 +113,7 @@ const TaskForm: React.FC<TaskFormProps> = ({ initialData, onCancel, onTaskSaved,
   });
   const [error, setError] = useState<string | null>(null);
   const [availableTasks, setAvailableTasks] = useState<Task[]>([]);
-  const [selectedGenieSpace, setSelectedGenieSpace] = useState<string>('');
+  const [selectedGenieSpace, setSelectedGenieSpace] = useState<{ id: string; name: string } | null>(null);
   const [perplexityConfig, setPerplexityConfig] = useState<PerplexityConfig>({});
   const [serperConfig, setSerperConfig] = useState<SerperConfig>({});
   const [selectedMcpServers, setSelectedMcpServers] = useState<string[]>([]);
@@ -132,8 +135,12 @@ const TaskForm: React.FC<TaskFormProps> = ({ initialData, onCancel, onTaskSaved,
       const genieConfig = initialData.tool_configs.GenieTool as Record<string, unknown>;
       if (genieConfig) {
         const spaceId = genieConfig.spaceId || genieConfig.space_id;
+        const spaceName = genieConfig.spaceName || genieConfig.space_name || spaceId; // Fallback to ID if name not stored
         if (spaceId && typeof spaceId === 'string') {
-          setSelectedGenieSpace(spaceId);
+          setSelectedGenieSpace({
+            id: spaceId as string,
+            name: spaceName as string
+          });
         }
       }
       
@@ -241,8 +248,8 @@ const TaskForm: React.FC<TaskFormProps> = ({ initialData, onCancel, onTaskSaved,
         
         // Handle GenieTool config
         if (selectedGenieSpace && formData.tools.some(toolId => {
-          const tool = tools.find(t => 
-            String(t.id) === String(toolId) || 
+          const tool = tools.find(t =>
+            String(t.id) === String(toolId) ||
             t.id === Number(toolId) ||
             t.title === toolId
           );
@@ -251,7 +258,8 @@ const TaskForm: React.FC<TaskFormProps> = ({ initialData, onCancel, onTaskSaved,
           updatedToolConfigs = {
             ...updatedToolConfigs,
             GenieTool: {
-              spaceId: selectedGenieSpace
+              spaceId: selectedGenieSpace.id,
+              spaceName: selectedGenieSpace.name
             }
           };
         } else if (!selectedGenieSpace) {
@@ -408,6 +416,47 @@ const TaskForm: React.FC<TaskFormProps> = ({ initialData, onCancel, onTaskSaved,
     setExpandedOutput(false);
   };
 
+  const handleGenieSpaceClick = async (event: React.MouseEvent) => {
+    // Prevent any bubbling that might interfere
+    event.stopPropagation();
+
+    if (!selectedGenieSpace) {
+      console.warn('No Genie space selected');
+      return;
+    }
+
+    try {
+      console.log('Fetching Databricks configuration...');
+      const databricksService = DatabricksService.getInstance();
+      const config = await databricksService.getDatabricksConfig();
+      console.log('Databricks config:', config);
+
+      if (config && config.workspace_url) {
+        // Ensure the URL has https:// and remove trailing slash if present
+        let workspaceUrl = config.workspace_url.startsWith('https://')
+          ? config.workspace_url
+          : `https://${config.workspace_url}`;
+
+        // Remove trailing slash to avoid double slashes
+        workspaceUrl = workspaceUrl.replace(/\/$/, '');
+
+        // Construct the Genie room URL
+        // Format: https://{workspace}/genie/rooms/{space_id}/monitoring
+        const genieUrl = `${workspaceUrl}/genie/rooms/${selectedGenieSpace.id}/monitoring`;
+
+        console.log('Opening Genie URL:', genieUrl);
+        // Open in new tab
+        window.open(genieUrl, '_blank', 'noopener,noreferrer');
+      } else {
+        console.warn('Databricks workspace URL not configured');
+        alert('Databricks workspace URL is not configured. Please configure it in Settings > Configuration > Databricks.');
+      }
+    } catch (error) {
+      console.error('Error opening Genie space:', error);
+      alert('Error opening Genie space. Please check the console for details.');
+    }
+  };
+
   return (
     <>
       <Card sx={{ 
@@ -538,16 +587,29 @@ const TaskForm: React.FC<TaskFormProps> = ({ initialData, onCancel, onTaskSaved,
                   <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 0.5 }}>
                     {(selected as string[]).map((toolId) => {
                       // Try to find tool by comparing both string and number forms
-                      const tool = tools.find(t => 
-                        String(t.id) === String(toolId) || 
+                      const tool = tools.find(t =>
+                        String(t.id) === String(toolId) ||
                         t.id === Number(toolId) ||
                         t.title === toolId  // Also check by title for backward compatibility
                       );
                       return (
-                        <Chip 
+                        <Chip
                           key={toolId}
                           label={tool ? tool.title : `Tool ${toolId}`}
                           size="small"
+                          onDelete={() => {
+                            const newTools = formData.tools.filter(id => String(id) !== String(toolId));
+                            handleToolsChange({ target: { value: newTools } } as SelectChangeEvent<string[]>);
+                          }}
+                          onMouseDown={(event: React.MouseEvent) => {
+                            event.stopPropagation(); // Prevent dropdown from opening when clicking delete icon
+                          }}
+                          deleteIcon={
+                            <DeleteIcon
+                              fontSize="small"
+                              sx={{ fontSize: '16px !important' }}
+                            />
+                          }
                         />
                       );
                     })}
@@ -577,43 +639,70 @@ const TaskForm: React.FC<TaskFormProps> = ({ initialData, onCancel, onTaskSaved,
               </Select>
             </FormControl>
 
-            {/* Genie Space Selector - Show only when GenieTool is selected */}
+            {/* Genie Space Display - Show only when GenieTool is selected */}
             {formData.tools.some(toolId => {
-              const tool = tools.find(t => 
-                String(t.id) === String(toolId) || 
+              const tool = tools.find(t =>
+                String(t.id) === String(toolId) ||
                 t.id === Number(toolId) ||
                 t.title === toolId
               );
               return tool?.title === 'GenieTool';
             }) && (
               <Box sx={{ mt: 2 }}>
-                <GenieSpaceSelector
-                  value={selectedGenieSpace}
-                  onChange={(value) => {
-                    setSelectedGenieSpace(value as string || '');
-                    // Update tool configs when space changes
-                    if (value) {
-                      setToolConfigs(prev => ({
-                        ...prev,
-                        GenieTool: {
-                          spaceId: value as string
+                <Typography variant="subtitle2" sx={{ mb: 1 }}>Genie Space</Typography>
+                {selectedGenieSpace ? (
+                  <Tooltip title={`Space ID: ${selectedGenieSpace.id} - Click to open in Databricks`} arrow>
+                    <Chip
+                      label={selectedGenieSpace.name}
+                      size="medium"
+                      color="primary"
+                      variant="outlined"
+                      onClick={handleGenieSpaceClick}
+                      onDelete={() => {
+                        setSelectedGenieSpace(null);
+                        // Remove GenieTool config when space is removed
+                        setToolConfigs(prev => {
+                          const newConfigs = { ...prev };
+                          delete newConfigs.GenieTool;
+                          return newConfigs;
+                        });
+                      }}
+                      deleteIcon={<DeleteIcon fontSize="small" />}
+                      sx={{
+                        cursor: 'pointer',
+                        '&:hover': {
+                          backgroundColor: 'rgba(25, 118, 210, 0.08)',
                         }
-                      }));
-                    } else {
-                      // Remove GenieTool config if no space selected
-                      setToolConfigs(prev => {
-                        const newConfigs = { ...prev };
-                        delete newConfigs.GenieTool;
-                        return newConfigs;
-                      });
-                    }
-                  }}
-                  label="Genie Space"
-                  placeholder="Search for Genie spaces..."
-                  helperText="Select the Genie space to use with this task"
-                  required
-                  fullWidth
-                />
+                      }}
+                    />
+                  </Tooltip>
+                ) : (
+                  <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+                    <GenieSpaceSelector
+                      value=""
+                      onChange={(value, spaceName) => {
+                        if (value) {
+                          setSelectedGenieSpace({
+                            id: value as string,
+                            name: spaceName || value as string  // Use the name if provided, otherwise fallback to ID
+                          });
+                          // Update tool configs when space is selected
+                          setToolConfigs(prev => ({
+                            ...prev,
+                            GenieTool: {
+                              spaceId: value as string,
+                              spaceName: spaceName || value as string
+                            }
+                          }));
+                        }
+                      }}
+                      label=""
+                      placeholder="Select a Genie space..."
+                      helperText=""
+                      fullWidth
+                    />
+                  </Box>
+                )}
               </Box>
             )}
 

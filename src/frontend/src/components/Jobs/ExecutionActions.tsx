@@ -79,13 +79,16 @@ const RunActions: React.FC<RunActionsProps> = ({
         }}
       />
       <Tooltip title={t('runHistory.actions.viewResult')}>
-        <IconButton
-          size="small"
-          onClick={() => onViewResult(run)}
-          color="primary"
-        >
-          <PreviewIcon fontSize="small" />
-        </IconButton>
+        <span>
+          <IconButton
+            size="small"
+            onClick={() => onViewResult(run)}
+            color="primary"
+            disabled={['running', 'pending', 'queued', 'in_progress'].includes(run.status?.toLowerCase() || '')}
+          >
+            <PreviewIcon fontSize="small" />
+          </IconButton>
+        </span>
       </Tooltip>
       <Tooltip title={t('runHistory.actions.downloadPdf')}>
         <IconButton
@@ -107,13 +110,16 @@ const RunActions: React.FC<RunActionsProps> = ({
         </IconButton>
       </Tooltip>
       <Tooltip title={t('runHistory.actions.viewLogs')}>
-        <IconButton
-          size="small"
-          onClick={() => onShowLogs(run.job_id)}
-          color="primary"
-        >
-          <TerminalIcon fontSize="small" />
-        </IconButton>
+        <span>
+          <IconButton
+            size="small"
+            onClick={() => onShowLogs(run.job_id)}
+            color="primary"
+            disabled={['running', 'pending', 'queued', 'in_progress'].includes(run.status?.toLowerCase() || '')}
+          >
+            <TerminalIcon fontSize="small" />
+          </IconButton>
+        </span>
       </Tooltip>
       <Tooltip title={t('runHistory.actions.schedule')}>
         <IconButton

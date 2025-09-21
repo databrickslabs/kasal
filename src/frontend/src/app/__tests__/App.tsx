@@ -11,6 +11,7 @@ import { LanguageService } from '../../api/LanguageService';
 import { WorkflowTest } from '../../components/WorkflowTest';
 import { Documentation } from '../../components/Documentation';
 import DatabaseManagementService from '../../api/DatabaseManagementService';
+import { usePermissionLoader } from '../../hooks/usePermissions';
 import '../../config/i18n/config';
 
 // Cache for Database Management permission to avoid repeated API calls
@@ -26,6 +27,9 @@ let databaseManagementPermissionCache: {
 export const getDatabaseManagementPermission = () => databaseManagementPermissionCache;
 
 function App() {
+  // Load and maintain user permissions throughout the app
+  usePermissionLoader();
+
   useEffect(() => {
     const initialize = async () => {
       // Initialize language
@@ -56,7 +60,7 @@ function App() {
 
   return (
     <ThemeProvider>
-      <Toaster 
+      <Toaster
         position="top-center"
         toastOptions={{
           duration: 6000,

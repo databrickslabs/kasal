@@ -7,7 +7,8 @@ import EditIcon from '@mui/icons-material/Edit';
 import CodeIcon from '@mui/icons-material/Code';
 import MemoryIcon from '@mui/icons-material/Memory';
 import FileIcon from '@mui/icons-material/FileUpload';
-import { AgentService, Agent } from '../../api/AgentService';
+import AttachFileIcon from '@mui/icons-material/AttachFile';
+import { Agent } from '../../api/AgentService';
 import AgentForm from './AgentForm';
 import { ToolService } from '../../api/ToolService';
 import { Tool, KnowledgeSource } from '../../types/agent';
@@ -364,10 +365,14 @@ const AgentNode: React.FC<{ data: AgentNodeData; id: string }> = ({ data, id }) 
     return baseStyles;
   };
 
-  const hasFiles = data.knowledge_sources?.some(source => 
-    source.type === 'databricks_volume' || 
+  const hasFiles = data.knowledge_sources?.some(source =>
+    source.type === 'databricks_volume' ||
     (source.type !== 'text' && source.type !== 'url' && source.fileInfo?.exists)
   );
+
+  // Check if agent has DatabricksKnowledgeSearchTool
+  const hasKnowledgeSearchTool = data.tools?.includes('DatabricksKnowledgeSearchTool') ||
+                                  data.tools?.includes('36'); // Also check for tool ID
 
   return (
     <Box
@@ -381,19 +386,41 @@ const AgentNode: React.FC<{ data: AgentNodeData; id: string }> = ({ data, id }) 
       data-nodetype="agent"
       data-selected={isSelected ? 'true' : 'false'}
     >
-      {hasFiles && (
-        <Box 
-          sx={{ 
-            position: 'absolute', 
-            top: 4, 
-            left: 4, 
+      {/* Show attachment icon when agent has DatabricksKnowledgeSearchTool */}
+      {hasKnowledgeSearchTool && (
+        <Box
+          sx={{
+            position: 'absolute',
+            top: 4,
+            left: 4,
+            color: 'primary.main',
+            display: 'flex'
+          }}
+        >
+          <Tooltip
+            title="Has Knowledge Search capability for attached documents"
+            disableInteractive
+            placement="top"
+          >
+            <AttachFileIcon fontSize="small" />
+          </Tooltip>
+        </Box>
+      )}
+
+      {/* Legacy knowledge sources indicator (kept for backward compatibility) */}
+      {hasFiles && !hasKnowledgeSearchTool && (
+        <Box
+          sx={{
+            position: 'absolute',
+            top: 4,
+            left: 4,
             color: 'success.main',
             display: 'flex'
           }}
         >
-          <Tooltip 
-            title={`Has ${data.knowledge_sources?.length || 0} knowledge source(s)`} 
-            disableInteractive 
+          <Tooltip
+            title={`Has ${data.knowledge_sources?.length || 0} knowledge source(s)`}
+            disableInteractive
             placement="top"
           >
             <FileIcon fontSize="small" />

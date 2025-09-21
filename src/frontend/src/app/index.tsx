@@ -6,17 +6,6 @@ import { BrowserRouter } from 'react-router-dom';
 import { Provider } from 'react-redux';
 import { store } from '../store';
 
-// Prevent ResizeObserver loop limit exceeded errors
-const originalError = console.error;
-console.error = (...args) => {
-  if (args[0]?.includes?.('ResizeObserver loop limit exceeded') ||
-      args[0]?.includes?.('ResizeObserver loop completed with undelivered notifications')) {
-    // Ignore ResizeObserver errors
-    return;
-  }
-  originalError(...args);
-};
-
 const root = ReactDOM.createRoot(
   document.getElementById('root') as HTMLElement
 );
