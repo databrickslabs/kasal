@@ -60,7 +60,7 @@ const docSections: DocSection[] = [
 ];
 
 const Documentation: React.FC = () => {
-  const [currentDoc, setCurrentDoc] = useState<string>('index');
+  const [currentDoc, setCurrentDoc] = useState<string>('README');
   const [docContent, setDocContent] = useState<string>('');
   const [loading, setLoading] = useState<boolean>(true);
   const [openSections, setOpenSections] = useState<{ [key: string]: boolean }>({});
@@ -121,7 +121,7 @@ const Documentation: React.FC = () => {
       </Toolbar>
       <List>
         <ListItem disablePadding>
-          <ListItemButton onClick={() => handleDocSelect('index')}>
+          <ListItemButton onClick={() => handleDocSelect('README')}>
             <HomeIcon sx={{ mr: 1 }} />
             <ListItemText primary="Home" />
           </ListItemButton>
