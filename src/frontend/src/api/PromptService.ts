@@ -27,7 +27,7 @@ export class PromptService {
   }
 
   /**
-   * Get all prompt templates
+   * Get all prompt instructions
    */
   async getAllPrompts(): Promise<PromptTemplate[]> {
     try {
@@ -82,7 +82,7 @@ export class PromptService {
   }
 
   /**
-   * Reset all prompt templates to default values
+   * Reset all prompt instructions to default values
    */
   async resetPromptTemplates(): Promise<{message: string, reset_count: number}> {
     try {
@@ -91,7 +91,7 @@ export class PromptService {
       );
       return response.data;
     } catch (error) {
-      console.error('Error resetting prompt templates:', error);
+      console.error('Error resetting prompt instructions:', error);
       throw error;
     }
   }
