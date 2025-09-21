@@ -153,3 +153,5 @@ logs/
 !frontend/src/components/Configuration/Memory/
 # ChromaDB lock files
 chromadb-*.lock
+router_layer
+service_layer
