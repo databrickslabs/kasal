@@ -126,29 +126,38 @@ class UserService:
         # Return updated user
         return await self.user_repo.get(user_id)
 
-    async def get_or_create_user_by_email(self, email: str) -> Optional[User]:
+    async def get_or_create_user_by_email(self, email: str, update_login: bool = False) -> Optional[User]:
         """
         Get or create a user by email address.
         This is used for proxy-based authentication where users are auto-created.
 
         Args:
             email: User's email address
+            update_login: Whether to update the last_login timestamp (default: False to prevent locking)
 
         Returns:
             User: The existing or newly created user
         """
         logger.info(f"get_or_create_user_by_email called for email: {email}")
-        # Check if user exists
-        user = await self.user_repo.get_by_email(email)
 
-        if user:
-            # User exists, update last login
-            await self.user_repo.update_last_login(user.id)
-            logger.debug(f"Existing user found: {email}")
+        # Use try-catch to handle race conditions where user might be created between check and create
+        try:
+            # Check if user exists
+            user = await self.user_repo.get_by_email(email)
 
-            # Check if this existing user should be granted admin privileges (if no system admins exist)
-            await self._handle_first_user_admin_setup(user, is_new_user=False)
-        else:
+            if user:
+                # User exists, optionally update last login (disabled by default to prevent SQLite locking)
+                if update_login:
+                    try:
+                        await self.user_repo.update_last_login(user.id)
+                    except Exception as e:
+                        # Log but don't fail on last_login update errors
+                        logger.warning(f"Failed to update last_login for {email}: {e}")
+                logger.debug(f"Existing user found: {email}")
+
+                # Check if this existing user should be granted admin privileges (if no system admins exist)
+                await self._handle_first_user_admin_setup(user, is_new_user=False)
+                return user
             # Create new user (OAuth proxy authentication - no password needed)
 
             # Generate username from email
@@ -170,15 +179,38 @@ class UserService:
                 "role": UserRole.REGULAR
             }
 
-            user = await self.user_repo.create(user_data)
-            # No separate profile creation needed - display_name is now part of User
+            try:
+                user = await self.user_repo.create(user_data)
+                # No separate profile creation needed - display_name is now part of User
 
-            logger.info(f"Created new user via proxy auth: {email}")
+                logger.info(f"Created new user via proxy auth: {email}")
 
-            # Check if this is the first user and needs admin setup
-            await self._handle_first_user_admin_setup(user, is_new_user=True)
+                # Check if this is the first user and needs admin setup
+                await self._handle_first_user_admin_setup(user, is_new_user=True)
+                return user
 
-        return user
+            except Exception as create_error:
+                # Handle race condition where user was created between our check and create attempt
+                if "UNIQUE constraint failed" in str(create_error) or "unique constraint" in str(create_error).lower():
+                    logger.warning(f"Race condition detected: User {email} was created by another request. Fetching existing user.")
+                    # Fetch the user that was created by the other request
+                    existing_user = await self.user_repo.get_by_email(email)
+                    if existing_user:
+                        logger.info(f"Successfully retrieved user created by concurrent request: {email}")
+                        # Still check for admin setup since this might be needed
+                        await self._handle_first_user_admin_setup(existing_user, is_new_user=False)
+                        return existing_user
+                    else:
+                        logger.error(f"UNIQUE constraint error but user {email} still not found after race condition")
+                        raise
+
+                # Re-raise other errors
+                logger.error(f"Error creating user {email}: {create_error}")
+                raise
+
+        except Exception as e:
+            logger.error(f"Error in get_or_create_user_by_email for {email}: {e}")
+            raise
 
     async def _handle_first_user_admin_setup(self, user: User, is_new_user: bool = False) -> None:
         """

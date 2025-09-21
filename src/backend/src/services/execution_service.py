@@ -776,22 +776,23 @@ class ExecutionService:
                 if not flow_id:
                     exec_logger.info(f"[ExecutionService.create_execution] No flow_id provided for execution_id: {execution_id}, trying to find most recent flow")
                     try:
-                        # Directly query for the most recent flow from the database
-                        from src.db.session import SessionLocal
+                        # Use async query for the most recent flow from the database
+                        from src.db.session import async_session_factory
                         from src.models.flow import Flow
-                        
-                        db = SessionLocal()
-                        try:
-                            # Get the most recent flow
-                            most_recent_flow = db.query(Flow).order_by(Flow.created_at.desc()).first()
+                        from sqlalchemy import select, desc
+
+                        async with async_session_factory() as db:
+                            # Get the most recent flow using async query
+                            stmt = select(Flow).order_by(desc(Flow.created_at)).limit(1)
+                            result = await db.execute(stmt)
+                            most_recent_flow = result.scalars().first()
+
                             if most_recent_flow:
                                 flow_id = most_recent_flow.id
                                 exec_logger.info(f"[ExecutionService.create_execution] Found most recent flow with ID {flow_id} for execution_id: {execution_id}")
                             else:
                                 exec_logger.error(f"[ExecutionService.create_execution] No flows found in database for execution_id: {execution_id}")
                                 raise ValueError("No flow found in the database. Please create a flow first.")
-                        finally:
-                            db.close()
                     except Exception as e:
                         exec_logger.error(f"[ExecutionService.create_execution] Error finding most recent flow: {str(e)}")
                         raise ValueError(f"Error finding most recent flow: {str(e)}")

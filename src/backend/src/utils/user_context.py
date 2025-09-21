@@ -302,23 +302,21 @@ class GroupContext:
                 # Get or create the user
                 logger.info(f"[USER CONTEXT DEBUG] Creating UserService and calling get_or_create_user_by_email for {email}")
                 user_service = UserService(session)
-                user = await user_service.get_or_create_user_by_email(email)
+                # Don't update last_login to prevent locking
+                user = await user_service.get_or_create_user_by_email(email, update_login=False)
                 logger.info(f"[USER CONTEXT DEBUG] get_or_create_user_by_email returned user: {user.email if user else 'None'}, is_system_admin: {user.is_system_admin if user else 'N/A'}")
 
                 if not user:
                     logger.error(f"Failed to get or create user for email: {email}")
                     return None, []
 
-                # Commit the session to ensure user and any groups are saved
-                await session.commit()
-                logger.info(f"[USER CONTEXT DEBUG] Session committed for user {user.email}")
-
                 group_service = GroupService(session)
                 # This returns list of tuples: (group, role)
                 groups_with_roles = await group_service.get_user_groups_with_roles(user.id)
 
-                # Commit any pending changes
+                # Single commit at the end for all changes
                 await session.commit()
+                logger.info(f"[USER CONTEXT DEBUG] Session committed for user {user.email}")
 
                 return user, groups_with_roles
 
