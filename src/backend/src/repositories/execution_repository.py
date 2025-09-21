@@ -34,7 +34,8 @@ class ExecutionRepository(BaseRepository[ExecutionHistory]):
         offset: int = 0,
         group_ids: List[str] = None,
         status_filter: List[str] = None,
-        user_email: str = None
+        user_email: str = None,
+        system_level: bool = False
     ) -> Tuple[List[ExecutionHistory], int]:
         """
         Get paginated execution history with group and user filtering.
@@ -45,13 +46,18 @@ class ExecutionRepository(BaseRepository[ExecutionHistory]):
             group_ids: List of group IDs for filtering
             status_filter: List of status values to filter by
             user_email: User email for user-level filtering
+            system_level: If True, bypass group filtering for system operations
 
         Returns:
             Tuple of (list of executions, total count)
         """
         # Build base filter with group filtering
         base_filter = True
-        if group_ids is not None:
+        if system_level:
+            # SYSTEM LEVEL: Allow access to all executions for cleanup/admin operations
+            logging.getLogger(__name__).info("System-level access granted to get_execution_history")
+            base_filter = True
+        elif group_ids is not None:
             # STRICT GROUP ISOLATION: Only include executions with matching group_id
             # CRITICAL: Exclude ALL NULL group_id records to prevent data leakage
             # If group_ids is empty list, return no results (no group access)
