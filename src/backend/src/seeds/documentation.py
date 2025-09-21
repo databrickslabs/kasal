@@ -1,13 +1,17 @@
 """
-Seed the documentation_embeddings table with CrewAI concepts documentation.
+Seed the documentation_embeddings table with CrewAI concepts and tool best practices.
 
-This module downloads and processes documentation from the CrewAI website,
-creates embeddings, and stores them in the database for use in providing
-context to the LLM during crew generation.
+This module:
+1. Downloads and processes documentation from the CrewAI website
+2. Loads tool-specific best practices from JSON configuration
+3. Creates embeddings and stores them in the database
+4. Provides context to the LLM for better task generation
 """
 import logging
 import requests
 import os
+import json
+from pathlib import Path
 from bs4 import BeautifulSoup
 from typing import List, Dict, Any, Optional
 from datetime import datetime
@@ -15,7 +19,7 @@ from src.schemas.documentation_embedding import DocumentationEmbeddingCreate
 from src.services.documentation_embedding_service import DocumentationEmbeddingService
 from src.services.memory_backend_service import MemoryBackendService
 from src.core.llm_manager import LLMManager
-from src.core.unit_of_work import UnitOfWork
+from src.db.session import async_session_factory
 
 # Import OpenAI SDK at module level for mock_create_embedding
 from openai import AsyncOpenAI, OpenAI
@@ -33,6 +37,9 @@ DOCS_URLS = [
     "https://docs.crewai.com/concepts/tools",
     "https://docs.crewai.com/concepts/processes",
 ]
+
+# Path to best practices JSON
+BEST_PRACTICES_PATH = Path(__file__).parent / "tool_best_practices.json"
 
 # Embedding model configuration
 EMBEDDING_MODEL = "databricks-gte-large-en"
@@ -94,6 +101,163 @@ async def mock_create_embedding(text: str) -> List[float]:
     logger.info("Generated mock embedding for testing purposes")
     return normalized_embedding
 
+def load_best_practices() -> Dict[str, Any]:
+    """Load best practices from JSON file."""
+    try:
+        if BEST_PRACTICES_PATH.exists():
+            with open(BEST_PRACTICES_PATH, 'r', encoding='utf-8') as f:
+                return json.load(f)
+        else:
+            logger.warning(f"Best practices file not found at {BEST_PRACTICES_PATH}")
+            return {}
+    except Exception as e:
+        logger.error(f"Error loading best practices: {e}")
+        return {}
+
+
+def create_best_practices_content(best_practices: Dict[str, Any]) -> List[Dict[str, str]]:
+    """Convert best practices JSON into documentation content."""
+    content_docs = []
+
+    if not best_practices.get('tool_best_practices'):
+        return content_docs
+
+    for tool_key, tool_data in best_practices['tool_best_practices'].items():
+        tool_name = tool_data.get('name', tool_key)
+        tool_description = tool_data.get('description', '')
+
+        # Create comprehensive documentation for each tool
+        for category_key, category_data in tool_data.get('categories', {}).items():
+            category_title = category_data.get('title', category_key)
+
+            # Process practices in each category
+            for practice in category_data.get('practices', []):
+                # Create a comprehensive content piece for each practice
+                content_parts = [
+                    f"# {tool_name} - {category_title}",
+                    f"\n## {practice.get('pattern', 'Pattern')}",
+                    f"\n{tool_description}\n"
+                ]
+
+                # Add template if available
+                if practice.get('template'):
+                    content_parts.append(f"### Task Template\n```\n{practice['template']}\n```\n")
+
+                # Add example if available
+                if practice.get('example'):
+                    content_parts.append(f"### Example\n```\n{practice['example']}\n```\n")
+
+                # Add guidelines if available
+                if practice.get('guidelines'):
+                    content_parts.append("### Guidelines")
+                    for guideline in practice['guidelines']:
+                        content_parts.append(f"- {guideline}")
+                    content_parts.append("")
+
+                # Add additional fields for specific practices
+                if practice.get('description'):
+                    content_parts.append(f"### Description\n{practice['description']}\n")
+
+                if practice.get('implementation'):
+                    content_parts.append(f"### Implementation\n```\n{practice['implementation']}\n```\n")
+
+                if practice.get('benefits'):
+                    content_parts.append("### Benefits")
+                    for benefit in practice['benefits']:
+                        content_parts.append(f"- {benefit}")
+                    content_parts.append("")
+
+                if practice.get('use_cases'):
+                    content_parts.append("### Use Cases")
+                    for use_case in practice['use_cases']:
+                        content_parts.append(f"- {use_case}")
+                    content_parts.append("")
+
+                # Create the document
+                doc = {
+                    "source": f"{tool_key}_{category_key}_best_practices",
+                    "title": f"{tool_name} - {category_title} - {practice.get('pattern', 'Best Practice')}",
+                    "content": "\n".join(content_parts)
+                }
+                content_docs.append(doc)
+
+            # Process error handling patterns if present
+            for error_pattern in category_data.get('practices', []):
+                if error_pattern.get('scenario'):
+                    content_parts = [
+                        f"# {tool_name} - Error Handling",
+                        f"\n## Scenario: {error_pattern['scenario']}",
+                        f"\n### Task Description Addition",
+                        f"{error_pattern.get('task_description_addon', '')}",
+                        f"\n### Expected Output Addition",
+                        f"{error_pattern.get('expected_output_addon', '')}"
+                    ]
+
+                    doc = {
+                        "source": f"{tool_key}_error_handling",
+                        "title": f"{tool_name} - Error Handling - {error_pattern['scenario']}",
+                        "content": "\n".join(content_parts)
+                    }
+                    content_docs.append(doc)
+
+    # Add integration guidelines as a separate document
+    if best_practices.get('integration_guidelines'):
+        guidelines = best_practices['integration_guidelines']
+        content_parts = [
+            f"# {guidelines.get('title', 'Integration Guidelines')}",
+            "\n## Core Principles"
+        ]
+
+        for principle in guidelines.get('principles', []):
+            content_parts.append(f"- {principle}")
+
+        content_parts.append("\n## Integration Checklist")
+        for item in guidelines.get('checklist', []):
+            content_parts.append(f"- [ ] {item}")
+
+        doc = {
+            "source": "integration_guidelines",
+            "title": "Tool Integration Guidelines",
+            "content": "\n".join(content_parts)
+        }
+        content_docs.append(doc)
+
+    return content_docs
+
+
+async def create_best_practices_chunks(content_docs: List[Dict[str, str]]) -> List[Dict[str, Any]]:
+    """Create chunks from best practices content."""
+    from langchain.text_splitter import RecursiveCharacterTextSplitter
+
+    all_chunks = []
+    text_splitter = RecursiveCharacterTextSplitter(
+        chunk_size=1000,
+        chunk_overlap=200,
+        separators=["\n\n", "\n", ".", " ", ""]
+    )
+
+    for doc in content_docs:
+        content = doc.get("content", "")
+        if not content:
+            continue
+
+        chunks = text_splitter.split_text(content)
+        logger.info(f"Split {doc['title']} into {len(chunks)} chunks")
+
+        for i, chunk in enumerate(chunks):
+            chunk_data = {
+                "source": doc["source"],
+                "title": f"{doc['title']} - Part {i+1}",
+                "content": chunk,
+                "chunk_index": i,
+                "total_chunks": len(chunks),
+                "doc_type": "best_practices"
+            }
+            all_chunks.append(chunk_data)
+
+    return all_chunks
+
+
 async def create_documentation_chunks(url: str) -> List[Dict[str, Any]]:
     """Create documentation chunks from a URL."""
     from langchain.text_splitter import RecursiveCharacterTextSplitter
@@ -149,17 +313,17 @@ async def check_existing_documentation() -> tuple[bool, int]:
         from src.services.memory_backend_service import MemoryBackendService
         from src.schemas.memory_backend import MemoryBackendType
         
-        async with UnitOfWork() as uow:
-            memory_backend_service = MemoryBackendService(uow)
-            doc_embedding_service = DocumentationEmbeddingService(uow)
+        async with async_session_factory() as session:
+            memory_backend_service = MemoryBackendService(session)
+            doc_embedding_service = DocumentationEmbeddingService(session)
             
             # Check if ANY group has Databricks configured
             # Documentation is global, so we use the latest created Databricks config
-            all_backends = await uow.memory_backend_repository.get_all()
-            
+            all_backends = await memory_backend_service.get_all()
+
             # Filter active Databricks backends and sort by created_at descending
             databricks_backends = [
-                b for b in all_backends 
+                b for b in all_backends
                 if b.is_active and b.backend_type == MemoryBackendType.DATABRICKS
             ]
             
@@ -198,7 +362,7 @@ async def check_existing_documentation() -> tuple[bool, int]:
                             return False, 0
                         
                         # Create service instance
-                        databricks_index_service = DatabricksIndexService(uow)
+                        databricks_index_service = DatabricksIndexService(session)
                         
                         # Check index status using the service layer
                         try:
@@ -306,53 +470,71 @@ async def check_existing_documentation() -> tuple[bool, int]:
 
 async def seed_documentation_embeddings(user_token: Optional[str] = None) -> None:
     """Seed documentation embeddings using services only.
-    
+
     Args:
         user_token: Optional user access token for OBO authentication with Databricks
     """
     logger.info("Starting documentation embeddings seeding...")
-    
+
     # Check which backend is configured
     using_databricks = False
     databricks_backend = None
     index_name = None
-    
+
+    # Determine if we're in local development mode
+    import os
+    database_type = os.getenv("DATABASE_TYPE", "postgres").lower()
+    is_local_dev = (
+        database_type == "sqlite" or
+        (database_type == "postgres" and os.getenv("POSTGRES_SERVER", "localhost") == "localhost")
+    )
+
     try:
         from src.services.memory_backend_service import MemoryBackendService
         from src.schemas.memory_backend import MemoryBackendType
-        
-        async with UnitOfWork() as uow:
-            memory_backend_service = MemoryBackendService(uow)
-            
+
+        async with async_session_factory() as session:
+            memory_backend_service = MemoryBackendService(session)
+
             # Get all backends to find the latest Databricks config
-            all_backends = await uow.memory_backend_repository.get_all()
-            
+            all_backends = await memory_backend_service.get_all()
+
             # Filter active Databricks backends and sort by created_at descending
             databricks_backends = [
-                b for b in all_backends 
+                b for b in all_backends
                 if b.is_active and b.backend_type == MemoryBackendType.DATABRICKS
             ]
-            
+
             if databricks_backends:
                 # Sort by created_at descending and take the first (most recent)
                 databricks_backends.sort(key=lambda x: x.created_at, reverse=True)
                 databricks_backend = databricks_backends[0]
                 using_databricks = True
-                
+
                 # Get index name for marker file
                 db_config = databricks_backend.databricks_config
                 if isinstance(db_config, dict):
                     index_name = db_config.get('document_index')
                 else:
                     index_name = getattr(db_config, 'document_index', None)
-                
+
                 logger.info(f"🚀 Using latest Databricks Vector Search for documentation storage (from group: {databricks_backend.group_id}, created: {databricks_backend.created_at})")
                 if index_name:
                     logger.info(f"📍 Target index: {index_name}")
             else:
-                logger.info("📊 Using local database for documentation storage")
+                # Check if we're in local development mode
+                if not is_local_dev:
+                    logger.info("⏭️ Skipping documentation embeddings - not in local development mode and no Databricks configured")
+                    logger.info("Documentation embeddings are only created in:")
+                    logger.info("  1. Local development (SQLite or localhost PostgreSQL)")
+                    logger.info("  2. When Databricks Vector Search is configured")
+                    return
+                logger.info("📊 Using local database for documentation storage (local development mode)")
     except Exception as e:
         logger.warning(f"Could not check backend configuration: {e}")
+        if not is_local_dev:
+            logger.info("⏭️ Skipping documentation embeddings - not in local development mode")
+            return
         logger.info("📊 Defaulting to local database for documentation storage")
     
     # Check if we can create embeddings - fail fast if not configured
@@ -377,13 +559,17 @@ async def seed_documentation_embeddings(user_token: Optional[str] = None) -> Non
         logger.warning("To enable real embeddings, configure Databricks in the frontend settings.")
         use_mock_embeddings = True
     
-    # Process each documentation URL
+    # Process each documentation URL and best practices
     total_chunks_processed = 0
-    
-    # Create a UnitOfWork and DocumentationEmbeddingService for saving embeddings
-    async with UnitOfWork() as uow:
-        doc_embedding_service = DocumentationEmbeddingService(uow)
-        logger.info("Created DocumentationEmbeddingService with UnitOfWork")
+
+    # Load best practices from JSON
+    logger.info("Loading tool best practices...")
+    best_practices = load_best_practices()
+
+    # Create a session and DocumentationEmbeddingService for saving embeddings
+    async with async_session_factory() as session:
+        doc_embedding_service = DocumentationEmbeddingService(session)
+        logger.info("Created DocumentationEmbeddingService with session")
         
         # If using Databricks, validate index readiness before processing any embeddings
         if using_databricks and databricks_backend:
@@ -491,7 +677,64 @@ async def seed_documentation_embeddings(user_token: Optional[str] = None) -> Non
             except Exception as e:
                 logger.error(f"Error processing URL {url}: {str(e)}")
                 # Continue with other URLs
-        
+
+        # Process best practices documentation
+        if best_practices:
+            logger.info("Processing tool best practices documentation...")
+            try:
+                # Convert best practices to content documents
+                content_docs = create_best_practices_content(best_practices)
+                logger.info(f"Created {len(content_docs)} best practice documents")
+
+                # Create chunks from best practices
+                best_practice_chunks = await create_best_practices_chunks(content_docs)
+                logger.info(f"Created {len(best_practice_chunks)} best practice chunks")
+
+                # Create embeddings for each chunk
+                for chunk in best_practice_chunks:
+                    try:
+                        # Create embedding - use real if available, otherwise mock
+                        if use_mock_embeddings or not embedding_available:
+                            embedding = await mock_create_embedding(chunk["content"])
+                        else:
+                            try:
+                                embedder_config = {
+                                    'provider': 'databricks',
+                                    'config': {'model': EMBEDDING_MODEL}
+                                }
+                                embedding = await LLMManager.get_embedding(
+                                    text=chunk["content"],
+                                    model=EMBEDDING_MODEL,
+                                    embedder_config=embedder_config
+                                )
+                            except Exception as e:
+                                logger.debug(f"Embedding failed for chunk, using mock: {str(e)}")
+                                embedding = await mock_create_embedding(chunk["content"])
+
+                        # Create schema for database record
+                        doc_embedding_create = DocumentationEmbeddingCreate(
+                            source=chunk["source"],
+                            title=chunk["title"],
+                            content=chunk["content"],
+                            embedding=embedding,
+                            doc_metadata={
+                                "doc_type": chunk.get("doc_type", "best_practices"),
+                                "chunk_index": chunk["chunk_index"],
+                                "total_chunks": chunk["total_chunks"]
+                            }
+                        )
+
+                        # Use service to create the record
+                        await doc_embedding_service.create_documentation_embedding(doc_embedding_create, user_token=user_token)
+                        total_chunks_processed += 1
+
+                    except Exception as e:
+                        logger.error(f"Error processing best practice chunk: {str(e)}")
+                        # Continue with other chunks
+
+            except Exception as e:
+                logger.error(f"Error processing best practices: {str(e)}")
+
         logger.info(f"Completed seeding documentation embeddings: {total_chunks_processed} chunks processed")
         
         if using_databricks and total_chunks_processed > 0:

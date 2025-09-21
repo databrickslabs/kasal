@@ -37,7 +37,7 @@ def debug_log(message):
 try:
     debug_log("Importing seeders...")
     # Import all needed modules
-    from src.seeds import tools, schemas, prompt_templates, model_configs, documentation, roles
+    from src.seeds import tools, schemas, prompt_templates, model_configs, documentation, groups
     from src.db.session import async_session_factory
     debug_log("Successfully imported all seeder modules")
 except ImportError as e:
@@ -79,11 +79,13 @@ try:
 except (NameError, AttributeError) as e:
     logger.error(f"Error adding documentation seeder: {e}")
 
+# Roles seeder removed - using simplified 3-tier role system
+
 try:
-    SEEDERS["roles"] = roles.seed
-    debug_log("Added roles.seed to SEEDERS")
+    SEEDERS["groups"] = groups.seed
+    debug_log("Added groups.seed to SEEDERS")
 except (NameError, AttributeError) as e:
-    logger.error(f"Error adding roles seeder: {e}")
+    logger.error(f"Error adding groups seeder: {e}")
 
 # Log available seeders
 logger.info(f"Available seeders: {list(SEEDERS.keys())}")
@@ -114,7 +116,7 @@ async def run_all_seeders() -> None:
         return
     
     # Separate fast seeders from slow ones
-    fast_seeders = ['tools', 'schemas', 'prompt_templates', 'model_configs', 'roles']
+    fast_seeders = ['groups', 'tools', 'schemas', 'prompt_templates', 'model_configs']
     slow_seeders = ['documentation']  # Documentation seeder is slow due to embeddings
     
     # Run fast seeders first (sequentially as they're quick)
