@@ -97,13 +97,16 @@ class TestGetGroupContext:
                 x_forwarded_access_token="old-token",
                 x_auth_request_email="test@example.com",
                 x_auth_request_user="testuser",
-                x_auth_request_access_token="auth-token"
+                x_auth_request_access_token="auth-token",
+                x_group_id=None,
+                x_group_domain=None
             )
             
             # Verify OAuth2-Proxy headers are preferred
             mock_from_email.assert_called_once_with(
                 email="test@example.com",
-                access_token="auth-token"
+                access_token="auth-token",
+                group_id=None
             )
             assert result == mock_group_context
     
@@ -124,13 +127,16 @@ class TestGetGroupContext:
                 x_forwarded_access_token="fallback-token",
                 x_auth_request_email=None,
                 x_auth_request_user=None,
-                x_auth_request_access_token=None
+                x_auth_request_access_token=None,
+                x_group_id=None,
+                x_group_domain=None
             )
             
             # Verify fallback headers are used
             mock_from_email.assert_called_once_with(
                 email="fallback@example.com",
-                access_token="fallback-token"
+                access_token="fallback-token",
+                group_id=None
             )
             assert result == mock_group_context
     
@@ -151,7 +157,9 @@ class TestGetGroupContext:
                     x_forwarded_access_token=None,
                     x_auth_request_email=None,
                     x_auth_request_user=None,
-                    x_auth_request_access_token=None
+                    x_auth_request_access_token=None,
+                    x_group_id=None,
+                    x_group_domain=None
                 )
 
                 # Verify empty context is returned
@@ -175,13 +183,16 @@ class TestGetGroupContext:
                 x_forwarded_access_token=None,
                 x_auth_request_email="partial@example.com",
                 x_auth_request_user=None,
-                x_auth_request_access_token=None
+                x_auth_request_access_token=None,
+                x_group_id=None,
+                x_group_domain=None
             )
             
             # Verify called with email only
             mock_from_email.assert_called_once_with(
                 email="partial@example.com",
-                access_token=None
+                access_token=None,
+                group_id=None
             )
             assert result == mock_group_context
 

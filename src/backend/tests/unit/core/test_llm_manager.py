@@ -969,10 +969,12 @@ class TestComplete100PercentCoverage:
         """Test litellm.embedding exception - lines 735-737."""
         with patch('src.core.llm_manager.ApiKeysService.get_provider_api_key') as mock_api_keys:
             with patch('litellm.aembedding') as mock_embedding:
+                # Force non-Databricks provider to use litellm path
+                embedder_config = {"provider": "openai", "config": {"model": "text-embedding-ada-002"}}
                 mock_api_keys.return_value = "test-key"
                 mock_embedding.side_effect = Exception("Embedding API error")
-                
-                result = await LLMManager.get_embedding("test text")
+
+                result = await LLMManager.get_embedding("test text", embedder_config=embedder_config)
                 assert result is None
 
     @pytest.mark.asyncio

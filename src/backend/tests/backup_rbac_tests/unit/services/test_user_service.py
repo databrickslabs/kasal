@@ -12,9 +12,8 @@ import json
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.services.user_service import UserService
-from src.models.user import User, UserProfile
-from src.models.enums import UserRole, UserStatus
-from src.schemas.user import UserUpdate, UserProfileUpdate
+from src.models.user import User, UserProfile, ExternalIdentity
+from src.schemas.user import UserUpdate, UserProfileUpdate, UserRole
 
 
 # Mock models

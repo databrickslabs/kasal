@@ -37,7 +37,7 @@ class MockGroup:
 
 class MockGroupUser:
     def __init__(self, id="group-user-123", group_id="group-123", user_id="user-123",
-                 role=GroupUserRole.USER, status=GroupUserStatus.ACTIVE,
+                 role=GroupUserRole.OPERATOR, status=GroupUserStatus.ACTIVE,
                  joined_at=None, auto_created=True, created_at=None, updated_at=None,
                  group=None, user=None):
         self.id = id
@@ -392,7 +392,7 @@ class TestGroupService:
             result = await group_service.assign_user_to_group(
                 "group-123", 
                 "test@example.com", 
-                GroupUserRole.USER
+                GroupUserRole.OPERATOR
             )
             
             assert result["email"] == "test@example.com"

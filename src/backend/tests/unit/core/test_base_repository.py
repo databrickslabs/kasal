@@ -170,7 +170,7 @@ class TestBaseRepository:
             
             mock_session.add.assert_called_once()
             mock_session.flush.assert_called_once()
-            mock_session.commit.assert_called_once()
+            # Note: commit is NOT called - handled by session dependency
             mock_session.refresh.assert_called_once()
     
     @pytest.mark.asyncio
@@ -207,7 +207,7 @@ class TestBaseRepository:
         assert result == mock_model_instance
         mock_session.add.assert_called_once_with(mock_model_instance)
         mock_session.flush.assert_called_once()
-        mock_session.commit.assert_called_once()
+        # Note: commit is NOT called - handled by session dependency
         mock_session.refresh.assert_called_once_with(mock_model_instance)
     
     @pytest.mark.asyncio
@@ -243,7 +243,7 @@ class TestBaseRepository:
                 assert result == updated_instance
                 mock_session.execute.assert_called_once()
                 mock_session.flush.assert_called_once()
-                mock_session.commit.assert_called_once()
+                # Note: commit is NOT called - handled by session dependency
     
     @pytest.mark.asyncio
     async def test_update_not_found(self, base_repository, mock_session):
@@ -280,16 +280,15 @@ class TestBaseRepository:
         # Mock get method to return existing object
         with patch.object(base_repository, "get", return_value=mock_model_instance):
             # Mock session methods
-            mock_session.delete = MagicMock()  # delete is sync
+            mock_session.delete = MagicMock()  # delete is sync in SQLAlchemy
             mock_session.flush = AsyncMock()
-            mock_session.commit = AsyncMock()
-            
+
             result = await base_repository.delete(test_id)
-            
+
             assert result is True
             mock_session.delete.assert_called_once_with(mock_model_instance)
             mock_session.flush.assert_called_once()
-            mock_session.commit.assert_called_once()
+            # Note: commit is NOT called - handled by session dependency
     
     @pytest.mark.asyncio
     async def test_delete_not_found(self, base_repository, mock_session):
@@ -309,12 +308,12 @@ class TestBaseRepository:
         
         # Mock get method to return existing object
         with patch.object(base_repository, "get", return_value=mock_model_instance):
-            # Since session.delete is synchronous, set it to raise immediately
+            # session.delete is sync, so set it to raise immediately
             mock_session.delete = MagicMock(side_effect=Exception("Database error"))
-            
+
             with pytest.raises(Exception, match="Database error"):
                 await base_repository.delete(test_id)
-            
+
             mock_session.rollback.assert_called_once()
     
     @pytest.mark.asyncio

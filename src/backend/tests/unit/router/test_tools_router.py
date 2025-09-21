@@ -95,12 +95,39 @@ def mock_db_session():
 
 @pytest.fixture
 def mock_group_context():
-    """Create a mock group context."""
+    """Create a mock group context with admin role."""
     context = GroupContext(
         group_ids=["group-123"],
         group_email="test@example.com",
         email_domain="example.com",
-        user_id="user-123"
+        user_id="user-123",
+        user_role="admin"  # Default to admin for most tests
+    )
+    return context
+
+
+@pytest.fixture
+def mock_group_context_editor():
+    """Create a mock group context with editor role."""
+    context = GroupContext(
+        group_ids=["group-123"],
+        group_email="editor@example.com",
+        email_domain="example.com",
+        user_id="user-456",
+        user_role="editor"
+    )
+    return context
+
+
+@pytest.fixture
+def mock_group_context_operator():
+    """Create a mock group context with operator role."""
+    context = GroupContext(
+        group_ids=["group-123"],
+        group_email="operator@example.com",
+        email_domain="example.com",
+        user_id="user-789",
+        user_role="operator"
     )
     return context
 
@@ -300,104 +327,176 @@ class TestCreateTool:
         mock_service_instance = AsyncMock()
         mock_tool_service_class.return_value = mock_service_instance
         mock_service_instance.create_tool_with_group.side_effect = HTTPException(status_code=400, detail="Creation failed")
-        
+
         response = client.post("/tools/", json=sample_tool_create.model_dump(mode='json'))
-        
+
         assert response.status_code == 400
         assert "Creation failed" in response.json()["detail"]
+
+    @patch('src.api.tools_router.ToolService')
+    def test_create_tool_forbidden_operator(self, mock_tool_service_class, app, mock_db_session, mock_group_context_operator, sample_tool_create):
+        """Test that operators cannot create tools."""
+        from fastapi.testclient import TestClient
+        from src.core.dependencies import get_group_context
+
+        # Override group context with operator role
+        async def override_get_group_context():
+            return mock_group_context_operator
+
+        app.dependency_overrides[get_group_context] = override_get_group_context
+        client = TestClient(app)
+
+        response = client.post("/tools/", json=sample_tool_create.model_dump(mode='json'))
+
+        assert response.status_code == 403
+        assert "Only editors and admins can create tools" in response.json()["detail"]
 
 
 class TestUpdateTool:
     """Test cases for update tool endpoint."""
-    
+
     @patch('src.api.tools_router.ToolService')
     def test_update_tool_success(self, mock_tool_service_class, client, mock_db_session, sample_tool_update):
         """Test successful tool update."""
         updated_tool = MockTool(title="Updated Tool", group_id="group-123", created_by_email="test@example.com")
-        
+
         mock_service_instance = AsyncMock()
         mock_tool_service_class.return_value = mock_service_instance
         mock_service_instance.update_tool_with_group_check.return_value = updated_tool
-        
+
         response = client.put("/tools/1", json=sample_tool_update.model_dump(mode='json'))
-        
+
         assert response.status_code == 200
         data = response.json()
         assert data["title"] == "Updated Tool"
         mock_service_instance.update_tool_with_group_check.assert_called_once()
-    
+
     @patch('src.api.tools_router.ToolService')
     def test_update_tool_not_found(self, mock_tool_service_class, client, mock_db_session, sample_tool_update):
         """Test updating non-existent tool."""
         mock_service_instance = AsyncMock()
         mock_tool_service_class.return_value = mock_service_instance
         mock_service_instance.update_tool_with_group_check.side_effect = HTTPException(status_code=404, detail="Tool not found")
-        
+
         response = client.put("/tools/999", json=sample_tool_update.model_dump(mode='json'))
-        
+
         assert response.status_code == 404
         assert "Tool not found" in response.json()["detail"]
+
+    @patch('src.api.tools_router.ToolService')
+    def test_update_tool_forbidden_operator(self, mock_tool_service_class, app, mock_db_session, mock_group_context_operator, sample_tool_update):
+        """Test that operators cannot update tools."""
+        from fastapi.testclient import TestClient
+        from src.core.dependencies import get_group_context
+
+        # Override group context with operator role
+        async def override_get_group_context():
+            return mock_group_context_operator
+
+        app.dependency_overrides[get_group_context] = override_get_group_context
+        client = TestClient(app)
+
+        response = client.put("/tools/1", json=sample_tool_update.model_dump(mode='json'))
+
+        assert response.status_code == 403
+        assert "Only editors and admins can update tools" in response.json()["detail"]
 
 
 class TestDeleteTool:
     """Test cases for delete tool endpoint."""
-    
+
     @patch('src.api.tools_router.ToolService')
     def test_delete_tool_success(self, mock_tool_service_class, client, mock_db_session):
         """Test successful tool deletion."""
         mock_service_instance = AsyncMock()
         mock_tool_service_class.return_value = mock_service_instance
         mock_service_instance.delete_tool_with_group_check.return_value = True
-        
+
         response = client.delete("/tools/1")
-        
+
         assert response.status_code == 204
         mock_service_instance.delete_tool_with_group_check.assert_called_once()
-    
+
     @patch('src.api.tools_router.ToolService')
     def test_delete_tool_not_found(self, mock_tool_service_class, client, mock_db_session):
         """Test deleting non-existent tool."""
         mock_service_instance = AsyncMock()
         mock_tool_service_class.return_value = mock_service_instance
         mock_service_instance.delete_tool_with_group_check.side_effect = HTTPException(status_code=404, detail="Tool not found")
-        
+
         response = client.delete("/tools/999")
-        
+
         assert response.status_code == 404
         assert "Tool not found" in response.json()["detail"]
+
+    @patch('src.api.tools_router.ToolService')
+    def test_delete_tool_forbidden_operator(self, mock_tool_service_class, app, mock_db_session, mock_group_context_operator):
+        """Test that operators cannot delete tools."""
+        from fastapi.testclient import TestClient
+        from src.core.dependencies import get_group_context
+
+        # Override group context with operator role
+        async def override_get_group_context():
+            return mock_group_context_operator
+
+        app.dependency_overrides[get_group_context] = override_get_group_context
+        client = TestClient(app)
+
+        response = client.delete("/tools/1")
+
+        assert response.status_code == 403
+        assert "Only editors and admins can delete tools" in response.json()["detail"]
 
 
 class TestToggleToolEnabled:
     """Test cases for toggle tool enabled endpoint."""
-    
+
     @patch('src.api.tools_router.ToolService')
     def test_toggle_tool_enabled_success(self, mock_tool_service_class, client, mock_db_session):
         """Test successful tool toggle."""
         toggle_response = MockToggleResponse(message="Tool status updated", enabled=False)
-        
+
         mock_service_instance = AsyncMock()
         mock_tool_service_class.return_value = mock_service_instance
         mock_service_instance.toggle_tool_enabled_with_group_check.return_value = toggle_response
-        
+
         response = client.patch("/tools/1/toggle-enabled")
-        
+
         assert response.status_code == 200
         data = response.json()
         assert data["enabled"] is False
         assert "message" in data
         mock_service_instance.toggle_tool_enabled_with_group_check.assert_called_once()
-    
+
     @patch('src.api.tools_router.ToolService')
     def test_toggle_tool_enabled_not_found(self, mock_tool_service_class, client, mock_db_session):
         """Test toggling non-existent tool."""
         mock_service_instance = AsyncMock()
         mock_tool_service_class.return_value = mock_service_instance
         mock_service_instance.toggle_tool_enabled_with_group_check.side_effect = HTTPException(status_code=404, detail="Tool not found")
-        
+
         response = client.patch("/tools/999/toggle-enabled")
-        
+
         assert response.status_code == 404
         assert "Tool not found" in response.json()["detail"]
+
+    @patch('src.api.tools_router.ToolService')
+    def test_toggle_tool_enabled_forbidden_operator(self, mock_tool_service_class, app, mock_db_session, mock_group_context_operator):
+        """Test that operators cannot toggle tool status."""
+        from fastapi.testclient import TestClient
+        from src.core.dependencies import get_group_context
+
+        # Override group context with operator role
+        async def override_get_group_context():
+            return mock_group_context_operator
+
+        app.dependency_overrides[get_group_context] = override_get_group_context
+        client = TestClient(app)
+
+        response = client.patch("/tools/1/toggle-enabled")
+
+        assert response.status_code == 403
+        assert "Only editors and admins can toggle tool status" in response.json()["detail"]
 
 
 class TestGetAllToolConfigurations:

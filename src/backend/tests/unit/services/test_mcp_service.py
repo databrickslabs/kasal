@@ -147,18 +147,21 @@ class TestMCPServiceInitialization:
             mock_server_repo_class.assert_called_once_with(mock_session)
             mock_settings_repo_class.assert_called_once_with(mock_session)
     
-    def test_init_without_arguments_raises_error(self):
-        """Test initialization without arguments raises ValueError."""
-        with pytest.raises(ValueError, match="Either session or repositories must be provided"):
+    def test_init_without_session_raises_error(self):
+        """Test initialization without session raises TypeError."""
+        with pytest.raises(TypeError):
             MCPService()
     
-    @pytest.mark.asyncio
-    async def test_from_unit_of_work(self, mock_uow):
-        """Test creation from UnitOfWork."""
-        service = await MCPService.from_unit_of_work(mock_uow)
-        
-        assert service.server_repository is mock_uow.mcp_server_repository
-        assert service.settings_repository is mock_uow.mcp_settings_repository
+    def test_init_with_session(self, mock_async_session):
+        """Test initialization with session."""
+        with patch('src.services.mcp_service.MCPServerRepository') as mock_server_repo:
+            with patch('src.services.mcp_service.MCPSettingsRepository') as mock_settings_repo:
+                service = MCPService(mock_async_session)
+
+                mock_server_repo.assert_called_once_with(mock_async_session)
+                mock_settings_repo.assert_called_once_with(mock_async_session)
+                assert service.server_repository is mock_server_repo.return_value
+                assert service.settings_repository is mock_settings_repo.return_value
 
 
 class TestGetAllServers:

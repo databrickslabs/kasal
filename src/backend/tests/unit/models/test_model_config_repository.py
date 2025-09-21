@@ -217,7 +217,7 @@ class TestModelConfigRepositoryToggleEnabled:
             
             assert result is True
             assert model_config.enabled is True
-            mock_async_session.commit.assert_called_once()
+            mock_async_session.flush.assert_called_once()
     
     @pytest.mark.asyncio
     async def test_toggle_enabled_model_not_found(self, model_config_repository, mock_async_session):

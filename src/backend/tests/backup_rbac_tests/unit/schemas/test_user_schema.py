@@ -11,8 +11,15 @@ from pydantic import ValidationError
 from src.schemas.user import (
     UserBase, UserCreate, UserUpdate, PasswordChange, PasswordResetRequest,
     PasswordReset, UserLogin, Token, TokenData, UserProfileBase,
-    UserProfileCreate, UserProfileUpdate, UserProfileInDB, IdentityProviderType,
-    UserInDB, UserWithProfile, OAuthAuthorize, OAuthCallback
+    UserProfileCreate, UserProfileUpdate, UserProfileInDB, PrivilegeBase,
+    PrivilegeCreate, PrivilegeUpdate, PrivilegeInDB, RoleBase, RoleCreate,
+    RoleUpdate, RoleInDB, RoleWithPrivileges, IdentityProviderType,
+    IdentityProviderBase, IdentityProviderConfig, IdentityProviderCreate,
+    IdentityProviderUpdate, IdentityProviderInDB, IdentityProviderResponse,
+    IdentityProviderListResponse, IdentityProviderUsageStatsResponse,
+    ExternalIdentityBase, ExternalIdentityCreate, ExternalIdentityInDB,
+    UserInDB, UserWithProfile, UserWithExternalIdentities, UserComplete,
+    UserRoleAssign, OAuthAuthorize, OAuthCallback
 )
 from src.models.enums import UserRole, UserStatus
 

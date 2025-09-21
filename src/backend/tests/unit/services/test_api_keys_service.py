@@ -50,9 +50,12 @@ def mock_repository():
 
 
 @pytest.fixture
-def api_keys_service_with_repository(mock_repository):
+def api_keys_service_with_repository(mock_repository, mock_async_session):
     """Create an API keys service with mocked repository."""
-    return ApiKeysService(repository=mock_repository)
+    with patch('src.services.api_keys_service.ApiKeyRepository') as mock_repo_class:
+        mock_repo_class.return_value = mock_repository
+        service = ApiKeysService(session=mock_async_session)
+        return service
 
 
 @pytest.fixture
@@ -99,14 +102,18 @@ def sample_api_key_update():
 class TestApiKeysServiceInit:
     """Test cases for ApiKeysService initialization."""
     
-    def test_init_with_repository(self, mock_repository):
-        """Test initialization with repository."""
-        service = ApiKeysService(repository=mock_repository)
-        
-        assert service.repository == mock_repository
-        assert service.session is None
-        assert service.is_async is True
-        assert service.encryption_utils is not None
+    def test_init_with_session(self, mock_async_session):
+        """Test initialization with session."""
+        with patch('src.services.api_keys_service.ApiKeyRepository') as mock_repo_class:
+            mock_repo_instance = AsyncMock()
+            mock_repo_class.return_value = mock_repo_instance
+            service = ApiKeysService(session=mock_async_session)
+
+            mock_repo_class.assert_called_once_with(mock_async_session)
+            assert service.repository == mock_repo_instance
+            assert service.session is None
+            assert service.is_async is True
+            assert service.encryption_utils is not None
     
     def test_init_with_async_session(self, mock_async_session):
         """Test initialization with async session."""

@@ -387,3 +387,32 @@ class TestAuthService:
         auth_service.refresh_token_repo.revoke_all_for_user.assert_called_once_with(
             user_id
         )
+
+    @pytest.mark.asyncio
+    async def test_revoke_refresh_token_no_match(self, auth_service):
+        """Test revoking a refresh token when no matching token is found."""
+        token = "nonexistent_token"
+        token_data = {"sub": "user-123"}
+        
+        with patch('src.services.auth_service.jwt.decode') as mock_jwt_decode:
+            mock_jwt_decode.return_value = token_data
+            auth_service.refresh_token_repo.get_all = AsyncMock(return_value=[])
+            
+            result = await auth_service.revoke_refresh_token(token)
+            
+            assert result is False
+
+
+    @pytest.mark.asyncio
+    async def test_refresh_access_token_no_valid_tokens(self, auth_service):
+        """Test refreshing access token when no valid tokens are found."""
+        refresh_token = "valid_refresh_token"
+        token_data = {"sub": "user-123"}
+        
+        with patch('src.services.auth_service.jwt.decode') as mock_jwt_decode:
+            mock_jwt_decode.return_value = token_data
+            auth_service.refresh_token_repo.get_all = AsyncMock(return_value=[])
+            
+            result = await auth_service.refresh_access_token(refresh_token)
+            
+            assert result is None
