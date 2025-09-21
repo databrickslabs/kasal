@@ -170,7 +170,6 @@ def mock_group_context():
     context = GroupContext(
         group_ids=["group-123"],
         group_email="test@example.com",
-        email_domain="example.com",
         user_id="user-123"
     )
     return context
