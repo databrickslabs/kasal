@@ -1,171 +1,180 @@
-# Modern Python Backend
+# Kasal Documentation Hub
 
-A modern, scalable backend architecture using FastAPI, SQLAlchemy, and best practices for 2025.
+> **Choose your path** - Technical depth or business value
 
-## Architecture Overview
+---
 
-This project follows a clean architecture pattern with clear separation of concerns:
+## Quick Navigation
 
-- **API Layer**: FastAPI routes and controllers
-- **Service Layer**: Business logic implementation
-- **Repository Layer**: Data access abstraction
-- **DB Layer**: Database models and connectivity
-- **Schema Layer**: Data validation and serialization (Pydantic models)
+### By Role
 
-## Features
+<div style="display: grid; grid-template-columns: 1fr 1fr; gap: 20px; margin: 20px 0;">
 
-- ✅ FastAPI with async support
-- ✅ SQLAlchemy 2.0 with async support
-- ✅ Clean architecture with dependency injection
-- ✅ Repository pattern for data access
-- ✅ Unit of Work pattern for transactions
-- ✅ Environment-based configuration
-- ✅ Comprehensive test setup
-- ✅ Modern typing and code quality tools
-- ✅ Database seeding for predefined data
-- ✅ Multi-engine AI orchestration ready (CrewAI active, LangGraph integration prepared)
+<div style="background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); padding: 20px; border-radius: 10px;">
 
-## Project Structure
+### [Business User Guide](./BUSINESS_USER_GUIDE.md)
+**For Leaders & Managers**
+- ROI Calculator
+- Success Stories
+- 15-Minute Setup
+- No Code Required
 
-```
-backend/
-├── src/                 # Application source code
-│   ├── api/             # API routes and controllers
-│   │   ├── __init__.py  # Router registration
-│   │   └── {domain}_router.py  # Domain-specific route handlers
-│   ├── core/            # Core application components
-│   ├── db/              # Database setup and session management
-│   ├── models/          # SQLAlchemy models
-│   ├── repositories/    # Repository pattern implementations
-│   │   ├── base_repository.py  # Base repository with common operations
-│   │   └── {domain}_repository.py  # Domain-specific repositories
-│   ├── schemas/         # Pydantic models for validation
-│   │   ├── __init__.py  # Re-exports important schemas
-│   │   ├── base.py      # Common base schemas
-│   │   └── {domain}/    # Domain-specific schemas
-│   ├── services/        # Business logic services
-│   │   └── {domain}_service.py  # Domain-specific services
-│   ├── seeds/           # Database seeders for populating initial data
-│   ├── config/          # Configuration management
-│   ├── utils/           # Utility functions
-│   ├── __init__.py
-│   └── main.py          # Application entry point
-├── tests/               # Test suite
-│   ├── integration/     # Integration tests
-│   └── unit/            # Unit tests
-├── docs/                # Project documentation
-│   ├── ARCHITECTURE.md  # Architectural design details
-│   ├── BEST_PRACTICES.md # Coding guidelines
-│   ├── MODELS.md        # Database model documentation
-│   ├── SCHEMAS.md       # Schema documentation
-│   ├── REPOSITORY_PATTERN.md # Repository pattern documentation
-│   └── README.md        # Documentation index
-├── pyproject.toml       # Project dependencies and settings
-└── README.md            # Project documentation
-```
+</div>
 
-### Organization Principles
+<div style="background: linear-gradient(135deg, #00A1C9 0%, #005F8C 100%); padding: 20px; border-radius: 10px;">
 
-Our codebase follows these organizational principles:
+### [Developer Guide](./DEVELOPER_GUIDE.md)
+**For Engineers**
+- Quick Start Code
+- API Reference
+- Testing Strategy
+- Production Deploy
 
-1. **Domain-based Structure**: Files are organized by domain (e.g., executions, agents)
-2. **Consolidated Services**: Each domain has a single service file handling all related operations
-3. **Dedicated Repositories**: Each domain has a repository handling data access operations
-4. **Consistent Naming**: Files follow consistent naming patterns (`{domain}_service.py`, `{domain}_repository.py`)
-5. **Single Responsibility**: Each component focuses on a specific domain area
-6. **Layered Architecture**: Clear separation between API, service, repository, and data layers
+</div>
 
-## Getting Started
+<div style="background: linear-gradient(135deg, #FF3621 0%, #CC1700 100%); padding: 20px; border-radius: 10px;">
 
-### Prerequisites
+### [Architecture Guide](./ARCHITECTURE_GUIDE.md)
+**For Architects**
+- System Design
+- Security Model
+- Scaling Strategy
+- Integration Patterns
 
-- Python 3.9 or higher
-- Poetry for dependency management
+</div>
 
-### Installation
+<div style="background: linear-gradient(135deg, #48C774 0%, #357A5B 100%); padding: 20px; border-radius: 10px;">
 
-1. Clone this repository
-2. Install dependencies:
-   ```
-   cd backend
-   poetry install
-   ```
+### [API Reference](./API_REFERENCE.md)
+**For Integrators**
+- REST Endpoints
+- WebSocket Events
+- SDKs & Libraries
+- Rate Limits
 
-### Running the Application
+</div>
 
+</div>
+
+---
+
+## Quick Links
+
+### Get Started in 30 Seconds
 ```bash
-# Development server
-poetry run uvicorn src.main:app --reload
-
-# Production server
-poetry run uvicorn src.main:app --host 0.0.0.0 --port 8000
+# Clone, install, run
+git clone https://github.com/youorg/kasal
+cd kasal && pip install -r src/requirements.txt
+cd src/backend && ./run.sh
 ```
 
-### Database Migrations
+### Most Popular
+- [5-Minute Demo](https://kasal.ai/demo)
+- [API Playground](https://api.kasal.ai/docs)
+- [Discord Community](https://discord.gg/kasal)
+- [Video Tutorials](https://kasal.ai/videos)
 
-Basic commands for working with database migrations:
+---
 
-```bash
-# Initialize Alembic (first time only)
-poetry run alembic init migrations
+## Documentation Map
 
-# Create a migration
-poetry run alembic revision --autogenerate -m "description"
+### Core Concepts
+| Topic | Business | Developer | Architect |
+|-------|----------|-----------|-----------|
+| **Getting Started** | [Quick Start](./BUSINESS_USER_GUIDE.md#quick-start) | [Installation](./DEVELOPER_GUIDE.md#install--run) | [Overview](./ARCHITECTURE_GUIDE.md#system-overview) |
+| **AI Agents** | [Use Cases](./BUSINESS_USER_GUIDE.md#quick-start) | [Agent Code](./DEVELOPER_GUIDE.md#agents) | [AI Layer](./ARCHITECTURE_GUIDE.md#component-architecture) |
+| **Workflows** | [Templates](./BUSINESS_USER_GUIDE.md#quick-start) | [Crew Setup](./DEVELOPER_GUIDE.md#crews) | [Orchestration](./ARCHITECTURE_GUIDE.md#component-architecture) |
+| **Security** | [Compliance](./BUSINESS_USER_GUIDE.md#common-questions) | [Auth Flow](./DEVELOPER_GUIDE.md#security) | [Security Model](./ARCHITECTURE_GUIDE.md#security-architecture) |
+| **Integration** | [One-Click](./BUSINESS_USER_GUIDE.md#step-3-connect-your-tools) | [APIs](./API_REFERENCE.md) | [Patterns](./ARCHITECTURE_GUIDE.md#integration-architecture) |
 
-# Run migrations
-poetry run alembic upgrade head
-```
+### Advanced Topics
+| Topic | Documentation | Audience |
+|-------|--------------|----------|
+| **Scaling** | [Performance Architecture](./ARCHITECTURE_GUIDE.md#performance-architecture) | Architects |
+| **Memory Backends** | [Custom Memory](./DEVELOPER_GUIDE.md#advanced-topics) | Developers |
+| **Monitoring** | [Observability](./ARCHITECTURE_GUIDE.md#monitoring--observability) | DevOps |
+| **Disaster Recovery** | [DR Strategy](./ARCHITECTURE_GUIDE.md#disaster-recovery) | Operations |
 
-For a comprehensive guide on database migrations, including best practices, troubleshooting, and real-world examples, see [Database Migrations Guide](DATABASE_MIGRATIONS.md).
+---
 
-### Database Seeding
+## Learning Paths
 
-The application automatically seeds the database with predefined data during startup. This includes tool configurations, schemas, prompt templates, and model configurations.
+### Path 1: Business Leader
+1. [ROI Calculator](./BUSINESS_USER_GUIDE.md#roi-calculator)
+2. [Success Metrics](./BUSINESS_USER_GUIDE.md#success-metrics)
+3. [Control Center](./BUSINESS_USER_GUIDE.md#control-center)
+4. [Pricing](./BUSINESS_USER_GUIDE.md#common-questions)
 
-By default, automatic seeding is enabled and occurs during the application's startup lifecycle in the FastAPI lifespan context manager.
+### Path 2: Developer
+1. [Quick Start](./DEVELOPER_GUIDE.md#quick-start)
+2. [Core Concepts](./DEVELOPER_GUIDE.md#core-concepts)
+3. [Testing](./DEVELOPER_GUIDE.md#testing)
+4. [Deployment](./DEVELOPER_GUIDE.md#deployment)
 
-For manual seeding or development needs:
+### Path 3: Solution Architect
+1. [Architecture](./ARCHITECTURE_GUIDE.md#high-level-architecture)
+2. [Security](./ARCHITECTURE_GUIDE.md#security-architecture)
+3. [Data Model](./ARCHITECTURE_GUIDE.md#data-architecture)
+4. [Scaling](./ARCHITECTURE_GUIDE.md#performance-architecture)
 
-```bash
-# Run all seeders
-poetry run python -m src.seeds.seed_runner --all
+---
 
-# Run specific seeders
-poetry run python -m src.seeds.seed_runner --tools
-poetry run python -m src.seeds.seed_runner --schemas
-poetry run python -m src.seeds.seed_runner --prompt_templates
-poetry run python -m src.seeds.seed_runner --model_configs
+## Search Topics
 
-# Run with debug mode
-poetry run python -m src.seeds.seed_runner --all --debug
-```
+**Popular searches**: authentication, api keys, webhooks, rate limits, docker, kubernetes, databricks, memory, agents, tools, execution, monitoring, backup
 
-You can disable automatic seeding by setting:
-```
-AUTO_SEED_DATABASE=false
-```
+---
 
-For more details, see [Database Seeding](docs/DATABASE_SEEDING.md).
+## Support Channels
 
-### Testing
+### Get Help
+- **In-App Chat**: 24/7 support
+- **Email**: support@kasal.ai
+- **Tickets**: [support.kasal.ai](https://support.kasal.ai)
+- **GitHub**: [github.com/kasal/kasal](https://github.com/kasal/kasal)
 
-```bash
-# Run all tests
-poetry run pytest
+### Community
+- **Discord**: [discord.gg/kasal](https://discord.gg/kasal)
+- **Twitter**: [@kasalai](https://twitter.com/kasalai)
+- **YouTube**: [youtube.com/@kasalai](https://youtube.com/@kasalai)
 
-# Run with coverage
-poetry run pytest --cov=src
-```
+---
 
-## Best Practices
+## Brand Guidelines
 
-This project implements the following best practices:
+### Colors
+- **Primary**: #FF3621 (Vibrant Red-Orange)
+- **Secondary**: #00A1C9 (Bright Cyan)
+- **Success**: #48C774 (Green)
+- **Warning**: #FFB86C (Orange)
+- **Dark**: #1E1E1E (Background)
 
-1. **Clean Architecture**: Separation of concerns with layers
-2. **Repository Pattern**: Abstract database access
-3. **Unit of Work Pattern**: Handle transactions
-4. **Dependency Injection**: Manage dependencies cleanly
-5. **Async First**: Utilize async/await for better performance
-6. **Type Hints**: Comprehensive typing for better code quality
-7. **Testing**: Unit and integration tests for reliable code
-8. **Data Seeding**: Idempotent database population with predefined data
+### Voice
+- **Professional** but approachable
+- **Concise** over verbose
+- **Visual** over text-heavy
+- **Action-oriented** language
+
+---
+
+## Documentation Updates
+
+| Version | Date | Changes |
+|---------|------|---------|
+| v2.0 | Jan 2025 | Complete redesign with personas |
+| v1.5 | Dec 2024 | Added API reference |
+| v1.0 | Nov 2024 | Initial documentation |
+
+---
+
+## Contributing
+
+Found an issue? Want to improve docs?
+1. Fork the repo
+2. Make changes
+3. Submit PR
+4. Get credit!
+
+---
+
+*Documentation that respects your time*
