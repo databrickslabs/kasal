@@ -11,6 +11,7 @@ from src.schemas.documentation_embedding import DocumentationEmbeddingCreate
 from src.schemas.memory_backend import MemoryBackendType
 from src.core.logger import LoggerManager
 from src.repositories.memory_backend_repository import MemoryBackendRepository
+from src.services.embedding_queue_service import embedding_queue
 
 # Configure logging
 logger = LoggerManager.get_instance().documentation_embedding
@@ -327,10 +328,34 @@ class DocumentationEmbeddingService:
         if not self.session:
             raise ValueError("Session is required for database operations")
 
-        # Create the embedding in the database
-        from src.repositories.documentation_embedding_repository import DocumentationEmbeddingRepository
-        repository = DocumentationEmbeddingRepository(self.session)
-        return await repository.create(doc_embedding)
+        # Use batching service for SQLite to reduce lock contention
+        import os
+        if database_type == "sqlite":
+            logger.info("Using embedding queue service for batch processing")
+            # Add to queue for batch processing
+            await embedding_queue.add_embedding(
+                source=doc_embedding.source,
+                title=doc_embedding.title,
+                content=doc_embedding.content,
+                embedding=doc_embedding.embedding,
+                doc_metadata=doc_embedding.doc_metadata
+            )
+            # Return a placeholder immediately to avoid blocking
+            return DocumentationEmbedding(
+                id="queued-" + str(uuid.uuid4()),
+                source=doc_embedding.source,
+                title=doc_embedding.title,
+                content=doc_embedding.content,
+                doc_metadata=doc_embedding.doc_metadata or {},
+                embedding=doc_embedding.embedding,
+                created_at=datetime.utcnow(),
+                updated_at=datetime.utcnow()
+            )
+        else:
+            # Create the embedding in the database directly for PostgreSQL
+            from src.repositories.documentation_embedding_repository import DocumentationEmbeddingRepository
+            repository = DocumentationEmbeddingRepository(self.session)
+            return await repository.create(doc_embedding)
     
     async def get_documentation_embedding(
         self, 

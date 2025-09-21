@@ -18,7 +18,7 @@ from src.core.logger import LoggerManager
 from src.models.execution_status import ExecutionStatus
 from src.schemas.execution import CrewConfig
 from src.repositories.execution_repository import ExecutionRepository
-from src.repositories.flow_repository import SyncFlowRepository, get_sync_flow_repository
+# Sync flow repository removed - use async FlowRepository instead
 from src.engines.factory import EngineFactory
 from src.engines.crewai.crewai_engine_service import CrewAIEngineService
 from src.services.execution_status_service import ExecutionStatusService
@@ -577,14 +577,15 @@ class CrewAIExecutionService:
             if flow_id and (not nodes or not isinstance(nodes, list)):
                 crew_logger.info(f"No nodes provided but flow_id exists: {flow_id}. Loading flow data from repository")
                 try:
-                    # Get repository instance through factory function with session
-                    from src.db.session import SessionLocal
-                    db = SessionLocal()
-                    try:
-                        flow_repository = get_sync_flow_repository(db)
+                    # Get repository instance through async factory function with session
+                    from src.db.session import async_session_factory
+                    from src.repositories.flow_repository import FlowRepository
 
-                        # Find flow by ID
-                        flow = flow_repository.find_by_id(flow_id)
+                    async with async_session_factory() as db:
+                        flow_repository = FlowRepository(db)
+
+                        # Find flow by ID using async method
+                        flow = await flow_repository.get(flow_id)
                         if not flow:
                             crew_logger.error(f"Flow with ID {flow_id} not found in repository")
                             return {
@@ -603,8 +604,6 @@ class CrewAIExecutionService:
                         if flow.flow_config:
                             execution_config['flow_config'] = flow.flow_config
                             crew_logger.info(f"Loaded flow_config from repository for flow {flow_id}")
-                    finally:
-                        db.close()
                 except Exception as e:
                     crew_logger.error(f"Error loading flow data from repository: {str(e)}", exc_info=True)
                     return {
