@@ -29,6 +29,8 @@ interface CrewExecutionState {
   reasoningEnabled: boolean;
   reasoningLLM: string;
   schemaDetectionEnabled: boolean;
+  processType: 'sequential' | 'hierarchical';
+  managerLLM: string;
   isCrewPlanningOpen: boolean;
   isScheduleDialogOpen: boolean;
   inputMode: 'dialog' | 'chat';
@@ -57,6 +59,8 @@ interface CrewExecutionState {
   setReasoningEnabled: (enabled: boolean) => void;
   setReasoningLLM: (model: string) => void;
   setSchemaDetectionEnabled: (enabled: boolean) => void;
+  setProcessType: (type: 'sequential' | 'hierarchical') => void;
+  setManagerLLM: (model: string) => void;
   setCrewPlanningOpen: (open: boolean) => void;
   setScheduleDialogOpen: (open: boolean) => void;
   setSelectedTools: (tools: Tool[]) => void;
@@ -98,6 +102,8 @@ export const useCrewExecutionStore = create<CrewExecutionState>((set, get) => ({
   reasoningEnabled: false,
   reasoningLLM: '',
   schemaDetectionEnabled: true,
+  processType: (localStorage.getItem('crewai-process-type') as 'sequential' | 'hierarchical') || 'sequential',
+  managerLLM: localStorage.getItem('crewai-manager-llm') || '',
   isCrewPlanningOpen: false,
   isScheduleDialogOpen: false,
   inputMode: (localStorage.getItem('crewai-input-mode') as 'dialog' | 'chat') || 'dialog',
@@ -124,6 +130,16 @@ export const useCrewExecutionStore = create<CrewExecutionState>((set, get) => ({
   setReasoningEnabled: (enabled) => set({ reasoningEnabled: enabled }),
   setReasoningLLM: (model) => set({ reasoningLLM: model }),
   setSchemaDetectionEnabled: (enabled) => set({ schemaDetectionEnabled: enabled }),
+  setProcessType: (type) => {
+    console.log('[CrewExecutionStore] Setting process type to:', type);
+    localStorage.setItem('crewai-process-type', type);
+    set({ processType: type });
+    console.log('[CrewExecutionStore] Process type set, new state:', get().processType);
+  },
+  setManagerLLM: (model) => {
+    localStorage.setItem('crewai-manager-llm', model);
+    set({ managerLLM: model });
+  },
   setCrewPlanningOpen: (open) => set({ isCrewPlanningOpen: open }),
   setScheduleDialogOpen: (open) => set({ isScheduleDialogOpen: open }),
   setSelectedTools: (tools) => set({ selectedTools: tools }),
@@ -165,7 +181,7 @@ export const useCrewExecutionStore = create<CrewExecutionState>((set, get) => ({
 
   // Execution methods
   executeCrew: async (nodes, edges) => {
-    const { selectedModel, planningEnabled, planningLLM, reasoningEnabled, reasoningLLM, schemaDetectionEnabled, inputVariables } = get();
+    const { selectedModel, planningEnabled, planningLLM, reasoningEnabled, reasoningLLM, schemaDetectionEnabled, inputVariables, processType, managerLLM } = get();
     set({ isExecuting: true });
 
     try {
@@ -189,13 +205,19 @@ export const useCrewExecutionStore = create<CrewExecutionState>((set, get) => ({
           }))
       );
 
-      // Prepare additionalInputs with planning_llm and reasoning_llm if enabled
-      const additionalInputs: Record<string, unknown> = { ...inputVariables };
+      // Prepare additionalInputs with planning_llm, reasoning_llm, process type, and manager_llm
+      const additionalInputs: Record<string, unknown> = {
+        ...inputVariables,
+        process: processType
+      };
       if (planningEnabled && planningLLM) {
         additionalInputs.planning_llm = planningLLM;
       }
       if (reasoningEnabled && reasoningLLM) {
         additionalInputs.reasoning_llm = reasoningLLM;
+      }
+      if (processType === 'hierarchical' && managerLLM) {
+        additionalInputs.manager_llm = managerLLM;
       }
       
       console.log('[CrewExecution] Executing with inputs:', additionalInputs);
@@ -224,11 +246,12 @@ export const useCrewExecutionStore = create<CrewExecutionState>((set, get) => ({
       window.dispatchEvent(openExecutionHistoryEvent);
 
       // Dispatch custom jobCreated event to update the run history immediately
-      const jobCreatedEvent = new CustomEvent('jobCreated', { 
-        detail: { 
+      const jobCreatedEvent = new CustomEvent('jobCreated', {
+        detail: {
           jobId: response.execution_id || response.job_id,
           jobName: `Crew Execution (${new Date().toLocaleTimeString()})`,
-          status: 'running'
+          status: 'running',
+          groupId: localStorage.getItem('selectedGroupId') // Include the group ID for security filtering
         }
       });
       console.log('[CrewExecution] Dispatching jobCreated event:', jobCreatedEvent.detail);
@@ -353,11 +376,12 @@ export const useCrewExecutionStore = create<CrewExecutionState>((set, get) => ({
       });
 
       // Dispatch custom jobCreated event to update the run history immediately
-      const jobCreatedEvent = new CustomEvent('jobCreated', { 
-        detail: { 
+      const jobCreatedEvent = new CustomEvent('jobCreated', {
+        detail: {
           jobId: response.execution_id || response.job_id,
           jobName: `Flow Execution (${new Date().toLocaleTimeString()})`,
-          status: 'running'
+          status: 'running',
+          groupId: localStorage.getItem('selectedGroupId') // Include the group ID for security filtering
         }
       });
       console.log('[FlowExecution] Dispatching jobCreated event:', jobCreatedEvent.detail);
@@ -399,7 +423,7 @@ export const useCrewExecutionStore = create<CrewExecutionState>((set, get) => ({
   },
 
   executeTab: async (tabId, nodes, edges, tabName) => {
-    const { selectedModel, planningEnabled, planningLLM, reasoningEnabled, reasoningLLM, schemaDetectionEnabled } = get();
+    const { selectedModel, planningEnabled, planningLLM, reasoningEnabled, reasoningLLM, schemaDetectionEnabled, processType, managerLLM } = get();
     set({ isExecuting: true });
 
     try {
@@ -422,13 +446,18 @@ export const useCrewExecutionStore = create<CrewExecutionState>((set, get) => ({
         throw new Error('Tab execution requires at least one agent and one task node for crew execution, or flow nodes for flow execution');
       }
 
-      // Prepare additionalInputs with planning_llm and reasoning_llm if enabled
-      const additionalInputs: Record<string, unknown> = {};
+      // Prepare additionalInputs with planning_llm, reasoning_llm, process type, and manager_llm
+      const additionalInputs: Record<string, unknown> = {
+        process: processType
+      };
       if (planningEnabled && planningLLM) {
         additionalInputs.planning_llm = planningLLM;
       }
       if (reasoningEnabled && reasoningLLM) {
         additionalInputs.reasoning_llm = reasoningLLM;
+      }
+      if (processType === 'hierarchical' && managerLLM) {
+        additionalInputs.manager_llm = managerLLM;
       }
 
       console.log(`[TabExecution] Executing tab as ${executionType} with model:`, selectedModel);
@@ -453,11 +482,12 @@ export const useCrewExecutionStore = create<CrewExecutionState>((set, get) => ({
       });
 
       // Dispatch custom jobCreated event to update the run history immediately
-      const jobCreatedEvent = new CustomEvent('jobCreated', { 
-        detail: { 
+      const jobCreatedEvent = new CustomEvent('jobCreated', {
+        detail: {
           jobId: response.execution_id || response.job_id,
           jobName: `${tabName || 'Unnamed Tab'} (${new Date().toLocaleTimeString()})`,
-          status: 'running'
+          status: 'running',
+          groupId: localStorage.getItem('selectedGroupId') // Include the group ID for security filtering
         }
       });
       console.log('[TabExecution] Dispatching jobCreated event:', jobCreatedEvent.detail);
@@ -620,11 +650,12 @@ export const useCrewExecutionStore = create<CrewExecutionState>((set, get) => ({
       });
 
       // Dispatch custom jobCreated event to update the run history immediately
-      window.dispatchEvent(new CustomEvent('jobCreated', { 
-        detail: { 
+      window.dispatchEvent(new CustomEvent('jobCreated', {
+        detail: {
           jobId: response.execution_id || response.job_id,
           jobName: `Crew Generation (${new Date().toLocaleTimeString()})`,
-          status: 'running'
+          status: 'running',
+          groupId: localStorage.getItem('selectedGroupId') // Include the group ID for security filtering
         }
       }));
 

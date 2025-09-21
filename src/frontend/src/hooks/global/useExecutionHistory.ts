@@ -154,19 +154,52 @@ export const useRunHistory = () => {
     }
   };
 
-  // Filter the runs based on the search query
+  // Filter the runs based on the search query AND group
   const filteredRuns = useMemo(() => {
     // Ensure runHistory is an array
     const safeRunHistory = Array.isArray(runHistory) ? runHistory : [];
-    
+
+    // Get the selected group ID from localStorage for additional client-side filtering
+    const selectedGroupId = localStorage.getItem('selectedGroupId');
+
+    // Log for debugging
+    historyLogger.debug(`Filtering runs - Total: ${safeRunHistory.length}, Selected Group: ${selectedGroupId}`);
+
+    // Filter by group first (security filter)
+    let groupFilteredRuns = safeRunHistory;
+    if (selectedGroupId) {
+      const beforeFilter = safeRunHistory.length;
+      groupFilteredRuns = safeRunHistory.filter((run) => {
+        // If the run has a group_id, it must match the selected workspace
+        // If no group_id, check if it's an old run that should be filtered out
+        if (run?.group_id) {
+          const matches = run.group_id === selectedGroupId;
+          if (!matches) {
+            historyLogger.debug(`Filtering out run ${run.run_name} - group ${run.group_id} doesn't match ${selectedGroupId}`);
+          }
+          return matches;
+        }
+        // For runs without group_id (legacy), we can't verify ownership
+        // These should be filtered out for security
+        historyLogger.debug(`Filtering out run ${run?.run_name} - no group_id (legacy/orphan)`);
+        return false;
+      });
+      historyLogger.debug(`Group filter applied: ${beforeFilter} → ${groupFilteredRuns.length} runs`);
+    } else {
+      // No selected group - this shouldn't happen in normal operation
+      historyLogger.warn('No selectedGroupId found - returning empty array for security');
+      groupFilteredRuns = [];
+    }
+
+    // Then filter by search query
     return searchQuery
-      ? safeRunHistory.filter((run) => {
+      ? groupFilteredRuns.filter((run) => {
           // Convert search query and run name to lowercase for case-insensitive search
           const query = searchQuery.toLowerCase();
           const runName = run?.run_name?.toLowerCase() || '';
           return runName.includes(query);
         })
-      : safeRunHistory;
+      : groupFilteredRuns;
   }, [runHistory, searchQuery]);
 
   const sortedRuns = useMemo(() => {
@@ -247,8 +280,40 @@ export const useRunHistory = () => {
     };
   }, [isLoading, runHistory.length]);
 
-  // Initial fetch
+  // Clear orphan runs and fetch fresh data when group changes
   useEffect(() => {
+    const selectedGroupId = localStorage.getItem('selectedGroupId');
+    historyLogger.info(`Group context initialized/changed: ${selectedGroupId}`);
+
+    // Clear any cached runs without group_id from the store
+    const currentState = useRunStatusStore.getState();
+    const cleanedHistory = currentState.runHistory.filter(run => {
+      // Only keep runs that have a group_id matching the selected one
+      if (!run.group_id) {
+        historyLogger.debug(`Removing orphan run from cache: ${run.run_name}`);
+        return false;
+      }
+      if (run.group_id !== selectedGroupId) {
+        historyLogger.debug(`Removing run from different group: ${run.run_name} (${run.group_id})`);
+        return false;
+      }
+      return true;
+    });
+
+    // Update the store if we removed any orphan runs
+    if (cleanedHistory.length !== currentState.runHistory.length) {
+      historyLogger.info(`Cleaned ${currentState.runHistory.length - cleanedHistory.length} orphan/invalid runs from cache`);
+      useRunStatusStore.setState({
+        ...currentState,
+        runHistory: cleanedHistory,
+        activeRuns: Object.fromEntries(
+          Object.entries(currentState.activeRuns)
+            .filter(([_, run]) => run.group_id === selectedGroupId)
+        )
+      });
+    }
+
+    // Fetch fresh data
     fetchRuns();
   }, [fetchRuns]);
 

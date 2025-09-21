@@ -16,14 +16,21 @@ export const apiClient = axios.create({
   },
 });
 
-// Add a request interceptor to include authentication tokens
+// Add a request interceptor to include authentication tokens and group context
 apiClient.interceptors.request.use(
   (config) => {
     const token = localStorage.getItem('token');
     if (token) {
       config.headers.Authorization = `Bearer ${token}`;
     }
-    
+
+    // Add group context headers if available
+    const selectedGroupId = localStorage.getItem('selectedGroupId');
+
+    if (selectedGroupId) {
+      config.headers['group_id'] = selectedGroupId;  // Use 'group_id' to match database column name
+    }
+
     return config;
   },
   (error) => {
@@ -38,8 +45,22 @@ apiClient.interceptors.response.use(
     if (error.response) {
       // The request was made and the server responded with a status code
       // that falls out of the range of 2xx
-      // Don't log 404 errors as they might be expected (e.g., no default config)
-      if (error.response.status !== 404) {
+
+      // List of endpoints where 404 is expected and shouldn't be logged as an error
+      const expectedNotFoundEndpoints = [
+        '/databricks/config',
+        '/memory-backend/config',
+        '/default-config',
+        '/knowledge/config'
+      ];
+
+      const isExpected404 = error.response.status === 404 &&
+        expectedNotFoundEndpoints.some(endpoint =>
+          error.config?.url?.includes(endpoint)
+        );
+
+      // Don't log 404 errors for configuration endpoints or other expected cases
+      if (!isExpected404 && error.response.status !== 404) {
         console.error('API Error Response:', {
           status: error.response.status,
           data: error.response.data,
