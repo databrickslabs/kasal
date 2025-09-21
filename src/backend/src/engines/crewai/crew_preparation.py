@@ -7,7 +7,7 @@ This module handles the preparation and configuration of CrewAI agents and tasks
 from typing import Dict, Any, List, Optional
 import logging
 from datetime import datetime
-from crewai import Agent, Crew, Task
+from crewai import Agent, Crew, Task, Process
 from src.core.logger import LoggerManager
 from src.engines.crewai.helpers.task_helpers import create_task, is_data_missing
 from src.engines.crewai.helpers.agent_helpers import create_agent
@@ -323,7 +323,17 @@ class CrewPreparation:
             for i, agent_config in enumerate(self.config.get('agents', [])):
                 # Use the agent's 'name' if present, then 'id', then 'role', or generate a name if none exist
                 agent_name = agent_config.get('name', agent_config.get('id', agent_config.get('role', f'agent_{i}')))
-                agent_id = agent_config.get('id', agent_name)
+                config_agent_id = agent_config.get('id', agent_name)
+
+                # CRITICAL FIX: Look up the actual Kasal agent UUID from database using AgentService
+                # The config agent_id is the CrewAI agent name, but we need the Kasal agent UUID for vector search
+                kasal_agent_id = await self._lookup_kasal_agent_uuid_via_service(agent_config, config_agent_id)
+                agent_id = kasal_agent_id if kasal_agent_id else config_agent_id
+
+                # Debug logging to track agent ID resolution for knowledge source access control
+                logger.info(f"[CrewPreparation] Agent {i}: name='{agent_name}', config_id='{config_agent_id}'")
+                logger.info(f"[CrewPreparation] Agent {i}: kasal_agent_id='{kasal_agent_id}', final_agent_id='{agent_id}'")
+                logger.info(f"[CrewPreparation] Agent {i}: Will use agent_id '{agent_id}' for knowledge source access control")
                 
                 # Log agent configuration to debug knowledge_sources
                 logger.info(f"[CrewPreparation] Processing agent {agent_name} with config keys: {list(agent_config.keys())}")
@@ -346,7 +356,8 @@ class CrewPreparation:
                     agent_config=agent_config,
                     tool_service=self.tool_service,
                     tool_factory=self.tool_factory,
-                    config=self.config  # Pass the full config for execution_id and group_id
+                    config=self.config,  # Pass the full config for execution_id and group_id
+                    agent_id=agent_id   # Pass Kasal agent UUID for knowledge source access control
                 )
                 if not agent:
                     logger.error(f"Failed to create agent: {agent_name}")
@@ -370,35 +381,37 @@ class CrewPreparation:
                             embedder_config = self.embedder_config
                             logger.info(f"Using embedder config from crew: {embedder_config}")
                         
+                        # CRITICAL FIX: Clean the agent_id to remove prefixes before passing to knowledge sources
+                        # This prevents the agent_agent-UUID format in the vector index
+                        clean_agent_id = agent_id
+                        if agent_id:
+                            # Strip any agent_ or agent- prefixes to get the clean UUID
+                            if agent_id.startswith('agent_'):
+                                clean_agent_id = agent_id[6:]  # Remove 'agent_' prefix
+                            if clean_agent_id.startswith('agent-'):
+                                clean_agent_id = clean_agent_id[6:]  # Remove 'agent-' prefix
+
+                        logger.info(f"[CREW] Agent ID cleanup: original='{agent_id}', clean='{clean_agent_id}'")
+
                         # Create knowledge sources from configuration with agent access control
                         knowledge_sources = KnowledgeSourceFactory.create_knowledge_sources(
                             agent_config['knowledge_sources'],
                             execution_id=execution_id,
                             group_id=group_id,
                             embedder_config=embedder_config,
-                            agent_id=agent_id  # Pass the Kasal Agent UUID for access control
+                            agent_id=clean_agent_id  # Pass the clean Kasal Agent UUID for access control
                         )
                         
                         if knowledge_sources:
                             # Set knowledge_sources directly on the agent
                             agent.knowledge_sources = knowledge_sources
                             logger.info(f"Added {len(knowledge_sources)} knowledge sources to agent {agent_name}")
-                            
-                            # CRITICAL: Call add() on each knowledge source to trigger embedding
+
+                            # NOTE: We'll call add() on each knowledge source AFTER set_knowledge() is called
+                            # This ensures the knowledge is properly initialized before processing
                             for ks in knowledge_sources:
                                 if hasattr(ks, 'collection_name'):
-                                    logger.info(f"  - Collection: {ks.collection_name}")
-                                
-                                # Trigger the knowledge source processing
-                                if hasattr(ks, 'add'):
-                                    logger.info(f"[CrewPreparation] Calling add() on knowledge source: {ks.collection_name}")
-                                    try:
-                                        ks.add()  # This will load, chunk, and embed the content
-                                        logger.info(f"[CrewPreparation] ✅ Successfully processed knowledge source: {ks.collection_name}")
-                                    except Exception as add_error:
-                                        logger.error(f"[CrewPreparation] ❌ Error processing knowledge source {ks.collection_name}: {add_error}", exc_info=True)
-                                else:
-                                    logger.warning(f"[CrewPreparation] Knowledge source {ks} does not have add() method")
+                                    logger.info(f"  - Collection: {ks.collection_name} (will be processed after crew initialization)")
                     except Exception as e:
                         logger.error(f"Error adding knowledge sources to agent {agent_name}: {e}", exc_info=True)
                     
@@ -578,10 +591,20 @@ class CrewPreparation:
                     logger.info(f"No agent memory settings found - using crew memory default: {default_crew_memory}")
             
             # Create the crew directly instead of calling an external function
+            # Handle process type properly - convert string to Process enum if needed
+            process_type = crew_config.get('process', 'sequential')
+            if isinstance(process_type, str):
+                if process_type.lower() == 'hierarchical':
+                    process_type = Process.hierarchical
+                    logger.info("Using hierarchical process for crew")
+                else:
+                    process_type = Process.sequential
+                    logger.info("Using sequential process for crew")
+
             crew_kwargs = {
                 'agents': list(self.agents.values()),
                 'tasks': self.tasks,
-                'process': crew_config.get('process', 'sequential'),
+                'process': process_type,
                 'verbose': True,
                 'memory': default_crew_memory
             }
@@ -600,25 +623,97 @@ class CrewPreparation:
                 # Get the model from the execution config or crew config
                 requested_model = self.config.get('model') or crew_config.get('model')
                 
-                # Only set manager_llm if not already specified in crew_config
-                if 'manager_llm' not in crew_config:
+                # Handle hierarchical process configuration
+                if process_type == Process.hierarchical:
+                    # Check for manager_agent first, then manager_llm
+                    if 'manager_agent' in crew_config and crew_config['manager_agent']:
+                        # Create a manager agent from configuration
+                        manager_config = crew_config['manager_agent']
+                        if isinstance(manager_config, dict):
+                            logger.info("Creating custom manager agent from configuration")
+                            manager_agent = await create_agent(
+                                agent_config=manager_config,
+                                llm=await LLMManager.get_llm(requested_model) if requested_model else None,
+                                tool_service=self.tool_service,
+                                tool_factory=self.tool_factory,
+                                user_token=self.user_token
+                            )
+                            crew_kwargs['manager_agent'] = manager_agent
+                            logger.info("Set custom manager agent for hierarchical process")
+                    elif 'manager_llm' not in crew_config:
+                        # Set manager_llm if not already specified and no manager_agent
+                        logger.info("Hierarchical process detected - setting manager_llm")
+                        if requested_model:
+                            try:
+                                manager_llm = await LLMManager.get_llm(requested_model)
+                                crew_kwargs['manager_llm'] = manager_llm
+                                logger.info(f"Set manager LLM for hierarchical process: {requested_model}")
+                            except Exception as llm_error:
+                                logger.warning(f"Could not create manager LLM: {llm_error}")
+                                # Use default if available
+                                if is_databricks_apps_environment():
+                                    fallback_llm = await LLMManager.get_llm("databricks-llama-4-maverick")
+                                    crew_kwargs['manager_llm'] = fallback_llm
+                        else:
+                            logger.warning("Hierarchical process requires manager_llm or manager_agent")
+                    else:
+                        # manager_llm already in crew_config
+                        provided_manager_llm = crew_config['manager_llm']
+
+                        # Check if it's a string that needs conversion to LLM object
+                        if isinstance(provided_manager_llm, str):
+                            logger.info(f"Converting manager_llm string '{provided_manager_llm}' to LLM object")
+                            try:
+                                # Use LLMManager to create the LLM object with proper prefix
+                                crew_kwargs['manager_llm'] = await LLMManager.get_llm(provided_manager_llm)
+                                logger.info(f"Successfully converted manager_llm '{provided_manager_llm}' to LLM object")
+                            except Exception as llm_error:
+                                logger.error(f"Failed to convert manager_llm string to LLM object: {llm_error}")
+                                # Try with databricks/ prefix if it's a Databricks model
+                                if 'databricks' in provided_manager_llm.lower() and not provided_manager_llm.startswith('databricks/'):
+                                    prefixed_model = f"databricks/{provided_manager_llm}"
+                                    logger.info(f"Retrying with databricks/ prefix: {prefixed_model}")
+                                    try:
+                                        crew_kwargs['manager_llm'] = await LLMManager.get_llm(prefixed_model)
+                                        logger.info(f"Successfully created manager_llm with prefix: {prefixed_model}")
+                                    except Exception as retry_error:
+                                        logger.error(f"Failed to create manager_llm even with prefix: {retry_error}")
+                                        # Fall back to default
+                                        if is_databricks_apps_environment():
+                                            fallback_llm = await LLMManager.get_llm("databricks-llama-4-maverick")
+                                            crew_kwargs['manager_llm'] = fallback_llm
+                                            logger.info("Using fallback Databricks model for manager_llm")
+                                        else:
+                                            raise
+                                else:
+                                    raise
+                        else:
+                            # It's already an LLM object, use as-is
+                            crew_kwargs['manager_llm'] = provided_manager_llm
+                            logger.info("Using provided manager_llm object for hierarchical process")
+                elif 'manager_llm' not in crew_config and process_type != Process.hierarchical:
+                    # Sequential process - manager_llm not needed but can be set for planning
                     if requested_model:
-                        logger.info(f"Using submitted model for crew manager: {requested_model}")
+                        logger.info(f"Using submitted model for planning: {requested_model}")
                         try:
-                            manager_llm = await LLMManager.get_llm(requested_model)
-                            crew_kwargs['manager_llm'] = manager_llm
-                            logger.info(f"Set crew manager LLM to: {requested_model}")
+                            planning_llm = await LLMManager.get_llm(requested_model)
+                            # For sequential process, manager_llm is used for planning if enabled
+                            if crew_config.get('planning', False):
+                                crew_kwargs['manager_llm'] = planning_llm
+                                logger.info(f"Set planning LLM to: {requested_model}")
                         except Exception as llm_error:
                             logger.warning(f"Could not create LLM for model {requested_model}: {llm_error}")
                             # Fall back to environment-appropriate default
                             if is_databricks_apps_environment():
                                 logger.info("Falling back to Databricks model in Apps environment")
                                 fallback_llm = await LLMManager.get_llm("databricks-llama-4-maverick")
-                                crew_kwargs['manager_llm'] = fallback_llm
+                                if crew_config.get('planning', False):
+                                    crew_kwargs['manager_llm'] = fallback_llm
                     elif is_databricks_apps_environment():
                         logger.info("No model specified - using Databricks default in Apps environment")
                         default_llm = await LLMManager.get_llm("databricks-llama-4-maverick")
-                        crew_kwargs['manager_llm'] = default_llm
+                        if crew_config.get('planning', False):
+                            crew_kwargs['manager_llm'] = default_llm
                     else:
                         logger.info("No model specified - will use CrewAI defaults")
                         
@@ -708,9 +803,9 @@ class CrewPreparation:
                             if not databricks_endpoint:
                                 try:
                                     from src.services.databricks_service import DatabricksService
-                                    from src.core.unit_of_work import UnitOfWork
-                                    async with UnitOfWork() as uow:
-                                        databricks_service = await DatabricksService.from_unit_of_work(uow)
+                                    from src.db.session import async_session_factory
+                                    async with async_session_factory() as session:
+                                        databricks_service = DatabricksService(session)
                                         db_config = await databricks_service.get_databricks_config()
                                         if db_config and db_config.workspace_url:
                                             # Normalize the workspace URL from database
@@ -901,11 +996,11 @@ class CrewPreparation:
             if crew_kwargs.get('memory', False) and not should_disable_memory_for_crew:
                 try:
                     from src.services.memory_backend_service import MemoryBackendService
-                    from src.core.unit_of_work import UnitOfWork
-                    
-                    # Use async unit of work to get the service
-                    async with UnitOfWork() as uow:
-                        service = MemoryBackendService(uow)
+                    from src.db.session import async_session_factory
+
+                    # Create service with session
+                    async with async_session_factory() as session:
+                        service = MemoryBackendService(session)
                         # Get the active memory backend configuration from database
                         # This configuration is managed through the Memory Backend UI or API
                         # and stored in the database, not passed from the frontend
@@ -1433,6 +1528,52 @@ class CrewPreparation:
             except Exception as context_error:
                 logger.warning(f"Failed to set context on memory backends: {context_error}")
             
+            # CRITICAL: Initialize knowledge for each agent after crew creation
+            # This converts knowledge_sources into the knowledge attribute
+            try:
+                logger.info("[CrewPreparation] Initializing knowledge for agents...")
+                for agent in self.crew.agents:
+                    if hasattr(agent, 'knowledge_sources') and agent.knowledge_sources:
+                        logger.info(f"[CrewPreparation] Agent {agent.role} has {len(agent.knowledge_sources)} knowledge sources")
+
+                        # Set the agent's crew reference first
+                        agent.crew = self.crew
+
+                        # Initialize the knowledge with the crew's embedder
+                        # This is what CrewAI does internally during kickoff
+                        if hasattr(agent, 'set_knowledge'):
+                            logger.info(f"[CrewPreparation] Calling set_knowledge() for agent {agent.role}")
+                            agent.set_knowledge(crew_embedder=crew_kwargs.get('embedder'))
+                            logger.info(f"[CrewPreparation] ✅ Knowledge initialized for agent {agent.role}")
+
+                            # Verify knowledge was set
+                            if hasattr(agent, 'knowledge') and agent.knowledge:
+                                logger.info(f"[CrewPreparation] Agent {agent.role} knowledge object created successfully")
+
+                                # CRITICAL: Now call add() on each knowledge source AFTER set_knowledge()
+                                # This ensures proper initialization before processing
+                                for ks in agent.knowledge_sources:
+                                    if hasattr(ks, 'add'):
+                                        logger.info(f"[CrewPreparation] Calling add() on knowledge source: {getattr(ks, 'collection_name', 'unknown')}")
+                                        try:
+                                            ks.add()  # This will prepare the knowledge source for retrieval
+                                            logger.info(f"[CrewPreparation] ✅ Successfully processed knowledge source")
+                                        except Exception as add_error:
+                                            logger.error(f"[CrewPreparation] ❌ Error processing knowledge source: {add_error}", exc_info=True)
+                                    else:
+                                        logger.warning(f"[CrewPreparation] Knowledge source does not have add() method")
+                            else:
+                                logger.warning(f"[CrewPreparation] Agent {agent.role} knowledge is still None after set_knowledge()")
+                        else:
+                            logger.warning(f"[CrewPreparation] Agent {agent.role} does not have set_knowledge() method")
+                    else:
+                        logger.info(f"[CrewPreparation] Agent {agent.role} has no knowledge sources")
+
+                logger.info("[CrewPreparation] Knowledge initialization completed for all agents")
+            except Exception as knowledge_error:
+                logger.error(f"[CrewPreparation] Error initializing agent knowledge: {knowledge_error}", exc_info=True)
+                # Don't fail the crew creation, but log the issue
+
             logger.info("Created crew successfully")
             return True
         except Exception as e:
@@ -1468,6 +1609,65 @@ class CrewPreparation:
             handle_crew_error(e, "Error during crew execution")
             return {"error": str(e)}
     
+    async def _lookup_kasal_agent_uuid_via_service(self, agent_config: Dict[str, Any], config_agent_id: str) -> Optional[str]:
+        """
+        Look up the actual Kasal agent UUID from the database using AgentService.
+
+        This is critical for knowledge source access control - we need to use the same
+        agent ID that the task search will use, which is the Kasal agent UUID from the database,
+        not the CrewAI agent name from the configuration.
+
+        Args:
+            agent_config: Agent configuration from CrewAI config
+            config_agent_id: Agent ID from config (usually CrewAI agent name)
+
+        Returns:
+            Kasal agent UUID from database, or None if not found
+        """
+        try:
+            from src.core.unit_of_work import UnitOfWork
+            from src.services.agent_service import AgentService
+            from src.utils.user_context import GroupContext
+
+            # Get the group_id from config
+            group_id = self.config.get('group_id', 'default')
+
+            from src.db.session import async_session_factory
+
+            async with async_session_factory() as session:
+                agent_service = AgentService(session)
+                group_context = GroupContext(group_ids=[group_id])
+
+                # Get all agents for the group
+                agents = await agent_service.find_by_group(group_context)
+
+                # Try to match by various criteria
+                agent_role = agent_config.get('role', '')
+                agent_name = agent_config.get('name', '')
+
+                logger.info(f"[CrewPreparation] Looking for agent in {len(agents)} agents in group '{group_id}'")
+                logger.info(f"[CrewPreparation] Searching for role='{agent_role}', name='{agent_name}', config_id='{config_agent_id}'")
+
+                for db_agent in agents:
+                    # Try exact matches first
+                    if (db_agent.role == agent_role or
+                        db_agent.name == agent_name or
+                        str(db_agent.id) == config_agent_id):
+                        logger.info(f"[CrewPreparation] Found matching agent: UUID={db_agent.id}, role='{db_agent.role}', name='{db_agent.name}'")
+                        return str(db_agent.id)
+
+                # If no exact match, log available agents for debugging
+                logger.warning(f"[CrewPreparation] No matching agent found for config_id='{config_agent_id}'")
+                logger.info(f"[CrewPreparation] Available agents:")
+                for db_agent in agents:
+                    logger.info(f"[CrewPreparation]   - UUID={db_agent.id}, role='{db_agent.role}', name='{db_agent.name}'")
+
+                return None
+
+        except Exception as e:
+            logger.error(f"[CrewPreparation] Error looking up Kasal agent UUID: {e}")
+            return None
+
     def cleanup(self):
         """
         Cleanup method to restore original environment settings.

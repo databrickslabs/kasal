@@ -116,10 +116,9 @@ class BackendFlow:
             if repository:
                 flow = repository.find_by_id(self._flow_id)
             else:
-                # Get repository from factory
-                from src.repositories.flow_repository import get_sync_flow_repository
-                flow_repository = get_sync_flow_repository()
-                flow = flow_repository.find_by_id(self._flow_id)
+                # Log error if no repository provided
+                logger.error(f"No flow repository provided for flow_id {self._flow_id}")
+                raise ValueError(f"No flow repository provided for flow_id {self._flow_id}")
                     
             if not flow:
                 logger.error(f"Flow with ID {self._flow_id} not found")

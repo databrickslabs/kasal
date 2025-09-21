@@ -135,13 +135,20 @@ async def run_crew(execution_id: str, crew: Crew, running_jobs: Dict, group_cont
     
     # Initialize AgentTraceEventListener for trace processing (without global event listeners)
     from src.engines.crewai.callbacks.logging_callbacks import AgentTraceEventListener
+    logger.debug(f"[TRACE_DEBUG] Creating AgentTraceEventListener for execution {execution_id}")
     trace_listener = AgentTraceEventListener(job_id=execution_id, group_context=group_context)
-    
+    logger.debug(f"[TRACE_DEBUG] AgentTraceEventListener created successfully")
+
     # CRITICAL: Register the event listeners with the CrewAI event bus
     # This was missing and caused events not to be captured
     from crewai.events import crewai_event_bus
+    logger.debug(f"[TRACE_DEBUG] About to register event listeners with CrewAI event bus")
     trace_listener.setup_listeners(crewai_event_bus)
-    logger.info(f"Registered AgentTraceEventListener with CrewAI event bus for execution {execution_id}")
+    logger.debug(f"[TRACE_DEBUG] Registered AgentTraceEventListener with CrewAI event bus for execution {execution_id}")
+
+    # Debug: Check if event bus has handlers registered
+    logger.debug(f"[TRACE_DEBUG] Event bus type: {type(crewai_event_bus)}")
+    logger.debug(f"[TRACE_DEBUG] Event bus has handlers: {hasattr(crewai_event_bus, '_handlers')}")
     
     # Note: LLM event routing has been deprecated in CrewAI 0.177+
     # LLM events are now captured through AgentExecutionCompletedEvent in logging_callbacks
@@ -655,13 +662,26 @@ async def run_crew_in_process(
             if execution_id in running_jobs:
                 del running_jobs[execution_id]
                 logger.info(f"Removed job {execution_id} from running jobs list.")
-            
+
+            # Log the final status that will be set
+            logger.info(f"[run_crew_in_process] About to update final status for {execution_id}:")
+            logger.info(f"  - final_status: {final_status}")
+            logger.info(f"  - final_message: {final_message}")
+            logger.info(f"  - has final_result: {final_result is not None}")
+
             # Update final status
-            await update_execution_status_with_retry(
+            update_success = await update_execution_status_with_retry(
                 execution_id,
                 final_status,
                 final_message,
                 final_result
             )
+
+            if update_success:
+                logger.info(f"[run_crew_in_process] Successfully updated status for {execution_id} to {final_status}")
+            else:
+                logger.error(f"[run_crew_in_process] Failed to update status for {execution_id} to {final_status}")
+
         except Exception as cleanup_error:
             logger.error(f"Error during cleanup for process execution {execution_id}: {str(cleanup_error)}")
+            logger.error(f"Cleanup error traceback: {traceback.format_exc()}")

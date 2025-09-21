@@ -142,10 +142,10 @@ async def get_databricks_workspace_host():
     """
     try:
         from src.services.databricks_service import DatabricksService
-        from src.core.unit_of_work import UnitOfWork
-        
-        async with UnitOfWork() as uow:
-            service = await DatabricksService.from_unit_of_work(uow)
+        from src.db.session import async_session_factory
+
+        async with async_session_factory() as session:
+            service = DatabricksService(session)
             config = await service.get_databricks_config()
             
             if config and config.workspace_url:

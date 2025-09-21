@@ -95,7 +95,21 @@ def adapt_config(config: CrewConfig) -> Dict[str, Any]:
     if config.inputs and "memory_backend_config" in config.inputs:
         engine_config["memory_backend_config"] = config.inputs["memory_backend_config"]
         logger.info(f"Preserving memory backend configuration: {config.inputs['memory_backend_config']}")
-    
+
+    # Handle hierarchical process configuration
+    if config.inputs and config.inputs.get("process") == "hierarchical":
+        logger.info("Hierarchical process detected in configuration")
+
+        # Check for manager_llm configuration
+        if "manager_llm" in config.inputs:
+            engine_config["crew"]["manager_llm"] = config.inputs["manager_llm"]
+            logger.info(f"Using specific manager LLM for hierarchical process: {config.inputs['manager_llm']}")
+
+        # Check for manager_agent configuration
+        if "manager_agent" in config.inputs:
+            engine_config["crew"]["manager_agent"] = config.inputs["manager_agent"]
+            logger.info("Using custom manager agent configuration for hierarchical process")
+
     return engine_config
 
 def normalize_config(execution_config: Dict[str, Any]) -> Dict[str, Any]:
@@ -143,7 +157,7 @@ def normalize_flow_config(config: Dict[str, Any]) -> Dict[str, Any]:
             'backstory': agent.get('backstory'),
             'tools': agent.get('tools', []),
             'tool_configs': agent.get('tool_configs', {}),  # Include tool_configs
-            'allow_delegation': agent.get('allow_delegation', True),
+            'allow_delegation': agent.get('allow_delegation', False),
             'verbose': agent.get('verbose', True),
             'memory': agent.get('memory', {}),
             'llm_config': agent.get('llm_config', {})

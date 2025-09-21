@@ -15,135 +15,23 @@ from src.engines.crewai.helpers.tool_helpers import resolve_tool_ids_to_names
 # Get logger from the centralized logging system
 logger = LoggerManager.get_instance().crew
 
-def process_knowledge_sources(knowledge_sources: List[Any]) -> List[Any]:
-    """
-    Process knowledge sources and return CrewAI-compatible knowledge source paths.
-    
-    For now, we'll just extract the paths from Databricks volume sources and return
-    them as strings, which CrewAI can handle. The actual knowledge source objects
-    will be created by CrewAI internally.
-    
-    Args:
-        knowledge_sources: List of knowledge sources, which can be strings, 
-                          dictionaries with metadata, or objects with 'path' property
-                          
-    Returns:
-        List of knowledge source paths as strings compatible with CrewAI
-    """
-    if not knowledge_sources:
-        logger.info("[CREW] No knowledge sources to process")
-        return knowledge_sources
-    
-    logger.info(f"[CREW] Processing {len(knowledge_sources)} knowledge sources: {knowledge_sources}")
-    
-    processed_sources = []
-    
-    for source in knowledge_sources:
-        try:
-            # Handle dictionaries
-            if isinstance(source, dict):
-                source_type = source.get('type')
-
-                # Handle Databricks volume sources specifically
-                if source_type == 'databricks_volume':
-                    try:
-                        # Import here to avoid circular imports
-                        from src.engines.crewai.knowledge.databricks_volume_knowledge_source import DatabricksVolumeKnowledgeSource
-                        import os
-
-                        # Extract required parameters
-                        source_path = source.get('source', source.get('source_path', source.get('path', '')))
-                        metadata = source.get('metadata', {})
-
-                        logger.info(f"[CREW] Creating DatabricksVolumeKnowledgeSource with full path: {source_path}, metadata: {metadata}")
-
-                        # Extract volume path from full path like /Volumes/users/test/knowledge/file.docx
-                        if source_path and source_path.startswith('/Volumes/'):
-                            # Parse /Volumes/catalog/schema/volume/path/to/file.ext
-                            path_parts = source_path.split('/')
-                            if len(path_parts) >= 5:  # ['', 'Volumes', 'catalog', 'schema', 'volume', ...]
-                                volume_path = f"{path_parts[2]}.{path_parts[3]}.{path_parts[4]}"
-                            else:
-                                logger.error(f"Invalid Databricks volume path format: {source_path}")
-                                continue
-                        else:
-                            logger.error(f"Invalid or missing source path for Databricks volume: {source_path}")
-                            continue
-
-                        # Create Databricks knowledge source
-                        databricks_source = DatabricksVolumeKnowledgeSource(
-                            volume_path=volume_path,
-                            execution_id=metadata.get('execution_id', 'default'),
-                            group_id=metadata.get('group_id', 'default'),
-                            file_paths=[source_path],
-                            workspace_url=os.environ.get('DATABRICKS_HOST'),
-                            token=os.environ.get('DATABRICKS_TOKEN')
-                        )
-
-                        processed_sources.append(databricks_source)
-                        continue
-
-                    except ImportError as e:
-                        logger.error(f"Failed to import DatabricksVolumeKnowledgeSource: {e}")
-                    except Exception as e:
-                        logger.error(f"Failed to create DatabricksVolumeKnowledgeSource: {e}")
-
-                # Handle regular dictionary sources (non-Databricks)
-                # Check for path keys, handling None values properly
-                if 'source' in source:
-                    source_path = source['source']
-                elif 'source_path' in source:
-                    source_path = source['source_path']
-                elif 'path' in source:
-                    source_path = source['path']
-                else:
-                    source_path = None
-                    logger.warning(f"[CREW] Dict source without path field: {source}")
-                    continue
-
-                # Include all paths, even None and empty strings
-                logger.info(f"[CREW] Extracted path from dict source: {source_path}")
-                processed_sources.append(source_path)
-            
-            # Handle string paths (already in the right format)
-            elif isinstance(source, str):
-                processed_sources.append(source)
-                logger.info(f"[CREW] Using string source as-is: {source}")
-            
-            # Handle objects with 'path' property
-            elif hasattr(source, 'path'):
-                processed_sources.append(source.path)
-                logger.info(f"[CREW] Extracted path from object: {source.path}")
-            
-            # Handle objects with 'source' property
-            elif hasattr(source, 'source'):
-                processed_sources.append(source.source)
-                logger.info(f"[CREW] Extracted source from object: {source.source}")
-            
-            else:
-                logger.warning(f"Unknown knowledge source format: {type(source)} - {source}")
-                
-        except Exception as e:
-            logger.error(f"Error processing knowledge source {source}: {str(e)}")
-            # On error, if it's a string, still add it
-            if isinstance(source, str):
-                processed_sources.append(source)
-    
-    logger.info(f"Processed {len(processed_sources)} knowledge sources")
-    return processed_sources
+# NOTE: Knowledge sources are now implemented as tools (DatabricksKnowledgeSearchTool)
+# Agents should have the DatabricksKnowledgeSearchTool in their tools list instead of knowledge_sources
+# The tool provides direct control over when and how knowledge is searched
 
 
 async def create_agent(
-    agent_key: str, 
-    agent_config: Dict, 
-    tools: List[Any] = None, 
+    agent_key: str,
+    agent_config: Dict,
+    tools: List[Any] = None,
     config: Dict = None,
     tool_service = None,
-    tool_factory = None
+    tool_factory = None,
+    agent_id: Optional[str] = None
 ) -> Agent:
     """
     Creates an Agent instance from the provided configuration.
-    
+
     Args:
         agent_key: The unique identifier for the agent
         agent_config: Dictionary containing agent configuration
@@ -151,10 +39,11 @@ async def create_agent(
         config: Global configuration dictionary containing API keys
         tool_service: Optional tool service for resolving tool IDs to names
         tool_factory: Optional tool factory for creating tools
-        
+        agent_id: Optional Kasal agent UUID for knowledge source access control
+
     Returns:
         Agent: A configured CrewAI Agent instance
-        
+
     Raises:
         ValueError: If required fields are missing
     """
@@ -168,18 +57,12 @@ async def create_agent(
         if not agent_config[field]:  # Check if field is empty
             raise ValueError(f"Field '{field}' cannot be empty in agent configuration")
     
-    # Process knowledge sources if present
+    # NOTE: Knowledge sources removed - use DatabricksKnowledgeSearchTool instead
     if 'knowledge_sources' in agent_config:
-        logger.info(f"[CREW] Agent {agent_key} has {len(agent_config.get('knowledge_sources', []))} knowledge sources")
-
-        if agent_config.get('knowledge_sources'):
-            logger.info(f"[CREW] Knowledge sources config for {agent_key}: {agent_config['knowledge_sources']}")
-
-            # Process knowledge sources to extract paths for CrewAI
-            processed_sources = process_knowledge_sources(agent_config['knowledge_sources'])
-            agent_config = agent_config.copy()  # Don't modify original dict
-            agent_config['knowledge_sources'] = processed_sources
-            logger.info(f"[CREW] Processed knowledge sources for {agent_key}: {processed_sources}")
+        logger.warning(f"[CREW] Agent {agent_key} has knowledge_sources configured, but this is deprecated. Use DatabricksKnowledgeSearchTool in the agent's tools list instead.")
+        # Remove knowledge_sources from config to avoid confusion
+        agent_config = agent_config.copy()
+        del agent_config['knowledge_sources']
     
     # Handle LLM configuration
     llm = None
@@ -237,13 +120,24 @@ async def create_agent(
                                     llm_kwargs[attr] = value
                     else:
                         # Fallback if we can't extract params
-                        llm_kwargs = {'model': model_name}
+                        # Check if it's a Databricks model and add prefix if needed
+                        if 'databricks' in model_name.lower() and not model_name.startswith('databricks/'):
+                            llm_kwargs = {'model': f'databricks/{model_name}'}
+                            logger.info(f"Added databricks/ prefix to model: databricks/{model_name}")
+                        else:
+                            llm_kwargs = {'model': model_name}
                     
                     # Apply any additional parameters from llm_config
                     for key, value in llm_config.items():
                         if value is not None:
                             llm_kwargs[key] = value
-                    
+
+                    # Ensure Databricks models have the correct prefix
+                    model_in_kwargs = llm_kwargs.get('model', '')
+                    if 'databricks' in model_in_kwargs.lower() and not model_in_kwargs.startswith('databricks/'):
+                        llm_kwargs['model'] = f'databricks/{model_in_kwargs}'
+                        logger.info(f"Ensured databricks/ prefix for model: {llm_kwargs['model']}")
+
                     # Use GPT5Handler to transform parameters if needed
                     model_name = llm_kwargs.get('model', '')
                     if GPT5Handler.is_gpt5_model(model_name):
@@ -272,7 +166,13 @@ async def create_agent(
                     for key, value in llm_config.items():
                         if value is not None:
                             llm_kwargs[key] = value
-                    
+
+                    # Ensure Databricks models have the correct prefix
+                    model_in_kwargs = llm_kwargs.get('model', '')
+                    if 'databricks' in model_in_kwargs.lower() and not model_in_kwargs.startswith('databricks/'):
+                        llm_kwargs['model'] = f'databricks/{model_in_kwargs}'
+                        logger.info(f"Ensured databricks/ prefix for default model: {llm_kwargs['model']}")
+
                     # Use GPT5Handler to transform parameters if needed
                     model_name = llm_kwargs.get('model', '')
                     if GPT5Handler.is_gpt5_model(model_name):
@@ -306,8 +206,9 @@ async def create_agent(
         from src.services.mcp_service import MCPService
         from src.engines.crewai.tools.mcp_integration import MCPIntegration
         
-        async with UnitOfWork() as uow:
-            mcp_service = await MCPService.from_unit_of_work(uow)
+        from src.db.session import async_session_factory
+        async with async_session_factory() as session:
+            mcp_service = MCPService(session)
             mcp_tools = await MCPIntegration.create_mcp_tools_for_agent(
                 agent_config, agent_key, mcp_service
             )
@@ -415,7 +316,7 @@ async def create_agent(
         'tools': agent_tools or [],
         'llm': llm,
         'verbose': agent_config.get('verbose', True),
-        'allow_delegation': agent_config.get('allow_delegation', True),
+        'allow_delegation': agent_config.get('allow_delegation', False),
         'cache': agent_config.get('cache', False),
         # SECURITY: Always force allow_code_execution to False for safety
         'allow_code_execution': False,  # Hardcoded to False - ignoring agent_config
@@ -428,8 +329,8 @@ async def create_agent(
     additional_params = [
         'max_iter', 'max_rpm', 'memory', 'code_execution_mode',
         'max_context_window_size', 'max_tokens',
-        'reasoning', 'max_reasoning_attempts', 'knowledge_sources'
-        # Note: 'knowledge_sources' re-added for CrewAI compatibility
+        'reasoning', 'max_reasoning_attempts'
+        # Note: knowledge_sources removed - use DatabricksKnowledgeSearchTool instead
     ]
     
     for param in additional_params:

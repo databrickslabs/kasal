@@ -156,7 +156,7 @@ class CrewAIEngineService(BaseEngineService):
             logger.error(f"Failed to initialize CrewAI engine: {str(e)}")
             return False
     
-    async def run_execution(self, execution_id: str, execution_config: Dict[str, Any], group_context: GroupContext = None) -> str:
+    async def run_execution(self, execution_id: str, execution_config: Dict[str, Any], group_context: GroupContext = None, session = None) -> str:
         """Execute a CrewAI crew with process isolation and comprehensive monitoring.
         
         Orchestrates the complete execution lifecycle including crew preparation,
@@ -237,16 +237,22 @@ class CrewAIEngineService(BaseEngineService):
             logger.info(f"[CrewAIEngineService] Starting run_execution for ID: {execution_id} (already has RUNNING status)")
             
             try:
-                # Create services using the Unit of Work pattern
-                from src.core.unit_of_work import UnitOfWork
+                # Create services using the passed session
                 from src.services.tool_service import ToolService
                 from src.services.api_keys_service import ApiKeysService
-                
-                # Use a single UnitOfWork to manage all repositories
-                async with UnitOfWork() as uow:
-                    # Create services from the UnitOfWork
-                    tool_service = await ToolService.from_unit_of_work(uow)
-                    api_keys_service = await ApiKeysService.from_unit_of_work(uow)
+
+                # Use the passed session for services
+                if session:
+                    # Create services directly with session
+                    tool_service = ToolService(session)
+                    api_keys_service = ApiKeysService(session)
+                else:
+                    # Fallback: create a new session if none provided
+                    from src.db.session import get_db
+                    async for db_session in get_db():
+                        tool_service = ToolService(db_session)
+                        api_keys_service = ApiKeysService(db_session)
+                        break
                     
                     # Extract user token from group context for tool factory
                     user_token = group_context.access_token if group_context else None
@@ -542,16 +548,22 @@ class CrewAIEngineService(BaseEngineService):
             )
             
             try:
-                # Create services using the Unit of Work pattern
-                from src.core.unit_of_work import UnitOfWork
+                # Create services using the passed session
                 from src.services.tool_service import ToolService
                 from src.services.api_keys_service import ApiKeysService
-                
-                # Use a single UnitOfWork to manage all repositories
-                async with UnitOfWork() as uow:
-                    # Create services from the UnitOfWork
-                    tool_service = await ToolService.from_unit_of_work(uow)
-                    api_keys_service = await ApiKeysService.from_unit_of_work(uow)
+
+                # Use the passed session for services
+                if session:
+                    # Create services directly with session
+                    tool_service = ToolService(session)
+                    api_keys_service = ApiKeysService(session)
+                else:
+                    # Fallback: create a new session if none provided
+                    from src.db.session import get_db
+                    async for db_session in get_db():
+                        tool_service = ToolService(db_session)
+                        api_keys_service = ApiKeysService(db_session)
+                        break
                     
                     # Create a tool factory instance with API keys service
                     tool_factory = await ToolFactory.create(flow_config, api_keys_service)
