@@ -118,6 +118,15 @@ except ImportError:
         PythonPPTXTool = None
         logging.warning("Could not import PythonPPTXTool")
 
+try:
+    from .custom.databricks_knowledge_search_tool import DatabricksKnowledgeSearchTool
+except ImportError:
+    try:
+        from .custom.databricks_knowledge_search_tool import DatabricksKnowledgeSearchTool
+    except ImportError:
+        DatabricksKnowledgeSearchTool = None
+        logging.warning("Could not import DatabricksKnowledgeSearchTool")
+
 
 # Setup logger
 logger = logging.getLogger(__name__)
@@ -209,7 +218,8 @@ class ToolFactory:
             "SerplyWebpageToMarkdownTool": SerplyWebpageToMarkdownTool,
             "SnowflakeSearchTool": SnowflakeSearchTool,
             "WeaviateVectorSearchTool": WeaviateVectorSearchTool,
-            "PythonPPTXTool": PythonPPTXTool
+            "PythonPPTXTool": PythonPPTXTool,
+            "DatabricksKnowledgeSearchTool": DatabricksKnowledgeSearchTool
         }
         
         # Initialize _initialized flag
@@ -315,13 +325,13 @@ class ToolFactory:
     async def _load_available_tools_async(self):
         """Load all available tools from the service asynchronously"""
         try:
-            # Get services using Unit of Work pattern
-            from src.core.unit_of_work import UnitOfWork
+            # Get services using session factory
             from src.services.tool_service import ToolService
-            
-            async with UnitOfWork() as uow:
-                # Create tool service from UnitOfWork
-                tool_service = await ToolService.from_unit_of_work(uow)
+            from src.db.session import async_session_factory
+
+            async with async_session_factory() as session:
+                # Create tool service with session
+                tool_service = ToolService(session)
                 
                 # Get tools through service
                 tools_response = await tool_service.get_all_tools()
@@ -504,13 +514,13 @@ class ToolFactory:
     
     async def _update_tool_config_async(self, tool_identifier, tool_info, config_update):
         """Async implementation of tool config update"""
-        # Get services using Unit of Work pattern
-        from src.core.unit_of_work import UnitOfWork
+        # Get services using session factory
+        from src.db.session import async_session_factory
         from src.services.tool_service import ToolService
-        
-        async with UnitOfWork() as uow:
-            # Create tool service from UnitOfWork
-            tool_service = await ToolService.from_unit_of_work(uow)
+
+        async with async_session_factory() as session:
+            # Create tool service with session
+            tool_service = ToolService(session)
             
             # If we found by ID, use ID for update, otherwise use title
             if isinstance(tool_identifier, (int, str)) and str(tool_identifier).isdigit():
@@ -934,11 +944,11 @@ class ToolFactory:
                         try:
                             # Try to get from DatabricksService configuration
                             from src.services.databricks_service import DatabricksService
-                            from src.core.unit_of_work import UnitOfWork
-                            
+                            from src.db.session import async_session_factory
+
                             async def get_databricks_config():
-                                async with UnitOfWork() as uow:
-                                    service = await DatabricksService.from_unit_of_work(uow)
+                                async with async_session_factory() as session:
+                                    service = DatabricksService(session)
                                     config = await service.get_databricks_config()
                                     if config and config.workspace_url:
                                         workspace_url = config.workspace_url.rstrip('/')
@@ -1021,11 +1031,11 @@ class ToolFactory:
                         try:
                             # Try to get from DatabricksService configuration
                             from src.services.databricks_service import DatabricksService
-                            from src.core.unit_of_work import UnitOfWork
-                            
+                            from src.db.session import async_session_factory
+
                             async def get_databricks_config():
-                                async with UnitOfWork() as uow:
-                                    service = await DatabricksService.from_unit_of_work(uow)
+                                async with async_session_factory() as session:
+                                    service = DatabricksService(session)
                                     config = await service.get_databricks_config()
                                     if config and config.workspace_url:
                                         workspace_url = config.workspace_url.rstrip('/')
@@ -1313,7 +1323,25 @@ class ToolFactory:
                 # Create the tool with any specified configuration
                 tool = PythonPPTXTool(**tool_config)
                 return tool
-            
+
+            elif tool_name == "DatabricksKnowledgeSearchTool":
+                # Create the tool with group_id and user_token
+                # NOTE: We do NOT pass execution_id as it prevents searching across all knowledge documents
+                # The tool should search ALL documents for the group, not just current execution
+                tool_args = {
+                    "group_id": self.config.get('group_id', 'default'),
+                    # DO NOT PASS execution_id - we want to search all documents!
+                    # "execution_id": self.config.get('execution_id') or self.config.get('run_id'),
+                    "user_token": self.user_token
+                }
+                # Add any tool-specific config
+                if tool_config and isinstance(tool_config, dict):
+                    tool_args.update(tool_config)
+
+                logger.info(f"Creating DatabricksKnowledgeSearchTool with group_id: {tool_args['group_id']} (no execution_id filter)")
+                tool = DatabricksKnowledgeSearchTool(**tool_args)
+                return tool
+
             # For all other tools, try to create with config parameters
             else:
                 # Check if the config has any data

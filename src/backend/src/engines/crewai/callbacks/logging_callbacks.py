@@ -364,15 +364,17 @@ class AgentTraceEventListener(BaseEventListener):
         # Set job_id and context
         self.job_id = job_id
         self.group_context = group_context
+        logger.debug(f"[TRACE_DEBUG] AgentTraceEventListener.__init__ - Getting trace queue for job {job_id}")
         self._queue = get_trace_queue()
+        logger.debug(f"[TRACE_DEBUG] AgentTraceEventListener.__init__ - Got queue: {type(self._queue)}, size: {self._queue.qsize()}")
         self._init_time = datetime.now(timezone.utc)
-        
+
         # Initialize registries for this job
         if job_id not in AgentTraceEventListener._task_registry:
             AgentTraceEventListener._task_registry[job_id] = {}
         if job_id not in AgentTraceEventListener._task_start_times:
             AgentTraceEventListener._task_start_times[job_id] = {}
-        
+
         log_prefix = f"[AgentTraceEventListener][{self.job_id}]"
         if job_id not in AgentTraceEventListener._init_logged:
             logger.info(f"{log_prefix} Initializing trace listener at {self._init_time.isoformat()}")
@@ -497,15 +499,15 @@ class AgentTraceEventListener(BaseEventListener):
     
     def setup_listeners(self, crewai_event_bus):
         """Register comprehensive event handlers with CrewAI event bus.
-        
+
         This method sets up handlers for all available CrewAI event types,
         including core events, tool events, memory/knowledge events, and
         specialized events like reasoning and guardrails.
-        
+
         Args:
             crewai_event_bus: The CrewAI event bus instance to register
                 handlers with. Must support the `on()` decorator pattern.
-        
+
         Event Handlers Registered:
             - AgentExecutionCompletedEvent: Main agent execution handler
             - CrewKickoffStartedEvent: Crew initialization
@@ -516,13 +518,15 @@ class AgentTraceEventListener(BaseEventListener):
             - Task events: If available (started/completed/failed)
             - Reasoning events: If available (agent reasoning process)
             - Guardrail events: If available (LLM output validation)
-        
+
         Note:
             Event availability is version-dependent and checked via
             conditional imports at module level.
         """
         log_prefix = f"[AgentTraceEventListener][{self.job_id}]"
         logger.info(f"{log_prefix} Setting up refined event listeners for CrewAI")
+        logger.debug(f"[TRACE_DEBUG] setup_listeners called for job {self.job_id}")
+        logger.debug(f"[TRACE_DEBUG] Event bus type: {type(crewai_event_bus)}")
         
         @crewai_event_bus.on(AgentExecutionCompletedEvent)
         def on_agent_execution_completed(source, event):
@@ -530,6 +534,7 @@ class AgentTraceEventListener(BaseEventListener):
             Handle agent execution completion events.
             This consolidated event now encompasses tool usage, task completion, and LLM calls.
             """
+            logger.debug(f"[TRACE_DEBUG] *** HANDLER CALLED *** AgentExecutionCompletedEvent received for job {self.job_id}!")
             logger.info(f"{log_prefix} *** HANDLER CALLED *** AgentExecutionCompletedEvent received!")
             try:
                 # Extract agent information
@@ -1414,7 +1419,11 @@ class AgentTraceEventListener(BaseEventListener):
                     )
                 except Exception as e:
                     logger.error(f"{log_prefix} Error in on_task_completed: {e}", exc_info=True)
-    
+
+        # Log that all listeners have been registered
+        logger.debug(f"[TRACE_DEBUG] All event listeners registered for job {self.job_id}")
+        logger.info(f"{log_prefix} Event listener setup complete")
+
     def _handle_task_completion(self, task_name: str, task_id: str, log_prefix: str):
         """Handle task completion tracking and duration calculation.
         
@@ -1534,9 +1543,10 @@ class AgentTraceEventListener(BaseEventListener):
         try:
             timestamp = datetime.now(timezone.utc)
             time_since_init = (timestamp - self._init_time).total_seconds()
-            
+
+            logger.debug(f"[TRACE_DEBUG] _enqueue_trace called: event_type={event_type}, source={event_source}")
             logger.debug(f"{log_prefix} Enqueuing {event_type} trace | Source: {event_source} | Context: {event_context[:30] if event_context else 'None'}...")
-            
+
             # Create trace data for database/queue
             trace_data = {
                 "job_id": self.job_id,
@@ -1563,13 +1573,17 @@ class AgentTraceEventListener(BaseEventListener):
             is_subprocess = os.environ.get('CREW_SUBPROCESS_MODE') == 'true'
             
             if is_subprocess:
+                logger.debug(f"[TRACE_DEBUG] Subprocess mode detected, writing directly to database")
                 logger.debug(f"{log_prefix} Writing trace directly to database (subprocess mode)")
                 # In subprocess mode, we need to write directly since the queue isn't shared
                 self._write_trace_to_db_async(trace_data)
             else:
+                logger.debug(f"[TRACE_DEBUG] Main process mode, putting trace on queue")
+                logger.debug(f"[TRACE_DEBUG] Queue before put: size={self._queue.qsize()}")
                 logger.debug(f"{log_prefix} Putting trace on queue (main process mode)")
                 self._queue.put(trace_data)
-                
+                logger.debug(f"[TRACE_DEBUG] Queue after put: size={self._queue.qsize()}")
+
                 # Also enqueue to job output queue for real-time streaming
                 enqueue_log(self.job_id, {"content": output_content, "timestamp": timestamp.isoformat()})
                 
@@ -1633,18 +1647,26 @@ class AgentTraceEventListener(BaseEventListener):
                         extra_data = {}
                     
                     # Use the ExecutionTraceService which writes to PostgreSQL
-                    await ExecutionTraceService.create_trace({
-                        "job_id": trace_data.get("job_id"),
-                        "event_source": trace_data.get("event_source"),
-                        "event_context": trace_data.get("event_context"),
-                        "event_type": trace_data.get("event_type"),
-                        "output": cleaned_output,  # Use cleaned output
-                        "trace_metadata": extra_data,
-                        "group_id": trace_data.get("group_id"),
-                        "group_email": trace_data.get("group_email")
-                    })
+                    from src.db.database_router import get_smart_db_session
+
+                    async for session in get_smart_db_session():
+                        trace_service = ExecutionTraceService(session)
+                        await trace_service.create_trace({
+                            "job_id": trace_data.get("job_id"),
+                            "event_source": trace_data.get("event_source"),
+                            "event_context": trace_data.get("event_context"),
+                            "event_type": trace_data.get("event_type"),
+                            "output": cleaned_output,  # Use cleaned output
+                            "trace_metadata": extra_data,
+                            "group_id": trace_data.get("group_id"),
+                            "group_email": trace_data.get("group_email")
+                        })
                     logger.info(f"{log_prefix} ✅ Trace written to PostgreSQL successfully")
                     return True
+                except ValueError as e:
+                    # This is expected when job doesn't exist - not an error
+                    logger.debug(f"{log_prefix} Trace skipped (job doesn't exist): {e}")
+                    return False
                 except Exception as e:
                     logger.error(f"{log_prefix} Failed to write trace to PostgreSQL: {e}", exc_info=True)
                     return False

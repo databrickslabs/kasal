@@ -64,7 +64,6 @@ class CrewAIDatabricksWrapper:
             try:
                 # Import memory backend service for the relationship retriever
                 from src.services.memory_backend_service import MemoryBackendService
-                from src.core.unit_of_work import UnitOfWork
                 # Store UnitOfWork class for creating service instances
                 self.unit_of_work_class = UnitOfWork
                 self.memory_backend_service_class = MemoryBackendService
@@ -123,10 +122,10 @@ class CrewAIDatabricksWrapper:
             
             # Log search details for entity memory
             if self.memory_type == "entity":
-                entity_logger.info(f"[_service_search] Performing embedding search on index: {self.index_name}")
-                entity_logger.info(f"[_service_search] Endpoint: {self.endpoint_name}")
-                entity_logger.info(f"[_service_search] Filters provided: {filters}")
-                entity_logger.info(f"[_service_search] Storage crew_id: {self.storage.crew_id if self.storage else 'No storage'}")
+                entity_logger.debug(f"[_service_search] Performing embedding search on index: {self.index_name}")
+                entity_logger.debug(f"[_service_search] Endpoint: {self.endpoint_name}")
+                entity_logger.debug(f"[_service_search] Filters provided: {filters}")
+                entity_logger.debug(f"[_service_search] Storage crew_id: {self.storage.crew_id if self.storage else 'No storage'}")
                 
                 # Add crew_id filter if not already present and storage has crew_id
                 if self.storage and self.storage.crew_id:
@@ -134,13 +133,14 @@ class CrewAIDatabricksWrapper:
                         filters = {}
                     if 'crew_id' not in filters:
                         filters['crew_id'] = self.storage.crew_id
-                        entity_logger.info(f"[_service_search] Added crew_id filter: {self.storage.crew_id}")
-                
-                entity_logger.info(f"[_service_search] Final filters: {filters}")
+                        entity_logger.debug(f"[_service_search] Added crew_id filter: {self.storage.crew_id}")
+
+                entity_logger.debug(f"[_service_search] Final filters: {filters}")
             
             async def _async_search():
-                async with UnitOfWork() as uow:
-                    service = MemoryBackendService(uow)
+                from src.db.session import async_session_factory
+                async with async_session_factory() as session:
+                    service = MemoryBackendService(session)
                     return await service.search_vectors(
                         workspace_url=self.workspace_url,
                         index_name=self.index_name,
@@ -367,9 +367,9 @@ class CrewAIDatabricksWrapper:
         
         # Special logging for entity memory to debug
         if self.memory_type == "entity":
-            entity_logger.info(f"[CrewAIDatabricksWrapper.save] Entity memory save called!")
+            entity_logger.debug(f"[CrewAIDatabricksWrapper.save] Entity memory save called!")
             for i, arg in enumerate(args):
-                entity_logger.info(f"[CrewAIDatabricksWrapper.save] Arg {i}: type={type(arg)}, value={str(arg)[:200] if hasattr(arg, '__str__') else 'no str'}")
+                entity_logger.debug(f"[CrewAIDatabricksWrapper.save] Arg {i}: type={type(arg)}, length={len(str(arg)) if hasattr(arg, '__str__') else 0}")
         
         # Handle different call signatures based on memory type
         value = None
@@ -422,7 +422,7 @@ class CrewAIDatabricksWrapper:
             entity_full_text = args[0] if isinstance(args[0], str) else str(args[0])
             metadata = args[1] if len(args) > 1 and isinstance(args[1], dict) else {}
             
-            entity_logger.info(f"[save] Entity memory - raw args: {args}")
+            entity_logger.debug(f"[save] Entity memory - raw args count: {len(args)}")
             entity_logger.info(f"[save] Entity memory - kwargs: {kwargs}")
             entity_logger.info(f"[save] Entity memory - entity_full_text: '{entity_full_text}'")
             entity_logger.info(f"[save] Entity memory - metadata: {metadata}")
@@ -554,14 +554,14 @@ class CrewAIDatabricksWrapper:
             
             # Log agent information for debugging
             if self.memory_type == "entity":
-                entity_logger.info(f"[save] Agent parameter received: {kwargs.get('agent')}")
-                entity_logger.info(f"[save] Agent context fallback: {self.agent_context}")
-                entity_logger.info(f"[save] Final agent used: {agent}")
-                entity_logger.info(f"[save] Agent type: {type(agent)}")
+                entity_logger.debug(f"[save] Agent parameter received: {type(kwargs.get('agent'))}")
+                entity_logger.debug(f"[save] Agent context fallback: role={getattr(self.agent_context, 'role', 'unknown')}")
+                entity_logger.debug(f"[save] Final agent used: role={getattr(agent, 'role', 'unknown')}, id={getattr(agent, 'id', 'unknown')}")
+                entity_logger.debug(f"[save] Agent type: {type(agent).__name__}")
                 if hasattr(agent, 'role'):
-                    entity_logger.info(f"[save] Agent role: {agent.role}")
+                    entity_logger.debug(f"[save] Agent role: {agent.role}")
                 if hasattr(agent, 'id'):
-                    entity_logger.info(f"[save] Agent id: {agent.id}")
+                    entity_logger.debug(f"[save] Agent id: {agent.id}")
             
             # Handle different input formats
             if isinstance(value, str):
@@ -643,13 +643,13 @@ class CrewAIDatabricksWrapper:
                         
                         # Enhanced debug logging for entity memory
                         if self.memory_type == "entity":
-                            entity_logger.info(f"[save] Agent parameter during agent_id mapping: {agent}")
-                            entity_logger.info(f"[save] Agent type during mapping: {type(agent)}")
-                            entity_logger.info(f"[save] metadata.agent during mapping: {metadata.get('agent')}")
+                            entity_logger.debug(f"[save] Agent parameter during agent_id mapping: {type(agent).__name__}")
+                            entity_logger.debug(f"[save] Agent type during mapping: {type(agent).__name__}")
+                            entity_logger.debug(f"[save] metadata.agent during mapping: {type(metadata.get('agent'))}")
                             if hasattr(agent, 'role'):
-                                entity_logger.info(f"[save] Agent.role available: {agent.role}")
+                                entity_logger.debug(f"[save] Agent.role available: {agent.role}")
                             if hasattr(agent, 'id'):
-                                entity_logger.info(f"[save] Agent.id available: {agent.id}")
+                                entity_logger.debug(f"[save] Agent.id available: {agent.id}")
                         
                         if agent and hasattr(agent, 'role'):
                             # Use agent role as agent_id (most preferred - human readable)
@@ -1241,7 +1241,7 @@ class CrewAIDatabricksWrapper:
         Returns:
             List of entity names
         """
-        entity_logger.info(f"[CrewAIDatabricksWrapper.get_entities] Called for {self.memory_type} memory")
+        entity_logger.debug(f"[CrewAIDatabricksWrapper.get_entities] Called for {self.memory_type} memory")
         
         # Search for all entities
         results = self.search(query="", top_k=limit)

@@ -298,8 +298,18 @@ class DatabricksVectorStorage:
                     record["updated_at"] = datetime.utcnow().isoformat()
                 if "doc_metadata" in schema:
                     record["doc_metadata"] = json.dumps(data.get("metadata", {}))
+                if "agent_ids" in schema:
+                    # Handle agent_ids for document access control
+                    agent_ids = data.get("agent_ids")
+                    if agent_ids:
+                        # agent_ids is already a JSON string from the knowledge service
+                        record["agent_ids"] = agent_ids
+                    else:
+                        # Default to empty array if no agents specified
+                        record["agent_ids"] = "[]"
                 if "group_id" in schema:
-                    record["group_id"] = self.crew_id
+                    # Use group_id from data if provided, otherwise fall back to crew_id
+                    record["group_id"] = data.get("group_id", self.crew_id)
                 if "embedding" in schema:
                     record["embedding"] = embedding
                 if "embedding_model" in schema:

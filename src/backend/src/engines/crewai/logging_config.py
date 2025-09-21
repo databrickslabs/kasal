@@ -478,18 +478,31 @@ def configure_subprocess_logging(execution_id: str):
             datefmt='%Y-%m-%d %H:%M:%S'
         ))
         crew_logger.addHandler(file_handler)
-    
+
+    # Check if debug logging is enabled via environment variable
+    import os
+    debug_enabled = os.environ.get('KASAL_DEBUG_TRACES', '').lower() in ['true', '1', 'yes']
+    log_level = logging.DEBUG if debug_enabled else logging.INFO
+
+    # Set the crew logger level as well
+    crew_logger.setLevel(log_level)
+
+    if debug_enabled:
+        crew_logger.info("[TRACE_DEBUG] Debug logging enabled via KASAL_DEBUG_TRACES environment variable")
+
     # Apply file handler to all relevant loggers
     for logger_name in [
         'src.engines.crewai.callbacks.logging_callbacks',
         'src.engines.crewai.callbacks.execution_callback',
         'src.engines.crewai.trace_management',
+        'src.services.trace_queue',  # Add trace queue logger
+        'src.engines.crewai.execution_runner',  # Add execution runner logger
         '__main__'  # For any direct logging in subprocess
     ]:
         module_logger = logging.getLogger(logger_name)
         module_logger.handlers = []  # Clear existing handlers
         module_logger.addHandler(file_handler)
-        module_logger.setLevel(logging.INFO)
+        module_logger.setLevel(log_level)
         module_logger.propagate = False
     
     return crew_logger

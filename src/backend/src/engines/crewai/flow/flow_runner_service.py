@@ -793,8 +793,8 @@ class FlowRunnerService:
                                         process_str = str(crew_data.process).lower()
                                         if process_str == 'hierarchical':
                                             process_type = Process.hierarchical
-                                        elif process_str == 'parallel':
-                                            process_type = Process.parallel
+                                        # Note: CrewAI does not have Process.parallel
+                                        # Use hierarchical for delegation or async_execution for task-level parallelism
                                     
                                     crew = Crew(
                                         agents=agents,
