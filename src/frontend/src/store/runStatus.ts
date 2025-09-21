@@ -45,6 +45,7 @@ interface RunStatusState {
   stopPolling: () => void;
   setUserActive: (active: boolean) => void;
   cleanup: () => void;
+  clearRunHistory: () => void;
 }
 
 export const useRunStatusStore = create<RunStatusState>((set, get) => {
@@ -52,8 +53,23 @@ export const useRunStatusStore = create<RunStatusState>((set, get) => {
   const setupEventListeners = () => {
     // Create a function that will be called when a new job is created
     const jobCreatedHandler = (event: CustomEvent) => {
-      const { jobId, jobName, status } = event.detail || {};
+      const { jobId, jobName, status, groupId } = event.detail || {};
       if (jobId) {
+        // SECURITY FIX: Only add the run if it belongs to the current user's selected workspace
+        const selectedGroupId = localStorage.getItem('selectedGroupId');
+
+        // If the event includes a groupId, check if it matches the selected workspace
+        if (groupId && groupId !== selectedGroupId) {
+          console.log(`[RunStatusStore] Ignoring jobCreated for different group: ${groupId} (selected: ${selectedGroupId})`);
+          return;
+        }
+
+        // If no groupId in event, skip for safety (can't verify ownership)
+        if (!groupId) {
+          console.log(`[RunStatusStore] Ignoring jobCreated without groupId for security`);
+          return;
+        }
+
         // Create a placeholder run for immediate display
         const newRun: ExtendedRun = {
           id: jobId,
@@ -65,8 +81,8 @@ export const useRunStatusStore = create<RunStatusState>((set, get) => {
           agents_yaml: '',
           tasks_yaml: ''
         };
-        
-        console.log(`[RunStatusStore] Job created: ${jobId}, adding to store with status ${newRun.status}`);
+
+        console.log(`[RunStatusStore] Job created: ${jobId} for group ${groupId}, adding to store with status ${newRun.status}`);
         // Add the placeholder run and start tracking it
         const store = get();
         store.addRun(newRun);
@@ -225,9 +241,30 @@ export const useRunStatusStore = create<RunStatusState>((set, get) => {
         
         // Get current processedCompletions set
         const currentProcessedCompletions = new Set(state.processedCompletions);
-        
+
+        // SECURITY: Filter runs by group_id before processing
+        const selectedGroupId = localStorage.getItem('selectedGroupId');
+        const securityFilteredRuns = response.runs.filter(run => {
+          // Only include runs that belong to the selected group
+          if (!selectedGroupId) {
+            console.warn('[RunStatusStore] No selected group, filtering out all runs for security');
+            return false;
+          }
+          if (!run.group_id) {
+            console.log(`[RunStatusStore] Filtering out run ${run.run_name} - no group_id (orphan/legacy)`);
+            return false;
+          }
+          if (run.group_id !== selectedGroupId) {
+            console.log(`[RunStatusStore] Filtering out run ${run.run_name} from group ${run.group_id} (selected: ${selectedGroupId})`);
+            return false;
+          }
+          return true;
+        });
+
+        console.log(`[RunStatusStore] Security filter: ${response.runs.length} total → ${securityFilteredRuns.length} after group filter`);
+
         // Process the response data to ensure we have proper status information
-        const processedRuns = response.runs.map(run => {
+        const processedRuns = securityFilteredRuns.map(run => {
           // Check if this run's status has changed from running to completed/failed
           const currentActiveRun = state.activeRuns[run.job_id];
           
@@ -461,6 +498,21 @@ export const useRunStatusStore = create<RunStatusState>((set, get) => {
       const { stopPolling } = get();
       stopPolling();
       cleanupListeners();
+    },
+
+    clearRunHistory: () => {
+      console.log('[RunStatusStore] Clearing run history for group switch');
+      set({
+        runHistory: [],
+        activeRuns: {},
+        currentRun: null,
+        processedCompletions: new Set(),
+        error: null,
+        isLoading: false,
+        lastFetchTime: Date.now(),
+        lastFetchAttempt: Date.now(),
+        consecutiveEmptyFetches: 0
+      });
     }
   };
 }); 

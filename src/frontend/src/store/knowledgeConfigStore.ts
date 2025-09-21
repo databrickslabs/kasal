@@ -10,6 +10,8 @@ interface KnowledgeConfigState {
   isKnowledgeSourceEnabled: boolean;
   isLoading: boolean;
   lastChecked: number;
+  hasCheckedOnce: boolean; // Track if we've done an initial check
+  lastNotFoundTime: number; // Track when we last got a 404
 
   // Actions
   refreshConfiguration: () => Promise<void>;
@@ -24,6 +26,8 @@ export const useKnowledgeConfigStore = create<KnowledgeConfigState>()(
     isKnowledgeSourceEnabled: false,
     isLoading: false,
     lastChecked: 0,
+    hasCheckedOnce: false,
+    lastNotFoundTime: 0,
 
     setMemoryBackendConfigured: (configured: boolean) => {
       set({ isMemoryBackendConfigured: configured });
@@ -36,6 +40,16 @@ export const useKnowledgeConfigStore = create<KnowledgeConfigState>()(
     checkConfiguration: async () => {
       const now = Date.now();
       const state = get();
+
+      // If we've already checked and got 404s (services not configured),
+      // only re-check after 5 minutes or if explicitly refreshed
+      const CACHE_DURATION = 5 * 60 * 1000; // 5 minutes
+      if (state.hasCheckedOnce &&
+          state.lastNotFoundTime > 0 &&
+          (now - state.lastNotFoundTime) < CACHE_DURATION) {
+        // Skip check - we already know services aren't configured
+        return;
+      }
 
       // Avoid too frequent checks (minimum 1 second between checks)
       if (now - state.lastChecked < 1000 && !state.isLoading) {
@@ -60,29 +74,48 @@ export const useKnowledgeConfigStore = create<KnowledgeConfigState>()(
           databricksConfig?.knowledge_volume_path
         );
 
-        set({
-          isMemoryBackendConfigured: memoryConfigured,
-          isKnowledgeSourceEnabled: knowledgeSourceEnabled,
-          isLoading: false,
-        });
+        // If both services returned null (likely 404s), record this
+        if (!memoryConfig && !databricksConfig) {
+          set({
+            isMemoryBackendConfigured: false,
+            isKnowledgeSourceEnabled: false,
+            isLoading: false,
+            hasCheckedOnce: true,
+            lastNotFoundTime: now,
+          });
+        } else {
+          // At least one service is configured
+          set({
+            isMemoryBackendConfigured: memoryConfigured,
+            isKnowledgeSourceEnabled: knowledgeSourceEnabled,
+            isLoading: false,
+            hasCheckedOnce: true,
+            lastNotFoundTime: 0, // Clear the not found time
+          });
+        }
 
-        console.log('[KnowledgeConfig] Configuration refreshed:', {
-          memoryConfigured,
-          knowledgeSourceEnabled,
-        });
+        // Only log if we found some configuration
+        if (memoryConfigured || knowledgeSourceEnabled) {
+          console.log('[KnowledgeConfig] Configuration refreshed:', {
+            memoryConfigured,
+            knowledgeSourceEnabled,
+          });
+        }
       } catch (error) {
         console.error('[KnowledgeConfig] Error checking configuration:', error);
         set({
           isMemoryBackendConfigured: false,
           isKnowledgeSourceEnabled: false,
           isLoading: false,
+          hasCheckedOnce: true,
+          lastNotFoundTime: now,
         });
       }
     },
 
     refreshConfiguration: async () => {
-      // Force refresh by resetting lastChecked
-      set({ lastChecked: 0 });
+      // Force refresh by resetting lastChecked and cache
+      set({ lastChecked: 0, lastNotFoundTime: 0 });
       await get().checkConfiguration();
     },
   }))
