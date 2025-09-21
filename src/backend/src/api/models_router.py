@@ -4,7 +4,7 @@ from fastapi import APIRouter, Depends, HTTPException, status
 import logging
 
 from src.core.dependencies import SessionDep, GroupContextDep
-from src.core.unit_of_work import UnitOfWork
+from src.core.permissions import check_role_in_context
 from src.models.model_config import ModelConfig
 from src.schemas.model_config import (
     ModelConfigCreate,
@@ -24,15 +24,29 @@ router = APIRouter(
 # Set up logging
 logger = logging.getLogger(__name__)
 
-# Dependency to get ModelConfigService
-async def get_model_config_service() -> ModelConfigService:
-    async with UnitOfWork() as uow:
-        return await ModelConfigService.from_unit_of_work(uow)
+async def get_model_config_service(session: SessionDep) -> ModelConfigService:
+    """
+    Dependency provider for ModelConfigService.
+
+    Creates service with session following the pattern:
+    Router → Service → Repository → DB
+
+    Args:
+        session: Database session from FastAPI DI
+
+    Returns:
+        ModelConfigService instance with session
+    """
+    return ModelConfigService(session)
+
+
+# Type alias for cleaner function signatures
+ModelConfigServiceDep = Annotated[ModelConfigService, Depends(get_model_config_service)]
 
 
 @router.get("", response_model=ModelListResponse)
 async def get_models(
-    service: Annotated[ModelConfigService, Depends(get_model_config_service)],
+    service: ModelConfigServiceDep,
     group_context: GroupContextDep,
 ):
     """
@@ -62,7 +76,7 @@ async def get_models(
 
 @router.get("/enabled", response_model=ModelListResponse)
 async def get_enabled_models(
-    service: Annotated[ModelConfigService, Depends(get_model_config_service)],
+    service: ModelConfigServiceDep,
     group_context: GroupContextDep,
 ):
     """
@@ -89,7 +103,7 @@ async def get_enabled_models(
 @router.get("/{model_key}", response_model=ModelConfigResponse)
 async def get_model(
     model_key: str,
-    service: Annotated[ModelConfigService, Depends(get_model_config_service)],
+    service: ModelConfigServiceDep,
     group_context: GroupContextDep,
 ):
     """
@@ -127,22 +141,30 @@ async def get_model(
 @router.post("", response_model=ModelConfigResponse, status_code=status.HTTP_201_CREATED)
 async def create_model(
     model: ModelConfigCreate,
-    service: Annotated[ModelConfigService, Depends(get_model_config_service)],
+    service: ModelConfigServiceDep,
     group_context: GroupContextDep,
 ):
     """
     Create a new model configuration.
-    
+    Only Admins can create model configurations.
+
     Args:
         model: Model configuration data
         service: ModelConfig service injected by dependency
-        
+
     Returns:
         Created model configuration
-        
+
     Raises:
         HTTPException: If model with the same key already exists
     """
+    # Check permissions - only admins can create model configurations
+    if not check_role_in_context(group_context, ["admin"]):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Only admins can create model configurations"
+        )
+
     try:
         logger.info(f"API call: POST /models - Creating model {model.key}")
         
@@ -166,23 +188,31 @@ async def create_model(
 async def update_model(
     model_key: str,
     model: ModelConfigUpdate,
-    service: Annotated[ModelConfigService, Depends(get_model_config_service)],
+    service: ModelConfigServiceDep,
     group_context: GroupContextDep,
 ):
     """
     Update an existing model configuration.
-    
+    Only Admins can update model configurations.
+
     Args:
         model_key: Key of the model configuration to update
         model: Updated model configuration data
         service: ModelConfig service injected by dependency
-        
+
     Returns:
         Updated model configuration
-        
+
     Raises:
         HTTPException: If model not found
     """
+    # Check permissions - only admins can update model configurations
+    if not check_role_in_context(group_context, ["admin"]):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Only admins can update model configurations"
+        )
+
     try:
         logger.info(f"API call: PUT /models/{model_key}")
         
@@ -207,7 +237,7 @@ async def update_model(
 async def toggle_model(
     model_key: str,
     toggle_data: ModelToggleUpdate,
-    service: Annotated[ModelConfigService, Depends(get_model_config_service)],
+    service: ModelConfigServiceDep,
     group_context: GroupContextDep,
 ):
     """
@@ -247,19 +277,27 @@ async def toggle_model(
 @router.delete("/{model_key}", status_code=status.HTTP_204_NO_CONTENT)
 async def delete_model(
     model_key: str,
-    service: Annotated[ModelConfigService, Depends(get_model_config_service)],
+    service: ModelConfigServiceDep,
     group_context: GroupContextDep,
 ):
     """
     Delete a model configuration.
-    
+    Only Admins can delete model configurations.
+
     Args:
         model_key: Key of the model configuration to delete
         service: ModelConfig service injected by dependency
-        
+
     Raises:
         HTTPException: If model not found
     """
+    # Check permissions - only admins can delete model configurations
+    if not check_role_in_context(group_context, ["admin"]):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Only admins can delete model configurations"
+        )
+
     try:
         logger.info(f"API call: DELETE /models/{model_key}")
         
@@ -281,18 +319,26 @@ async def delete_model(
 
 @router.post("/enable-all", response_model=ModelListResponse)
 async def enable_all_models(
-    service: Annotated[ModelConfigService, Depends(get_model_config_service)],
+    service: ModelConfigServiceDep,
     group_context: GroupContextDep,
 ):
     """
     Enable all model configurations.
-    
+    Only Admins can enable all model configurations.
+
     Args:
         service: ModelConfig service injected by dependency
-        
+
     Returns:
         List of all model configurations after enabling
     """
+    # Check permissions - only admins can enable all models
+    if not check_role_in_context(group_context, ["admin"]):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Only admins can enable all model configurations"
+        )
+
     try:
         logger.info("API call: POST /models/enable-all")
         
@@ -307,18 +353,26 @@ async def enable_all_models(
 
 @router.post("/disable-all", response_model=ModelListResponse)
 async def disable_all_models(
-    service: Annotated[ModelConfigService, Depends(get_model_config_service)],
+    service: ModelConfigServiceDep,
     group_context: GroupContextDep,
 ):
     """
     Disable all model configurations.
-    
+    Only Admins can disable all model configurations.
+
     Args:
         service: ModelConfig service injected by dependency
-        
+
     Returns:
         List of all model configurations after disabling
     """
+    # Check permissions - only admins can disable all models
+    if not check_role_in_context(group_context, ["admin"]):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Only admins can disable all model configurations"
+        )
+
     try:
         logger.info("API call: POST /models/disable-all")
         

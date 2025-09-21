@@ -2,15 +2,14 @@
 Database Management API Router.
 """
 from fastapi import APIRouter, HTTPException, Response, Request, Depends, Header
-from typing import Dict, Any, Optional
+from typing import Dict, Any, Optional, Annotated
 import os
 
 from src.services.database_management_service import DatabaseManagementService
-from src.services.databricks_role_service import DatabricksRoleService
+from src.services.lakebase_service import LakebaseService
 from src.core.logger import LoggerManager
-from src.core.dependencies import SessionDep, get_group_context, GroupContextDep
-from src.core.unit_of_work import UnitOfWork
-from src.utils.user_context import GroupContext
+from src.core.dependencies import SessionDep, LegacySessionDep, GroupContextDep
+from src.core.permissions import check_role_in_context
 from src.schemas.database_management import (
     ExportRequest,
     ExportResponse,
@@ -18,41 +17,62 @@ from src.schemas.database_management import (
     ImportResponse,
     ListBackupsRequest,
     ListBackupsResponse,
-    DatabaseInfoResponse,
-    DeleteBackupRequest,
-    DeleteBackupResponse
+    DatabaseInfoResponse
 )
 
 router = APIRouter(prefix="/database-management", tags=["database-management"])
 logger = LoggerManager.get_instance().api
 
 
+def get_database_management_service(
+    session: SessionDep,
+    raw_request: Request
+) -> DatabaseManagementService:
+    """
+    Dependency factory for DatabaseManagementService.
+    Extracts user token from request and creates service with session.
+    """
+    from src.utils.databricks_auth import extract_user_token_from_request
+    user_token = extract_user_token_from_request(raw_request)
+    # Service will create its own repository internally
+    return DatabaseManagementService(session=session, user_token=user_token)
+
+
+# Type alias for the service dependency
+DatabaseManagementServiceDep = Annotated[DatabaseManagementService, Depends(get_database_management_service)]
+
+
 @router.post("/export", response_model=ExportResponse)
 async def export_database(
     request: ExportRequest,
-    raw_request: Request,
+    service: DatabaseManagementServiceDep,
     group_context: GroupContextDep
 ) -> ExportResponse:
     """
     Export database to a Databricks volume.
-    
+    Only Admins can export databases.
+
     Args:
         request: Export request with catalog, schema, and volume name
-        raw_request: FastAPI request object for extracting auth headers
-        
+        service: Database management service (injected)
+        group_context: Group context for permissions
+
     Returns:
         Export result with Databricks URL for the backup
     """
+    # Check permissions - only admins can export databases
+    if not check_role_in_context(group_context, ["admin"]):
+        raise HTTPException(
+            status_code=403,
+            detail="Only admins can export databases"
+        )
+
     try:
-        # Extract user token from request headers for OBO authentication
-        from src.utils.databricks_auth import extract_user_token_from_request
-        user_token = extract_user_token_from_request(raw_request)
-        
         # Log authentication context
         logger.info(f"Database export request - catalog: {request.catalog}, schema: {request.schema_name}, volume: {request.volume_name}")
-        logger.info(f"User token available: {bool(user_token)}, SPN configured: {bool(os.getenv('DATABRICKS_CLIENT_ID'))}")
-        
-        service = DatabaseManagementService(user_token=user_token)
+        logger.info(f"User token available: {bool(service.user_token)}, SPN configured: {bool(os.getenv('DATABRICKS_CLIENT_ID'))}")
+
+        # Use the injected service
         result = await service.export_to_volume(
             catalog=request.catalog,
             schema=request.schema_name,
@@ -75,25 +95,30 @@ async def export_database(
 @router.post("/import", response_model=ImportResponse)
 async def import_database(
     request: ImportRequest,
-    raw_request: Request,
+    service: DatabaseManagementServiceDep,
     group_context: GroupContextDep
 ) -> ImportResponse:
     """
     Import database from a Databricks volume.
-    
+    Only Admins can import databases.
+
     Args:
         request: Import request with catalog, schema, volume name, and backup filename
-        raw_request: FastAPI request object for extracting auth headers
-        
+        service: Database management service (injected)
+        group_context: Group context for permissions
+
     Returns:
         Import result with database statistics
     """
+    # Check permissions - only admins can import databases
+    if not check_role_in_context(group_context, ["admin"]):
+        raise HTTPException(
+            status_code=403,
+            detail="Only admins can import databases"
+        )
+
     try:
-        # Extract user token from request headers for OBO authentication
-        from src.utils.databricks_auth import extract_user_token_from_request
-        user_token = extract_user_token_from_request(raw_request)
-        
-        service = DatabaseManagementService(user_token=user_token)
+        # Use the injected service
         result = await service.import_from_volume(
             catalog=request.catalog,
             schema=request.schema_name,
@@ -116,7 +141,7 @@ async def import_database(
 @router.post("/list-backups", response_model=ListBackupsResponse)
 async def list_backups(
     request: ListBackupsRequest,
-    raw_request: Request,
+    service: DatabaseManagementServiceDep,
     group_context: GroupContextDep
 ) -> ListBackupsResponse:
     """
@@ -124,17 +149,14 @@ async def list_backups(
     
     Args:
         request: Request with catalog, schema, and volume name
-        raw_request: FastAPI request object for extracting auth headers
-        
+        service: Database management service (injected)
+        group_context: Group context for permissions
+
     Returns:
         List of available backups with their Databricks URLs
     """
     try:
-        # Extract user token from request headers for OBO authentication
-        from src.utils.databricks_auth import extract_user_token_from_request
-        user_token = extract_user_token_from_request(raw_request)
-        
-        service = DatabaseManagementService(user_token=user_token)
+        # Use the injected service
         result = await service.list_backups(
             catalog=request.catalog,
             schema=request.schema_name,
@@ -155,6 +177,7 @@ async def list_backups(
 
 @router.get("/info", response_model=DatabaseInfoResponse)
 async def get_database_info(
+    service: DatabaseManagementServiceDep,
     group_context: GroupContextDep
 ) -> DatabaseInfoResponse:
     """
@@ -164,7 +187,7 @@ async def get_database_info(
         Database statistics and information
     """
     try:
-        service = DatabaseManagementService()
+        # Use the injected service
         result = await service.get_database_info()
         
         if not result["success"]:
@@ -200,9 +223,7 @@ async def debug_permissions(
                 "databricks_host": databricks_host
             }
         
-        # Create role service and fetch permissions
-        from src.services.databricks_role_service import DatabricksRoleService
-        role_service = DatabricksRoleService(uow.session)
+        # Note: Complex role service removed - using simplified permissions
         
         # Try to fetch permissions and capture the raw response
         # Ensure the host has https:// protocol
@@ -340,6 +361,7 @@ async def debug_headers(
 
 @router.get("/check-permission")
 async def check_database_management_permission(
+    service: DatabaseManagementServiceDep,
     session: SessionDep,
     group_context: GroupContextDep
 ) -> Dict[str, Any]:
@@ -362,8 +384,8 @@ async def check_database_management_permission(
         logger.info(f"Permission check - Email: {user_email}, Has token: {bool(user_token)}")
         if not user_token:
             logger.info("No user token in group context - OBO may not be enabled for this app")
-        
-        service = DatabaseManagementService()
+
+        # Use the injected service
         result = await service.check_user_permission(
             user_email=user_email,
             session=session,
@@ -386,3 +408,273 @@ async def check_database_management_permission(
             "error": str(e),
             "reason": "Error checking permissions - defaulting to safe mode"
         }
+
+
+# Lakebase specific endpoints
+@router.get("/lakebase/config")
+async def get_lakebase_config(
+    session: LegacySessionDep,  # Always use fallback DB for config
+    group_context: GroupContextDep
+) -> Dict[str, Any]:
+    """
+    Get current Lakebase configuration.
+
+    Returns:
+        Lakebase configuration settings
+    """
+    try:
+        from src.utils.databricks_auth import extract_user_token_from_request
+        user_email = group_context.group_email if group_context else None
+
+        service = LakebaseService(session=session, user_email=user_email)
+        config = await service.get_config()
+        return config
+
+    except Exception as e:
+        logger.error(f"Error getting Lakebase config: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.post("/lakebase/config")
+async def save_lakebase_config(
+    config: Dict[str, Any],
+    session: LegacySessionDep,  # Always use fallback DB for config
+    group_context: GroupContextDep
+) -> Dict[str, Any]:
+    """
+    Save Lakebase configuration.
+
+    Args:
+        config: Configuration dictionary
+
+    Returns:
+        Saved configuration
+    """
+    try:
+        user_email = group_context.group_email if group_context else None
+        service = LakebaseService(session=session, user_email=user_email)
+        saved_config = await service.save_config(config)
+        return saved_config
+
+    except Exception as e:
+        logger.error(f"Error saving Lakebase config: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.post("/lakebase/create")
+async def create_lakebase_instance(
+    request: Dict[str, Any],
+    session: SessionDep,
+    raw_request: Request,
+    group_context: GroupContextDep
+) -> Dict[str, Any]:
+    """
+    Create a new Lakebase instance and migrate existing data.
+
+    Args:
+        request: Instance creation parameters
+
+    Returns:
+        Instance details
+    """
+    try:
+        # Extract user token for authentication
+        from src.utils.databricks_auth import extract_user_token_from_request
+        user_token = extract_user_token_from_request(raw_request)
+        user_email = group_context.group_email if group_context else None
+
+        service = LakebaseService(session=session, user_token=user_token, user_email=user_email)
+
+        # Create instance and migrate data
+        instance = await service.create_instance(
+            instance_name=request.get("instance_name", "kasal-lakebase"),
+            capacity=request.get("capacity", "CU_1"),
+            retention_days=request.get("retention_days", 14),
+            node_count=request.get("node_count", 1)
+        )
+
+        return instance
+
+    except Exception as e:
+        logger.error(f"Error creating Lakebase instance: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.get("/lakebase/instance/{instance_name}")
+async def get_lakebase_instance(
+    instance_name: str,
+    session: SessionDep,
+    raw_request: Request,
+    group_context: GroupContextDep
+) -> Dict[str, Any]:
+    """
+    Get Lakebase instance details.
+
+    Args:
+        instance_name: Name of the instance
+
+    Returns:
+        Instance details
+    """
+    try:
+        # Extract user token for authentication
+        from src.utils.databricks_auth import extract_user_token_from_request
+        user_token = extract_user_token_from_request(raw_request)
+        user_email = group_context.group_email if group_context else None
+
+        service = LakebaseService(session=session, user_token=user_token, user_email=user_email)
+        instance = await service.get_instance(instance_name)
+
+        if not instance or instance.get("state") == "NOT_FOUND":
+            raise HTTPException(status_code=404, detail=f"Instance {instance_name} not found")
+
+        return instance
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error getting Lakebase instance: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.get("/lakebase/tables")
+async def check_lakebase_tables(
+    session: SessionDep,
+    config_session: LegacySessionDep,
+    raw_request: Request,
+    group_context: GroupContextDep
+):
+    """
+    Check what tables exist in the configured Lakebase instance.
+    Returns detailed information about tables and their status.
+    """
+    try:
+        # Extract user token for authentication
+        from src.utils.databricks_auth import extract_user_token_from_request
+        user_token = extract_user_token_from_request(raw_request)
+
+        # Initialize service with user token
+        service = LakebaseService(user_token=user_token)
+
+        # Check tables
+        result = await service.check_lakebase_tables(config_session)
+
+        return result
+
+    except Exception as e:
+        logger.error(f"Error checking Lakebase tables: {e}")
+        raise HTTPException(
+            status_code=500,
+            detail=f"Error checking Lakebase tables: {str(e)}"
+        )
+
+@router.post("/lakebase/migrate")
+async def migrate_to_lakebase(
+    request: Dict[str, Any],
+    session: SessionDep,
+    raw_request: Request,
+    group_context: GroupContextDep
+) -> Dict[str, Any]:
+    """
+    Manually trigger migration to Lakebase.
+
+    Args:
+        request: Migration parameters (instance_name, endpoint)
+
+    Returns:
+        Migration result
+    """
+    try:
+        # Extract user token for authentication
+        from src.utils.databricks_auth import extract_user_token_from_request
+        user_token = extract_user_token_from_request(raw_request)
+        user_email = group_context.group_email if group_context else None
+
+        service = LakebaseService(session=session, user_token=user_token, user_email=user_email)
+
+        # Trigger migration
+        instance_name = request.get("instance_name", "kasal-lakebase")
+        endpoint = request.get("endpoint")
+
+        if not endpoint:
+            raise HTTPException(status_code=400, detail="Endpoint is required for migration")
+
+        logger.info(f"🚀 Migration to Lakebase requested by {user_email}")
+        result = await service.migrate_existing_data(instance_name, endpoint)
+
+        # Update configuration to mark migration as complete
+        config = await service.get_config()
+        config["migration_completed"] = True
+        config["migration_status"] = "completed"
+        config["migration_result"] = result
+        await service.save_config(config)
+
+        logger.info("✅ Migration configuration saved. Next API calls will use Lakebase.")
+        return result
+
+    except Exception as e:
+        logger.error(f"Error migrating to Lakebase: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.post("/lakebase/start")
+async def start_lakebase_instance(
+    request: Dict[str, Any],
+    session: SessionDep,
+    raw_request: Request,
+    group_context: GroupContextDep
+) -> Dict[str, Any]:
+    """
+    Start a stopped Lakebase instance.
+
+    Args:
+        request: Instance name in request body
+
+    Returns:
+        Instance status after start attempt
+    """
+    try:
+        from src.utils.databricks_auth import extract_user_token_from_request
+
+        user_token = extract_user_token_from_request(raw_request)
+
+        service = LakebaseService(session=session, user_token=user_token)
+        result = await service.start_instance(request.get("instance_name"))
+
+        return result
+
+    except Exception as e:
+        logger.error(f"Error starting Lakebase instance: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.post("/lakebase/test-connection")
+async def test_lakebase_connection(
+    request: Dict[str, Any],
+    session: SessionDep,
+    raw_request: Request,
+    group_context: GroupContextDep
+) -> Dict[str, Any]:
+    """
+    Test connection to Lakebase instance.
+
+    Args:
+        request: Instance name in request body
+
+    Returns:
+        Connection test result
+    """
+    try:
+        # Extract user token for authentication
+        from src.utils.databricks_auth import extract_user_token_from_request
+        user_token = extract_user_token_from_request(raw_request)
+        user_email = group_context.group_email if group_context else None
+
+        service = LakebaseService(session=session, user_token=user_token, user_email=user_email)
+        result = await service.test_connection(request.get("instance_name"))
+
+        return result
+
+    except Exception as e:
+        logger.error(f"Error testing Lakebase connection: {e}")
+        raise HTTPException(status_code=500, detail=str(e))

@@ -10,14 +10,13 @@ import asyncio
 from typing import Annotated
 from fastapi import APIRouter, HTTPException, Depends, BackgroundTasks
 import uuid
-from sqlalchemy.ext.asyncio import AsyncSession
 from datetime import datetime, UTC
 from sqlalchemy import select
 from sqlalchemy import desc
 
 from src.core.logger import LoggerManager
-from src.core.dependencies import GroupContextDep
-from src.db.session import get_db
+from src.core.dependencies import GroupContextDep, SessionDep
+from src.core.permissions import check_role_in_context
 from src.models.execution_history import ExecutionHistory
 from src.schemas.execution import (
     CrewConfig, 
@@ -42,21 +41,35 @@ router = APIRouter(
     tags=["executions"],
 )
 
+# Dependency to get ExecutionService with explicit SessionDep
+def get_execution_service(session: SessionDep) -> ExecutionService:
+    """
+    Factory function for ExecutionService with explicit session dependency.
+
+    Args:
+        session: Database session from FastAPI DI
+
+    Returns:
+        ExecutionService instance with injected session
+    """
+    return ExecutionService(session=session)
+
 @router.post("", response_model=ExecutionCreateResponse)
 async def create_execution(
     config: CrewConfig,
     background_tasks: BackgroundTasks,
-    group_context: GroupContextDep,
-    db: AsyncSession = Depends(get_db)
+    service: Annotated[ExecutionService, Depends(get_execution_service)],
+    group_context: GroupContextDep
 ):
     """
     Create a new execution.
-    
+
     Args:
         config: Configuration for the execution
         background_tasks: FastAPI background tasks
-        db: Database session
-        
+        service: Execution service (injected)
+        group_context: Group context for permissions
+
     Returns:
         Dict with execution_id, status, and run_name
     """
@@ -76,7 +89,7 @@ async def create_execution(
                     raise ValueError(f"Invalid flow_id format: {config.flow_id}. Must be a valid UUID.")
             
             # Verify the flow exists in database
-            flow_service = FlowService(db)
+            flow_service = FlowService(service.session)
             try:
                 flow = await flow_service.get_flow(config.flow_id)
                 logger.info(f"Found flow in database: {flow.name} ({flow.id})")
@@ -98,11 +111,9 @@ async def create_execution(
                 else:
                     logger.warning(f"[create_execution] Agent {agent_id} has NO knowledge_sources")
         
-        # Create service instance
-        execution_service = ExecutionService()
-        
+        # Use the injected service
         # Delegate all business logic to the service
-        result = await execution_service.create_execution(
+        result = await service.create_execution(
             config=config,
             background_tasks=background_tasks,
             group_context=group_context
@@ -124,11 +135,32 @@ async def create_execution(
         raise HTTPException(status_code=500, detail=str(e))
 
 
+
+
+@router.get("/health")
+async def health_check():
+    """Health check endpoint."""
+    return {"status": "healthy"}
+
+
+@router.get("/debug-context")
+async def debug_context(
+    group_context: GroupContextDep
+):
+    """Debug endpoint to check group context extraction."""
+    return {
+        "group_ids": group_context.group_ids,
+        "group_email": group_context.group_email,
+        "email_domain": group_context.email_domain,
+        "has_access_token": bool(group_context.access_token)
+    }
+
+
 @router.get("/{execution_id}", response_model=ExecutionResponse)
 async def get_execution_status(
-    execution_id: str, 
+    execution_id: str,
     group_context: GroupContextDep,
-    db: AsyncSession = Depends(get_db)
+    db: SessionDep
 ):
     """
     Get the status of a specific execution with group filtering.
@@ -140,8 +172,9 @@ async def get_execution_status(
     Returns:
         ExecutionResponse with execution details
     """
-    # Use the service method to get execution data with group filtering
-    execution_data = await ExecutionService.get_execution_status(execution_id, group_ids=group_context.group_ids)
+    # Create service instance and use method to get execution data with group filtering
+    service = ExecutionService(session=db)
+    execution_data = await service.get_execution_status(execution_id, group_ids=group_context.group_ids)
     
     if not execution_data:
         raise HTTPException(status_code=404, detail="Execution not found")
@@ -173,19 +206,41 @@ async def get_execution_status(
 
 
 @router.get("", response_model=list[ExecutionResponse])
-async def list_executions(group_context: GroupContextDep):
+async def list_executions(
+    group_context: GroupContextDep,
+    db: SessionDep,
+    limit: int = 50,
+    offset: int = 0
+):
     """
     List executions with group filtering.
-    
+
     Args:
         group_context: Group context for filtering
-    
+        limit: Maximum number of executions to return (default: 50)
+        offset: Number of executions to skip (default: 0)
+
     Returns:
         List of ExecutionResponse objects
     """
-    # Use the service's list_executions method with group filtering
-    executions_list = await ExecutionService.list_executions(group_ids=group_context.group_ids)
-    
+    # Log the group context for debugging
+    logger.info(f"list_executions called with group_ids: {group_context.group_ids}, email: {group_context.group_email}")
+
+    # Additional debug logging
+    if not group_context.group_ids:
+        logger.warning("No group_ids in context - this will return no results")
+
+    # Create service instance and use the list_executions method with group and user filtering
+    service = ExecutionService(session=db)
+    executions_list = await service.list_executions(
+        group_ids=group_context.group_ids,
+        user_email=group_context.group_email,  # Add user-level filtering
+        limit=limit,
+        offset=offset
+    )
+
+    logger.info(f"ExecutionService returned {len(executions_list)} executions for user {group_context.group_email}")
+
     # Process results before converting to response models
     processed_executions = []
     for execution_data in executions_list:
@@ -216,8 +271,8 @@ async def list_executions(group_context: GroupContextDep):
 @router.post("/generate-name", response_model=ExecutionNameGenerationResponse)
 async def generate_execution_name(
     request: ExecutionNameGenerationRequest,
-    group_context: GroupContextDep,
-    db: AsyncSession = Depends(get_db)
+    service: Annotated[ExecutionService, Depends(get_execution_service)],
+    group_context: GroupContextDep
 ):
     """
     Generate a descriptive name for an execution based on agents and tasks configuration.
@@ -225,40 +280,44 @@ async def generate_execution_name(
     This endpoint analyzes the given agent and task configurations and generates
     a short, memorable name (2-4 words) that captures the essence of the execution.
     """
-    execution_service = ExecutionService()
-    return await execution_service.generate_execution_name(request)
+    return await service.generate_execution_name(request)
 
 
-@router.get("/health")
-async def health_check():
-    """Health check endpoint."""
-    return {"status": "healthy"}
 
 
 @router.post("/{execution_id}/stop", response_model=StopExecutionResponse)
 async def stop_execution(
     execution_id: str,
     request: StopExecutionRequest,
+    service: Annotated[ExecutionService, Depends(get_execution_service)],
     group_context: GroupContextDep,
-    db: AsyncSession = Depends(get_db)
+    db: SessionDep
 ):
     """
     Stop a running execution.
-    
+    Only Admins and Editors can stop executions.
+
     This endpoint allows graceful or forceful stopping of an execution.
     Graceful stop will try to complete the current task before stopping.
     Force stop will immediately terminate the execution.
-    
+
     Args:
         execution_id: The ID of the execution to stop
         request: Stop request details including stop type and reason
         group_context: Group context for access control
         db: Database session
-        
+
     Returns:
         StopExecutionResponse with status and partial results if available
     """
-    execution_service = ExecutionService()
+    # Check permissions - only admins and editors can stop executions
+    if not check_role_in_context(group_context, ["admin", "editor"]):
+        raise HTTPException(
+            status_code=403,
+            detail="Only admins and editors can stop executions"
+        )
+
+    # Use the injected service
     
     try:
         # Get the execution from database to verify it exists and user has access
@@ -285,7 +344,7 @@ async def stop_execution(
             )
         
         # Call the stop service method
-        stop_result = await execution_service.stop_execution(
+        stop_result = await service.stop_execution(
             execution_id=execution_id,
             stop_type=request.stop_type,
             reason=request.reason,
@@ -310,7 +369,7 @@ async def stop_execution(
 async def force_stop_execution(
     execution_id: str,
     group_context: GroupContextDep,
-    db: AsyncSession = Depends(get_db)
+    db: SessionDep
 ):
     """
     Force stop a running execution immediately.
@@ -333,20 +392,24 @@ async def force_stop_execution(
         reason="Force stop requested by user",
         preserve_partial_results=True
     )
-    
+
+    # Create service instance
+    service = ExecutionService(session=db)
+
     return await stop_execution(
         execution_id=execution_id,
         request=request,
+        service=service,
         group_context=group_context,
         db=db
     )
 
 
 @router.get("/{execution_id}/status", response_model=ExecutionStatusResponse)
-async def get_execution_status(
+async def get_execution_status_simple(
     execution_id: str,
     group_context: GroupContextDep,
-    db: AsyncSession = Depends(get_db)
+    db: SessionDep
 ):
     """
     Get the current status of an execution.

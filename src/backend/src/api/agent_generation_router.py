@@ -13,7 +13,7 @@ from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
 
 from src.services.agent_generation_service import AgentGenerationService
-from src.core.dependencies import GroupContextDep
+from src.core.dependencies import GroupContextDep, SessionDep
 
 # Configure logging
 logger = logging.getLogger(__name__)
@@ -35,24 +35,27 @@ class AgentPrompt(BaseModel):
 @router.post("/generate", response_model=Dict[str, Any])
 async def generate_agent(
     prompt: AgentPrompt,
-    group_context: GroupContextDep
+    group_context: GroupContextDep,
+    session: SessionDep
 ):
     """
     Generate agent configuration from natural language description.
-    
+
     This endpoint processes a natural language description of an agent
     and returns a structured configuration that can be used with CrewAI.
-    
+
     Args:
         prompt: Request payload with prompt text, model, and optional tools
-        
+        group_context: Group context for multi-group isolation
+        session: Database session from dependency injection
+
     Returns:
         Dict[str, Any]: Agent configuration in JSON format
     """
     try:
-        # Create service instance
-        service = AgentGenerationService.create()
-        
+        # Create service instance with injected session
+        service = AgentGenerationService(session)
+
         # Delegate to service layer
         return await service.generate_agent(
             prompt_text=prompt.prompt,
@@ -60,7 +63,7 @@ async def generate_agent(
             tools=prompt.tools,
             group_context=group_context
         )
-            
+
     except ValueError as e:
         # For validation errors
         logger.warning(f"Validation error in agent generation: {str(e)}")

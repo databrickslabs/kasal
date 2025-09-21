@@ -9,7 +9,6 @@ import logging
 
 from src.core.dependencies import SessionDep, GroupContextDep
 from src.services.databricks_knowledge_service import DatabricksKnowledgeService
-from src.repositories.databricks_config_repository import DatabricksConfigRepository
 
 logger = logging.getLogger(__name__)
 
@@ -26,22 +25,21 @@ def get_databricks_knowledge_service(
 ) -> DatabricksKnowledgeService:
     """
     Get a properly initialized DatabricksKnowledgeService instance.
-    
+
     Args:
         session: Database session from dependency injection
         group_context: Group context for multi-tenant filtering
-        
+
     Returns:
         Initialized DatabricksKnowledgeService with all dependencies
     """
     # Get group_id from context - use first group ID or default
     group_id = group_context.group_ids[0] if group_context and group_context.group_ids else "default"
     created_by_email = group_context.group_email if group_context else None
-    
-    # Create repository and service
-    databricks_repository = DatabricksConfigRepository(session)
+
+    # Create service and pass session to it
     return DatabricksKnowledgeService(
-        databricks_repository=databricks_repository,
+        session=session,
         group_id=group_id,
         created_by_email=created_by_email
     )
@@ -54,7 +52,8 @@ async def upload_knowledge_file(
     service: Annotated[DatabricksKnowledgeService, Depends(get_databricks_knowledge_service)],
     group_context: GroupContextDep,
     file: UploadFile = File(...),
-    volume_config: str = Form(...)
+    volume_config: str = Form(...),
+    agent_ids: str = Form("[]")  # JSON array of agent IDs
 ) -> Dict[str, Any]:
     """
     Upload a file to Databricks Volume for knowledge source.
@@ -64,6 +63,7 @@ async def upload_knowledge_file(
         request: FastAPI request object (for extracting user token)
         file: The uploaded file
         volume_config: JSON string containing volume configuration
+        agent_ids: JSON array of agent IDs that can access this knowledge source
         group_context: Group context for multi-tenant operations
 
     Returns:
@@ -73,25 +73,32 @@ async def upload_knowledge_file(
     logger.info(f"[API] Execution ID: {execution_id}")
     logger.info(f"[API] File: {file.filename} ({file.content_type})")
     logger.info(f"[API] Volume config: {volume_config}")
+    logger.info(f"[API] Agent IDs raw: '{agent_ids}' (type: {type(agent_ids)})")
     logger.info(f"[API] Group context: {group_context}")
 
     try:
         # Extract user token for OBO authentication
         from src.utils.databricks_auth import extract_user_token_from_request
         user_token = extract_user_token_from_request(request)
-        
+
         if user_token:
             logger.info("Found user token for OBO authentication")
-        
+
         # Parse volume configuration
         config = json.loads(volume_config)
-        
+
+        # Parse agent_ids
+        logger.info(f"[API] 🔍 AGENT IDS DEBUG: raw='{agent_ids}', empty_check={not agent_ids}, none_check={agent_ids is None}")
+        parsed_agent_ids = json.loads(agent_ids) if agent_ids else []
+        logger.info(f"[API] ✅ Parsed agent IDs: {parsed_agent_ids} (length: {len(parsed_agent_ids)})")
+
         # Upload file with user token
         result = await service.upload_knowledge_file(
             file=file,
             execution_id=execution_id,
             group_id=group_context.group_ids[0] if group_context and group_context.group_ids else "default",
             volume_config=config,
+            agent_ids=parsed_agent_ids,  # Pass agent IDs for access control
             user_token=user_token  # Pass user token for OBO
         )
         

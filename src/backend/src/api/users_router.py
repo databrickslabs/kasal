@@ -1,12 +1,10 @@
-from typing import List, Optional
+from typing import List, Optional, Annotated
 from fastapi import APIRouter, Depends, HTTPException, status, Query
-from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.core.dependencies import SessionDep, GroupContextDep
 from src.dependencies.admin_auth import AdminUserDep, AuthenticatedUserDep
 from src.schemas.user import (
-    UserInDB, UserUpdate, UserProfileUpdate, UserWithProfile, 
-    UserRoleAssign, UserComplete, ExternalIdentityInDB
+    UserInDB, UserUpdate, UserPermissionUpdate
 )
 from src.models.user import User
 from src.services.user_service import UserService
@@ -17,69 +15,49 @@ router = APIRouter(
     responses={401: {"description": "Unauthorized"}},
 )
 
-@router.get("/me", response_model=UserWithProfile)
+# Dependency to get UserService with explicit SessionDep
+def get_user_service(session: SessionDep) -> UserService:
+    """
+    Factory function for UserService with explicit session dependency.
+
+    Args:
+        session: Database session from FastAPI DI
+
+    Returns:
+        UserService instance with injected session
+    """
+    return UserService(session)
+
+@router.get("/me", response_model=UserInDB)
 async def read_users_me(
     current_user: AuthenticatedUserDep,
-    session: SessionDep,
+    service: Annotated[UserService, Depends(get_user_service)],
     group_context: GroupContextDep,
 ):
     """Get current user's information"""
-    user_service = UserService(session)
-    return await user_service.get_user_with_profile(current_user.id)
+    import logging
+    logger = logging.getLogger(__name__)
+    logger.info(f"[ENDPOINT DEBUG] /users/me called for user: {current_user.email}, is_system_admin: {current_user.is_system_admin}, is_personal_workspace_manager: {current_user.is_personal_workspace_manager}")
+    return await service.get_user_complete(current_user.id)
 
-@router.put("/me", response_model=UserWithProfile)
+@router.put("/me", response_model=UserInDB)
 async def update_users_me(
     user_update: UserUpdate,
     current_user: AuthenticatedUserDep,
-    session: SessionDep,
+    service: Annotated[UserService, Depends(get_user_service)],
     group_context: GroupContextDep,
 ):
     """Update current user's information"""
-    user_service = UserService(session)
-    return await user_service.update_user(current_user.id, user_update)
+    return await service.update_user(current_user.id, user_update)
 
-@router.put("/me/profile", response_model=UserWithProfile)
-async def update_users_profile(
-    profile_update: UserProfileUpdate,
-    current_user: AuthenticatedUserDep,
-    session: SessionDep,
-    group_context: GroupContextDep,
-):
-    """Update current user's profile"""
-    user_service = UserService(session)
-    return await user_service.update_user_profile(current_user.id, profile_update)
+# /me/profile endpoint removed - display_name is now part of User model
 
-@router.get("/me/external-identities", response_model=List[ExternalIdentityInDB])
-async def read_users_external_identities(
-    current_user: AuthenticatedUserDep,
-    session: SessionDep,
-    group_context: GroupContextDep,
-):
-    """Get current user's external identities"""
-    user_service = UserService(session)
-    return await user_service.get_user_external_identities(current_user.id)
-
-@router.delete("/me/external-identities/{provider}", status_code=status.HTTP_204_NO_CONTENT)
-async def delete_external_identity(
-    provider: str,
-    current_user: AuthenticatedUserDep,
-    session: SessionDep,
-    group_context: GroupContextDep,
-):
-    """Remove an external identity from current user"""
-    user_service = UserService(session)
-    success = await user_service.remove_external_identity(current_user.id, provider)
-    
-    if not success:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail=f"No external identity found for provider: {provider}"
-        )
+# External identity endpoints removed - using simplified auth
 
 # Admin endpoints
 @router.get("", response_model=List[UserInDB])
 async def read_users(
-    session: SessionDep,
+    service: Annotated[UserService, Depends(get_user_service)],
     admin_user: AdminUserDep,
     group_context: GroupContextDep,
     skip: int = 0,
@@ -89,27 +67,26 @@ async def read_users(
     search: Optional[str] = None,
 ):
     """Get list of users (admin only)"""
-    user_service = UserService(session)
     filters = {}
-    
+
     if role:
         filters["role"] = role
     if status:
         filters["status"] = status
-    
-    users = await user_service.get_users(skip=skip, limit=limit, filters=filters, search=search)
+
+    users = await service.get_users(skip=skip, limit=limit, filters=filters, search=search)
     return users
 
-@router.get("/{user_id}", response_model=UserComplete)
+@router.get("/{user_id}")
 async def read_user(
     user_id: str,
-    session: SessionDep,
+    service: Annotated[UserService, Depends(get_user_service)],
     admin_user: AdminUserDep,
     group_context: GroupContextDep,
 ):
     """Get user by ID (admin only)"""
-    user_service = UserService(session)
-    user = await user_service.get_user_complete(user_id)
+    # Use injected service
+    user = await service.get_user_complete(user_id)
     
     if not user:
         raise HTTPException(
@@ -123,53 +100,61 @@ async def read_user(
 async def update_user(
     user_id: str,
     user_update: UserUpdate,
-    session: SessionDep,
+    service: Annotated[UserService, Depends(get_user_service)],
     admin_user: AdminUserDep,
     group_context: GroupContextDep,
 ):
     """Update user information (admin only)"""
-    user_service = UserService(session)
-    user = await user_service.update_user(user_id, user_update)
-    
+    # Use injected service
+    user = await service.update_user(user_id, user_update)
+
     if not user:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="User not found"
         )
-    
+
     return user
 
-@router.put("/{user_id}/role", response_model=UserInDB)
-async def assign_user_role(
+# System admin endpoint for managing user permissions
+@router.put("/{user_id}/permissions", response_model=UserInDB)
+async def update_user_permissions(
     user_id: str,
-    role_assign: UserRoleAssign,
-    session: SessionDep,
+    permission_update: UserPermissionUpdate,
+    service: Annotated[UserService, Depends(get_user_service)],
     admin_user: AdminUserDep,
     group_context: GroupContextDep,
 ):
-    """Assign a role to a user (admin only)"""
-    user_service = UserService(session)
-    user = await user_service.assign_role(user_id, role_assign.role_id)
-    
+    """Update user permissions (system admin only)"""
+    # Check if the current user is a system admin
+    if not group_context or not group_context.current_user or not group_context.current_user.is_system_admin:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Only system admins can manage user permissions"
+        )
+
+    # Update the user permissions
+    user = await service.update_user_permissions(user_id, permission_update)
+
     if not user:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="User not found"
         )
-    
+
     return user
 
 @router.delete("/{user_id}", status_code=status.HTTP_204_NO_CONTENT)
 async def delete_user(
     user_id: str,
-    session: SessionDep,
+    service: Annotated[UserService, Depends(get_user_service)],
     admin_user: AdminUserDep,
     group_context: GroupContextDep,
 ):
     """Delete a user (admin only)"""
-    user_service = UserService(session)
-    success = await user_service.delete_user(user_id)
-    
+    # Use injected service
+    success = await service.delete_user(user_id)
+
     if not success:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,

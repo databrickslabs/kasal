@@ -7,21 +7,20 @@ from typing import Annotated, Dict, Any, List, Optional
 import logging
 
 from fastapi import APIRouter, Depends, HTTPException, status
-from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.schemas.mcp import (
-    MCPServerCreate, 
-    MCPServerUpdate, 
-    MCPServerResponse, 
-    MCPServerListResponse, 
+    MCPServerCreate,
+    MCPServerUpdate,
+    MCPServerResponse,
+    MCPServerListResponse,
     MCPToggleResponse,
     MCPTestConnectionRequest,
     MCPTestConnectionResponse,
     MCPSettingsResponse,
     MCPSettingsUpdate
 )
-from src.db.session import get_db
-from src.core.dependencies import GroupContextDep
+from src.core.dependencies import GroupContextDep, SessionDep
+from src.core.permissions import check_role_in_context
 from src.services.mcp_service import MCPService
 
 # Create router instance
@@ -34,10 +33,28 @@ router = APIRouter(
 # Set up logger
 logger = logging.getLogger(__name__)
 
+async def get_mcp_service(session: SessionDep) -> MCPService:
+    """
+    Dependency provider for MCPService.
+
+    Creates service with properly injected session following the pattern:
+    Router → Service → Repository → DB
+
+    Args:
+        session: Database session from FastAPI DI
+
+    Returns:
+        MCPService instance with injected session
+    """
+    return MCPService(session=session)
+
+# Type alias for cleaner function signatures
+MCPServiceDep = Annotated[MCPService, Depends(get_mcp_service)]
+
 
 @router.get("/servers", response_model=MCPServerListResponse)
 async def get_mcp_servers(
-    db: AsyncSession = Depends(get_db),
+    service: MCPServiceDep,
     group_context: GroupContextDep = None
 ) -> MCPServerListResponse:
     """
@@ -47,7 +64,6 @@ async def get_mcp_servers(
         List of MCP servers and count
     """
     try:
-        service = MCPService(db)
         return await service.get_all_servers()
     except Exception as e:
         logger.error(f"Error getting MCP servers: {str(e)}")
@@ -56,14 +72,13 @@ async def get_mcp_servers(
 
 @router.get("/servers/enabled", response_model=MCPServerListResponse)
 async def get_enabled_mcp_servers(
-    db: AsyncSession = Depends(get_db),
+    service: MCPServiceDep,
     group_context: GroupContextDep = None
 ) -> MCPServerListResponse:
     """
     Get all enabled MCP servers.
     """
     logger.info("Getting enabled MCP servers")
-    service = MCPService(db)
     servers_response = await service.get_enabled_servers()
     logger.info(f"Found {servers_response.count} enabled MCP servers")
     return servers_response
@@ -71,14 +86,13 @@ async def get_enabled_mcp_servers(
 
 @router.get("/servers/global", response_model=MCPServerListResponse)
 async def get_global_mcp_servers(
-    db: AsyncSession = Depends(get_db),
+    service: MCPServiceDep,
     group_context: GroupContextDep = None
 ) -> MCPServerListResponse:
     """
     Get all globally enabled MCP servers.
     """
     logger.info("Getting globally enabled MCP servers")
-    service = MCPService(db)
     servers_response = await service.get_global_servers()
     logger.info(f"Found {servers_response.count} globally enabled MCP servers")
     return servers_response
@@ -87,7 +101,7 @@ async def get_global_mcp_servers(
 @router.get("/servers/{server_id}", response_model=MCPServerResponse)
 async def get_mcp_server(
     server_id: int,
-    db: AsyncSession = Depends(get_db),
+    service: MCPServiceDep,
     group_context: GroupContextDep = None
 ) -> MCPServerResponse:
     """
@@ -95,7 +109,6 @@ async def get_mcp_server(
     """
     logger.info(f"Getting MCP server with ID {server_id}")
     try:
-        service = MCPService(db)
         server = await service.get_server_by_id(server_id)
         logger.info(f"Found MCP server with ID {server_id}")
         return server
@@ -106,15 +119,22 @@ async def get_mcp_server(
 @router.post("/servers", response_model=MCPServerResponse, status_code=status.HTTP_201_CREATED)
 async def create_mcp_server(
     server_data: MCPServerCreate,
-    db: AsyncSession = Depends(get_db),
+    service: MCPServiceDep,
     group_context: GroupContextDep = None
 ) -> MCPServerResponse:
     """
     Create a new MCP server.
+    Only Admins can create MCP servers.
     """
+    # Check permissions - only admins can create MCP servers
+    if not check_role_in_context(group_context, ["admin"]):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Only admins can create MCP servers"
+        )
+
     logger.info(f"Creating MCP server with name '{server_data.name}'")
     try:
-        service = MCPService(db)
         server = await service.create_server(server_data)
         logger.info(f"Created MCP server with ID {server.id}")
         return server
@@ -126,15 +146,22 @@ async def create_mcp_server(
 async def update_mcp_server(
     server_id: int,
     server_data: MCPServerUpdate,
-    db: AsyncSession = Depends(get_db),
+    service: MCPServiceDep,
     group_context: GroupContextDep = None
 ) -> MCPServerResponse:
     """
     Update an existing MCP server.
+    Only Admins can update MCP servers.
     """
+    # Check permissions - only admins can update MCP servers
+    if not check_role_in_context(group_context, ["admin"]):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Only admins can update MCP servers"
+        )
+
     logger.info(f"Updating MCP server with ID {server_id}")
     try:
-        service = MCPService(db)
         server = await service.update_server(server_id, server_data)
         logger.info(f"Updated MCP server with ID {server_id}")
         return server
@@ -145,15 +172,22 @@ async def update_mcp_server(
 @router.delete("/servers/{server_id}", status_code=status.HTTP_204_NO_CONTENT)
 async def delete_mcp_server(
     server_id: int,
-    db: AsyncSession = Depends(get_db),
+    service: MCPServiceDep,
     group_context: GroupContextDep = None
 ) -> None:
     """
     Delete an MCP server.
+    Only Admins can delete MCP servers.
     """
+    # Check permissions - only admins can delete MCP servers
+    if not check_role_in_context(group_context, ["admin"]):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Only admins can delete MCP servers"
+        )
+
     logger.info(f"Deleting MCP server with ID {server_id}")
     try:
-        service = MCPService(db)
         await service.delete_server(server_id)
         logger.info(f"Deleted MCP server with ID {server_id}")
     except HTTPException:
@@ -163,15 +197,22 @@ async def delete_mcp_server(
 @router.patch("/servers/{server_id}/toggle-enabled", response_model=MCPToggleResponse)
 async def toggle_mcp_server_enabled(
     server_id: int,
-    db: AsyncSession = Depends(get_db),
+    service: MCPServiceDep,
     group_context: GroupContextDep = None
 ) -> MCPToggleResponse:
     """
     Toggle the enabled status of an MCP server.
+    Only Admins can toggle MCP server status.
     """
+    # Check permissions - only admins can toggle MCP servers
+    if not check_role_in_context(group_context, ["admin"]):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Only admins can toggle MCP server status"
+        )
+
     logger.info(f"Toggling enabled status for MCP server with ID {server_id}")
     try:
-        service = MCPService(db)
         response = await service.toggle_server_enabled(server_id)
         status_text = "enabled" if response.enabled else "disabled"
         logger.info(f"MCP server with ID {server_id} {status_text}")
@@ -183,15 +224,22 @@ async def toggle_mcp_server_enabled(
 @router.patch("/servers/{server_id}/toggle-global-enabled", response_model=MCPToggleResponse)
 async def toggle_mcp_server_global_enabled(
     server_id: int,
-    db: AsyncSession = Depends(get_db),
+    service: MCPServiceDep,
     group_context: GroupContextDep = None
 ) -> MCPToggleResponse:
     """
     Toggle the global enabled status of an MCP server.
+    Only Admins can toggle global MCP server status.
     """
+    # Check permissions - only admins can toggle global MCP server status
+    if not check_role_in_context(group_context, ["admin"]):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Only admins can toggle global MCP server status"
+        )
+
     logger.info(f"Toggling global enabled status for MCP server with ID {server_id}")
     try:
-        service = MCPService(db)
         response = await service.toggle_server_global_enabled(server_id)
         status_text = "globally enabled" if response.enabled else "globally disabled"
         logger.info(f"MCP server with ID {server_id} {status_text}")
@@ -203,15 +251,22 @@ async def toggle_mcp_server_global_enabled(
 @router.post("/test-connection", response_model=MCPTestConnectionResponse)
 async def test_mcp_connection(
     test_data: MCPTestConnectionRequest,
-    db: AsyncSession = Depends(get_db),
+    service: MCPServiceDep,
     group_context: GroupContextDep = None
 ) -> MCPTestConnectionResponse:
     """
     Test connection to an MCP server.
+    Only Admins can test MCP server connections.
     """
+    # Check permissions - only admins can test MCP connections
+    if not check_role_in_context(group_context, ["admin"]):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Only admins can test MCP server connections"
+        )
+
     logger.info(f"Testing connection to MCP server at {test_data.server_url}")
     try:
-        service = MCPService(db)
         response = await service.test_connection(test_data)
         success_text = "successful" if response.success else "failed"
         logger.info(f"Connection test {success_text}: {response.message}")
@@ -226,7 +281,7 @@ async def test_mcp_connection(
 
 @router.get("/settings", response_model=MCPSettingsResponse)
 async def get_mcp_settings(
-    db: AsyncSession = Depends(get_db),
+    service: MCPServiceDep,
     group_context: GroupContextDep = None
 ) -> MCPSettingsResponse:
     """
@@ -234,7 +289,6 @@ async def get_mcp_settings(
     """
     logger.info("Getting global MCP settings")
     try:
-        service = MCPService(db)
         settings = await service.get_settings()
         logger.info(f"Retrieved global MCP settings (enabled: {settings.global_enabled})")
         return settings
@@ -245,15 +299,22 @@ async def get_mcp_settings(
 @router.put("/settings", response_model=MCPSettingsResponse)
 async def update_mcp_settings(
     settings_data: MCPSettingsUpdate,
-    db: AsyncSession = Depends(get_db),
+    service: MCPServiceDep,
     group_context: GroupContextDep = None
 ) -> MCPSettingsResponse:
     """
     Update global MCP settings.
+    Only Admins can update global MCP settings.
     """
+    # Check permissions - only admins can update global MCP settings
+    if not check_role_in_context(group_context, ["admin"]):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Only admins can update global MCP settings"
+        )
+
     logger.info(f"Updating global MCP settings (enabled: {settings_data.global_enabled})")
     try:
-        service = MCPService(db)
         settings = await service.update_settings(settings_data)
         logger.info(f"Updated global MCP settings (enabled: {settings.global_enabled})")
         return settings

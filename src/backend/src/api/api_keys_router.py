@@ -4,6 +4,7 @@ from fastapi import APIRouter, Depends, HTTPException, status
 import logging
 
 from src.core.dependencies import SessionDep, GroupContextDep
+from src.core.permissions import check_role_in_context
 from src.services.api_keys_service import ApiKeysService
 from src.schemas.api_key import ApiKeyCreate, ApiKeyUpdate, ApiKeyResponse
 
@@ -20,14 +21,28 @@ logger = logging.getLogger(__name__)
 def get_api_key_service(
     session: SessionDep
 ) -> ApiKeysService:
-    """Create ApiKeysService."""
+    """
+    Dependency provider for ApiKeysService.
+
+    Creates service with session following the pattern:
+    Router → Service → Repository → DB
+
+    Args:
+        session: Database session from FastAPI DI (from core.dependencies)
+
+    Returns:
+        ApiKeysService instance with session
+    """
     return ApiKeysService(session)
+
+# Type alias for cleaner function signatures
+ApiKeysServiceDep = Annotated[ApiKeysService, Depends(get_api_key_service)]
 
 
 @router.get("", response_model=List[ApiKeyResponse])
 async def get_api_keys_metadata(
     group_context: GroupContextDep,
-    service: Annotated[ApiKeysService, Depends(get_api_key_service)],
+    service: ApiKeysServiceDep,
 ):
     """
     Get API keys metadata (names, descriptions) without actual values.
@@ -54,18 +69,26 @@ async def get_api_keys_metadata(
 async def create_api_key(
     api_key_data: ApiKeyCreate,
     group_context: GroupContextDep,
-    service: Annotated[ApiKeysService, Depends(get_api_key_service)],
+    service: ApiKeysServiceDep,
 ):
     """
     Create a new API key.
-    
+    Only Admins and Editors can create API keys.
+
     Args:
         api_key_data: API key data for creation
         service: API key service injected by dependency
-        
+
     Returns:
         Created API key
     """
+    # Check permissions - only admins and editors can create API keys
+    if not check_role_in_context(group_context, ["admin", "editor"]):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Only admins and editors can create API keys"
+        )
+
     try:
         # Set group_id in service
         service.group_id = group_context.primary_group_id if group_context else None
@@ -95,19 +118,27 @@ async def update_api_key(
     api_key_name: str,
     api_key_data: ApiKeyUpdate,
     group_context: GroupContextDep,
-    service: Annotated[ApiKeysService, Depends(get_api_key_service)],
+    service: ApiKeysServiceDep,
 ):
     """
     Update an existing API key.
-    
+    Only Admins and Editors can update API keys.
+
     Args:
         api_key_name: Name of the API key to update
         api_key_data: API key data for update
         service: API key service injected by dependency
-        
+
     Returns:
         Updated API key
     """
+    # Check permissions - only admins and editors can update API keys
+    if not check_role_in_context(group_context, ["admin", "editor"]):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Only admins and editors can update API keys"
+        )
+
     try:
         # Set group_id in service
         service.group_id = group_context.primary_group_id if group_context else None
@@ -150,15 +181,23 @@ async def update_api_key(
 async def delete_api_key(
     api_key_name: str,
     group_context: GroupContextDep,
-    service: Annotated[ApiKeysService, Depends(get_api_key_service)],
+    service: ApiKeysServiceDep,
 ):
     """
     Delete an API key.
-    
+    Only Admins and Editors can delete API keys.
+
     Args:
         api_key_name: Name of the API key to delete
         service: API key service injected by dependency
     """
+    # Check permissions - only admins and editors can delete API keys
+    if not check_role_in_context(group_context, ["admin", "editor"]):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Only admins and editors can delete API keys"
+        )
+
     try:
         # Set group_id in service
         service.group_id = group_context.primary_group_id if group_context else None

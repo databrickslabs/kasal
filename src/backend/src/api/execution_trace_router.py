@@ -6,12 +6,12 @@ execution traces.
 """
 
 import logging
-from typing import Optional, List
-from fastapi import APIRouter, HTTPException, Query, status
+from typing import Optional, List, Annotated
+from fastapi import APIRouter, HTTPException, Query, status, Depends
 
 from src.core.logger import LoggerManager
 from src.services.execution_trace_service import ExecutionTraceService
-from src.core.dependencies import GroupContextDep
+from src.core.dependencies import SessionDep, GroupContextDep
 from src.schemas.execution_trace import (
     ExecutionTraceItem,
     ExecutionTraceList,
@@ -28,8 +28,28 @@ router = APIRouter(
     tags=["Execution Traces"]
 )
 
+# Dependency to get ExecutionTraceService
+def get_execution_trace_service(session: SessionDep) -> ExecutionTraceService:
+    """
+    Dependency provider for ExecutionTraceService.
+
+    Creates service with session following the pattern:
+    Router → Service → Repository → DB
+
+    Args:
+        session: Database session from FastAPI DI (from core.dependencies)
+
+    Returns:
+        ExecutionTraceService instance with session
+    """
+    return ExecutionTraceService(session)
+
+# Type alias for cleaner function signatures
+ExecutionTraceServiceDep = Annotated[ExecutionTraceService, Depends(get_execution_trace_service)]
+
 @router.get("/", response_model=ExecutionTraceList)
 async def get_all_traces(
+    service: ExecutionTraceServiceDep,
     group_context: GroupContextDep,
     limit: int = Query(100, ge=1, le=500),
     offset: int = Query(0, ge=0)
@@ -46,7 +66,7 @@ async def get_all_traces(
         ExecutionTraceList with paginated execution traces for the group
     """
     try:
-        return await ExecutionTraceService.get_all_traces_for_group(group_context, limit, offset)
+        return await service.get_all_traces_for_group(group_context, limit, offset)
     except Exception as e:
         logger.error(f"Error getting all traces: {str(e)}")
         raise HTTPException(
@@ -56,28 +76,30 @@ async def get_all_traces(
 
 @router.get("/execution/{run_id}", response_model=ExecutionTraceResponseByRunId)
 async def get_traces_by_run_id(
-    run_id: int, 
+    run_id: int,
+    service: ExecutionTraceServiceDep,
     group_context: GroupContextDep,
     limit: int = Query(100, ge=1, le=500),
     offset: int = Query(0, ge=0)
 ):
     """
     Get traces for an execution by run_id.
-    
+
     Args:
         run_id: Database ID of the execution
+        service: Execution trace service dependency
         group_context: Group context from headers for authorization
         limit: Maximum number of traces to return (1-500)
         offset: Pagination offset
-    
+
     Returns:
         ExecutionTraceResponseByRunId with traces for the execution
     """
     try:
-        result = await ExecutionTraceService.get_traces_by_run_id(
-            group_context=group_context, 
-            run_id=run_id, 
-            limit=limit, 
+        result = await service.get_traces_by_run_id(
+            group_context=group_context,
+            run_id=run_id,
+            limit=limit,
             offset=offset
         )
         if not result:
@@ -97,28 +119,30 @@ async def get_traces_by_run_id(
 
 @router.get("/job/{job_id}", response_model=ExecutionTraceResponseByJobId)
 async def get_traces_by_job_id(
-    job_id: str, 
+    job_id: str,
+    service: ExecutionTraceServiceDep,
     group_context: GroupContextDep,
     limit: int = Query(100, ge=1, le=500),
     offset: int = Query(0, ge=0)
 ):
     """
     Get traces for an execution by job_id.
-    
+
     Args:
         job_id: String ID of the execution (job_id)
+        service: Execution trace service dependency
         group_context: Group context from headers for authorization
         limit: Maximum number of traces to return (1-500)
         offset: Pagination offset
-    
+
     Returns:
         ExecutionTraceResponseByJobId with traces for the execution
     """
     try:
-        result = await ExecutionTraceService.get_traces_by_job_id(
-            group_context=group_context, 
-            job_id=job_id, 
-            limit=limit, 
+        result = await service.get_traces_by_job_id(
+            group_context=group_context,
+            job_id=job_id,
+            limit=limit,
             offset=offset
         )
         if not result:
@@ -139,25 +163,27 @@ async def get_traces_by_job_id(
 @router.get("/job/{job_id}/task-states")
 async def get_current_task_states(
     job_id: str,
+    service: ExecutionTraceServiceDep,
     group_context: GroupContextDep
 ):
     """
     Get current task execution states from traces.
     Returns which tasks are running, completed, or failed.
-    
+
     Args:
         job_id: String ID of the execution (job_id)
+        service: Execution trace service dependency
         group_context: Group context from headers for authorization
-    
+
     Returns:
         Dictionary mapping task IDs to their current states
     """
     try:
         # Get all traces for the job with authorization check
-        result = await ExecutionTraceService.get_traces_by_job_id(
-            group_context=group_context, 
-            job_id=job_id, 
-            limit=500, 
+        result = await service.get_traces_by_job_id(
+            group_context=group_context,
+            job_id=job_id,
+            limit=500,
             offset=0
         )
         if not result:
@@ -245,6 +271,7 @@ async def get_current_task_states(
 @router.get("/{trace_id}", response_model=ExecutionTraceItem)
 async def get_trace_by_id(
     trace_id: int,
+    service: ExecutionTraceServiceDep,
     group_context: GroupContextDep
 ):
     """
@@ -258,7 +285,7 @@ async def get_trace_by_id(
         ExecutionTraceItem with trace details
     """
     try:
-        trace = await ExecutionTraceService.get_trace_by_id_with_group_check(trace_id, group_context)
+        trace = await service.get_trace_by_id_with_group_check(trace_id, group_context)
         if not trace:
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND,
@@ -277,6 +304,7 @@ async def get_trace_by_id(
 @router.post("/", response_model=ExecutionTraceItem, status_code=status.HTTP_201_CREATED)
 async def create_trace(
     trace_data: dict,
+    service: ExecutionTraceServiceDep,
     group_context: GroupContextDep
 ):
     """
@@ -290,7 +318,7 @@ async def create_trace(
         Created ExecutionTraceItem
     """
     try:
-        return await ExecutionTraceService.create_trace_with_group(trace_data, group_context)
+        return await service.create_trace_with_group(trace_data, group_context)
     except Exception as e:
         logger.error(f"Error creating trace: {str(e)}")
         raise HTTPException(
@@ -301,6 +329,7 @@ async def create_trace(
 @router.delete("/execution/{run_id}", response_model=DeleteTraceResponse)
 async def delete_traces_by_run_id(
     run_id: int,
+    service: ExecutionTraceServiceDep,
     group_context: GroupContextDep
 ):
     """
@@ -314,7 +343,7 @@ async def delete_traces_by_run_id(
         DeleteTraceResponse with information about deleted traces
     """
     try:
-        return await ExecutionTraceService.delete_traces_by_run_id_with_group_check(run_id, group_context)
+        return await service.delete_traces_by_run_id_with_group_check(run_id, group_context)
     except Exception as e:
         logger.error(f"Error deleting traces for execution {run_id}: {str(e)}")
         raise HTTPException(
@@ -325,6 +354,7 @@ async def delete_traces_by_run_id(
 @router.delete("/job/{job_id}", response_model=DeleteTraceResponse)
 async def delete_traces_by_job_id(
     job_id: str,
+    service: ExecutionTraceServiceDep,
     group_context: GroupContextDep
 ):
     """
@@ -338,7 +368,7 @@ async def delete_traces_by_job_id(
         DeleteTraceResponse with information about deleted traces
     """
     try:
-        return await ExecutionTraceService.delete_traces_by_job_id_with_group_check(job_id, group_context)
+        return await service.delete_traces_by_job_id_with_group_check(job_id, group_context)
     except Exception as e:
         logger.error(f"Error deleting traces for job_id {job_id}: {str(e)}")
         raise HTTPException(
@@ -349,6 +379,7 @@ async def delete_traces_by_job_id(
 @router.delete("/{trace_id}", response_model=DeleteTraceResponse)
 async def delete_trace(
     trace_id: int,
+    service: ExecutionTraceServiceDep,
     group_context: GroupContextDep
 ):
     """
@@ -362,7 +393,7 @@ async def delete_trace(
         DeleteTraceResponse with information about the deleted trace
     """
     try:
-        result = await ExecutionTraceService.delete_trace_with_group_check(trace_id, group_context)
+        result = await service.delete_trace_with_group_check(trace_id, group_context)
         if not result:
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND,
@@ -380,6 +411,7 @@ async def delete_trace(
 
 @router.delete("/", response_model=DeleteTraceResponse)
 async def delete_all_traces(
+    service: ExecutionTraceServiceDep,
     group_context: GroupContextDep
 ):
     """
@@ -392,7 +424,7 @@ async def delete_all_traces(
         DeleteTraceResponse with information about deleted traces
     """
     try:
-        return await ExecutionTraceService.delete_all_traces_for_group(group_context)
+        return await service.delete_all_traces_for_group(group_context)
     except Exception as e:
         logger.error(f"Error deleting all traces: {str(e)}")
         raise HTTPException(

@@ -11,7 +11,7 @@ from fastapi import APIRouter, HTTPException
 
 from src.schemas.task_generation import TaskGenerationRequest, TaskGenerationResponse
 from src.services.task_generation_service import TaskGenerationService
-from src.core.dependencies import GroupContextDep
+from src.core.dependencies import GroupContextDep, SessionDep
 
 # Configure logging
 logger = logging.getLogger(__name__)
@@ -26,18 +26,19 @@ router = APIRouter(
 @router.post("/generate-task", response_model=TaskGenerationResponse)
 async def generate_task(
     request: TaskGenerationRequest,
-    group_context: GroupContextDep
+    group_context: GroupContextDep,
+    session: SessionDep
 ):
     """
     Generate a task based on the provided prompt and context.
-    
+
     This endpoint creates a task based on the provided text prompt,
     with optional agent context for tailoring the task to a specific agent.
     """
     try:
-        # Create service using factory method
-        task_generation_service = TaskGenerationService.create()
-        
+        # Create service with injected session
+        task_generation_service = TaskGenerationService(session)
+
         # Generate task
         logger.info(f"Generating task from prompt: {request.text[:50]}...")
         task_response = await task_generation_service.generate_task(request, group_context)

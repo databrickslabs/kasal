@@ -7,6 +7,7 @@ from fastapi import APIRouter, Depends, HTTPException, Path, Query, status
 from pydantic import ValidationError
 
 from src.core.dependencies import SessionDep, GroupContextDep
+from src.core.permissions import check_role_in_context
 from src.schemas.crew import CrewCreate, CrewUpdate, CrewResponse
 from src.services.crew_service import CrewService
 
@@ -111,15 +112,23 @@ async def create_crew(
 ):
     """
     Create a new crew for the current group.
-    
+    Only Editors and Admins can create crews.
+
     Args:
         crew_in: Crew data for creation
         service: Crew service injected by dependency
         group_context: Group context from headers
-        
+
     Returns:
         Created crew
     """
+    # Check permissions - only editors and admins can create crews
+    if not check_role_in_context(group_context, ["admin", "editor"]):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Only editors and admins can create crews"
+        )
+
     try:
         # Use the group-aware create method
         crew = await service.create_with_group(crew_in, group_context)
@@ -202,19 +211,27 @@ async def update_crew(
 ):
     """
     Update a crew for the current group.
-    
+    Only Editors and Admins can update crews.
+
     Args:
         crew_id: ID of the crew to update
         crew_update: Crew data for update (only provided fields will be updated)
         service: Crew service injected by dependency
         group_context: Group context from headers
-        
+
     Returns:
         Updated crew
-        
+
     Raises:
         HTTPException: If crew not found or doesn't belong to group
     """
+    # Check permissions - only editors and admins can update crews
+    if not check_role_in_context(group_context, ["admin", "editor"]):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Only editors and admins can update crews"
+        )
+
     try:
         updated_crew = await service.update_with_partial_data_by_group(crew_id, crew_update, group_context)
         if not updated_crew:
@@ -250,15 +267,23 @@ async def delete_crew(
 ):
     """
     Delete a crew for the current group.
-    
+    Only Editors and Admins can delete crews.
+
     Args:
         crew_id: ID of the crew to delete
         service: Crew service injected by dependency
         group_context: Group context from headers
-        
+
     Raises:
         HTTPException: If crew not found or doesn't belong to group
     """
+    # Check permissions - only editors and admins can delete crews
+    if not check_role_in_context(group_context, ["admin", "editor"]):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Only editors and admins can delete crews"
+        )
+
     try:
         deleted = await service.delete_by_group(crew_id, group_context)
         if not deleted:
@@ -278,11 +303,19 @@ async def delete_all_crews(
 ):
     """
     Delete all crews for the current group.
-    
+    Only Admins can delete all crews.
+
     Args:
         service: Crew service injected by dependency
         group_context: Group context from headers
     """
+    # Check permissions - only admins can delete all crews
+    if not check_role_in_context(group_context, ["admin"]):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Only admins can delete all crews"
+        )
+
     try:
         await service.delete_all_by_group(group_context)
     except Exception as e:

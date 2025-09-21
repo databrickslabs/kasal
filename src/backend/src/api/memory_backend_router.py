@@ -10,10 +10,11 @@ from fastapi import APIRouter, Depends, HTTPException, status, Request, Query
 from sqlalchemy.ext.asyncio import AsyncSession
 from datetime import datetime
 
-from src.core.dependencies import GroupContextDep
+from src.core.dependencies import GroupContextDep, SessionDep
+from src.core.permissions import check_role_in_context, is_workspace_admin
 from src.core.logger import LoggerManager
 from src.schemas.memory_backend import (
-    MemoryBackendConfig, 
+    MemoryBackendConfig,
     DatabricksMemoryConfig,
     MemoryBackendCreate,
     MemoryBackendUpdate,
@@ -21,25 +22,17 @@ from src.schemas.memory_backend import (
     MemoryBackendType
 )
 from src.services.memory_backend_service import MemoryBackendService
-from src.repositories.memory_backend_repository import MemoryBackendRepository
 from src.models.memory_backend import MemoryBackend
-from src.core.unit_of_work import UnitOfWork
 from src.utils.databricks_auth import extract_user_token_from_request
 
 logger = LoggerManager.get_instance().api
 
 router = APIRouter(prefix="/memory-backend", tags=["memory-backend"])
 
-# Dependency to get UnitOfWork
-async def get_uow():
-    """Get UnitOfWork instance."""
-    async with UnitOfWork() as uow:
-        yield uow
-
-# Dependency to get MemoryBackendService
-def get_memory_backend_service(uow: UnitOfWork = Depends(get_uow)) -> MemoryBackendService:
-    """Get MemoryBackendService instance with UnitOfWork."""
-    return MemoryBackendService(uow)
+# Dependency to get MemoryBackendService with injected session
+def get_memory_backend_service(session: SessionDep) -> MemoryBackendService:
+    """Get MemoryBackendService instance with injected session."""
+    return MemoryBackendService(session)
 
 
 @router.get("/databricks/workspace-url")
@@ -258,15 +251,23 @@ async def create_memory_config(
 ) -> MemoryBackendResponse:
     """
     Create a new memory backend configuration.
-    
+    Only workspace admins can create memory configurations for their workspace.
+
     Args:
         config: Memory backend configuration
         group_context: Current group context
         service: Memory backend service
-        
+
     Returns:
         Created memory backend configuration
     """
+    # Check permissions - only workspace admins can create memory configs
+    if not is_workspace_admin(group_context):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Only workspace admins can create memory configurations"
+        )
+
     try:
         # Service is injected via dependency
         backend = await service.create_memory_backend(group_context.primary_group_id, config)
@@ -302,19 +303,10 @@ async def get_memory_configs(
         List of memory backend configurations
     """
     try:
-        # Log request headers to debug authentication
-        logger.info(f"Request headers: {dict(request.headers)}")
-        logger.info(f"Group context - group_id: {group_context.primary_group_id}, email: {group_context.group_email}")
-        
-        # Service is injected via dependency
-        logger.info(f"Getting all memory backends for group: {group_context.primary_group_id}")
+        # Only log group context at debug level for frequently called endpoint
+        logger.debug(f"Getting memory backends for group: {group_context.primary_group_id}")
         backends = await service.get_memory_backends(group_context.primary_group_id)
-        logger.info(f"Found {len(backends)} backends for group")
-        
-        for backend in backends:
-            logger.info(f"Backend: {backend.name}, Type: {backend.backend_type}, Default: {backend.is_default}")
-            if backend.databricks_config:
-                logger.info(f"Databricks config: {backend.databricks_config}")
+        logger.debug(f"Found {len(backends)} backends for group")
         
         return [MemoryBackendResponse.model_validate(backend) for backend in backends]
         
@@ -382,15 +374,14 @@ async def get_default_memory_config(
     """
     try:
         # Service is injected via dependency
-        logger.info(f"Getting default memory backend for group: {group_context.primary_group_id}")
+        logger.debug(f"Getting default memory backend for group: {group_context.primary_group_id}")
         backend = await service.get_default_memory_backend(group_context.primary_group_id)
-        
+
         if backend:
-            logger.info(f"Found default backend: {backend.name}")
-            logger.info(f"Databricks config: {backend.databricks_config}")
+            logger.debug(f"Found default backend: {backend.name}")
             return MemoryBackendResponse.model_validate(backend)
         else:
-            logger.info(f"No default backend found for group: {group_context.primary_group_id}")
+            logger.debug(f"No default backend found for group: {group_context.primary_group_id}")
             return None
         
     except Exception as e:
@@ -410,16 +401,24 @@ async def update_memory_config(
 ) -> MemoryBackendResponse:
     """
     Update a memory backend configuration.
-    
+    Only workspace admins can update memory configurations for their workspace.
+
     Args:
         backend_id: Backend ID
         update_data: Update data
         group_context: Current group context
         service: Memory backend service
-        
+
     Returns:
         Updated memory backend configuration
     """
+    # Check permissions - only workspace admins can update memory configs
+    if not is_workspace_admin(group_context):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Only workspace admins can update memory configurations"
+        )
+
     try:
         # Service is injected via dependency
         backend = await service.update_memory_backend(group_context.primary_group_id, backend_id, update_data)
@@ -450,15 +449,23 @@ async def delete_memory_config(
 ) -> Dict[str, Any]:
     """
     Delete a memory backend configuration.
-    
+    Only workspace admins can delete memory configurations for their workspace.
+
     Args:
         backend_id: Backend ID
         group_context: Current group context
         service: Memory backend service
-        
+
     Returns:
         Success status
     """
+    # Check permissions - only workspace admins can delete memory configs
+    if not is_workspace_admin(group_context):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Only workspace admins can delete memory configurations"
+        )
+
     try:
         # Service is injected via dependency
         success = await service.delete_memory_backend(group_context.primary_group_id, backend_id)

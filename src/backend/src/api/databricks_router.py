@@ -8,6 +8,7 @@ from src.schemas.databricks_config import DatabricksConfigCreate, DatabricksConf
 from src.services.databricks_service import DatabricksService
 from src.services.api_keys_service import ApiKeysService
 from src.core.dependencies import SessionDep, GroupContextDep
+from src.core.permissions import check_role_in_context, is_workspace_admin
 from src.utils.databricks_auth import is_databricks_apps_environment
 
 router = APIRouter(
@@ -24,11 +25,8 @@ def get_api_keys_service(
     group_context: GroupContextDep
 ) -> ApiKeysService:
     """Get ApiKeysService instance with group context."""
-    from src.repositories.api_key_repository import ApiKeyRepository
-    
     group_id = group_context.primary_group_id if group_context else None
-    repository = ApiKeyRepository(session)
-    return ApiKeysService(repository=repository, group_id=group_id)
+    return ApiKeysService(session, group_id=group_id)
 
 # Dependency to get DatabricksService
 def get_databricks_service(
@@ -47,38 +45,47 @@ def get_databricks_service(
     Returns:
         Initialized DatabricksService with all dependencies
     """
-    from src.repositories.databricks_config_repository import DatabricksConfigRepository
-    
     # Get group_id from context
     group_id = group_context.primary_group_id if group_context else None
-    
-    # Create repository and service with group context
-    databricks_repository = DatabricksConfigRepository(session)
-    service = DatabricksService(databricks_repository, group_id=group_id)
+
+    # Create service with session and group context
+    service = DatabricksService(session, group_id=group_id)
     
     # Set the API keys service
     service.secrets_service.set_api_keys_service(api_keys_service)
     
     return service
 
+# Type alias for cleaner function signatures
+DatabricksServiceDep = Annotated[DatabricksService, Depends(get_databricks_service)]
+ApiKeysServiceDep = Annotated[ApiKeysService, Depends(get_api_keys_service)]
+
 
 @router.post("/config", response_model=Dict)
 async def set_databricks_config(
     request: DatabricksConfigCreate,
     group_context: GroupContextDep,
-    service: Annotated[DatabricksService, Depends(get_databricks_service)],
+    service: DatabricksServiceDep,
 ):
     """
     Set Databricks configuration.
-    
+    Only workspace admins can set Databricks configuration for their workspace.
+
     Args:
         request: Configuration data
         group_context: Group context for multi-tenant operations
         service: Databricks service
-        
+
     Returns:
         Success response with configuration
     """
+    # Check permissions - only workspace admins can set Databricks configuration
+    if not is_workspace_admin(group_context):
+        raise HTTPException(
+            status_code=403,
+            detail="Only workspace admins can set Databricks configuration"
+        )
+
     try:
         # Get user email from group context
         created_by_email = group_context.group_email if group_context else None
@@ -91,7 +98,7 @@ async def set_databricks_config(
 @router.get("/config", response_model=DatabricksConfigResponse)
 async def get_databricks_config(
     group_context: GroupContextDep,
-    service: Annotated[DatabricksService, Depends(get_databricks_service)],
+    service: DatabricksServiceDep,
 ):
     """
     Get current Databricks configuration.
@@ -104,7 +111,27 @@ async def get_databricks_config(
         Current Databricks configuration
     """
     try:
-        return await service.get_databricks_config()
+        config = await service.get_databricks_config()
+        if not config:
+            # Return a default empty configuration instead of 404
+            from src.schemas.databricks_config import DatabricksConfigResponse
+            return DatabricksConfigResponse(
+                workspace_url="",
+                warehouse_id="",
+                catalog="",
+                schema="",
+                enabled=False,
+                apps_enabled=False,
+                volume_enabled=False,
+                volume_path=None,
+                volume_file_format="json",
+                volume_create_date_dirs=True,
+                knowledge_volume_enabled=False,
+                knowledge_volume_path=None,
+                knowledge_chunk_size=1000,
+                knowledge_chunk_overlap=200
+            )
+        return config
     except HTTPException as he:
         raise he
     except Exception as e:
@@ -115,7 +142,7 @@ async def get_databricks_config(
 @router.get("/status/personal-token-required", response_model=Dict)
 async def check_personal_token_required(
     group_context: GroupContextDep,
-    service: Annotated[DatabricksService, Depends(get_databricks_service)],
+    service: DatabricksServiceDep,
 ):
     """
     Check if personal access token is required for Databricks.
@@ -137,7 +164,7 @@ async def check_personal_token_required(
 @router.get("/connection", response_model=Dict)
 async def check_databricks_connection(
     group_context: GroupContextDep,
-    service: Annotated[DatabricksService, Depends(get_databricks_service)],
+    service: DatabricksServiceDep,
 ):
     """
     Check connection to Databricks.

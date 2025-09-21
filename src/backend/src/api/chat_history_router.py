@@ -3,9 +3,8 @@ from typing import Annotated, List, Optional
 from fastapi import APIRouter, Depends, HTTPException, Path, Query, status
 import logging
 
-from src.core.dependencies import SessionDep, GroupContextDep, get_service
+from src.core.dependencies import SessionDep, GroupContextDep
 from src.models.chat_history import ChatHistory
-from src.repositories.chat_history_repository import ChatHistoryRepository
 from src.schemas.chat_history import (
     ChatHistoryResponse, 
     ChatHistoryListResponse,
@@ -26,13 +25,29 @@ router = APIRouter(
 logger = logging.getLogger(__name__)
 
 # Dependency to get ChatHistoryService
-get_chat_history_service = get_service(ChatHistoryService, ChatHistoryRepository, ChatHistory)
+def get_chat_history_service(session: SessionDep) -> ChatHistoryService:
+    """
+    Dependency provider for ChatHistoryService.
+
+    Creates service with session following the pattern:
+    Router → Service → Repository → DB
+
+    Args:
+        session: Database session from FastAPI DI (from core.dependencies)
+
+    Returns:
+        ChatHistoryService instance with session
+    """
+    return ChatHistoryService(session)
+
+# Type alias for cleaner function signatures
+ChatHistoryServiceDep = Annotated[ChatHistoryService, Depends(get_chat_history_service)]
 
 
 @router.post("/messages", response_model=ChatHistoryResponse, status_code=status.HTTP_201_CREATED)
 async def save_chat_message(
     message_request: SaveMessageRequest,
-    service: Annotated[ChatHistoryService, Depends(get_chat_history_service)],
+    service: ChatHistoryServiceDep,
     group_context: GroupContextDep,
 ):
     """
@@ -74,7 +89,7 @@ async def save_chat_message(
 @router.get("/sessions/{session_id}/messages", response_model=ChatHistoryListResponse)
 async def get_chat_session_messages(
     session_id: Annotated[str, Path(..., description="Chat session identifier")],
-    service: Annotated[ChatHistoryService, Depends(get_chat_history_service)],
+    service: ChatHistoryServiceDep,
     group_context: GroupContextDep,
     page: int = Query(0, ge=0, description="Page number (0-based)"),
     per_page: int = Query(50, ge=1, le=100, description="Messages per page"),
@@ -126,7 +141,7 @@ async def get_chat_session_messages(
 
 @router.get("/users/sessions", response_model=List[ChatHistoryResponse])
 async def get_user_chat_sessions(
-    service: Annotated[ChatHistoryService, Depends(get_chat_history_service)],
+    service: ChatHistoryServiceDep,
     group_context: GroupContextDep,
     page: int = Query(0, ge=0, description="Page number (0-based)"),
     per_page: int = Query(20, ge=1, le=50, description="Sessions per page"),
@@ -166,7 +181,7 @@ async def get_user_chat_sessions(
 
 @router.get("/sessions", response_model=ChatSessionListResponse)
 async def get_group_chat_sessions(
-    service: Annotated[ChatHistoryService, Depends(get_chat_history_service)],
+    service: ChatHistoryServiceDep,
     group_context: GroupContextDep,
     page: int = Query(0, ge=0, description="Page number (0-based)"),
     per_page: int = Query(20, ge=1, le=50, description="Sessions per page"),
@@ -213,7 +228,7 @@ async def get_group_chat_sessions(
 @router.delete("/sessions/{session_id}", status_code=status.HTTP_204_NO_CONTENT)
 async def delete_chat_session(
     session_id: Annotated[str, Path(..., description="Chat session identifier")],
-    service: Annotated[ChatHistoryService, Depends(get_chat_history_service)],
+    service: ChatHistoryServiceDep,
     group_context: GroupContextDep,
 ):
     """
@@ -245,7 +260,7 @@ async def delete_chat_session(
 
 @router.post("/sessions/new", response_model=dict, status_code=status.HTTP_201_CREATED)
 async def create_new_chat_session(
-    service: Annotated[ChatHistoryService, Depends(get_chat_history_service)],
+    service: ChatHistoryServiceDep,
     group_context: GroupContextDep,
 ):
     """
