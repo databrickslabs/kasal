@@ -354,6 +354,7 @@ export class RunService {
       run_name: name || `Run ${jobId}`,
       agents_yaml,
       tasks_yaml,
+      group_id: executionItem.group_id as string | undefined,  // CRITICAL: Extract group_id for security filtering
       group_email: executionItem.group_email as string | undefined,
       inputs,
       result: executionItem.result as Record<string, OutputDataType> | undefined,
@@ -417,45 +418,45 @@ export class RunService {
         if (limit) params.append('limit', limit.toString());
         if (offset) params.append('offset', offset.toString());
         if (updated_since) params.append('updated_since', updated_since);
-        
+
         try {
-          // Using the correct endpoint
+          // Use the standard executions endpoint which respects group context from headers
           const response = await apiClient.get(`/executions?${params.toString()}`);
-          
+
           // API is available if we got here
           this.apiAvailable = true;
-          
+
           // Convert the backend format to the frontend format
           const responseData = response.data;
-          const runs: Run[] = Array.isArray(responseData) 
+          const runs: Run[] = Array.isArray(responseData)
             ? responseData.map(item => this.convertToRun(item))
             : [];
-          
+
           const result = {
             runs,
             total: runs.length,
             limit: limit || 50,
             offset: offset || 0
           };
-          
+
           // Update the cache
           this.runsCache = {
             data: result,
             timestamp: now
           };
-          
+
           return result;
         } catch (error) {
           // Only set apiAvailable to false on 404, not on server errors
-          if (error && typeof error === 'object' && 'response' in error && 
-              error.response && typeof error.response === 'object' && 
+          if (error && typeof error === 'object' && 'response' in error &&
+              error.response && typeof error.response === 'object' &&
               'status' in error.response && error.response.status === 404) {
             this.apiAvailable = false;
           }
           // Fall through to return empty response
         }
       }
-      
+
       // Return empty response if API not available or call failed
       const emptyResponse = {
         runs: [],
@@ -463,7 +464,7 @@ export class RunService {
         limit: limit || 50,
         offset: offset || 0
       };
-      
+
       return emptyResponse;
     } catch (error) {
       return {
