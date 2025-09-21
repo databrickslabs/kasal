@@ -87,8 +87,14 @@ class BaseRepository(Generic[ModelType]):
             # Don't commit here - let the session dependency handle it
             # This ensures consistent transaction management across all operations
 
-            # Refresh the object to ensure we have all the DB-generated data
-            await self.session.refresh(db_obj)
+            # Try to refresh the object to ensure we have all the DB-generated data
+            # If the session has been committed elsewhere, this might fail
+            try:
+                await self.session.refresh(db_obj)
+            except Exception as refresh_error:
+                # If refresh fails (e.g., object detached), it's okay
+                # The object still has the data from flush
+                logger.debug(f"Could not refresh {self.model.__name__} (session may be closed): {refresh_error}")
 
             logger.debug(f"Created {self.model.__name__} with ID: {db_obj.id}")
             return db_obj
