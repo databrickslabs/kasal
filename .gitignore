@@ -5,6 +5,17 @@ node_modules/
 
 # Testing
 /coverage
+coverage.xml
+test_results.html
+htmlcov/
+.coverage
+*.cover
+.hypothesis/
+.pytest_cache/
+nosetests.xml
+coverage.xml
+*.cover
+.coverage.*
 
 # Production
 /build
@@ -144,8 +155,12 @@ logs/
 
 # Database files
 *.db
+*.db-shm
+*.db-wal
 *.sqlite
 *.sqlite3
+app.db*
+src/backend/app.db*
 
 
 
