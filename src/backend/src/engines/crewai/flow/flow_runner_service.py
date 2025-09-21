@@ -10,7 +10,7 @@ import asyncio
 import uuid
 from typing import Dict, List, Optional, Any, Union
 from datetime import datetime, UTC
-from sqlalchemy.orm import Session
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from fastapi import HTTPException, status
 
@@ -22,15 +22,15 @@ from src.schemas.flow_execution import (
     FlowExecutionStatus
 )
 from src.repositories.flow_execution_repository import (
-    SyncFlowExecutionRepository,
-    SyncFlowNodeExecutionRepository
+    FlowExecutionRepository,
+    FlowNodeExecutionRepository
 )
-from src.repositories.flow_repository import SyncFlowRepository
-from src.repositories.task_repository import SyncTaskRepository
-from src.repositories.agent_repository import SyncAgentRepository
-from src.repositories.tool_repository import SyncToolRepository
+from src.repositories.flow_repository import FlowRepository
+from src.repositories.task_repository import TaskRepository
+from src.repositories.agent_repository import AgentRepository
+from src.repositories.tool_repository import ToolRepository
 from src.core.logger import LoggerManager
-from src.db.session import SessionLocal
+from src.db.session import async_session_factory
 from src.services.api_keys_service import ApiKeysService
 from src.engines.crewai.flow.backend_flow import BackendFlow
 
@@ -40,15 +40,15 @@ logger = LoggerManager.get_instance().crew
 class FlowRunnerService:
     """Service for running Flow executions"""
     
-    def __init__(self, db: Session):
-        """Initialize with database session"""
+    def __init__(self, db: AsyncSession):
+        """Initialize with async database session"""
         self.db = db
-        self.flow_execution_repo = SyncFlowExecutionRepository(db)
-        self.node_execution_repo = SyncFlowNodeExecutionRepository(db)
-        self.flow_repo = SyncFlowRepository(db)
-        self.task_repo = SyncTaskRepository(db)
-        self.agent_repo = SyncAgentRepository(db)
-        self.tool_repo = SyncToolRepository(db)
+        self.flow_execution_repo = FlowExecutionRepository(db)
+        self.node_execution_repo = FlowNodeExecutionRepository(db)
+        self.flow_repo = FlowRepository(db)
+        self.task_repo = TaskRepository(db)
+        self.agent_repo = AgentRepository(db)
+        self.tool_repo = ToolRepository(db)
     
     def create_flow_execution(self, flow_id: Union[uuid.UUID, str], job_id: str, config: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
         """

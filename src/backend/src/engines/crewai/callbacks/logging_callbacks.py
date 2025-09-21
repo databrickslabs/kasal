@@ -173,7 +173,7 @@ from src.services.execution_logs_queue import enqueue_log, get_job_output_queue
 from src.services.task_tracking_service import TaskTrackingService
 from src.schemas.task_tracking import TaskStatusEnum, TaskStatusCreate
 from src.core.unit_of_work import SyncUnitOfWork
-from src.db.session import SessionLocal
+# SessionLocal removed - use async_session_factory instead
 from src.models.task import Task
 
 # Import shared utilities
@@ -1706,7 +1706,7 @@ class AgentTraceEventListener(BaseEventListener):
         log_prefix = f"[AgentTraceEventListener][{self.job_id}]"
         try:
             # Use the sync SessionLocal which is already configured for the correct database
-            from src.db.session import SessionLocal
+            # SessionLocal removed - use async_session_factory instead
             from src.models.execution_trace import ExecutionTrace
             
             logger.debug(f"{log_prefix} Writing trace to database using SessionLocal")
