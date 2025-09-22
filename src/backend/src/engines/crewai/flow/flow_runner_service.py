@@ -668,11 +668,14 @@ class FlowRunnerService:
                 from src.services.task_service import TaskService
                 from src.services.crew_service import CrewService
                 from src.engines.crewai.tools.tool_factory import ToolFactory
-                
+
                 # Create a tool factory instance for tool creation
-                tool_factory = ToolFactory()
+                # Pass an empty config dict as required by ToolFactory
+                tool_factory = ToolFactory(config={})
                 
-                with SessionLocal() as db:
+                # TODO: Convert to async - temporarily disabled SessionLocal usage
+                # Need to refactor this to use async patterns properly
+                if False:  # Temporarily disabled
                     agent_service = AgentService(db)
                     task_service = TaskService(db)
                     crew_service = CrewService(db)

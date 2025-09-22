@@ -305,23 +305,24 @@ class TestGetLogService:
     """Test cases for get_log_service factory."""
     
     def test_get_log_service_creates_singleton(self):
-        """Test that get_log_service creates a service instance."""
+        """Test that get_log_service creates a service instance with session."""
         with patch('src.core.dependencies.LLMLogRepository') as mock_repo_class:
             with patch('src.core.dependencies.LLMLogService') as mock_service_class:
                 mock_repo_instance = MagicMock()
                 mock_service_instance = MagicMock()
-                
+
                 mock_repo_class.return_value = mock_repo_instance
                 mock_service_class.return_value = mock_service_instance
-                
-                result = get_log_service()
-                
-                # Verify repository was created
-                mock_repo_class.assert_called_once_with()
-                
+
+                mock_session = MagicMock()
+                result = get_log_service(mock_session)
+
+                # Verify repository was created with session
+                mock_repo_class.assert_called_once_with(mock_session)
+
                 # Verify service was created with repository
                 mock_service_class.assert_called_once_with(mock_repo_instance)
-                
+
                 assert result == mock_service_instance
     
     def test_get_log_service_returns_same_type(self):
@@ -329,10 +330,11 @@ class TestGetLogService:
         # Mock the actual imports to avoid dependencies
         mock_repo = MagicMock(spec=LLMLogRepository)
         mock_service = MagicMock(spec=LLMLogService)
-        
+
         with patch('src.core.dependencies.LLMLogRepository', return_value=mock_repo):
             with patch('src.core.dependencies.LLMLogService', return_value=mock_service):
-                result = get_log_service()
-                
+                mock_session = MagicMock()
+                result = get_log_service(mock_session)
+
                 # Verify it returns the service instance
                 assert result == mock_service

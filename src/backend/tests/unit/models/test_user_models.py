@@ -9,9 +9,12 @@ import pytest
 from datetime import datetime, timezone, timedelta
 from unittest.mock import MagicMock
 
-from src.models.user import (
-    User, UserProfile, RefreshToken, generate_uuid
-)
+from src.models.user import User, RefreshToken, generate_uuid
+try:
+    from src.models.user import UserProfile  # Legacy (removed in simplified auth)
+    HAS_USER_PROFILE = True
+except Exception:
+    HAS_USER_PROFILE = False
 from src.models.enums import UserRole as UserRoleEnum, UserStatus, IdentityProviderType
 
 
@@ -23,19 +26,14 @@ class TestUser:
         # Arrange
         username = "testuser"
         email = "test@example.com"
-        hashed_password = "hashed_password_123"
-        
         # Act
         user = User(
             username=username,
             email=email,
-            hashed_password=hashed_password
         )
-        
         # Assert
         assert user.username == username
         assert user.email == email
-        assert user.hashed_password == hashed_password
         # Note: SQLAlchemy defaults are applied when saved to database
         assert User.__table__.columns['role'].default.arg == UserRoleEnum.REGULAR
         assert User.__table__.columns['status'].default.arg == UserStatus.ACTIVE
@@ -46,49 +44,43 @@ class TestUser:
         # Arrange
         username = "adminuser"
         email = "admin@company.com"
-        hashed_password = "secure_hash_456"
         role = UserRoleEnum.ADMIN
         status = UserStatus.ACTIVE
         last_login = datetime.now(timezone.utc)
-        
+        display_name = "Admin User"
         # Act
         user = User(
             username=username,
             email=email,
-            hashed_password=hashed_password,
             role=role,
             status=status,
-            last_login=last_login
+            last_login=last_login,
+            display_name=display_name,
         )
-        
         # Assert
         assert user.username == username
         assert user.email == email
-        assert user.hashed_password == hashed_password
         assert user.role == role
         assert user.status == status
         assert user.last_login == last_login
+        assert user.display_name == display_name
 
     def test_user_role_enum_values(self):
         """Test User with different role enum values."""
-        # Test all role types
         for role in [UserRoleEnum.ADMIN, UserRoleEnum.TECHNICAL, UserRoleEnum.REGULAR]:
             user = User(
                 username=f"user_{role.value}",
                 email=f"{role.value}@example.com",
-                hashed_password="password",
                 role=role
             )
             assert user.role == role
 
     def test_user_status_enum_values(self):
         """Test User with different status enum values."""
-        # Test all status types
         for status in [UserStatus.ACTIVE, UserStatus.INACTIVE, UserStatus.SUSPENDED]:
             user = User(
                 username=f"user_{status.value}",
                 email=f"{status.value}@example.com",
-                hashed_password="password",
                 status=status
             )
             assert user.status == status
@@ -102,7 +94,7 @@ class TestUser:
         """Test that username and email have unique constraints."""
         # Act
         columns = User.__table__.columns
-        
+
         # Assert
         assert columns['username'].unique is True
         assert columns['email'].unique is True
@@ -111,15 +103,13 @@ class TestUser:
 
     def test_user_relationships(self):
         """Test that User model has the expected relationships."""
-        # Act
         relationships = User.__mapper__.relationships
-        
-        # Assert
-        assert 'profile' in relationships
         assert 'refresh_tokens' in relationships
-        assert 'external_identities' in relationships
-        assert 'user_roles' in relationships
+        assert 'profile' not in relationships
+        assert 'external_identities' not in relationships
 
+
+@pytest.mark.skipif(not HAS_USER_PROFILE, reason="UserProfile model removed in simplified auth; display_name moved to User")
 
 class TestUserProfile:
     """Test cases for UserProfile model."""
@@ -131,7 +121,7 @@ class TestUserProfile:
         display_name = "John Doe"
         avatar_url = "https://example.com/avatar.jpg"
         preferences = '{"theme": "dark", "notifications": true}'
-        
+
         # Act
         profile = UserProfile(
             user_id=user_id,
@@ -139,7 +129,7 @@ class TestUserProfile:
             avatar_url=avatar_url,
             preferences=preferences
         )
-        
+
         # Assert
         assert profile.user_id == user_id
         assert profile.display_name == display_name
@@ -150,7 +140,7 @@ class TestUserProfile:
         """Test UserProfile with minimal required fields."""
         # Arrange & Act
         profile = UserProfile(user_id="user-456")
-        
+
         # Assert
         assert profile.user_id == "user-456"
         assert profile.display_name is None
@@ -166,7 +156,7 @@ class TestUserProfile:
         """Test that user_id has unique constraint."""
         # Act
         columns = UserProfile.__table__.columns
-        
+
         # Assert
         assert columns['user_id'].unique is True
 
@@ -180,14 +170,14 @@ class TestRefreshToken:
         user_id = "user-789"
         token = "hashed_refresh_token_abc123"
         expires_at = datetime.now(timezone.utc) + timedelta(days=30)
-        
+
         # Act
         refresh_token = RefreshToken(
             user_id=user_id,
             token=token,
             expires_at=expires_at
         )
-        
+
         # Assert
         assert refresh_token.user_id == user_id
         assert refresh_token.token == token
@@ -201,7 +191,7 @@ class TestRefreshToken:
         user_id = "user-revoked"
         token = "revoked_token_xyz"
         expires_at = datetime.now(timezone.utc) + timedelta(days=1)
-        
+
         # Act
         refresh_token = RefreshToken(
             user_id=user_id,
@@ -209,7 +199,7 @@ class TestRefreshToken:
             expires_at=expires_at,
             is_revoked=True
         )
-        
+
         # Assert
         assert refresh_token.is_revoked is True
 
@@ -222,7 +212,7 @@ class TestRefreshToken:
         """Test that token has unique constraint."""
         # Act
         columns = RefreshToken.__table__.columns
-        
+
         # Assert
         assert columns['token'].unique is True
 
@@ -240,7 +230,7 @@ class TestExternalIdentity:
         provider_user_id = "google_user_12345"
         email = "user@gmail.com"
         profile_data = '{"name": "John Doe", "picture": "https://lh3.googleusercontent.com/..."}'
-        
+
         # Act
         external_identity = ExternalIdentity(
             user_id=user_id,
@@ -249,7 +239,7 @@ class TestExternalIdentity:
             email=email,
             profile_data=profile_data
         )
-        
+
         # Assert
         assert external_identity.user_id == user_id
         assert external_identity.provider == provider
@@ -266,7 +256,7 @@ class TestExternalIdentity:
             provider="github",
             provider_user_id="github_123"
         )
-        
+
         # Assert
         assert external_identity.email is None
         assert external_identity.profile_data is None
@@ -275,7 +265,7 @@ class TestExternalIdentity:
         \"\"\"Test ExternalIdentity with last login timestamp.\"\"\"
         # Arrange
         last_login = datetime.now(timezone.utc)
-        
+
         # Act
         external_identity = ExternalIdentity(
             user_id="user-login",
@@ -283,7 +273,7 @@ class TestExternalIdentity:
             provider_user_id="ms_user_456",
             last_login=last_login
         )
-        
+
         # Assert
         assert external_identity.last_login == last_login
 
@@ -296,7 +286,7 @@ class TestExternalIdentity:
         \"\"\"Test that the unique constraint exists for provider and provider_user_id.\"\"\"
         # Act
         constraints = ExternalIdentity.__table_args__
-        
+
         # Assert
         assert len(constraints) == 1
         constraint = constraints[0]
@@ -315,13 +305,13 @@ class TestRole:
         # Arrange
         name = "Project Manager"
         description = "Can manage projects and assign tasks"
-        
+
         # Act
         role = Role(
             name=name,
             description=description
         )
-        
+
         # Assert
         assert role.name == name
         assert role.description == description
@@ -330,7 +320,7 @@ class TestRole:
         \"\"\"Test Role with minimal required fields.\"\"\"
         # Arrange & Act
         role = Role(name="Basic User")
-        
+
         # Assert
         assert role.name == "Basic User"
         assert role.description is None
@@ -344,7 +334,7 @@ class TestRole:
         \"\"\"Test that name has unique constraint.\"\"\"
         # Act
         columns = Role.__table__.columns
-        
+
         # Assert
         assert columns['name'].unique is True
 
@@ -352,7 +342,7 @@ class TestRole:
         \"\"\"Test that Role model has the expected relationships.\"\"\"
         # Act
         relationships = Role.__mapper__.relationships
-        
+
         # Assert
         assert 'role_privileges' in relationships
         assert 'user_roles' in relationships
@@ -366,13 +356,13 @@ class TestPrivilege:
         # Arrange
         name = "users:read"
         description = "Can read user information"
-        
+
         # Act
         privilege = Privilege(
             name=name,
             description=description
         )
-        
+
         # Assert
         assert privilege.name == name
         assert privilege.description == description
@@ -382,18 +372,18 @@ class TestPrivilege:
         # Arrange
         privileges = [
             "users:create",
-            "users:read", 
+            "users:read",
             "users:update",
             "users:delete",
             "agents:execute",
             "crews:manage",
             "workflows:deploy"
         ]
-        
+
         for priv_name in privileges:
             # Act
             privilege = Privilege(name=priv_name)
-            
+
             # Assert
             assert privilege.name == priv_name
             assert ":" in privilege.name  # Should follow resource:action format
@@ -407,7 +397,7 @@ class TestPrivilege:
         \"\"\"Test that name has unique constraint.\"\"\"
         # Act
         columns = Privilege.__table__.columns
-        
+
         # Assert
         assert columns['name'].unique is True
 
@@ -420,13 +410,13 @@ class TestRolePrivilege:
         # Arrange
         role_id = "role-123"
         privilege_id = "privilege-456"
-        
+
         # Act
         role_privilege = RolePrivilege(
             role_id=role_id,
             privilege_id=privilege_id
         )
-        
+
         # Assert
         assert role_privilege.role_id == role_id
         assert role_privilege.privilege_id == privilege_id
@@ -440,7 +430,7 @@ class TestRolePrivilege:
         \"\"\"Test that the unique constraint exists for role_id and privilege_id.\"\"\"
         # Act
         constraints = RolePrivilege.__table_args__
-        
+
         # Assert
         assert len(constraints) == 1
         constraint = constraints[0]
@@ -458,14 +448,14 @@ class TestUserRole:
         user_id = "user-789"
         role_id = "role-abc"
         assigned_by = "admin@company.com"
-        
+
         # Act
         user_role = UserRole(
             user_id=user_id,
             role_id=role_id,
             assigned_by=assigned_by
         )
-        
+
         # Assert
         assert user_role.user_id == user_id
         assert user_role.role_id == role_id
@@ -478,7 +468,7 @@ class TestUserRole:
             user_id="user-min",
             role_id="role-min"
         )
-        
+
         # Assert
         assert user_role.assigned_by is None
 
@@ -491,7 +481,7 @@ class TestUserRole:
         \"\"\"Test that the unique constraint exists for user_id and role_id.\"\"\"
         # Act
         constraints = UserRole.__table_args__
-        
+
         # Assert
         assert len(constraints) == 1
         constraint = constraints[0]
@@ -509,14 +499,14 @@ class TestIdentityProvider:
         name = "Google OAuth"
         provider_type = IdentityProviderType.OAUTH
         config = '{"client_id": "google_client_123", "client_secret": "secret"}'
-        
+
         # Act
         identity_provider = IdentityProvider(
             name=name,
             type=provider_type,
             config=config
         )
-        
+
         # Assert
         assert identity_provider.name == name
         assert identity_provider.type == provider_type
@@ -545,7 +535,7 @@ class TestIdentityProvider:
             config='{"issuer": "https://auth.company.com"}',
             is_default=True
         )
-        
+
         # Assert
         assert identity_provider.is_default is True
 
@@ -558,7 +548,7 @@ class TestIdentityProvider:
             config='{"sso_url": "https://saml.example.com"}',
             enabled=False
         )
-        
+
         # Assert
         assert identity_provider.enabled is False
 
@@ -581,18 +571,18 @@ class TestDatabricksRoleAlias:
         # Arrange
         name = "Databricks Admin"
         description = "Administrator role for Databricks"
-        
+
         # Act
         role_via_alias = DatabricksRole(
             name=name,
             description=description
         )
-        
+
         role_via_class = Role(
             name=name + "_2",
             description=description
         )
-        
+
         # Assert
         assert role_via_alias.description == role_via_class.description
         assert type(role_via_alias) == type(role_via_class)
@@ -609,7 +599,7 @@ class TestGenerateUuidFunction:
         # Act
         uuid1 = generate_uuid()
         uuid2 = generate_uuid()
-        
+
         # Assert
         assert uuid1 is not None
         assert uuid2 is not None
@@ -623,7 +613,7 @@ class TestGenerateUuidFunction:
         """Test that generate_uuid generates unique IDs."""
         # Act
         uuids = [generate_uuid() for _ in range(50)]
-        
+
         # Assert
         assert len(set(uuids)) == 50  # All UUIDs should be unique
 
@@ -635,20 +625,20 @@ class TestUserModelsIntegration:
         """Test User and UserProfile relationship setup."""
         # Arrange
         user_id = "integration-user-1"
-        
+
         # Act
         user = User(
             username="integrated_user",
             email="integrated@example.com",
-            hashed_password="password"
         )
-        
+        if not HAS_USER_PROFILE:
+            pytest.skip("UserProfile model removed; display_name lives on User")
         profile = UserProfile(
             user_id=user_id,
             display_name="Integrated User",
             preferences='{"language": "en", "timezone": "UTC"}'
         )
-        
+
         # Assert
         # Note: Actual relationship testing would require database session
         assert user.username == "integrated_user"
@@ -659,26 +649,25 @@ class TestUserModelsIntegration:
         """Test User with multiple RefreshToken relationships."""
         # Arrange
         user_id = "multi-token-user"
-        
+
         # Act
         user = User(
             username="token_user",
             email="tokens@example.com",
-            hashed_password="password"
         )
-        
+
         token1 = RefreshToken(
             user_id=user_id,
             token="token_1_hash",
             expires_at=datetime.now(timezone.utc) + timedelta(days=30)
         )
-        
+
         token2 = RefreshToken(
             user_id=user_id,
             token="token_2_hash",
             expires_at=datetime.now(timezone.utc) + timedelta(days=7)
         )
-        
+
         # Assert
         assert token1.user_id == token2.user_id == user_id
         assert token1.token != token2.token

@@ -905,16 +905,15 @@ class CrewPreparation:
                                 user_token=crew_user_token  # Pass user token for OBO auth
                             )
                             
-                            crew_kwargs['embedder'] = {
-                                'provider': 'custom',
-                                'config': {
-                                    'embedder': databricks_embedder
-                                }
-                            }
-                            logger.info(f"Configured CrewAI custom embedder for Databricks with model: {model_name}")
-                            
-                            # Store embedder config for knowledge sources
-                            self.embedder_config = crew_kwargs['embedder']
+                            # Don't set embedder in crew_kwargs for Databricks
+                            # CrewAI will use its default embedder, while we use our custom one for memory
+                            logger.info(f"Using custom Databricks embedder for memory backends: {model_name}")
+                            logger.info("CrewAI will use its default embedder for internal operations")
+
+                            # Store embedder for our custom memory backends
+                            # This will be used by our DatabricksVectorStorage
+                            self.custom_embedder = databricks_embedder
+                            self.embedder_config = {'provider': 'databricks', 'embedder': databricks_embedder}
                         else:
                             logger.warning("No Databricks API key found, falling back to default embedder")
                             
@@ -971,13 +970,15 @@ class CrewPreparation:
                             logger.info(f"Configured CrewAI embedder for Google: {crew_kwargs['embedder']}")
                     except Exception as e:
                         logger.error(f"Error configuring Google embedder: {e}")
-                else:
-                    # Other providers - pass through config as-is
+                elif provider != 'databricks':
+                    # Other providers (not databricks) - pass through config as-is
                     crew_kwargs['embedder'] = embedder_config
                     logger.info(f"Configured CrewAI embedder for {provider}: {crew_kwargs['embedder']}")
                 
                 # Store embedder config for knowledge sources
-                self.embedder_config = crew_kwargs.get('embedder')
+                # For Databricks, we already set embedder_config, for others use crew_kwargs
+                if provider != 'databricks':
+                    self.embedder_config = crew_kwargs.get('embedder')
                     
             logger.info(f"Final embedder configuration: {crew_kwargs.get('embedder', 'None (default)')}")
             
@@ -1391,11 +1392,12 @@ class CrewPreparation:
                 embedder_info = crew_kwargs['embedder']
                 if isinstance(embedder_info, dict):
                     logger.info(f"Embedder provider: {embedder_info.get('provider', 'unknown')}")
-                    if embedder_info.get('provider') == 'custom':
-                        custom_embedder = embedder_info.get('config', {}).get('embedder')
-                        if hasattr(custom_embedder, 'model'):
-                            logger.info(f"Custom embedder model: {custom_embedder.model}")
-                            logger.info(f"Expected embedding dimension: 1024")
+                else:
+                    # Direct embedder object (custom Databricks embedder)
+                    logger.info("Embedder provider: custom Databricks embedder")
+                    if hasattr(embedder_info, 'model'):
+                        logger.info(f"Custom embedder model: {embedder_info.model}")
+                        logger.info(f"Expected embedding dimension: 1024")
             logger.info("================================================")
             
             # Create the crew instance
@@ -1436,14 +1438,14 @@ class CrewPreparation:
                 # Check if Databricks knowledge volume is enabled
                 from src.core.unit_of_work import SyncUnitOfWork
                 from src.repositories.databricks_config_repository import DatabricksConfigRepository
-                
+                from src.db.session import async_session_factory
+
                 databricks_config = None
                 try:
-                    # Use synchronous UnitOfWork for non-async context
-                    sync_uow = SyncUnitOfWork.get_instance()
-                    sync_uow.initialize()
-                    databricks_repo = sync_uow.databricks_config_repository
-                    databricks_config = databricks_repo.get_active_config_sync(group_id=group_id)
+                    # Use async session for database access
+                    async with async_session_factory() as session:
+                        databricks_repo = DatabricksConfigRepository(session)
+                        databricks_config = await databricks_repo.get_active_config(group_id=group_id)
                 except Exception as db_error:
                     logger.warning(f"Could not check Databricks config from database: {db_error}")
                     # Continue without Databricks volume knowledge sources

@@ -84,6 +84,10 @@ class BaseRepository(Generic[ModelType]):
             # Flush changes to get generated ID and other DB-generated values
             await self.session.flush()
 
+            # Capture the ID immediately after flush while we know it's available
+            # This prevents lazy loading issues later
+            obj_id = db_obj.id if hasattr(db_obj, 'id') else 'unknown'
+
             # Don't commit here - let the session dependency handle it
             # This ensures consistent transaction management across all operations
 
@@ -96,7 +100,7 @@ class BaseRepository(Generic[ModelType]):
                 # The object still has the data from flush
                 logger.debug(f"Could not refresh {self.model.__name__} (session may be closed): {refresh_error}")
 
-            logger.debug(f"Created {self.model.__name__} with ID: {db_obj.id}")
+            logger.debug(f"Created {self.model.__name__} with ID: {obj_id}")
             return db_obj
         except Exception as e:
             logger.error(f"Error creating {self.model.__name__}: {str(e)}")

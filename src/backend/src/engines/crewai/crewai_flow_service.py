@@ -42,10 +42,10 @@ class CrewAIFlowService:
         if self.session:
             return FlowRunnerService(self.session)
         
-        # Otherwise, create a new session
-        new_session = SessionLocal()
-        # This session will be closed by the FlowRunnerService
-        return FlowRunnerService(new_session)
+        # Cannot create sync session - need async refactoring
+        # For now, return service without session
+        logger.warning("FlowRunnerService created without session - needs async refactoring")
+        return FlowRunnerService(None)
     
     async def run_flow(self, 
                       flow_id: Optional[Union[uuid.UUID, str]] = None, 

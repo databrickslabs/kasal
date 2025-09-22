@@ -13,7 +13,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from src.repositories.task_repository import TaskRepository, SyncTaskRepository, get_sync_task_repository
+from src.repositories.task_repository import TaskRepository
 from src.models.task import Task
 
 
@@ -736,6 +736,7 @@ class TestTaskRepositoryErrorHandling:
             mock_async_session.rollback.assert_called_once()
 
 
+@pytest.mark.skip(reason="SyncTaskRepository removed; async-only architecture")
 class TestSyncTaskRepository:
     """Test cases for SyncTaskRepository."""
     
@@ -835,6 +836,7 @@ class TestSyncTaskRepository:
         assert result == []
 
 
+@pytest.mark.skip(reason="Sync task repository factory removed; use async repos")
 class TestGetSyncTaskRepository:
     """Test cases for get_sync_task_repository factory function."""
     
