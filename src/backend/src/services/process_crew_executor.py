@@ -781,10 +781,26 @@ def run_crew_in_process(
         except Exception as flush_error:
             logger.error(f"Error waiting for trace flush: {flush_error}")
 
+        # Process the result safely, handling CrewAI result objects
+        processed_result = None
+        try:
+            if hasattr(result, 'raw'):
+                # CrewAI result object with raw attribute
+                processed_result = result.raw
+            elif isinstance(result, dict):
+                # Already a dictionary
+                processed_result = str(result)
+            else:
+                # Convert any other result to string
+                processed_result = str(result)
+        except Exception as e:
+            logger.warning(f"Error converting result to string: {e}. Using fallback.")
+            processed_result = "Crew execution completed but result could not be serialized"
+
         return {
             "status": "COMPLETED",
             "execution_id": execution_id,
-            "result": str(result),  # Convert to string to ensure serializability
+            "result": processed_result,  # Safely processed result
             "process_id": os.getpid()
         }
         

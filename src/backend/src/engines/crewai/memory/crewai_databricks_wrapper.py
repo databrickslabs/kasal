@@ -315,39 +315,45 @@ class CrewAIDatabricksWrapper:
     def _format_results_for_crewai(self, results: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
         """
         Format search results to match CrewAI's expected format.
-        
-        CrewAI expects each result to have a 'context' field, but our Databricks
-        results have 'data' field. This method ensures compatibility.
-        
+
+        CrewAI expects each result to have both 'context' AND 'content' fields.
+        The contextual_memory module specifically looks for 'content' field.
+
         Args:
             results: Raw search results from service layer
-            
+
         Returns:
-            Formatted results with 'context' field for CrewAI compatibility
+            Formatted results with both 'context' and 'content' fields for CrewAI compatibility
         """
         formatted_results = []
         for result in results:
             # Create a copy to avoid modifying original
             formatted_result = result.copy()
-            
-            # Ensure 'context' field exists - this is what CrewAI expects
-            if 'context' not in formatted_result:
-                # Map 'data' field to 'context' for CrewAI compatibility
-                if 'data' in formatted_result:
-                    formatted_result['context'] = formatted_result['data']
-                elif 'content' in formatted_result:
-                    formatted_result['context'] = formatted_result['content']
-                else:
-                    # Fallback - use a concatenation of available text fields
-                    text_parts = []
-                    metadata = formatted_result.get('metadata', {})
-                    if isinstance(metadata, dict):
-                        for key, value in metadata.items():
-                            if isinstance(value, str) and value.strip():
-                                text_parts.append(f"{key}: {value}")
-                    
-                    formatted_result['context'] = ' | '.join(text_parts) if text_parts else "No context available"
-            
+
+            # Determine the text value from available fields
+            text_value = None
+            if 'data' in formatted_result:
+                text_value = formatted_result['data']
+            elif 'content' in formatted_result:
+                text_value = formatted_result['content']
+            elif 'context' in formatted_result:
+                text_value = formatted_result['context']
+            else:
+                # Fallback - use a concatenation of available text fields
+                text_parts = []
+                metadata = formatted_result.get('metadata', {})
+                if isinstance(metadata, dict):
+                    for key, value in metadata.items():
+                        if isinstance(value, str) and value.strip():
+                            text_parts.append(f"{key}: {value}")
+
+                text_value = ' | '.join(text_parts) if text_parts else "No context available"
+
+            # CRITICAL: Ensure BOTH 'context' and 'content' fields exist
+            # CrewAI's contextual_memory.py line 113 specifically looks for 'content'
+            formatted_result['context'] = text_value
+            formatted_result['content'] = text_value
+
             formatted_results.append(formatted_result)
             
         logger.debug(f"[_format_results_for_crewai] Formatted {len(formatted_results)} results for CrewAI")

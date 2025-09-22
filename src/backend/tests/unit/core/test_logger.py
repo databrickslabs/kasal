@@ -99,21 +99,27 @@ class TestLoggerManager:
                 assert manager._log_dir == Path('/custom/log/path')
                 mock_mkdir.assert_called_once_with(parents=True, exist_ok=True)
     
+    @patch.dict(os.environ, {}, clear=True)
     def test_initialize_default_log_dir(self):
         """Test initialization with default log directory."""
         with patch('pathlib.Path.mkdir') as mock_mkdir:
-            # Arrange
-            manager = LoggerManager()
-            
-            # Act
-            manager.initialize()
-            
-            # Assert
-            # Should default to backend/logs
-            expected_path = Path(__file__).parent.parent.parent.parent / "logs"
-            assert manager._log_dir == expected_path
-            mock_mkdir.assert_called_once_with(parents=True, exist_ok=True)
-    
+            with patch('src.core.logger.RotatingFileHandler') as mock_handler:
+                mock_handler.return_value.level = logging.INFO
+                # Arrange
+                # Reset singleton to avoid prior env-initialized state
+                LoggerManager._instance = None
+                LoggerManager._initialized = False
+                manager = LoggerManager()
+
+                # Act
+                manager.initialize()
+
+                # Assert
+                # Should default to backend/logs
+                expected_path = Path(__file__).parent.parent.parent.parent / "logs"
+                assert manager._log_dir == expected_path
+                mock_mkdir.assert_called_once_with(parents=True, exist_ok=True)
+
     def test_logger_properties_auto_initialize(self):
         """Test that logger properties auto-initialize when accessed."""
         with tempfile.TemporaryDirectory() as temp_dir:

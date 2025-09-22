@@ -1711,16 +1711,27 @@ class AgentTraceEventListener(BaseEventListener):
             
             logger.debug(f"{log_prefix} Writing trace to database using SessionLocal")
             
-            # Use the existing SessionLocal which handles both SQLite and PostgreSQL
-            db = SessionLocal()
+            # Use async session for database operations
+            from src.db.session import async_session_factory
+            import asyncio
+
+            async def write_trace_async():
+                async with async_session_factory() as db:
+                    try:
+                        trace = ExecutionTrace(**trace_data)
+                        db.add(trace)
+                        await db.commit()
+                        logger.info(f"{log_prefix} ✅ Trace written to database successfully")
+                    except Exception as e:
+                        await db.rollback()
+                        logger.error(f"{log_prefix} Database error: {e}", exc_info=True)
+                        raise
+
+            # Run async operation in sync context
             try:
-                trace = ExecutionTrace(**trace_data)
-                db.add(trace)
-                db.commit()
-                logger.info(f"{log_prefix} ✅ Trace written to database successfully")
+                asyncio.run(write_trace_async())
             except Exception as e:
-                db.rollback()
-                logger.error(f"{log_prefix} Database error: {e}", exc_info=True)
+                logger.error(f"{log_prefix} Failed to write trace: {e}")
                 
                 # If the table doesn't exist in SQLite, try to create it
                 if "no such table" in str(e).lower():

@@ -173,14 +173,14 @@ class TestCrewPreparation:
             
             # Verify create_agent was called correctly
             assert mock_create.call_count == 2
-            mock_create.assert_any_call(
-                agent_key="researcher",
-                agent_config=crew_preparation.config["agents"][0],
-                tool_service=crew_preparation.tool_service,
-                tool_factory=crew_preparation.tool_factory,
-                config=crew_preparation.config
-            )
-    
+            call_kwargs_list = [c.kwargs for c in mock_create.call_args_list]
+            researcher_call = next(ck for ck in call_kwargs_list if ck.get('agent_key') == 'researcher')
+            assert researcher_call['agent_config'] == crew_preparation.config['agents'][0]
+            assert researcher_call['tool_service'] is crew_preparation.tool_service
+            assert researcher_call['tool_factory'] is crew_preparation.tool_factory
+            assert researcher_call['config'] is crew_preparation.config
+            assert 'agent_id' in researcher_call  # modern implementation passes resolved agent_id
+
     @pytest.mark.asyncio
     async def test_create_agents_with_fallback_names(self, crew_preparation):
         """Test agent creation with fallback naming."""

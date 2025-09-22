@@ -28,8 +28,11 @@ def mock_uow():
 
 @pytest.fixture
 def service(mock_uow):
-    """Create a MemoryConfigService instance."""
-    return MemoryConfigService(mock_uow)
+    """Create a MemoryConfigService instance and route repository calls to mock_uow.memory_backend_repository."""
+    svc = MemoryConfigService(session=MagicMock())
+    # Point the service's repository to the mock_uow repository to match the new session-injected pattern
+    svc.repository = mock_uow.memory_backend_repository
+    return svc
 
 
 @pytest.fixture

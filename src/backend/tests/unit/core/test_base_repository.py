@@ -280,16 +280,16 @@ class TestBaseRepository:
         # Mock get method to return existing object
         with patch.object(base_repository, "get", return_value=mock_model_instance):
             # Mock session methods
-            mock_session.delete = MagicMock()  # delete is sync in SQLAlchemy
+            mock_session.execute = AsyncMock()
             mock_session.flush = AsyncMock()
 
             result = await base_repository.delete(test_id)
 
             assert result is True
-            mock_session.delete.assert_called_once_with(mock_model_instance)
+            mock_session.execute.assert_called_once()
             mock_session.flush.assert_called_once()
             # Note: commit is NOT called - handled by session dependency
-    
+
     @pytest.mark.asyncio
     async def test_delete_not_found(self, base_repository, mock_session):
         """Test delete operation when record not found."""
@@ -308,14 +308,14 @@ class TestBaseRepository:
         
         # Mock get method to return existing object
         with patch.object(base_repository, "get", return_value=mock_model_instance):
-            # session.delete is sync, so set it to raise immediately
-            mock_session.delete = MagicMock(side_effect=Exception("Database error"))
+            # session now uses SQL DELETE via execute; simulate failure there
+            mock_session.execute = AsyncMock(side_effect=Exception("Database error"))
 
             with pytest.raises(Exception, match="Database error"):
                 await base_repository.delete(test_id)
 
             mock_session.rollback.assert_called_once()
-    
+
     @pytest.mark.asyncio
     async def test_uuid_id_type(self, base_repository, mock_session):
         """Test that repository works with UUID IDs."""

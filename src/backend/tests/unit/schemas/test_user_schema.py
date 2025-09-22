@@ -10,9 +10,8 @@ from pydantic import ValidationError
 
 from src.schemas.user import (
     UserBase, UserCreate, UserUpdate, PasswordChange, PasswordResetRequest,
-    PasswordReset, UserLogin, Token, TokenData, UserProfileBase,
-    UserProfileCreate, UserProfileUpdate, UserProfileInDB, IdentityProviderType,
-    UserInDB, UserWithProfile, OAuthAuthorize, OAuthCallback
+    PasswordReset, UserLogin, Token, TokenData, IdentityProviderType,
+    UserInDB, OAuthAuthorize, OAuthCallback
 )
 from src.models.enums import UserRole, UserStatus
 
@@ -478,6 +477,7 @@ class TestTokenData:
         assert token_data.exp == 1640995200
 
 
+@pytest.mark.skip(reason="UserProfile schemas removed; display_name moved to User model")
 class TestUserProfile:
     """Test cases for user profile schemas."""
     
@@ -530,6 +530,7 @@ class TestUserProfile:
         assert profile.display_name == "DB User"
 
 
+@pytest.mark.skip(reason="Legacy RBAC privilege schemas removed")
 class TestPrivilege:
     """Test cases for privilege schemas."""
     
@@ -573,6 +574,7 @@ class TestPrivilege:
         assert isinstance(privilege.created_at, datetime)
 
 
+@pytest.mark.skip(reason="Legacy RBAC role schemas removed")
 class TestRole:
     """Test cases for role schemas."""
     
@@ -648,6 +650,7 @@ class TestRole:
         assert role.privileges[0].name == "test:privilege"
 
 
+@pytest.mark.skip(reason="Complex identity provider schemas removed")
 class TestIdentityProvider:
     """Test cases for identity provider schemas."""
     
@@ -721,6 +724,7 @@ class TestIdentityProvider:
         assert provider.is_default is True
 
 
+@pytest.mark.skip(reason="External identity schemas removed in simplified auth")
 class TestExternalIdentity:
     """Test cases for external identity schemas."""
     
@@ -768,6 +772,7 @@ class TestExternalIdentity:
         assert identity.provider == "microsoft"
 
 
+@pytest.mark.skip(reason="Complex user composite schemas removed; use UserInDB")
 class TestUserComplexSchemas:
     """Test cases for complex user schemas."""
     
@@ -881,6 +886,7 @@ class TestOAuth:
         assert callback.state == "callback_state_789"
 
 
+@pytest.mark.skip(reason="UserRoleAssign schema removed with RBAC simplification")
 class TestUserRoleAssign:
     """Test cases for UserRoleAssign schema."""
     
@@ -891,6 +897,7 @@ class TestUserRoleAssign:
         assert role_assign.role_id == "role123"
 
 
+@pytest.mark.skip(reason="Schema interaction tests referenced removed legacy schemas")
 class TestSchemaInteraction:
     """Test cases for schema interactions and edge cases."""
     

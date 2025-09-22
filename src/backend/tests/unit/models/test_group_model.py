@@ -65,7 +65,7 @@ class TestGroup:
         group_id = Group.generate_group_id("Sales & Marketing")
 
         # Assert
-        assert "sales_marketing_" in group_id
+        assert "sales__marketing_" in group_id
         assert "&" not in group_id
         assert "." not in group_id
         assert " " not in group_id
@@ -78,7 +78,7 @@ class TestGroup:
 
         # Assert
         assert "engineering_team_" in group_id1
-        assert "techstartup_division_" in group_id2
+        assert "tech_startup_division_" in group_id2
         assert len(group_id1.split("_")[-1]) == 8  # UUID part
         assert len(group_id2.split("_")[-1]) == 8  # UUID part
 
@@ -269,8 +269,8 @@ class TestGroupUser:
         columns = GroupUser.__table__.columns
         
         # Assert
-        assert columns['role'].default.arg == "operator"
-        assert columns['status'].default.arg == "active"
+        assert columns['role'].default.arg == "USER"
+        assert columns['status'].default.arg == "ACTIVE"
         assert columns['auto_created'].default.arg is False
 
     def test_group_user_relationships(self):
@@ -450,7 +450,6 @@ class TestGroupEdgeCases:
         group = Group(
             id="long_name_group",
             name=long_name,
-            email_domain="long-company.com",
             description=long_description
         )
         

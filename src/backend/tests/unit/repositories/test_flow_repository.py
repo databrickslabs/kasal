@@ -13,7 +13,7 @@ from typing import List
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, text
 
-from src.repositories.flow_repository import FlowRepository, SyncFlowRepository
+from src.repositories.flow_repository import FlowRepository
 from src.models.flow import Flow
 
 
@@ -359,6 +359,7 @@ class TestFlowRepositoryDeleteAll:
         mock_async_session.rollback.assert_called_once()
 
 
+@pytest.mark.skip(reason="SyncFlowRepository removed; async-only architecture")
 class TestSyncFlowRepository:
     """Test cases for SyncFlowRepository."""
     
@@ -462,6 +463,7 @@ class TestSyncFlowRepository:
         mock_sync_session.commit.assert_called_once()
 
 
+@pytest.mark.skip(reason="Sync repository factory removed; use async repositories")
 class TestFlowRepositoryFactory:
     """Test cases for factory function."""
     
@@ -617,6 +619,7 @@ class TestFlowRepositoryUUIDHandling:
         result = await flow_repository.find_by_crew_id("not-a-uuid-at-all")
         assert result == []
     
+    @pytest.mark.skip(reason="Sync repository removed; no sync UUID tests applicable")
     def test_sync_uuid_conversion_edge_cases(self):
         """Test UUID conversion in sync repository."""
         mock_session = MagicMock()
