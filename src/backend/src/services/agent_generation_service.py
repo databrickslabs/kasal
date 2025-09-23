@@ -166,8 +166,8 @@ class AgentGenerationService:
         logger.info(f"Generating agent with model: {model} and tools: {tools}")
         
         try:
-            # Get and prepare prompt template
-            system_message = await self._prepare_prompt_template(tools)
+            # Get and prepare prompt template (composed with group/user overrides)
+            system_message = await self._prepare_prompt_template(tools, group_context)
 
             # Get relevant documentation based on the agent request
             documentation_context = await self._get_relevant_documentation(prompt_text, tools)
@@ -197,29 +197,26 @@ class AgentGenerationService:
             logger.error(f"Traceback: {traceback.format_exc()}")
             raise
     
-    async def _prepare_prompt_template(self, tools: List[str]) -> str:
+    async def _prepare_prompt_template(self, tools: List[str], group_context: Optional[GroupContext]) -> str:
         """
-        Prepare the prompt template with tools context.
-        
+        Prepare the prompt template (with group/user appended overrides).
+
         Args:
-            tools: List of tools to include in the prompt
-            
+            tools: List of tools (ignored for generation)
+            group_context: Current request's group context
+
         Returns:
-            str: Complete system message with tools context
-            
+            str: Complete system message
+
         Raises:
             ValueError: If prompt template is not found
         """
-        # Get prompt template from database using the TemplateService
-        system_message = await TemplateService.get_template_content("generate_agent")
-        
+        # Get composed prompt template from database using the TemplateService
+        system_message = await TemplateService.get_effective_template_content("generate_agent", group_context)
+
         if not system_message:
             raise ValueError("Required prompt template 'generate_agent' not found in database")
-        
-        # IMPORTANT: Do not include tools context in the prompt
-        # Tools should be added manually after generation if needed
-        # Remove any tools context that was previously added
-        
+
         return system_message
     
     async def _generate_agent_config(self, prompt_text: str, system_message: str, model: str,

@@ -161,9 +161,9 @@ class TaskGenerationService:
         model = request.model or os.getenv("TASK_MODEL", DEFAULT_TASK_MODEL)
         logger.info(f"Using model for task generation: {model}")
         
-        # Get prompt template from database
-        base_message = await TemplateService.get_template_content("generate_task")
-        
+        # Get composed prompt template from database (base + group/user overrides)
+        base_message = await TemplateService.get_effective_template_content("generate_task", group_context)
+
         # Check if we have a prompt template
         if not base_message:
             logger.error("No prompt template found in database for generate_task")

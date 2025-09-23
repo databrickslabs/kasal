@@ -79,12 +79,13 @@ class CrewGenerationService:
             logger.error(f"Failed to log LLM interaction: {str(e)}")
             logger.error(f"Traceback: {traceback.format_exc()}")
 
-    async def _prepare_prompt_template(self, tools: List[Dict[str, Any]]) -> str:
+    async def _prepare_prompt_template(self, tools: List[Dict[str, Any]], group_context: Optional[GroupContext]) -> str:
         """
-        Prepare the prompt template with tools context including tool descriptions.
+        Prepare the prompt template (with group/user appended overrides) and tool descriptions.
 
         Args:
             tools: List of tool dictionaries, each containing name, description, parameters, etc.
+            group_context: Current request's group context
 
         Returns:
             str: Complete system message with tools context
@@ -92,8 +93,8 @@ class CrewGenerationService:
         Raises:
             ValueError: If prompt template is not found
         """
-        # Get prompt template from database using the TemplateService
-        system_message = await TemplateService.get_template_content("generate_crew")
+        # Get composed prompt template from database using the TemplateService
+        system_message = await TemplateService.get_effective_template_content("generate_crew", group_context)
 
         if not system_message:
             raise ValueError("Required prompt template 'generate_crew' not found in database")
@@ -501,8 +502,8 @@ class CrewGenerationService:
             # Generate the crew using the LLM
             model = request.model or os.getenv("CREW_MODEL", "databricks-llama-4-maverick")
 
-            # Get and prepare the prompt template with tool descriptions
-            system_message = await self._prepare_prompt_template(tools_with_details)
+            # Get and prepare the prompt template with tool descriptions (incl. group/user overrides)
+            system_message = await self._prepare_prompt_template(tools_with_details, group_context)
             logger.info("CREATE CREW: Prepared prompt template with detailed tool information")
 
             # Get relevant documentation based on the user's prompt

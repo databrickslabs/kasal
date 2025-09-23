@@ -51,17 +51,33 @@ class TemplateRepository:
     
     async def find_by_name(self, name: str) -> Optional[PromptTemplate]:
         """
-        Find a prompt template by name.
-        
-        Args:
-            name: Template name to search for
-            
-        Returns:
-            PromptTemplate if found, else None
+        Find a prompt template by name (no group filter). If multiple rows exist
+        across groups, returns the first one (undefined order). Prefer to use
+        find_by_name_and_group for deterministic behavior.
         """
         query = select(self.model).where(self.model.name == name)
         result = await self.session.execute(query)
         return result.scalars().first()
+
+    async def find_by_name_and_group(self, name: str, group_id: Optional[str]) -> Optional[PromptTemplate]:
+        """
+        Find a prompt template by name and group_id. If group_id is None, this
+        returns the global/base template row.
+        """
+        if group_id is None:
+            query = select(self.model).where((self.model.name == name) & (self.model.group_id.is_(None)))
+        else:
+            query = select(self.model).where((self.model.name == name) & (self.model.group_id == group_id))
+        result = await self.session.execute(query)
+        return result.scalars().first()
+
+    async def find_all_by_name(self, name: str) -> List[PromptTemplate]:
+        """
+        Find all prompt templates with a given name across groups.
+        """
+        query = select(self.model).where(self.model.name == name)
+        result = await self.session.execute(query)
+        return list(result.scalars().all())
     
     async def find_active_templates(self) -> List[PromptTemplate]:
         """
