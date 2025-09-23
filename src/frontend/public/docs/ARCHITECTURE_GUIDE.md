@@ -345,7 +345,7 @@ with tracer.start_span("crew_execution"):
 - **Architecture Review Board**: Weekly Thursdays
 - **Design Docs**: Confluence/architecture
 - **Slack**: #architecture-decisions
-- **Email**: architecture@kasal.ai
+- **Email**: architecture@example.com
 
 ---
 

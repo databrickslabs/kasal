@@ -8,20 +8,20 @@
 
 ### Base URL
 ```
-Production:  https://api.kasal.ai/v1
-Staging:     https://staging-api.kasal.ai/v1
+Production:  https://api.example.com/v1
+Staging:     https://staging-api.example.com/v1
 Local:       http://localhost:8000/api/v1
 ```
 
 ### Authentication
 ```bash
 # Get access token
-curl -X POST https://api.kasal.ai/v1/auth/login \
+curl -X POST https://api.example.com/v1/auth/login \
   -H "Content-Type: application/json" \
   -d '{"email": "user@example.com", "password": "secure_pass"}'
 
 # Use token in requests
-curl -X GET https://api.kasal.ai/v1/crews \
+curl -X GET https://api.example.com/v1/crews \
   -H "Authorization: Bearer YOUR_ACCESS_TOKEN"
 ```
 
