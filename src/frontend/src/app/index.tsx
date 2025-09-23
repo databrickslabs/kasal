@@ -1,12 +1,14 @@
 import React from 'react';
 import ReactDOM from 'react-dom/client';
-import App from './__tests__/App';
+import App from '../App';
 import reportWebVitals from '../reportWebVitals';
 import { BrowserRouter } from 'react-router-dom';
 import { Provider } from 'react-redux';
 import { store } from '../store';
 
-// Reduce console noise, but keep errors visible in production for debugging
+// Console logging configuration - currently disabled to debug webpack issues
+// Uncomment this section once the application is working properly
+/*
 (() => {
   const noop = (..._args: unknown[]): void => { return; };
   if (process.env.NODE_ENV !== 'test') {
@@ -22,6 +24,7 @@ import { store } from '../store';
     // Do NOT silence console.error so we can see runtime issues in prod preview
   }
 })();
+*/
 
 const root = ReactDOM.createRoot(
   document.getElementById('root') as HTMLElement

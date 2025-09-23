@@ -905,15 +905,25 @@ class CrewPreparation:
                                 user_token=crew_user_token  # Pass user token for OBO auth
                             )
                             
-                            # Don't set embedder in crew_kwargs for Databricks
-                            # CrewAI will use its default embedder, while we use our custom one for memory
-                            logger.info(f"Using custom Databricks embedder for memory backends: {model_name}")
-                            logger.info("CrewAI will use its default embedder for internal operations")
+                            # Expose the custom embedder to CrewAI config so our memory wrappers receive it
+                            # IMPORTANT: Use 'custom' provider with an inner 'config.embedder' callable
+                            # Our CrewAIDatabricksWrapper looks for this exact shape
+                            crew_kwargs['embedder'] = {
+                                'provider': 'custom',
+                                'config': {
+                                    'embedder': databricks_embedder
+                                }
+                            }
+                            logger.info(f"Configured custom Databricks embedder for memory backends: {model_name}")
 
-                            # Store embedder for our custom memory backends
-                            # This will be used by our DatabricksVectorStorage
+                            # Store embedder for knowledge sources and any other consumers
                             self.custom_embedder = databricks_embedder
-                            self.embedder_config = {'provider': 'databricks', 'embedder': databricks_embedder}
+                            self.embedder_config = {
+                                'provider': 'custom',
+                                'config': {
+                                    'embedder': databricks_embedder
+                                }
+                            }
                         else:
                             logger.warning("No Databricks API key found, falling back to default embedder")
                             

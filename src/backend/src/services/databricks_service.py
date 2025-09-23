@@ -273,8 +273,8 @@ class DatabricksService:
             async with async_session_factory() as db:
                 repository = DatabricksConfigRepository(db)
                 # Create a temporary instance for the necessary methods
-                instance = cls(repository)
-                
+                instance = cls(db)
+
                 # Get configuration
                 config = await repository.get_active_config()
                 
@@ -395,8 +395,8 @@ class DatabricksService:
         databricks_repository = DatabricksConfigRepository(session)
         
         # Create service
-        service = cls(databricks_repository)
-        
+        service = cls(session)
+
         # Set the API keys service if provided
         if api_keys_service:
             service.secrets_service.set_api_keys_service(api_keys_service)

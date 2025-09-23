@@ -72,8 +72,14 @@ class ChatHistoryService(BaseService[ChatHistory, ChatHistoryCreate]):
                 'group_email': group_context.group_email
             })
 
-        # Create the model and convert to response schema
+        # Create the model and ensure attributes are fully loaded before validation
         chat_history = await self.repository.create(message_data)
+        # Refresh to avoid async lazy-loading during Pydantic attribute access (MissingGreenlet)
+        try:
+            await self.repository.session.refresh(chat_history)
+        except Exception:
+            # Even if refresh fails, proceed with available attributes to avoid blocking
+            pass
         # Convert SQLAlchemy model to Pydantic schema to avoid lazy loading issues
         return ChatHistoryResponse.model_validate(chat_history)
 

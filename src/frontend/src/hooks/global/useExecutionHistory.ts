@@ -243,22 +243,9 @@ export const useRunHistory = () => {
     );
   }, [runHistory]);
   
-  // Auto-refresh on an interval (only depends on fetchRuns)
-  useEffect(() => {
-    // Set up interval that checks the ref
-    const intervalId = setInterval(() => {
-      // Only refresh if there are running jobs
-      if (hasRunningJobsRef.current) {
-        historyLogger.debug('Refreshing data, running jobs detected');
-        fetchRuns().catch(err => 
-          historyLogger.error('Error refreshing in interval:', err)
-        );
-      }
-    }, 10000); // Check every 10 seconds
-    
-    // Clean up interval on unmount
-    return () => clearInterval(intervalId);
-  }, [fetchRuns]); // Only depends on fetchRuns, not runHistory
+  // Removed redundant interval polling: store's startPolling handles refresh.
+  // Keeping a local interval here led to duplicate TimerFire activity and long tasks.
+  // If a component needs a one-off refresh, call fetchRuns() directly or dispatch events.
 
   // Debounced loading state management
   useEffect(() => {
