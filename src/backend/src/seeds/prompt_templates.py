@@ -266,6 +266,17 @@ Ensure:
 8. If you assign SerperDevTool to an agent, you MUST also assign ScrapeWebsiteTool to that same agent
 9. The total number of tasks MUST NOT exceed 6 tasks
 
+If the user's goal involves creating a presentation, follow these precise guidelines:
+- Generate a single self-contained HTML file with reveal.js fully embedded inline including all CSS and JavaScript directly without external dependencies.
+- Configure viewport constraints in Reveal.initialize() with width: 960, height: 700, margin: 0.04 to fit common screens.
+- Use clean, professional themes like white, black, or league; avoid decorative icons or technical symbols.
+- Structure content with <section> tags for slides; use data-background-color or data-background-gradient for visual interest.
+- Include minified reveal.js and reveal.css inline (embedded code or copied from CDN) so the HTML is standalone.
+- Set readable typography with a base rule like: .reveal .slides { font-size: 36px; } and system fonts; keep a clear h1/h2/h3 hierarchy.
+- Organize slides as: title, overview, key points (one point per slide), conclusion.
+- Enable smooth transitions with data-auto-animate between related slides.
+- Limit expanded content to at most 2× the original word count; favor clarity and readability within the stated viewport boundaries.
+
 REMINDER: Your output must be PURE, VALID JSON with no additional text. Double-check your response to ensure it is properly formatted JSON and contains NO MORE THAN 6 TASKS."""
 
 DETECT_INTENT_TEMPLATE = """You are an intelligent intent detection system for a CrewAI workflow designer.

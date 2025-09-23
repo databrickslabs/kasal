@@ -70,21 +70,15 @@ class DataProcessingGuardrail(BaseGuardrail):
                 - feedback: Feedback message if validation failed
         """
         logger.info("Validating data processing status for all records")
-        
+
         try:
-            # Get the UnitOfWork singleton instance
+            # Initialize UnitOfWork and repository (sync context)
             uow = SyncUnitOfWork.get_instance()
-            logger.info(f"Got UnitOfWork instance: {uow}")
-            
-            # Initialize the UnitOfWork if needed
-            if not getattr(uow, '_initialized', False):
+            if not getattr(uow, "_initialized", False):
                 uow.initialize()
-                logger.info("Initialized UnitOfWork for data processing status check")
-            
-            # Create the repository with the session from UnitOfWork
-            repo = DataProcessingRepository(sync_session=uow._session)
-            logger.info(f"Created DataProcessingRepository with sync_session: {repo}")
-            
+                logger.debug("SyncUnitOfWork initialized for data processing status check")
+            repo = DataProcessingRepository(sync_session=getattr(uow, "_session", None))
+
             # First ensure the table exists and has test data
             if uow._session:
                 # Check if table exists by trying to count records

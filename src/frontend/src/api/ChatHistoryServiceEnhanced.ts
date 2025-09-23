@@ -1,5 +1,5 @@
-import axios, { AxiosError } from 'axios';
-import { config } from '../config/api/ApiConfig';
+import { AxiosError } from 'axios';
+import { apiClient } from '../config/api/ApiConfig';
 import {
   ChatMessage,
   SaveMessageRequest,
@@ -7,56 +7,8 @@ import {
   ChatSessionListResponse
 } from './ChatHistoryService';
 
-// Create a dedicated axios instance for chat history with longer timeout
-const chatHistoryClient = axios.create({
-  baseURL: config.apiUrl,
-  headers: {
-    'Content-Type': 'application/json',
-  },
-  timeout: 30000, // 30 seconds timeout
-});
-
-// Add request interceptor for authentication
-chatHistoryClient.interceptors.request.use(
-  (config) => {
-    const token = localStorage.getItem('token');
-    if (token) {
-      config.headers.Authorization = `Bearer ${token}`;
-    }
-    
-    // For local development: add mock tenant headers
-    const mockUserEmail = localStorage.getItem('mockUserEmail');
-    if (mockUserEmail && process.env.NODE_ENV === 'development') {
-      config.headers['X-Forwarded-Email'] = mockUserEmail;
-      config.headers['X-Forwarded-Access-Token'] = 'mock-token-for-dev';
-      console.log(`[DEV] Using mock user: ${mockUserEmail}`);
-    }
-    
-    return config;
-  },
-  (error) => {
-    return Promise.reject(error);
-  }
-);
-
-// Add response interceptor for error handling
-chatHistoryClient.interceptors.response.use(
-  (response) => response,
-  (error) => {
-    if (error.response) {
-      console.error('[ChatHistory] API Error Response:', {
-        status: error.response.status,
-        data: error.response.data,
-        headers: error.response.headers,
-      });
-    } else if (error.request) {
-      console.error('[ChatHistory] API No Response:', error.request);
-    } else {
-      console.error('[ChatHistory] API Request Error:', error.message);
-    }
-    return Promise.reject(error);
-  }
-);
+// Use the centralized apiClient so Authorization and group_id headers are injected
+const chatHistoryClient = apiClient;
 
 // Retry configuration
 const MAX_RETRIES = 3;
@@ -113,7 +65,7 @@ export class ChatHistoryServiceEnhanced {
   static async saveMessage(messageData: SaveMessageRequest): Promise<ChatMessage> {
     return withRetry(
       async () => {
-        const response = await chatHistoryClient.post<ChatMessage>('/chat-history/messages', messageData);
+        const response = await chatHistoryClient.post<ChatMessage>('/chat-history/messages', messageData, { timeout: 30000 });
         return response.data;
       },
       'saveMessage'
@@ -133,7 +85,8 @@ export class ChatHistoryServiceEnhanced {
         const response = await chatHistoryClient.get<ChatHistoryListResponse>(
           `/chat-history/sessions/${sessionId}/messages`,
           {
-            params: { page, per_page: perPage }
+            params: { page, per_page: perPage },
+            timeout: 30000
           }
         );
         return response.data;
@@ -154,7 +107,8 @@ export class ChatHistoryServiceEnhanced {
         const response = await chatHistoryClient.get<ChatMessage[]>(
           '/chat-history/users/sessions',
           {
-            params: { page, per_page: perPage }
+            params: { page, per_page: perPage },
+            timeout: 30000
           }
         );
         return response.data;
@@ -179,7 +133,8 @@ export class ChatHistoryServiceEnhanced {
         }
 
         const response = await chatHistoryClient.get<ChatSessionListResponse>('/chat-history/sessions', {
-          params
+          params,
+          timeout: 30000
         });
         return response.data;
       },
@@ -193,7 +148,7 @@ export class ChatHistoryServiceEnhanced {
   static async deleteSession(sessionId: string): Promise<void> {
     return withRetry(
       async () => {
-        await chatHistoryClient.delete(`/chat-history/sessions/${sessionId}`);
+        await chatHistoryClient.delete(`/chat-history/sessions/${sessionId}`, { timeout: 30000 });
       },
       'deleteSession'
     );
@@ -205,7 +160,7 @@ export class ChatHistoryServiceEnhanced {
   static async createNewSession(): Promise<{ session_id: string }> {
     return withRetry(
       async () => {
-        const response = await chatHistoryClient.post<{ session_id: string }>('/chat-history/sessions/new');
+        const response = await chatHistoryClient.post<{ session_id: string }>('/chat-history/sessions/new', undefined, { timeout: 30000 });
         return response.data;
       },
       'createNewSession'

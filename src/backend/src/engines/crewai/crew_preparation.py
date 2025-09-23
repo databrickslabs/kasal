@@ -6,6 +6,7 @@ This module handles the preparation and configuration of CrewAI agents and tasks
 
 from typing import Dict, Any, List, Optional
 import logging
+import re
 from datetime import datetime
 from crewai import Agent, Crew, Task, Process
 from src.core.logger import LoggerManager
@@ -905,16 +906,11 @@ class CrewPreparation:
                                 user_token=crew_user_token  # Pass user token for OBO auth
                             )
                             
-                            # Expose the custom embedder to CrewAI config so our memory wrappers receive it
-                            # IMPORTANT: Use 'custom' provider with an inner 'config.embedder' callable
-                            # Our CrewAIDatabricksWrapper looks for this exact shape
-                            crew_kwargs['embedder'] = {
-                                'provider': 'custom',
-                                'config': {
-                                    'embedder': databricks_embedder
-                                }
-                            }
-                            logger.info(f"Configured custom Databricks embedder for memory backends: {model_name}")
+                            # Expose the custom embedder for internal use (knowledge sources, custom backends)
+                            # Do NOT pass a 'custom' embedder provider into Crew(**kwargs) — CrewAI validation rejects it.
+                            # We'll rely on CrewAI default embedder when using default memory backend, and use this
+                            # custom embedder only for our own Databricks backends and knowledge flows.
+                            logger.info("Configured Databricks embedder for internal use (not passing to Crew kwargs)")
 
                             # Store embedder for knowledge sources and any other consumers
                             self.custom_embedder = databricks_embedder
@@ -1482,17 +1478,39 @@ class CrewPreparation:
                         volume_config=volume_config
                     )
                     
-                    # Add knowledge source to crew
+                    # Attach knowledge source to all agents instead of crew kwargs (Crew does not accept knowledge_sources kwarg)
                     if knowledge_source:
-                        crew_kwargs['knowledge_sources'] = [knowledge_source]
-                        logger.info(f"Added Databricks volume knowledge source for execution {execution_id}")
+                        attached_count = 0
+                        for agent in self.agents.values():
+                            # Initialize or extend agent-level knowledge_sources list
+                            existing = getattr(agent, 'knowledge_sources', []) or []
+                            setattr(agent, 'knowledge_sources', [*existing, knowledge_source])
+                            attached_count += 1
+                        logger.info(f"Attached Databricks volume knowledge source to {attached_count} agent(s) for execution {execution_id}")
                     
             except Exception as e:
                 logger.warning(f"Could not load knowledge sources: {e}")
                 # Continue without knowledge sources - not critical for execution
-            
-            self.crew = Crew(**crew_kwargs)
-            
+
+            # Log crew kwargs keys for diagnostics
+            try:
+                logger.info(f"Creating Crew with kwargs: {list(crew_kwargs.keys())}")
+                self.crew = Crew(**crew_kwargs)
+            except TypeError as te:
+                # Gracefully handle unexpected keyword arguments by retrying without them
+                msg = str(te)
+                if "unexpected keyword argument" in msg:
+                    m = re.search(r"unexpected keyword argument '([^']+)'", msg)
+                    bad_key = m.group(1) if m else None
+                    if bad_key and bad_key in crew_kwargs:
+                        logger.warning(f"Removing unsupported Crew kwarg '{bad_key}' and retrying")
+                        crew_kwargs.pop(bad_key, None)
+                        self.crew = Crew(**crew_kwargs)
+                    else:
+                        raise
+                else:
+                    raise
+
             if not self.crew:
                 logger.error("Failed to create crew")
                 return False

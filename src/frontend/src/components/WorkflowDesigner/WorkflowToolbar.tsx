@@ -20,6 +20,7 @@ import SettingsIcon from '@mui/icons-material/Settings';
 
 // Components
 import _SaveCrew from '../Crew/SaveCrew';
+import { hasCrewContent } from '../Chat/utils/chatHelpers';
 
 interface WorkflowToolbarProps {
   selectedModel: string;
@@ -82,7 +83,9 @@ const WorkflowToolbar: React.FC<WorkflowToolbarProps> = ({
     setShowSuccess,
     setErrorMessage,
   } = useCrewExecutionStore();
-  
+
+  const canRunCrew = React.useMemo(() => hasCrewContent(nodes), [nodes]);
+
   const handleMenuClose = useCallback(() => {
     setAnchorEl(null);
   }, []);
@@ -233,14 +236,14 @@ const WorkflowToolbar: React.FC<WorkflowToolbarProps> = ({
         <Box sx={{ height: 24, mx: 1, borderLeft: '1px solid rgba(0, 0, 0, 0.12)' }} />
 
         <div>
-          <Tooltip title={t('nemo.buttons.execute')} disableHoverListener={open}>
+          <Tooltip title={canRunCrew ? t('nemo.buttons.execute') : 'Add at least one Agent and one Task to run'} disableHoverListener={open}>
             <span>
               <IconButton
                 onClick={handleExecuteClick}
-                disabled={isExecuting}
+                disabled={isExecuting || !canRunCrew}
                 size="small"
                 data-tour="execute-button"
-                sx={{ 
+                sx={{
                   border: '1px solid #2E3B55',
                   borderRadius: 1,
                   p: 1,
@@ -261,7 +264,7 @@ const WorkflowToolbar: React.FC<WorkflowToolbarProps> = ({
               </IconButton>
             </span>
           </Tooltip>
-          
+
           <Menu
             id="execution-menu"
             anchorEl={anchorEl}

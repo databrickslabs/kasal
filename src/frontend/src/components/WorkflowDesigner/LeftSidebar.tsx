@@ -138,7 +138,7 @@ const LeftSidebar: React.FC<LeftSidebarProps> = ({
         const modelService = ModelService.getInstance();
         const response = await modelService.getEnabledModels();
         setModels(response);
-        
+
         // Initialize planning model when models are loaded
         if (response && Object.keys(response).length > 0 && !planningModel) {
           const firstModel = Object.keys(response)[0];
@@ -168,7 +168,7 @@ const LeftSidebar: React.FC<LeftSidebarProps> = ({
         setIsLoadingModels(false);
       }
     };
-    
+
     fetchModels();
   }, [planningModel, setPlanningLLM, reasoningModel, setReasoningLLM, managerModel, setManagerLLM, storeManagerLLM]);
 
@@ -207,7 +207,7 @@ const LeftSidebar: React.FC<LeftSidebarProps> = ({
     // List of shortcuts that are defined but don't have working implementations or are removed
     const nonFunctionalActions = new Set([
       'undo',
-      'redo', 
+      'redo',
       'selectAll',
       'copy',
       'paste',
@@ -226,13 +226,13 @@ const LeftSidebar: React.FC<LeftSidebarProps> = ({
 
     shortcuts.forEach(shortcut => {
       const action = shortcut.action;
-      
+
       // Skip shortcuts that don't have working implementations
       if (nonFunctionalActions.has(action)) {
         return;
       }
-      
-      if (action.includes('zoom') || action.includes('fit') || action.includes('clear') || 
+
+      if (action.includes('zoom') || action.includes('fit') || action.includes('clear') ||
           action.includes('delete')) {
         result['Canvas'].push(shortcut);
       } else if (action.includes('open') || action.includes('generate')) {
@@ -384,7 +384,7 @@ const LeftSidebar: React.FC<LeftSidebarProps> = ({
               </Tooltip>
             </Box>
             <Divider sx={{ mb: 1 }} />
-            
+
             <Box
               sx={{
                 display: 'flex',
@@ -405,7 +405,7 @@ const LeftSidebar: React.FC<LeftSidebarProps> = ({
                   size="small"
                 />
               </Box>
-              
+
               {planningEnabled && (
                 <FormControl size="small" fullWidth sx={{ mt: 1 }}>
                   <InputLabel sx={{ fontSize: '0.75rem' }}>Planning LLM</InputLabel>
@@ -459,7 +459,7 @@ const LeftSidebar: React.FC<LeftSidebarProps> = ({
               </Tooltip>
             </Box>
             <Divider sx={{ mb: 1 }} />
-            
+
             <Box
               sx={{
                 display: 'flex',
@@ -480,7 +480,7 @@ const LeftSidebar: React.FC<LeftSidebarProps> = ({
                   size="small"
                 />
               </Box>
-              
+
               {reasoningEnabled && (
                 <FormControl size="small" fullWidth sx={{ mt: 1 }}>
                   <InputLabel sx={{ fontSize: '0.75rem' }}>Reasoning LLM</InputLabel>
@@ -516,10 +516,10 @@ const LeftSidebar: React.FC<LeftSidebarProps> = ({
 
           {/* Schema Detection Section */}
           <Box sx={{ mb: 2 }}>
-            <Typography 
-              variant="subtitle2" 
-              sx={{ 
-                color: theme.palette.primary.main, 
+            <Typography
+              variant="subtitle2"
+              sx={{
+                color: theme.palette.primary.main,
                 mb: 1,
                 fontWeight: 600,
                 textTransform: 'uppercase',
@@ -530,7 +530,7 @@ const LeftSidebar: React.FC<LeftSidebarProps> = ({
               Schema Detection
             </Typography>
             <Divider sx={{ mb: 1 }} />
-            
+
             <Box
               sx={{
                 display: 'flex',
@@ -570,13 +570,13 @@ const LeftSidebar: React.FC<LeftSidebarProps> = ({
         >
           {Object.entries(groupedShortcuts).map(([category, shortcuts]) => {
             if (shortcuts.length === 0) return null;
-            
+
             return (
               <Box key={category} sx={{ mb: 2 }}>
-                <Typography 
-                  variant="subtitle2" 
-                  sx={{ 
-                    color: theme.palette.primary.main, 
+                <Typography
+                  variant="subtitle2"
+                  sx={{
+                    color: theme.palette.primary.main,
                     mb: 1,
                     fontWeight: 600,
                     textTransform: 'uppercase',
@@ -587,7 +587,7 @@ const LeftSidebar: React.FC<LeftSidebarProps> = ({
                   {category}
                 </Typography>
                 <Divider sx={{ mb: 1 }} />
-                
+
                 {shortcuts.map((shortcut, index) => (
                   <Box
                     key={`${shortcut.action}-${index}`}
@@ -604,9 +604,9 @@ const LeftSidebar: React.FC<LeftSidebarProps> = ({
                       },
                     }}
                   >
-                    <Typography 
-                      variant="caption" 
-                      sx={{ 
+                    <Typography
+                      variant="caption"
+                      sx={{
                         color: 'text.primary',
                         fontSize: '0.65rem',
                         lineHeight: 1.2
@@ -614,9 +614,9 @@ const LeftSidebar: React.FC<LeftSidebarProps> = ({
                     >
                       {shortcut.description}
                     </Typography>
-                    <Box 
-                      sx={{ 
-                        display: 'flex', 
+                    <Box
+                      sx={{
+                        display: 'flex',
                         gap: 0.25,
                         flexWrap: 'wrap'
                       }}
@@ -654,6 +654,11 @@ const LeftSidebar: React.FC<LeftSidebarProps> = ({
       )
     }
   ];
+
+  // Separate help item to render it at the very bottom of the activity bar
+  const topSidebarItems = sidebarItems.filter(item => item.id !== 'help');
+  const helpItem = sidebarItems.find(item => item.id === 'help');
+
 
   const handleSectionClick = (sectionId: string) => {
     if (sectionId === 'configuration') {
@@ -702,7 +707,7 @@ const LeftSidebar: React.FC<LeftSidebarProps> = ({
               py: 1
             }}
           >
-            {sidebarItems.map((item) => (
+            {topSidebarItems.map((item) => (
               <React.Fragment key={item.id}>
                 <Tooltip
                   title={
@@ -730,60 +735,48 @@ const LeftSidebar: React.FC<LeftSidebarProps> = ({
                     }}
                   >
                     <IconButton
-                    data-tour={item.dataTour}
-                    onMouseEnter={() => {
-                      // Don't set active section for configuration or help since they open dialogs
-                      if (item.id !== 'configuration' && item.id !== 'help') {
-                        setActiveSection(item.id);
-                      }
-                    }}
-                    onClick={() => handleSectionClick(item.id)}
-                    sx={{
-                      width: 40,
-                      height: 40,
-                      mb: 1,
-                      color: item.id === 'help'
-                        ? (!hasSeenTutorial ? theme.palette.primary.main : theme.palette.info.main)
-                        : 'text.secondary',
-                      animation: item.id === 'help' && !hasSeenTutorial
-                        ? 'pulse 2s infinite'
-                        : 'none',
-                      '@keyframes pulse': {
-                        '0%': { boxShadow: '0 0 0 0 rgba(25, 118, 210, 0.4)' },
-                        '70%': { boxShadow: '0 0 0 8px rgba(25, 118, 210, 0)' },
-                        '100%': { boxShadow: '0 0 0 0 rgba(25, 118, 210, 0)' }
-                      },
-                      backgroundColor: activeSection === item.id
-                        ? 'action.selected'
-                        : 'transparent',
-                      borderLeft: activeSection === item.id
-                        ? `2px solid ${theme.palette.primary.main}`
-                        : '2px solid transparent',
-                      borderRadius: 0,
-                      transition: 'all 0.2s ease-in-out',
-                      '&:hover': {
-                        backgroundColor: 'action.hover',
-                        color: item.id === 'help' ? theme.palette.info.dark : 'text.primary',
-                        transform: item.id === 'help' ? 'scale(1.1)' : 'none'
-                      }
-                    }}
-                  >
+                      data-tour={item.dataTour}
+                      onMouseEnter={() => {
+                        // Don't set active section for configuration or help since they open dialogs
+                        if (item.id !== 'configuration' && item.id !== 'help') {
+                          setActiveSection(item.id);
+                        }
+                      }}
+                      onClick={() => handleSectionClick(item.id)}
+                      sx={{
+                        width: 40,
+                        height: 40,
+                        mb: 1,
+                        color: item.id === 'help'
+                          ? (!hasSeenTutorial ? theme.palette.primary.main : theme.palette.info.main)
+                          : 'text.secondary',
+                        animation: item.id === 'help' && !hasSeenTutorial
+                          ? 'pulse 2s infinite'
+                          : 'none',
+                        '@keyframes pulse': {
+                          '0%': { boxShadow: '0 0 0 0 rgba(25, 118, 210, 0.4)' },
+                          '70%': { boxShadow: '0 0 0 8px rgba(25, 118, 210, 0)' },
+                          '100%': { boxShadow: '0 0 0 0 rgba(25, 118, 210, 0)' }
+                        },
+                        backgroundColor: activeSection === item.id
+                          ? 'action.selected'
+                          : 'transparent',
+                        borderLeft: activeSection === item.id
+                          ? `2px solid ${theme.palette.primary.main}`
+                          : '2px solid transparent',
+                        borderRadius: 0,
+                        transition: 'all 0.2s ease-in-out',
+                        '&:hover': {
+                          backgroundColor: 'action.hover',
+                          color: item.id === 'help' ? theme.palette.info.dark : 'text.primary',
+                          transform: item.id === 'help' ? 'scale(1.1)' : 'none'
+                        }
+                      }}
+                    >
                       {item.icon}
                     </IconButton>
                   </Badge>
                 </Tooltip>
-                {/* Add separator after help button */}
-                {item.id === 'help' && (
-                  <Box
-                    sx={{
-                      width: '80%',
-                      height: '1px',
-                      backgroundColor: 'divider',
-                      mb: 1,
-                      alignSelf: 'center'
-                    }}
-                  />
-                )}
                 {/* Insert action icons right after the Runtime Features */}
                 {item.id === 'runtime-features' && (
                   <>
@@ -797,7 +790,7 @@ const LeftSidebar: React.FC<LeftSidebarProps> = ({
                         alignSelf: 'center'
                       }}
                     />
-                    
+
                     <Tooltip title="Clear Canvas" placement="right">
                       <IconButton
                         onClick={onClearCanvas}
@@ -899,6 +892,70 @@ const LeftSidebar: React.FC<LeftSidebarProps> = ({
                 )}
               </React.Fragment>
             ))}
+
+            {/* Spacer to push the bottom group to the end */}
+            <Box sx={{ flexGrow: 1 }} />
+
+            {/* Help button pinned to bottom */}
+            {helpItem && (
+              <>
+                <Tooltip
+                  title={!hasSeenTutorial ? '🎯 Click to start your personalized tutorial!' : helpItem.tooltip}
+                  placement="right"
+                  arrow={!hasSeenTutorial}
+                >
+                  <Badge
+                    badgeContent={!hasSeenTutorial ? '!' : null}
+                    color="primary"
+                    variant="dot"
+                    invisible={hasSeenTutorial}
+                    sx={{
+                      '& .MuiBadge-dot': {
+                        animation: 'pulse 2s infinite',
+                        '@keyframes pulse': {
+                          '0%': { transform: 'scale(1)' },
+                          '50%': { transform: 'scale(1.2)' },
+                          '100%': { transform: 'scale(1)' }
+                        }
+                      }
+                    }}
+                  >
+                    <IconButton
+                      data-tour={helpItem.dataTour}
+                      onMouseEnter={() => { /* no-op for help */ }}
+                      onClick={() => handleSectionClick(helpItem.id)}
+                      sx={{
+                        width: 40,
+                        height: 40,
+                        mb: 1,
+                        color: !hasSeenTutorial ? theme.palette.primary.main : theme.palette.info.main,
+                        animation: !hasSeenTutorial ? 'pulse 2s infinite' : 'none',
+                        '@keyframes pulse': {
+                          '0%': { boxShadow: '0 0 0 0 rgba(25, 118, 210, 0.4)' },
+                          '70%': { boxShadow: '0 0 0 8px rgba(25, 118, 210, 0)' },
+                          '100%': { boxShadow: '0 0 0 0 rgba(25, 118, 210, 0)' }
+                        },
+                        backgroundColor: activeSection === helpItem.id
+                          ? 'action.selected'
+                          : 'transparent',
+                        borderLeft: activeSection === helpItem.id
+                          ? `2px solid ${theme.palette.primary.main}`
+                          : '2px solid transparent',
+                        borderRadius: 0,
+                        transition: 'all 0.2s ease-in-out',
+                        '&:hover': {
+                          backgroundColor: 'action.hover',
+                          color: theme.palette.info.dark,
+                          transform: 'scale(1.1)'
+                        }
+                      }}
+                    >
+                      {helpItem.icon}
+                    </IconButton>
+                  </Badge>
+                </Tooltip>
+              </>
+            )}
           </Paper>
 
           {/* Side Panel Content */}
@@ -923,4 +980,4 @@ const LeftSidebar: React.FC<LeftSidebarProps> = ({
   );
 };
 
-export default LeftSidebar; 
+export default LeftSidebar;

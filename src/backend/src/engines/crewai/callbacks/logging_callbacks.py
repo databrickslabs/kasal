@@ -172,7 +172,7 @@ from src.services.execution_logs_queue import enqueue_log, get_job_output_queue
 # Import task tracking
 from src.services.task_tracking_service import TaskTrackingService
 from src.schemas.task_tracking import TaskStatusEnum, TaskStatusCreate
-from src.core.unit_of_work import SyncUnitOfWork
+# Database operations disabled in callbacks (sync context)
 # SessionLocal removed - use async_session_factory instead
 from src.models.task import Task
 
@@ -1483,27 +1483,9 @@ class AgentTraceEventListener(BaseEventListener):
                 def update_task_status_sync():
                     """Update task status."""
                     try:
-                        new_loop = asyncio.new_event_loop()
-                        asyncio.set_event_loop(new_loop)
-                        try:
-                            uow = SyncUnitOfWork.get_instance()
-                            uow.initialize()
-                            
-                            task_tracking_service = TaskTrackingService(
-                                task_tracking_repository=uow.task_tracking_repository
-                            )
-                            
-                            future = asyncio.ensure_future(
-                                task_tracking_service.update_task_status(
-                                    job_id=self.job_id,
-                                    task_name=task_name,
-                                    status=status
-                                )
-                            )
-                            new_loop.run_until_complete(future)
-                            logger.debug(f"{log_prefix} Successfully updated task status to {status}")
-                        finally:
-                            new_loop.close()
+                        # Task tracking disabled - requires async operations
+                        logger.warning(f"{log_prefix} Task tracking disabled in sync callback context")
+                        return
                     except Exception as e:
                         logger.error(f"{log_prefix} Error updating task status: {e}", exc_info=True)
                 

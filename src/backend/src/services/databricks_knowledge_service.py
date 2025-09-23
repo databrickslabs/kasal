@@ -1239,18 +1239,18 @@ class DatabricksKnowledgeService:
 
             logger.info(f"[VECTOR_STORAGE] Looking for active Databricks configuration for group: {self.group_id}")
 
-            # Use Unit of Work pattern to get memory backends
+            # Use Unit of Work pattern to get memory backends FOR THIS GROUP ONLY
             async with UnitOfWork() as uow:
-                all_backends = await uow.memory_backend_repository.get_all()
+                group_backends = await uow.memory_backend_repository.get_by_group_id(self.group_id)
 
-            # Filter active Databricks backends
+            # Filter active Databricks backends for this group
             databricks_backends = [
-                b for b in all_backends
+                b for b in group_backends
                 if b.is_active and b.backend_type == MemoryBackendType.DATABRICKS
             ]
 
             if not databricks_backends:
-                logger.warning("[VECTOR_STORAGE] No active Databricks memory backend found")
+                logger.warning("[VECTOR_STORAGE] No active Databricks memory backend found for this group; skipping vector search usage")
                 return None
 
             # Sort by created_at descending and take the most recent
@@ -1410,6 +1410,29 @@ class DatabricksKnowledgeService:
             )
             logger.info("[SEARCH DEBUG] Repository created successfully")
 
+            # Quick readiness gate to avoid blocking when endpoint/index is provisioning
+            endpoint_name = getattr(config, 'document_endpoint_name', None) or getattr(config, 'endpoint_name', None)
+            try:
+                index_info = await asyncio.wait_for(
+                    index_repo.get_index(index_name=document_index, endpoint_name=endpoint_name, user_token=user_token),
+                    timeout=3
+                )
+                ready = False
+                try:
+                    if hasattr(index_info, 'success'):
+                        ready = bool(getattr(index_info, 'success', False) and getattr(getattr(index_info, 'index', None), 'ready', False))
+                    elif isinstance(index_info, dict):
+                        status = index_info.get('status') or {}
+                        ready = bool(status.get('ready') or index_info.get('ready'))
+                except Exception:
+                    ready = False
+                if not ready:
+                    logger.info("[SEARCH DEBUG] Databricks index not ready (provisioning). Skipping knowledge search.")
+                    return []
+            except Exception as e:
+                logger.info(f"[SEARCH DEBUG] Skipping knowledge search due to provisioning/unavailable: {e}")
+                return []
+
             # Build filters based on group_id and optional parameters
             logger.info("[SEARCH DEBUG] Building search filters...")
             filters = {
@@ -1435,7 +1458,7 @@ class DatabricksKnowledgeService:
 
             logger.info(f"[SEARCH DEBUG] Final search filters: {filters}")
 
-            # Perform the search
+            # Perform the search with a tight timeout to prevent blocking
             logger.info("[SEARCH DEBUG] Calling similarity_search with:")
             logger.info(f"  - query_text: '{query}'")
             logger.info(f"  - columns: {search_columns}")
@@ -1443,13 +1466,19 @@ class DatabricksKnowledgeService:
             logger.info(f"  - num_results: {limit}")
 
             try:
-                search_results = await index_repo.similarity_search(
-                    query_text=query,
-                    columns=search_columns,
-                    filters=filters,
-                    num_results=limit
+                search_results = await asyncio.wait_for(
+                    index_repo.similarity_search(
+                        query_text=query,
+                        columns=search_columns,
+                        filters=filters,
+                        num_results=limit
+                    ),
+                    timeout=5
                 )
                 logger.info(f"[SEARCH DEBUG] ✅ Search completed, got {len(search_results) if search_results else 0} results")
+            except asyncio.TimeoutError:
+                logger.warning("[SEARCH DEBUG] similarity_search timed out; returning empty results")
+                return []
             except Exception as search_error:
                 logger.error(f"[SEARCH DEBUG] ❌ Search failed with error: {search_error}", exc_info=True)
                 return []

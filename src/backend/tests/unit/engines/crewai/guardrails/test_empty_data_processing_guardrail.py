@@ -135,8 +135,6 @@ class TestEmptyDataProcessingGuardrail:
         assert hasattr(guardrail, 'validate')
         assert callable(guardrail.validate)
     
-    @patch('src.engines.crewai.guardrails.empty_data_processing_guardrail.SyncUnitOfWork')
-    @patch('src.engines.crewai.guardrails.empty_data_processing_guardrail.DataProcessingRepository')
     def test_validate_empty_table_success(self, mock_repo_class, mock_uow):
         """Test successful validation when table is empty."""
         # Setup UOW
@@ -162,8 +160,6 @@ class TestEmptyDataProcessingGuardrail:
             mock_logger.info.assert_any_call("Found 0 total records in data_processing table")
             mock_logger.info.assert_any_call("Data_processing table is empty as required")
     
-    @patch('src.engines.crewai.guardrails.empty_data_processing_guardrail.SyncUnitOfWork')
-    @patch('src.engines.crewai.guardrails.empty_data_processing_guardrail.DataProcessingRepository')
     def test_validate_non_empty_table_failure(self, mock_repo_class, mock_uow):
         """Test validation failure when table is not empty."""
         # Setup UOW
@@ -189,7 +185,6 @@ class TestEmptyDataProcessingGuardrail:
             mock_logger.warning.assert_called_with("Found 5 records in the data_processing table")
             mock_logger.info.assert_any_call("Found 5 total records in data_processing table")
     
-    @patch('src.engines.crewai.guardrails.empty_data_processing_guardrail.SyncUnitOfWork')
     def test_validate_uow_initialization(self, mock_uow):
         """Test that UOW is initialized if not already initialized."""
         # Setup UOW as not initialized
@@ -211,7 +206,6 @@ class TestEmptyDataProcessingGuardrail:
             mock_uow_instance.initialize.assert_called_once()
             mock_logger.info.assert_any_call("Initialized UnitOfWork for empty table check")
     
-    @patch('src.engines.crewai.guardrails.empty_data_processing_guardrail.SyncUnitOfWork')
     def test_validate_uow_already_initialized(self, mock_uow):
         """Test that UOW is not initialized if already initialized."""
         # Setup UOW as already initialized
@@ -231,8 +225,6 @@ class TestEmptyDataProcessingGuardrail:
         # Should NOT initialize UOW again
         mock_uow_instance.initialize.assert_not_called()
     
-    @patch('src.engines.crewai.guardrails.empty_data_processing_guardrail.SyncUnitOfWork')
-    @patch('src.engines.crewai.guardrails.empty_data_processing_guardrail.DataProcessingRepository')
     def test_validate_repository_creation(self, mock_repo_class, mock_uow):
         """Test that repository is created with correct session."""
         # Setup UOW
@@ -256,7 +248,6 @@ class TestEmptyDataProcessingGuardrail:
             # Should log repository creation
             mock_logger.info.assert_any_call(f"Created DataProcessingRepository with sync_session: {mock_repo}")
     
-    @patch('src.engines.crewai.guardrails.empty_data_processing_guardrail.SyncUnitOfWork')
     def test_validate_exception_handling(self, mock_uow):
         """Test validation exception handling."""
         # Setup UOW to throw exception
@@ -279,8 +270,6 @@ class TestEmptyDataProcessingGuardrail:
                 assert "Error validating empty table status" in error_call
                 mock_traceback.format_exc.assert_called_once()
     
-    @patch('src.engines.crewai.guardrails.empty_data_processing_guardrail.SyncUnitOfWork')
-    @patch('src.engines.crewai.guardrails.empty_data_processing_guardrail.DataProcessingRepository')
     def test_validate_repository_exception_handling(self, mock_repo_class, mock_uow):
         """Test validation exception handling when repository fails."""
         # Setup UOW
@@ -302,8 +291,6 @@ class TestEmptyDataProcessingGuardrail:
             assert "Error checking if data_processing table is empty" in result["feedback"]
             assert "Repository error" in result["feedback"]
     
-    @patch('src.engines.crewai.guardrails.empty_data_processing_guardrail.SyncUnitOfWork')
-    @patch('src.engines.crewai.guardrails.empty_data_processing_guardrail.DataProcessingRepository')
     def test_validate_different_output_types(self, mock_repo_class, mock_uow):
         """Test validation with different output parameter types."""
         # Setup
@@ -401,8 +388,6 @@ class TestEmptyDataProcessingGuardrail:
         assert guardrail.config["validation_criteria"]["expected_count"] == 0
         assert guardrail.config["logging_settings"]["log_level"] == "INFO"
     
-    @patch('src.engines.crewai.guardrails.empty_data_processing_guardrail.SyncUnitOfWork')
-    @patch('src.engines.crewai.guardrails.empty_data_processing_guardrail.DataProcessingRepository')
     def test_validate_logs_uow_instance(self, mock_repo_class, mock_uow):
         """Test that validation logs UOW instance information."""
         # Setup UOW
@@ -423,8 +408,6 @@ class TestEmptyDataProcessingGuardrail:
             # Should log UOW instance
             mock_logger.info.assert_any_call(f"Got UnitOfWork instance: {mock_uow_instance}")
     
-    @patch('src.engines.crewai.guardrails.empty_data_processing_guardrail.SyncUnitOfWork')
-    @patch('src.engines.crewai.guardrails.empty_data_processing_guardrail.DataProcessingRepository')
     def test_validate_with_large_record_count(self, mock_repo_class, mock_uow):
         """Test validation with large number of records."""
         # Setup UOW
@@ -446,8 +429,6 @@ class TestEmptyDataProcessingGuardrail:
             assert "The data_processing table contains 1000000 records" in result["feedback"]
             mock_logger.warning.assert_called_with("Found 1000000 records in the data_processing table")
     
-    @patch('src.engines.crewai.guardrails.empty_data_processing_guardrail.SyncUnitOfWork')
-    @patch('src.engines.crewai.guardrails.empty_data_processing_guardrail.DataProcessingRepository')
     def test_validate_edge_case_exactly_one_record(self, mock_repo_class, mock_uow):
         """Test validation with exactly one record."""
         # Setup UOW
