@@ -1,7 +1,7 @@
 import React from 'react';
 import { Dialog, DialogContent } from '@mui/material';
 import { Node, Edge } from 'reactflow';
-import type { CrewResponse as FlowCrewResponse, FlowConfiguration } from '../../types/flow';
+import type { FlowConfiguration } from '../../types/flow';
 import type { CrewResponse as CrewsCrewResponse } from '../../types/crews';
 import { Crew } from '../../types/crewPlan';
 
@@ -16,7 +16,6 @@ import Logs from '../Jobs/LLMLogs';
 import Configuration from '../Configuration/Configuration';
 import ToolForm from '../Tools/ToolForm';
 import { AddFlowDialog } from '../Flow';
-import SaveCrew from '../Crew/SaveCrew';
 
 interface WorkflowDialogsProps {
   // Dialog state

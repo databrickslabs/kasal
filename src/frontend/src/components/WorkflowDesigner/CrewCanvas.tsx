@@ -118,7 +118,7 @@ const CrewCanvas: React.FC<CrewCanvasProps> = ({
   onOpenTutorial,
   onOpenConfiguration
 }) => {
-  console.log('[CrewCanvas] Props received - onOpenTutorial:', onOpenTutorial, 'onOpenConfiguration:', onOpenConfiguration);
+
   const [isRendering, setIsRendering] = useState(true);
   const containerRef = useRef<HTMLDivElement>(null);
   const reactFlowInstanceRef = useRef<ReactFlowInstance | null>(null);
@@ -407,7 +407,7 @@ const CrewCanvas: React.FC<CrewCanvasProps> = ({
                   });
                 } catch (error) {
                   // Log error and retry if needed
-                  console.warn(`fitView attempt ${attempt} failed:`, error);
+
                   if (attempt < maxAttempts) {
                     attemptFitView(attempt + 1, maxAttempts);
                   }
@@ -417,7 +417,7 @@ const CrewCanvas: React.FC<CrewCanvasProps> = ({
           }
         } catch (error) {
           // Log any other errors
-          console.warn('Error in attemptFitView:', error);
+
         }
       };
       
@@ -469,7 +469,7 @@ const CrewCanvas: React.FC<CrewCanvasProps> = ({
       
       return edgesWithAnimation;
     } catch (error) {
-      console.error("CrewCanvas: Error filtering edges:", error);
+
       return [];
     }
   }, [edges, nodes, runStatusStore.hasRunningJobs]); // Add hasRunningJobs to dependencies
@@ -580,7 +580,7 @@ const CrewCanvas: React.FC<CrewCanvasProps> = ({
     
     const handleEdgeDelete = (event: CustomEvent) => {
       const { id } = event.detail;
-      console.log('Deleting edge:', id);
+
       onEdgesChange([{ type: 'remove', id }]);
     };
     
@@ -773,8 +773,7 @@ const CrewCanvas: React.FC<CrewCanvasProps> = ({
         open={isCrewPlanningDialogOpen}
         onClose={() => setIsCrewPlanningDialogOpen(false)}
         onGenerateCrew={(crewPlan: Crew, shouldExecute: boolean) => {
-          console.log('CrewCanvas received crew plan:', crewPlan, 'Should execute:', shouldExecute);
-          console.log('CrewCanvas task async_execution values:', crewPlan.tasks.map(t => ({ name: t.name, async: t.async_execution })));
+
           
           const newNodes: Node[] = [];
           const newEdges: Edge[] = [];
@@ -782,7 +781,7 @@ const CrewCanvas: React.FC<CrewCanvasProps> = ({
           // Step 1: Process agents and create agent nodes
           crewPlan.agents.forEach((agent: CrewAgent, index: number) => {
             const nodeId = `agent-${agent.id}`;
-            console.log(`CrewCanvas: Creating agent node: ${nodeId} (${agent.name})`);
+
             newNodes.push({
               id: nodeId,
               type: 'agentNode',
@@ -803,7 +802,7 @@ const CrewCanvas: React.FC<CrewCanvasProps> = ({
           // Step 2: Process tasks and create task nodes
           crewPlan.tasks.forEach((task: CrewTask, index: number) => {
             const nodeId = `task-${task.id}`;
-            console.log(`CrewCanvas: Creating task node: ${nodeId} (${task.name}), async_execution:`, task.async_execution);
+
             newNodes.push({
               id: nodeId,
               type: 'taskNode',

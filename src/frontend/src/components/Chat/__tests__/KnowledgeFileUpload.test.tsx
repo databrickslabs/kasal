@@ -4,6 +4,7 @@ import '@testing-library/jest-dom';
 import { KnowledgeFileUpload } from '../KnowledgeFileUpload';
 import { apiClient } from '../../../config/api/ApiConfig';
 import { Agent } from '../../../types/agent';
+import { AgentService } from '../../../api/AgentService';
 
 // Mock the API client
 jest.mock('../../../config/api/ApiConfig', () => ({
@@ -146,7 +147,7 @@ describe('KnowledgeFileUpload', () => {
   });
 
   it('updates agents with knowledge sources when files are uploaded', async () => {
-    const { AgentService } = require('../../../api/AgentService');
+
     
     // Mock successful file upload and agent update
     (apiClient.post as jest.Mock).mockResolvedValueOnce({

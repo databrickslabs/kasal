@@ -57,7 +57,7 @@ if (typeof window !== 'undefined') {
     ) {
       event.stopImmediatePropagation();
       event.preventDefault();
-      console.debug('ResizeObserver error suppressed:', event.message);
+
     }
   };
   
@@ -67,7 +67,7 @@ if (typeof window !== 'undefined') {
         (event.reason.message.includes('ResizeObserver loop') || 
          event.reason.message.includes('ResizeObserver Loop'))) {
       event.preventDefault();
-      console.debug('ResizeObserver promise rejection suppressed:', event.reason.message);
+
     }
   });
 }

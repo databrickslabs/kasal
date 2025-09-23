@@ -202,18 +202,16 @@ const TaskNode: React.FC<TaskNodeProps> = ({ data, id }) => {
   // Simple toggle function for selection
   const toggleSelection = useCallback(() => {
     setIsSelected(prev => !prev);
-  }, [id, isSelected]);
+  }, []);
 
   const handleDelete = useCallback(() => {
-    
-    
     setEditTooltipOpen(false);
     setDeleteTooltipOpen(false);
     setNodes(nodes => nodes.filter(node => node.id !== id));
-    setEdges(edges => edges.filter(edge => 
+    setEdges(edges => edges.filter(edge =>
       edge.source !== id && edge.target !== id
     ));
-  }, [id, getEdges, setNodes, setEdges]);
+  }, [id, setNodes, setEdges]);
 
   const handleEditClick = () => {
     setEditTooltipOpen(false);
@@ -297,7 +295,7 @@ const TaskNode: React.FC<TaskNodeProps> = ({ data, id }) => {
     if (!isButton && !isActionButton) {
       toggleSelection();
     }
-  }, [id, toggleSelection]);
+  }, [toggleSelection]);
 
   const iconStyles = {
     mr: 1.5,
@@ -634,4 +632,4 @@ const TaskNode: React.FC<TaskNodeProps> = ({ data, id }) => {
   );
 };
 
-export default TaskNode; 
+export default React.memo(TaskNode);

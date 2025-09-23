@@ -4,18 +4,6 @@
 // learn more: https://github.com/testing-library/jest-dom
 import '@testing-library/jest-dom';
 
-// Add global test types
-declare global {
-  namespace jest {
-    interface Matchers<R> {
-      toBeInTheDocument(): R;
-      toBeDisabled(): R;
-      toBeEnabled(): R;
-      toBeChecked(): R;
-      toHaveTextContent(text: string | RegExp): R;
-    }
-  }
-}
 
 // Mock window.matchMedia
 Object.defineProperty(window, 'matchMedia', {

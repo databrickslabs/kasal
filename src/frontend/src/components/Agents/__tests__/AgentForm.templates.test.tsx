@@ -5,8 +5,7 @@
  * and helper text functionality added to the AgentForm component.
  */
 import React from 'react';
-import { render, screen, fireEvent, waitFor } from '@testing-library/react';
-import { act } from '@testing-library/react';
+import { render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { ThemeProvider } from '@mui/material/styles';
 import { createTheme } from '@mui/material/styles';
@@ -316,7 +315,6 @@ describe('AgentForm Template Features', () => {
 
   describe('Template Field Validation', () => {
     it('should preserve existing template values when editing', async () => {
-      const user = userEvent.setup();
       const initialData = {
         id: '1',
         name: 'Test Agent',

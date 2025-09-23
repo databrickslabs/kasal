@@ -95,14 +95,8 @@ export const useKnowledgeConfigStore = create<KnowledgeConfigState>()(
         }
 
         // Only log if we found some configuration
-        if (memoryConfigured || knowledgeSourceEnabled) {
-          console.log('[KnowledgeConfig] Configuration refreshed:', {
-            memoryConfigured,
-            knowledgeSourceEnabled,
-          });
-        }
+        /* no-op: intentionally not logging to avoid console noise */
       } catch (error) {
-        console.error('[KnowledgeConfig] Error checking configuration:', error);
         set({
           isMemoryBackendConfigured: false,
           isKnowledgeSourceEnabled: false,
@@ -144,12 +138,10 @@ useKnowledgeConfigStore.subscribe(
 if (typeof window !== 'undefined') {
   // Listen for custom events when configuration changes
   window.addEventListener('databricks-config-updated', () => {
-    console.log('[KnowledgeConfig] Databricks config updated, refreshing...');
     useKnowledgeConfigStore.getState().refreshConfiguration();
   });
 
   window.addEventListener('memory-backend-updated', () => {
-    console.log('[KnowledgeConfig] Memory backend updated, refreshing...');
     useKnowledgeConfigStore.getState().refreshConfiguration();
   });
 

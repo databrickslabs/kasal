@@ -1,21 +1,23 @@
 /**
  * Simplified unit tests for AgentForm template functionality.
- * 
+ *
  * Tests the template generation features and UI components
  * without complex service dependencies.
  */
+/* eslint-disable react/prop-types, @typescript-eslint/no-empty-function */
+
 import React from 'react';
-import { render, screen, fireEvent, waitFor } from '@testing-library/react';
+import { render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { ThemeProvider } from '@mui/material/styles';
 import { createTheme } from '@mui/material/styles';
-import { 
-  TextField, 
-  Button, 
-  Typography, 
-  Dialog, 
-  DialogTitle, 
-  DialogContent, 
+import {
+  TextField,
+  Button,
+  Typography,
+  Dialog,
+  DialogTitle,
+  DialogContent,
   DialogActions,
   IconButton,
   InputAdornment,
@@ -39,9 +41,9 @@ jest.mock('../../../api/GenerateService', () => ({
 const theme = createTheme();
 
 // Simplified AgentForm component focusing on template functionality
-const TemplateSection = ({ 
-  systemTemplate = '', 
-  promptTemplate = '', 
+const TemplateSection = ({
+  systemTemplate = '',
+  promptTemplate = '',
   responseTemplate = '',
   onTemplateChange = () => {},
   onGenerateTemplates = () => {},
@@ -71,7 +73,7 @@ const TemplateSection = ({
                   {isGenerating ? 'Generating...' : 'Generate Templates'}
                 </Button>
               </Box>
-              
+
               <TextField
                 fullWidth
                 label="System Template"
@@ -163,8 +165,8 @@ const TemplateSection = ({
         </Accordion>
 
         {/* System Template Dialog */}
-        <Dialog 
-          open={expandedSystem} 
+        <Dialog
+          open={expandedSystem}
           onClose={() => setExpandedSystem(false)}
           fullWidth
           maxWidth="md"
@@ -199,8 +201,8 @@ const TemplateSection = ({
         </Dialog>
 
         {/* Prompt Template Dialog */}
-        <Dialog 
-          open={expandedPrompt} 
+        <Dialog
+          open={expandedPrompt}
           onClose={() => setExpandedPrompt(false)}
           fullWidth
           maxWidth="md"
@@ -235,8 +237,8 @@ const TemplateSection = ({
         </Dialog>
 
         {/* Response Template Dialog */}
-        <Dialog 
-          open={expandedResponse} 
+        <Dialog
+          open={expandedResponse}
           onClose={() => setExpandedResponse(false)}
           fullWidth
           maxWidth="md"
@@ -285,7 +287,7 @@ describe('AgentForm Template Features', () => {
   describe('Template Fields Rendering', () => {
     it('should render all three template fields with labels', () => {
       render(
-        <TemplateSection 
+        <TemplateSection
           onTemplateChange={mockTemplateChange}
           onGenerateTemplates={mockGenerateTemplates}
         />
@@ -298,7 +300,7 @@ describe('AgentForm Template Features', () => {
 
     it('should render helper text for each template field', () => {
       render(
-        <TemplateSection 
+        <TemplateSection
           onTemplateChange={mockTemplateChange}
           onGenerateTemplates={mockGenerateTemplates}
         />
@@ -319,7 +321,7 @@ describe('AgentForm Template Features', () => {
 
     it('should render expand buttons for each template field', () => {
       render(
-        <TemplateSection 
+        <TemplateSection
           onTemplateChange={mockTemplateChange}
           onGenerateTemplates={mockGenerateTemplates}
         />
@@ -335,7 +337,7 @@ describe('AgentForm Template Features', () => {
     it('should call onChange when typing in template fields', async () => {
       const user = userEvent.setup();
       render(
-        <TemplateSection 
+        <TemplateSection
           onTemplateChange={mockTemplateChange}
           onGenerateTemplates={mockGenerateTemplates}
         />
@@ -352,7 +354,7 @@ describe('AgentForm Template Features', () => {
     it('should open system template dialog when expand button is clicked', async () => {
       const user = userEvent.setup();
       render(
-        <TemplateSection 
+        <TemplateSection
           onTemplateChange={mockTemplateChange}
           onGenerateTemplates={mockGenerateTemplates}
         />
@@ -369,7 +371,7 @@ describe('AgentForm Template Features', () => {
     it('should open prompt template dialog when expand button is clicked', async () => {
       const user = userEvent.setup();
       render(
-        <TemplateSection 
+        <TemplateSection
           onTemplateChange={mockTemplateChange}
           onGenerateTemplates={mockGenerateTemplates}
         />
@@ -386,7 +388,7 @@ describe('AgentForm Template Features', () => {
     it('should open response template dialog when expand button is clicked', async () => {
       const user = userEvent.setup();
       render(
-        <TemplateSection 
+        <TemplateSection
           onTemplateChange={mockTemplateChange}
           onGenerateTemplates={mockGenerateTemplates}
         />
@@ -404,7 +406,7 @@ describe('AgentForm Template Features', () => {
   describe('Template Generation', () => {
     it('should render Generate Templates button', () => {
       render(
-        <TemplateSection 
+        <TemplateSection
           onTemplateChange={mockTemplateChange}
           onGenerateTemplates={mockGenerateTemplates}
         />
@@ -415,7 +417,7 @@ describe('AgentForm Template Features', () => {
 
     it('should disable Generate Templates button when canGenerate is false', () => {
       render(
-        <TemplateSection 
+        <TemplateSection
           onTemplateChange={mockTemplateChange}
           onGenerateTemplates={mockGenerateTemplates}
           canGenerate={false}
@@ -428,7 +430,7 @@ describe('AgentForm Template Features', () => {
 
     it('should enable Generate Templates button when canGenerate is true', () => {
       render(
-        <TemplateSection 
+        <TemplateSection
           onTemplateChange={mockTemplateChange}
           onGenerateTemplates={mockGenerateTemplates}
           canGenerate={true}
@@ -441,7 +443,7 @@ describe('AgentForm Template Features', () => {
 
     it('should show loading state when generating templates', () => {
       render(
-        <TemplateSection 
+        <TemplateSection
           onTemplateChange={mockTemplateChange}
           onGenerateTemplates={mockGenerateTemplates}
           canGenerate={true}
@@ -457,7 +459,7 @@ describe('AgentForm Template Features', () => {
     it('should call onGenerateTemplates when button is clicked', async () => {
       const user = userEvent.setup();
       render(
-        <TemplateSection 
+        <TemplateSection
           onTemplateChange={mockTemplateChange}
           onGenerateTemplates={mockGenerateTemplates}
           canGenerate={true}
@@ -480,7 +482,7 @@ describe('AgentForm Template Features', () => {
       };
 
       render(
-        <TemplateSection 
+        <TemplateSection
           {...templates}
           onTemplateChange={mockTemplateChange}
           onGenerateTemplates={mockGenerateTemplates}
@@ -495,7 +497,7 @@ describe('AgentForm Template Features', () => {
     it('should sync content between field and dialog', async () => {
       const user = userEvent.setup();
       render(
-        <TemplateSection 
+        <TemplateSection
           systemTemplate="Initial content"
           onTemplateChange={mockTemplateChange}
           onGenerateTemplates={mockGenerateTemplates}
@@ -517,7 +519,7 @@ describe('AgentForm Template Features', () => {
     it('should close dialog when Done button is clicked', async () => {
       const user = userEvent.setup();
       render(
-        <TemplateSection 
+        <TemplateSection
           onTemplateChange={mockTemplateChange}
           onGenerateTemplates={mockGenerateTemplates}
         />
@@ -543,7 +545,7 @@ describe('AgentForm Template Features', () => {
     it('should have larger text area in dialog (15 rows)', async () => {
       const user = userEvent.setup();
       render(
-        <TemplateSection 
+        <TemplateSection
           onTemplateChange={mockTemplateChange}
           onGenerateTemplates={mockGenerateTemplates}
         />
