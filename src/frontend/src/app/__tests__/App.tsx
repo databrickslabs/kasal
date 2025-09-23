@@ -1,18 +1,20 @@
-import { useEffect } from 'react';
-import { Box } from '@mui/material';
+import { useEffect, lazy, Suspense } from 'react';
+import { Box, CircularProgress } from '@mui/material';
 import { Routes, Route, Navigate } from 'react-router-dom';
 import { Toaster } from 'react-hot-toast';
 import ThemeProvider from '../../config/theme/ThemeProvider';
-import RunHistory from '../../components/Jobs/ExecutionHistory';
-import WorkflowDesigner from '../../components/WorkflowDesigner';
-import ToolForm from '../../components/Tools/ToolForm';
 import ShortcutsCircle from '../../components/ShortcutsCircle';
 import { LanguageService } from '../../api/LanguageService';
-import { WorkflowTest } from '../../components/WorkflowTest';
-import { Documentation } from '../../components/Documentation';
 import DatabaseManagementService from '../../api/DatabaseManagementService';
 import { usePermissionLoader } from '../../hooks/usePermissions';
 import '../../config/i18n/config';
+
+// Lazy load heavy components to reduce initial bundle size
+const RunHistory = lazy(() => import('../../components/Jobs/ExecutionHistory'));
+const WorkflowDesigner = lazy(() => import('../../components/WorkflowDesigner'));
+const ToolForm = lazy(() => import('../../components/Tools/ToolForm'));
+const WorkflowTest = lazy(() => import('../../components/WorkflowTest').then(module => ({ default: module.WorkflowTest })));
+const Documentation = lazy(() => import('../../components/Documentation').then(module => ({ default: module.Documentation })));
 
 // Cache for Database Management permission to avoid repeated API calls
 let databaseManagementPermissionCache: {
@@ -79,15 +81,28 @@ function App() {
           overflow: 'hidden'
         }}
       >
-        <Routes>
-          <Route path="/" element={<Navigate to="/workflow" replace />} />
-          <Route path="/workflow" element={<WorkflowDesigner />} />
-          <Route path="/nemo" element={<Navigate to="/workflow" replace />} />
-          <Route path="/runs" element={<RunHistory />} />
-          <Route path="/tools" element={<ToolForm />} />
-          <Route path="/workflow-test" element={<WorkflowTest />} />
-          <Route path="/docs/*" element={<Documentation />} />
-        </Routes>
+        <Suspense
+          fallback={
+            <Box
+              display="flex"
+              justifyContent="center"
+              alignItems="center"
+              minHeight="100vh"
+            >
+              <CircularProgress />
+            </Box>
+          }
+        >
+          <Routes>
+            <Route path="/" element={<Navigate to="/workflow" replace />} />
+            <Route path="/workflow" element={<WorkflowDesigner />} />
+            <Route path="/nemo" element={<Navigate to="/workflow" replace />} />
+            <Route path="/runs" element={<RunHistory />} />
+            <Route path="/tools" element={<ToolForm />} />
+            <Route path="/workflow-test" element={<WorkflowTest />} />
+            <Route path="/docs/*" element={<Documentation />} />
+          </Routes>
+        </Suspense>
       </Box>
     </ThemeProvider>
   );

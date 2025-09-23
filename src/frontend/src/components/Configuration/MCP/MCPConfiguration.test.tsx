@@ -1,6 +1,5 @@
 import React from 'react';
-import { render, screen, fireEvent, waitFor, act, within } from '@testing-library/react';
-import userEvent from '@testing-library/user-event';
+import { render, screen, fireEvent, waitFor, act } from '@testing-library/react';
 import '@testing-library/jest-dom';
 import MCPConfiguration from './MCPConfiguration';
 
@@ -9,7 +8,7 @@ jest.mock('react-i18next', () => ({
   useTranslation: () => ({
     t: (key: string, options?: any) => options?.defaultValue || key,
     i18n: {
-      changeLanguage: () => new Promise(() => {}),
+      changeLanguage: jest.fn().mockResolvedValue(undefined),
     },
   }),
 }));

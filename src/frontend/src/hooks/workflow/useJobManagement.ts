@@ -22,11 +22,6 @@ export const useJobManagement = ({ onJobStatusChanged }: UseJobManagementProps =
 
   const { startTracking, stopTracking } = useRunStatus(jobId || '');
 
-  const handleJobStatusChanged = useCallback((jobId: string, status: string) => {
-    if (onJobStatusChanged) {
-      onJobStatusChanged(jobId, status);
-    }
-  }, [onJobStatusChanged]);
 
   const executeJob = useCallback(async (agentsYaml: string, tasksYaml: string) => {
     setIsLoading(true);

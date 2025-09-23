@@ -38,20 +38,20 @@ import { CanvasLayoutManager } from '../../utils/CanvasLayoutManager';
 import { useUILayoutState } from '../../store/uiLayout';
 
 // Import types
-import { 
-  WorkflowChatProps, 
-  ChatMessage, 
-  ModelConfig, 
-  GeneratedAgent, 
-  GeneratedTask, 
-  GeneratedCrew 
+import {
+  WorkflowChatProps,
+  ChatMessage,
+  ModelConfig,
+  GeneratedAgent,
+  GeneratedTask,
+  GeneratedCrew
 } from './types';
 
 // Import utilities
 import { hasCrewContent, isExecuteCommand, extractJobIdFromCommand } from './utils/chatHelpers';
-import { 
-  createAgentGenerationHandler, 
-  createTaskGenerationHandler, 
+import {
+  createAgentGenerationHandler,
+  createTaskGenerationHandler,
   createCrewGenerationHandler,
   handleConfigureCrew
 } from './utils/nodeGenerationHandlers';
@@ -85,7 +85,7 @@ const WorkflowChat: React.FC<WorkflowChatProps> = ({
   const [models, setModels] = useState<Record<string, ModelConfig>>({});
   const [isLoadingModels, setIsLoadingModels] = useState(false);
   const [modelMenuAnchor, setModelMenuAnchor] = useState<null | HTMLElement>(null);
-  
+
   // Variable collection state
   const [isCollectingVariables, setIsCollectingVariables] = useState(false);
   const [variablesToCollect, setVariablesToCollect] = useState<string[]>([]);
@@ -99,13 +99,23 @@ const WorkflowChat: React.FC<WorkflowChatProps> = ({
     isKnowledgeSourceEnabled,
     checkConfiguration,
   } = useKnowledgeConfigStore();
-  
+
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
   const { setNodes, setEdges } = useWorkflowStore();
   const { setInputMode, inputMode, setInputVariables, executeCrew, executeFlow } = useCrewExecutionStore();
   const uiLayoutState = useUILayoutState();
-  
+  const messagesContainerRef = useRef<HTMLDivElement>(null);
+  const isUserNearBottomRef = useRef(true);
+  const handleMessagesScroll = () => {
+    const el = messagesContainerRef.current;
+    if (!el) return;
+    const threshold = 80;
+    const atBottom = el.scrollHeight - el.scrollTop - el.clientHeight <= threshold;
+    isUserNearBottomRef.current = atBottom;
+  };
+
+
   // Create enhanced layout manager instance
   const layoutManagerRef = useRef<CanvasLayoutManager>(
     new CanvasLayoutManager({
@@ -169,7 +179,7 @@ const WorkflowChat: React.FC<WorkflowChatProps> = ({
     setLastExecutionJobId,
     executionStartTime: _executionStartTime,
   } = useExecutionMonitoring(sessionId, saveMessageToBackend, setMessages);
-  
+
   const scrollToBottom = () => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   };
@@ -224,13 +234,12 @@ const WorkflowChat: React.FC<WorkflowChatProps> = ({
 
     if (typeof window !== 'undefined') {
       window.addEventListener('resize', handleResize);
-      
+
       (window as unknown as Record<string, unknown>).debugCanvasLayout = () => {
         const debug = layoutManagerRef.current.getLayoutDebugInfo();
-        console.log('🎯 Canvas Layout Debug Info:', debug);
         return debug;
       };
-      
+
       return () => {
         window.removeEventListener('resize', handleResize);
         delete (window as unknown as Record<string, unknown>).debugCanvasLayout;
@@ -239,7 +248,9 @@ const WorkflowChat: React.FC<WorkflowChatProps> = ({
   }, []);
 
   useEffect(() => {
-    scrollToBottom();
+    if (isUserNearBottomRef.current) {
+      scrollToBottom();
+    }
   }, [messages]);
 
   // Notify parent of loading state changes
@@ -253,14 +264,14 @@ const WorkflowChat: React.FC<WorkflowChatProps> = ({
   useEffect(() => {
     const focusAttempts = [0, 100, 300, 500, 1000];
     const timeouts: NodeJS.Timeout[] = [];
-    
+
     focusAttempts.forEach(delay => {
       const timeoutId = setTimeout(() => {
         inputRef.current?.focus();
       }, delay);
       timeouts.push(timeoutId);
     });
-    
+
     return () => {
       timeouts.forEach(clearTimeout);
     };
@@ -293,7 +304,7 @@ const WorkflowChat: React.FC<WorkflowChatProps> = ({
         const response = await modelService.getEnabledModels();
         setModels(response as Record<string, ModelConfig>);
       } catch (error) {
-        console.error('Error fetching models:', error);
+
         setModels({
           'databricks-llama-4-maverick': {
             name: 'databricks-llama-4-maverick',
@@ -352,7 +363,7 @@ const WorkflowChat: React.FC<WorkflowChatProps> = ({
     if (isCollectingVariables && variablesToCollect.length > 0 && currentVariableIndex < variablesToCollect.length) {
       const currentVariable = variablesToCollect[currentVariableIndex];
       const value = inputValue.trim();
-      
+
       // Save user's response
       const userMessage: ChatMessage = {
         id: `msg-${Date.now()}`,
@@ -363,17 +374,17 @@ const WorkflowChat: React.FC<WorkflowChatProps> = ({
       setMessages(prev => [...prev, userMessage]);
       setInputValue('');
       saveMessageToBackend(userMessage);
-      
+
       // Store the collected variable
       const updatedVariables = { ...collectedVariables, [currentVariable]: value };
       setCollectedVariables(updatedVariables);
-      
+
       // Check if we have more variables to collect
       if (currentVariableIndex + 1 < variablesToCollect.length) {
         // Ask for the next variable
         setCurrentVariableIndex(currentVariableIndex + 1);
         const nextVariable = variablesToCollect[currentVariableIndex + 1];
-        
+
         const promptMessage: ChatMessage = {
           id: `msg-${Date.now() + 1}`,
           type: 'assistant',
@@ -386,7 +397,7 @@ const WorkflowChat: React.FC<WorkflowChatProps> = ({
         // All variables collected, execute the crew
         setIsCollectingVariables(false);
         setInputVariables(updatedVariables);
-        
+
         const confirmMessage: ChatMessage = {
           id: `msg-${Date.now() + 1}`,
           type: 'assistant',
@@ -395,7 +406,7 @@ const WorkflowChat: React.FC<WorkflowChatProps> = ({
         };
         setMessages(prev => [...prev, confirmMessage]);
         saveMessageToBackend(confirmMessage);
-        
+
         // Execute with the collected variables
         const pendingMessage: ChatMessage = {
           id: `exec-pending-${Date.now()}`,
@@ -404,46 +415,46 @@ const WorkflowChat: React.FC<WorkflowChatProps> = ({
           timestamp: new Date(),
         };
         setMessages(prev => [...prev, pendingMessage]);
-        
+
         if (pendingExecutionType === 'crew') {
           await executeCrew(nodes, edges);
         } else {
           await executeFlow(nodes, edges);
         }
-        
+
         // Reset collection state
         setVariablesToCollect([]);
         setCollectedVariables({});
         setCurrentVariableIndex(0);
       }
-      
+
       return;
     }
 
     // Check if user is responding to execution prompt
     const lastMessage = messages[messages.length - 1];
-    const isExecutionPromptResponse = lastMessage?.type === 'assistant' && 
+    const isExecutionPromptResponse = lastMessage?.type === 'assistant' &&
                                      lastMessage?.content.includes('Would you like to execute this crew now?');
-    
+
     if (isExecutionPromptResponse) {
       const response = inputValue.trim().toLowerCase();
-      
+
       const userMessage: ChatMessage = {
         id: `msg-${Date.now()}`,
         type: 'user',
         content: inputValue,
         timestamp: new Date(),
       };
-      
+
       setMessages(prev => [...prev, userMessage]);
       setInputValue('');
       saveMessageToBackend(userMessage);
-      
+
       if (response === 'yes' || response === 'y' || response === 'yeah' || response === 'sure' || response === 'ok' || response === 'okay') {
         if (hasCrewContent(nodes)) {
           // Check if we need to collect variables
           const variables = extractVariablesFromNodes(nodes);
-          
+
           if (variables.length > 0 && inputMode === 'chat') {
             // Start variable collection in chat mode
             setIsCollectingVariables(true);
@@ -451,7 +462,7 @@ const WorkflowChat: React.FC<WorkflowChatProps> = ({
             setCollectedVariables({});
             setCurrentVariableIndex(0);
             setPendingExecutionType('crew');
-            
+
             const introMessage: ChatMessage = {
               id: `msg-${Date.now() + 1}`,
               type: 'assistant',
@@ -494,13 +505,13 @@ const WorkflowChat: React.FC<WorkflowChatProps> = ({
         content: inputValue,
         timestamp: new Date(),
       };
-      
+
       setMessages(prev => [...prev, userMessage]);
       setInputValue('');
       saveMessageToBackend(userMessage);
-      
+
       setInputMode('dialog');
-      
+
       const responseMessage: ChatMessage = {
         id: `msg-${Date.now() + 1}`,
         type: 'assistant',
@@ -511,7 +522,7 @@ const WorkflowChat: React.FC<WorkflowChatProps> = ({
       saveMessageToBackend(responseMessage);
       return;
     }
-    
+
     if (lowerInput === 'input mode chat' || lowerInput === 'input chat') {
       const userMessage: ChatMessage = {
         id: `msg-${Date.now()}`,
@@ -519,13 +530,13 @@ const WorkflowChat: React.FC<WorkflowChatProps> = ({
         content: inputValue,
         timestamp: new Date(),
       };
-      
+
       setMessages(prev => [...prev, userMessage]);
       setInputValue('');
       saveMessageToBackend(userMessage);
-      
+
       setInputMode('chat');
-      
+
       const responseMessage: ChatMessage = {
         id: `msg-${Date.now() + 1}`,
         type: 'assistant',
@@ -545,19 +556,19 @@ const WorkflowChat: React.FC<WorkflowChatProps> = ({
         content: inputValue,
         timestamp: new Date(),
       };
-      
+
       setMessages(prev => [...prev, userMessage]);
       setInputValue('');
       saveMessageToBackend(userMessage);
-      
+
       const specificJobId = extractJobIdFromCommand(inputValue);
-      
+
       if (specificJobId) {
         setIsLoading(true);
-        
+
         try {
           const traces = await TraceService.getTraces(specificJobId);
-          
+
           if (traces && traces.length > 0) {
             const assistantMessage: ChatMessage = {
               id: `msg-${Date.now() + 1}`,
@@ -566,7 +577,7 @@ const WorkflowChat: React.FC<WorkflowChatProps> = ({
               timestamp: new Date(),
             };
             setMessages(prev => [...prev, assistantMessage]);
-            
+
             traces.forEach((trace, index) => {
               let content = '';
               if (typeof trace.output === 'string') {
@@ -578,11 +589,11 @@ const WorkflowChat: React.FC<WorkflowChatProps> = ({
               } else if (trace.output) {
                 content = JSON.stringify(trace.output, null, 2);
               }
-              
+
               if (!content.trim()) {
                 return;
               }
-              
+
               const traceMessage: ChatMessage = {
                 id: `trace-display-${trace.id}-${index}`,
                 type: 'trace',
@@ -594,7 +605,7 @@ const WorkflowChat: React.FC<WorkflowChatProps> = ({
                 eventType: trace.event_type,
                 jobId: specificJobId || undefined
               };
-              
+
               setMessages(prev => [...prev, traceMessage]);
               saveMessageToBackend(traceMessage);
             });
@@ -608,7 +619,7 @@ const WorkflowChat: React.FC<WorkflowChatProps> = ({
             setMessages(prev => [...prev, assistantMessage]);
           }
         } catch (error) {
-          console.error('Error fetching execution traces:', error);
+
           const errorMessage: ChatMessage = {
             id: `msg-${Date.now() + 1}`,
             type: 'assistant',
@@ -619,14 +630,14 @@ const WorkflowChat: React.FC<WorkflowChatProps> = ({
         } finally {
           setIsLoading(false);
         }
-        
+
         return;
       }
-      
+
       if (hasCrewContent(nodes)) {
         // Check if we need to collect variables
         const variables = extractVariablesFromNodes(nodes);
-        
+
         if (variables.length > 0 && inputMode === 'chat') {
           // Start variable collection in chat mode
           setIsCollectingVariables(true);
@@ -634,7 +645,7 @@ const WorkflowChat: React.FC<WorkflowChatProps> = ({
           setCollectedVariables({});
           setCurrentVariableIndex(0);
           setPendingExecutionType('crew');
-          
+
           const introMessage: ChatMessage = {
             id: `msg-${Date.now() + 1}`,
             type: 'assistant',
@@ -652,12 +663,12 @@ const WorkflowChat: React.FC<WorkflowChatProps> = ({
             timestamp: new Date(),
           };
           setMessages(prev => [...prev, pendingMessage]);
-          
+
           onExecuteCrew();
         }
         return;
       }
-      
+
       const assistantMessage: ChatMessage = {
         id: `msg-${Date.now() + 1}`,
         type: 'assistant',
@@ -668,7 +679,7 @@ const WorkflowChat: React.FC<WorkflowChatProps> = ({
       return;
     }
 
-    console.log('Sending message:', inputValue);
+
 
     const userMessage: ChatMessage = {
       id: `msg-${Date.now()}`,
@@ -684,13 +695,13 @@ const WorkflowChat: React.FC<WorkflowChatProps> = ({
     saveMessageToBackend(userMessage);
 
     try {
-      console.log('Calling dispatcher service...');
+
       const result: DispatchResult = await DispatcherService.dispatch({
         message: userMessage.content,
         model: selectedModel,
         tools: selectedTools,
       });
-      console.log('Dispatcher response:', result);
+
 
       const assistantMessage: ChatMessage = {
         id: `msg-${Date.now() + 1}`,
@@ -726,15 +737,15 @@ const WorkflowChat: React.FC<WorkflowChatProps> = ({
         }
       }
     } catch (error) {
-      console.error('Error processing message:', error);
-      
+
+
       const errorMessage: ChatMessage = {
         id: `msg-${Date.now() + 1}`,
         type: 'assistant',
         content: '❌ Failed to process your request. Please try again or rephrase your message.',
         timestamp: new Date(),
       };
-      
+
       setMessages(prev => [...prev, errorMessage]);
       saveMessageToBackend(errorMessage);
     } finally {
@@ -750,7 +761,7 @@ const WorkflowChat: React.FC<WorkflowChatProps> = ({
 
   const getAssistantResponse = (result: DispatchResult): string => {
     const { dispatcher, generation_result } = result;
-    
+
     if (dispatcher.intent === 'unknown') {
       return "I'm not sure what you want to create. Please specify if you want to create an agent, a task, or a complete crew.";
     }
@@ -771,23 +782,23 @@ const WorkflowChat: React.FC<WorkflowChatProps> = ({
       case 'generate_crew': {
         const crew = generation_result as GeneratedCrew;
         let response = "I've created a crew with:\n";
-        
+
         if (crew.agents && crew.agents.length > 0) {
           response += "\n**Agents & Tasks:**\n";
           crew.agents.forEach((agent, index) => {
             response += `${index + 1}. **${agent.name}** (${agent.role}) - ${agent.goal}\n`;
-            
-            const agentTasks = crew.tasks?.filter((task) => 
+
+            const agentTasks = crew.tasks?.filter((task) =>
               task.agent_id === agent.id || task.agent_id?.toString() === agent.id?.toString()
             ) || [];
-            
+
             if (agentTasks.length > 0) {
               agentTasks.forEach((task) => {
                 response += `   → ${task.name}: ${task.description}\n`;
               });
             }
           });
-          
+
           const unassignedTasks = crew.tasks?.filter((task) => !task.agent_id) || [];
           if (unassignedTasks.length > 0) {
             response += "\n**Unassigned Tasks:**\n";
@@ -796,30 +807,30 @@ const WorkflowChat: React.FC<WorkflowChatProps> = ({
             });
           }
         }
-        
+
         response += "\nTo execute plan type either **execute crew** or **ec**";
         return response;
       }
       case 'generate_plan': {
         const crew = generation_result as GeneratedCrew;
         let response = "I've created a plan with:\n";
-        
+
         if (crew.agents && crew.agents.length > 0) {
           response += "\n**Agents & Tasks:**\n";
           crew.agents.forEach((agent, index) => {
             response += `${index + 1}. **${agent.name}** (${agent.role}) - ${agent.goal}\n`;
-            
-            const agentTasks = crew.tasks?.filter((task) => 
+
+            const agentTasks = crew.tasks?.filter((task) =>
               task.agent_id === agent.id || task.agent_id?.toString() === agent.id?.toString()
             ) || [];
-            
+
             if (agentTasks.length > 0) {
               agentTasks.forEach((task) => {
                 response += `   → ${task.name}: ${task.description}\n`;
               });
             }
           });
-          
+
           const unassignedTasks = crew.tasks?.filter((task) => !task.agent_id) || [];
           if (unassignedTasks.length > 0) {
             response += "\n**Unassigned Tasks:**\n";
@@ -828,7 +839,7 @@ const WorkflowChat: React.FC<WorkflowChatProps> = ({
             });
           }
         }
-        
+
         response += "\nTo execute plan type either **execute crew** or **ec**";
         return response;
       }
@@ -839,7 +850,7 @@ const WorkflowChat: React.FC<WorkflowChatProps> = ({
 
   const handleKeyPress = (e: React.KeyboardEvent) => {
     e.stopPropagation();
-    
+
     if (e.key === 'Enter' && !e.shiftKey) {
       e.preventDefault();
       handleSendMessage();
@@ -848,20 +859,20 @@ const WorkflowChat: React.FC<WorkflowChatProps> = ({
 
 
   return (
-    <Box 
-      sx={{ 
-        height: '100%', 
-        display: 'flex', 
-        flexDirection: 'column', 
+    <Box
+      sx={{
+        height: '100%',
+        display: 'flex',
+        flexDirection: 'column',
         position: 'relative',
         overflow: 'hidden',
         maxWidth: '100%',
         width: '100%',
       }}>
       {/* Header with session controls */}
-      <Box sx={{ 
-        p: 1, 
-        borderBottom: 1, 
+      <Box sx={{
+        p: 1,
+        borderBottom: 1,
         borderColor: 'divider',
         display: 'flex',
         alignItems: 'center',
@@ -870,11 +881,11 @@ const WorkflowChat: React.FC<WorkflowChatProps> = ({
         flexShrink: 0,
       }}>
         <Box sx={{ display: 'flex', flexDirection: 'column' }}>
-          <Typography 
-            variant="subtitle2" 
-            sx={{ 
-              display: 'flex', 
-              alignItems: 'center', 
+          <Typography
+            variant="subtitle2"
+            sx={{
+              display: 'flex',
+              alignItems: 'center',
               gap: 1,
               fontWeight: 600
             }}
@@ -883,9 +894,9 @@ const WorkflowChat: React.FC<WorkflowChatProps> = ({
             Kasal
           </Typography>
           {currentSessionName !== 'New Chat' && (
-            <Typography 
-              variant="caption" 
-              sx={{ 
+            <Typography
+              variant="caption"
+              sx={{
                 color: 'text.secondary',
                 ml: 3
               }}
@@ -901,8 +912,8 @@ const WorkflowChat: React.FC<WorkflowChatProps> = ({
             </IconButton>
           </Tooltip>
           <Tooltip title="Chat History">
-            <IconButton 
-              size="small" 
+            <IconButton
+              size="small"
               onClick={() => {
                 setShowSessionList(true);
                 loadChatSessions();
@@ -912,8 +923,8 @@ const WorkflowChat: React.FC<WorkflowChatProps> = ({
             </IconButton>
           </Tooltip>
           <Tooltip title="Collapse Chat">
-            <IconButton 
-              size="small" 
+            <IconButton
+              size="small"
               onClick={onToggleCollapse}
             >
               <ChevronLeftIcon fontSize="small" />
@@ -939,20 +950,20 @@ const WorkflowChat: React.FC<WorkflowChatProps> = ({
         }}
       >
         {/* Session list header and content (simplified for brevity) */}
-        <Box sx={{ 
-          p: 1.5, 
-          borderBottom: 1, 
+        <Box sx={{
+          p: 1.5,
+          borderBottom: 1,
           borderColor: 'divider',
           backgroundColor: theme => theme.palette.mode === 'dark' ? 'grey.900' : 'grey.50',
-          display: 'flex', 
-          alignItems: 'center', 
+          display: 'flex',
+          alignItems: 'center',
           justifyContent: 'space-between'
         }}>
           <Typography variant="subtitle2" sx={{ fontWeight: 600 }}>Chat History</Typography>
           <Stack direction="row" spacing={0.5}>
             <Tooltip title="Refresh">
-              <IconButton 
-                size="small" 
+              <IconButton
+                size="small"
                 onClick={loadChatSessions}
                 disabled={isLoadingSessions}
               >
@@ -960,8 +971,8 @@ const WorkflowChat: React.FC<WorkflowChatProps> = ({
               </IconButton>
             </Tooltip>
             <Tooltip title="Close">
-              <IconButton 
-                size="small" 
+              <IconButton
+                size="small"
                 onClick={() => setShowSessionList(false)}
               >
                 <CloseIcon fontSize="small" />
@@ -969,7 +980,7 @@ const WorkflowChat: React.FC<WorkflowChatProps> = ({
             </Tooltip>
           </Stack>
         </Box>
-        
+
         {/* Session list content */}
         <Box sx={{ flex: 1, overflow: 'auto', p: 2 }}>
           {chatSessions.length === 0 ? (
@@ -983,8 +994,8 @@ const WorkflowChat: React.FC<WorkflowChatProps> = ({
                   key={session.session_id}
                   onClick={() => loadSessionMessages(session.session_id)}
                   selected={session.session_id === sessionId}
-                  sx={{ 
-                    borderRadius: 1, 
+                  sx={{
+                    borderRadius: 1,
                     mb: 1,
                     border: 1,
                     borderColor: 'divider',
@@ -1011,7 +1022,7 @@ const WorkflowChat: React.FC<WorkflowChatProps> = ({
                           localStorage.setItem('chatSessionJobNames', JSON.stringify(sessionJobNames));
                           loadChatSessions();
                         } catch (error) {
-                          console.error('Failed to delete session:', error);
+
                           const errorMessage: ChatMessage = {
                             id: `error-${Date.now()}`,
                             type: 'assistant',
@@ -1047,18 +1058,21 @@ const WorkflowChat: React.FC<WorkflowChatProps> = ({
         />
       )}
 
-      <Box sx={{ 
-        flex: 1, 
-        overflow: 'auto', 
-        px: 1, // Reduced horizontal padding from 2 to 1
-        py: 2, // Keep vertical padding
-        width: '100%', 
-        maxWidth: '100%',
-        position: 'relative',
-        minWidth: 0, // Prevent flex item from growing
-        display: 'flex',
-        flexDirection: 'column',
-      }}>
+      <Box
+        ref={messagesContainerRef}
+        onScroll={handleMessagesScroll}
+        sx={{
+          flex: 1,
+          overflow: 'auto',
+          px: 1, // Reduced horizontal padding from 2 to 1
+          py: 2, // Keep vertical padding
+          width: '100%',
+          maxWidth: '100%',
+          position: 'relative',
+          minWidth: 0, // Prevent flex item from growing
+          display: 'flex',
+          flexDirection: 'column',
+        }}>
         {messages.length === 0 ? (
           <Box sx={{ textAlign: 'center', mt: 4 }}>
             <Typography variant="body2" color="text.secondary" paragraph>
@@ -1066,19 +1080,19 @@ const WorkflowChat: React.FC<WorkflowChatProps> = ({
             </Typography>
             <List dense>
               <ListItem>
-                <ListItemText 
+                <ListItemText
                   primary="Create an agent that can analyze financial data"
                   secondary="Creates a single agent"
                 />
               </ListItem>
               <ListItem>
-                <ListItemText 
+                <ListItemText
                   primary="I need a task to summarize documents"
                   secondary="Creates a single task"
                 />
               </ListItem>
               <ListItem>
-                <ListItemText 
+                <ListItemText
                   primary="Build a research team with a researcher and writer"
                   secondary="Complete a plan"
                 />
@@ -1086,8 +1100,8 @@ const WorkflowChat: React.FC<WorkflowChatProps> = ({
             </List>
           </Box>
         ) : (
-          <List sx={{ 
-            width: '100%', 
+          <List sx={{
+            width: '100%',
             maxWidth: '100%',
             pt: 0, // Remove top padding
             pb: 0, // Remove bottom padding
@@ -1095,7 +1109,7 @@ const WorkflowChat: React.FC<WorkflowChatProps> = ({
             {(() => {
               // Messages are already deduplicated by Zustand store
               const deduplicatedMessages = messages;
-              
+
               const filteredMessages = deduplicatedMessages.filter(message => {
                 // Filter out execution start and completion messages
                 if (message.type === 'execution' && (
@@ -1156,8 +1170,8 @@ const WorkflowChat: React.FC<WorkflowChatProps> = ({
         <div ref={messagesEndRef} />
       </Box>
 
-      <Paper 
-        elevation={3} 
+      <Paper
+        elevation={3}
         sx={{ p: 2, borderTop: 1, borderColor: 'divider', borderRadius: 0, flexShrink: 0 }}
       >
         <Box sx={{ position: 'relative' }}>
@@ -1208,39 +1222,37 @@ const WorkflowChat: React.FC<WorkflowChatProps> = ({
                         console.log('Knowledge files uploaded:', files);
                       }}
                       onAgentsUpdated={(updatedAgents) => {
-                        console.log('[DEBUG] onAgentsUpdated called with agents:', updatedAgents.map(a => ({
-                          id: a.id,
-                          name: a.name,
-                          knowledge_sources: a.knowledge_sources
-                        })));
-                        
+
+
+
+
+
+
                         // Update the canvas nodes with the updated agent data
                         const updatedNodes = nodes.map(node => {
                           if (node.type === 'agentNode') {
-                            console.log('[DEBUG] Checking node:', {
-                              nodeId: node.id,
-                              nodeDataId: node.data.id,
-                              nodeDataAgentId: node.data.agentId,
-                              nodeDataName: node.data.name
-                            });
-                            
+
+
+
+
+
+
+
                             const updatedAgent = updatedAgents.find(a => {
                               // Try multiple matching strategies
-                              const matches = 
+                              const matches =
                                 a.id === node.data.agentId ||  // Match by agentId
                                 a.id === node.data.id ||        // Match by id
                                 (a.id && `agent-${a.id}` === node.id) ||  // Match by node.id pattern
                                 `agent-${a.name}` === node.id;  // Match by name pattern
-                              
-                              if (matches) {
-                                console.log(`[DEBUG] Found match for node ${node.id} with agent ${a.name}`);
-                              }
+
+
                               return matches;
                             });
-                            
+
                             if (updatedAgent) {
-                              console.log(`[DEBUG] Updating node ${node.id} with knowledge_sources:`, updatedAgent.knowledge_sources);
-                              console.log(`[DEBUG] Updating node ${node.id} with tools:`, updatedAgent.tools);
+
+
                               return {
                                 ...node,
                                 data: {
@@ -1256,22 +1268,22 @@ const WorkflowChat: React.FC<WorkflowChatProps> = ({
                           return node;
                         });
                         setNodes(updatedNodes as FlowNode[]);
-                        console.log('Updated canvas nodes with knowledge sources:', updatedAgents.map(a => ({
-                          name: a.name,
-                          knowledge_sources: a.knowledge_sources?.length || 0
-                        })));
+
+
+
+
                       }}
                       // Pass only agents that are currently on the canvas
                       availableAgents={nodes
                         .filter(node => node.type === 'agentNode')
                         .map(node => {
-                          console.log('[DEBUG] Available agent from node:', {
-                            nodeId: node.id,
-                            nodeData: node.data,
-                            agentId: node.data.agentId,
-                            id: node.data.id,
-                            name: node.data.name
-                          });
+
+
+
+
+
+
+
                           return {
                             ...node.data,
                             id: node.data.agentId || node.data.id  // Ensure we have an ID
@@ -1302,9 +1314,9 @@ const WorkflowChat: React.FC<WorkflowChatProps> = ({
                         },
                       }}
                     >
-                      <Typography 
-                        variant="caption" 
-                        sx={{ 
+                      <Typography
+                        variant="caption"
+                        sx={{
                           fontSize: '0.75rem',
                           overflow: 'hidden',
                           textOverflow: 'ellipsis',
@@ -1409,7 +1421,7 @@ const WorkflowChat: React.FC<WorkflowChatProps> = ({
             color="primary"
             onClick={handleSendMessage}
             disabled={!inputValue.trim() || isLoading || !!executingJobId}
-            sx={{ 
+            sx={{
               position: 'absolute',
               right: 8,
               bottom: 8,

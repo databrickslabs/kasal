@@ -28,7 +28,7 @@ class ChatHistoryService(BaseService[ChatHistory, ChatHistoryCreate]):
     
 
     async def save_message(
-        self, 
+        self,
         session_id: str,
         user_id: str,
         message_type: str,
@@ -37,7 +37,7 @@ class ChatHistoryService(BaseService[ChatHistory, ChatHistoryCreate]):
         confidence: Optional[float] = None,
         generation_result: Optional[dict] = None,
         group_context: Optional[GroupContext] = None
-    ) -> ChatHistory:
+    ) -> ChatHistoryResponse:
         """
         Save a chat message with group context.
         
@@ -72,15 +72,18 @@ class ChatHistoryService(BaseService[ChatHistory, ChatHistoryCreate]):
                 'group_email': group_context.group_email
             })
 
-        return await self.repository.create(message_data)
+        # Create the model and convert to response schema
+        chat_history = await self.repository.create(message_data)
+        # Convert SQLAlchemy model to Pydantic schema to avoid lazy loading issues
+        return ChatHistoryResponse.model_validate(chat_history)
 
     async def get_chat_session(
-        self, 
-        session_id: str, 
-        page: int = 0, 
+        self,
+        session_id: str,
+        page: int = 0,
         per_page: int = 50,
         group_context: Optional[GroupContext] = None
-    ) -> List[ChatHistory]:
+    ) -> List[ChatHistoryResponse]:
         """
         Get chat messages for a specific session with group filtering.
         
@@ -96,20 +99,22 @@ class ChatHistoryService(BaseService[ChatHistory, ChatHistoryCreate]):
         if not group_context or not group_context.group_ids:
             return []
 
-        return await self.repository.get_by_session_and_group(
+        messages = await self.repository.get_by_session_and_group(
             session_id=session_id,
             group_ids=group_context.group_ids,
             page=page,
             per_page=per_page
         )
+        # Convert SQLAlchemy models to Pydantic schemas
+        return [ChatHistoryResponse.model_validate(msg) for msg in messages]
 
     async def get_user_sessions(
-        self, 
-        user_id: str, 
-        page: int = 0, 
+        self,
+        user_id: str,
+        page: int = 0,
         per_page: int = 20,
         group_context: Optional[GroupContext] = None
-    ) -> List[ChatHistory]:
+    ) -> List[ChatHistoryResponse]:
         """
         Get recent chat sessions for a user with group filtering.
         
@@ -125,12 +130,14 @@ class ChatHistoryService(BaseService[ChatHistory, ChatHistoryCreate]):
         if not group_context or not group_context.group_ids:
             return []
 
-        return await self.repository.get_user_sessions(
+        sessions = await self.repository.get_user_sessions(
             user_id=user_id,
             group_ids=group_context.group_ids,
             page=page,
             per_page=per_page
         )
+        # Convert SQLAlchemy models to Pydantic schemas
+        return [ChatHistoryResponse.model_validate(session) for session in sessions]
 
     async def get_group_sessions(
         self, 

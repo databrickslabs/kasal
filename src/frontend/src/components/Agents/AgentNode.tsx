@@ -136,7 +136,7 @@ const AgentNode: React.FC<{ data: AgentNodeData; id: string }> = ({ data, id }) 
           function_calling_llm: data.function_calling_llm,
           max_rpm: data.max_rpm,
           max_execution_time: data.max_execution_time,
-          embedder_config: data.embedder_config as any,
+          embedder_config: (data.embedder_config as import('../../types/agent').EmbedderConfig | undefined),
           knowledge_sources: data.knowledge_sources,
         };
         setAgentData(agentFromData);
@@ -606,4 +606,4 @@ const AgentNode: React.FC<{ data: AgentNodeData; id: string }> = ({ data, id }) 
   );
 };
 
-export default AgentNode; 
+export default React.memo(AgentNode);

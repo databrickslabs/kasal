@@ -2,14 +2,15 @@ import React from 'react';
 import { render, screen } from '@testing-library/react';
 import { ThemeProvider } from '@mui/material/styles';
 import { createTheme } from '@mui/material/styles';
-import ToolForm from './ToolForm';
+import ToolForm, { customTools } from './ToolForm';
+import { ToolService } from '../../api/ToolService';
 
 // Mock the translation hook
 jest.mock('react-i18next', () => ({
   useTranslation: () => ({
     t: (key: string) => key,
     i18n: {
-      changeLanguage: () => new Promise(() => {}),
+      changeLanguage: () => Promise.resolve(),
     },
   }),
 }));
@@ -17,7 +18,7 @@ jest.mock('react-i18next', () => ({
 // Mock the ToolService
 jest.mock('../../api/ToolService', () => ({
   ToolService: {
-    fetchAllTools: jest.fn().mockResolvedValue([
+    listTools: jest.fn().mockResolvedValue([
       {
         id: 67,
         title: 'DatabricksCustomTool',
@@ -69,16 +70,13 @@ describe('ToolForm', () => {
 
   it('should categorize DatabricksJobsTool as a custom tool', async () => {
     renderComponent();
-    
+
     // Wait for tools to load
     const customTab = await screen.findByText('tools.tabs.custom');
     expect(customTab).toBeInTheDocument();
   });
 
   it('should include all custom tools in the customTools array', () => {
-    // Import the customTools array from the component
-    const { customTools } = require('./ToolForm');
-    
     expect(customTools).toContain('GenieTool');
     expect(customTools).toContain('PerplexityTool');
     expect(customTools).toContain('DatabricksCustomTool');
@@ -87,14 +85,12 @@ describe('ToolForm', () => {
   });
 
   it('should correctly categorize tools based on customTools array', async () => {
-    const { ToolService } = require('../../api/ToolService');
-    
     renderComponent();
-    
+
     // Wait for the fetch to complete
     await screen.findByText('tools.title');
-    
+
     // Verify ToolService was called
-    expect(ToolService.fetchAllTools).toHaveBeenCalled();
+    expect(ToolService.listTools).toHaveBeenCalled();
   });
 });

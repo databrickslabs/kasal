@@ -7,7 +7,7 @@ jest.mock('../config/api/ApiConfig');
 describe('DatabricksVectorSearchService', () => {
   beforeEach(() => {
     jest.clearAllMocks();
-    jest.spyOn(console, 'log').mockImplementation(() => {});
+    jest.spyOn(console, 'log').mockImplementation(jest.fn());
   });
 
   afterEach(() => {

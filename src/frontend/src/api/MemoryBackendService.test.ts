@@ -1,4 +1,4 @@
-import { MemoryBackendService, TestConnectionResult, AvailableIndexesResponse, DatabricksIndex } from './MemoryBackendService';
+import { MemoryBackendService, TestConnectionResult, AvailableIndexesResponse } from './MemoryBackendService';
 import { apiClient } from '../config/api/ApiConfig';
 import { MemoryBackendConfig, DatabricksMemoryConfig, MemoryBackendType } from '../types/memoryBackend';
 import { AxiosError } from 'axios';
@@ -8,7 +8,7 @@ jest.mock('../config/api/ApiConfig');
 describe('MemoryBackendService', () => {
   beforeEach(() => {
     jest.clearAllMocks();
-    jest.spyOn(console, 'error').mockImplementation(() => {});
+    jest.spyOn(console, 'error').mockImplementation(jest.fn());
   });
 
   afterEach(() => {

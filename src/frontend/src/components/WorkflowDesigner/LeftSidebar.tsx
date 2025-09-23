@@ -118,8 +118,7 @@ const LeftSidebar: React.FC<LeftSidebarProps> = ({
     managerLLM: storeManagerLLM,
   } = useCrewExecutionStore();
 
-  // Debug logging
-  console.log('[LeftSidebar] Current store processType:', storeProcessType);
+
 
   // Get active shortcuts from store
   const { shortcuts } = useShortcutsStore();
@@ -165,9 +164,7 @@ const LeftSidebar: React.FC<LeftSidebarProps> = ({
             setManagerLLM(firstModel);
           }
         }
-      } catch (error) {
-        console.error('Error fetching models:', error);
-      } finally {
+      } catch (error) { /* ignore error to keep UI responsive */ } finally {
         setIsLoadingModels(false);
       }
     };
@@ -195,7 +192,7 @@ const LeftSidebar: React.FC<LeftSidebarProps> = ({
 
   const handleProcessTypeChange = useCallback((event: SelectChangeEvent) => {
     const value = event.target.value as 'sequential' | 'hierarchical';
-    console.log('[LeftSidebar] Changing process type to:', value);
+
     setStoreProcessType(value);
     // Also call the prop setter if it exists for backward compatibility
     if (setProcessType) {
@@ -666,11 +663,9 @@ const LeftSidebar: React.FC<LeftSidebarProps> = ({
     }
     if (sectionId === 'help') {
       // Open tutorial dialog
-      console.log('[LeftSidebar] Help button clicked, onOpenTutorial:', onOpenTutorial);
+
       if (onOpenTutorial) {
         onOpenTutorial();
-      } else {
-        console.warn('[LeftSidebar] onOpenTutorial prop is not provided');
       }
       return;
     }

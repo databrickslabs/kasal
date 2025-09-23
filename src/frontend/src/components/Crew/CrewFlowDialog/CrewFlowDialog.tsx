@@ -1392,7 +1392,7 @@ const CrewFlowSelectionDialog: React.FC<CrewFlowSelectionDialogProps> = ({
             <CloseIcon />
           </IconButton>
         </DialogTitle>
-        <DialogContent onKeyDown={handleDialogKeyDown}>
+        <DialogContent onKeyDown={handleDialogKeyDown} data-tour="catalog-dialog">
           {error && (
             <Alert severity="error" sx={{ mb: 2 }}>
               {error}

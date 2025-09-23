@@ -16,9 +16,7 @@ import {
   Avatar,
 } from '@mui/material';
 import {
-  AdminPanelSettings as AdminIcon,
   Edit as EditorIcon,
-  PlayCircle as OperatorIcon,
   Close as CloseIcon,
   School as SchoolIcon,
 } from '@mui/icons-material';
@@ -99,48 +97,22 @@ const InteractiveTutorial: React.FC<TutorialProps> = ({ isOpen, onClose }) => {
   const { setHasSeenTutorial } = useWorkflowStore();
   const [run, setRun] = useState(false);
   const [selectedRole, setSelectedRole] = useState<string | null>(null);
-  const [showRoleSelection, setShowRoleSelection] = useState(true);
+  const [showRoleSelection, setShowRoleSelection] = useState(false);
   const [showSelectionDialog, setShowSelectionDialog] = useState(false);
 
   // Tutorial role options
   const tutorialRoles = [
     {
-      id: 'admin',
-      title: 'Admin Tutorial',
-      icon: <AdminIcon />,
-      color: '#f44336',
-      description: 'System configuration and platform management',
-      features: [
-        'Database configuration',
-        'Memory backend setup',
-        'User & group management',
-        'API key management',
-      ],
-    },
-    {
       id: 'editor',
-      title: 'Editor Tutorial',
+      title: 'Content Creator Tutorial',
       icon: <EditorIcon />,
       color: '#2196f3',
-      description: 'Create and build AI workflows',
+      description: 'Build AI content workflows + jumpstart with Catalog',
       features: [
         'Create agents & tasks',
         'Build workflows',
-        'Execute crews',
-        'Monitor execution',
-      ],
-    },
-    {
-      id: 'operator',
-      title: 'Operator Tutorial',
-      icon: <OperatorIcon />,
-      color: '#4caf50',
-      description: 'Run and monitor workflows',
-      features: [
-        'Browse catalog',
-        'Execute workflows',
-        'View trace & logs',
-        'Manage results',
+        'Browse catalog templates',
+        'Execute & save templates',
       ],
     },
   ];
@@ -155,7 +127,7 @@ const InteractiveTutorial: React.FC<TutorialProps> = ({ isOpen, onClose }) => {
   };
 
   // Admin-specific steps - Focus on Configuration
-  const adminSteps: Step[] = [
+  const _adminSteps: Step[] = [
     {
       target: '[data-tour="workflow-designer"]',
       content: 'Welcome Admin! This tutorial will guide you through system configuration and management. As an admin, you have full control over the platform settings, user management, and system resources. Let\'s start by opening the Configuration panel.',
@@ -225,7 +197,7 @@ const InteractiveTutorial: React.FC<TutorialProps> = ({ isOpen, onClose }) => {
   ];
 
   // Editor-specific steps - Focus on Creating and Running Plans
-  const editorSteps: Step[] = [
+  const editorSteps: Step[] = useMemo(() => [
     {
       target: '[data-tour="workflow-designer"]',
       content: 'Welcome Editor! This tutorial will teach you how to create AI agents and tasks, then execute them. You have two ways to build workflows: using the chat panel (AI-assisted) or the right sidebar (manual control).',
@@ -249,16 +221,16 @@ const InteractiveTutorial: React.FC<TutorialProps> = ({ isOpen, onClose }) => {
     },
     {
       target: '[data-tour="canvas-area"]',
-      content: 'Canvas Area: Your workflow visualizes here. You can:\n• Right-click to add components\n• Drag to connect agents to tasks\n• Double-click to edit\n• See the flow of work visually',
+      content: 'Canvas Area: This is where your workflow appears. Add agents via the Chat panel (AI-assisted) or manually in the Right Sidebar. You can also import existing Plans, Agents, and Tasks from the Catalog. Drag to connect agents to tasks and double-click items to edit.',
       placement: 'center',
     },
     {
-      target: '[data-tour="agent-node"]',
+      target: '[data-nodetype="agent"]',
       content: 'Agents: These are your AI workers. Each agent needs:\n• A role (what they are)\n• A goal (what they achieve)\n• Tools (what they can use)\n• At least ONE task (critical!)',
       placement: 'auto',
     },
     {
-      target: '[data-tour="task-node"]',
+      target: '[data-nodetype="task"]',
       content: 'Tasks: These define the work. Each task needs:\n• A clear description\n• Expected output\n• An assigned agent\nRemember: Unassigned tasks will cause execution to fail!',
       placement: 'auto',
     },
@@ -268,19 +240,29 @@ const InteractiveTutorial: React.FC<TutorialProps> = ({ isOpen, onClose }) => {
       placement: 'bottom',
     },
     {
-      target: '[data-tour="trace-button"]',
-      content: 'View Trace: After execution starts, click here to monitor progress. You\'ll see:\n• Which agent is working\n• Task completion status\n• Real-time logs\n• Any errors or issues',
+      target: '[data-tour="open-workflow"]',
+      content: 'Catalog: Click here to browse and import existing Plans, Agents, and Tasks you can customize.',
       placement: 'bottom',
+    },
+    {
+      target: '[data-tour="catalog-dialog"]',
+      content: 'Catalog Browser: Search and filter, then import Plans, Agents, or Tasks. Imported items will appear on the canvas, ready to connect and run.',
+      placement: 'center',
+    },
+    {
+      target: '[data-tour="canvas-area"]',
+      content: 'Imported Template: The selected template appears here. Tweak agents and tasks, then run.',
+      placement: 'center',
     },
     {
       target: '[data-tour="save-button"]',
       content: 'Save Workflow: Once your workflow runs successfully, save it as a template for reuse. Give it a clear name and description.',
       placement: 'bottom',
     },
-  ];
+  ], []);
 
   // Operator-specific steps - Focus on Running Plans from Catalog
-  const operatorSteps: Step[] = [
+  const _operatorSteps: Step[] = [
     {
       target: '[data-tour="workflow-designer"]',
       content: 'Welcome Operator! This tutorial will show you how to run pre-built workflows from the catalog. As an operator, your role is to execute and monitor AI workflows created by editors.',
@@ -341,21 +323,9 @@ const InteractiveTutorial: React.FC<TutorialProps> = ({ isOpen, onClose }) => {
 
   // Get steps based on selected role
   const steps = useMemo(() => {
-    // Use selected role if chosen, otherwise use user's actual role
-    const roleToUse = selectedRole || userRole;
-
-    switch (roleToUse) {
-      case 'admin':
-        return adminSteps;
-      case 'editor':
-        return editorSteps;
-      case 'operator':
-        return operatorSteps;
-      default:
-        return editorSteps; // Default to editor steps
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [selectedRole, userRole]);
+    // Single-persona tutorial: always use editor steps
+    return editorSteps;
+  }, [editorSteps]);
 
   // Start the tour when component mounts and isOpen is true
   useEffect(() => {

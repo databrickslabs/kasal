@@ -29,7 +29,7 @@ interface SecurityDisclaimerProps {
 }
 
 // Security risk levels and descriptions for each tool
-const TOOL_SECURITY_INFO: Record<string, {
+export const TOOL_SECURITY_INFO: Record<string, {
   riskLevel: 'CRITICAL' | 'HIGH' | 'MEDIUM' | 'LOW';
   risks: string[];
   mitigations: string[];

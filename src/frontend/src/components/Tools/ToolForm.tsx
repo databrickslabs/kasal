@@ -51,8 +51,8 @@ const toolIcons: ToolIcon[] = [
 ];
 
 // Custom tools from tool_factory.py
-const customTools = [
-  'GenieTool', 
+export const customTools = [
+  'GenieTool',
   'PerplexityTool',
   'DatabricksCustomTool',
   'DatabricksJobsTool',
