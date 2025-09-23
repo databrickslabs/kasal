@@ -50,7 +50,6 @@ import GroupManagement from './GroupManagement';
 import WorkspaceOverview from './WorkspaceOverview';
 import UserPermissionManagement from './UserPermissionManagement';
 import { LANGUAGES } from '../../config/i18n/config';
-import DatabricksEnvironmentService from '../../api/DatabricksEnvironmentService';
 
 interface ConfigurationProps {
   onClose?: () => void;
@@ -160,7 +159,6 @@ function Configuration({ onClose }: ConfigurationProps): JSX.Element {
   // Always show Database Management now (no permission check needed)
   // Future: Will check for admin group membership
   const [showDatabaseManagement, setShowDatabaseManagement] = useState(true);
-  const [isDatabricksApps, setIsDatabricksApps] = useState(false);
 
   // Build navigation items dynamically based on permissions
   const navItems: NavItem[] = React.useMemo(() => {
@@ -230,14 +228,12 @@ function Configuration({ onClose }: ConfigurationProps): JSX.Element {
         index: currentIndex++
       });
 
-      // Databricks configuration for workspace (if not in Databricks Apps)
-      if (!isDatabricksApps) {
-        baseNavItems.push({
-          label: t('configuration.databricks.tab', { defaultValue: 'Databricks' }),
-          icon: <CloudIcon fontSize="small" />,
-          index: currentIndex++
-        });
-      }
+      // Databricks configuration for workspace (always visible now)
+      baseNavItems.push({
+        label: t('configuration.databricks.tab', { defaultValue: 'Databricks' }),
+        icon: <CloudIcon fontSize="small" />,
+        index: currentIndex++
+      });
 
       // Memory Backend - workspace admins can configure
       baseNavItems.push({
@@ -279,7 +275,7 @@ function Configuration({ onClose }: ConfigurationProps): JSX.Element {
     }
 
     return baseNavItems;
-  }, [showDatabaseManagement, isDatabricksApps, t, isSystemAdmin, isWorkspaceAdmin, isOperator]); // Recalculate when permission or environment changes
+  }, [showDatabaseManagement, t, isSystemAdmin, isWorkspaceAdmin, isOperator]); // Recalculate when permission changes
 
   // Ensure permissions are loaded on mount
   useEffect(() => {
@@ -306,12 +302,6 @@ function Configuration({ onClose }: ConfigurationProps): JSX.Element {
         const currentLang = await languageService.getCurrentLanguage();
         setCurrentLanguage(currentLang);
 
-        // Check if we're in Databricks Apps environment
-        const envInfo = await DatabricksEnvironmentService.getEnvironmentInfo();
-        setIsDatabricksApps(envInfo.is_databricks_apps);
-        if (envInfo.is_databricks_apps) {
-          console.log('Running in Databricks Apps environment - Databricks configuration tab hidden');
-        }
 
         // Database Management is now always visible
         // Future: Will check for admin group membership

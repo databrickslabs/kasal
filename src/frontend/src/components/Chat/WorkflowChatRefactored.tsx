@@ -25,6 +25,7 @@ import CloseIcon from '@mui/icons-material/Close';
 import RefreshIcon from '@mui/icons-material/Refresh';
 import KeyboardArrowDownIcon from '@mui/icons-material/KeyboardArrowDown';
 import ChevronLeftIcon from '@mui/icons-material/ChevronLeft';
+import PlayArrowIcon from '@mui/icons-material/PlayArrow';
 import DispatcherService, { DispatchResult, ConfigureCrewResult } from '../../api/DispatcherService';
 import { useWorkflowStore } from '../../store/workflow';
 import { useCrewExecutionStore } from '../../store/crewExecution';
@@ -856,6 +857,10 @@ const WorkflowChat: React.FC<WorkflowChatProps> = ({
       handleSendMessage();
     }
   };
+  const isSendMode = inputValue.trim().length > 0;
+  const canRunCrew = hasCrewContent(nodes);
+  const isActionDisabled = isLoading || !!executingJobId || (!isSendMode && !canRunCrew);
+
 
 
   return (
@@ -1179,7 +1184,7 @@ const WorkflowChat: React.FC<WorkflowChatProps> = ({
             ref={inputRef}
             fullWidth
             variant="outlined"
-            placeholder={executingJobId ? "Execution in progress..." : hasCrewContent(nodes) ? "Type 'execute crew' or 'ec'..." : "Describe what you want to create..."}
+            placeholder={executingJobId ? "Execution in progress..." : "Describe what you want to create..."}
             value={inputValue}
             onChange={(e) => setInputValue(e.target.value)}
             onKeyDown={(e) => {
@@ -1417,31 +1422,39 @@ const WorkflowChat: React.FC<WorkflowChatProps> = ({
             }}
           />
           {/* Send button */}
-          <IconButton
-            color="primary"
-            onClick={handleSendMessage}
-            disabled={!inputValue.trim() || isLoading || !!executingJobId}
-            sx={{
-              position: 'absolute',
-              right: 8,
-              bottom: 8,
-              padding: '6px',
-              backgroundColor: 'primary.main',
-              color: 'primary.contrastText',
-              borderRadius: '50%',
-              width: 28,
-              height: 28,
-              '&:hover': {
-                backgroundColor: 'primary.dark',
-              },
-              '&.Mui-disabled': {
-                backgroundColor: 'action.disabledBackground',
-                color: 'action.disabled',
-              },
-            }}
-          >
-            {isLoading || executingJobId ? <CircularProgress size={16} sx={{ color: 'inherit' }} /> : <ArrowUpwardIcon sx={{ fontSize: 16 }} />}
-          </IconButton>
+          <Tooltip title={isSendMode ? 'Send' : (canRunCrew ? 'Run Crew' : 'Add at least one Agent and one Task to run')}>
+            <span>
+              <IconButton
+                color="primary"
+                onClick={isSendMode ? handleSendMessage : () => { if (canRunCrew && onExecuteCrew) onExecuteCrew(); }}
+                disabled={isActionDisabled}
+                sx={{
+                  position: 'absolute',
+                  right: 8,
+                  bottom: 8,
+                  padding: '6px',
+                  backgroundColor: 'primary.main',
+                  color: 'primary.contrastText',
+                  borderRadius: '50%',
+                  width: 28,
+                  height: 28,
+                  '&:hover': {
+                    backgroundColor: 'primary.dark',
+                  },
+                  '&.Mui-disabled': {
+                    backgroundColor: 'action.disabledBackground',
+                    color: 'action.disabled',
+                  },
+                }}
+              >
+                {isLoading || executingJobId ? (
+                  <CircularProgress size={16} sx={{ color: 'inherit' }} />
+                ) : (
+                  isSendMode ? <ArrowUpwardIcon sx={{ fontSize: 16 }} /> : <PlayArrowIcon sx={{ fontSize: 16 }} />
+                )}
+              </IconButton>
+            </span>
+          </Tooltip>
         </Box>
       </Paper>
     </Box>

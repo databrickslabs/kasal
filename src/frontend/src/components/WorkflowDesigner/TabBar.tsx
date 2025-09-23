@@ -70,6 +70,7 @@ const TabBar: React.FC<TabBarProps> = ({
     clearTabExecutionStatus
   } = useTabManagerStore();
 
+
   const [contextMenu, setContextMenu] = useState<{
     mouseX: number;
     mouseY: number;

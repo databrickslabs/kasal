@@ -268,33 +268,29 @@ class TestAgentTraceEventListener:
         assert listener._active_context[job_id]['task'] == "Analyze data"
     
     @patch('src.engines.crewai.callbacks.logging_callbacks.TaskTrackingService')
-    @patch('src.engines.crewai.callbacks.logging_callbacks.SyncUnitOfWork')
-    def test_update_task_status_in_subprocess(self, mock_uow, mock_task_service, setup):
+    def test_update_task_status_in_subprocess(self, mock_task_service, setup):
         """Test task status update in subprocess mode."""
         job_id, group_context = setup
-        
+
         # Set subprocess mode
         os.environ['CREW_SUBPROCESS_MODE'] = 'true'
-        
+
         try:
-            # Mock the UnitOfWork and TaskTrackingService
-            mock_uow_instance = MagicMock()
-            mock_uow.get_instance.return_value = mock_uow_instance
-            
+            # Mock TaskTrackingService (kept for interface stability)
             mock_service_instance = AsyncMock()
             mock_task_service.return_value = mock_service_instance
-            
+
             with patch('src.engines.crewai.callbacks.logging_callbacks.get_trace_queue') as mock_get_queue:
                 mock_get_queue.return_value = MagicMock()
                 listener = AgentTraceEventListener(job_id, group_context)
-                
+
                 # This would normally be called in a thread
                 from src.schemas.task_tracking import TaskStatusEnum
                 listener._update_task_status("Test Task", TaskStatusEnum.COMPLETED, "[Test]")
-                
+
                 # The actual update happens in a thread, so we can't easily verify it
                 # Just ensure no exceptions are raised
-                
+
         finally:
             # Clean up
             os.environ.pop('CREW_SUBPROCESS_MODE', None)

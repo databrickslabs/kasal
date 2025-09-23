@@ -308,7 +308,7 @@ const GroupManagement: React.FC = () => {
     setLoading(true);
     try {
       const groupService = GroupService.getInstance();
-      await groupService.removeUserFromGroup(selectedGroup.id, userToRemove.id);
+      await groupService.removeUserFromGroup(selectedGroup.id, userToRemove.user_id || userToRemove.id);
 
       setRemoveUserDialogOpen(false);
       setUserToRemove(null);

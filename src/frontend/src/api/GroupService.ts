@@ -1,4 +1,5 @@
-import { ApiService } from './ApiService';
+import { apiClient } from '../config/api/ApiConfig';
+const ApiService = apiClient;
 
 // Types for group management
 export interface Group {

@@ -244,13 +244,20 @@ class DatabricksJobsTool(BaseTool):
                 if is_databricks_apps_environment():
                     logger.info("Detected Databricks Apps environment")
                 if not self._token:
-                    # Second fallback: Try to get Databricks API key from API Keys Service
+                    # First try: environment variables for PAT (explicit user-config should win over DB/service)
+                    logger.info("Checking environment variables for Databricks token...")
+                    self._token = os.getenv("DATABRICKS_TOKEN") or os.getenv("DATABRICKS_API_KEY")
+                    if self._token:
+                        logger.info("✅ Using DATABRICKS token from environment")
+
+                if not self._token:
+                    # Next try: API Keys Service
                     logger.info("Attempting to get Databricks API key from API Keys Service...")
                     try:
                         from src.core.unit_of_work import UnitOfWork
                         from src.services.api_keys_service import ApiKeysService
                         import asyncio
-                        
+
                         # Create a new event loop for this sync context
                         loop = None
                         try:
@@ -258,7 +265,7 @@ class DatabricksJobsTool(BaseTool):
                         except RuntimeError:
                             loop = asyncio.new_event_loop()
                             asyncio.set_event_loop(loop)
-                        
+
                         async def get_databricks_token():
                             async with UnitOfWork() as uow:
                                 # Try both possible key names
@@ -266,39 +273,35 @@ class DatabricksJobsTool(BaseTool):
                                        await ApiKeysService.get_provider_api_key("DATABRICKS_API_KEY") or \
                                        await ApiKeysService.get_provider_api_key("DATABRICKS_TOKEN")
                                 return token
-                        
+
                         if loop.is_running():
                             # If we're in an async context, we can't run the loop
-                            logger.warning("Cannot fetch API key from service in async context - will try environment variables")
+                            logger.warning("Cannot fetch API key from service in async context - skipping")
                         else:
                             self._token = loop.run_until_complete(get_databricks_token())
                             if self._token:
                                 logger.info("✅ Successfully retrieved Databricks API key from API Keys Service")
                             else:
                                 logger.warning("❌ No Databricks API key found in API Keys Service")
-                                
                     except Exception as api_service_error:
                         logger.warning(f"❌ Failed to get API key from service: {api_service_error}")
-                    
-                    # Third fallback: environment variables for PAT
-                    if not self._token:
-                        logger.info("Attempting to get Databricks API key from environment variables...")
-                        self._token = os.getenv("DATABRICKS_API_KEY") or os.getenv("DATABRICKS_TOKEN")
-                        if self._token:
-                            logger.info("✅ Using DATABRICKS_API_KEY/TOKEN from environment")
-                        else:
-                            logger.warning("❌ No DATABRICKS_API_KEY or DATABRICKS_TOKEN found in environment")
                             
             except ImportError as e:
                 logger.debug(f"Enhanced auth not available: {e}")
-                # Fall back to API Keys Service and then environment variables
+                # Fall back to environment variables first, then API Keys Service
+                if not self._token:
+                    logger.info("Checking environment variables for Databricks token (fallback path)...")
+                    self._token = os.getenv("DATABRICKS_TOKEN") or os.getenv("DATABRICKS_API_KEY")
+                    if self._token:
+                        logger.info("✅ Using DATABRICKS token from environment (fallback)")
+
                 if not self._token:
                     logger.info("Trying API Keys Service without enhanced auth...")
                     try:
                         from src.core.unit_of_work import UnitOfWork
                         from src.services.api_keys_service import ApiKeysService
                         import asyncio
-                        
+
                         # Create a new event loop for this sync context
                         loop = None
                         try:
@@ -306,32 +309,25 @@ class DatabricksJobsTool(BaseTool):
                         except RuntimeError:
                             loop = asyncio.new_event_loop()
                             asyncio.set_event_loop(loop)
-                        
+
                         async def get_databricks_token():
                             async with UnitOfWork() as uow:
                                 token = await ApiKeysService.get_provider_api_key("databricks") or \
                                        await ApiKeysService.get_provider_api_key("DATABRICKS_API_KEY") or \
                                        await ApiKeysService.get_provider_api_key("DATABRICKS_TOKEN")
                                 return token
-                        
+
                         if not loop.is_running():
                             self._token = loop.run_until_complete(get_databricks_token())
                             if self._token:
                                 logger.info("✅ Successfully retrieved Databricks API key from API Keys Service (fallback)")
                             else:
                                 logger.warning("❌ No Databricks API key found in API Keys Service (fallback)")
-                                
                     except Exception as api_service_error:
                         logger.warning(f"❌ Failed to get API key from service (fallback): {api_service_error}")
-                    
-                    # Final fallback: environment variables
-                    if not self._token:
-                        logger.info("Final fallback: checking environment variables...")
-                        self._token = os.getenv("DATABRICKS_API_KEY") or os.getenv("DATABRICKS_TOKEN")
-                        if self._token:
-                            logger.info("✅ Using DATABRICKS_API_KEY/TOKEN from environment (final fallback)")
-                        else:
-                            logger.error("❌ No authentication available: no user token, no API key in service, no environment variables")
+
+                if not self._token:
+                    logger.error("❌ No authentication available: no user token, no API key in service, no environment variables")
         
         # Set fallback values from environment if not set from config
         if not self._host:
