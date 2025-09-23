@@ -45,7 +45,7 @@ const ShowResult = memo<ShowResultProps>(({ open, onClose, result, run }) => {
   const dialogRef = useRef<HTMLDivElement>(null);
   // Track if the dialog has been opened at least once
   const hasOpenedRef = useRef(false);
-  
+
   // Update the hasOpened ref when dialog opens and set view mode based on content
   useEffect(() => {
     if (open) {
@@ -58,13 +58,13 @@ const ShowResult = memo<ShowResultProps>(({ open, onClose, result, run }) => {
         } else {
           setViewMode('code');
         }
-        
+
         // Check for Databricks volume information from configuration
         checkForDatabricksVolumeInfo(result);
       }
     }
   }, [open, result, run]);
-  
+
   // Function to check for Databricks volume information from configuration
   const checkForDatabricksVolumeInfo = async (resultData: any) => {
     try {
@@ -76,7 +76,7 @@ const ShowResult = memo<ShowResultProps>(({ open, onClose, result, run }) => {
 
       const databricksService = DatabricksService.getInstance();
       const globalConfig = await databricksService.getDatabricksConfig();
-      
+
       if (!globalConfig || !globalConfig.workspace_url) {
         console.log('No Databricks configuration found');
         return;
@@ -93,17 +93,17 @@ const ShowResult = memo<ShowResultProps>(({ open, onClose, result, run }) => {
           // Check if any task has volume configuration
           // eslint-disable-next-line react/prop-types
           const tasksContent = run?.tasks_yaml;
-          
+
           // Look for callback_config in the tasks
           // Pattern to find callback_config with DatabricksVolumeCallback
           const callbackPattern = /callback_config:\s*["']?DatabricksVolumeCallback/;
           const hasVolumeCallback = callbackPattern.test(tasksContent);
-          
+
           if (hasVolumeCallback) {
             // Extract volume path from callback config if specified
             const volumePathPattern = /volume_path:\s*["']?([^"'\n]+)["']?/;
             const pathMatch = volumePathPattern.exec(tasksContent);
-            
+
             if (pathMatch && pathMatch[1]) {
               volumePath = pathMatch[1];
               volumeEnabled = true;
@@ -129,16 +129,16 @@ const ShowResult = memo<ShowResultProps>(({ open, onClose, result, run }) => {
         // Get execution name from run
         // eslint-disable-next-line react/prop-types
         const executionName = run?.run_name || run?.job_id || 'unknown';
-        
+
         // Construct the full volume path
         // Format: /Volumes/catalog/schema/volume/execution_name/[date]/files...
         const fullVolumePath = `/Volumes/${volumePath.replace(/\./g, '/')}/${executionName}`;
-        
+
         setDatabricksVolumeInfo({
           path: fullVolumePath,
           workspaceUrl: globalConfig.workspace_url
         });
-        
+
         console.log('Databricks volume detected:', {
           path: fullVolumePath,
           workspaceUrl: globalConfig.workspace_url
@@ -150,10 +150,10 @@ const ShowResult = memo<ShowResultProps>(({ open, onClose, result, run }) => {
       console.error('Error checking for Databricks volume info:', error);
     }
   };
-  
+
   // URL detection regex pattern
   const urlPattern = /(https?:\/\/[^\s]+)/g;
-  
+
   // Check if result contains HTML content
   const isHtmlContent = useMemo(() => {
     if (!result) return false;
@@ -195,15 +195,15 @@ const ShowResult = memo<ShowResultProps>(({ open, onClose, result, run }) => {
   // Download HTML function
   const handleDownloadHtml = () => {
     if (!run) return;
-    
+
     // Extract the HTML content from the result
     let htmlContent = '';
-    
+
     // Check if result contains HTML
     if (result && typeof result === 'object') {
       // Look for HTML in the result values
       const resultString = JSON.stringify(result);
-      
+
       // If the result contains HTML tags, extract the HTML
       if (resultString.includes('<html') || resultString.includes('<!DOCTYPE')) {
         // Find the actual HTML content in the result
@@ -216,7 +216,7 @@ const ShowResult = memo<ShowResultProps>(({ open, onClose, result, run }) => {
         }
       }
     }
-    
+
     // If no HTML found, create a simple HTML with the result
     if (!htmlContent) {
       htmlContent = `
@@ -233,7 +233,7 @@ const ShowResult = memo<ShowResultProps>(({ open, onClose, result, run }) => {
 </html>
       `;
     }
-    
+
     const blob = new Blob([htmlContent], { type: 'text/html' });
     const url = URL.createObjectURL(blob);
     const link = document.createElement('a');
@@ -282,19 +282,19 @@ const ShowResult = memo<ShowResultProps>(({ open, onClose, result, run }) => {
     return parts.map((part, index) => {
       if (part.match(urlPattern)) {
         return (
-          <Box 
-            key={index} 
-            sx={{ 
-              display: 'inline-flex', 
+          <Box
+            key={index}
+            sx={{
+              display: 'inline-flex',
               alignItems: 'center',
               gap: 0.5
             }}
           >
-            <Link 
-              href={part} 
-              target="_blank" 
+            <Link
+              href={part}
+              target="_blank"
               rel="noopener noreferrer"
-              sx={{ 
+              sx={{
                 display: 'inline-flex',
                 alignItems: 'center',
                 gap: 0.5,
@@ -335,7 +335,7 @@ const ShowResult = memo<ShowResultProps>(({ open, onClose, result, run }) => {
     if (text.match(/^```(html|HTML)\s*\n[\s\S]*\n```\s*$/)) {
       return true;
     }
-    
+
     // Check if the text contains HTML tags
     const htmlPatterns = [
       /<\/?[a-z][\s\S]*>/i,  // HTML tags
@@ -370,23 +370,23 @@ const ShowResult = memo<ShowResultProps>(({ open, onClose, result, run }) => {
       const isInitializedRef = useRef<boolean>(false);
       const contentKeyRef = useRef<string>('');
       const lastWrittenContentRef = useRef<string>('');
-    
+
     // Clean up the HTML string - remove markdown code block syntax if present
     const cleanupHtml = (htmlContent: string) => {
       let cleanedHtml = htmlContent;
-      
+
       // Remove ```html or ```HTML from the beginning and ``` from the end
       if (cleanedHtml.match(/^```(html|HTML)\s*\n/)) {
         cleanedHtml = cleanedHtml.replace(/^```(html|HTML)\s*\n/, '');
         cleanedHtml = cleanedHtml.replace(/\n```\s*$/, '');
       }
-      
+
       return cleanedHtml;
     };
-    
+
     const cleanedHtml = cleanupHtml(html);
     const currentKey = getHtmlKey(cleanedHtml);
-    
+
     // Check if this is actually new content
     const isNewContent = contentKeyRef.current !== currentKey;
     if (isNewContent) {
@@ -394,30 +394,30 @@ const ShowResult = memo<ShowResultProps>(({ open, onClose, result, run }) => {
       isInitializedRef.current = false;
 
     }
-    
+
     // Initialize iframe when content changes
     useEffect(() => {
 
-      
+
       if (!iframeRef.current) return;
-      
+
       const iframe = iframeRef.current;
-      
+
       // Only write if we have new content
       if (!isNewContent && isInitializedRef.current) {
         return;
       }
-      
+
       // Double-check we haven't already written this exact content
       if (lastWrittenContentRef.current === cleanedHtml && isInitializedRef.current) {
         return;
       }
-      
+
       isInitializedRef.current = true;
       lastWrittenContentRef.current = cleanedHtml;
-      
+
       let processedHtml = cleanedHtml;
-      
+
       // Add scripts to handle sandboxed environment limitations
       const initScript = `
         <script>
@@ -426,7 +426,7 @@ const ShowResult = memo<ShowResultProps>(({ open, onClose, result, run }) => {
             // Store the original methods if they exist
             const originalPushState = window.history.pushState;
             const originalReplaceState = window.history.replaceState;
-            
+
             // Override history methods to prevent errors in sandboxed context
             try {
               window.history.pushState = function(state, title, url) {
@@ -438,7 +438,7 @@ const ShowResult = memo<ShowResultProps>(({ open, onClose, result, run }) => {
                   console.debug('pushState blocked in sandbox:', e.message);
                 }
               };
-              
+
               window.history.replaceState = function(state, title, url) {
                 try {
                   // Try to call the original method
@@ -448,7 +448,7 @@ const ShowResult = memo<ShowResultProps>(({ open, onClose, result, run }) => {
                   console.debug('replaceState blocked in sandbox:', e.message);
                 }
               };
-              
+
               // Also handle popstate events that might cause issues
               window.addEventListener('error', function(e) {
                 if (e.message && e.message.includes('history')) {
@@ -460,7 +460,7 @@ const ShowResult = memo<ShowResultProps>(({ open, onClose, result, run }) => {
               // Even the override might fail in some strict contexts
               console.debug('Could not override history methods:', e.message);
             }
-            
+
             // For libraries that check for history API support
             if (!window.history.state) {
               try {
@@ -472,13 +472,13 @@ const ShowResult = memo<ShowResultProps>(({ open, onClose, result, run }) => {
                 // Ignore if we can't define the property
               }
             }
-            
+
             // Handle location.hash for navigation-based libraries
             let virtualHash = '';
             try {
               Object.defineProperty(window.location, 'hash', {
                 get: function() { return virtualHash; },
-                set: function(value) { 
+                set: function(value) {
                   virtualHash = value;
                   // Trigger hashchange event for libraries that listen to it
                   window.dispatchEvent(new HashChangeEvent('hashchange'));
@@ -499,7 +499,7 @@ const ShowResult = memo<ShowResultProps>(({ open, onClose, result, run }) => {
             height: 100% !important;
             overflow: auto !important;
           }
-          
+
           /* Ensure content fits viewport */
           body > *:first-child:not(script):not(style) {
             max-width: 100% !important;
@@ -528,7 +528,7 @@ const ShowResult = memo<ShowResultProps>(({ open, onClose, result, run }) => {
           })();
         </script>
       `;
-      
+
       // Insert initialization script at the very beginning of the document
       // This ensures it runs before any library scripts
       if (processedHtml.includes('<head>')) {
@@ -539,15 +539,42 @@ const ShowResult = memo<ShowResultProps>(({ open, onClose, result, run }) => {
         // If no head or html tag, prepend the script
         processedHtml = initScript + processedHtml;
       }
-      
+
       // Use srcdoc for better security and compatibility
       // This avoids the need for allow-same-origin while still allowing scripts
       // srcdoc content is treated as having a unique origin
       iframe.srcdoc = processedHtml;
     }, [isNewContent, cleanedHtml]); // Re-run when content actually changes
-    
+    // Ensure focus enters the iframe so users can interact with rendered HTML via keyboard
+    useEffect(() => {
+      const iframe = iframeRef.current;
+      if (!iframe) return;
 
-    
+      const focusIframe = () => {
+        try {
+          // Focus the iframe element and its window if possible
+          iframe.focus();
+          iframe.contentWindow?.focus();
+        } catch (_) {
+          // Ignore focus errors in strict sandbox contexts
+        }
+      };
+
+      // Attempt to focus shortly after setting srcdoc
+      const t = window.setTimeout(focusIframe, 0);
+
+      // Also focus when iframe reports load
+      iframe.addEventListener('load', focusIframe);
+
+      return () => {
+        window.clearTimeout(t);
+        iframe.removeEventListener('load', focusIframe);
+      };
+    }, [isNewContent, cleanedHtml]);
+
+
+
+
     return (
       <Box
         sx={{
@@ -564,6 +591,15 @@ const ShowResult = memo<ShowResultProps>(({ open, onClose, result, run }) => {
       >
         <iframe
           ref={iframeRef}
+          tabIndex={-1}
+          onLoad={() => {
+            try {
+              iframeRef.current?.focus();
+              iframeRef.current?.contentWindow?.focus();
+            } catch (_) {
+              // Ignore focus errors in strict sandbox contexts
+            }
+          }}
           sandbox="allow-scripts allow-forms allow-modals allow-popups allow-presentation allow-pointer-lock allow-downloads"
           allow="accelerometer; camera; encrypted-media; fullscreen; gyroscope; magnetometer; microphone; midi; payment; usb; xr-spatial-tracking"
           style={{
@@ -582,12 +618,12 @@ const ShowResult = memo<ShowResultProps>(({ open, onClose, result, run }) => {
       // Clean both HTML strings for comparison
       const cleanPrev = prevProps.html.replace(/^```(html|HTML)\s*\n/, '').replace(/\n```\s*$/, '').trim();
       const cleanNext = nextProps.html.replace(/^```(html|HTML)\s*\n/, '').replace(/\n```\s*$/, '').trim();
-      
+
       // Return true if props are equal (skip re-render), false if different (re-render)
       const isEqual = cleanPrev === cleanNext && prevProps.isFullscreen === nextProps.isFullscreen;
-      
 
-      
+
+
       return isEqual;
     }
   );
@@ -600,12 +636,12 @@ const ShowResult = memo<ShowResultProps>(({ open, onClose, result, run }) => {
         const value = entries[0][1];
         return renderSingleValue(value);
       }
-      
+
       return entries.map(([key, value], index) => (
         <Box key={key} sx={{ mb: 3 }}>
-          <Typography 
-            variant="subtitle1" 
-            sx={{ 
+          <Typography
+            variant="subtitle1"
+            sx={{
               color: 'primary.main',
               fontWeight: 700,
               mb: 1,
@@ -614,9 +650,9 @@ const ShowResult = memo<ShowResultProps>(({ open, onClose, result, run }) => {
           >
             {key}
           </Typography>
-          <Paper 
-            elevation={0} 
-            sx={{ 
+          <Paper
+            elevation={0}
+            sx={{
               bgcolor: theme.palette.mode === 'light' ? 'grey.50' : 'grey.900',
               p: 2.5,
               borderRadius: 1.5,
@@ -698,7 +734,7 @@ const ShowResult = memo<ShowResultProps>(({ open, onClose, result, run }) => {
                   },
                 },
               }}>
-                <ReactMarkdown 
+                <ReactMarkdown
                   className="markdown-body"
                   remarkPlugins={[remarkGfm]}
                   components={{
@@ -741,7 +777,7 @@ const ShowResult = memo<ShowResultProps>(({ open, onClose, result, run }) => {
                 lineHeight: 1.6,
                 color: theme.palette.mode === 'light' ? 'rgba(0, 0, 0, 0.87)' : 'rgba(255, 255, 255, 0.87)'
               }}>
-                {typeof value === 'string' 
+                {typeof value === 'string'
                   ? renderWithLinks(value)
                   : formatValue(value)
                 }
@@ -755,9 +791,9 @@ const ShowResult = memo<ShowResultProps>(({ open, onClose, result, run }) => {
       ));
     }
     return (
-      <Paper 
-        elevation={0} 
-        sx={{ 
+      <Paper
+        elevation={0}
+        sx={{
           bgcolor: theme.palette.mode === 'light' ? 'grey.50' : 'grey.900',
           p: 2.5,
           borderRadius: 1.5,
@@ -773,7 +809,7 @@ const ShowResult = memo<ShowResultProps>(({ open, onClose, result, run }) => {
         {typeof content === 'string' && isHTML(content) && viewMode === 'html' ? (
           <SandboxedHTMLRenderer html={content} isFullscreen={isFullscreen} />
         ) : typeof content === 'string' && isMarkdown(content) && !isHTML(content) ? (
-          <ReactMarkdown 
+          <ReactMarkdown
             className="markdown-body"
             remarkPlugins={[remarkGfm]}
           >
@@ -789,7 +825,7 @@ const ShowResult = memo<ShowResultProps>(({ open, onClose, result, run }) => {
             lineHeight: 1.6,
             color: theme.palette.mode === 'light' ? 'rgba(0, 0, 0, 0.87)' : 'rgba(255, 255, 255, 0.87)'
           }}>
-            {typeof content === 'string' 
+            {typeof content === 'string'
               ? renderWithLinks(content)
               : formatValue(content)
             }
@@ -803,7 +839,7 @@ const ShowResult = memo<ShowResultProps>(({ open, onClose, result, run }) => {
     try {
       // Extract text content from the result
       let textContent = '';
-      
+
       if (typeof memoizedResult === 'string') {
         textContent = memoizedResult;
       } else if (typeof memoizedResult === 'object' && memoizedResult !== null) {
@@ -825,10 +861,10 @@ const ShowResult = memo<ShowResultProps>(({ open, onClose, result, run }) => {
       } else {
         textContent = String(memoizedResult);
       }
-      
+
       await navigator.clipboard.writeText(textContent);
       setCopied(true);
-      
+
       // Reset the copied state after 2 seconds
       setTimeout(() => {
         setCopied(false);
@@ -841,9 +877,9 @@ const ShowResult = memo<ShowResultProps>(({ open, onClose, result, run }) => {
 
   const renderSingleValue = (value: ResultValue) => {
     return (
-      <Paper 
-        elevation={0} 
-        sx={{ 
+      <Paper
+        elevation={0}
+        sx={{
           bgcolor: theme.palette.mode === 'light' ? 'grey.50' : 'grey.900',
           p: 2.5,
           borderRadius: 1.5,
@@ -925,7 +961,7 @@ const ShowResult = memo<ShowResultProps>(({ open, onClose, result, run }) => {
               },
             },
           }}>
-            <ReactMarkdown 
+            <ReactMarkdown
               className="markdown-body"
               remarkPlugins={[remarkGfm]}
               components={{
@@ -968,7 +1004,7 @@ const ShowResult = memo<ShowResultProps>(({ open, onClose, result, run }) => {
             lineHeight: 1.6,
             color: theme.palette.mode === 'light' ? 'rgba(0, 0, 0, 0.87)' : 'rgba(255, 255, 255, 0.87)'
           }}>
-            {typeof value === 'string' 
+            {typeof value === 'string'
               ? renderWithLinks(value)
               : formatValue(value)
             }
@@ -979,23 +1015,23 @@ const ShowResult = memo<ShowResultProps>(({ open, onClose, result, run }) => {
   };
 
   return (
-    <Dialog 
+    <Dialog
       ref={dialogRef}
-      open={open} 
+      open={open}
       onClose={onClose}
       keepMounted={hasOpenedRef.current} // Keep the dialog mounted after first open
-      maxWidth={viewMode === 'html' && Object.values(memoizedResult || {}).some(value => 
+      maxWidth={viewMode === 'html' && Object.values(memoizedResult || {}).some(value =>
         typeof value === 'string' && isHTML(value)
-      ) ? "xl" : "lg"} 
+      ) ? "xl" : "lg"}
       fullWidth
       sx={{
         zIndex: (theme) => theme.zIndex.modal + 100, // Higher z-index to appear above other dialogs
       }}
       PaperProps={{
-        sx: { 
+        sx: {
           maxHeight: isFullscreen ? '100vh' : '95vh',
           borderRadius: isFullscreen ? 0 : 2,
-          width: viewMode === 'html' && Object.values(memoizedResult || {}).some(value => 
+          width: viewMode === 'html' && Object.values(memoizedResult || {}).some(value =>
             typeof value === 'string' && isHTML(value)
           ) ? (isFullscreen ? '100vw' : '95vw') : undefined,
           margin: isFullscreen ? 0 : undefined,
@@ -1005,7 +1041,7 @@ const ShowResult = memo<ShowResultProps>(({ open, onClose, result, run }) => {
       <DialogTitle sx={{ px: 3, py: 2, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
         {/* View Mode Toggle - only show if HTML content is detected */}
         {(() => {
-          const hasHTMLContent = Object.values(memoizedResult || {}).some(value => 
+          const hasHTMLContent = Object.values(memoizedResult || {}).some(value =>
             typeof value === 'string' && isHTML(value)
           );
           return hasHTMLContent ? (
@@ -1029,7 +1065,7 @@ const ShowResult = memo<ShowResultProps>(({ open, onClose, result, run }) => {
             <Box />
           );
         })()}
-        
+
         <Box sx={{ display: 'flex', gap: 1 }}>
           <Tooltip title={isFullscreen ? "Exit fullscreen" : "Fullscreen"}>
             <IconButton
@@ -1047,7 +1083,7 @@ const ShowResult = memo<ShowResultProps>(({ open, onClose, result, run }) => {
               {isFullscreen ? <FullscreenExitIcon /> : <FullscreenIcon />}
             </IconButton>
           </Tooltip>
-          
+
           <Tooltip title={copied ? "Copied!" : "Copy to clipboard"}>
             <IconButton
               onClick={handleCopyToClipboard}
@@ -1066,18 +1102,18 @@ const ShowResult = memo<ShowResultProps>(({ open, onClose, result, run }) => {
           </Tooltip>
         </Box>
       </DialogTitle>
-      <DialogContent sx={{ 
-        px: viewMode === 'html' && Object.values(memoizedResult || {}).some(value => 
+      <DialogContent sx={{
+        px: viewMode === 'html' && Object.values(memoizedResult || {}).some(value =>
           typeof value === 'string' && isHTML(value)
-        ) ? 1 : 3, 
-        py: viewMode === 'html' && Object.values(memoizedResult || {}).some(value => 
+        ) ? 1 : 3,
+        py: viewMode === 'html' && Object.values(memoizedResult || {}).some(value =>
           typeof value === 'string' && isHTML(value)
         ) ? 1 : 2,
         overflow: 'auto',
         display: 'flex',
         flexDirection: 'column',
       }}>
-        <Box sx={{ 
+        <Box sx={{
           px: 0,
           py: 0,
           flexGrow: 1,
@@ -1100,13 +1136,13 @@ const ShowResult = memo<ShowResultProps>(({ open, onClose, result, run }) => {
                     const catalog = pathParts[0];
                     const schema = pathParts[1];
                     const volume = pathParts[2];
-                    
+
                     // Remove trailing slash from workspace URL if present
                     const workspaceUrl = databricksVolumeInfo.workspaceUrl.replace(/\/$/, '');
-                    
+
                     // Construct the URL to the volume in Databricks catalog
                     const volumeUrl = `${workspaceUrl}/explore/data/volumes/${catalog}/${schema}/${volume}`;
-                    
+
                     // Open in new tab
                     window.open(volumeUrl, '_blank');
                   } else {
@@ -1152,7 +1188,7 @@ const ShowResult = memo<ShowResultProps>(({ open, onClose, result, run }) => {
             </Button>
           </Tooltip>
         )}
-        <Button 
+        <Button
           onClick={onClose}
           variant="contained"
           color="primary"

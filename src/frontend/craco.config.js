@@ -43,55 +43,18 @@ module.exports = {
               extractComments: false,
             }),
           ],
-          runtimeChunk: 'single',
           splitChunks: {
             chunks: 'all',
-            maxInitialRequests: 25,
-            minSize: 20000,
             cacheGroups: {
-              default: false,
-              vendors: false,
-              // Vendor chunk for all node_modules
               vendor: {
-                name: 'vendor',
                 test: /[\\/]node_modules[\\/]/,
-                chunks: 'all',
-                priority: 20,
-              },
-              // Separate chunk for React ecosystem
-              react: {
-                test: /[\\/]node_modules[\\/](react|react-dom|react-router|react-router-dom)[\\/]/,
-                name: 'react-vendor',
-                chunks: 'all',
-                priority: 30,
-              },
-              // Separate chunk for MUI
-              mui: {
-                test: /[\\/]node_modules[\\/]@mui[\\/]/,
-                name: 'mui-vendor',
-                chunks: 'all',
-                priority: 25,
-              },
-              // Separate chunk for ReactFlow
-              reactflow: {
-                test: /[\\/]node_modules[\\/]reactflow[\\/]/,
-                name: 'reactflow-vendor',
-                chunks: 'all',
-                priority: 24,
-              },
-              // Separate chunk for other large libraries
-              libs: {
-                test: /[\\/]node_modules[\\/](lodash|axios|d3|marked|prism-react-renderer|jspdf|js-yaml)[\\/]/,
-                name: 'libs-vendor',
-                chunks: 'all',
-                priority: 22,
-              },
-              // Common chunk for shared modules
-              common: {
-                minChunks: 2,
+                name: 'vendor',
                 priority: 10,
+              },
+              default: {
+                minChunks: 2,
+                priority: -20,
                 reuseExistingChunk: true,
-                enforce: true,
               },
             },
           },
@@ -118,10 +81,6 @@ module.exports = {
           })
         );
 
-        // Add ModuleConcatenationPlugin for scope hoisting
-        webpackConfig.plugins.push(
-          new webpack.optimize.ModuleConcatenationPlugin()
-        );
 
         // Ignore moment.js locales to reduce bundle size
         webpackConfig.plugins.push(
@@ -151,8 +110,6 @@ module.exports = {
         alias: {
           ...webpackConfig.resolve.alias,
           '@': path.resolve(__dirname, 'src'),
-          // Add specific aliases for heavy modules to use lighter versions
-          'lodash': 'lodash-es',
         },
         // Prioritize browser-friendly entry points for bundling
         mainFields: ['browser', 'module', 'main'],

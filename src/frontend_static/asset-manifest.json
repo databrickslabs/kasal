@@ -1,26 +1,18 @@
 {
   "files": {
-    "main.js": "/static/js/main.ba428fba.js",
-    "runtime.js": "/static/js/runtime.2b7baf50.js",
-    "static/js/665.7080decd.chunk.js": "/static/js/665.7080decd.chunk.js",
+    "main.js": "/static/js/main.6747410c.js",
+    "static/js/665.f33e7818.chunk.js": "/static/js/665.f33e7818.chunk.js",
     "static/css/818.dcd14070.chunk.css": "/static/css/818.dcd14070.chunk.css",
-    "static/js/818.96ad8882.chunk.js": "/static/js/818.96ad8882.chunk.js",
-    "static/js/810.ec4e5af1.chunk.js": "/static/js/810.ec4e5af1.chunk.js",
+    "static/js/818.67cdee05.chunk.js": "/static/js/818.67cdee05.chunk.js",
+    "static/js/810.2336fb31.chunk.js": "/static/js/810.2336fb31.chunk.js",
     "static/js/112.b28d29f8.chunk.js": "/static/js/112.b28d29f8.chunk.js",
-    "static/js/319.00069235.chunk.js": "/static/js/319.00069235.chunk.js",
+    "static/js/319.3a8a199f.chunk.js": "/static/js/319.3a8a199f.chunk.js",
     "static/js/531.30593cf7.chunk.js": "/static/js/531.30593cf7.chunk.js",
-    "react-vendor.js": "/static/js/react-vendor.e4ec066c.js",
-    "mui-vendor.js": "/static/js/mui-vendor.5828bf25.js",
-    "libs-vendor.js": "/static/js/libs-vendor.fe321744.js",
-    "vendor.js": "/static/js/vendor.358a64c9.js",
+    "vendor.js": "/static/js/vendor.a8d31ea4.js",
     "index.html": "/index.html"
   },
   "entrypoints": [
-    "static/js/runtime.2b7baf50.js",
-    "static/js/react-vendor.e4ec066c.js",
-    "static/js/mui-vendor.5828bf25.js",
-    "static/js/libs-vendor.fe321744.js",
-    "static/js/vendor.358a64c9.js",
-    "static/js/main.ba428fba.js"
+    "static/js/vendor.a8d31ea4.js",
+    "static/js/main.6747410c.js"
   ]
 }

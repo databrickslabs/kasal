@@ -140,86 +140,96 @@ export const InputVariablesDialog: React.FC<InputVariablesDialogProps> = ({
           </IconButton>
         </Box>
       </DialogTitle>
-      <DialogContent>
-        {detectedVariables.length > 0 && (
-          <Alert severity="info" sx={{ mb: 2 }}>
-            <Box display="flex" alignItems="center" gap={1}>
-              <Typography variant="body2">
-                Detected variables in your workflow:
-              </Typography>
-              {detectedVariables.map(varName => (
-                <Chip key={varName} label={`{${varName}}`} size="small" color="primary" />
-              ))}
-            </Box>
-          </Alert>
-        )}
 
-        <Box sx={{ mt: 2 }}>
-          <Typography variant="subtitle2" gutterBottom>
-            Define values for variables used in your agents and tasks:
-          </Typography>
-          
-          {variables.map((variable, index) => (
-            <Box key={index} sx={{ display: 'flex', gap: 1, mb: 2, alignItems: 'flex-start' }}>
-              <TextField
-                label="Variable Name"
-                value={variable.name}
-                onChange={(e) => handleVariableChange(index, 'name', e.target.value)}
-                size="small"
-                sx={{ flex: 1 }}
-                error={!!errors[variable.name]}
-                disabled={detectedVariables.includes(variable.name)}
-              />
-              <TextField
-                label="Value"
-                value={variable.value}
-                onChange={(e) => handleVariableChange(index, 'value', e.target.value)}
-                size="small"
-                sx={{ flex: 2 }}
-                error={!!errors[variable.name]}
-                helperText={errors[variable.name]}
-                required={detectedVariables.includes(variable.name)}
-              />
-              {!detectedVariables.includes(variable.name) && (
-                <IconButton
-                  onClick={() => handleRemoveVariable(index)}
+      {/* Wrap content in a form so Enter submits, and focus the submit button */}
+      <Box
+        component="form"
+        onSubmit={(e) => {
+          e.preventDefault();
+          handleConfirm();
+        }}
+      >
+        <DialogContent>
+          {detectedVariables.length > 0 && (
+            <Alert severity="info" sx={{ mb: 2 }}>
+              <Box display="flex" alignItems="center" gap={1}>
+                <Typography variant="body2">
+                  Detected variables in your workflow:
+                </Typography>
+                {detectedVariables.map(varName => (
+                  <Chip key={varName} label={`{${varName}}`} size="small" color="primary" />
+                ))}
+              </Box>
+            </Alert>
+          )}
+
+          <Box sx={{ mt: 2 }}>
+            <Typography variant="subtitle2" gutterBottom>
+              Define values for variables used in your agents and tasks:
+            </Typography>
+
+            {variables.map((variable, index) => (
+              <Box key={index} sx={{ display: 'flex', gap: 1, mb: 2, alignItems: 'flex-start' }}>
+                <TextField
+                  label="Variable Name"
+                  value={variable.name}
+                  onChange={(e) => handleVariableChange(index, 'name', e.target.value)}
                   size="small"
-                  color="error"
-                >
-                  <CloseIcon />
-                </IconButton>
-              )}
-            </Box>
-          ))}
+                  sx={{ flex: 1 }}
+                  error={!!errors[variable.name]}
+                  disabled={detectedVariables.includes(variable.name)}
+                />
+                <TextField
+                  label="Value"
+                  value={variable.value}
+                  onChange={(e) => handleVariableChange(index, 'value', e.target.value)}
+                  size="small"
+                  sx={{ flex: 2 }}
+                  error={!!errors[variable.name]}
+                  helperText={errors[variable.name]}
+                  required={detectedVariables.includes(variable.name)}
+                />
+                {!detectedVariables.includes(variable.name) && (
+                  <IconButton
+                    onClick={() => handleRemoveVariable(index)}
+                    size="small"
+                    color="error"
+                  >
+                    <CloseIcon />
+                  </IconButton>
+                )}
+              </Box>
+            ))}
 
-          <Button
-            startIcon={<AddIcon />}
-            onClick={handleAddVariable}
-            variant="outlined"
-            size="small"
-            sx={{ mt: 1 }}
-          >
-            Add Custom Variable
+            <Button
+              startIcon={<AddIcon />}
+              onClick={handleAddVariable}
+              variant="outlined"
+              size="small"
+              sx={{ mt: 1 }}
+            >
+              Add Custom Variable
+            </Button>
+          </Box>
+
+          <Alert severity="info" sx={{ mt: 3 }}>
+            <Typography variant="body2">
+              <strong>How to use variables:</strong>
+            </Typography>
+            <Typography variant="body2" component="ul" sx={{ mt: 1, pl: 2 }}>
+              <li>Use {'{variable_name}'} syntax in agent roles, goals, backstories, and task descriptions</li>
+              <li>Variables will be replaced with the values you provide here during execution</li>
+              <li>Example: {'"Analyze {topic} trends in {industry}"'} → {'"Analyze AI trends in Healthcare"'}</li>
+            </Typography>
+          </Alert>
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={onClose}>Cancel</Button>
+          <Button type="submit" variant="contained" color="primary" autoFocus>
+            Execute with Variables
           </Button>
-        </Box>
-
-        <Alert severity="info" sx={{ mt: 3 }}>
-          <Typography variant="body2">
-            <strong>How to use variables:</strong>
-          </Typography>
-          <Typography variant="body2" component="ul" sx={{ mt: 1, pl: 2 }}>
-            <li>Use {'{variable_name}'} syntax in agent roles, goals, backstories, and task descriptions</li>
-            <li>Variables will be replaced with the values you provide here during execution</li>
-            <li>Example: {'"Analyze {topic} trends in {industry}"'} → {'"Analyze AI trends in Healthcare"'}</li>
-          </Typography>
-        </Alert>
-      </DialogContent>
-      <DialogActions>
-        <Button onClick={onClose}>Cancel</Button>
-        <Button onClick={handleConfirm} variant="contained" color="primary">
-          Execute with Variables
-        </Button>
-      </DialogActions>
+        </DialogActions>
+      </Box>
     </Dialog>
   );
 };
