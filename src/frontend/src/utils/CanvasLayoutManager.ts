@@ -35,11 +35,12 @@ export interface UILayoutState {
   chatPanelCollapsed: boolean;
   chatPanelWidth: number;          // Dynamic width when expanded
   chatPanelCollapsedWidth: number; // Width when collapsed (60px)
-  
+  chatPanelSide: 'left' | 'right'; // Which side the chat panel is docked to
+
   // Execution history
   executionHistoryVisible: boolean;
   executionHistoryHeight: number;  // Dynamic height
-  
+
   // Panel splits (for dual canvas mode)
   panelPosition: number;           // 0-100% split between crew/flow panels
   areFlowsVisible: boolean;        // Whether flows panel is shown
@@ -111,7 +112,8 @@ export class CanvasLayoutManager {
       chatPanelCollapsed: false,
       chatPanelWidth: 450,
       chatPanelCollapsedWidth: 60,
-      
+      chatPanelSide: 'right',
+
       // Execution history defaults
       executionHistoryVisible: false,
       executionHistoryHeight: 60,
@@ -167,12 +169,17 @@ export class CanvasLayoutManager {
       availableWidth -= this.uiState.rightSidebarWidth;
     }
 
-    // Subtract chat panel (overlay from the right)
+    // Subtract chat panel (overlay from the configured side)
     if (this.uiState.chatPanelVisible) {
-      const chatWidth = this.uiState.chatPanelCollapsed 
-        ? this.uiState.chatPanelCollapsedWidth 
+      const chatWidth = this.uiState.chatPanelCollapsed
+        ? this.uiState.chatPanelCollapsedWidth
         : this.uiState.chatPanelWidth;
+      // Reduce available width regardless of side
       availableWidth -= chatWidth;
+      // If docked on the left, also shift the available X start position
+      if (this.uiState.chatPanelSide === 'left') {
+        availableX += chatWidth;
+      }
     }
 
     // Subtract execution history (overlay from the bottom)
