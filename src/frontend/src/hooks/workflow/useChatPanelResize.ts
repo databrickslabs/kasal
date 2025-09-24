@@ -1,10 +1,12 @@
 import React from 'react';
+import { useUILayoutStore } from '../../store/uiLayout';
 
 export function useChatPanelResize(
   setChatPanelWidth: (width: number) => void
 ): { handleResizeStart: (e: React.MouseEvent) => void } {
   const [isResizing, setIsResizing] = React.useState(false);
   const throttleRef = React.useRef<number>(0);
+  const { chatPanelSide, leftSidebarBaseWidth } = useUILayoutStore();
 
   const handleResizeStart = React.useCallback((e: React.MouseEvent) => {
     e.preventDefault();
@@ -19,8 +21,16 @@ export function useChatPanelResize(
       if (now - (throttleRef.current || 0) < 50) return; // throttle ~20fps
       throttleRef.current = now;
 
-      // 48px for right sidebar
-      const newWidth = window.innerWidth - e.clientX - 48;
+      let newWidth: number;
+
+      if (chatPanelSide === 'right') {
+        // Right side: calculate from right edge (original logic)
+        newWidth = window.innerWidth - e.clientX - 48; // 48px for right sidebar
+      } else {
+        // Left side: calculate from left edge
+        newWidth = e.clientX - leftSidebarBaseWidth; // Subtract left sidebar width
+      }
+
       const minWidth = 280; // Minimum chat panel width
       const maxWidth = Math.min(800, window.innerWidth * 0.6); // Max 60% of screen
 
@@ -32,7 +42,7 @@ export function useChatPanelResize(
       });
       window.dispatchEvent(event);
     },
-    [isResizing, setChatPanelWidth]
+    [isResizing, setChatPanelWidth, chatPanelSide, leftSidebarBaseWidth]
   );
 
   const handleResizeEnd = React.useCallback(() => {

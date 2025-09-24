@@ -33,7 +33,6 @@ import { useCrewFlowHandlers } from '../../hooks/workflow/useCrewFlowHandlers';
 import { useToolHandlers } from '../../hooks/workflow/useToolHandlers';
 import { useCanvasHandlers } from '../../hooks/workflow/useCanvasHandlers';
 import { useDialogHandlers } from '../../hooks/workflow/useDialogHandlers';
-import LeftSidebar from './LeftSidebar';
 import RightSidebar from './RightSidebar';
 
 // Node and edge types are imported from flow-config
@@ -700,35 +699,7 @@ const CrewCanvas: React.FC<CrewCanvasProps> = ({
             variant={BackgroundVariant.Dots}
           />
 
-          <LeftSidebar
-            onClearCanvas={handleClear}
-            onGenerateConnections={handleGenerateConnectionsWrapper}
-            onZoomIn={() => reactFlowInstanceRef.current?.zoomIn()}
-            onZoomOut={() => reactFlowInstanceRef.current?.zoomOut()}
-            onFitView={() => reactFlowInstanceRef.current?.fitView()}
-            onToggleInteractivity={() => {
-              if (reactFlowInstanceRef.current) {
-                const currentNodes = reactFlowInstanceRef.current.getNodes();
-                const updatedNodes = currentNodes.map(node => ({
-                  ...node,
-                  selectable: !node.selectable
-                }));
-                reactFlowInstanceRef.current.setNodes(updatedNodes);
-              }
-            }}
-            isGeneratingConnections={isGeneratingConnections}
-            planningEnabled={planningEnabled}
-            setPlanningEnabled={setPlanningEnabled}
-            reasoningEnabled={reasoningEnabled}
-            setReasoningEnabled={setReasoningEnabled}
-            schemaDetectionEnabled={schemaDetectionEnabled}
-            setSchemaDetectionEnabled={setSchemaDetectionEnabled}
-            processType={processType}
-            setProcessType={setProcessType}
-            showRunHistory={showRunHistory}
-            setIsConfigurationDialogOpen={onOpenConfiguration}
-            onOpenTutorial={onOpenTutorial}
-          />
+
 
           <RightSidebar
             onOpenLogsDialog={onOpenLogsDialog}

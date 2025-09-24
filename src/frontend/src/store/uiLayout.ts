@@ -10,6 +10,7 @@ interface UILayoutStore extends UILayoutState {
   setExecutionHistoryHeight: (height: number) => void;
   setExecutionHistoryVisible: (visible: boolean) => void;
   setLeftSidebarExpanded: (expanded: boolean) => void;
+  setLeftSidebarVisible: (visible: boolean) => void;
   setPanelPosition: (position: number) => void;
   setAreFlowsVisible: (visible: boolean) => void;
   setChatPanelSide: (side: 'left' | 'right') => void;
@@ -98,6 +99,9 @@ export const useUILayoutStore = create<UILayoutStore>((set, get) => ({
 
   setLeftSidebarExpanded: (expanded: boolean) =>
     set({ leftSidebarExpanded: expanded }),
+
+  setLeftSidebarVisible: (visible: boolean) =>
+    set({ leftSidebarVisible: visible }),
 
   setPanelPosition: (position: number) => {
     set({ panelPosition: position });

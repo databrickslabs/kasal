@@ -17,7 +17,6 @@ import {
   MenuItem,
 } from '@mui/material';
 import ArrowUpwardIcon from '@mui/icons-material/ArrowUpward';
-import SmartToyIcon from '@mui/icons-material/SmartToy';
 import ChatIcon from '@mui/icons-material/Chat';
 import AddIcon from '@mui/icons-material/Add';
 import DeleteIcon from '@mui/icons-material/Delete';
@@ -899,7 +898,7 @@ const WorkflowChat: React.FC<WorkflowChatProps> = ({
               fontWeight: 600
             }}
           >
-            <SmartToyIcon fontSize="small" />
+            <Box component="img" src="/favicon.svg" alt="Kasal" sx={{ width: 16, height: 16, borderRadius: 0.5 }} />
             Kasal
           </Typography>
           {currentSessionName !== 'New Chat' && (

@@ -39,12 +39,13 @@ export function useWorkflowLayoutEvents(params: {
         const baseZoom = Math.min(zoomX, zoomY, 2.2);
         const zoom = baseZoom * 1.5; // Zoom in 50% more
 
-        const rightOffset = 240;
+        // Dynamic offset based on chat panel position
+        const chatOffset = currentUIState.chatPanelVisible && currentUIState.chatPanelSide === 'right' ? 240 : -150;
         const viewportX =
           canvasArea.x +
           (canvasArea.width - layoutBounds.width * zoom) / 2 -
           layoutBounds.x * zoom +
-          rightOffset;
+          chatOffset;
         const viewportY =
           canvasArea.y +
           (canvasArea.height - layoutBounds.height * zoom) / 2 -
