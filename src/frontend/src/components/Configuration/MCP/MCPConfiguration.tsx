@@ -33,8 +33,10 @@ import DeleteIcon from '@mui/icons-material/Delete';
 import CloseIcon from '@mui/icons-material/Close';
 import CheckCircleIcon from '@mui/icons-material/CheckCircle';
 import ErrorIcon from '@mui/icons-material/Error';
+
 import { useTranslation } from 'react-i18next';
 import { MCPService } from '../../../api/MCPService';
+import { usePermissionStore } from '../../../store/permissions';
 
 // Define MCP Server configuration interface
 export interface MCPServerConfig {
@@ -53,6 +55,7 @@ export interface MCPServerConfig {
   args?: string[];   // Arguments for stdio server type
   session_id?: string;  // Session ID for streamable server type
   additional_config?: Record<string, unknown>;  // Additional configuration parameters
+  group_id?: string | null; // Workspace override identifier when present
 }
 
 export const DEFAULT_MCP_CONFIG: MCPServerConfig = {
@@ -69,7 +72,8 @@ export const DEFAULT_MCP_CONFIG: MCPServerConfig = {
   rate_limit: 60,
   command: '',
   args: [],
-  additional_config: {}
+  additional_config: {},
+  group_id: null,
 };
 
 // Define MCP configuration to store multiple servers
@@ -151,7 +155,7 @@ const ServerEditDialog: React.FC<ServerEditDialogProps> = ({
   };
 
   const handleSliderChange = (field: keyof MCPServerConfig) => (
-    _event: Event, 
+    _event: Event,
     newValue: number | number[]
   ) => {
     setEditedServer(prev => prev ? {
@@ -164,7 +168,7 @@ const ServerEditDialog: React.FC<ServerEditDialogProps> = ({
     if (editedServer) {
       // For existing servers, only include API key if it has been changed
       const serverToSave = { ...editedServer };
-      
+
       console.log('Save Debug:', {
         isNew,
         currentApiKey: editedServer.api_key,
@@ -172,7 +176,7 @@ const ServerEditDialog: React.FC<ServerEditDialogProps> = ({
         areEqual: editedServer.api_key === originalApiKey,
         apiKeyChanged: !isNew && editedServer.api_key !== originalApiKey
       });
-      
+
       if (!isNew && editedServer.api_key === originalApiKey) {
         // API key hasn't changed, remove it from the update payload
         console.log('Removing API key from update payload - unchanged');
@@ -181,7 +185,7 @@ const ServerEditDialog: React.FC<ServerEditDialogProps> = ({
       } else if (!isNew) {
         console.log('Including API key in update payload - changed');
       }
-      
+
       onSave(serverToSave);
       onClose();
     }
@@ -189,10 +193,10 @@ const ServerEditDialog: React.FC<ServerEditDialogProps> = ({
 
   const handleTestConnection = async () => {
     if (!editedServer) return;
-    
+
     setTestingConnection(true);
     setConnectionTestResult({ tested: false, success: false, message: '' });
-    
+
     try {
       const mcpService = MCPService.getInstance();
       const result = await mcpService.testConnection(editedServer);
@@ -215,16 +219,16 @@ const ServerEditDialog: React.FC<ServerEditDialogProps> = ({
 
 
   return (
-    <Dialog 
-      open={open} 
+    <Dialog
+      open={open}
       onClose={onClose}
       fullWidth
       maxWidth="md"
-      PaperProps={{ 
-        sx: { 
+      PaperProps={{
+        sx: {
           borderRadius: 2,
           boxShadow: '0 8px 32px rgba(0,0,0,0.12)'
-        } 
+        }
       }}
     >
       <DialogTitle sx={{
@@ -238,7 +242,7 @@ const ServerEditDialog: React.FC<ServerEditDialogProps> = ({
         <Box sx={{ display: 'flex', alignItems: 'center' }}>
           <CloudIcon sx={{ mr: 1.5, color: 'primary.main', fontSize: '1.5rem' }} />
           <Typography variant="h5">
-            {isNew 
+            {isNew
               ? t('configuration.mcp.addServer', { defaultValue: 'Add MCP Server' })
               : t('configuration.mcp.editServer', { defaultValue: 'Edit MCP Server' })}
           </Typography>
@@ -256,14 +260,14 @@ const ServerEditDialog: React.FC<ServerEditDialogProps> = ({
               onChange={handleTextChange('name')}
               fullWidth
               required
-              sx={{ 
+              sx={{
                 '& .MuiOutlinedInput-root': {
                   borderRadius: 1.5,
                 }
               }}
             />
           </Grid>
-          
+
           <Grid item xs={12} md={9}>
             <TextField
               label={t('configuration.mcp.serverUrl', { defaultValue: 'Server URL' })}
@@ -272,7 +276,7 @@ const ServerEditDialog: React.FC<ServerEditDialogProps> = ({
               fullWidth
               required
               helperText={t('configuration.mcp.serverUrlHelp', { defaultValue: 'Full URL of the MCP server endpoint' })}
-              sx={{ 
+              sx={{
                 '& .MuiOutlinedInput-root': {
                   borderRadius: 1.5,
                 }
@@ -293,7 +297,7 @@ const ServerEditDialog: React.FC<ServerEditDialogProps> = ({
               </Select>
             </FormControl>
           </Grid>
-          
+
           {editedServer.server_type === 'streamable' && (
             <Grid item xs={12} md={6}>
               <FormControl fullWidth>
@@ -310,7 +314,7 @@ const ServerEditDialog: React.FC<ServerEditDialogProps> = ({
               </FormControl>
             </Grid>
           )}
-          
+
           {editedServer.server_type === 'streamable' && editedServer.auth_type !== 'databricks_obo' && (
             <Grid item xs={12} md={editedServer.auth_type === 'databricks_obo' ? 12 : 6}>
               <TextField
@@ -321,7 +325,7 @@ const ServerEditDialog: React.FC<ServerEditDialogProps> = ({
                 type="password"
                 required
                 helperText={t('configuration.mcp.apiKeyHelp', { defaultValue: 'Authentication key for the MCP server' })}
-                sx={{ 
+                sx={{
                   '& .MuiOutlinedInput-root': {
                     borderRadius: 1.5,
                   }
@@ -338,7 +342,7 @@ const ServerEditDialog: React.FC<ServerEditDialogProps> = ({
                 onChange={handleTextChange('session_id')}
                 fullWidth
                 helperText={t('configuration.mcp.sessionIdHelp', { defaultValue: 'Optional session ID for maintaining state across requests. Leave empty for stateless connections.' })}
-                sx={{ 
+                sx={{
                   '& .MuiOutlinedInput-root': {
                     borderRadius: 1.5,
                   }
@@ -377,7 +381,7 @@ const ServerEditDialog: React.FC<ServerEditDialogProps> = ({
               valueLabelDisplay="auto"
             />
           </Grid>
-          
+
           <Grid item xs={12} md={6}>
             <Box sx={{ display: 'flex', alignItems: 'center', mb: 1 }}>
               <Typography variant="body2">
@@ -402,7 +406,7 @@ const ServerEditDialog: React.FC<ServerEditDialogProps> = ({
               valueLabelDisplay="auto"
             />
           </Grid>
-          
+
           <Grid item xs={12} md={6}>
             <Box sx={{ display: 'flex', alignItems: 'center', mb: 1 }}>
               <Typography variant="body2">
@@ -428,11 +432,11 @@ const ServerEditDialog: React.FC<ServerEditDialogProps> = ({
             />
           </Grid>
         </Grid>
-        
+
         {/* Connection Test Result */}
         {connectionTestResult.tested && (
           <Box sx={{ mt: 2 }}>
-            <Alert 
+            <Alert
               severity={connectionTestResult.success ? 'success' : 'error'}
               icon={connectionTestResult.success ? <CheckCircleIcon /> : <ErrorIcon />}
             >
@@ -445,15 +449,15 @@ const ServerEditDialog: React.FC<ServerEditDialogProps> = ({
         <Button
           onClick={handleTestConnection}
           disabled={
-            testingConnection || 
-            !editedServer.server_url?.trim() || 
-            (editedServer.server_type === 'streamable' && 
-             editedServer.auth_type !== 'databricks_obo' && 
+            testingConnection ||
+            !editedServer.server_url?.trim() ||
+            (editedServer.server_type === 'streamable' &&
+             editedServer.auth_type !== 'databricks_obo' &&
              !editedServer.api_key?.trim())
           }
           startIcon={testingConnection ? <CircularProgress size={16} /> : <CloudIcon />}
         >
-          {testingConnection 
+          {testingConnection
             ? t('configuration.mcp.testingConnection', { defaultValue: 'Testing...' })
             : t('configuration.mcp.testConnection', { defaultValue: 'Test Connection' })
           }
@@ -462,8 +466,8 @@ const ServerEditDialog: React.FC<ServerEditDialogProps> = ({
           <Button onClick={onClose} color="inherit" sx={{ mr: 1 }}>
             {t('common.cancel', { defaultValue: 'Cancel' })}
           </Button>
-          <Button 
-            onClick={handleSave} 
+          <Button
+            onClick={handleSave}
             variant="contained"
             color="primary"
           >
@@ -487,19 +491,21 @@ const MCPConfiguration: React.FC = () => {
     severity: 'success' as 'success' | 'error',
   });
   const [_loading, set_Loading] = useState(false);
+  const _userRole = usePermissionStore(state => state.userRole);
+
 
   const loadMcpServers = async () => {
     set_Loading(true);
     try {
       const mcpService = MCPService.getInstance();
       const response = await mcpService.getMcpServers();
-      
+
       // Update the mcpConfig with the servers from the API
       setMcpConfig(prevConfig => ({
         ...prevConfig,
         servers: response.servers || []
       }));
-      
+
       // Try to load global settings as well
       try {
         const globalSettings = await mcpService.getGlobalSettings();
@@ -510,7 +516,7 @@ const MCPConfiguration: React.FC = () => {
       } catch (error) {
         console.warn('Could not load global MCP settings:', error);
       }
-      
+
     } catch (error) {
       console.error('Error loading MCP servers:', error);
       setNotification({
@@ -533,7 +539,7 @@ const MCPConfiguration: React.FC = () => {
       ...prev,
       global_enabled: checked
     }));
-    
+
     try {
       const mcpService = MCPService.getInstance();
       await mcpService.updateGlobalSettings({ global_enabled: checked });
@@ -552,16 +558,31 @@ const MCPConfiguration: React.FC = () => {
     }
   };
 
+  const _handleEnableForWorkspace = async (server: MCPServerConfig) => {
+    try {
+      const mcpService = MCPService.getInstance();
+      await mcpService.enableForWorkspace(server.id);
+      setNotification({ open: true, message: 'Enabled for this workspace', severity: 'success' });
+      await loadMcpServers();
+    } catch (error) {
+      setNotification({
+        open: true,
+        message: error instanceof Error ? error.message : 'Failed to enable for this workspace',
+        severity: 'error',
+      });
+    }
+  };
+
   const handleServerToggle = (serverId: string) => async (
     _event: React.ChangeEvent<HTMLInputElement>
   ) => {
     try {
       const mcpService = MCPService.getInstance();
       await mcpService.toggleMcpServerEnabled(serverId);
-      
+
       // Reload servers to get updated state
       await loadMcpServers();
-      
+
     } catch (error) {
       console.error(`Error toggling MCP server ${serverId}:`, error);
       setNotification({
@@ -578,16 +599,16 @@ const MCPConfiguration: React.FC = () => {
     try {
       const mcpService = MCPService.getInstance();
       await mcpService.toggleMcpServerGlobalEnabled(serverId);
-      
+
       // Reload servers to get updated state
       await loadMcpServers();
-      
+
       setNotification({
         open: true,
         message: 'MCP server global setting updated successfully',
         severity: 'success',
       });
-      
+
     } catch (error) {
       console.error(`Error toggling MCP server global setting ${serverId}:`, error);
       setNotification({
@@ -603,14 +624,14 @@ const MCPConfiguration: React.FC = () => {
       // Fetch full server details with decrypted API key
       const mcpService = MCPService.getInstance();
       const fullServer = await mcpService.getMcpServer(server.id);
-      
+
       console.log('Edit server - fetched full details:', {
         serverId: server.id,
         listApiKey: server.api_key,
         fullApiKey: fullServer?.api_key,
         fullApiKeyLength: fullServer?.api_key?.length || 0
       });
-      
+
       if (fullServer) {
         setCurrentServer(fullServer);
         setIsNewServer(false);
@@ -641,10 +662,10 @@ const MCPConfiguration: React.FC = () => {
     try {
       const mcpService = MCPService.getInstance();
       await mcpService.deleteMcpServer(serverId);
-      
+
       // Reload servers after successful deletion
       await loadMcpServers();
-      
+
       setNotification({
         open: true,
         message: 'MCP Server deleted successfully',
@@ -663,7 +684,7 @@ const MCPConfiguration: React.FC = () => {
   const handleSaveServer = async (updatedServer: MCPServerConfig) => {
     try {
       const mcpService = MCPService.getInstance();
-      
+
       if (isNewServer) {
         // Create new server
         await mcpService.createMcpServer(updatedServer);
@@ -671,16 +692,16 @@ const MCPConfiguration: React.FC = () => {
         // Update existing server
         await mcpService.updateMcpServer(updatedServer.id, updatedServer);
       }
-      
+
       // Reload servers after successful save
       await loadMcpServers();
-      
+
       setNotification({
         open: true,
         message: `MCP Server ${isNewServer ? 'created' : 'updated'} successfully`,
         severity: 'success',
       });
-      
+
       setEditDialogOpen(false);
     } catch (error) {
       console.error('Error saving MCP server:', error);
@@ -695,11 +716,11 @@ const MCPConfiguration: React.FC = () => {
 
   return (
     <Box>
-      <Box sx={{ 
-        display: 'flex', 
-        alignItems: 'center', 
-        justifyContent: 'space-between', 
-        mb: 3 
+      <Box sx={{
+        display: 'flex',
+        alignItems: 'center',
+        justifyContent: 'space-between',
+        mb: 3
       }}>
         <Box sx={{ display: 'flex', alignItems: 'center' }}>
           <CloudIcon sx={{ mr: 1.5, color: 'primary.main', fontSize: '1.4rem' }} />
@@ -719,7 +740,7 @@ const MCPConfiguration: React.FC = () => {
           label={t('configuration.mcp.globalEnable', { defaultValue: 'Enable MCP Servers' })}
         />
       </Box>
-      
+
       {mcpConfig.global_enabled && (
         <Alert severity="info" sx={{ mb: 3 }}>
           <Typography variant="body2">
@@ -730,19 +751,19 @@ const MCPConfiguration: React.FC = () => {
           </Typography>
         </Alert>
       )}
-      
-      <Paper 
-        variant="outlined" 
-        sx={{ 
-          p: 3, 
-          mb: 3, 
+
+      <Paper
+        variant="outlined"
+        sx={{
+          p: 3,
+          mb: 3,
           bgcolor: 'background.paper',
           borderRadius: 2
         }}
       >
-        <Box sx={{ 
-          display: 'flex', 
-          justifyContent: 'space-between', 
+        <Box sx={{
+          display: 'flex',
+          justifyContent: 'space-between',
           alignItems: 'center',
           mb: 2
         }}>
@@ -758,7 +779,7 @@ const MCPConfiguration: React.FC = () => {
             {t('configuration.mcp.addServer', { defaultValue: 'Add Server' })}
           </Button>
         </Box>
-        
+
         <Box sx={{ mt: 2 }}>
           {mcpConfig.servers.length === 0 ? (
             <Typography variant="body2" color="text.secondary" align="center" sx={{ py: 3 }}>
@@ -770,16 +791,16 @@ const MCPConfiguration: React.FC = () => {
                 .slice() // Create a copy of the array to avoid modifying the original
                 .sort((a, b) => a.name.localeCompare(b.name)) // Sort by name alphabetically
                 .map((server) => (
-                <Paper 
-                  key={server.id} 
-                  variant="outlined" 
-                  sx={{ 
+                <Paper
+                  key={server.id}
+                  variant="outlined"
+                  sx={{
                     p: 2,
                     borderRadius: 1.5,
-                    transition: 'all 0.2s', 
-                    '&:hover': { 
+                    transition: 'all 0.2s',
+                    '&:hover': {
                       boxShadow: '0 4px 12px rgba(0,0,0,0.08)',
-                      borderColor: 'primary.main' 
+                      borderColor: 'primary.main'
                     }
                   }}
                 >
@@ -789,18 +810,18 @@ const MCPConfiguration: React.FC = () => {
                         <Typography variant="subtitle1" fontWeight="medium">
                           {server.name}
                         </Typography>
-                        <Chip 
-                          label="STREAMABLE" 
-                          size="small" 
-                          color="secondary" 
+                        <Chip
+                          label="STREAMABLE"
+                          size="small"
+                          color="secondary"
                           variant="outlined"
                           sx={{ ml: 1.5, fontSize: '0.7rem', height: 20 }}
                         />
                         {server.global_enabled && (
-                          <Chip 
-                            label="GLOBAL" 
-                            size="small" 
-                            color="primary" 
+                          <Chip
+                            label="GLOBAL"
+                            size="small"
+                            color="primary"
                             sx={{ ml: 1, fontSize: '0.7rem', height: 20 }}
                           />
                         )}
@@ -809,7 +830,7 @@ const MCPConfiguration: React.FC = () => {
                         {server.server_url}
                       </Typography>
                     </Box>
-                    
+
                     <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
                       <Box sx={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', mr: 1 }}>
                         <FormControlLabel
@@ -866,8 +887,8 @@ const MCPConfiguration: React.FC = () => {
           )}
         </Box>
       </Paper>
-      
-      
+
+
       {/* Server Edit Dialog */}
       <ServerEditDialog
         open={editDialogOpen}
@@ -876,7 +897,7 @@ const MCPConfiguration: React.FC = () => {
         onSave={handleSaveServer}
         isNew={isNewServer}
       />
-      
+
       {/* Notification */}
       <Snackbar
         open={notification.open}
@@ -892,4 +913,4 @@ const MCPConfiguration: React.FC = () => {
   );
 };
 
-export default MCPConfiguration; 
+export default MCPConfiguration;

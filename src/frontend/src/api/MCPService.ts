@@ -206,4 +206,18 @@ export class MCPService {
       throw new Error(axiosError.response?.data?.detail || 'Error updating MCP global settings');
     }
   }
-} 
+
+  /**
+   * Create or update a workspace override for a server and enable it
+   */
+  async enableForWorkspace(id: string): Promise<MCPServerConfig> {
+    try {
+      const response = await apiClient.post<MCPServerConfig>(`/mcp/servers/${id}/enable-for-workspace`);
+      return response.data;
+    } catch (error) {
+      const axiosError = error as AxiosError<ErrorResponse>;
+      throw new Error(axiosError.response?.data?.detail || `Error enabling server ${id} for workspace`);
+    }
+  }
+
+}

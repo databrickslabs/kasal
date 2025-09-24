@@ -58,13 +58,12 @@ async def get_mcp_servers(
     group_context: GroupContextDep = None
 ) -> MCPServerListResponse:
     """
-    Get all MCP servers.
-    
-    Returns:
-        List of MCP servers and count
+    Get MCP servers effective for the current workspace (group).
+    Deduplicated by name, preferring workspace overrides over base.
     """
     try:
-        return await service.get_all_servers()
+        group_id = getattr(group_context, 'primary_group_id', None) if group_context else None
+        return await service.get_all_servers_effective(group_id)
     except Exception as e:
         logger.error(f"Error getting MCP servers: {str(e)}")
         raise HTTPException(status_code=500, detail=str(e))
@@ -125,6 +124,11 @@ async def create_mcp_server(
     """
     Create a new MCP server.
     Only Admins can create MCP servers.
+
+    Behavior:
+    - If a workspace context (group_id) is present, the server is created scoped to that workspace
+      to prevent cross-workspace visibility.
+    - Otherwise, it is created as a base (global) server.
     """
     # Check permissions - only admins can create MCP servers
     if not check_role_in_context(group_context, ["admin"]):
@@ -133,9 +137,12 @@ async def create_mcp_server(
             detail="Only admins can create MCP servers"
         )
 
-    logger.info(f"Creating MCP server with name '{server_data.name}'")
+    # Determine workspace scoping
+    group_id = getattr(group_context, 'primary_group_id', None) if group_context else None
+
+    logger.info(f"Creating MCP server with name '{server_data.name}' scoped to group_id={group_id}")
     try:
-        server = await service.create_server(server_data)
+        server = await service.create_server(server_data, group_id=group_id)
         logger.info(f"Created MCP server with ID {server.id}")
         return server
     except HTTPException:
@@ -244,6 +251,29 @@ async def toggle_mcp_server_global_enabled(
         status_text = "globally enabled" if response.enabled else "globally disabled"
         logger.info(f"MCP server with ID {server_id} {status_text}")
         return response
+    except HTTPException:
+        raise
+
+@router.post("/servers/{server_id}/enable-for-workspace", response_model=MCPServerResponse)
+async def enable_mcp_server_for_workspace(
+    server_id: int,
+    service: MCPServiceDep,
+    group_context: GroupContextDep = None
+) -> MCPServerResponse:
+    """
+    Create or update a workspace-scoped override for this server and enable it.
+    Only Admins can perform this action.
+    """
+    if not check_role_in_context(group_context, ["admin"]):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Only admins can enable MCP server for a workspace"
+        )
+    group_id = getattr(group_context, 'primary_group_id', None)
+    if not group_id:
+        raise HTTPException(status_code=400, detail="No workspace/group selected")
+    try:
+        return await service.enable_server_for_group(server_id, group_id)
     except HTTPException:
         raise
 

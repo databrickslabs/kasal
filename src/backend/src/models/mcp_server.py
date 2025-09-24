@@ -1,5 +1,5 @@
 from datetime import datetime
-from sqlalchemy import Column, Integer, String, Boolean, Float, JSON, DateTime
+from sqlalchemy import Column, Integer, String, Boolean, Float, JSON, DateTime, UniqueConstraint
 
 from src.db.base import Base
 
@@ -7,13 +7,16 @@ from src.db.base import Base
 class MCPServer(Base):
     """
     SQLAlchemy model for MCP (Model Context Protocol) server configurations.
-    
+
     Stores configuration information for connecting to an MCP server,
     including authentication and connection parameters.
     """
-    
+
     __tablename__ = "mcp_servers"
-    
+    __table_args__ = (
+        UniqueConstraint('name', 'group_id', name='uq_mcpserver_name_group'),
+    )
+
     id = Column(Integer, primary_key=True)
     name = Column(String, nullable=False)
     server_url = Column(String, nullable=False)
@@ -22,6 +25,8 @@ class MCPServer(Base):
     auth_type = Column(String, default="api_key")  # "api_key" or "databricks_obo"
     enabled = Column(Boolean, default=False)
     global_enabled = Column(Boolean, default=False)  # Enable across all agents/tasks
+    # NEW: Workspace scoping (nullable for base entries)
+    group_id = Column(String, nullable=True)
     timeout_seconds = Column(Integer, default=30)
     max_retries = Column(Integer, default=3)
     model_mapping_enabled = Column(Boolean, default=False)
@@ -29,9 +34,8 @@ class MCPServer(Base):
     additional_config = Column(JSON, default=dict)  # Additional configuration parameters
     created_at = Column(DateTime, default=datetime.utcnow)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
-    
+
     def __init__(self, **kwargs):
         super(MCPServer, self).__init__(**kwargs)
         if self.additional_config is None:
             self.additional_config = {}
- 
