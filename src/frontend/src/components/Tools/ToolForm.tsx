@@ -28,15 +28,20 @@ import {
   DialogActions,
   Tabs,
   Tab,
-  Switch
+  Switch,
+  Chip,
+  Tooltip
 } from '@mui/material';
 import DeleteIcon from '@mui/icons-material/Delete';
 import EditIcon from '@mui/icons-material/Edit';
 import AddIcon from '@mui/icons-material/Add';
+import ContentCopyOutlinedIcon from '@mui/icons-material/ContentCopyOutlined';
+
 import { Tool, ToolIcon } from '../../types/tool';
 import { Tool as ServiceTool, ToolService } from '../../api/ToolService';
 import { useTranslation } from 'react-i18next';
 import SecurityDisclaimer from './SecurityDisclaimer';
+import { usePermissionStore } from '../../store/permissions';
 
 const toolIcons: ToolIcon[] = [
   { value: 'screwdriver-wrench', label: 'Screwdriver Wrench' },
@@ -62,11 +67,11 @@ export const customTools = [
 const convertServiceToolToTool = (serviceTool: ServiceTool): Tool => {
   // Determine the category based on the tool title
   let category: 'PreBuilt' | 'Custom' = 'PreBuilt';
-  
+
   if (customTools.includes(serviceTool.title)) {
     category = 'Custom';
   }
-  
+
   return {
     id: String(serviceTool.id),
     title: serviceTool.title,
@@ -74,7 +79,8 @@ const convertServiceToolToTool = (serviceTool: ServiceTool): Tool => {
     icon: serviceTool.icon,
     config: serviceTool.config,
     category,
-    enabled: serviceTool.enabled !== undefined ? serviceTool.enabled : true
+    enabled: serviceTool.enabled !== undefined ? serviceTool.enabled : true,
+    group_id: serviceTool.group_id,
   };
 };
 
@@ -106,6 +112,8 @@ const ToolForm: React.FC = () => {
     severity: 'success',
   });
 
+  const userRole = usePermissionStore(state => state.userRole);
+
 
   useEffect(() => {
     loadTools();
@@ -113,7 +121,7 @@ const ToolForm: React.FC = () => {
 
 
   useEffect(() => {
-    const filtered = tools.filter(tool => 
+    const filtered = tools.filter(tool =>
       tool.title.toLowerCase().includes(searchQuery.toLowerCase()) ||
       tool.description.toLowerCase().includes(searchQuery.toLowerCase())
     );
@@ -156,10 +164,10 @@ const ToolForm: React.FC = () => {
 
       if (isEditing && formData.id) {
         const updatedTool = await ToolService.updateTool(Number(formData.id), cleanFormData);
-        
+
         // Update the tools list with the new data
-        setTools(prevTools => 
-          prevTools.map(tool => 
+        setTools(prevTools =>
+          prevTools.map(tool =>
             tool.id === formData.id ? convertServiceToolToTool(updatedTool) : tool
           )
         );
@@ -234,7 +242,7 @@ const ToolForm: React.FC = () => {
     if (window.confirm(t('tools.regular.confirmations.delete'))) {
       try {
         await ToolService.deleteTool(Number(id));
-        
+
         // Update the tools list by removing the deleted tool
         setTools(prevTools => prevTools.filter(tool => tool.id !== id));
         setNotification({
@@ -271,15 +279,15 @@ const ToolForm: React.FC = () => {
   const performToggleEnabled = async (id: string) => {
     try {
       const { enabled } = await ToolService.toggleToolEnabled(Number(id));
-      
+
       // Update the tools list with the new enabled state
-      const updatedTools = (prevTools: Tool[]) => 
-        prevTools.map(tool => 
+      const updatedTools = (prevTools: Tool[]) =>
+        prevTools.map(tool =>
           tool.id === id ? { ...tool, enabled } : tool
         );
-      
+
       setTools(updatedTools);
-      
+
       const status = enabled ? 'enabled' : 'disabled';
       setNotification({
         open: true,
@@ -294,12 +302,12 @@ const ToolForm: React.FC = () => {
       console.log("Dispatching tool state change event with tools:", formattedTools);
 
       // Dispatch custom event with the fresh tool data
-      const toolUpdateEvent = new CustomEvent<{toolId: string; enabled: boolean; tools: Tool[]}>('toolStateChanged', { 
-        detail: { 
-          toolId: id, 
+      const toolUpdateEvent = new CustomEvent<{toolId: string; enabled: boolean; tools: Tool[]}>('toolStateChanged', {
+        detail: {
+          toolId: id,
           enabled,
           tools: formattedTools
-        } 
+        }
       });
       window.dispatchEvent(toolUpdateEvent);
     } catch (error) {
@@ -311,6 +319,34 @@ const ToolForm: React.FC = () => {
       });
     }
   };
+
+
+  const handleEnableForWorkspace = async (tool: Tool) => {
+    try {
+      // Ensure a group-specific configuration exists by copying current config
+      await ToolService.updateToolConfigurationForGroup(tool.title, tool.config || {});
+
+      // Refresh tools list to get the group override with its ID
+      const refreshed = await ToolService.listTools();
+      const formatted = refreshed.map(convertServiceToolToTool);
+      setTools(formatted);
+
+      // Find the new group-specific tool row and enable it if disabled
+      const groupTool = formatted.find(t => t.title === tool.title && !!t.group_id);
+      if (groupTool?.id && groupTool.enabled === false) {
+        await ToolService.toggleToolEnabled(Number(groupTool.id));
+        // reflect enabled locally
+        setTools(prev => prev.map(p => p.id === groupTool.id ? { ...p, enabled: true } : p));
+      }
+
+      setNotification({ open: true, message: 'Workspace override created', severity: 'success' });
+    } catch (error) {
+      console.error('Error enabling tool for workspace:', error);
+      setNotification({ open: true, message: error instanceof Error ? error.message : 'Error enabling tool for workspace', severity: 'error' });
+    }
+  };
+
+
 
   const handleSecurityDisclaimerConfirm = async () => {
     if (pendingToggleTool?.id) {
@@ -385,10 +421,10 @@ const ToolForm: React.FC = () => {
                 </IconButton>
               </Box>
             </Box>
-            
-            <Tabs 
-              value={activeTab} 
-              onChange={handleTabChange} 
+
+            <Tabs
+              value={activeTab}
+              onChange={handleTabChange}
               sx={{ mb: 2 }}
             >
               <Tab label={t('tools.regular.tabs.prebuilt')} />
@@ -416,7 +452,14 @@ const ToolForm: React.FC = () => {
                     ) : (
                       prebuiltTools.map((tool) => (
                         <TableRow key={tool.id}>
-                          <TableCell>{tool.title}</TableCell>
+                          <TableCell>
+                            <Stack direction="row" spacing={1} alignItems="center">
+                              <span>{tool.title}</span>
+                              {tool.group_id && (
+                                <Chip size="small" label="Workspace" color="primary" variant="outlined" />
+                              )}
+                            </Stack>
+                          </TableCell>
                           <TableCell>
                             {tool.description.length > 100
                               ? `${tool.description.substring(0, 100)}...`
@@ -431,6 +474,19 @@ const ToolForm: React.FC = () => {
                             />
                           </TableCell>
                           <TableCell align="center">
+                            {(!tool.group_id && userRole === 'admin') && (
+                              <Tooltip title="Enable for this workspace (create override)">
+                                <IconButton
+                                  size="small"
+                                  color="primary"
+                                  onClick={() => handleEnableForWorkspace(tool)}
+                                  sx={{ mr: 1 }}
+                                  aria-label="Enable for this workspace"
+                                >
+                                  <ContentCopyOutlinedIcon fontSize="small" />
+                                </IconButton>
+                              </Tooltip>
+                            )}
                             <IconButton
                               size="small"
                               onClick={() => handleOpenEditForm(tool)}
@@ -475,7 +531,14 @@ const ToolForm: React.FC = () => {
                     ) : (
                       customToolsList.map((tool) => (
                         <TableRow key={tool.id}>
-                          <TableCell>{tool.title}</TableCell>
+                          <TableCell>
+                            <Stack direction="row" spacing={1} alignItems="center">
+                              <span>{tool.title}</span>
+                              {tool.group_id && (
+                                <Chip size="small" label="Workspace" color="primary" variant="outlined" />
+                              )}
+                            </Stack>
+                          </TableCell>
                           <TableCell>
                             {tool.description.length > 100
                               ? `${tool.description.substring(0, 100)}...`
@@ -490,6 +553,19 @@ const ToolForm: React.FC = () => {
                             />
                           </TableCell>
                           <TableCell align="center">
+                            {(!tool.group_id && userRole === 'admin') && (
+                              <Tooltip title="Enable for this workspace (create override)">
+                                <IconButton
+                                  size="small"
+                                  color="primary"
+                                  onClick={() => handleEnableForWorkspace(tool)}
+                                  sx={{ mr: 1 }}
+                                  aria-label="Enable for this workspace"
+                                >
+                                  <ContentCopyOutlinedIcon fontSize="small" />
+                                </IconButton>
+                              </Tooltip>
+                            )}
                             <IconButton
                               size="small"
                               onClick={() => handleOpenEditForm(tool)}
@@ -516,8 +592,8 @@ const ToolForm: React.FC = () => {
           </CardContent>
         </Card>
 
-        <Dialog 
-          open={isFormOpen} 
+        <Dialog
+          open={isFormOpen}
           onClose={handleCloseForm}
           maxWidth="sm"
           fullWidth
@@ -561,7 +637,7 @@ const ToolForm: React.FC = () => {
                     ))}
                   </Select>
                 </FormControl>
-                
+
                 <FormControl fullWidth>
                   <InputLabel>{t('tools.regular.form.category')}</InputLabel>
                   <Select
@@ -574,7 +650,7 @@ const ToolForm: React.FC = () => {
                     <MenuItem value="Custom">{t('tools.regular.categories.custom')}</MenuItem>
                   </Select>
                 </FormControl>
-                
+
                 {/* Dynamic Config Key-Value Form */}
                 <Box>
                   <Typography variant="subtitle1" gutterBottom sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
@@ -686,4 +762,4 @@ const ToolForm: React.FC = () => {
   );
 };
 
-export default ToolForm; 
+export default ToolForm;

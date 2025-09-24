@@ -157,9 +157,15 @@ module.exports = {
           targets: {
             browsers: ['>0.2%', 'not dead', 'not op_mini all'],
           },
+          loose: true, // Set loose mode for preset-env
         },
       ],
     ],
-    plugins: [],
+    plugins: [
+      // Explicitly configure the Babel plugins with consistent loose mode
+      ['@babel/plugin-transform-class-properties', { loose: true }],
+      ['@babel/plugin-transform-private-methods', { loose: true }],
+      ['@babel/plugin-transform-private-property-in-object', { loose: true }],
+    ],
   },
 };

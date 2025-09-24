@@ -361,7 +361,7 @@ const DatabaseManagement: React.FC = () => {
       const response = await apiClient.post<BackupList>('/database-management/list-backups', {
         catalog,
         schema,
-        volume: volumeName
+        volume_name: volumeName
       });
       setBackups(response.data);
     } catch (err: any) {
@@ -378,8 +378,8 @@ const DatabaseManagement: React.FC = () => {
       const response = await apiClient.post<ExportResult>('/database-management/export', {
         catalog,
         schema,
-        volume: volumeName,
-        format: exportFormat
+        volume_name: volumeName,
+        export_format: exportFormat
       });
       setExportResult(response.data);
       if (response.data.success) {
@@ -408,8 +408,8 @@ const DatabaseManagement: React.FC = () => {
       const response = await apiClient.post<ImportResult>('/database-management/import', {
         catalog,
         schema,
-        volume: volumeName,
-        filename: selectedBackup
+        volume_name: volumeName,
+        backup_filename: selectedBackup
       });
 
       if (response.data.success) {

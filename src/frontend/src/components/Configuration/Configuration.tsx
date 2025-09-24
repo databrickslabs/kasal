@@ -39,7 +39,7 @@ import { useUserStore } from '../../store/user';
 import ModelConfiguration from './Models';
 import APIKeys from './APIKeys/APIKeys';
 import ObjectManagement from './ObjectManagement';
-import ToolForm from '../Tools/ToolForm';
+import ToolsConfiguration from './Tools/ToolsConfiguration';
 import PromptConfiguration from './PromptConfiguration';
 import DatabricksConfiguration from './DatabricksConfiguration';
 import MCPConfiguration from './MCP/MCPConfiguration';
@@ -86,6 +86,7 @@ interface NavItem {
   label: string;
   icon: JSX.Element;
   index: number;
+  group: 'general' | 'system' | 'workspace';
 }
 
 function Configuration({ onClose }: ConfigurationProps): JSX.Element {
@@ -169,113 +170,119 @@ function Configuration({ onClose }: ConfigurationProps): JSX.Element {
     baseNavItems.push({
       label: t('configuration.general.title', { defaultValue: 'General' }),
       icon: <TranslateIcon fontSize="small" />,
-      index: currentIndex++
+      index: currentIndex++,
+      group: 'general'
     });
 
     // System admin-only sections (manage entire system)
     if (isSystemAdmin) {
-      // Workspaces - system admins can manage all workspaces
       baseNavItems.push({
         label: t('configuration.workspaces.tab', { defaultValue: 'Workspaces' }),
         icon: <WorkspacesIcon fontSize="small" />,
-        index: currentIndex++
+        index: currentIndex++,
+        group: 'system'
       });
-
-      // Engines - system-wide configuration
       baseNavItems.push({
         label: t('configuration.engines.tab', { defaultValue: 'Engines' }),
         icon: <EngineeringIcon fontSize="small" />,
-        index: currentIndex++
+        index: currentIndex++,
+        group: 'system'
       });
-
-      // Models - system-wide models
       baseNavItems.push({
-        label: t('configuration.models.tab', { defaultValue: 'Models' }),
+        label: t('configuration.models.global', { defaultValue: 'Models (Global)' }),
         icon: <ModelIcon fontSize="small" />,
-        index: currentIndex++
+        index: currentIndex++,
+        group: 'system'
       });
-
-      // Tools - system-wide tools
+      // Tools (Global) - system-wide tools
       baseNavItems.push({
-        label: t('configuration.tools.tab', { defaultValue: 'Tools' }),
+        label: t('configuration.tools.global', { defaultValue: 'Tools (Global)' }),
         icon: <BuildIcon fontSize="small" />,
-        index: currentIndex++
+        index: currentIndex++,
+        group: 'system'
       });
-
-      // User Permission Management - system admins only
       baseNavItems.push({
         label: t('configuration.userPermissions.tab', { defaultValue: 'User Permissions' }),
         icon: <SettingsIcon fontSize="small" />,
-        index: currentIndex++
+        index: currentIndex++,
+        group: 'system'
       });
-
-      // Database Management - system-wide
       if (showDatabaseManagement) {
         baseNavItems.push({
           label: t('configuration.database.tab', { defaultValue: 'Database Management' }),
           icon: <StorageIcon fontSize="small" />,
-          index: currentIndex++
+          index: currentIndex++,
+          group: 'system'
         });
       }
     }
 
     // Workspace admin sections (configure workspace-specific settings)
     if (isWorkspaceAdmin) {
-      // Workspace Overview - summary of workspace configuration
       baseNavItems.push({
         label: t('configuration.workspaceOverview.tab', { defaultValue: 'Workspace Overview' }),
         icon: <WorkspacesIcon fontSize="small" />,
-        index: currentIndex++
+        index: currentIndex++,
+        group: 'workspace'
       });
-
-      // Databricks configuration for workspace (always visible now)
       baseNavItems.push({
         label: t('configuration.databricks.tab', { defaultValue: 'Databricks' }),
         icon: <CloudIcon fontSize="small" />,
-        index: currentIndex++
+        index: currentIndex++,
+        group: 'workspace'
       });
-
-      // Memory Backend - workspace admins can configure
       baseNavItems.push({
         label: t('configuration.memoryBackend.tab', { defaultValue: 'Memory Backend' }),
         icon: <MemoryIcon fontSize="small" />,
-        index: currentIndex++
+        index: currentIndex++,
+        group: 'workspace'
       });
-
-      // MCP Servers - workspace admins can configure
       baseNavItems.push({
         label: t('configuration.mcpServers.tab', { defaultValue: 'MCP Servers' }),
         icon: <CloudIcon fontSize="small" />,
-        index: currentIndex++
+        index: currentIndex++,
+        group: 'workspace'
+      });
+      // Models (Workspace) - workspace models management
+      baseNavItems.push({
+        label: t('configuration.models.workspace', { defaultValue: 'Models (Workspace)' }),
+        icon: <ModelIcon fontSize="small" />,
+        index: currentIndex++,
+        group: 'workspace'
+      });
+      // Tools (Workspace) - workspace tools management
+      baseNavItems.push({
+        label: t('configuration.tools.workspace', { defaultValue: 'Tools (Workspace)' }),
+        icon: <BuildIcon fontSize="small" />,
+        index: currentIndex++,
+        group: 'workspace'
       });
     }
 
-    // Sections visible to editors and admins (but not operators)
+    // Sections visible to editors and admins (but not operators) — workspace-relevant
     if (!isOperator) {
-      // API Keys - editors can manage their own keys
       baseNavItems.push({
         label: t('configuration.apiKeys.tab', { defaultValue: 'API Keys' }),
         icon: <KeyIcon fontSize="small" />,
-        index: currentIndex++
+        index: currentIndex++,
+        group: 'workspace'
       });
-
-      // Object Management - editors can manage objects
       baseNavItems.push({
         label: t('configuration.objects.tab', { defaultValue: 'Object Management' }),
         icon: <CodeIcon fontSize="small" />,
-        index: currentIndex++
+        index: currentIndex++,
+        group: 'workspace'
       });
-
-      // Prompt Instructions - editors can configure prompts
       baseNavItems.push({
         label: t('configuration.prompts.tab', { defaultValue: 'Prompt Instructions' }),
         icon: <TextFormatIcon fontSize="small" />,
-        index: currentIndex++
+        index: currentIndex++,
+        group: 'workspace'
       });
     }
 
     return baseNavItems;
-  }, [showDatabaseManagement, t, isSystemAdmin, isWorkspaceAdmin, isOperator]); // Recalculate when permission changes
+  }, [showDatabaseManagement, t, isSystemAdmin, isWorkspaceAdmin, isOperator]);
 
   // Ensure permissions are loaded on mount
   useEffect(() => {
@@ -354,17 +361,41 @@ function Configuration({ onClose }: ConfigurationProps): JSX.Element {
     setNotification({ ...notification, open: false });
   };
 
+  useEffect(() => {
+    // Allow deep-link navigation into specific configuration sections (e.g., API Keys)
+    const handler = (_evt: Event) => {
+      try {
+
+
+        const target = navItems.find(i => i.label === t('configuration.apiKeys.tab', { defaultValue: 'API Keys' }));
+        if (target) {
+          setActiveSection(target.index);
+        }
+      } catch (e) {
+        // no-op
+      }
+    };
+    window.addEventListener('kasal:navigate-config', handler as EventListener);
+    return () => window.removeEventListener('kasal:navigate-config', handler as EventListener);
+  }, [navItems, t]);
+  // Group nav items for sidebar sections (for clearer separation in sidebar)
+  const generalItems = React.useMemo(() => navItems.filter(i => i.group === 'general'), [navItems]);
+  const systemItems = React.useMemo(() => navItems.filter(i => i.group === 'system'), [navItems]);
+  const workspaceItems = React.useMemo(() => navItems.filter(i => i.group === 'workspace'), [navItems]);
+
+
   return (
-    <Box sx={{ 
+    <Box sx={{
       width: '80vw',
       height: '80vh',
-      mx: 'auto', 
-      px: 2, 
-      py: 1.5 
+      mx: 'auto',
+      px: 2,
+      py: 1.5
     }}>
-      <Box sx={{ 
-        display: 'flex', 
-        alignItems: 'center', 
+
+      <Box sx={{
+        display: 'flex',
+        alignItems: 'center',
         justifyContent: 'space-between',
         mb: 3,
         pb: 1.5,
@@ -376,10 +407,10 @@ function Configuration({ onClose }: ConfigurationProps): JSX.Element {
           <Typography variant="h5">{t('configuration.title')}</Typography>
         </Box>
         {onClose && (
-          <IconButton 
+          <IconButton
             onClick={onClose}
             size="small"
-            sx={{ 
+            sx={{
               color: 'text.secondary',
               '&:hover': {
                 color: 'text.primary',
@@ -412,23 +443,84 @@ function Configuration({ onClose }: ConfigurationProps): JSX.Element {
           overflow: 'hidden'
         }}>
         {/* Left Sidebar Navigation */}
-        <Paper 
-          sx={{ 
-            width: 240, 
+        <Paper
+          sx={{
+            width: 240,
             flexShrink: 0,
             borderRadius: 1,
             height: '100%',
             overflow: 'auto'
-          }} 
+          }}
           elevation={1}
         >
           <List sx={{ py: 1 }}>
-            {navItems.map((item) => (
+            {/* General */}
+            {generalItems.map((item) => (
               <ListItemButton
                 key={item.index}
                 selected={activeSection === item.index}
                 onClick={() => handleNavChange(item.index)}
-                sx={{ 
+                sx={{
+                  mb: 0.5,
+                  borderRadius: 1,
+                  mx: 0.5,
+                  '&.Mui-selected': {
+                    backgroundColor: 'action.selected',
+                    '&:hover': {
+                      backgroundColor: 'action.hover',
+                    },
+                  },
+                }}
+              >
+                <ListItemIcon sx={{ minWidth: 40 }}>
+                  {item.icon}
+                </ListItemIcon>
+                <ListItemText primary={item.label} />
+              </ListItemButton>
+            ))}
+
+            {/* System Administration */}
+            {systemItems.length > 0 && (
+              <Box sx={{ px: 2, pt: 1, pb: 0.5 }}>
+                <Typography variant="overline" color="text.secondary">System Administration</Typography>
+              </Box>
+            )}
+            {systemItems.map((item) => (
+              <ListItemButton
+                key={item.index}
+                selected={activeSection === item.index}
+                onClick={() => handleNavChange(item.index)}
+                sx={{
+                  mb: 0.5,
+                  borderRadius: 1,
+                  mx: 0.5,
+                  '&.Mui-selected': {
+                    backgroundColor: 'action.selected',
+                    '&:hover': {
+                      backgroundColor: 'action.hover',
+                    },
+                  },
+                }}
+              >
+                <ListItemIcon sx={{ minWidth: 40 }}>
+                  {item.icon}
+                </ListItemIcon>
+                <ListItemText primary={item.label} />
+              </ListItemButton>
+            ))}
+
+            {/* Workspace Settings */}
+            {workspaceItems.length > 0 && (
+              <Box sx={{ px: 2, pt: 1, pb: 0.5 }}>
+                <Typography variant="overline" color="text.secondary">Workspace Settings</Typography>
+              </Box>
+            )}
+            {workspaceItems.map((item) => (
+              <ListItemButton
+                key={item.index}
+                selected={activeSection === item.index}
+                onClick={() => handleNavChange(item.index)}
+                sx={{
                   mb: 0.5,
                   borderRadius: 1,
                   mx: 0.5,
@@ -450,7 +542,7 @@ function Configuration({ onClose }: ConfigurationProps): JSX.Element {
         </Paper>
 
         {/* Content Area */}
-        <Box sx={{ 
+        <Box sx={{
           flex: 1,
           bgcolor: 'background.paper',
           borderRadius: 1,
@@ -551,20 +643,38 @@ function Configuration({ onClose }: ConfigurationProps): JSX.Element {
               );
             }
 
-            // Models (Admin only)
-            if (item.label === t('configuration.models.tab', { defaultValue: 'Models' })) {
+            // Models (Global) - System Administration
+            if (item.label === t('configuration.models.global', { defaultValue: 'Models (Global)' })) {
               return (
                 <ContentPanel key={item.index} value={activeSection} index={item.index}>
-                  <ModelConfiguration />
+                  <ModelConfiguration mode="system" />
                 </ContentPanel>
               );
             }
 
-            // Tools (Admin only)
-            if (item.label === t('configuration.tools.tab', { defaultValue: 'Tools' })) {
+            // Models (Workspace) - Workspace Settings
+            if (item.label === t('configuration.models.workspace', { defaultValue: 'Models (Workspace)' })) {
               return (
                 <ContentPanel key={item.index} value={activeSection} index={item.index}>
-                  <ToolForm />
+                  <ModelConfiguration mode="workspace" />
+                </ContentPanel>
+              );
+            }
+
+            // Tools (Global) - System Administration
+            if (item.label === t('configuration.tools.global', { defaultValue: 'Tools (Global)' })) {
+              return (
+                <ContentPanel key={item.index} value={activeSection} index={item.index}>
+                  <ToolsConfiguration mode="system" />
+                </ContentPanel>
+              );
+            }
+
+            // Tools (Workspace) - Workspace Settings
+            if (item.label === t('configuration.tools.workspace', { defaultValue: 'Tools (Workspace)' })) {
+              return (
+                <ContentPanel key={item.index} value={activeSection} index={item.index}>
+                  <ToolsConfiguration mode="workspace" />
                 </ContentPanel>
               );
             }
@@ -666,4 +776,4 @@ function Configuration({ onClose }: ConfigurationProps): JSX.Element {
   );
 }
 
-export default Configuration; 
+export default Configuration;
