@@ -10,6 +10,8 @@ from src.models.agent import Agent
 from src.models.task import Task
 from src.models.execution_history import ExecutionHistory, TaskStatus, ErrorTrace
 from src.models.tool import Tool
+from src.models.group_tool import GroupTool
+
 from src.models.log import LLMLog
 from src.models.model_config import ModelConfig
 from src.models.databricks_config import DatabricksConfig
@@ -50,20 +52,21 @@ __all__ = [
     "Base",
     "Agent",
     "Task",
-    "ExecutionHistory", 
-    "TaskStatus", 
+    "ExecutionHistory",
+    "TaskStatus",
     "ErrorTrace",
     "Tool",
+    "GroupTool",
     "LLMLog",
     "ModelConfig",
     "DatabricksConfig",
     "InitializationStatus",
     "PromptTemplate",
     "ExecutionTrace",
-    "Crew", 
+    "Crew",
     "Plan",
     "Flow",
-    "FlowExecution", 
+    "FlowExecution",
     "FlowNodeExecution",
     "Schedule",
     "ApiKey",
@@ -81,10 +84,10 @@ __all__ = [
     "RefreshToken",
     # Billing models
     "LLMUsageBilling",
-    "BillingPeriod", 
+    "BillingPeriod",
     "BillingAlert",
     # Documentation models
     "DocumentationEmbedding",
     # Database configuration models
     "LakebaseConfig"
-] 
+]
