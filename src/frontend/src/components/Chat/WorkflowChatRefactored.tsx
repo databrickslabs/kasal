@@ -898,7 +898,7 @@ const WorkflowChat: React.FC<WorkflowChatProps> = ({
               fontWeight: 600
             }}
           >
-            <Box component="img" src="/favicon.svg" alt="Kasal" sx={{ width: 16, height: 16, borderRadius: 0.5 }} />
+            <Box component="img" src="/kasal-icon-16.png" alt="Kasal" sx={{ width: 16, height: 16, borderRadius: 0.5 }} />
             Kasal
           </Typography>
           {currentSessionName !== 'New Chat' && (

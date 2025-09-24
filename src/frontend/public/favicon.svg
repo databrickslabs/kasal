@@ -1,0 +1,24 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" width="256" height="256">
+  <!-- Kasal hex-K logo (vectorized) -->
+  <!-- Colors approximated from provided PNG -->
+  <defs>
+    <style>
+      .brand { fill: #F15A3D; stroke: #F15A3D; }
+      .outline { fill: none; stroke: #F15A3D; stroke-linejoin: round; }
+    </style>
+  </defs>
+
+  <!-- Double hexagon outline -->
+  <polygon class="outline" stroke-width="14" points="128,10 228,68 228,188 128,246 28,188 28,68" />
+  <polygon class="outline" stroke-width="10" points="128,30 210,77 210,179 128,226 46,179 46,77" />
+
+  <!-- Stylized K -->
+  <!-- Vertical bar -->
+  <rect class="brand" x="88" y="70" width="26" height="116" rx="6" />
+  <!-- Upper diagonal -->
+  <polygon class="brand" points="114,122 114,92 128,92 162,60 182,60 148,98 182,136 162,136 128,100 114,100" />
+  <!-- Lower diagonal -->
+  <polygon class="brand" points="114,130 128,130 162,166 182,166 148,204 128,204 128,180 114,164" />
+</svg>
+

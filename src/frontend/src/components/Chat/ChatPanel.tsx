@@ -75,7 +75,7 @@ const ChatPanel: React.FC<ChatPanelProps> = ({
           alignItems: 'center',
           gap: 1
         }}>
-          <Box component="img" src="/favicon.svg" alt="Kasal"
+          <Box component="img" src="/kasal-icon-24.png" alt="Kasal"
             sx={{ width: 24, height: 24, borderRadius: 0.5 }}
           />
           <Tooltip title="Expand Kasal Chat" placement={chatSide === 'right' ? 'left' : 'right'}>
