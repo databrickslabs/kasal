@@ -26,6 +26,8 @@ import RefreshIcon from '@mui/icons-material/Refresh';
 import KeyboardArrowDownIcon from '@mui/icons-material/KeyboardArrowDown';
 import ChevronLeftIcon from '@mui/icons-material/ChevronLeft';
 import PlayArrowIcon from '@mui/icons-material/PlayArrow';
+import SwapHorizIcon from '@mui/icons-material/SwapHoriz';
+
 import DispatcherService, { DispatchResult, ConfigureCrewResult } from '../../api/DispatcherService';
 import { useWorkflowStore } from '../../store/workflow';
 import { useCrewExecutionStore } from '../../store/crewExecution';
@@ -36,7 +38,7 @@ import { ChatHistoryService } from '../../api/ChatHistoryService';
 import { ModelService } from '../../api/ModelService';
 import TraceService from '../../api/TraceService';
 import { CanvasLayoutManager } from '../../utils/CanvasLayoutManager';
-import { useUILayoutState } from '../../store/uiLayout';
+import { useUILayoutState, useUILayoutStore } from '../../store/uiLayout';
 
 // Import types
 import {
@@ -106,6 +108,8 @@ const WorkflowChat: React.FC<WorkflowChatProps> = ({
   const { setNodes, setEdges } = useWorkflowStore();
   const { setInputMode, inputMode, setInputVariables, executeCrew, executeFlow } = useCrewExecutionStore();
   const uiLayoutState = useUILayoutState();
+  const { chatPanelSide, setChatPanelSide } = useUILayoutStore();
+
   const messagesContainerRef = useRef<HTMLDivElement>(null);
   const isUserNearBottomRef = useRef(true);
   const handleMessagesScroll = () => {
@@ -927,6 +931,14 @@ const WorkflowChat: React.FC<WorkflowChatProps> = ({
               <ChatIcon fontSize="small" />
             </IconButton>
           </Tooltip>
+          <Tooltip title={chatPanelSide === 'right' ? 'Move Chat to Left' : 'Move Chat to Right'}>
+            <IconButton
+              size="small"
+              onClick={() => setChatPanelSide(chatPanelSide === 'right' ? 'left' : 'right')}
+            >
+              <SwapHorizIcon fontSize="small" />
+            </IconButton>
+          </Tooltip>
           <Tooltip title="Collapse Chat">
             <IconButton
               size="small"
@@ -1422,8 +1434,6 @@ const WorkflowChat: React.FC<WorkflowChatProps> = ({
             }}
           />
           {/* Send button */}
-          <Tooltip title={isSendMode ? 'Send' : (canRunCrew ? 'Run Crew' : 'Add at least one Agent and one Task to run')}>
-            <span>
               <IconButton
                 color="primary"
                 onClick={isSendMode ? handleSendMessage : () => { if (canRunCrew && onExecuteCrew) onExecuteCrew(); }}
@@ -1453,8 +1463,6 @@ const WorkflowChat: React.FC<WorkflowChatProps> = ({
                   isSendMode ? <ArrowUpwardIcon sx={{ fontSize: 16 }} /> : <PlayArrowIcon sx={{ fontSize: 16 }} />
                 )}
               </IconButton>
-            </span>
-          </Tooltip>
         </Box>
       </Paper>
     </Box>

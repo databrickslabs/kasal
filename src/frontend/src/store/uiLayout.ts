@@ -12,7 +12,8 @@ interface UILayoutStore extends UILayoutState {
   setLeftSidebarExpanded: (expanded: boolean) => void;
   setPanelPosition: (position: number) => void;
   setAreFlowsVisible: (visible: boolean) => void;
-  
+  setChatPanelSide: (side: 'left' | 'right') => void;
+
   // Computed getters
   getUILayoutState: () => UILayoutState;
 }
@@ -60,6 +61,7 @@ export const useUILayoutStore = create<UILayoutStore>((set, get) => ({
   chatPanelCollapsed: persistedState.chatPanelCollapsed !== undefined ? persistedState.chatPanelCollapsed : false,
   chatPanelWidth: persistedState.chatPanelWidth || 450,
   chatPanelCollapsedWidth: 60,
+  chatPanelSide: persistedState.chatPanelSide || 'right',
   executionHistoryVisible: persistedState.executionHistoryVisible !== undefined ? persistedState.executionHistoryVisible : false,
   executionHistoryHeight: persistedState.executionHistoryHeight || 60,
   panelPosition: persistedState.panelPosition || 50,
@@ -107,6 +109,11 @@ export const useUILayoutStore = create<UILayoutStore>((set, get) => ({
     saveToLocalStorage({ areFlowsVisible: visible });
   },
 
+  setChatPanelSide: (side: 'left' | 'right') => {
+    set({ chatPanelSide: side });
+    saveToLocalStorage({ chatPanelSide: side });
+  },
+
   // Computed getter that returns the current UI layout state
   getUILayoutState: (): UILayoutState => {
     const state = get();
@@ -124,6 +131,7 @@ export const useUILayoutStore = create<UILayoutStore>((set, get) => ({
       chatPanelCollapsed: state.chatPanelCollapsed,
       chatPanelWidth: state.chatPanelWidth,
       chatPanelCollapsedWidth: state.chatPanelCollapsedWidth,
+      chatPanelSide: state.chatPanelSide,
       executionHistoryVisible: state.executionHistoryVisible,
       executionHistoryHeight: state.executionHistoryHeight,
       panelPosition: state.panelPosition,

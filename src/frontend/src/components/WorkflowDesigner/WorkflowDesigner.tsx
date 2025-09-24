@@ -180,7 +180,13 @@ const WorkflowDesigner: React.FC<WorkflowDesignerProps> = (): JSX.Element => {
     setPanelPosition: setUIStorePanelPosition,
     setAreFlowsVisible: setUIStoreAreFlowsVisible,
     chatPanelWidth,
+    chatPanelCollapsedWidth,
     chatPanelCollapsed: isChatCollapsed,
+    chatPanelSide,
+    leftSidebarExpanded,
+    leftSidebarBaseWidth,
+    leftSidebarExpandedWidth,
+    rightSidebarWidth,
     executionHistoryHeight,
     chatPanelVisible: showChatPanel,
     executionHistoryVisible: showRunHistory,
@@ -943,8 +949,12 @@ const WorkflowDesigner: React.FC<WorkflowDesignerProps> = (): JSX.Element => {
             position: 'relative',
             // Adjust width based on chat panel visibility and state
             width: showChatPanel
-              ? `calc(100% - ${isChatCollapsed ? 60 : chatPanelWidth}px)` // Subtract only chat panel width (right sidebar is already positioned)
+              ? `calc(100% - ${isChatCollapsed ? chatPanelCollapsedWidth : chatPanelWidth}px)`
               : '100%', // Full width when chat is hidden
+            // If chat panel is on the left, shift content to the right by chat width
+            ml: showChatPanel && chatPanelSide === 'left'
+              ? `${isChatCollapsed ? chatPanelCollapsedWidth : chatPanelWidth}px`
+              : 0,
             transition: 'width 0.3s ease-in-out'
           }}>
             <WorkflowPanels
@@ -1040,13 +1050,15 @@ const WorkflowDesigner: React.FC<WorkflowDesignerProps> = (): JSX.Element => {
                 sx={{
                   position: 'absolute',
                   top: 0, // Start from top of container
-                  right: 48, // Position to the left of RightSidebar (48px width)
+                  ...(chatPanelSide === 'right'
+                    ? { right: rightSidebarWidth }
+                    : { left: leftSidebarExpanded ? leftSidebarExpandedWidth : leftSidebarBaseWidth }),
                   bottom: showRunHistory ? `${executionHistoryHeight - 0}px` : 0, // Extend 20px into execution history for subtle intersection
-                  width: isChatCollapsed ? '60px' : `${chatPanelWidth}px`, // Dynamic width
+                  width: isChatCollapsed ? `${chatPanelCollapsedWidth}px` : `${chatPanelWidth}px`, // Dynamic width
                   display: 'flex',
                   flexDirection: 'row', // Change to row to accommodate resize handle
                   overflow: 'hidden',
-                  borderLeft: 1,
+                  ...(chatPanelSide === 'right' ? { borderLeft: 1 } : { borderRight: 1 }),
                   borderColor: 'divider',
                   backgroundColor: 'background.paper',
                   zIndex: 10, // Higher than execution history (8) and right sidebar

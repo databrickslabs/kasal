@@ -236,8 +236,6 @@ const WorkflowToolbar: React.FC<WorkflowToolbarProps> = ({
         <Box sx={{ height: 24, mx: 1, borderLeft: '1px solid rgba(0, 0, 0, 0.12)' }} />
 
         <div>
-          <Tooltip title={canRunCrew ? t('nemo.buttons.execute') : 'Add at least one Agent and one Task to run'} disableHoverListener={open}>
-            <span>
               <IconButton
                 onClick={handleExecuteClick}
                 disabled={isExecuting || !canRunCrew}
@@ -262,8 +260,6 @@ const WorkflowToolbar: React.FC<WorkflowToolbarProps> = ({
                   </Box>
                 )}
               </IconButton>
-            </span>
-          </Tooltip>
 
           <Menu
             id="execution-menu"
