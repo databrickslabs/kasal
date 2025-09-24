@@ -37,7 +37,7 @@ def debug_log(message):
 try:
     debug_log("Importing seeders...")
     # Import all needed modules
-    from src.seeds import tools, schemas, prompt_templates, model_configs, documentation, groups
+    from src.seeds import tools, schemas, prompt_templates, model_configs, documentation, groups, api_keys
     from src.db.session import async_session_factory
     debug_log("Successfully imported all seeder modules")
 except ImportError as e:
@@ -87,6 +87,12 @@ try:
 except (NameError, AttributeError) as e:
     logger.error(f"Error adding groups seeder: {e}")
 
+try:
+    SEEDERS["api_keys"] = api_keys.seed
+    debug_log("Added api_keys.seed to SEEDERS")
+except (NameError, AttributeError) as e:
+    logger.error(f"Error adding api_keys seeder: {e}")
+
 # Log available seeders
 logger.info(f"Available seeders: {list(SEEDERS.keys())}")
 
@@ -116,9 +122,9 @@ async def run_all_seeders() -> None:
         return
     
     # Separate fast seeders from slow ones
-    fast_seeders = ['groups', 'tools', 'schemas', 'prompt_templates', 'model_configs']
+    fast_seeders = ['groups', 'api_keys', 'tools', 'schemas', 'prompt_templates', 'model_configs']
     slow_seeders = ['documentation']  # Documentation seeder is slow due to embeddings
-    
+
     # Run fast seeders first (sequentially as they're quick)
     for seeder_name, seeder_func in SEEDERS.items():
         if seeder_name in fast_seeders:

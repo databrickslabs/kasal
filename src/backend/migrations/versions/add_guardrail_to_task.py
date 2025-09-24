@@ -17,10 +17,18 @@ depends_on = None
 
 
 def upgrade():
-    # Add guardrail column to tasks table
-    op.add_column('tasks', sa.Column('guardrail', sa.String(), nullable=True))
+    # Add guardrail column to tasks table, but only if it doesn't already exist
+    bind = op.get_bind()
+    inspector = sa.inspect(bind)
+    existing_columns = [col['name'] for col in inspector.get_columns('tasks')]
+    if 'guardrail' not in existing_columns:
+        op.add_column('tasks', sa.Column('guardrail', sa.String(), nullable=True))
 
 
 def downgrade():
-    # Remove guardrail column from tasks table
-    op.drop_column('tasks', 'guardrail') 
+    # Remove guardrail column from tasks table if it exists
+    bind = op.get_bind()
+    inspector = sa.inspect(bind)
+    existing_columns = [col['name'] for col in inspector.get_columns('tasks')]
+    if 'guardrail' in existing_columns:
+        op.drop_column('tasks', 'guardrail')

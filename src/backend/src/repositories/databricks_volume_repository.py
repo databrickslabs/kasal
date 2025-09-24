@@ -363,18 +363,64 @@ class DatabricksVolumeRepository:
             
             def _download_file():
                 try:
-                    # Use the Files API through the SDK
-                    with self._workspace_client.files.download(volume_path) as f:
-                        content = f.read()
-                    
-                    logger.info(f"Successfully downloaded file from {volume_path}, size: {len(content)} bytes")
+                    # Use the Files API through the SDK. SDK may return a DownloadResponse with .contents,
+                    # a streaming response, raw bytes, or a file-like object. Normalize to bytes.
+                    resp = self._workspace_client.files.download(volume_path)
+
+                    def _to_bytes(obj):
+                        if obj is None:
+                            return None
+                        if isinstance(obj, (bytes, bytearray)):
+                            return bytes(obj)
+                        # Common DownloadResponse path
+                        if hasattr(obj, "contents"):
+                            return _to_bytes(getattr(obj, "contents"))
+                        # File-like
+                        if hasattr(obj, "read"):
+                            try:
+                                return _to_bytes(obj.read())
+                            except Exception:
+                                pass
+                        # Streaming API
+                        if hasattr(obj, "iter_bytes"):
+                            try:
+                                return b"".join(obj.iter_bytes())
+                            except Exception:
+                                pass
+                        # Generic iterable of chunks
+                        try:
+                            it = iter(obj)
+                            chunks = []
+                            for chunk in it:
+                                if isinstance(chunk, (bytes, bytearray)):
+                                    chunks.append(bytes(chunk))
+                                elif hasattr(chunk, "read"):
+                                    b = _to_bytes(chunk)
+                                    if b:
+                                        chunks.append(b)
+                            if chunks:
+                                return b"".join(chunks)
+                        except TypeError:
+                            pass
+                        # Fallback attribute
+                        possible = getattr(obj, "data", None)
+                        if isinstance(possible, (bytes, bytearray)):
+                            return bytes(possible)
+                        return None
+
+                    content = _to_bytes(resp)
+                    if content is None:
+                        raise RuntimeError(f"Unexpected download response type; no bytes available (type={type(resp).__name__})")
+
+                    size = len(content)
+                    logger.info(f"Successfully downloaded file from {volume_path}, size: {size} bytes")
                     return {
                         "success": True,
                         "path": volume_path,
                         "content": content,
-                        "size": len(content)
+                        "size": size
                     }
-                    
+
                 except Exception as e:
                     error_msg = str(e)
                     if "not found" in error_msg.lower() or "404" in error_msg:
@@ -382,7 +428,7 @@ class DatabricksVolumeRepository:
                             "success": False,
                             "error": f"File not found: {volume_path}"
                         }
-                    
+
                     logger.error(f"Failed to download file: {e}")
                     return {
                         "success": False,

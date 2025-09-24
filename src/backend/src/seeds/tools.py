@@ -96,7 +96,6 @@ def get_tool_configs():
             "result_as_answer": False
         },  # CodeInterpreterTool
         "4": {
-            "composio_api_key": "your-composio-api-key-here",
             "result_as_answer": False
         },  # ComposioTool
         "5": {
@@ -254,7 +253,6 @@ def get_tool_configs():
             "result_as_answer": False
         },  # YoutubeVideoSearchTool
         "31": {
-            "perplexity_api_key": "your-perplexity-api-key-here",
             "model": "sonar",  # Options: sonar, sonar-pro, sonar-deep-research, sonar-reasoning, sonar-reasoning-pro, r1-1776
             "max_tokens": 2000,  # Max output tokens (default: 2000, documented limit: 4000)
             "temperature": 0.1,  # Controls randomness (0.0-1.0)

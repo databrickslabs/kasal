@@ -33,6 +33,15 @@ if not logger_manager._initialized or not logger_manager._log_dir:
 # Get a logger from the LoggerManager system
 logger = logging.getLogger(__name__)
 
+# Check if SQL debugging is enabled via environment variable
+SQL_DEBUG = os.environ.get("SQL_DEBUG", "false").lower() == "true"
+if SQL_DEBUG:
+    logger.warning("=" * 80)
+    logger.warning("SQL_DEBUG is ENABLED - All SQL queries will be logged!")
+    logger.warning("This WILL impact performance. Disable when done debugging.")
+    logger.warning("To disable: unset SQL_DEBUG or export SQL_DEBUG=false")
+    logger.warning("=" * 80)
+
 # Database retry decorator for handling SQLite locks
 def retry_db_operation(max_retries: int = 3, delay: float = 0.1, backoff: float = 2.0):
     """Decorator to retry database operations when SQLite is locked."""
@@ -92,11 +101,21 @@ class SQLAlchemyLogger:
     def setup_logger(self):
         # Create sqlalchemy.log file handler
         sqlalchemy_log_file = self.log_dir / "sqlalchemy.log"
-        
+
         # Ensure the sqlalchemy engine logger doesn't propagate logs to stdout
         engine_logger = logging.getLogger('sqlalchemy.engine')
         engine_logger.propagate = False
-        
+
+        # Set logging level based on SQL_DEBUG flag
+        if SQL_DEBUG:
+            engine_logger.setLevel(logging.INFO)
+            # Also log to console when debugging
+            console_handler = logging.StreamHandler()
+            console_handler.setFormatter(logging.Formatter('%(message)s'))
+            engine_logger.addHandler(console_handler)
+        else:
+            engine_logger.setLevel(logging.WARNING)
+
         # Ensure handlers are set up properly
         if not engine_logger.handlers:
             # Create file handler if not already configured elsewhere
@@ -108,9 +127,11 @@ class SQLAlchemyLogger:
             )
             file_handler.setFormatter(self.formatter)
             engine_logger.addHandler(file_handler)
-        
+
         # Log that the database logger has been configured
         logger.info(f"SQLAlchemy logs will be written to {sqlalchemy_log_file}")
+        if SQL_DEBUG:
+            logger.info("SQL_DEBUG enabled: SQL queries will also be shown in console")
         
 # Initialize SQLAlchemy logging
 sql_logger = SQLAlchemyLogger()
@@ -153,7 +174,7 @@ if str(settings.DATABASE_URI).startswith('sqlite'):
     logger.info("Using StaticPool for SQLite to reuse single connection")
     engine = create_async_engine(
         str(settings.DATABASE_URI),
-        echo=False,  # Disable SQL logging for performance
+        echo=SQL_DEBUG,  # Control SQL logging via SQL_DEBUG env var
         future=True,
         poolclass=StaticPool,  # Single connection reuse for SQLite
         # Don't set isolation_level for SQLite - let it use default
@@ -165,7 +186,7 @@ if str(settings.DATABASE_URI).startswith('sqlite'):
 elif use_nullpool:
     logger.info("Using NullPool as requested")
     engine_opts = {
-        "echo": False,
+        "echo": SQL_DEBUG,  # Control SQL logging via SQL_DEBUG env var
         "future": True,
         "poolclass": NullPool,
         "connect_args": connect_args,
@@ -177,12 +198,12 @@ elif use_nullpool:
 else:
     # Use the default async pool (AsyncAdaptedQueuePool is automatically used)
     engine_opts = {
-        "echo": False,  # Disable SQL logging for better performance
+        "echo": SQL_DEBUG,  # Control SQL logging via SQL_DEBUG env var
         "future": True,
         "pool_pre_ping": True,
         "pool_size": 5,
         "max_overflow": 10,
-        "echo_pool": False,  # Disable pool logging for better performance
+        "echo_pool": SQL_DEBUG,  # Control pool logging via SQL_DEBUG env var
         "connect_args": connect_args,  # SQLite-specific connection arguments
     }
     # Only set isolation_level for non-SQLite databases
@@ -368,7 +389,7 @@ async def init_db() -> None:
         if not tables_exist:
             # Use a fresh engine for initialization with settings optimized for table creation
             init_engine_opts = {
-                "echo": False,  # Disable detailed logging for better performance
+                "echo": SQL_DEBUG,  # Control SQL logging via SQL_DEBUG env var
                 "future": True,
             }
 
