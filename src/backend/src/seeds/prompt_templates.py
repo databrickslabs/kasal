@@ -100,9 +100,9 @@ Think carefully about the workflow and how information flows between tasks."""
 
 GENERATE_JOB_NAME_TEMPLATE = """Generate a concise, descriptive name (2-4 words) for an AI job run based on the agents and tasks involved.
 Focus on the specific domain, region, and purpose of the job.
-The name should reflect the main activity (e.g., 'Lebanese News Monitor' for a Lebanese journalist monitoring news).
+The name should reflect the main activity (e.g., 'Swiss News Monitor' for a Swiss journalist monitoring news).
 Prioritize including:
-1. The region or topic (e.g., Lebanese, Beirut)
+1. The region or topic (e.g., Switzerland, Zurich)
 2. The main activity (e.g., News Analysis, Press Review)
 Only return the name, no explanations or additional text.
 Avoid generic terms like 'Agent', 'Task', 'Initiative', or 'Collaboration'."""

@@ -58,7 +58,7 @@ class ToolRepository(BaseRepository[Tool]):
     async def find_enabled(self) -> List[Tool]:
         """
         Find all enabled tools.
-        
+
         Returns:
             List of enabled tools
         """
@@ -66,13 +66,23 @@ class ToolRepository(BaseRepository[Tool]):
         result = await self.session.execute(query)
         return list(result.scalars().all())
 
+    async def find_base_by_title(self, title: str) -> Optional[Tool]:
+        """
+        Find the base (global) tool by title (group_id is NULL).
+        """
+        query = select(self.model).where(
+            (self.model.title == title) & (self.model.group_id.is_(None))
+        )
+        result = await self.session.execute(query)
+        return result.scalars().first()
+
     async def toggle_enabled(self, tool_id: int) -> Optional[Tool]:
         """
         Toggle the enabled status of a tool.
-        
+
         Args:
             tool_id: ID of the tool to toggle
-            
+
         Returns:
             Updated tool if found, else None
         """
@@ -80,7 +90,7 @@ class ToolRepository(BaseRepository[Tool]):
             tool = await self.get(tool_id)
             if not tool:
                 return None
-            
+
             # Toggle the enabled status
             tool.enabled = not tool.enabled
             await self.session.commit()
@@ -96,11 +106,11 @@ class ToolRepository(BaseRepository[Tool]):
     async def update_configuration_by_title(self, title: str, config: Dict[str, Any]) -> Optional[Tool]:
         """
         Update configuration for a tool identified by its title.
-        
+
         Args:
             title: Title of the tool to update
             config: New configuration dictionary
-            
+
         Returns:
             Updated Tool object if found and updated, else None
         """
@@ -108,7 +118,7 @@ class ToolRepository(BaseRepository[Tool]):
             tool = await self.find_by_title(title)
             if not tool:
                 return None
-                
+
             tool.config = config
             await self.session.commit()
             await self.session.refresh(tool)
@@ -117,6 +127,25 @@ class ToolRepository(BaseRepository[Tool]):
             # Log the error and rollback
             import logging
             logging.error(f"Error in update_configuration_by_title for {title}: {str(e)}")
+            await self.session.rollback()
+            raise
+
+    async def update_configuration_for_title_and_group(self, title: str, group_id: str, config: Dict[str, Any]) -> Optional[Tool]:
+        """
+        Update configuration for a tool by title scoped to a specific group.
+        If a tool with (title, group_id) exists, update it; otherwise return None.
+        """
+        try:
+            tool = await self.find_by_title_and_group(title, group_id)
+            if not tool:
+                return None
+            tool.config = config
+            await self.session.commit()
+            await self.session.refresh(tool)
+            return tool
+        except Exception as e:
+            import logging
+            logging.error(f"Error in update_configuration_for_title_and_group for {title}/{group_id}: {str(e)}")
             await self.session.rollback()
             raise
 
