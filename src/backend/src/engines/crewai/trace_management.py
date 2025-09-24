@@ -176,18 +176,61 @@ class TraceManager:
                                     # FILTER: Store important events in execution_trace
                                     # Include agent_execution, tool_usage, crew_started, crew_completed, task_started, task_completed
                                     important_event_types = [
-                                        "agent_execution", "tool_usage", "crew_started", 
-                                        "crew_completed", "task_started", "task_completed", "llm_call"
+                                        "agent_execution", "tool_usage", "tool_error",
+                                        "crew_started", "crew_completed",
+                                        "task_started", "task_completed", "task_failed",
+                                        "llm_call", "llm_guardrail",
+                                        "memory_write", "memory_retrieval",
+                                        "memory_write_started", "memory_retrieval_started",
+                                        "knowledge_retrieval", "knowledge_retrieval_started",
+                                        "agent_reasoning", "agent_reasoning_error"
                                     ]
-                                    
+
+                                    # Debug-only events that should be suppressed when debug tracing is disabled
+                                    debug_only_event_types = {
+                                        "memory_write_started", "memory_retrieval_started",
+                                        "memory_write", "memory_retrieval",
+                                        "knowledge_retrieval_started", "knowledge_retrieval",
+                                        "agent_reasoning", "agent_reasoning_error",
+                                        "llm_guardrail",
+                                    }
+
                                     if event_type in important_event_types:
+                                        # Respect engine debug tracing config for verbose events
+                                        try:
+                                            if not hasattr(TraceManager, "_debug_tracing_enabled_cache"):
+                                                TraceManager._debug_tracing_enabled_cache = None
+                                            if TraceManager._debug_tracing_enabled_cache is None:
+                                                from src.services.engine_config_service import EngineConfigService
+                                                from src.db.session import async_session_factory
+                                                async with async_session_factory() as cfg_session:
+                                                    cfg_service = EngineConfigService(cfg_session)
+                                                    TraceManager._debug_tracing_enabled_cache = await cfg_service.get_crewai_debug_tracing()
+                                            if (event_type in debug_only_event_types) and (TraceManager._debug_tracing_enabled_cache is False):
+                                                logger.debug(f"[TraceManager._trace_writer_loop] {trace_info} Debug tracing disabled - skipping {event_type}")
+                                                continue
+                                        except Exception as cfg_err:
+                                            logger.debug(f"[TraceManager._trace_writer_loop] Could not read debug tracing flag: {cfg_err}. Defaulting to enabled.")
+
                                         # Prepare trace data in the format expected by ExecutionTraceService
                                         # Extract output content from the nested structure
                                         output_data = trace_data.get("output", {})
                                         if isinstance(output_data, dict):
-                                            output_content = output_data.get("content", "")
+                                            output_content = output_data.get("content")
+                                            if output_content is None:
+                                                # No 'content' field - serialize the entire dict to JSON for visibility
+                                                try:
+                                                    import json
+                                                    output_content = json.dumps(output_data, ensure_ascii=False)
+                                                except Exception:
+                                                    output_content = str(output_data)
                                         else:
                                             output_content = str(output_data) if output_data else ""
+
+                                        # If no explicit trace_metadata, reuse the structured output_data
+                                        trace_metadata = trace_data.get("trace_metadata", trace_data.get("extra_data"))
+                                        if trace_metadata is None and isinstance(output_data, dict):
+                                            trace_metadata = output_data
 
                                         trace_dict = {
                                             "job_id": job_id,
@@ -195,15 +238,15 @@ class TraceManager:
                                             "event_context": trace_data.get("event_context", ""),
                                             "event_type": event_type,
                                             "output": output_content,
-                                            "trace_metadata": trace_data.get("trace_metadata", trace_data.get("extra_data", {}))
+                                            "trace_metadata": trace_metadata or {}
                                         }
-                                        
+
                                         # Add group context if available in trace data
                                         if "group_id" in trace_data:
                                             trace_dict["group_id"] = trace_data["group_id"]
                                         if "group_email" in trace_data:
                                             trace_dict["group_email"] = trace_data["group_email"]
-                                        
+
                                         try:
                                             # Create ExecutionTraceService with session and use it to create the trace
                                             logger.debug(f"[TRACE_DEBUG] About to write trace to DB: job_id={job_id}, event_type={event_type}")

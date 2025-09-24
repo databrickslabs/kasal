@@ -337,7 +337,20 @@ class AgentTraceEventListener(BaseEventListener):
     # Track task start times for duration calculation
     _task_start_times: Dict[str, Dict[str, datetime]] = {}
     
-    def __init__(self, job_id: str, group_context=None, register_global_events=False):
+    # Event types that are considered verbose/debug-only and can be suppressed
+    DEBUG_ONLY_EVENT_TYPES = {
+        "memory_write_started",
+        "memory_retrieval_started",
+        "memory_write",
+        "memory_retrieval",
+        "knowledge_retrieval_started",
+        "knowledge_retrieval",
+        "agent_reasoning",
+        "agent_reasoning_error",
+        "llm_guardrail",
+    }
+
+    def __init__(self, job_id: str, group_context=None, debug_tracing: bool = True, register_global_events=False):
         """Initialize the agent trace event listener.
         
         Args:
@@ -364,6 +377,7 @@ class AgentTraceEventListener(BaseEventListener):
         # Set job_id and context
         self.job_id = job_id
         self.group_context = group_context
+        self.debug_tracing = debug_tracing
         logger.debug(f"[TRACE_DEBUG] AgentTraceEventListener.__init__ - Getting trace queue for job {job_id}")
         self._queue = get_trace_queue()
         logger.debug(f"[TRACE_DEBUG] AgentTraceEventListener.__init__ - Got queue: {type(self._queue)}, size: {self._queue.qsize()}")
@@ -715,9 +729,9 @@ class AgentTraceEventListener(BaseEventListener):
                     self._enqueue_trace(
                         event_source=agent_name,
                         event_context=f"saving_{memory_type}",
-                        event_type="memory_operation",
+                        event_type="memory_write_started",
                         output_content=output_content,
-                        extra_data={"operation": "save_started", "memory_type": memory_type}
+                        extra_data={"operation": "save_started", "memory_type": memory_type, "backend": "default"}
                     )
                 except Exception as e:
                     logger.error(f"{log_prefix} Error in on_memory_save_started: {e}", exc_info=True)
@@ -741,9 +755,9 @@ class AgentTraceEventListener(BaseEventListener):
                     self._enqueue_trace(
                         event_source=agent_name,
                         event_context=f"saved_{memory_type}",
-                        event_type="memory_operation",
+                        event_type="memory_write",
                         output_content=output_content,
-                        extra_data={"operation": "save_completed", "memory_type": memory_type}
+                        extra_data={"operation": "save_completed", "memory_type": memory_type, "backend": "default"}
                     )
                 except Exception as e:
                     logger.error(f"{log_prefix} Error in on_memory_save_completed: {e}", exc_info=True)
@@ -754,15 +768,16 @@ class AgentTraceEventListener(BaseEventListener):
                 try:
                     agent_name = extract_agent_name_from_event(event) or "Unknown Agent"
                     query = str(event.query) if hasattr(event, 'query') else "query"
-                    
-                    logger.info(f"{log_prefix} Event: MemoryQueryStarted | Agent: {agent_name}")
-                    
+                    memory_type = event.memory_type if hasattr(event, 'memory_type') else "memory"
+
+                    logger.info(f"{log_prefix} Event: MemoryQueryStarted | Agent: {agent_name} | Type: {memory_type}")
+
                     self._enqueue_trace(
                         event_source=agent_name,
-                        event_context="memory_query",
-                        event_type="memory_operation",
+                        event_context=f"memory_query[{memory_type}]",
+                        event_type="memory_retrieval_started",
                         output_content=query,  # Just the actual query, no prefix
-                        extra_data={"operation": "query_started", "query": query}
+                        extra_data={"operation": "query_started", "query": query, "memory_type": memory_type, "backend": "default"}
                     )
                 except Exception as e:
                     logger.error(f"{log_prefix} Error in on_memory_query_started: {e}", exc_info=True)
@@ -773,15 +788,16 @@ class AgentTraceEventListener(BaseEventListener):
                 try:
                     agent_name = extract_agent_name_from_event(event) or "Unknown Agent"
                     results = str(event.results) if hasattr(event, 'results') else "results retrieved"
-                    
-                    logger.info(f"{log_prefix} Event: MemoryQueryCompleted | Agent: {agent_name}")
-                    
+                    memory_type = event.memory_type if hasattr(event, 'memory_type') else "memory"
+
+                    logger.info(f"{log_prefix} Event: MemoryQueryCompleted | Agent: {agent_name} | Type: {memory_type}")
+
                     self._enqueue_trace(
                         event_source=agent_name,
-                        event_context="memory_query",
-                        event_type="memory_operation",
+                        event_context=f"memory_query[{memory_type}]",
+                        event_type="memory_retrieval",
                         output_content=results,  # Just the actual results
-                        extra_data={"operation": "query_completed"}
+                        extra_data={"operation": "query_completed", "memory_type": memory_type, "backend": "default"}
                     )
                 except Exception as e:
                     logger.error(f"{log_prefix} Error in on_memory_query_completed: {e}", exc_info=True)
@@ -804,7 +820,7 @@ class AgentTraceEventListener(BaseEventListener):
                     self._enqueue_trace(
                         event_source=agent_name,
                         event_context="knowledge_retrieval",
-                        event_type="knowledge_operation",
+                        event_type="knowledge_retrieval_started",
                         output_content=query,  # Just the actual query
                         extra_data={"operation": "retrieval_started", "query": query}
                     )
@@ -823,7 +839,7 @@ class AgentTraceEventListener(BaseEventListener):
                     self._enqueue_trace(
                         event_source=agent_name,
                         event_context="knowledge_retrieval",
-                        event_type="knowledge_operation",
+                        event_type="knowledge_retrieval",
                         output_content=results,  # Just the actual results
                         extra_data={"operation": "retrieval_completed"}
                     )
@@ -1527,6 +1543,12 @@ class AgentTraceEventListener(BaseEventListener):
             time_since_init = (timestamp - self._init_time).total_seconds()
 
             logger.debug(f"[TRACE_DEBUG] _enqueue_trace called: event_type={event_type}, source={event_source}")
+
+            # Respect debug tracing flag: suppress verbose events when disabled
+            if not getattr(self, 'debug_tracing', True) and event_type in self.DEBUG_ONLY_EVENT_TYPES:
+                logger.debug(f"{log_prefix} Debug tracing disabled - skipping event {event_type}")
+                return
+
             logger.debug(f"{log_prefix} Enqueuing {event_type} trace | Source: {event_source} | Context: {event_context[:30] if event_context else 'None'}...")
 
             # Create trace data for database/queue
