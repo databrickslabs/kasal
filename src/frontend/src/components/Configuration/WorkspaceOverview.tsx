@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import { useState, useEffect } from 'react';
 import {
   Box,
   Typography,
@@ -12,6 +12,7 @@ import {
   ListItem,
   ListItemText,
   ListItemIcon,
+  Button,
 } from '@mui/material';
 import CloudIcon from '@mui/icons-material/Cloud';
 import MemoryIcon from '@mui/icons-material/Memory';
@@ -20,11 +21,15 @@ import GroupIcon from '@mui/icons-material/Group';
 import AdminPanelSettingsIcon from '@mui/icons-material/AdminPanelSettings';
 import CheckCircleIcon from '@mui/icons-material/CheckCircle';
 import WarningIcon from '@mui/icons-material/Warning';
+import BuildIcon from '@mui/icons-material/Build';
 import { GroupService } from '../../api/GroupService';
 import { DatabricksService, DatabricksConfig } from '../../api/DatabricksService';
 import { MemoryBackendService } from '../../api/MemoryBackendService';
 import { MemoryBackendConfig } from '../../types/memoryBackend';
 import { usePermissionStore } from '../../store/permissions';
+import { ToolService, Tool as ServiceTool } from '../../api/ToolService';
+import { MCPService } from '../../api/MCPService';
+import type { MCPServerConfig } from '../Configuration/MCP/MCPConfiguration';
 
 interface WorkspaceInfo {
   name: string;
@@ -43,6 +48,8 @@ function WorkspaceOverview({ onConfigureSection }: WorkspaceOverviewProps): JSX.
   const [workspaceInfo, setWorkspaceInfo] = useState<WorkspaceInfo | null>(null);
   const [databricksConfig, setDatabricksConfig] = useState<DatabricksConfig | null>(null);
   const [memoryConfig, setMemoryConfig] = useState<MemoryBackendConfig | null>(null);
+  const [tools, setTools] = useState<ServiceTool[]>([]);
+  const [mcpServers, setMcpServers] = useState<MCPServerConfig[]>([]);
   const [error, setError] = useState<string | null>(null);
 
   const selectedGroupId = localStorage.getItem('selectedGroupId');
@@ -100,6 +107,22 @@ function WorkspaceOverview({ onConfigureSection }: WorkspaceOverviewProps): JSX.
         console.log('No memory backend configuration found');
       }
 
+      // Load Tools enabled for this workspace (effective list from backend)
+      try {
+        const enabled = await ToolService.listEnabledTools();
+        setTools(enabled);
+      } catch (err) {
+        console.log('No enabled tools found');
+      }
+
+      // Load MCP servers for this workspace (effective list)
+      try {
+        const mcpResp = await MCPService.getInstance().getMcpServers();
+        setMcpServers(mcpResp.servers || []);
+      } catch (err) {
+        console.log('No MCP servers found');
+      }
+
     } catch (err) {
       console.error('Error loading workspace info:', err);
       setError('Failed to load workspace information');
@@ -123,10 +146,31 @@ function WorkspaceOverview({ onConfigureSection }: WorkspaceOverviewProps): JSX.
     );
   };
 
+  // Tools returned here are already the enabled, effective set for this workspace
+  const enabledTools = tools;
+
+  // Compute effective MCP servers (prefer workspace overrides over base)
+  const effectiveMcpServers = (() => {
+    const byName = new Map<string, MCPServerConfig>();
+    for (const s of mcpServers) {
+      const existing = byName.get(s.name);
+      if (!existing) {
+        byName.set(s.name, s);
+      } else if (!existing.group_id && s.group_id) {
+        // Prefer workspace-specific override when present
+        byName.set(s.name, s);
+      }
+    }
+    return Array.from(byName.values());
+  })();
+
+  const enabledMcpServers = effectiveMcpServers.filter(s => s.enabled !== false);
+
   if (loading) {
     return (
       <Box sx={{ p: 3 }}>
         <Typography>Loading workspace information...</Typography>
+
       </Box>
     );
   }
@@ -286,6 +330,7 @@ function WorkspaceOverview({ onConfigureSection }: WorkspaceOverviewProps): JSX.
                     primary="Backend Type"
                     secondary={memoryConfig.backend_type || 'Default'}
                   />
+
                 </ListItem>
                 <ListItem>
                   <ListItemIcon sx={{ minWidth: 36 }}>
@@ -348,6 +393,7 @@ function WorkspaceOverview({ onConfigureSection }: WorkspaceOverviewProps): JSX.
                   />
                 </ListItem>
               </List>
+
             ) : (
               <Typography variant="body2" color="text.secondary">
                 Volume storage is not configured for this workspace
@@ -395,6 +441,79 @@ function WorkspaceOverview({ onConfigureSection }: WorkspaceOverviewProps): JSX.
             )}
           </Paper>
         </Grid>
+        {/* Tools Enabled in Workspace */}
+        <Grid item xs={12} md={6}>
+          <Paper sx={{ p: 2, height: '100%' }}>
+            <Box sx={{ display: 'flex', alignItems: 'center', mb: 2 }}>
+              <BuildIcon sx={{ mr: 1, color: 'primary.main' }} />
+              <Typography variant="subtitle1" sx={{ flexGrow: 1 }}>
+                Tools
+              </Typography>
+              <Chip label={`${enabledTools.length} enabled`} size="small" color={enabledTools.length > 0 ? 'success' : 'warning'} variant="outlined" />
+            </Box>
+
+            {enabledTools.length > 0 ? (
+              <List dense>
+                {enabledTools.map(tool => (
+                  <ListItem key={`${tool.title}-${tool.id}`}>
+                    <ListItemIcon sx={{ minWidth: 36 }}>
+                      {getStatusIcon(true)}
+                    </ListItemIcon>
+                    <ListItemText
+                      primary={tool.title}
+                      secondary={tool.group_id ? 'Workspace override' : 'Base'}
+                    />
+                    {tool.group_id && <Chip label="Workspace" size="small" color="primary" variant="outlined" />}
+                  </ListItem>
+                ))}
+              </List>
+            ) : (
+              <Typography variant="body2" color="text.secondary">
+                No tools enabled for this workspace
+              </Typography>
+            )}
+          </Paper>
+        </Grid>
+
+        {/* MCP Servers Enabled in Workspace */}
+        <Grid item xs={12} md={6}>
+          <Paper sx={{ p: 2, height: '100%' }}>
+            <Box sx={{ display: 'flex', alignItems: 'center', mb: 2 }}>
+              <BuildIcon sx={{ mr: 1, color: 'primary.main' }} />
+              <Typography variant="subtitle1" sx={{ flexGrow: 1 }}>
+                MCP Servers
+              </Typography>
+              <Chip label={`${enabledMcpServers.length} enabled`} size="small" color={enabledMcpServers.length > 0 ? 'success' : 'warning'} variant="outlined" />
+              {onConfigureSection && (
+                <Button size="small" sx={{ ml: 1 }} onClick={() => onConfigureSection('mcp')}>
+                  Configure
+                </Button>
+              )}
+            </Box>
+
+            {enabledMcpServers.length > 0 ? (
+              <List dense>
+                {enabledMcpServers.map(server => (
+                  <ListItem key={`${server.name}-${server.id}`}>
+                    <ListItemIcon sx={{ minWidth: 36 }}>
+                      {getStatusIcon(true)}
+                    </ListItemIcon>
+                    <ListItemText
+                      primary={server.name}
+                      secondary={server.group_id ? 'Workspace override' : 'Base'}
+                    />
+                    {server.group_id && <Chip label="Workspace" size="small" color="primary" variant="outlined" />}
+                  </ListItem>
+                ))}
+              </List>
+            ) : (
+              <Typography variant="body2" color="text.secondary">
+                No MCP servers enabled for this workspace
+              </Typography>
+            )}
+          </Paper>
+        </Grid>
+
       </Grid>
 
       {/* Admin Notice */}

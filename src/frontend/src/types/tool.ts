@@ -9,6 +9,8 @@ export interface Tool {
   config?: Record<string, ConfigValue>;
   category?: 'PreBuilt' | 'Custom';
   enabled?: boolean;
+  group_id?: string;
+
 }
 
 export interface SavedToolsProps {
@@ -18,4 +20,4 @@ export interface SavedToolsProps {
 export interface ToolIcon {
   value: string;
   label: string;
-} 
+}

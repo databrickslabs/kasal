@@ -176,7 +176,7 @@ const TaskNode: React.FC<TaskNodeProps> = ({ data, id }) => {
     if (isEditing) {
       const fetchTools = async () => {
         try {
-          const tools = await ToolService.listTools();
+          const tools = await ToolService.listEnabledTools();
           setAvailableTools(tools);
         } catch (error) {
           console.error('Error fetching tools:', error);
@@ -190,7 +190,7 @@ const TaskNode: React.FC<TaskNodeProps> = ({ data, id }) => {
   useEffect(() => {
     const fetchTools = async () => {
       try {
-        const tools = await ToolService.listTools();
+        const tools = await ToolService.listEnabledTools();
         setAvailableTools(tools);
       } catch (error) {
         console.error('Error fetching tools:', error);

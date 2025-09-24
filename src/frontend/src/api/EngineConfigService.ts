@@ -25,6 +25,12 @@ export interface CrewAIFlowStatusResponse {
   flow_enabled: boolean;
 }
 
+export interface CrewAIDebugTracingStatusResponse {
+  debug_tracing: boolean;
+}
+
+
+
 export class EngineConfigService {
   private static baseUrl = `/engine-config`;
 
@@ -80,6 +86,25 @@ export class EngineConfigService {
   }
 
   /**
+   * Get CrewAI debug tracing status
+   */
+  static async getCrewAIDebugTracing(): Promise<CrewAIDebugTracingStatusResponse> {
+    const response = await apiClient.get<CrewAIDebugTracingStatusResponse>(`${this.baseUrl}/crewai/debug-tracing`);
+    return response.data;
+  }
+
+  /**
+   * Set CrewAI debug tracing status
+   */
+  static async setCrewAIDebugTracing(enabled: boolean): Promise<{ success: boolean; debug_tracing: boolean }> {
+    const response = await apiClient.patch<{ success: boolean; debug_tracing: boolean }>(
+      `${this.baseUrl}/crewai/debug-tracing`,
+      { debug_tracing: enabled }
+    );
+    return response.data;
+  }
+
+  /**
    * Toggle engine configuration enabled status
    */
   static async toggleEngineEnabled(engineName: string, enabled: boolean): Promise<EngineConfig> {
@@ -100,4 +125,4 @@ export class EngineConfigService {
     );
     return response.data;
   }
-} 
+}

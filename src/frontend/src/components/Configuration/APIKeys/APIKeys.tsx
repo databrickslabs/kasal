@@ -58,18 +58,48 @@ function APIKeys(): JSX.Element {
   const [editDialog, setEditDialog] = useState<boolean>(false);
   const [editingApiKey, setEditingApiKey] = useState<ApiKeyWithMasked | null>(null);
 
-  const [notification, setNotification] = useState<NotificationState>({ 
-    open: false, 
-    message: '', 
-    severity: 'success' 
+  const [notification, setNotification] = useState<NotificationState>({
+    open: false,
+    message: '',
+    severity: 'success'
   });
   const [createDialog, setCreateDialog] = useState<boolean>(false);
-  const [newApiKey, setNewApiKey] = useState<ApiKeyCreate>({ 
-    name: '', 
-    value: '', 
-    description: '' 
+  const [newApiKey, setNewApiKey] = useState<ApiKeyCreate>({
+    name: '',
+    value: '',
+    description: ''
   });
   const [activeTab, setActiveTab] = useState<number>(0);
+
+  // Deep-link listener: allow other components to switch tab/open a specific key
+  useEffect(() => {
+    const setTabHandler = (evt: Event) => {
+      try {
+        const custom = evt as CustomEvent<{ tab?: string }>;
+        if (custom.detail?.tab === 'local') setActiveTab(1);
+        if (custom.detail?.tab === 'models') setActiveTab(0);
+      } catch (e) { /* no-op */ }
+    };
+    const focusKeyHandler = (evt: Event) => {
+      try {
+        const custom = evt as CustomEvent<{ name?: string }>;
+        const name = custom.detail?.name;
+        if (!name) return;
+        // Decide which tab based on predefined model keys vs local keystore
+        const isModel = modelApiKeys.includes(name);
+        setActiveTab(isModel ? 0 : 1);
+        // Prefill create dialog for convenience
+        setNewApiKey({ name, value: '', description: `API Key for ${name}` });
+        setCreateDialog(true);
+      } catch (e) { /* no-op */ }
+    };
+    window.addEventListener('kasal:api-keys:set-tab', setTabHandler as EventListener);
+    window.addEventListener('kasal:api-keys:focus-key', focusKeyHandler as EventListener);
+    return () => {
+      window.removeEventListener('kasal:api-keys:set-tab', setTabHandler as EventListener);
+      window.removeEventListener('kasal:api-keys:focus-key', focusKeyHandler as EventListener);
+    };
+  }, []);
 
   // Add predefined model API keys
   const modelApiKeys = [
@@ -101,19 +131,19 @@ function APIKeys(): JSX.Element {
     if (editDialogOpen && providerToEdit && !loading && apiKeys.length > 0) {
       // Map provider name to API key name
       const keyName = providerToKeyName[providerToEdit.toLowerCase()];
-      
+
       if (keyName) {
         // Find the API key
         const apiKey = apiKeys.find(key => key.name === keyName);
-        
+
         if (apiKey) {
           // Auto-open the edit dialog for this key
           setEditingApiKey(apiKey);
           setEditDialog(true);
-          
+
           // Set active tab to model API keys (tab 0)
           setActiveTab(0);
-          
+
           // Reset the store state
           closeApiKeyEditor();
         }
@@ -457,9 +487,9 @@ function APIKeys(): JSX.Element {
             </Box>
             {(() => {
               // Add placeholder entries for specific keys if they don't exist
-              const placeholderKeys = ['SERPER_API_KEY', 'PERPLEXITY_API_KEY'];
+              const placeholderKeys = ['SERPER_API_KEY', 'PERPLEXITY_API_KEY', 'FIRECRAWL_API_KEY', 'EXA_API_KEY', 'LINKUP_API_KEY', 'COMPOSIO_API_KEY'];
               const existingKeyNames = localApiKeys.map(k => k.name);
-              
+
               const placeholderApiKeys: ApiKey[] = placeholderKeys
                 .filter(keyName => !existingKeyNames.includes(keyName))
                 .map((keyName, index) => ({
@@ -470,7 +500,7 @@ function APIKeys(): JSX.Element {
                   created_at: '',
                   updated_at: ''
                 }));
-              
+
               const combinedKeys = [...localApiKeys, ...placeholderApiKeys];
               return renderApiKeysTable(combinedKeys);
             })()}
