@@ -83,7 +83,7 @@ class DatabricksVectorStorage:
         self.agent_id = agent_id or "default_agent"
         self.memory_type = memory_type
         self.embedding_dimension = embedding_dimension
-        
+
         # Initialize memory logger based on type
         if memory_type == "short_term":
             self.memory_logger = short_term_logger
@@ -93,15 +93,19 @@ class DatabricksVectorStorage:
             self.memory_logger = entity_logger
         else:
             self.memory_logger = memory_logger
-            
+
         self.memory_logger.info(f"Initializing Databricks Vector Storage for {memory_type} memory")
         self.memory_logger.info(f"Endpoint: {endpoint_name}, Index: {index_name}")
         self.memory_logger.info(f"Crew ID: {crew_id}, Agent ID: {agent_id}")
-        
+
+        # Trace context set by crew_preparation after crew creation
+        # Expected shape: { 'job_id': str, 'group_context': {...}, 'execution_id': str }
+        self.trace_context: Optional[dict] = None
+
         # Store workspace URL and user token for repository
         self.workspace_url = workspace_url
         self.user_token = user_token
-        
+
         # Initialize repository for clean architecture - this handles all operations
         self.repository = DatabricksVectorIndexRepository(workspace_url or os.getenv('DATABRICKS_HOST', ''))
         
@@ -376,15 +380,43 @@ class DatabricksVectorStorage:
                 [record],
                 self.user_token
             )
-            
+
             if not result.get("success"):
                 error_msg = result.get("message", "Upsert failed")
                 self.memory_logger.error(f"Upsert failed: {error_msg}")
                 self.memory_logger.error(f"Record that failed: {json.dumps({k: v for k, v in record.items() if k != 'embedding'}, indent=2)}")
                 raise Exception(error_msg)
-                
+
             self.memory_logger.debug(f"Saved {self.memory_type} memory record to index {self.index_name}")
-            
+
+            # Emit execution trace for successful write
+            try:
+                if self.trace_context and self.trace_context.get('job_id'):
+                    from src.services.trace_queue import get_trace_queue
+                    q = get_trace_queue()
+                    # Prepare safe snapshot without embedding
+                    safe_record = {k: v for k, v in record.items() if k != 'embedding'}
+                    q.put_nowait({
+                        "job_id": self.trace_context.get('job_id'),
+                        "event_type": "memory_write",
+                        "event_source": f"Memory[{self.memory_type}:databricks]",
+                        "event_context": f"index={self.index_name}",
+                        "output": {
+                            "backend": "databricks",
+                            "memory_type": self.memory_type,
+                            "index": self.index_name,
+                            "endpoint": self.endpoint_name,
+                            "record": safe_record
+                        },
+                        "trace_metadata": {
+                            "crew_id": self.crew_id,
+                            "workspace_url": self.workspace_url
+                        },
+                        "group_context": self.trace_context.get('group_context')
+                    })
+            except Exception as trace_err:
+                self.memory_logger.debug(f"Could not enqueue memory_write trace: {trace_err}")
+
         except Exception as e:
             self.memory_logger.error(f"Failed to save to Databricks Vector Search: {e}")
             raise

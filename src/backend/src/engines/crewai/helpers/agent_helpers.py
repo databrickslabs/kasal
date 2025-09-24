@@ -210,7 +210,7 @@ async def create_agent(
         async with async_session_factory() as session:
             mcp_service = MCPService(session)
             mcp_tools = await MCPIntegration.create_mcp_tools_for_agent(
-                agent_config, agent_key, mcp_service
+                agent_config, agent_key, mcp_service, config
             )
             agent_tools.extend(mcp_tools)
             logger.info(f"Added {len(mcp_tools)} MCP tools to agent {agent_key}")

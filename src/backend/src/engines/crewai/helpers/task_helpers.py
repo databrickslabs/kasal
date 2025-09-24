@@ -273,7 +273,7 @@ async def create_task(
             mcp_service = MCPService(session)
             # This will automatically handle global + explicit servers
             mcp_tools = await MCPIntegration.create_mcp_tools_for_task(
-                task_config, task_key, mcp_service
+                task_config, task_key, mcp_service, config
             )
             task_tools.extend(mcp_tools)
             logger.info(f"Added {len(mcp_tools)} MCP tools to task {task_key}")
@@ -425,38 +425,62 @@ async def create_task(
     if not existing_callback:
         try:
             from src.services.databricks_service import DatabricksService
+            from src.services.memory_backend_service import MemoryBackendService
             from src.db.session import async_session_factory
 
             async with async_session_factory() as session:
                 databricks_service = DatabricksService(session)
                 databricks_config = await databricks_service.get_databricks_config()
-                
-                # Check if volume uploads are globally enabled
+
+                # Only consider auto-adding the DatabricksVolumeCallback if:
+                # - Global volume uploads are enabled, AND
+                # - The active memory backend for this workspace/group is Databricks
                 if databricks_config and databricks_config.volume_enabled and databricks_config.volume_path:
-                    logger.info(f"Global volume configuration found for task {task_key}: enabled={databricks_config.volume_enabled}, path={databricks_config.volume_path}")
-                    
-                    # Set DatabricksVolumeCallback as the default callback
-                    existing_callback = 'DatabricksVolumeCallback'
-                    
-                    # Use task-specific config if available, otherwise use global config
-                    if not callback_config:
-                        callback_config = {
-                            'volume_path': databricks_config.volume_path,
-                            'file_format': databricks_config.volume_file_format or 'json',
-                            'create_date_dirs': databricks_config.volume_create_date_dirs if databricks_config.volume_create_date_dirs is not None else True
-                        }
-                        logger.info(f"Using global volume configuration for task {task_key}: {callback_config}")
+                    group_id = None
+                    try:
+                        group_id = config.get('group_id') if isinstance(config, dict) else None
+                    except Exception:
+                        group_id = None
+
+                    active_is_databricks = False
+                    try:
+                        memory_service = MemoryBackendService(session)
+                        active_config = await memory_service.get_active_config(group_id) if group_id else None
+                        if active_config:
+                            # Treat a "disabled" memory config (all types false) as NOT Databricks
+                            all_disabled = (not active_config.enable_short_term and not active_config.enable_long_term and not active_config.enable_entity)
+                            if not all_disabled and getattr(active_config, 'backend_type', None) and getattr(active_config.backend_type, 'value', str(active_config.backend_type)) in ['databricks', 'DATABRICKS']:
+                                active_is_databricks = True
+                    except Exception as me:
+                        logger.debug(f"Could not determine active memory backend for group {group_id}: {me}")
+                        active_is_databricks = False
+
+                    if active_is_databricks:
+                        logger.info(f"Global volume configuration found and active memory backend is Databricks for task {task_key}: path={databricks_config.volume_path}")
+                        # Set DatabricksVolumeCallback as the default callback
+                        existing_callback = 'DatabricksVolumeCallback'
+
+                        # Use task-specific config if available, otherwise use global config
+                        if not callback_config:
+                            callback_config = {
+                                'volume_path': databricks_config.volume_path,
+                                'file_format': databricks_config.volume_file_format or 'json',
+                                'create_date_dirs': databricks_config.volume_create_date_dirs if databricks_config.volume_create_date_dirs is not None else True
+                            }
+                            logger.info(f"Using global volume configuration for task {task_key}: {callback_config}")
+                        else:
+                            # Task has its own callback_config, merge with global defaults
+                            if 'volume_path' not in callback_config:
+                                callback_config['volume_path'] = databricks_config.volume_path
+                            if 'file_format' not in callback_config:
+                                callback_config['file_format'] = databricks_config.volume_file_format or 'json'
+                            if 'create_date_dirs' not in callback_config:
+                                callback_config['create_date_dirs'] = databricks_config.volume_create_date_dirs if databricks_config.volume_create_date_dirs is not None else True
+                            logger.info(f"Merged task-specific config with global defaults for task {task_key}: {callback_config}")
                     else:
-                        # Task has its own callback_config, merge with global defaults
-                        if 'volume_path' not in callback_config:
-                            callback_config['volume_path'] = databricks_config.volume_path
-                        if 'file_format' not in callback_config:
-                            callback_config['file_format'] = databricks_config.volume_file_format or 'json'
-                        if 'create_date_dirs' not in callback_config:
-                            callback_config['create_date_dirs'] = databricks_config.volume_create_date_dirs if databricks_config.volume_create_date_dirs is not None else True
-                        logger.info(f"Merged task-specific config with global defaults for task {task_key}: {callback_config}")
+                        logger.info(f"Skipping auto DatabricksVolumeCallback for task {task_key}: active memory backend is not Databricks (group_id={group_id})")
         except Exception as e:
-            logger.debug(f"Could not check global volume configuration: {e}")
+            logger.debug(f"Could not check global volume configuration or memory backend: {e}")
             # Continue without global config
     
     # Handle guardrail if present in the task configuration

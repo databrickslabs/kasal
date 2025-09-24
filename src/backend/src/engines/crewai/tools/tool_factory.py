@@ -251,7 +251,7 @@ class ToolFactory:
                 # Setup API keys if we have the service
                 if self.api_keys_service:
                     # Pre-load common API keys into environment
-                    api_keys_to_load = ["SERPER_API_KEY", "PERPLEXITY_API_KEY", "OPENAI_API_KEY", "FIRECRAWL_API_KEY", "LINKUP_API_KEY", "DATABRICKS_API_KEY"]
+                    api_keys_to_load = ["SERPER_API_KEY", "PERPLEXITY_API_KEY", "OPENAI_API_KEY", "FIRECRAWL_API_KEY", "LINKUP_API_KEY", "DATABRICKS_API_KEY", "EXA_API_KEY", "COMPOSIO_API_KEY"]
                     for key_name in api_keys_to_load:
                         try:
                             # Use utility function to avoid event loop issues
@@ -304,7 +304,7 @@ class ToolFactory:
                     # Also pre-load API keys if we have the service
                     if self.api_keys_service:
                         # Pre-load common API keys into environment
-                        api_keys_to_load = ["SERPER_API_KEY", "PERPLEXITY_API_KEY", "OPENAI_API_KEY", "FIRECRAWL_API_KEY", "LINKUP_API_KEY", "DATABRICKS_API_KEY"]
+                        api_keys_to_load = ["SERPER_API_KEY", "PERPLEXITY_API_KEY", "OPENAI_API_KEY", "FIRECRAWL_API_KEY", "LINKUP_API_KEY", "DATABRICKS_API_KEY", "EXA_API_KEY", "COMPOSIO_API_KEY"]
                         for key_name in api_keys_to_load:
                             try:
                                 api_key = loop.run_until_complete(
@@ -328,22 +328,33 @@ class ToolFactory:
             # Get services using session factory
             from src.services.tool_service import ToolService
             from src.db.session import async_session_factory
+            from src.utils.user_context import GroupContext
 
             async with async_session_factory() as session:
                 # Create tool service with session
                 tool_service = ToolService(session)
-                
-                # Get tools through service
-                tools_response = await tool_service.get_all_tools()
+
+                # Group-aware: prefer loading tools for the current group if provided in config
+                group_id = None
+                try:
+                    group_id = self.config.get("group_id") if isinstance(self.config, dict) else None
+                except Exception:
+                    group_id = None
+
+                if group_id:
+                    group_context = GroupContext(group_ids=[group_id])
+                    tools_response = await tool_service.get_enabled_tools_for_group(group_context)
+                else:
+                    tools_response = await tool_service.get_all_tools()
                 tools = tools_response.tools
-                
+
                 # Store tools by both title and ID
                 self._available_tools = {}
                 for tool in tools:
                     self._available_tools[tool.title] = tool
                     self._available_tools[str(tool.id)] = tool  # Convert ID to string since it might come as string from config
-                
-                logger.info(f"Loaded {len(tools)} tools from service using UnitOfWork")
+
+                logger.info(f"Loaded {len(tools)} tools from service (group_id={group_id})")
                 logger.debug(f"Available tools: {[f'{t.id}:{t.title}' for t in tools]}")
         except Exception as e:
             logger.error(f"Error loading available tools: {str(e)}")

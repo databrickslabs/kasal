@@ -319,11 +319,11 @@ def create_execution_callbacks(job_id: str, config: Dict[str, Any] = None, group
             current_task = execution_context.get("current_task")
             
             # DEBUG: Log execution context state
-            logger.info(f"{log_prefix} [DEBUG STEP] Current agent: {agent_name}")
-            logger.info(f"{log_prefix} [DEBUG STEP] Current task from context: {current_task}")
-            logger.info(f"{log_prefix} [DEBUG STEP] Last task ID: {execution_context.get('last_task_id')}")
-            logger.info(f"{log_prefix} [DEBUG STEP] Task index: {execution_context.get('task_index', 0)}")
-            logger.info(f"{log_prefix} [DEBUG STEP] Tasks already logged: {execution_context.get('task_started_logged', set())}")
+            logger.debug(f"{log_prefix} [DEBUG STEP] Current agent: {agent_name}")
+            logger.debug(f"{log_prefix} [DEBUG STEP] Current task from context: {current_task}")
+            logger.debug(f"{log_prefix} [DEBUG STEP] Last task ID: {execution_context.get('last_task_id')}")
+            logger.debug(f"{log_prefix} [DEBUG STEP] Task index: {execution_context.get('task_index', 0)}")
+            logger.debug(f"{log_prefix} [DEBUG STEP] Tasks already logged: {execution_context.get('task_started_logged', set())}")
             
             if current_task:
                 # Get the task ID

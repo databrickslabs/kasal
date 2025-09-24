@@ -135,8 +135,21 @@ async def run_crew(execution_id: str, crew: Crew, running_jobs: Dict, group_cont
     
     # Initialize AgentTraceEventListener for trace processing (without global event listeners)
     from src.engines.crewai.callbacks.logging_callbacks import AgentTraceEventListener
-    logger.debug(f"[TRACE_DEBUG] Creating AgentTraceEventListener for execution {execution_id}")
-    trace_listener = AgentTraceEventListener(job_id=execution_id, group_context=group_context)
+    from src.services.engine_config_service import EngineConfigService
+    from src.db.session import get_db
+
+    # Fetch debug tracing flag from engine configuration (default True on errors)
+    debug_tracing_enabled = True
+    try:
+        async for session in get_db():
+            service = EngineConfigService(session)
+            debug_tracing_enabled = await service.get_crewai_debug_tracing()
+            break
+    except Exception as e:
+        logger.warning(f"Failed to read CrewAI debug tracing flag; defaulting to True. Error: {e}")
+
+    logger.debug(f"[TRACE_DEBUG] Creating AgentTraceEventListener for execution {execution_id} (debug_tracing={debug_tracing_enabled})")
+    trace_listener = AgentTraceEventListener(job_id=execution_id, group_context=group_context, debug_tracing=debug_tracing_enabled)
     logger.debug(f"[TRACE_DEBUG] AgentTraceEventListener created successfully")
 
     # CRITICAL: Register the event listeners with the CrewAI event bus

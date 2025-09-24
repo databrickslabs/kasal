@@ -37,7 +37,7 @@ class CrewAIDatabricksWrapper:
     def __init__(self, databricks_storage: DatabricksVectorStorage, embedder=None, agent_context=None, enable_relationship_retrieval=False, crew=None):
         """
         Initialize the wrapper.
-        
+
         Args:
             databricks_storage: The underlying Databricks storage instance (for save operations)
             embedder: Optional embedder for generating embeddings
@@ -51,7 +51,10 @@ class CrewAIDatabricksWrapper:
         self.agent_context = agent_context  # Store for entity memory when agent not provided
         self.enable_relationship_retrieval = enable_relationship_retrieval
         self.crew = crew  # Store crew reference to extract agent LLM models
-        
+
+        # Trace context (set later in crew_preparation): { job_id, group_context, agent_name }
+        self.trace_context: Optional[dict] = None
+
         # Store connection details for service calls
         self.workspace_url = databricks_storage.workspace_url
         self.index_name = databricks_storage.index_name
@@ -190,56 +193,131 @@ class CrewAIDatabricksWrapper:
     def _async_save(self, data: Dict[str, Any]) -> None:
         """
         Helper method to handle async save operations from sync context.
-        
+
+        This method properly handles the async/sync boundary when CrewAI
+        (sync) needs to save to Databricks Vector Search (async).
+
+        The issue: SQLite's StaticPool (single connection) conflicts with
+        multiple event loops, causing "Future attached to different loop" errors.
+
         Args:
             data: Data dictionary to save
         """
-        try:
-            import asyncio
-            
-            async def _do_save():
-                await self.storage.save(data)
-            
-            # Handle async call from sync context
+        import asyncio
+        import traceback
+        import os
+
+        # Add detailed logging for debugging
+        if self.memory_type == "entity":
+            entity_logger.info(f"[_async_save] Starting save for entity: {data.get('entity_name', 'unknown')}")
+            entity_logger.debug(f"[_async_save] Data keys: {list(data.keys())}")
+
+        async def _do_save():
+            """Inner async function that performs the actual save."""
             try:
-                # Check if we're in an async context
-                loop = asyncio.get_running_loop()
-                # We're in an async context, create a new event loop in a thread
-                import concurrent.futures
-                import os
-                
-                # Ensure USE_NULLPOOL is set before creating new connections
-                if not os.environ.get("USE_NULLPOOL"):
-                    os.environ["USE_NULLPOOL"] = "true"
-                
-                def run_in_new_loop():
-                    """Run the async function in a completely new event loop."""
-                    new_loop = asyncio.new_event_loop()
-                    asyncio.set_event_loop(new_loop)
-                    try:
-                        return new_loop.run_until_complete(_do_save())
-                    finally:
-                        new_loop.close()
-                
-                with concurrent.futures.ThreadPoolExecutor() as executor:
-                    future = executor.submit(run_in_new_loop)
-                    future.result()
-            except RuntimeError:
-                # No event loop running, safe to use asyncio.run
-                # Ensure USE_NULLPOOL is set
-                import os
-                if not os.environ.get("USE_NULLPOOL"):
-                    os.environ["USE_NULLPOOL"] = "true"
-                asyncio.run(_do_save())
+                if self.memory_type == "entity":
+                    entity_logger.info(f"[_do_save] Calling storage.save for entity '{data.get('entity_name', 'unknown')}'")
+
+                # Call the actual async save on the storage backend
+                result = await self.storage.save(data)
+
+                if self.memory_type == "entity":
+                    entity_logger.info(f"[_do_save] Successfully saved entity '{data.get('entity_name', 'unknown')}'")
+
+                return result
+
+            except Exception as save_error:
+                error_msg = f"Failed to save to storage: {save_error}\n{traceback.format_exc()}"
+                logger.error(error_msg)
+                if self.memory_type == "entity":
+                    entity_logger.error(f"[_do_save] {error_msg}")
+                raise
+
+        try:
+            # CRITICAL: Force USE_NULLPOOL for this operation to avoid StaticPool conflicts
+            # StaticPool's single connection can't be shared across event loops
+            original_nullpool = os.environ.get("USE_NULLPOOL")
+            os.environ["USE_NULLPOOL"] = "true"
+
+            try:
+                # Method 1: Check if we're already in an async context
+                try:
+                    loop = asyncio.get_running_loop()
+                    # We're in an async context but need to avoid event loop conflicts
+
+                    if self.memory_type == "entity":
+                        entity_logger.info(f"[_async_save] Detected running event loop, using thread-safe execution")
+
+                    # Create a new thread with its own event loop to avoid conflicts
+                    import concurrent.futures
+
+                    def run_in_thread():
+                        """Run the save in a separate thread with its own event loop."""
+                        # Create a new event loop for this thread
+                        new_loop = asyncio.new_event_loop()
+                        asyncio.set_event_loop(new_loop)
+
+                        try:
+                            # Run the save coroutine
+                            result = new_loop.run_until_complete(_do_save())
+                            return result
+                        finally:
+                            # Clean up the event loop
+                            new_loop.close()
+                            # Clear the event loop to prevent reuse
+                            asyncio.set_event_loop(None)
+
+                    # Execute in thread pool with a single worker
+                    with concurrent.futures.ThreadPoolExecutor(max_workers=1) as executor:
+                        future = executor.submit(run_in_thread)
+                        # Wait for completion with timeout
+                        result = future.result(timeout=30)
+
+                    if self.memory_type == "entity":
+                        entity_logger.info(f"[_async_save] Save completed via ThreadPoolExecutor")
+
+                    return result
+
+                except RuntimeError as e:
+                    # No event loop running - safe to use asyncio.run
+                    if "no running event loop" in str(e).lower() or "no current event loop" in str(e).lower():
+
+                        if self.memory_type == "entity":
+                            entity_logger.info(f"[_async_save] No event loop detected, using asyncio.run")
+
+                        # Run the async function directly
+                        result = asyncio.run(_do_save())
+
+                        if self.memory_type == "entity":
+                            entity_logger.info(f"[_async_save] Save completed via asyncio.run")
+
+                        return result
+                    else:
+                        raise
+
+            finally:
+                # Restore original USE_NULLPOOL setting
+                if original_nullpool is None:
+                    os.environ.pop("USE_NULLPOOL", None)
+                else:
+                    os.environ["USE_NULLPOOL"] = original_nullpool
+
         except Exception as e:
-            logger.error(f"Error in async save: {e}")
+            error_msg = f"Error in async save: {str(e)}\n{traceback.format_exc()}"
+            logger.error(error_msg)
+            if self.memory_type == "entity":
+                entity_logger.error(f"[_async_save] {error_msg}")
+
+            # Log but don't raise to prevent breaking crew execution
+            # The memory save failure shouldn't stop the entire crew
+            logger.warning(f"Memory save failed but continuing crew execution: {str(e)}")
     
-    def _async_relationship_search(self, query: str, initial_results: List[Dict[str, Any]], 
-                                 agent_id: str, group_id: str, max_hops: int = 2, 
+    def _async_relationship_search(self, query: str, initial_results: List[Dict[str, Any]],
+                                 agent_id: str, group_id: str, max_hops: int = 2,
                                  max_total: int = 10, relationship_weight: float = 0.3) -> List[Dict[str, Any]]:
         """
         Helper method to handle async relationship search from sync context.
-        
+
         Args:
             query: Search query
             initial_results: Initial semantic search results
@@ -248,20 +326,22 @@ class CrewAIDatabricksWrapper:
             max_hops: Maximum relationship hops
             max_total: Maximum total results
             relationship_weight: Weight for relationship scoring
-            
+
         Returns:
             Enhanced search results
         """
         try:
             import asyncio
-            
+            import concurrent.futures
+            import os
+
             async def _do_relationship_search():
                 # Create service instance within async context
                 async with self.unit_of_work_class() as uow:
                     service = self.memory_backend_service_class(uow)
                     # Temporarily set the service for the retriever
                     self.relationship_retriever.memory_backend_service = service
-                    
+
                     return await self.relationship_retriever.search_with_relationships(
                         query=query,
                         initial_results=initial_results,
@@ -275,42 +355,75 @@ class CrewAIDatabricksWrapper:
                         max_total=max_total,
                         relationship_weight=relationship_weight
                     )
-            
-            # Handle async call from sync context
+
             try:
-                # Check if we're in an async context
-                loop = asyncio.get_running_loop()
-                # We're in an async context, create a new event loop in a thread
-                import concurrent.futures
-                import os
-                
-                # Ensure USE_NULLPOOL is set before creating new connections
-                if not os.environ.get("USE_NULLPOOL"):
-                    os.environ["USE_NULLPOOL"] = "true"
-                
+                # Try to detect an existing running loop (e.g., when called from async context)
+                _ = asyncio.get_running_loop()
+
+                # In async context: run in a dedicated new loop via a thread to avoid nested event-loop issues
                 def run_in_new_loop():
-                    """Run the async function in a completely new event loop."""
                     new_loop = asyncio.new_event_loop()
                     asyncio.set_event_loop(new_loop)
                     try:
+                        if not os.environ.get("USE_NULLPOOL"):
+                            os.environ["USE_NULLPOOL"] = "true"
                         return new_loop.run_until_complete(_do_relationship_search())
                     finally:
                         new_loop.close()
-                
-                with concurrent.futures.ThreadPoolExecutor() as executor:
+                        asyncio.set_event_loop(None)
+
+                with concurrent.futures.ThreadPoolExecutor(max_workers=1) as executor:
                     future = executor.submit(run_in_new_loop)
                     return future.result()
+
             except RuntimeError:
-                # No event loop running, safe to use asyncio.run
-                # Ensure USE_NULLPOOL is set
-                import os
+                # No running loop: safe to use asyncio.run
                 if not os.environ.get("USE_NULLPOOL"):
                     os.environ["USE_NULLPOOL"] = "true"
                 return asyncio.run(_do_relationship_search())
+
         except Exception as e:
             entity_logger.error(f"Error in async relationship search: {e}")
             # Return original results as fallback
             return self._format_results_for_crewai(initial_results)
+
+    def _emit_retrieval_trace(self, query: Any, results: List[Dict[str, Any]], top_k: int) -> None:
+        """Emit an execution_trace event for memory retrieval if trace context is available."""
+        try:
+            if not getattr(self, 'trace_context', None) or not self.trace_context.get('job_id'):
+                return
+            from src.services.trace_queue import get_trace_queue
+            q = get_trace_queue()
+            # Summarize top results (avoid large payloads)
+            def summarize(item):
+                # Prefer content/context fields
+                text = item.get('content') or item.get('context') or str(item)[:200]
+                return {
+                    'id': item.get('id') or item.get('document_id') or item.get('entity_name') or 'unknown',
+                    'snippet': (text[:200] + '...') if isinstance(text, str) and len(text) > 200 else text
+                }
+            summary = [summarize(r) for r in (results or [])][:min(top_k, 5)]
+            q.put_nowait({
+                'job_id': self.trace_context.get('job_id'),
+                'event_type': 'memory_retrieval',
+                'event_source': f"Memory[{self.memory_type}:databricks]",
+                'event_context': f"index={self.index_name}",
+                'output': {
+                    'backend': 'databricks',
+                    'memory_type': self.memory_type,
+                    'query': query if isinstance(query, str) else '[embedding]',
+                    'top_k': top_k,
+                    'results': summary
+                },
+                'trace_metadata': {
+                    'crew_id': getattr(self.storage, 'crew_id', None),
+                    'endpoint': self.endpoint_name,
+                    'index': self.index_name
+                },
+                'group_context': self.trace_context.get('group_context')
+            })
+        except Exception as e:
+            logger.debug(f"Could not enqueue memory_retrieval trace: {e}")
     
     def _format_results_for_crewai(self, results: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
         """
@@ -868,6 +981,7 @@ class CrewAIDatabricksWrapper:
             # Check if memory is disabled for the current agent
             if not self._is_memory_enabled_for_current_agent():
                 logger.info(f"[search] Memory is disabled for current agent, skipping {self.memory_type} similarity search")
+                self._emit_retrieval_trace(query, [], top_k)
                 return []
             
             # Debug logging
@@ -955,20 +1069,27 @@ class CrewAIDatabricksWrapper:
                                 )
                                 
                                 entity_logger.info(f"[search] Relationship retrieval returned {len(enhanced_results)} results")
+                                self._emit_retrieval_trace(query, enhanced_results, top_k)
                                 return enhanced_results
-                                
+
                             except Exception as e:
                                 entity_logger.error(f"[search] Relationship retrieval failed: {e}")
                                 entity_logger.info("[search] Falling back to standard semantic search")
-                                return self._format_results_for_crewai(initial_results)
+                                formatted = self._format_results_for_crewai(initial_results)
+                                self._emit_retrieval_trace(query, formatted, top_k)
+                                return formatted
                         else:
                             # Standard semantic search
-                            return self._format_results_for_crewai(initial_results)
+                            formatted = self._format_results_for_crewai(initial_results)
+                            self._emit_retrieval_trace(query, formatted, top_k)
+                            return formatted
                     else:
                         logger.warning("Failed to generate embedding for query")
+                        self._emit_retrieval_trace(query, [], top_k)
                         return []
                 else:
                     logger.warning("No embedder available for text query")
+                    self._emit_retrieval_trace(query, [], top_k)
                     return []
                     
             elif isinstance(query, dict) and 'embedding' in query:
@@ -989,13 +1110,16 @@ class CrewAIDatabricksWrapper:
                         return self._format_results_for_crewai(results)
                     else:
                         logger.warning(f"Query vector length {query_len} doesn't match embedding dimension {self.storage.embedding_dimension}")
+                        self._emit_retrieval_trace(query, [], top_k)
                         return []
                 except Exception as e:
                     logger.error(f"Error processing vector query: {e}")
+                    self._emit_retrieval_trace(query, [], top_k)
                     return []
                 
             else:
                 logger.warning(f"Unsupported query type for search: {type(query)}")
+                self._emit_retrieval_trace(query, [], top_k)
                 return []
                 
         except Exception as e:
@@ -1003,6 +1127,7 @@ class CrewAIDatabricksWrapper:
             # Log the full traceback for debugging
             import traceback
             logger.error(f"Full traceback: {traceback.format_exc()}")
+            self._emit_retrieval_trace(query, [], top_k)
             return []
             
     def reset(self) -> None:
