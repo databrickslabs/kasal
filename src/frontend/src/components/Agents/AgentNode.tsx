@@ -250,24 +250,37 @@ const AgentNode: React.FC<{ data: AgentNodeData; id: string }> = ({ data, id }) 
     }
   }, [data.knowledge_sources, isEditing, agentData?.knowledge_sources]);
 
-  // Improved click handler with local selection
+  // Enhanced click handler: left-click opens form, right-click enables dragging
   const handleNodeClick = useCallback((event: React.MouseEvent) => {
     // Completely stop event propagation
     event.preventDefault();
     event.stopPropagation();
-    
+
     // Check if the click was on an interactive element
     const target = event.target as HTMLElement;
     const isButton = !!target.closest('button');
     const isActionButton = !!target.closest('.action-buttons');
-    
+
     if (!isButton && !isActionButton) {
-      console.log(`AgentNode click on ${id} - toggling selection`);
-      toggleSelection();
+      if (event.button === 0) {
+        // Left-click: Open agent form for editing
+        console.log(`AgentNode left-click on ${id} - opening edit form`);
+        handleEditClick();
+      } else if (event.button === 2) {
+        // Right-click: Enable dragging by selecting the node
+        console.log(`AgentNode right-click on ${id} - enabling drag mode`);
+        toggleSelection();
+      }
     } else {
       console.log(`AgentNode click on ${id} ignored - clicked on button or action button`);
     }
-  }, [id, toggleSelection]);
+  }, [id, toggleSelection, handleEditClick]);
+
+  // Handle context menu (right-click) to prevent browser default menu
+  const handleContextMenu = useCallback((event: React.MouseEvent) => {
+    event.preventDefault();
+    event.stopPropagation();
+  }, []);
 
   const getAgentNodeStyles = () => {
     const baseStyles = {
@@ -378,9 +391,10 @@ const AgentNode: React.FC<{ data: AgentNodeData; id: string }> = ({ data, id }) 
     <Box
       sx={{
         ...getAgentNodeStyles(),
-        cursor: 'move'
+        cursor: 'pointer'
       }}
       onClick={handleNodeClick}
+      onContextMenu={handleContextMenu}
       data-agentid={data.agentId}
       data-nodeid={id}
       data-nodetype="agent"

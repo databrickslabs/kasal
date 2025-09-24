@@ -42,9 +42,10 @@ export function useUIFitView(params: {
     const baseZoom = Math.min(zoomX, zoomY, 2.5);
     const zoom = baseZoom * 1.5; // Zoom in 50% more
 
-    const rightOffset = 250;
+    // Dynamic offset based on chat panel position
+    const chatOffset = currentUIState.chatPanelVisible && currentUIState.chatPanelSide === 'right' ? 250 : -150;
     const viewportX =
-      canvasArea.x + (canvasArea.width - nodesWidth * zoom) / 2 - minX * zoom + rightOffset;
+      canvasArea.x + (canvasArea.width - nodesWidth * zoom) / 2 - minX * zoom + chatOffset;
     const viewportY =
       canvasArea.y + (canvasArea.height - nodesHeight * zoom) / 2 - minY * zoom;
 

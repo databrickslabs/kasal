@@ -183,9 +183,7 @@ const WorkflowDesigner: React.FC<WorkflowDesignerProps> = (): JSX.Element => {
     chatPanelCollapsedWidth,
     chatPanelCollapsed: isChatCollapsed,
     chatPanelSide,
-    leftSidebarExpanded,
     leftSidebarBaseWidth,
-    leftSidebarExpandedWidth,
     rightSidebarWidth,
     executionHistoryHeight,
     chatPanelVisible: showChatPanel,
@@ -251,10 +249,12 @@ const WorkflowDesigner: React.FC<WorkflowDesignerProps> = (): JSX.Element => {
     return () => {
       window.removeEventListener('openExecutionHistory', handleOpenExecutionHistory);
     };
+
   }, [showRunHistory, setExecutionHistoryVisible]);
 
   // Use the dialog manager
   const dialogManager = useDialogManager(hasSeenTutorial, setHasSeenTutorial);
+
 
   // Connection generation state
   const [isGeneratingConnections, setIsGeneratingConnections] = React.useState(false);
@@ -938,24 +938,116 @@ const WorkflowDesigner: React.FC<WorkflowDesignerProps> = (): JSX.Element => {
           display: 'flex',
           flexDirection: 'row',
           overflow: 'hidden',
-          position: 'relative'
+          position: 'relative',
+          marginLeft: `${leftSidebarBaseWidth}px` // Push entire content area to the right of LeftSidebar
         }}>
+          {/* Chat Panel on Left (when positioned left) */}
+          {showChatPanel && chatPanelSide === 'left' && (
+            <Box
+              onMouseEnter={() => {
+                window.postMessage({ type: 'chat-hover-state', isHovering: true }, '*');
+              }}
+              onMouseLeave={() => {
+                window.postMessage({ type: 'chat-hover-state', isHovering: false }, '*');
+              }}
+              sx={{
+                width: isChatCollapsed ? `${chatPanelCollapsedWidth}px` : `${chatPanelWidth}px`,
+                height: showRunHistory ? `calc(100% - ${executionHistoryHeight}px)` : '100%',
+                display: 'flex',
+                flexDirection: 'row',
+                overflow: 'hidden',
+                backgroundColor: 'background.paper',
+                borderRight: 1,
+                borderColor: 'divider',
+                zIndex: 15, // Higher than LeftSidebar (10) to ensure collapsed chat is visible
+                transition: isChatCollapsed ? 'width 0.3s ease-in-out' : 'none',
+              }}>
+              {/* Chat Content */}
+              <Box sx={{ flex: 1, overflow: 'hidden' }}>
+                <ChatPanel
+                  chatSide={chatPanelSide}
+                  onNodesGenerated={(newNodes, newEdges) => {
+                    setNodes(currentNodes => [...currentNodes, ...newNodes]);
+                    setEdges(currentEdges => [...currentEdges, ...newEdges]);
+                  }}
+                  onLoadingStateChange={setIsChatProcessing}
+                  isVisible={showChatPanel}
+                  nodes={nodes}
+                  edges={edges}
+                  onExecuteCrew={() => {
+                    // Set current tab as running when executing from chat
+                    const activeTab = getActiveTab();
+                    if (activeTab) {
+                      setRunningTabId(activeTab.id);
+                      updateTabExecutionStatus(activeTab.id, 'running');
+
+                      // Clear any existing timeout
+                      if (runningTabTimeoutRef.current) {
+                        clearTimeout(runningTabTimeoutRef.current);
+                      }
+
+                      // Set a safety timeout to clear running state after 5 minutes
+                      const tabIdToTimeout = activeTab.id; // Capture the tab ID
+                      runningTabTimeoutRef.current = setTimeout(() => {
+                        setRunningTabId((currentRunningTabId) => {
+                          if (currentRunningTabId === tabIdToTimeout) {
+                            return null;
+                          }
+                          return currentRunningTabId;
+                        });
+                        updateTabExecutionStatus(tabIdToTimeout, 'completed');
+                      }, 5 * 60 * 1000); // 5 minutes
+                    }
+                    // Make sure nodes are synced to the execution store
+                    setCrewExecutionNodes(nodes);
+                    setCrewExecutionEdges(edges);
+                    // Small delay to ensure state is updated
+                    setTimeout(() => {
+                      handleRunClick('crew');
+                    }, 100);
+                  }}
+                  isCollapsed={isChatCollapsed}
+                  onToggleCollapse={() => {
+                    setChatPanelCollapsed(!isChatCollapsed);
+                    // Trigger node repositioning when toggling collapse
+                    setTimeout(() => {
+                      const event = new CustomEvent('recalculateNodePositions', {
+                        detail: { reason: 'chat-panel-toggle' }
+                      });
+                      window.dispatchEvent(event);
+                    }, 350); // Wait for animation to complete
+                  }}
+                  chatSessionId={getActiveTab()?.chatSessionId}
+                  onOpenLogs={handleShowExecutionLogs}
+                />
+              </Box>
+              {/* Resize Handle - on the right side when chat is on left */}
+              {!isChatCollapsed && (
+                <Box
+                  onMouseDown={handleResizeStart}
+                  sx={{
+                    width: 4,
+                    height: '100%',
+                    backgroundColor: 'divider',
+                    cursor: 'ew-resize',
+                    '&:hover': {
+                      backgroundColor: 'primary.main',
+                    },
+                    transition: 'background-color 0.2s ease',
+                    zIndex: 7,
+                  }}
+                />
+              )}
+            </Box>
+          )}
+
           {/* Main content area with WorkflowPanels */}
           <Box sx={{
             flex: 1,
             display: 'flex',
             flexDirection: 'column',
             overflow: 'hidden',
-            position: 'relative',
-            // Adjust width based on chat panel visibility and state
-            width: showChatPanel
-              ? `calc(100% - ${isChatCollapsed ? chatPanelCollapsedWidth : chatPanelWidth}px)`
-              : '100%', // Full width when chat is hidden
-            // If chat panel is on the left, shift content to the right by chat width
-            ml: showChatPanel && chatPanelSide === 'left'
-              ? `${isChatCollapsed ? chatPanelCollapsedWidth : chatPanelWidth}px`
-              : 0,
-            transition: 'width 0.3s ease-in-out'
+            position: 'relative'
           }}>
             <WorkflowPanels
               areFlowsVisible={areFlowsVisible}
@@ -1036,33 +1128,27 @@ const WorkflowDesigner: React.FC<WorkflowDesignerProps> = (): JSX.Element => {
               }}
             />
 
-            {/* Chat Panel positioned to the left of the RightSidebar */}
-            {showChatPanel && (
+            {/* Chat Panel on Right (when positioned right) */}
+            {showChatPanel && chatPanelSide === 'right' && (
               <Box
                 onMouseEnter={() => {
-                  // Notify RightSidebar that mouse is over chat
                   window.postMessage({ type: 'chat-hover-state', isHovering: true }, '*');
                 }}
                 onMouseLeave={() => {
-                  // Notify RightSidebar that mouse left chat
                   window.postMessage({ type: 'chat-hover-state', isHovering: false }, '*');
                 }}
                 sx={{
                   position: 'absolute',
-                  top: 0, // Start from top of container
-                  ...(chatPanelSide === 'right'
-                    ? { right: rightSidebarWidth }
-                    : { left: leftSidebarExpanded ? leftSidebarExpandedWidth : leftSidebarBaseWidth }),
-                  bottom: showRunHistory ? `${executionHistoryHeight - 0}px` : 0, // Extend 20px into execution history for subtle intersection
-                  width: isChatCollapsed ? `${chatPanelCollapsedWidth}px` : `${chatPanelWidth}px`, // Dynamic width
+                  top: 0,
+                  right: rightSidebarWidth,
+                  bottom: showRunHistory ? `${executionHistoryHeight}px` : 0,
+                  width: isChatCollapsed ? `${chatPanelCollapsedWidth}px` : `${chatPanelWidth}px`,
                   display: 'flex',
-                  flexDirection: 'row', // Change to row to accommodate resize handle
+                  flexDirection: 'row',
                   overflow: 'hidden',
-                  ...(chatPanelSide === 'right' ? { borderLeft: 1 } : { borderRight: 1 }),
-                  borderColor: 'divider',
                   backgroundColor: 'background.paper',
-                  zIndex: 10, // Higher than execution history (8) and right sidebar
-                  transition: isChatCollapsed ? 'width 0.3s ease-in-out' : 'none', // Smooth animation only for collapse
+                  zIndex: 10,
+                  transition: isChatCollapsed ? 'width 0.3s ease-in-out' : 'none',
                 }}>
                 {/* Resize Handle */}
                 {!isChatCollapsed && (
@@ -1138,6 +1224,7 @@ const WorkflowDesigner: React.FC<WorkflowDesignerProps> = (): JSX.Element => {
                     }}
                     chatSessionId={getActiveTab()?.chatSessionId}
                     onOpenLogs={handleShowExecutionLogs}
+                    chatSide={chatPanelSide}
                   />
                 </Box>
               </Box>
@@ -1631,6 +1718,7 @@ const WorkflowDesigner: React.FC<WorkflowDesignerProps> = (): JSX.Element => {
             dialogManager.setIsTutorialOpen(true);
           }}
         />
+
       </Box>
     </div>
   );

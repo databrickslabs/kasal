@@ -281,21 +281,35 @@ const TaskNode: React.FC<TaskNodeProps> = ({ data, id }) => {
     }
   }, [isEditing]);
 
-  // Improved click handler with local selection
+  // Enhanced click handler: left-click opens form, right-click enables dragging
   const handleNodeClick = useCallback((event: React.MouseEvent) => {
     // Completely stop event propagation
     event.preventDefault();
     event.stopPropagation();
-    
+
     // Check if the click was on an interactive element
     const target = event.target as HTMLElement;
     const isButton = !!target.closest('button');
     const isActionButton = !!target.closest('.action-buttons');
-    
+
     if (!isButton && !isActionButton) {
-      toggleSelection();
+      if (event.button === 0) {
+        // Left-click: Open task form for editing
+        console.log(`TaskNode left-click on ${id} - opening edit form`);
+        handleEditClick();
+      } else if (event.button === 2) {
+        // Right-click: Enable dragging by selecting the node
+        console.log(`TaskNode right-click on ${id} - enabling drag mode`);
+        toggleSelection();
+      }
     }
-  }, [toggleSelection]);
+  }, [toggleSelection, handleEditClick]);
+
+  // Handle context menu (right-click) to prevent browser default menu
+  const handleContextMenu = useCallback((event: React.MouseEvent) => {
+    event.preventDefault();
+    event.stopPropagation();
+  }, []);
 
   const iconStyles = {
     mr: 1.5,
@@ -341,6 +355,7 @@ const TaskNode: React.FC<TaskNodeProps> = ({ data, id }) => {
       flexDirection: 'column',
       position: 'relative',
       padding: 2,
+      cursor: 'pointer',
       background: (theme: Theme) => {
         if (isRunning) {
           return `linear-gradient(135deg, ${theme.palette.info.light}15, ${theme.palette.info.main}10)`;
@@ -438,9 +453,10 @@ const TaskNode: React.FC<TaskNodeProps> = ({ data, id }) => {
         position={Position.Left}
         style={{ background: '#2196f3', width: '7px', height: '7px' }}
       />
-      <Box 
+      <Box
         sx={getTaskStyles()}
         onClick={handleNodeClick}
+        onContextMenu={handleContextMenu}
         data-taskid={data.taskId}
         data-label={data.label}
         data-nodeid={id}

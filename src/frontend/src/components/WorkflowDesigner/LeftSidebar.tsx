@@ -38,6 +38,8 @@ import { ModelService } from '../../api/ModelService';
 import { useCrewExecutionStore } from '../../store/crewExecution';
 import { usePermissionStore } from '../../store/permissions';
 import { useWorkflowStore } from '../../store/workflow';
+import { useUILayoutStore } from '../../store/uiLayout';
+
 
 // Default fallback model when API is down
 const DEFAULT_FALLBACK_MODEL = {
@@ -108,6 +110,13 @@ const LeftSidebar: React.FC<LeftSidebarProps> = ({
   const [planningModel, setPlanningModel] = useState<string>('');
   const [reasoningModel, setReasoningModel] = useState<string>('');
   const [managerModel, setManagerModel] = useState<string>('');
+  const { setLeftSidebarExpanded } = useUILayoutStore();
+
+  // Reflect expanded state of the left sidebar (when a section is active) into the UI layout store
+  useEffect(() => {
+    setLeftSidebarExpanded(!!activeSection);
+  }, [activeSection, setLeftSidebarExpanded]);
+
 
   const {
     setPlanningLLM,
@@ -685,7 +694,7 @@ const LeftSidebar: React.FC<LeftSidebarProps> = ({
         top: '48px', // Account for TabBar height
         left: 0,
         height: showRunHistory ? `calc(100% - 48px - ${executionHistoryHeight}px)` : 'calc(100% - 48px)',
-        zIndex: 10,
+        zIndex: 20, // Temporarily higher to ensure visibility
         display: 'flex',
         flexDirection: 'row'
       }}
@@ -701,6 +710,7 @@ const LeftSidebar: React.FC<LeftSidebarProps> = ({
               borderRadius: 0,
               borderRight: '1px solid',
               borderColor: 'divider',
+              boxShadow: '2px 0 4px rgba(0,0,0,0.1)', // Temporary shadow for visibility
               display: 'flex',
               flexDirection: 'column',
               alignItems: 'center',
