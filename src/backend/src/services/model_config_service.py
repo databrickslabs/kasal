@@ -21,7 +21,7 @@ logger = LoggerManager.get_instance().crew
 
 class ModelConfigService:
     """Service for model configuration operations."""
-    
+
     def __init__(self, session: AsyncSession):
         """
         Initialize the service with session.
@@ -30,48 +30,48 @@ class ModelConfigService:
             session: Database session
         """
         self.repository = ModelConfigRepository(session)
-    
-    
+
+
     async def find_all(self) -> List[ModelConfig]:
         """
         Get all model configurations from the repository.
-        
+
         Returns:
             List of all model configurations
         """
         return await self.repository.find_all()
-    
+
     async def find_enabled_models(self) -> List[ModelConfig]:
         """
         Get all enabled model configurations from the repository.
-        
+
         Returns:
             List of enabled model configurations
         """
         return await self.repository.find_enabled_models()
-    
+
     async def find_by_key(self, key: str) -> Optional[ModelConfig]:
         """
         Get a model configuration by its key from the repository.
-        
+
         Args:
             key: The model key to find
-            
+
         Returns:
             Model configuration if found, None otherwise
         """
         return await self.repository.find_by_key(key)
-    
+
     async def create_model_config(self, model_data):
         """
         Create a new model configuration.
-        
+
         Args:
             model_data: Data for the new model configuration
-            
+
         Returns:
             Created model configuration
-            
+
         Raises:
             ValueError: If model with the same key already exists
         """
@@ -79,7 +79,7 @@ class ModelConfigService:
         existing_model = await self.repository.find_by_key(model_data.key)
         if existing_model:
             raise ValueError(f"Model with key {model_data.key} already exists")
-        
+
         # Convert Pydantic model to dict if needed
         if hasattr(model_data, "model_dump"):
             model_dict = model_data.model_dump()
@@ -87,18 +87,18 @@ class ModelConfigService:
             model_dict = model_data.dict()
         else:
             model_dict = dict(model_data)
-        
+
         # Create new model
         return await self.repository.create(model_dict)
-    
+
     async def update_model_config(self, key: str, model_data):
         """
         Update an existing model configuration.
-        
+
         Args:
             key: Key of the model to update
             model_data: Updated model data
-            
+
         Returns:
             Updated model configuration, or None if not found
         """
@@ -106,7 +106,7 @@ class ModelConfigService:
         existing_model = await self.repository.find_by_key(key)
         if not existing_model:
             return None
-        
+
         # Convert Pydantic model to dict if needed
         if hasattr(model_data, "model_dump"):
             model_dict = model_data.model_dump(exclude_unset=True)
@@ -114,28 +114,28 @@ class ModelConfigService:
             model_dict = model_data.dict(exclude_unset=True)
         else:
             model_dict = dict(model_data)
-            
+
         # Update model
         return await self.repository.update(existing_model.id, model_dict)
-    
+
     async def toggle_model_enabled(self, key: str, enabled: bool) -> Optional[ModelConfig]:
         """
         Toggle the enabled status of a model configuration.
-        
+
         Args:
             key: Key of the model to toggle
             enabled: New enabled status
-            
+
         Returns:
             Updated model configuration, or None if not found
         """
         try:
             # Use the direct DML method to avoid locking
             updated = await self.repository.toggle_enabled(key, enabled)
-            
+
             if not updated:
                 return None
-                
+
             # Get the updated model
             return await self.repository.find_by_key(key)
         except Exception as e:
@@ -143,26 +143,26 @@ class ModelConfigService:
             logger.error(f"Error in toggle_model_enabled for key={key}: {str(e)}")
             # Re-raise for controller layer to handle
             raise
-    
+
     async def delete_model_config(self, key: str) -> bool:
         """
         Delete a model configuration.
-        
+
         Args:
             key: Key of the model to delete
-            
+
         Returns:
             True if deleted, False if not found
         """
         logger.info(f"Service: Attempting to delete model with key: {key}")
-        
+
         # Use the dedicated repository method for deletion by key
         return await self.repository.delete_by_key(key)
-    
+
     async def enable_all_models(self) -> List[ModelConfig]:
         """
         Enable all model configurations.
-        
+
         Returns:
             List of all model configurations after enabling
         """
@@ -171,17 +171,17 @@ class ModelConfigService:
             success = await self.repository.enable_all_models()
             if not success:
                 logger.warning("Failed to enable all models")
-                
+
             # Return all models
             return await self.find_all()
         except Exception as e:
             logger.error(f"Error enabling all models: {str(e)}")
             raise
-    
+
     async def disable_all_models(self) -> List[ModelConfig]:
         """
         Disable all model configurations.
-        
+
         Returns:
             List of all model configurations after disabling
         """
@@ -190,23 +190,23 @@ class ModelConfigService:
             success = await self.repository.disable_all_models()
             if not success:
                 logger.warning("Failed to disable all models")
-                
+
             # Return all models
             return await self.find_all()
         except Exception as e:
             logger.error(f"Error disabling all models: {str(e)}")
             raise
-    
+
     async def get_model_config(self, model: str) -> Dict[str, Any]:
         """
         Get configuration for a specific model.
-        
+
         Args:
             model: Name of the model to get configuration for
-            
+
         Returns:
             Dictionary containing model configuration
-            
+
         Raises:
             HTTPException: If model configuration is not found
         """
@@ -229,10 +229,10 @@ class ModelConfigService:
                 config = get_model_config(model)
                 if not config:
                     raise ValueError(f"Model configuration not found for model: {model}")
-            
+
             # Get API key for the provider using class method
             provider = config["provider"].lower()
-            
+
             # Check if we're in Databricks Apps environment for Databricks provider
             if provider == "databricks":
                 try:
@@ -243,7 +243,7 @@ class ModelConfigService:
                         return config
                 except ImportError:
                     logger.warning("Enhanced Databricks auth not available")
-            
+
             # For non-Databricks providers or non-Apps environment, get API key
             api_key = await ApiKeysService.get_provider_api_key(provider)
             if not api_key:
@@ -258,36 +258,36 @@ class ModelConfigService:
                 except ImportError:
                     pass
                 raise ValueError(f"No API key found for provider: {provider}")
-            
+
             # Add API key to config
             config["api_key"] = api_key
             return config
-            
+
         except Exception as e:
             logger.error(f"Error getting model configuration: {str(e)}")
             raise HTTPException(
                 status_code=500,
                 detail=f"Failed to get model configuration: {str(e)}"
-            )     
+            )
     # Group-aware methods for multi-tenant support
-    
+
     async def find_all_for_group(self, group_context: GroupContext) -> List[ModelConfig]:
         """
         Get all model configurations for a specific group.
-        
+
         Shows:
         1. Default models (group_id = null) - visible to everyone
         2. Group-specific models - visible only to members of that group
         3. If a model has both default and group versions, the group version takes precedence
-        
+
         Args:
             group_context: Group context with group IDs
-            
+
         Returns:
             List of model configurations for the group
         """
         all_models = await self.repository.find_all()
-        
+
         # If no group context, show only default models
         if not group_context or not group_context.group_ids:
             default_models = [
@@ -295,96 +295,86 @@ class ModelConfigService:
                 if model.group_id is None
             ]
             return default_models
-        
+
         # Build a dictionary to handle overrides: model_key -> model
         models_by_key = {}
-        
+
         # First, add all default models (group_id = null)
         for model in all_models:
             if model.group_id is None:
                 models_by_key[model.key] = model
-        
+
         # Then, override with group-specific models if they exist
         for model in all_models:
             if model.group_id in group_context.group_ids:
                 # This will override the default if it exists
                 models_by_key[model.key] = model
-        
+
         # Convert back to list
         return list(models_by_key.values())
-    
+
     async def find_enabled_models_for_group(self, group_context: GroupContext) -> List[ModelConfig]:
         """
         Get all enabled model configurations for a specific group.
-        
-        Shows:
-        1. Default enabled models (group_id = null) - visible to everyone
-        2. Group-specific enabled models - visible only to members of that group
-        3. If a model has both default and group versions, the group version takes precedence
-        
+
+        Applies group overrides first, then filters by enabled. This ensures that
+        a workspace-level disable will properly hide a model even if the global
+        default is enabled.
+
         Args:
             group_context: Group context with group IDs
-            
+
         Returns:
-            List of enabled model configurations for the group
+            List of enabled model configurations effective for the group
         """
-        enabled_models = await self.repository.find_enabled_models()
-        
-        # If no group context, show only default enabled models
-        if not group_context or not group_context.group_ids:
-            default_models = [
-                model for model in enabled_models
-                if model.group_id is None
-            ]
-            return default_models
-        
-        # Build a dictionary to handle overrides: model_key -> model
-        models_by_key = {}
-        
-        # First, add all default enabled models (group_id = null)
-        for model in enabled_models:
-            if model.group_id is None:
-                models_by_key[model.key] = model
-        
-        # Then, override with group-specific enabled models if they exist
-        for model in enabled_models:
-            if model.group_id in group_context.group_ids:
-                # This will override the default if it exists
-                models_by_key[model.key] = model
-        
-        # Convert back to list
-        return list(models_by_key.values())
-    
+        # First compute the effective models for the group (with overrides applied)
+        effective_models = await self.find_all_for_group(group_context)
+
+        # Then filter to only enabled ones
+        return [m for m in effective_models if getattr(m, "enabled", True)]
+
+    async def find_all_global(self) -> List[ModelConfig]:
+        """Return all global (system-wide) model configurations (group_id is None)."""
+        return await self.repository.find_all_global()
+
+    async def toggle_global_enabled(self, key: str, enabled: bool) -> Optional[ModelConfig]:
+        """Toggle enabled on the global model by key (does not create group override)."""
+        updated = await self.repository.toggle_global_enabled(key, enabled)
+        if not updated:
+            return None
+        return await self.repository.find_global_by_key(key)
+
+
     async def toggle_model_enabled_with_group(self, key: str, enabled: bool, group_context: GroupContext) -> Optional[ModelConfig]:
         """
         Toggle the enabled status of a model with group verification.
-        
+
         For default models (group_id = null):
         - Creates a group-specific copy with the toggled state
         - Ensures each group has their own enabled/disabled settings
-        
+
         For group-specific models:
         - Only the owning group can toggle them
-        
+
         Args:
             key: Key of the model to toggle
             enabled: New enabled status
             group_context: Group context with group IDs
-            
+
         Returns:
             Updated model configuration, or None if not found
-            
+
         Raises:
             HTTPException: If not authorized or toggle fails
         """
         try:
             # First get the model (could be default or group-specific)
             all_models = await self.repository.find_all()
-            
+
             # Find the model (prefer group-specific over default)
             target_model = None
             default_model = None
-            
+
             for model in all_models:
                 if model.key == key:
                     if model.group_id is None:
@@ -392,15 +382,15 @@ class ModelConfigService:
                     elif group_context and model.group_id in group_context.group_ids:
                         target_model = model
                         break
-            
+
             # If no group-specific model found, use default
             if not target_model:
                 target_model = default_model
-            
+
             if not target_model:
                 logger.warning(f"Model with key {key} not found")
                 return None
-            
+
             # Must have a valid group context to toggle models
             if not group_context or not group_context.group_ids:
                 logger.warning(f"No group context provided for toggling model {key}")
@@ -408,20 +398,20 @@ class ModelConfigService:
                     status_code=status.HTTP_403_FORBIDDEN,
                     detail="Group context required to toggle models"
                 )
-            
+
             primary_group_id = group_context.primary_group_id
-            
+
             # If it's a default model (group_id = null), create a group-specific copy
             if target_model.group_id is None:
                 # Check if a group-specific version already exists
                 existing_group_model = await self.repository.find_by_key_and_group(
-                    key, 
+                    key,
                     primary_group_id
                 )
-                
+
                 if existing_group_model:
-                    # Toggle the existing group-specific model
-                    await self.repository.toggle_enabled(existing_group_model.key, enabled)
+                    # Toggle the existing group-specific model in its group scope
+                    await self.repository.toggle_enabled_in_group(existing_group_model.key, primary_group_id, enabled)
                     return await self.repository.find_by_key_and_group(key, primary_group_id)
                 else:
                     # Create a new group-specific copy with toggled state
@@ -438,7 +428,7 @@ class ModelConfigService:
                         'created_by_email': group_context.group_email
                     }
                     return await self.repository.create(model_data)
-            
+
             # For group-specific models, check authorization
             if target_model.group_id not in group_context.group_ids:
                 logger.warning(f"Model with key {key} not authorized for group")
@@ -446,11 +436,11 @@ class ModelConfigService:
                     status_code=status.HTTP_404_NOT_FOUND,  # Return 404 not 403 to avoid information leakage
                     detail=f"Model with key {key} not found"
                 )
-            
-            # Toggle the group-specific model
-            await self.repository.toggle_enabled(target_model.key, enabled)
+
+            # Toggle the group-specific model in its group scope
+            await self.repository.toggle_enabled_in_group(target_model.key, target_model.group_id, enabled)
             return await self.repository.find_by_key_and_group(key, target_model.group_id)
-            
+
         except HTTPException:
             raise
         except Exception as e:

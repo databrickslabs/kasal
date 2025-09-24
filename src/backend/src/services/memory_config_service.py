@@ -97,34 +97,38 @@ class MemoryConfigService:
                 logger.info(f"Created MemoryBackendConfig with enable_relationship_retrieval: {config.enable_relationship_retrieval}")
                 return config
         
-        # If no group-specific backend, try to find any active backend with is_default=true
-        # This is a fallback for system-wide defaults
-        all_backends = await repo.get_all()
-        for backend in all_backends:
-            if backend.is_active and backend.is_default:
-                # Convert databricks_config dict to DatabricksMemoryConfig if needed
-                databricks_config = None
-                if backend.databricks_config and backend.backend_type == MemoryBackendType.DATABRICKS:
-                    config_dict = backend.databricks_config.copy()
-                    
-                    # In Databricks Apps, override workspace_url with DATABRICKS_HOST if not set
-                    if is_databricks_apps_environment() and not config_dict.get('workspace_url'):
-                        databricks_host = os.getenv("DATABRICKS_HOST")
-                        if databricks_host:
-                            workspace_url = databricks_host if databricks_host.startswith("http") else f"https://{databricks_host}"
-                            config_dict['workspace_url'] = workspace_url
-                            logger.info(f"Auto-populating workspace_url from DATABRICKS_HOST: {workspace_url}")
-                    
-                    databricks_config = DatabricksMemoryConfig(**config_dict)
-                
-                return MemoryBackendConfig(
-                    backend_type=backend.backend_type,
-                    databricks_config=databricks_config,
-                    enable_short_term=backend.enable_short_term,
-                    enable_long_term=backend.enable_long_term,
-                    enable_entity=backend.enable_entity,
-                    enable_relationship_retrieval=backend.enable_relationship_retrieval,
-                    custom_config=backend.custom_config
-                )
-        
+        # If no group-specific backend was found:
+        # Only fall back to a system-wide default when NO group_id is provided.
+        # When a group_id is provided but the workspace has not configured memory,
+        # we must return None so the engine uses the built-in default (Chroma/SQLite)
+        # rather than inheriting a system default Databricks backend.
+        if not group_id:
+            all_backends = await repo.get_all()
+            for backend in all_backends:
+                if backend.is_active and backend.is_default:
+                    # Convert databricks_config dict to DatabricksMemoryConfig if needed
+                    databricks_config = None
+                    if backend.databricks_config and backend.backend_type == MemoryBackendType.DATABRICKS:
+                        config_dict = backend.databricks_config.copy()
+
+                        # In Databricks Apps, override workspace_url with DATABRICKS_HOST if not set
+                        if is_databricks_apps_environment() and not config_dict.get('workspace_url'):
+                            databricks_host = os.getenv("DATABRICKS_HOST")
+                            if databricks_host:
+                                workspace_url = databricks_host if databricks_host.startswith("http") else f"https://{databricks_host}"
+                                config_dict['workspace_url'] = workspace_url
+                                logger.info(f"Auto-populating workspace_url from DATABRICKS_HOST: {workspace_url}")
+
+                        databricks_config = DatabricksMemoryConfig(**config_dict)
+
+                    return MemoryBackendConfig(
+                        backend_type=backend.backend_type,
+                        databricks_config=databricks_config,
+                        enable_short_term=backend.enable_short_term,
+                        enable_long_term=backend.enable_long_term,
+                        enable_entity=backend.enable_entity,
+                        enable_relationship_retrieval=backend.enable_relationship_retrieval,
+                        custom_config=backend.custom_config
+                    )
+
         return None

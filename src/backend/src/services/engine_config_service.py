@@ -208,10 +208,10 @@ class EngineConfigService:
     async def set_crewai_flow_enabled(self, enabled: bool) -> bool:
         """
         Set the CrewAI flow enabled status.
-        
+
         Args:
             enabled: Whether flow should be enabled
-            
+
         Returns:
             True if successful
         """
@@ -220,7 +220,36 @@ class EngineConfigService:
         except Exception as e:
             logger.error(f"Error setting CrewAI flow enabled status: {str(e)}")
             raise
-    
+
+    async def get_crewai_debug_tracing(self) -> bool:
+        """
+        Get the CrewAI debug tracing enabled status.
+
+        Returns:
+            True if debug tracing is enabled, False otherwise (defaults to True if not found)
+        """
+        try:
+            return await self.repository.get_crewai_debug_tracing()
+        except Exception as e:
+            logger.error(f"Error getting CrewAI debug tracing status: {str(e)}")
+            return True  # Default to enabled on error
+
+    async def set_crewai_debug_tracing(self, enabled: bool) -> bool:
+        """
+        Set the CrewAI debug tracing enabled status.
+
+        Args:
+            enabled: Whether debug tracing should be enabled
+
+        Returns:
+            True if successful
+        """
+        try:
+            return await self.repository.set_crewai_debug_tracing(enabled)
+        except Exception as e:
+            logger.error(f"Error setting CrewAI debug tracing status: {str(e)}")
+            raise
+
     async def delete_engine_config(self, engine_name: str) -> bool:
         """
         Delete an engine configuration.
