@@ -10,6 +10,7 @@ import os
 import json
 from typing import Dict, Any, List, Optional
 import time
+import asyncio
 
 from crewai import LLM
 from src.schemas.model_provider import ModelProvider
@@ -793,48 +794,142 @@ class LLMManager:
                 
                 # Use direct HTTP request to avoid config file issues
                 import aiohttp
-                
-                try:
-                    # Construct the direct API endpoint using centralized utility
-                    # Extract workspace URL from api_base (which contains /serving-endpoints)
-                    workspace_url = DatabricksURLUtils.extract_workspace_from_endpoint(api_base)
-                    endpoint_url = DatabricksURLUtils.construct_model_invocation_url(workspace_url, embedding_model)
-                    
-                    # Use OAuth headers if available, otherwise fall back to API key
-                    if headers:
-                        request_headers = headers.copy()
-                        if "Content-Type" not in request_headers:
-                            request_headers["Content-Type"] = "application/json"
-                    else:
-                        request_headers = {
-                            "Authorization": f"Bearer {api_key}",
-                            "Content-Type": "application/json"
+                import jwt
+                import datetime
+
+                # Helper function to check if JWT is expired
+                def is_jwt_expired(token_str: str) -> bool:
+                    """Check if JWT token is expired or about to expire."""
+                    try:
+                        # Decode JWT without verification to check expiry
+                        decoded = jwt.decode(token_str, options={"verify_signature": False})
+                        exp_timestamp = decoded.get('exp')
+                        if exp_timestamp:
+                            # Check if token expires in less than 5 minutes (add buffer)
+                            exp_time = datetime.datetime.fromtimestamp(exp_timestamp)
+                            buffer_time = datetime.datetime.now() + datetime.timedelta(minutes=5)
+                            if exp_time < buffer_time:
+                                logger.info(f"JWT token expired or expiring soon (expires: {exp_time})")
+                                return True
+                    except Exception as e:
+                        logger.debug(f"Could not decode JWT for expiry check: {e}")
+                    return False
+
+                # Check if current token is expired and refresh if needed
+                auth_refreshed = False
+                if headers and 'Authorization' in headers:
+                    current_token = headers['Authorization'].replace('Bearer ', '')
+                    if current_token.startswith('eyJ') and is_jwt_expired(current_token):
+                        logger.info("JWT token expired, refreshing authentication...")
+                        # Re-authenticate to get fresh token
+                        headers_result, error = await get_databricks_auth_headers()
+                        if headers_result and not error:
+                            headers = headers_result
+                            auth_refreshed = True
+                            logger.info("Successfully refreshed authentication headers")
+                        else:
+                            logger.error(f"Failed to refresh authentication: {error}")
+                            # Try with API key as fallback
+                            if not api_key:
+                                api_key = await ApiKeysService.get_provider_api_key("DATABRICKS")
+                            if api_key:
+                                headers = None
+                                logger.info("Falling back to API key authentication")
+                elif api_key and is_jwt_expired(api_key):
+                    logger.info("API key JWT expired, attempting to refresh...")
+                    # Try to get fresh token
+                    fresh_key = await ApiKeysService.get_provider_api_key("DATABRICKS")
+                    if fresh_key and fresh_key != api_key:
+                        api_key = fresh_key
+                        auth_refreshed = True
+                        logger.info("Successfully refreshed API key")
+
+                # Maximum number of retry attempts
+                max_retries = 2
+                retry_count = 0
+
+                while retry_count < max_retries:
+                    try:
+                        # Construct the direct API endpoint using centralized utility
+                        # Extract workspace URL from api_base (which contains /serving-endpoints)
+                        workspace_url = DatabricksURLUtils.extract_workspace_from_endpoint(api_base)
+                        endpoint_url = DatabricksURLUtils.construct_model_invocation_url(workspace_url, embedding_model)
+
+                        # Use OAuth headers if available, otherwise fall back to API key
+                        if headers:
+                            request_headers = headers.copy()
+                            if "Content-Type" not in request_headers:
+                                request_headers["Content-Type"] = "application/json"
+                        else:
+                            request_headers = {
+                                "Authorization": f"Bearer {api_key}",
+                                "Content-Type": "application/json"
+                            }
+
+                        payload = {
+                            "input": [text] if isinstance(text, str) else text
                         }
-                    
-                    payload = {
-                        "input": [text] if isinstance(text, str) else text
-                    }
-                    
-                    async with aiohttp.ClientSession() as session:
-                        async with session.post(endpoint_url, headers=request_headers, json=payload) as response:
-                            if response.status == 200:
-                                result = await response.json()
-                                # Databricks embedding API returns embeddings in 'data' field
-                                if 'data' in result and len(result['data']) > 0:
-                                    embedding = result['data'][0].get('embedding', result['data'][0])
-                                    logger.info(f"Successfully created embedding with {len(embedding)} dimensions using direct Databricks API")
-                                    return embedding
-                                else:
-                                    logger.warning("No embedding data found in Databricks response")
+
+                        async with aiohttp.ClientSession() as session:
+                            async with session.post(endpoint_url, headers=request_headers, json=payload) as response:
+                                if response.status == 200:
+                                    result = await response.json()
+                                    # Databricks embedding API returns embeddings in 'data' field
+                                    if 'data' in result and len(result['data']) > 0:
+                                        embedding = result['data'][0].get('embedding', result['data'][0])
+                                        logger.info(f"Successfully created embedding with {len(embedding)} dimensions using direct Databricks API")
+                                        return embedding
+                                    else:
+                                        logger.warning("No embedding data found in Databricks response")
+                                        return None
+                                elif response.status == 401 or response.status == 403:
+                                    # Authentication error - try to refresh token
+                                    error_text = await response.text()
+                                    logger.error(f"Authentication error {response.status}: {error_text}")
+
+                                    if retry_count == 0 and not auth_refreshed:
+                                        logger.info("Attempting to refresh authentication after 401/403 error...")
+                                        # Try to refresh authentication
+                                        headers_result, error = await get_databricks_auth_headers()
+                                        if headers_result and not error:
+                                            headers = headers_result
+                                            auth_refreshed = True
+                                            retry_count += 1
+                                            logger.info("Retrying with refreshed authentication...")
+                                            await asyncio.sleep(1)  # Brief delay before retry
+                                            continue
+                                        else:
+                                            # Try API key as fallback
+                                            fresh_key = await ApiKeysService.get_provider_api_key("DATABRICKS")
+                                            if fresh_key:
+                                                api_key = fresh_key
+                                                headers = None
+                                                retry_count += 1
+                                                logger.info("Retrying with fresh API key...")
+                                                await asyncio.sleep(1)  # Brief delay before retry
+                                                continue
+
+                                    logger.error("Authentication failed after refresh attempts")
                                     return None
-                            else:
-                                error_text = await response.text()
-                                logger.error(f"Databricks embedding API error {response.status}: {error_text}")
-                                return None
-                                
-                except Exception as e:
-                    logger.error(f"Error calling Databricks embedding API directly: {str(e)}")
-                    return None
+                                else:
+                                    error_text = await response.text()
+                                    logger.error(f"Databricks embedding API error {response.status}: {error_text}")
+                                    return None
+
+                    except aiohttp.ClientError as e:
+                        logger.error(f"Network error calling Databricks embedding API: {str(e)}")
+                        if retry_count < max_retries - 1:
+                            retry_count += 1
+                            logger.info(f"Retrying after network error (attempt {retry_count + 1}/{max_retries})...")
+                            await asyncio.sleep(2)  # Wait before retry
+                            continue
+                        return None
+                    except Exception as e:
+                        logger.error(f"Error calling Databricks embedding API directly: {str(e)}")
+                        return None
+
+                logger.error("Failed to create embedding after all retry attempts")
+                return None
                 
             elif provider == 'ollama':
                 # Use Ollama for embeddings

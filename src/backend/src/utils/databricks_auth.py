@@ -368,32 +368,137 @@ class DatabricksAuth:
             logger.error(f"Error in manual OAuth flow: {e}")
             return None
 
-    async def _validate_token(self) -> bool:
-        """Validate the API token by making a simple API call."""
+    async def _validate_token(self, force_refresh: bool = False) -> bool:
+        """Validate the API token by making a simple API call.
+
+        Args:
+            force_refresh: If True, force a token refresh even if current token seems valid
+
+        Returns:
+            bool: True if token is valid or successfully refreshed, False otherwise
+        """
         try:
             if not self._api_token or not self._workspace_host:
                 return False
-            
+
+            # Check if JWT is expired
+            if self._api_token.startswith('eyJ'):
+                import jwt
+                import datetime
+                try:
+                    # Decode JWT without verification to check expiry
+                    decoded = jwt.decode(self._api_token, options={"verify_signature": False})
+                    exp_timestamp = decoded.get('exp')
+                    if exp_timestamp:
+                        exp_time = datetime.datetime.fromtimestamp(exp_timestamp)
+                        current_time = datetime.datetime.now()
+                        # Check if token expires in less than 5 minutes
+                        buffer_time = current_time + datetime.timedelta(minutes=5)
+                        if exp_time < buffer_time or force_refresh:
+                            logger.info(f"JWT token expired or expiring soon (expires: {exp_time}), refreshing...")
+                            # Try to refresh the token
+                            if await self._refresh_token():
+                                logger.info("Successfully refreshed JWT token")
+                                return True
+                            else:
+                                logger.error("Failed to refresh JWT token")
+                                return False
+                except Exception as e:
+                    logger.debug(f"Could not decode JWT for expiry check: {e}")
+
             # Simple validation call to get current user
             url = f"{self._workspace_host}/api/2.0/preview/scim/v2/Me"
             headers = {
                 "Authorization": f"Bearer {self._api_token}",
                 "Content-Type": "application/json"
             }
-            
+
             response = requests.get(url, headers=headers, timeout=10)
-            
+
             if response.status_code == 200:
                 user_data = response.json()
                 username = user_data.get("userName", "Unknown")
                 logger.info(f"Token validated for user: {username}")
                 return True
+            elif response.status_code in [401, 403]:
+                logger.error(f"Token validation failed with status {response.status_code}, attempting refresh...")
+                # Try to refresh the token
+                if await self._refresh_token():
+                    # Retry validation with new token
+                    headers["Authorization"] = f"Bearer {self._api_token}"
+                    response = requests.get(url, headers=headers, timeout=10)
+                    if response.status_code == 200:
+                        user_data = response.json()
+                        username = user_data.get("userName", "Unknown")
+                        logger.info(f"Token validated after refresh for user: {username}")
+                        return True
+                return False
             else:
                 logger.error(f"Token validation failed with status {response.status_code}")
                 return False
-                
+
         except Exception as e:
             logger.error(f"Error validating token: {e}")
+            return False
+
+    async def _refresh_token(self) -> bool:
+        """Refresh the authentication token.
+
+        Returns:
+            bool: True if token was successfully refreshed, False otherwise
+        """
+        try:
+            logger.info("Attempting to refresh authentication token...")
+
+            # If using OAuth, try to get a new token
+            if self._use_databricks_apps:
+                if self._user_access_token:
+                    # Can't refresh user token - it needs to come from the request
+                    logger.warning("Cannot refresh user OBO token - needs to be provided in request")
+                    return False
+                else:
+                    # Try to get new service principal token
+                    new_token = await self._get_service_principal_token()
+                    if new_token:
+                        # We don't store the OAuth token directly, just return success
+                        logger.info("Successfully refreshed service principal OAuth token")
+                        return True
+            else:
+                # Try to get fresh PAT from database or environment
+                from src.services.api_keys_service import ApiKeysService
+                from src.core.unit_of_work import UnitOfWork
+
+                api_uow = UnitOfWork()
+                try:
+                    await api_uow.__aenter__()
+                    api_service = await ApiKeysService.from_unit_of_work(api_uow)
+
+                    # Try to get fresh token
+                    for key_name in ["DATABRICKS_TOKEN", "DATABRICKS_API_KEY"]:
+                        api_key = await api_service.find_by_name(key_name)
+                        if api_key and api_key.encrypted_value:
+                            from src.utils.encryption_utils import EncryptionUtils
+                            new_token = EncryptionUtils.decrypt_value(api_key.encrypted_value)
+                            if new_token and new_token != self._api_token:
+                                self._api_token = new_token
+                                logger.info(f"Successfully refreshed API token from {key_name}")
+                                return True
+
+                    # Try environment variables as fallback
+                    env_token = os.environ.get("DATABRICKS_TOKEN") or os.environ.get("DATABRICKS_API_KEY")
+                    if env_token and env_token != self._api_token:
+                        self._api_token = env_token
+                        logger.info("Successfully refreshed API token from environment")
+                        return True
+
+                finally:
+                    await api_uow.__aexit__(None, None, None)
+
+            logger.error("No fresh token available for refresh")
+            return False
+
+        except Exception as e:
+            logger.error(f"Error refreshing token: {e}")
             return False
 
     def get_workspace_host(self) -> Optional[str]:
