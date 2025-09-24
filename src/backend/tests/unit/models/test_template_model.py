@@ -222,12 +222,13 @@ class TestPromptTemplate:
         assert PromptTemplate.__tablename__ == "prompttemplate"
 
     def test_prompt_template_unique_name_constraint(self):
-        """Test that the name field has unique constraint."""
+        """Test that the model enforces uniqueness by (name, group_id) composite, not column-level unique."""
         # Act
         name_column = PromptTemplate.__table__.columns['name']
-        
+
         # Assert
-        assert name_column.unique is True
+        # Column-level unique should be disabled; composite UniqueConstraint('name', 'group_id') is used instead
+        assert not name_column.unique
         assert name_column.nullable is False
 
     def test_prompt_template_indexes(self):
