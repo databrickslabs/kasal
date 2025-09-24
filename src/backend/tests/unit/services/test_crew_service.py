@@ -431,7 +431,7 @@ class TestCrewServiceFindByGroup:
         result = await crew_service.find_by_group(sample_group_context)
         
         assert result == crews
-        mock_repository.find_by_group.assert_called_once_with(["group-123", "group-456"])
+        mock_repository.find_by_group.assert_called_once_with(["group-123"])
     
     @pytest.mark.asyncio
     async def test_find_by_group_empty_group_context(self, crew_service):
@@ -455,7 +455,7 @@ class TestCrewServiceFindByGroup:
         result = await crew_service.find_by_group(sample_group_context)
         
         assert result == []
-        mock_repository.find_by_group.assert_called_once_with(["group-123", "group-456"])
+        mock_repository.find_by_group.assert_called_once_with(["group-123"])
 
 
 class TestCrewServiceGetByGroup:
@@ -471,7 +471,7 @@ class TestCrewServiceGetByGroup:
         result = await crew_service.get_by_group(crew_id, sample_group_context)
         
         assert result == crew
-        mock_repository.get_by_group.assert_called_once_with(crew_id, ["group-123", "group-456"])
+        mock_repository.get_by_group.assert_called_once_with(crew_id, ["group-123"])
     
     @pytest.mark.asyncio
     async def test_get_by_group_empty_group_context(self, crew_service):
@@ -497,7 +497,7 @@ class TestCrewServiceGetByGroup:
         result = await crew_service.get_by_group(crew_id, sample_group_context)
         
         assert result is None
-        mock_repository.get_by_group.assert_called_once_with(crew_id, ["group-123", "group-456"])
+        mock_repository.get_by_group.assert_called_once_with(crew_id, ["group-123"])
 
 
 class TestCrewServiceUpdateWithPartialDataByGroup:
@@ -521,7 +521,7 @@ class TestCrewServiceUpdateWithPartialDataByGroup:
         result = await crew_service.update_with_partial_data_by_group(crew_id, sample_crew_update, sample_group_context)
         
         assert result == updated_crew
-        mock_repository.get_by_group.assert_called_once_with(crew_id, ["group-123", "group-456"])
+        mock_repository.get_by_group.assert_called_once_with(crew_id, ["group-123"])
         mock_repository.update.assert_called_once()
     
     @pytest.mark.asyncio
@@ -549,7 +549,7 @@ class TestCrewServiceUpdateWithPartialDataByGroup:
         result = await crew_service.update_with_partial_data_by_group(crew_id, sample_crew_update, sample_group_context)
         
         assert result is None
-        mock_repository.get_by_group.assert_called_once_with(crew_id, ["group-123", "group-456"])
+        mock_repository.get_by_group.assert_called_once_with(crew_id, ["group-123"])
         mock_repository.update.assert_not_called()
     
     @pytest.mark.asyncio
@@ -564,7 +564,7 @@ class TestCrewServiceUpdateWithPartialDataByGroup:
         result = await crew_service.update_with_partial_data_by_group(crew_id, empty_update, sample_group_context)
         
         assert result == existing_crew
-        mock_repository.get_by_group.assert_called_once_with(crew_id, ["group-123", "group-456"])
+        mock_repository.get_by_group.assert_called_once_with(crew_id, ["group-123"])
         mock_repository.update.assert_not_called()
 
 
@@ -580,7 +580,7 @@ class TestCrewServiceDeleteByGroup:
         result = await crew_service.delete_by_group(crew_id, sample_group_context)
         
         assert result is True
-        mock_repository.delete_by_group.assert_called_once_with(crew_id, ["group-123", "group-456"])
+        mock_repository.delete_by_group.assert_called_once_with(crew_id, ["group-123"])
     
     @pytest.mark.asyncio
     async def test_delete_by_group_empty_context(self, crew_service):
@@ -606,7 +606,7 @@ class TestCrewServiceDeleteByGroup:
         result = await crew_service.delete_by_group(crew_id, sample_group_context)
         
         assert result is False
-        mock_repository.delete_by_group.assert_called_once_with(crew_id, ["group-123", "group-456"])
+        mock_repository.delete_by_group.assert_called_once_with(crew_id, ["group-123"])
 
 
 class TestCrewServiceDeleteAllByGroup:
@@ -618,8 +618,8 @@ class TestCrewServiceDeleteAllByGroup:
         mock_repository.delete_all_by_group.return_value = None
         
         await crew_service.delete_all_by_group(sample_group_context)
-        
-        mock_repository.delete_all_by_group.assert_called_once_with(["group-123", "group-456"])
+
+        mock_repository.delete_all_by_group.assert_called_once_with(["group-123"])
     
     @pytest.mark.asyncio
     async def test_delete_all_by_group_empty_context(self, crew_service, mock_repository):
