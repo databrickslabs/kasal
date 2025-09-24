@@ -9,7 +9,7 @@ import logging
 from fastapi import APIRouter, Depends, HTTPException, status
 
 from src.core.dependencies import GroupContextDep, SessionDep
-from src.core.permissions import check_role_in_context
+from src.core.permissions import check_role_in_context, require_admin
 from src.schemas.tool import ToolCreate, ToolUpdate, ToolResponse, ToolListResponse, ToggleResponse
 from src.services.tool_service import ToolService
 from src.engines.factory import EngineFactory
@@ -88,6 +88,18 @@ async def get_enabled_tools(
     logger.info(f"Found {tools_response.count} enabled tools")
     return tools_response
 
+
+
+@router.get("/global", response_model=ToolListResponse)
+@require_admin()
+async def list_global_tools(
+    service: ToolServiceDep,
+    group_context: GroupContextDep = None,
+) -> ToolListResponse:
+    """List globally cataloged tools (base tools with no group_id)."""
+    all_tools = await service.get_all_tools()
+    base_tools = [t for t in all_tools.tools if getattr(t, "group_id", None) is None]
+    return ToolListResponse(tools=base_tools, count=len(base_tools))
 
 @router.get("/{tool_id}", response_model=ToolResponse)
 async def get_tool_by_id(
@@ -194,7 +206,7 @@ async def delete_tool(
     """
     Delete a tool with group isolation.
     Only Editors and Admins can delete tools.
-    
+
     Args:
         tool_id: ID of the tool to delete
         db: Database session
@@ -225,7 +237,7 @@ async def toggle_tool_enabled(
 ) -> ToggleResponse:
     """
     Toggle the enabled status of a tool with group isolation.
-    
+
     Args:
         tool_id: ID of the tool to toggle
         db: Database session
@@ -247,33 +259,15 @@ async def toggle_tool_enabled(
 
 @router.get("/configurations/all", response_model=Dict[str, Dict[str, Any]])
 async def get_all_tool_configurations(
-    session: SessionDep,
+    service: ToolServiceDep,
     group_context: GroupContextDep = None,
 ) -> Dict[str, Dict[str, Any]]:
     """
-    Get configurations for all tools for the current group.
-    
-    Args:
-        db: Database session
-        group_context: Group context from headers
-    
-    Returns:
-        Dictionary mapping tool names to their configurations
+    Get configurations for all tools for the current group using group-first override.
     """
-    logger.info("Getting all tool configurations")
+    logger.info("Getting all tool configurations (group-aware)")
     try:
-        # Get the CrewAI engine
-        engine = await EngineFactory.get_engine(
-            engine_type="crewai",
-            db=session,
-            initialize=True
-        )
-        
-        # Get tool registry from engine
-        tool_registry = engine.tool_registry
-        
-        # Get all configurations
-        configs = tool_registry.get_all_tool_configurations()
+        configs = await service.get_all_tool_configurations_for_group(group_context)
         logger.info(f"Retrieved configurations for {len(configs)} tools")
         return configs
     except Exception as e:
@@ -286,40 +280,15 @@ async def get_all_tool_configurations(
 @router.get("/configurations/{tool_name}", response_model=Dict[str, Any])
 async def get_tool_configuration(
     tool_name: str,
-    session: SessionDep,
+    service: ToolServiceDep,
     group_context: GroupContextDep = None,
 ) -> Dict[str, Any]:
     """
-    Get configuration for a specific tool with group isolation.
-    
-    Args:
-        tool_name: Name of the tool
-        db: Database session
-        group_context: Group context from headers
-        
-    Returns:
-        Tool configuration dictionary
+    Get configuration for a specific tool with group-first fallback to base.
     """
     logger.info(f"Getting configuration for tool: {tool_name}")
     try:
-        # Get the CrewAI engine
-        engine = await EngineFactory.get_engine(
-            engine_type="crewai",
-            db=session,
-            initialize=True
-        )
-        
-        # Get tool registry from engine
-        tool_registry = engine.tool_registry
-        
-        # Get configuration
-        config = tool_registry.get_tool_configuration(tool_name)
-        if not config:
-            # Return empty config if none exists
-            logger.info(f"No configuration found for tool: {tool_name}")
-            return {}
-            
-        logger.info(f"Retrieved configuration for tool: {tool_name}")
+        config = await service.get_tool_configuration_with_group_check(tool_name, group_context)
         return config
     except Exception as e:
         logger.error(f"Error getting tool configuration: {str(e)}")
@@ -332,47 +301,24 @@ async def get_tool_configuration(
 async def update_tool_configuration(
     tool_name: str,
     config: Dict[str, Any],
-    session: SessionDep,
+    service: ToolServiceDep,
     group_context: GroupContextDep = None,
 ) -> Dict[str, Any]:
     """
-    Update configuration for a specific tool with group isolation.
-
-    Uses dependency injection to get session.
-
-    Args:
-        tool_name: Name of the tool
-        config: New configuration dictionary
-        session: Database session from FastAPI DI
-        group_context: Group context from headers
-        
-    Returns:
-        Updated tool configuration dictionary
+    Update configuration for a specific tool, scoped to the caller's group.
+    Only Admins can configure tools.
     """
+    # Enforce admin-only configuration changes
+    if not check_role_in_context(group_context, ["admin"]):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Only admins can configure tools"
+        )
+
     logger.info(f"Updating configuration for tool: {tool_name}")
     try:
-        # Get the CrewAI engine
-        engine = await EngineFactory.get_engine(
-            engine_type="crewai",
-            db=session,
-            initialize=True
-        )
-        
-        # Get tool registry from engine
-        tool_registry = engine.tool_registry
-        
-        # Update configuration
-        success = await tool_registry.update_tool_configuration(tool_name, config)
-        if not success:
-            raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
-                detail=f"Tool {tool_name} not found or configuration update failed"
-            )
-            
-        # Get updated configuration
-        updated_config = tool_registry.get_tool_configuration(tool_name)
-        logger.info(f"Updated configuration for tool: {tool_name}")
-        return updated_config
+        updated = await service.update_tool_configuration_group_scoped(tool_name, config, group_context)
+        return updated.config or {}
     except HTTPException:
         raise
     except Exception as e:
@@ -390,12 +336,12 @@ async def get_tool_configuration_schema(
 ) -> Dict[str, Any]:
     """
     Get configuration schema for a specific tool with group isolation.
-    
+
     Args:
         tool_name: Name of the tool
         db: Database session
         group_context: Group context from headers
-        
+
     Returns:
         JSON schema dictionary describing the tool's configuration format
     """
@@ -407,10 +353,10 @@ async def get_tool_configuration_schema(
             db=session,
             initialize=True
         )
-        
+
         # Get tool registry from engine
         tool_registry = engine.tool_registry
-        
+
         # Get schema
         schema = tool_registry.get_tool_configuration_schema(tool_name)
         if not schema:
@@ -418,7 +364,7 @@ async def get_tool_configuration_schema(
                 status_code=status.HTTP_404_NOT_FOUND,
                 detail=f"Schema for tool {tool_name} not found"
             )
-            
+
         logger.info(f"Retrieved configuration schema for tool: {tool_name}")
         return schema
     except HTTPException:
@@ -439,19 +385,15 @@ async def update_tool_configuration_in_memory(
 ) -> Dict[str, Any]:
     """
     Update a tool's configuration in memory without requiring a database entry.
-    
-    This is useful for runtime configuration of tools that don't have a database record.
-    The changes won't be persisted after server restart.
-    
-    Args:
-        tool_name: Name of the tool
-        config: New configuration dictionary
-        db: Database session
-        group_context: Group context from headers
-        
-    Returns:
-        Updated tool configuration dictionary
+    Only Admins can use this ephemeral override.
     """
+    # Enforce admin-only configuration changes
+    if not check_role_in_context(group_context, ["admin"]):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Only admins can configure tools"
+        )
+
     logger.info(f"Updating in-memory configuration for tool: {tool_name}")
     try:
         # Get the CrewAI engine
@@ -460,10 +402,10 @@ async def update_tool_configuration_in_memory(
             db=session,
             initialize=True
         )
-        
+
         # Get tool registry from engine
         tool_registry = engine.tool_registry
-        
+
         # Update configuration in memory
         success = tool_registry.update_tool_configuration_in_memory(tool_name, config)
         if not success:
@@ -471,7 +413,7 @@ async def update_tool_configuration_in_memory(
                 status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
                 detail=f"Failed to update in-memory configuration for tool {tool_name}"
             )
-            
+
         # Get updated configuration
         updated_config = tool_registry.get_tool_configuration(tool_name)
         logger.info(f"Updated in-memory configuration for tool: {tool_name}")
@@ -483,4 +425,30 @@ async def update_tool_configuration_in_memory(
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Error updating in-memory tool configuration: {str(e)}"
-        ) 
+        )
+
+
+
+@router.patch("/{tool_id}/global-availability", response_model=ToolResponse)
+@require_admin()
+async def set_global_availability(
+    tool_id: int,
+    payload: Dict[str, Any],
+    service: ToolServiceDep,
+    group_context: GroupContextDep = None,
+) -> ToolResponse:
+    """System admin: set global availability (enabled) for a base tool.
+
+    Rejects if the tool is group-scoped (must be a base tool with group_id=None).
+    """
+    if "enabled" not in payload or not isinstance(payload["enabled"], bool):
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="'enabled' boolean is required")
+
+    # Ensure the tool exists and is a base (global) tool
+    tool = await service.get_tool_by_id(tool_id)
+    if getattr(tool, "group_id", None) is not None:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Not a global tool")
+
+    # Update enabled on the base tool
+    updated = await service.update_tool(tool_id, ToolUpdate(enabled=bool(payload["enabled"])) )
+    return updated

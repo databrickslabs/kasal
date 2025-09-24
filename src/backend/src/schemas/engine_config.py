@@ -32,7 +32,7 @@ class EngineConfigResponse(EngineConfigBase):
     id: int
     created_at: datetime
     updated_at: datetime
-    
+
     model_config = ConfigDict(from_attributes=True)
 class EngineConfigToggleUpdate(BaseModel):
     """Schema for toggling engine configuration enabled status."""
@@ -52,4 +52,8 @@ class EngineConfigListResponse(BaseModel):
 
 class CrewAIFlowConfigUpdate(BaseModel):
     """Schema for updating CrewAI flow configuration."""
-    flow_enabled: bool = Field(..., description="Whether flow feature is enabled") 
+    flow_enabled: bool = Field(..., description="Whether flow feature is enabled")
+
+class CrewAIDebugTracingUpdate(BaseModel):
+    """Schema for updating CrewAI debug tracing configuration."""
+    debug_tracing: bool = Field(..., description="Whether detailed debug tracing is enabled")

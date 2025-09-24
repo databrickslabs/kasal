@@ -72,29 +72,31 @@ class ExecutionNameService:
     async def generate_execution_name(self, request: ExecutionNameGenerationRequest) -> ExecutionNameGenerationResponse:
         """
         Generate a descriptive name for an execution based on agents and tasks configuration.
-        
+
         Args:
             request: Request containing agents and tasks configuration
-            
+
         Returns:
             Response containing the generated name
         """
         try:
             # Get the template for name generation
-            default_prompt = "Generate a 2-4 word descriptive name for this execution based on the agents and tasks."
-            system_message = await TemplateService.get_template_content("generate_job_name", default_prompt)
-            
-            # Prepare the prompt
-            prompt = f"""Based on the following configuration, generate a 2-4 word descriptive name:
+            # This template already includes instructions to only return the name without explanations
+            system_message = await TemplateService.get_template_content("generate_job_name")
 
-Agents:
+            # Fallback if template is not found (shouldn't happen if seeds are run)
+            if not system_message:
+                system_message = """Generate a concise, descriptive name (2-4 words) for an AI job run based on the agents and tasks involved.
+Only return the name, no explanations or additional text."""
+                logger.warning("generate_job_name template not found, using fallback")
+
+            # Prepare the prompt with just the data
+            prompt = f"""Agents:
 {request.agents_yaml}
 
 Tasks:
-{request.tasks_yaml}
+{request.tasks_yaml}"""
 
-Generate a short, memorable name that captures the essence of this execution."""
-            
             # Prepare messages for LLM
             messages = [
                 {"role": "system", "content": system_message},
