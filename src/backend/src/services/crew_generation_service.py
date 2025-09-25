@@ -451,7 +451,7 @@ class CrewGenerationService:
             logger.error(traceback.format_exc())
             return ""
 
-    async def create_crew_complete(self, request: CrewGenerationRequest, group_context: Optional[GroupContext] = None) -> Dict[str, Any]:
+    async def create_crew_complete(self, request: CrewGenerationRequest, group_context: Optional[GroupContext] = None, fast_planning: bool = False) -> Dict[str, Any]:
         """
         Create a crew with agents and tasks.
 
@@ -535,8 +535,8 @@ class CrewGenerationService:
                 response = await litellm.acompletion(
                     **model_params,
                     messages=messages,
-                    temperature=0.7,
-                    max_tokens=4000
+                    temperature=0.2 if fast_planning else 0.7,
+                    max_tokens=1500 if fast_planning else 4000
                 )
 
                 # Extract and parse the content

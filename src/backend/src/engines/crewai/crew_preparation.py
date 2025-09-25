@@ -607,7 +607,8 @@ class CrewPreparation:
                 'tasks': self.tasks,
                 'process': process_type,
                 'verbose': True,
-                'memory': default_crew_memory
+                'memory': default_crew_memory,
+                'tracing': False  # Explicitly disable CrewAI cloud tracing
             }
 
             # Set default LLM for crew manager using the submitted model

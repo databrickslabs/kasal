@@ -210,8 +210,8 @@ class TaskGenerationService:
             response = await litellm.acompletion(
                 **model_params,
                 messages=messages,
-                temperature=0.7,
-                max_tokens=4000
+                temperature=0.2 if fast_planning else 0.7,
+                max_tokens=1200 if fast_planning else 4000
             )
             
             # Extract content from response
@@ -372,10 +372,10 @@ class TaskGenerationService:
         
         return response
     
-    async def generate_and_save_task(self, request: TaskGenerationRequest, group_context: GroupContext) -> dict:
+    async def generate_and_save_task(self, request: TaskGenerationRequest, group_context: GroupContext, fast_planning: bool = False) -> dict:
         """
         Generate a task using LLM.
-        
+
         This method follows the exact same pattern as AgentGenerationService.generate_agent()
         - Only handles generation, no database saving
         - Database persistence should be handled by the calling layer (frontend)

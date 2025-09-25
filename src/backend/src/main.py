@@ -23,10 +23,23 @@ from src.services.execution_cleanup_service import ExecutionCleanupService
 from src.utils.databricks_url_utils import DatabricksURLUtils
 
 # Set up basic logging initially, will be enhanced in lifespan
+# Use LOG_LEVEL from environment to control all loggers including third-party libraries
+log_level = os.environ.get("LOG_LEVEL", "INFO").upper()
 logging.basicConfig(
-    level=logging.INFO,
+    level=getattr(logging, log_level, logging.INFO),
     format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
 )
+
+
+# Optionally suppress console logs entirely (root handlers)
+if os.environ.get("SUPPRESS_CONSOLE_LOGS", "false").lower() == "true":
+    root_logger = logging.getLogger()
+    root_logger.handlers = [h for h in root_logger.handlers if not isinstance(h, logging.StreamHandler)]
+
+# Suppress DEBUG logs from third-party libraries
+for lib_logger in ["aiosqlite", "sqlalchemy.engine", "sqlalchemy.pool", "httpx", "httpcore"]:
+    logging.getLogger(lib_logger).setLevel(logging.WARNING)
+
 logger = logging.getLogger(__name__)
 
 # Set debug flag for seeders
@@ -47,24 +60,34 @@ os.makedirs(log_path, exist_ok=True)
 async def lifespan(app: FastAPI):
     """
     Lifespan manager for the FastAPI application.
-    
+
     Handles startup and shutdown events for the application.
     """
     # Initialize the centralized logging system
     log_dir = os.environ.get("LOG_DIR")
     logger_manager = LoggerManager.get_instance(log_dir)
     logger_manager.initialize()
-    
+
     system_logger = logger_manager.system
     system_logger.info(f"Starting application... Logs will be stored in: {log_dir}")
-    
+
+    # Reduce noisy module logs to keep stdout manageable
+    try:
+        import logging as _logging
+        _logging.getLogger("src.utils.user_context").setLevel(_logging.WARNING)
+        _logging.getLogger("src.core.dependencies").setLevel(_logging.WARNING)
+        _logging.getLogger("src.services.user_service").setLevel(_logging.WARNING)
+    except Exception as _e:
+        system_logger.warning(f"Failed to adjust module log levels: {_e}")
+
+
     # Validate and fix Databricks environment variables early in startup
     try:
         system_logger.info("Validating Databricks environment configuration...")
         DatabricksURLUtils.validate_and_fix_environment()
     except Exception as e:
         system_logger.warning(f"Error validating Databricks environment: {e}")
-    
+
     # Import needed for DB init
     # pylint: disable=unused-import,import-outside-toplevel
     import src.db.all_models  # noqa
@@ -90,22 +113,22 @@ async def lifespan(app: FastAPI):
             system_logger.info("Embedding queue service started in background for SQLite batch processing")
         except Exception as e:
             system_logger.error(f"Failed to start embedding queue service: {e}")
-    
+
     # Now check if database exists and tables are initialized
     scheduler = None
     db_initialized = False
-    
+
     try:
         # Simple check for tables - just check if the database file exists with content
         if str(settings.DATABASE_URI).startswith('sqlite'):
             db_path = settings.SQLITE_DB_PATH
-            
+
             # Get absolute path if relative
             if not os.path.isabs(db_path):
                 db_path = os.path.abspath(db_path)
-            
+
             system_logger.info(f"Checking database at: {db_path}")
-            
+
             if os.path.exists(db_path) and os.path.getsize(db_path) > 0:
                 # Try to execute a simple query to verify tables
                 try:
@@ -136,7 +159,7 @@ async def lifespan(app: FastAPI):
                 system_logger.warning(f"Database connection failed: {e}")
     except Exception as e:
         system_logger.error(f"Error checking database: {e}")
-    
+
     # Clean up stale jobs from previous run
     if db_initialized:
         system_logger.info("Cleaning up stale jobs from previous run...")
@@ -147,17 +170,17 @@ async def lifespan(app: FastAPI):
         except Exception as e:
             system_logger.error(f"Error cleaning up stale jobs: {e}")
             # Don't raise - allow app to start even if cleanup fails
-    
+
     # Run database seeders after DB initialization
     if db_initialized:
         # Import needed for seeders
         # pylint: disable=unused-import,import-outside-toplevel
         from src.seeds.seed_runner import run_all_seeders
-        
+
         # Check if seeding is enabled
         should_seed = settings.AUTO_SEED_DATABASE
         system_logger.info(f"AUTO_SEED_DATABASE setting: {settings.AUTO_SEED_DATABASE}")
-        
+
         # Run seeders if enabled
         if should_seed:
             system_logger.info("Running database seeders...")
@@ -165,7 +188,7 @@ async def lifespan(app: FastAPI):
                 # Always run seeders in background to avoid blocking startup
                 import asyncio
                 system_logger.info("Starting seeders in background...")
-                
+
                 async def run_seeders_background():
                     try:
                         system_logger.info("Background seeders started...")
@@ -176,7 +199,7 @@ async def lifespan(app: FastAPI):
                         import traceback
                         error_trace = traceback.format_exc()
                         system_logger.error(f"Background seeder error trace: {error_trace}")
-                
+
                 # Create background task
                 asyncio.create_task(run_seeders_background())
                 system_logger.info("Seeders started in background, application startup continues...")
@@ -190,7 +213,7 @@ async def lifespan(app: FastAPI):
             system_logger.info("Database seeding skipped (AUTO_SEED_DATABASE is False)")
     else:
         system_logger.warning("Skipping seeding as database is not initialized.")
-    
+
     # Initialize scheduler on startup only if database is initialized
     if db_initialized:
         system_logger.info("Initializing scheduler...")
@@ -198,7 +221,7 @@ async def lifespan(app: FastAPI):
             # Get database connection
             db_gen = get_db()
             db = await anext(db_gen)
-            
+
             # Initialize scheduler service
             scheduler = SchedulerService(db)
             await scheduler.start_scheduler()
@@ -208,9 +231,9 @@ async def lifespan(app: FastAPI):
             # Don't raise here, let the application start without scheduler
     else:
         system_logger.warning("Skipping scheduler initialization. Database not ready.")
-    
+
     system_logger.info("Application startup complete")
-    
+
     try:
         yield
     finally:
@@ -244,7 +267,7 @@ async def lifespan(app: FastAPI):
                 system_logger.info("Scheduler shut down successfully.")
             except Exception as e:
                 system_logger.error(f"Error during scheduler shutdown: {e}")
-        
+
         system_logger.info("Application shutdown complete.")
 
 # Initialize FastAPI app

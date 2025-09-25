@@ -149,11 +149,11 @@ class LoggerManager:
         self._databricks_entity_logger = self._setup_logger('databricks_entity', formatters['databricks_entity'], suppress_stdout=True)
         self._documentation_embedding_logger = self._setup_logger('documentation_embedding', formatters['documentation_embedding'], suppress_stdout=True)
         self._knowledge_source_logger = self._setup_logger('knowledge_source', formatters['knowledge_source'], debug_level=True, suppress_stdout=True)
-        self._database_logger = self._setup_logger('database', formatters['database'], debug_level=True)
+        self._database_logger = self._setup_logger('database', formatters['database'], debug_level=True, suppress_stdout=True)
 
         # Configure uvicorn access logging after all loggers are initialized
         self._configure_uvicorn_logging()
-        
+
         # Log initialization success
         self._system_logger.info(f"Logging system initialized. Log directory: {self._log_dir}")
     

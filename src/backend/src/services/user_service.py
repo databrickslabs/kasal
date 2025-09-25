@@ -199,7 +199,19 @@ class UserService:
                 # Handle race condition where user was created between our check and create attempt
                 if "UNIQUE constraint failed" in str(create_error) or "unique constraint" in str(create_error).lower():
                     logger.warning(f"Race condition detected: User {email} was created by another request. Fetching existing user.")
+
+                    # CRITICAL: Rollback the failed transaction to clear session state
+                    # SQLite sessions can't see committed data from other connections until rollback
+                    try:
+                        await self.session.rollback()
+                        # Expunge all objects to ensure fresh fetch from database
+                        self.session.expunge_all()
+                        logger.debug(f"Session rolled back and cleared after UNIQUE constraint error for {email}")
+                    except Exception as rollback_error:
+                        logger.warning(f"Error during rollback: {rollback_error}")
+
                     # Fetch the user that was created by the other request
+                    # The rollback and expunge allow us to see data committed by other sessions
                     existing_user = await self.user_repo.get_by_email(email)
                     if existing_user:
                         logger.info(f"Successfully retrieved user created by concurrent request: {email}")

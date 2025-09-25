@@ -136,8 +136,8 @@ class AgentGenerationService:
             logger.error(traceback.format_exc())
             return ""
     
-    async def generate_agent(self, prompt_text: str, model: str = None, tools: List[str] = None, 
-                            group_context: Optional[GroupContext] = None) -> Dict[str, Any]:
+    async def generate_agent(self, prompt_text: str, model: str = None, tools: List[str] = None,
+                            group_context: Optional[GroupContext] = None, fast_planning: bool = False) -> Dict[str, Any]:
         """
         Generate agent configuration from natural language description.
         
@@ -174,7 +174,7 @@ class AgentGenerationService:
 
             # Generate agent configuration with enhanced context
             agent_config = await self._generate_agent_config(
-                prompt_text, system_message, model, documentation_context
+                prompt_text, system_message, model, documentation_context, fast_planning=fast_planning
             )
 
             # Log the interaction
@@ -220,7 +220,7 @@ class AgentGenerationService:
         return system_message
     
     async def _generate_agent_config(self, prompt_text: str, system_message: str, model: str,
-                                     documentation_context: str = None) -> Dict[str, Any]:
+                                     documentation_context: str = None, fast_planning: bool = False) -> Dict[str, Any]:
         """
         Generate and process agent configuration.
 
@@ -262,8 +262,8 @@ class AgentGenerationService:
             response = await litellm.acompletion(
                 **model_params,
                 messages=messages,
-                temperature=0.7,
-                max_tokens=4000
+                temperature=0.2 if fast_planning else 0.7,
+                max_tokens=1200 if fast_planning else 4000
             )
             
             # Extract and parse content

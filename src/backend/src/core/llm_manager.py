@@ -273,13 +273,14 @@ litellm.retry_on = ["429", "timeout", "rate_limit_error"]  # Retry on these erro
 
 # Configure MLflow integration for Databricks observability
 _mlflow_configured = False
-_use_mlflow = os.getenv("KASAL_USE_MLFLOW", "true").lower() in ("true", "1", "yes")
+# Default to disabled globally; we enable per-workspace dynamically
+_use_mlflow = False
 
 def _configure_databricks_mlflow():
     """Configure MLflow using existing Databricks authentication system"""
     global _mlflow_configured
 
-    if _mlflow_configured or not _use_mlflow:
+    if _mlflow_configured is True:
         return
 
     try:
@@ -298,8 +299,16 @@ def _configure_databricks_mlflow():
                 # Set up experiment for LLM operations
                 experiment_name = os.getenv("MLFLOW_EXPERIMENT_NAME", "/Shared/kasal-llm-operations")
                 try:
-                    mlflow.set_experiment(experiment_name)
-                    logger.info(f"MLflow experiment set to: {experiment_name}")
+                    exp = mlflow.set_experiment(experiment_name)
+                    logger.info(f"MLflow experiment set to: {experiment_name} (ID: {getattr(exp, 'experiment_id', 'unknown')})")
+                    # Explicitly configure MLflow 3.x tracing destination and enable it
+                    try:
+                        from mlflow.tracing.destination import Databricks as _Dest
+                        mlflow.tracing.set_destination(_Dest(experiment_id=str(getattr(exp, "experiment_id", ""))))
+                        mlflow.tracing.enable()
+                        logger.info("MLflow tracing destination set and tracing enabled")
+                    except Exception as te:
+                        logger.warning(f"Could not configure MLflow tracing destination: {te}")
                 except Exception as e:
                     logger.warning(f"Could not set MLflow experiment '{experiment_name}': {e}")
                     # Continue with default experiment
@@ -308,8 +317,8 @@ def _configure_databricks_mlflow():
                 # This dual approach ensures maximum coverage of LLM calls
 
                 # 1. Enable LiteLLM autolog (captures underlying LLM calls)
-                mlflow.litellm.autolog()
-                logger.info("✅ MLflow LiteLLM autolog enabled")
+                mlflow.litellm.autolog(log_traces=True)
+                logger.info("✅ MLflow LiteLLM autolog enabled (log_traces=True)")
 
                 # 2. Enable CrewAI autolog (captures CrewAI workflow structure)
                 try:
@@ -336,21 +345,10 @@ def _configure_databricks_mlflow():
     except Exception as e:
         logger.warning(f"Failed to configure Databricks MLflow: {e}")
 
-# Attempt to configure MLflow on module initialization
-_configure_databricks_mlflow()
-
-# Configure litellm callbacks - use MLflow if available, otherwise file logger
-if _mlflow_configured and _use_mlflow:
-    # MLflow autolog will handle callbacks automatically
-    logger.info("Using MLflow for LLM observability")
-    # Still keep file logger as secondary logging
-    litellm.success_callback = [litellm_file_logger]
-    litellm.failure_callback = [litellm_file_logger]
-else:
-    # Use file logger as primary logging
-    litellm.success_callback = [litellm_file_logger]
-    litellm.failure_callback = [litellm_file_logger]
-    logger.info("Using file-based logging for LLM observability")
+# Configure litellm callbacks to file logger by default
+litellm.success_callback = [litellm_file_logger]
+litellm.failure_callback = [litellm_file_logger]
+logger.info("Using file-based logging for LLM observability")
 
 # Configure logging
 logger.info(f"Configured LiteLLM to write logs to: {log_file_path}")
@@ -839,25 +837,39 @@ class LLMManager:
         return LLM(**llm_params)
 
     @staticmethod
-    async def get_llm(model_name: str, temperature: Optional[float] = None) -> MLflowTrackedLLM:
+    async def get_llm(model_name: str, temperature: Optional[float] = None):
         """
-        Create a CrewAI LLM instance for the specified model with MLflow tracking.
-
-        Args:
-            model_name: The model identifier to configure
-            temperature: Optional temperature override (0.0-1.0)
-
-        Returns:
-            MLflowTrackedLLM: CrewAI LLM instance wrapped with MLflow tracking
+        Create a CrewAI LLM instance for the specified model.
+        If MLflow is enabled for the current workspace (group), wrap with MLflow tracking.
         """
         # Get standard LLM configuration
         llm = await LLMManager.configure_crewai_llm(model_name, temperature)
 
-        # Wrap with MLflow tracking to ensure all calls are captured
-        tracked_llm = MLflowTrackedLLM(llm, model_name)
-        logger.info(f"🎯 Created MLflow-tracked LLM for model: {model_name}")
+        # Determine if MLflow is enabled for this group
+        try:
+            from src.core.user_context import UserContext
+            from src.db.session import async_session_factory
+            from src.services.mlflow_service import MLflowService
 
-        return tracked_llm
+            group_ctx = UserContext.get_group_context()
+            group_id = getattr(group_ctx, "primary_group_id", None) if group_ctx else None
+
+            enabled = False
+            async with async_session_factory() as db:
+                svc = MLflowService(db, group_id=group_id)
+                enabled = await svc.is_enabled()
+
+            if enabled:
+                _configure_databricks_mlflow()
+                tracked_llm = MLflowTrackedLLM(llm, model_name)
+                logger.info(f"🎯 Created MLflow-tracked LLM for model: {model_name}")
+                return tracked_llm
+            else:
+                logger.info("MLflow disabled for this workspace; returning plain LLM")
+                return llm
+        except Exception as e:
+            logger.warning(f"Could not determine MLflow status; returning plain LLM. Error: {e}")
+            return llm
 
     @staticmethod
     async def get_embedding(text: str, model: str = "databricks-gte-large-en", embedder_config: Optional[Dict[str, Any]] = None) -> Optional[List[float]]:
