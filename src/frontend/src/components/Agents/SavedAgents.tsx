@@ -44,7 +44,7 @@ const SavedAgents: React.FC<SavedAgentsProps> = ({ refreshTrigger }) => {
     };
 
     const fetchTools = async () => {
-      const fetchedTools = await ToolService.listTools();
+      const fetchedTools = await ToolService.listEnabledTools();
       setTools(fetchedTools.map(tool => tool.title));
     };
 

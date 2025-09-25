@@ -1,5 +1,5 @@
 import { Connection, Edge } from 'reactflow';
-import { useUILayoutStore } from '../store/uiLayout';
+
 
 /**
  * Generates a standardized edge ID based on the connection parameters
@@ -37,12 +37,10 @@ export const createEdge = (
   }
 
   // Fallback enforcement: if creating an Agent -> Task edge and no handles are specified,
-  // choose connectors based on current layout orientation from UI store.
+  // always use horizontal connectors: agent right -> task left (independent of orientation)
   const looksLikeAgentToTask = connection.source.startsWith('agent-') && connection.target.startsWith('task-');
-  const orientation = useUILayoutStore.getState().getUILayoutState().layoutOrientation;
-  // Vertical: agent right -> task left; Horizontal: agent bottom -> task top
-  const defaultSource = orientation === 'vertical' ? 'right' : 'bottom';
-  const defaultTarget = orientation === 'vertical' ? 'left' : 'top';
+  const defaultSource = 'right';
+  const defaultTarget = 'left';
 
   const sourceHandle = connection.sourceHandle ?? (looksLikeAgentToTask ? defaultSource : null);
   const targetHandle = connection.targetHandle ?? (looksLikeAgentToTask ? defaultTarget : null);

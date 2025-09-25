@@ -115,10 +115,9 @@ const LeftSidebar: React.FC<LeftSidebarProps> = ({
   const toggleLayoutOrientation = useCallback(() => {
     const next = (layoutOrientation === 'horizontal') ? 'vertical' : 'horizontal';
     setLayoutOrientation(next);
-    // Trigger node repositioning and fit view
+    // Trigger node repositioning and fit view (recalculateNodePositions already calls fitView)
     setTimeout(() => {
       window.dispatchEvent(new CustomEvent('recalculateNodePositions', { detail: { reason: 'layout-orientation-toggle' } }));
-      window.dispatchEvent(new Event('fitViewToNodesInternal'));
     }, 50);
   }, [layoutOrientation, setLayoutOrientation]);
 

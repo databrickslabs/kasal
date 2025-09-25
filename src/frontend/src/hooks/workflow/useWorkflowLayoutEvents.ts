@@ -16,7 +16,7 @@ export function useWorkflowLayoutEvents(params: {
 }) {
   const {
     nodes,
-    edges,
+    edges: _edges,
     setNodes,
     setEdges,
     crewFlowInstanceRef,
@@ -45,15 +45,10 @@ export function useWorkflowLayoutEvents(params: {
 
         // Calculate viewport position to center nodes within the available canvas area
         // The CanvasLayoutManager already accounts for chat panel position in canvasArea.x and canvasArea.width
-        // Add a slight left bias when chat is docked left to keep content visually centered
-        const leftBias = currentUIState.chatPanelVisible && currentUIState.chatPanelSide === 'left'
-          ? -(40 + Math.min(240, Math.max(0, (currentUIState.chatPanelWidth || 0) - 300) * 0.6))
-          : 0;
-
         const viewportX =
           canvasArea.x +
           (canvasArea.width - layoutBounds.width * zoom) / 2 -
-          layoutBounds.x * zoom + leftBias;
+          layoutBounds.x * zoom;
         const viewportY =
           canvasArea.y +
           (canvasArea.height - layoutBounds.height * zoom) / 2 -
@@ -86,7 +81,7 @@ export function useWorkflowLayoutEvents(params: {
       const customEvent = event as CustomEvent | undefined;
       const reason = customEvent?.detail?.reason as string | undefined;
 
-      // Only reorganize for specific reasons, not general UI changes
+      // Only handle specific reasons, not general UI changes
       if (
         reason !== 'chat-panel-resize' &&
         reason !== 'execution-history-resize' &&
@@ -95,6 +90,15 @@ export function useWorkflowLayoutEvents(params: {
         return;
       }
 
+      // For chat panel and execution history resize: just recenter viewport, don't move nodes
+      if (reason === 'chat-panel-resize' || reason === 'execution-history-resize') {
+        setTimeout(() => {
+          handleUIAwareFitView();
+        }, 100);
+        return;
+      }
+
+      // For layout orientation toggle: reorganize nodes AND recenter viewport
       const layoutManager = new CanvasLayoutManager({ margin: 20, minNodeSpacing: 50 });
       const currentUIState = useUILayoutStore.getState().getUILayoutState();
 
@@ -107,11 +111,11 @@ export function useWorkflowLayoutEvents(params: {
       const reorganizedNodes = layoutManager.reorganizeNodes(nodes, 'crew');
       setNodes(reorganizedNodes);
 
-      // If layout orientation changed, retarget agent->task edge handles to match orientation
+      // Retarget agent->task edge handles to match orientation
       if (reason === 'layout-orientation-toggle') {
-        const orientation = currentUIState.layoutOrientation;
-        const sourceHandle = orientation === 'vertical' ? 'right' : 'bottom';
-        const targetHandle = orientation === 'vertical' ? 'left' : 'top';
+        // Always retarget Agent -> Task edges to horizontal connectors: agent right -> task left
+        const sourceHandle = 'right' as const;
+        const targetHandle = 'left' as const;
 
         setEdges(prevEdges => prevEdges.map(e => {
           const sourceNode = reorganizedNodes.find(n => n.id === e.source);

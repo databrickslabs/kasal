@@ -1,6 +1,6 @@
 import React, { useCallback, useState, useEffect } from 'react';
 import { Handle, Position, useReactFlow } from 'reactflow';
-import { Box, Typography, Dialog, DialogContent, IconButton, Tooltip } from '@mui/material';
+import { Box, Typography, Dialog, DialogContent, IconButton, Tooltip, CircularProgress } from '@mui/material';
 import PersonIcon from '@mui/icons-material/Person';
 import DeleteIcon from '@mui/icons-material/Delete';
 import EditIcon from '@mui/icons-material/Edit';
@@ -81,7 +81,7 @@ const AgentNode: React.FC<{ data: AgentNodeData; id: string }> = ({ data, id }) 
 
   const loadTools = async () => {
     try {
-      const toolsList = await ToolService.listTools();
+      const toolsList = await ToolService.listEnabledTools();
       setTools(toolsList.map(tool => ({
         ...tool,
         id: String(tool.id)
@@ -590,6 +590,38 @@ const AgentNode: React.FC<{ data: AgentNodeData; id: string }> = ({ data, id }) 
           </IconButton>
         </Tooltip>
       </Box>
+
+
+      {Boolean((data as any)?.loading) && (
+        <Box
+          sx={{
+            position: 'absolute',
+            inset: 0,
+            borderRadius: '12px',
+            background: (theme: any) => theme.palette.mode === 'light'
+              ? 'linear-gradient(180deg, rgba(255,255,255,0.6), rgba(255,255,255,0.4))'
+              : 'linear-gradient(180deg, rgba(0,0,0,0.3), rgba(0,0,0,0.2))',
+            backdropFilter: 'blur(1px)',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            zIndex: 5,
+          }}
+        >
+          <Box sx={{
+            display: 'flex', alignItems: 'center', gap: 1,
+            animation: 'bounce 1.2s ease-in-out infinite',
+            '@keyframes bounce': {
+              '0%': { transform: 'translateY(0)' },
+              '50%': { transform: 'translateY(-3px)' },
+              '100%': { transform: 'translateY(0)' },
+            },
+          }}>
+            <CircularProgress size={16} sx={{ color: 'primary.main' }} />
+            <Typography variant="caption" color="textSecondary">Creating…</Typography>
+          </Box>
+        </Box>
+      )}
 
       {isEditing && agentData && (
         <Dialog

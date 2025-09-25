@@ -24,9 +24,13 @@ import CheckCircleIcon from '@mui/icons-material/CheckCircle';
 import PlayCircleIcon from '@mui/icons-material/PlayCircle';
 import ContentCopyIcon from '@mui/icons-material/ContentCopy';
 import PreviewIcon from '@mui/icons-material/Preview';
+import TimelineIcon from '@mui/icons-material/Timeline';
 import TerminalIcon from '@mui/icons-material/Terminal';
 import RefreshIcon from '@mui/icons-material/Refresh';
+import InsightsIcon from '@mui/icons-material/Insights';
 import { ShowTraceProps, Trace } from '../../types/trace';
+
+import apiClient from '../../config/api/ApiConfig';
 import TraceService from '../../api/TraceService';
 import { useUserPreferencesStore } from '../../store/userPreferencesStore';
 import { useTranslation } from 'react-i18next';
@@ -68,14 +72,14 @@ interface ProcessedTraces {
   };
 }
 
-const ShowTraceTimeline: React.FC<ShowTraceProps> = ({ 
-  open, 
-  onClose, 
-  runId, 
-  run, 
-  onViewResult, 
-  onShowLogs, 
- 
+const ShowTraceTimeline: React.FC<ShowTraceProps> = ({
+  open,
+  onClose,
+  runId,
+  run,
+  onViewResult,
+  onShowLogs,
+
 }) => {
   const { t } = useTranslation();
   const { useNewExecutionUI } = useUserPreferencesStore();
@@ -96,15 +100,16 @@ const ShowTraceTimeline: React.FC<ShowTraceProps> = ({
   const [isLoadingLogs, setIsLoadingLogs] = useState(false);
   const [logsError, setLogsError] = useState<string | null>(null);
   const [isRefreshing, setIsRefreshing] = useState(false);
+  const [evaluationEnabled, setEvaluationEnabled] = useState<boolean>(false);
 
   // Handle opening logs dialog
   const handleOpenLogs = async () => {
     if (!run) return;
-    
+
     setShowLogsDialog(true);
     setIsLoadingLogs(true);
     setLogsError(null);
-    
+
     try {
       const fetchedLogs = await executionLogService.getHistoricalLogs(run.job_id);
       // Convert LogMessage to LogEntry format
@@ -124,15 +129,80 @@ const ShowTraceTimeline: React.FC<ShowTraceProps> = ({
     }
   };
 
+  // Compute MLflow Traces deep link for this workspace (experiment + workspace id)
+  const getMlflowTracesUrl = async (): Promise<string> => {
+    try {
+      // 1) Resolve workspace URL (avoid hitting /databricks/config to prevent schema mismatch issues)
+      let workspaceUrl = '';
+
+      // 2) Get environment to obtain workspace_id (for the 'o' query param)
+      let workspaceId: string | undefined;
+      try {
+        const envResp = await apiClient.get('/databricks/environment');
+        workspaceId = envResp?.data?.workspace_id || undefined;
+        // If workspaceUrl still empty, try env host
+        const envHost = envResp?.data?.databricks_host;
+        if (!workspaceUrl && envHost) {
+          workspaceUrl = envHost.startsWith('http') ? envHost : `https://${envHost}`;
+        }
+      } catch (e) {
+        console.warn('Unable to get Databricks environment info');
+      }
+
+      // 3) If not configured, try to infer from current host when running in Databricks
+      if (!workspaceUrl || workspaceUrl === 'compute' || !workspaceUrl.includes('.')) {
+        if (typeof window !== 'undefined' && window.location.hostname.includes('databricks')) {
+          workspaceUrl = `https://${window.location.hostname}`;
+        } else {
+          // 4) Fallback to backend helper if available
+          try {
+            const resp = await apiClient.get('/databricks/workspace-url');
+            workspaceUrl = resp.data?.workspace_url || '';
+          } catch (e) {
+            console.warn('Unable to determine Databricks workspace URL');
+          }
+        }
+      }
+
+      if (!workspaceUrl) return '#';
+
+      // Normalize
+      if (workspaceUrl.endsWith('/')) workspaceUrl = workspaceUrl.slice(0, -1);
+      if (!workspaceUrl.startsWith('http')) workspaceUrl = `https://${workspaceUrl}`;
+
+      // 5) Fetch experiment id for crew traces
+      let experimentId: string | undefined;
+      try {
+        const expResp = await apiClient.get('/mlflow/experiment-info');
+        experimentId = expResp?.data?.experiment_id || undefined;
+      } catch (e) {
+        console.warn('Unable to resolve MLflow experiment id');
+      }
+
+      if (experimentId) {
+        // Build deep link to Traces tab. 'o' param (workspace id) improves routing if available.
+        const o = workspaceId ? `?o=${encodeURIComponent(workspaceId)}` : '';
+        return `${workspaceUrl}/ml/experiments/${encodeURIComponent(experimentId)}/traces${o}`;
+      }
+
+      // Fallback to experiments root if we cannot resolve experiment id
+      return `${workspaceUrl}/mlflow/experiments`;
+    } catch (err) {
+      console.error('Failed to build MLflow traces URL:', err);
+      return '#';
+    }
+  };
+
+
   // Process traces into hierarchical structure
   const processTraces = useCallback((rawTraces: Trace[]): ProcessedTraces => {
     // Filter out Task Orchestrator events before processing
-    const filteredTraces = rawTraces.filter(trace => 
-      trace.event_source !== 'Task Orchestrator' && 
+    const filteredTraces = rawTraces.filter(trace =>
+      trace.event_source !== 'Task Orchestrator' &&
       trace.event_context !== 'task_management'
     );
-    
-    const sorted = [...filteredTraces].sort((a, b) => 
+
+    const sorted = [...filteredTraces].sort((a, b) =>
       new Date(a.created_at).getTime() - new Date(b.created_at).getTime()
     );
 
@@ -146,12 +216,12 @@ const ShowTraceTimeline: React.FC<ShowTraceProps> = ({
 
     // Separate global events
     const globalEvents = {
-      start: sorted.filter(t => 
-        t.event_source === 'crew' && 
+      start: sorted.filter(t =>
+        t.event_source === 'crew' &&
         (t.event_type === 'crew_started' || t.event_type === 'execution_started')
       ),
-      end: sorted.filter(t => 
-        t.event_source === 'crew' && 
+      end: sorted.filter(t =>
+        t.event_source === 'crew' &&
         (t.event_type === 'crew_completed' || t.event_type === 'execution_completed')
       )
     };
@@ -193,15 +263,15 @@ const ShowTraceTimeline: React.FC<ShowTraceProps> = ({
     // Second pass: group traces by agent
     sorted.forEach(trace => {
       // Skip global events, task orchestration events, and task events for agent grouping
-      if (trace.event_source === 'crew' || 
-          trace.event_source === 'task' || 
+      if (trace.event_source === 'crew' ||
+          trace.event_source === 'task' ||
           trace.event_source === 'Task Orchestrator' ||
           trace.event_context === 'task_management') {
         return;
       }
 
       let agent = trace.event_source || 'Unknown Agent';
-      
+
       // For LLM calls, extract agent from extra_data if available
       if (trace.event_type === 'llm_call' && trace.extra_data && typeof trace.extra_data === 'object') {
         const extraData = trace.extra_data as Record<string, unknown>;
@@ -230,7 +300,7 @@ const ShowTraceTimeline: React.FC<ShowTraceProps> = ({
 
     // Process each agent's traces
     const agents: GroupedTrace[] = [];
-    
+
     agentMap.forEach((agentTraces, agentName) => {
       if (agentTraces.length === 0) return;
 
@@ -247,7 +317,7 @@ const ShowTraceTimeline: React.FC<ShowTraceProps> = ({
         if (trace.event_type === 'task_started') {
           // Extract task name from the task_started event
           let newTaskName: string | null = null;
-          
+
           // First try trace_metadata (where task_name is typically stored)
           if (trace.trace_metadata) {
             const metadata = trace.trace_metadata as Record<string, unknown>;
@@ -256,7 +326,7 @@ const ShowTraceTimeline: React.FC<ShowTraceProps> = ({
               newTaskName = taskName;
             }
           }
-          
+
           // Fallback to extra_data if trace_metadata doesn't have task_name
           if (!newTaskName && trace.extra_data) {
             const extraData = trace.extra_data as Record<string, unknown>;
@@ -265,7 +335,7 @@ const ShowTraceTimeline: React.FC<ShowTraceProps> = ({
               newTaskName = taskName;
             }
           }
-          
+
           // If we found a task name, use it as the new current task
           if (newTaskName) {
             // Make task name unique if it already exists
@@ -277,21 +347,21 @@ const ShowTraceTimeline: React.FC<ShowTraceProps> = ({
             currentTask = uniqueTaskName;
           }
         }
-        
+
         // If we still don't have a current task, try to find it from task descriptions
         if (!currentTask) {
           const traceTime = new Date(trace.created_at).getTime();
-          
+
           // Find matching task by checking task completions
           const taskEntries = Array.from(taskDescriptions.entries());
           for (const [taskContext, taskDesc] of taskEntries) {
             // Find task completion trace
-            const taskCompletion = sorted.find(t => 
-              t.event_source === 'task' && 
-              t.event_type === 'task_completed' && 
+            const taskCompletion = sorted.find(t =>
+              t.event_source === 'task' &&
+              t.event_type === 'task_completed' &&
               t.event_context === taskContext
             );
-            
+
             if (taskCompletion) {
               const taskEndTime = new Date(taskCompletion.created_at).getTime();
               // If trace is before task completion and agent matches, it belongs to this task
@@ -329,7 +399,7 @@ const ShowTraceTimeline: React.FC<ShowTraceProps> = ({
         const events = taskTraces.map((trace, idx) => {
           const timestamp = new Date(trace.created_at);
           const nextTrace = taskTraces[idx + 1];
-          const duration = nextTrace 
+          const duration = nextTrace
             ? new Date(nextTrace.created_at).getTime() - timestamp.getTime()
             : undefined;
 
@@ -342,19 +412,19 @@ const ShowTraceTimeline: React.FC<ShowTraceProps> = ({
             eventType = 'llm';
             let agentName = '';
             let modelName = '';
-            
+
             if (trace.extra_data && typeof trace.extra_data === 'object') {
               const extraData = trace.extra_data as Record<string, unknown>;
               agentName = (extraData.agent_role as string) || '';
               modelName = (extraData.model as string) || '';
             }
-            
+
             if (agentName && agentName !== 'Unknown Agent') {
               description = `LLM call (${agentName})`;
             } else {
               description = 'LLM call';
             }
-            
+
             if (modelName) {
               // Extract just the model name (e.g., "deepseek-chat" from "deepseek/deepseek-chat")
               const modelParts = modelName.split('/');
@@ -377,14 +447,14 @@ const ShowTraceTimeline: React.FC<ShowTraceProps> = ({
               }
             }
             const output = outputStr;
-            
+
             // Check extra_data for step type information
             let stepType = '';
             if (trace.extra_data && typeof trace.extra_data === 'object') {
               const extraData = trace.extra_data as Record<string, unknown>;
               stepType = (extraData.step_type as string) || '';
             }
-            
+
             if (output.includes('Tool:')) {
               // Tool usage
               const toolMatch = output.match(/Tool: ([^|]+)/);
@@ -510,7 +580,7 @@ const ShowTraceTimeline: React.FC<ShowTraceProps> = ({
               outputContent = content as string | Record<string, unknown>;
             }
           }
-          
+
           return {
             type: eventType,
             description,
@@ -550,7 +620,7 @@ const ShowTraceTimeline: React.FC<ShowTraceProps> = ({
 
   const fetchTraceData = useCallback(async (isInitialLoad = true) => {
     if (!runId) return;
-    
+
     try {
       // Use different loading states for initial load vs refresh
       if (isInitialLoad) {
@@ -558,7 +628,7 @@ const ShowTraceTimeline: React.FC<ShowTraceProps> = ({
       } else {
         setIsRefreshing(true);
       }
-      
+
       const runExists = await TraceService.checkRunExists(runId);
       if (!runExists) {
         setError(`Run ID ${runId} does not exist or is no longer available.`);
@@ -568,12 +638,12 @@ const ShowTraceTimeline: React.FC<ShowTraceProps> = ({
       }
 
       const runData = await TraceService.getRunDetails(runId);
-      const traceId = (runData.job_id && runData.job_id.includes('-')) 
-                      ? runData.job_id 
+      const traceId = (runData.job_id && runData.job_id.includes('-'))
+                      ? runData.job_id
                       : runId;
 
       const traces = await TraceService.getTraces(traceId);
-      
+
       if (!traces || !Array.isArray(traces) || traces.length === 0) {
         setError('No trace data is available for this run.');
         setTraces([]);
@@ -581,7 +651,7 @@ const ShowTraceTimeline: React.FC<ShowTraceProps> = ({
         setTraces(traces);
         const processed = processTraces(traces);
         setProcessedTraces(processed);
-        
+
         if (isInitialLoad) {
           // Only expand all agents on initial load
           setExpandedAgents(new Set(processed.agents.map((_, idx) => idx)));
@@ -613,13 +683,78 @@ const ShowTraceTimeline: React.FC<ShowTraceProps> = ({
     }
   }, [open, fetchTraceData]);
 
+  // Load evaluation toggle to enable/disable button
+  useEffect(() => {
+    if (!open) return;
+    (async () => {
+      try {
+        const resp = await apiClient.get('/mlflow/evaluation-status');
+        setEvaluationEnabled(!!resp?.data?.enabled);
+      } catch (e) {
+        setEvaluationEnabled(false);
+      }
+    })();
+  }, [open]);
+
+  // Trigger evaluation and open the MLflow run page
+  const triggerEvaluationAndOpen = async () => {
+    if (!run) return;
+    try {
+      // 1) Trigger evaluation
+      const ev = await apiClient.post('/mlflow/evaluate', { job_id: run.job_id });
+      const runId = ev?.data?.run_id as string | undefined;
+      const experimentId = ev?.data?.experiment_id as string | undefined;
+
+      if (!runId || !experimentId) {
+        console.error('Evaluation did not return run_id/experiment_id', ev?.data);
+        setError('MLflow evaluation did not start or returned no run information. Please check backend logs.');
+        return;
+      }
+
+      // 2) Resolve workspace URL and ID similar to traces
+      let workspaceUrl = '';
+      let workspaceId: string | undefined;
+      try {
+        const envResp = await apiClient.get('/databricks/environment');
+        workspaceId = envResp?.data?.workspace_id || undefined;
+        const envHost = envResp?.data?.databricks_host;
+        if (!workspaceUrl && envHost) {
+          workspaceUrl = envHost.startsWith('http') ? envHost : `https://${envHost}`;
+        }
+      } catch (e) { console.warn('Unable to get Databricks environment info for evaluation'); }
+      if (!workspaceUrl || workspaceUrl === 'compute' || !workspaceUrl.includes('.')) {
+        if (typeof window !== 'undefined' && window.location.hostname.includes('databricks')) {
+          workspaceUrl = `https://${window.location.hostname}`;
+        } else {
+          try {
+            const resp = await apiClient.get('/databricks/workspace-url');
+            workspaceUrl = resp.data?.workspace_url || '';
+          } catch (e) { console.warn('Unable to determine Databricks workspace URL'); }
+        }
+      }
+      if (!workspaceUrl) {
+        setError('Could not determine Databricks workspace URL to open evaluation run.');
+        return;
+      }
+      if (workspaceUrl.endsWith('/')) workspaceUrl = workspaceUrl.slice(0, -1);
+      if (!workspaceUrl.startsWith('http')) workspaceUrl = `https://${workspaceUrl}`;
+
+      // 3) Build URL with workspace param
+      const o = workspaceId ? `?o=${encodeURIComponent(workspaceId)}` : '';
+      const url = `${workspaceUrl}/ml/experiments/${encodeURIComponent(experimentId)}/runs/${encodeURIComponent(runId)}${o}`;
+      window.open(url, '_blank', 'noopener');
+    } catch (e) {
+      console.error('Failed to trigger evaluation:', e);
+    }
+  };
+
   // Auto-expand tasks for expanded agents when traces update
   useEffect(() => {
     if (!processedTraces || !isRefreshing) return;
-    
+
     setExpandedTasks(prevExpandedTasks => {
       const newExpandedTasks = new Set(prevExpandedTasks);
-      
+
       // For each expanded agent, ensure all its tasks are in the expanded set
       expandedAgents.forEach(agentIdx => {
         if (processedTraces.agents[agentIdx]) {
@@ -630,7 +765,7 @@ const ShowTraceTimeline: React.FC<ShowTraceProps> = ({
           });
         }
       });
-      
+
       return newExpandedTasks;
     });
   }, [processedTraces, expandedAgents, isRefreshing]);
@@ -641,9 +776,9 @@ const ShowTraceTimeline: React.FC<ShowTraceProps> = ({
 
     // Check if execution is in a terminal state (don't refresh if completed/failed/cancelled/stopped)
     const isTerminalState = run?.status && [
-      'completed', 
-      'failed', 
-      'cancelled', 
+      'completed',
+      'failed',
+      'cancelled',
       'stopped',
       'error'
     ].includes(run.status.toLowerCase());
@@ -730,7 +865,7 @@ const ShowTraceTimeline: React.FC<ShowTraceProps> = ({
 
   const formatOutput = (output: string | Record<string, unknown> | undefined): string => {
     if (!output) return 'No output available';
-    
+
     if (typeof output === 'string') {
       // Clean up tool results and other formatted strings
       if (output.includes('ToolResult')) {
@@ -746,7 +881,7 @@ const ShowTraceTimeline: React.FC<ShowTraceProps> = ({
       }
       return output;
     }
-    
+
     return JSON.stringify(output, null, 2);
   };
 
@@ -758,8 +893,8 @@ const ShowTraceTimeline: React.FC<ShowTraceProps> = ({
 
   return (
     <>
-    <Dialog 
-      open={open} 
+    <Dialog
+      open={open}
       onClose={onClose}
       maxWidth="lg"
       fullWidth
@@ -776,16 +911,18 @@ const ShowTraceTimeline: React.FC<ShowTraceProps> = ({
             <Typography variant="h6">Execution Trace Timeline</Typography>
             {isRefreshing && (
               <Tooltip title="Refreshing...">
-                <RefreshIcon 
-                  sx={{ 
-                    fontSize: 20, 
+                <RefreshIcon
+                  sx={{
+                    fontSize: 20,
+
+
                     color: 'primary.main',
                     animation: 'spin 1s linear infinite',
                     '@keyframes spin': {
                       '0%': { transform: 'rotate(0deg)' },
                       '100%': { transform: 'rotate(360deg)' }
                     }
-                  }} 
+                  }}
                 />
               </Tooltip>
             )}
@@ -794,8 +931,8 @@ const ShowTraceTimeline: React.FC<ShowTraceProps> = ({
                 ? "Refresh now (auto-refresh disabled - execution completed)"
                 : "Refresh now (auto-refreshes every 5s)"
             }>
-              <IconButton 
-                size="small" 
+              <IconButton
+                size="small"
                 onClick={() => fetchTraceData(false)}
                 disabled={isRefreshing || loading}
                 sx={{ ml: 0.5 }}
@@ -825,6 +962,39 @@ const ShowTraceTimeline: React.FC<ShowTraceProps> = ({
                     </IconButton>
                   </span>
                 </Tooltip>
+                <Tooltip title="MLflow Trace">
+                  <span>
+                    <IconButton
+                      size="small"
+                      onClick={async () => {
+                        const url = await getMlflowTracesUrl();
+                        if (url && url !== '#') {
+                          window.open(url, '_blank', 'noopener');
+                        }
+                      }}
+                      color="primary"
+                      disabled={['running', 'pending', 'queued', 'in_progress'].includes(run?.status?.toLowerCase() || '')}
+                    >
+                      <TimelineIcon fontSize="small" />
+                    </IconButton>
+                  </span>
+                </Tooltip>
+
+                {/* MLflow Evaluation trigger/view */}
+                <Tooltip title={evaluationEnabled ? 'MLflow Evaluation' : 'Enable MLflow Evaluation in Configuration'}>
+                  <span>
+                    <IconButton
+                      size="small"
+                      onClick={triggerEvaluationAndOpen}
+                      color="primary"
+                      disabled={!evaluationEnabled || ['running', 'pending', 'queued', 'in_progress'].includes(run?.status?.toLowerCase() || '')}
+                    >
+                      <InsightsIcon fontSize="small" />
+                    </IconButton>
+                  </span>
+                </Tooltip>
+
+
                 <Tooltip title={t('runHistory.actions.viewLogs')}>
                   <span>
                     <IconButton
@@ -837,6 +1007,8 @@ const ShowTraceTimeline: React.FC<ShowTraceProps> = ({
                     </IconButton>
                   </span>
                 </Tooltip>
+
+
                 <Divider orientation="vertical" flexItem sx={{ mx: 1 }} />
               </>
             )}
@@ -953,8 +1125,8 @@ const ShowTraceTimeline: React.FC<ShowTraceProps> = ({
                                 const hasOutput = !!event.output;
                                 // Make all events with output clickable, including memory operations
                                 const isClickable = hasOutput && (
-                                  event.type === 'llm' || 
-                                  event.type === 'agent_complete' || 
+                                  event.type === 'llm' ||
+                                  event.type === 'agent_complete' ||
                                   event.type === 'agent_output' ||
                                   event.type === 'tool_result' ||
                                   event.type === 'task_complete' ||
@@ -967,7 +1139,7 @@ const ShowTraceTimeline: React.FC<ShowTraceProps> = ({
                                   event.type.includes('tool') ||
                                   event.type.includes('knowledge')
                                 );
-                                
+
                                 return (
                                   <Box
                                     key={eventIdx}
@@ -982,7 +1154,7 @@ const ShowTraceTimeline: React.FC<ShowTraceProps> = ({
                                       ml: 1,
                                       position: 'relative',
                                       cursor: isClickable ? 'pointer' : 'default',
-                                      '&:hover': { 
+                                      '&:hover': {
                                         bgcolor: isClickable ? 'action.hover' : 'transparent',
                                         '& .output-hint': {
                                           opacity: 1
@@ -995,15 +1167,15 @@ const ShowTraceTimeline: React.FC<ShowTraceProps> = ({
                                     onClick={() => isClickable && handleEventClick(event)}
                                   >
                                     <Typography variant="caption" sx={{ minWidth: 60 }}>
-                                      {processedTraces.globalStart && 
+                                      {processedTraces.globalStart &&
                                         formatTimeDelta(processedTraces.globalStart, event.timestamp)}
                                     </Typography>
                                     <Typography variant="body2" sx={{ minWidth: 20 }}>
                                       {getEventIcon(event.type)}
                                     </Typography>
-                                    <Typography 
-                                      variant="body2" 
-                                      sx={{ 
+                                    <Typography
+                                      variant="body2"
+                                      sx={{
                                         flex: 1,
                                         color: isClickable ? 'primary.main' : 'text.primary',
                                         textDecoration: isClickable ? 'underline dotted' : 'none',
@@ -1025,7 +1197,7 @@ const ShowTraceTimeline: React.FC<ShowTraceProps> = ({
                                           className="output-hint"
                                           size="small"
                                           label="View"
-                                          sx={{ 
+                                          sx={{
                                             height: 18,
                                             fontSize: '0.65rem',
                                             bgcolor: 'primary.main',
@@ -1114,8 +1286,8 @@ const ShowTraceTimeline: React.FC<ShowTraceProps> = ({
       </DialogContent>
 
       {/* Output Details Dialog */}
-      <Dialog 
-        open={!!selectedEvent} 
+      <Dialog
+        open={!!selectedEvent}
         onClose={() => setSelectedEvent(null)}
         maxWidth="md"
         fullWidth
@@ -1147,17 +1319,17 @@ const ShowTraceTimeline: React.FC<ShowTraceProps> = ({
                     {typeof selectedEvent.output === 'object' && selectedEvent.output && (
                       <Box sx={{ mb: 2 }}>
                         {('operation' in selectedEvent.output) && (
-                          <Chip 
-                            label={`Operation: ${selectedEvent.output.operation as string}`} 
-                            sx={{ mr: 1, mb: 1 }} 
+                          <Chip
+                            label={`Operation: ${selectedEvent.output.operation as string}`}
+                            sx={{ mr: 1, mb: 1 }}
                             size="small"
                             color="primary"
                           />
                         )}
                         {('memory_type' in selectedEvent.output) && (
-                          <Chip 
-                            label={`Type: ${selectedEvent.output.memory_type as string}`} 
-                            sx={{ mr: 1, mb: 1 }} 
+                          <Chip
+                            label={`Type: ${selectedEvent.output.memory_type as string}`}
+                            sx={{ mr: 1, mb: 1 }}
                             size="small"
                             color="secondary"
                           />
@@ -1166,7 +1338,7 @@ const ShowTraceTimeline: React.FC<ShowTraceProps> = ({
                     )}
                   </Box>
                 ) : null}
-                
+
                 {/* Special formatting for tool usage */}
                 {selectedEvent.type === 'tool_usage' || selectedEvent.type === 'tool_result' ? (
                   <Box>
@@ -1176,9 +1348,9 @@ const ShowTraceTimeline: React.FC<ShowTraceProps> = ({
                     {typeof selectedEvent.output === 'object' && selectedEvent.output && (
                       <Box sx={{ mb: 2 }}>
                         {('tool_name' in selectedEvent.output) && (
-                          <Chip 
-                            label={`Tool: ${selectedEvent.output.tool_name as string}`} 
-                            sx={{ mr: 1, mb: 1 }} 
+                          <Chip
+                            label={`Tool: ${selectedEvent.output.tool_name as string}`}
+                            sx={{ mr: 1, mb: 1 }}
                             size="small"
                             color="info"
                           />
@@ -1187,10 +1359,10 @@ const ShowTraceTimeline: React.FC<ShowTraceProps> = ({
                     )}
                   </Box>
                 ) : null}
-                
-                <Paper 
-                  sx={{ 
-                    p: 2, 
+
+                <Paper
+                  sx={{
+                    p: 2,
                     mt: 1,
                     backgroundColor: (theme) => theme.palette.mode === 'dark' ? 'grey.900' : 'grey.50',
                     maxHeight: '60vh',
@@ -1300,7 +1472,7 @@ const ShowTraceTimeline: React.FC<ShowTraceProps> = ({
         )}
       </Dialog>
     </Dialog>
-    
+
     {/* Render dialogs outside of main dialog to ensure proper z-index stacking */}
     {/* Show Logs Dialog - only in new UI mode */}
     {useNewExecutionUI && run && showLogsDialog && (

@@ -300,6 +300,26 @@ function WorkspaceOverview({ onConfigureSection }: WorkspaceOverviewProps): JSX.
                     secondary={databricksConfig.enabled ? 'Enabled' : 'Disabled'}
                   />
                 </ListItem>
+                <ListItem>
+                  <ListItemIcon sx={{ minWidth: 36 }}>
+                    {getStatusIcon(!!databricksConfig.mlflow_enabled)}
+                  </ListItemIcon>
+                  <ListItemText
+                    primary="MLflow Tracing"
+                    secondary={databricksConfig.mlflow_enabled ? 'Enabled' : 'Disabled'}
+                  />
+                </ListItem>
+                <ListItem>
+                  <ListItemIcon sx={{ minWidth: 36 }}>
+                    {getStatusIcon(!!databricksConfig.evaluation_enabled)}
+                  </ListItemIcon>
+                  <ListItemText
+                    primary="MLflow Evaluation"
+                    secondary={databricksConfig.evaluation_enabled ? 'Enabled' : 'Disabled'}
+                  />
+                </ListItem>
+
+
               </List>
             ) : (
               <Typography variant="body2" color="text.secondary">

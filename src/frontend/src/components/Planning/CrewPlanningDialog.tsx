@@ -146,7 +146,7 @@ const CrewPlanningDialog: React.FC<CrewPlanningDialogProps> = ({
       if (!localTools || localTools.length === 0) {
         try {
           const toolService = ToolService;
-          const refreshedTools = await toolService.listTools();
+          const refreshedTools = await toolService.listEnabledTools();
           const formattedTools = refreshedTools
             .map(tool => ({
               ...tool,

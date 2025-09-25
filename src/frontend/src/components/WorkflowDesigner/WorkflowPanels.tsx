@@ -21,6 +21,8 @@ interface WorkflowPanelsProps {
   onCrewFlowInit: (instance: ReactFlowInstance) => void;
   onFlowFlowInit: (instance: ReactFlowInstance) => void;
   onPanelDragStart: (e: React.MouseEvent) => void;
+  // FitView handler
+  handleUIAwareFitView: () => void;
   // Runtime features props
   planningEnabled: boolean;
   setPlanningEnabled: (enabled: boolean) => void;
@@ -58,6 +60,7 @@ const WorkflowPanels: React.FC<WorkflowPanelsProps> = ({
   onCrewFlowInit,
   onFlowFlowInit,
   onPanelDragStart,
+  handleUIAwareFitView,
   planningEnabled,
   setPlanningEnabled,
   reasoningEnabled,
@@ -111,6 +114,7 @@ const WorkflowPanels: React.FC<WorkflowPanelsProps> = ({
             onSelectionChange={onSelectionChange}
             onPaneContextMenu={onPaneContextMenu}
             onInit={onCrewFlowInit}
+            handleUIAwareFitView={handleUIAwareFitView}
             planningEnabled={planningEnabled}
             setPlanningEnabled={setPlanningEnabled}
             reasoningEnabled={reasoningEnabled}
@@ -223,6 +227,7 @@ const WorkflowPanels: React.FC<WorkflowPanelsProps> = ({
           onSelectionChange={onSelectionChange}
           onPaneContextMenu={onPaneContextMenu}
           onInit={onCrewFlowInit}
+          handleUIAwareFitView={handleUIAwareFitView}
           planningEnabled={planningEnabled}
           setPlanningEnabled={setPlanningEnabled}
           reasoningEnabled={reasoningEnabled}

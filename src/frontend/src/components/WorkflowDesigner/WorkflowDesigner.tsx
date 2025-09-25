@@ -1066,6 +1066,7 @@ const WorkflowDesigner: React.FC<WorkflowDesignerProps> = (): JSX.Element => {
               onPaneContextMenu={handlePaneContextMenu}
               onCrewFlowInit={handleCrewFlowInit}
               onFlowFlowInit={handleFlowFlowInit}
+              handleUIAwareFitView={handleUIAwareFitView}
               planningEnabled={planningEnabled}
               setPlanningEnabled={setPlanningEnabled}
               reasoningEnabled={reasoningEnabled}
