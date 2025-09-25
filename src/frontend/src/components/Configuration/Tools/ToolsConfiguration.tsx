@@ -31,6 +31,8 @@ import { usePermissionStore } from '../../../store/permissions';
 import { GroupToolService, type GroupToolMapping } from '../../../api/GroupToolService';
 import { ToolService, type Tool } from '../../../api/ToolService';
 import { APIKeysService, type ApiKey } from '../../../api/APIKeysService';
+import SecurityDisclaimer from '../../Tools/SecurityDisclaimer';
+import { Tool as UITool } from '../../../types/tool';
 
 function KeyReadinessChip({ ready, onClick }: { ready: boolean; onClick?: () => void }) {
   if (ready) {
@@ -49,6 +51,17 @@ function KeyReadinessChip({ ready, onClick }: { ready: boolean; onClick?: () => 
   );
 }
 
+const convertToolToUITool = (tool: Tool): UITool => ({
+  id: String(tool.id),
+  title: tool.title,
+  description: tool.description,
+  icon: tool.icon,
+  config: tool.config,
+  category: 'PreBuilt',
+  enabled: tool.enabled,
+  group_id: tool.group_id,
+});
+
 export default function ToolsConfiguration({ mode = 'auto' }: { mode?: 'system' | 'workspace' | 'auto' }): JSX.Element {
   const { isSystemAdmin, userRole } = usePermissionStore((s) => ({
     isSystemAdmin: s.isSystemAdmin,
@@ -62,6 +75,10 @@ export default function ToolsConfiguration({ mode = 'auto' }: { mode?: 'system' 
   const [selectedMapping, setSelectedMapping] = useState<GroupToolMapping | null>(null);
 
   const [selectedGlobalTool, setSelectedGlobalTool] = useState<Tool | null>(null);
+
+  // Security disclaimer state
+  const [securityDisclaimerOpen, setSecurityDisclaimerOpen] = useState(false);
+  const [pendingToggleTool, setPendingToggleTool] = useState<UITool | null>(null);
 
   const openGlobalConfigure = (t: Tool) => {
     setSelectedGlobalTool(t);
@@ -194,8 +211,39 @@ export default function ToolsConfiguration({ mode = 'auto' }: { mode?: 'system' 
   };
 
   const handleGlobalToggle = async (toolId: number, enabled: boolean) => {
+    const tool = globalTools.find(t => t.id === toolId);
+    console.log('handleGlobalToggle called:', { toolId, enabled, tool });
+    if (!tool) return;
+
+    // If enabling the tool, show security disclaimer first
+    if (enabled) {
+      console.log('Showing security disclaimer for tool:', tool.title);
+      setPendingToggleTool(convertToolToUITool(tool));
+      setSecurityDisclaimerOpen(true);
+      return;
+    }
+
+    // If disabling, proceed directly
+    console.log('Disabling tool without disclaimer');
+    await performGlobalToggle(toolId, enabled);
+  };
+
+  const performGlobalToggle = async (toolId: number, enabled: boolean) => {
     await ToolService.setGlobalAvailability(toolId, enabled);
     await loadGlobal();
+  };
+
+  const handleSecurityDisclaimerConfirm = async () => {
+    if (pendingToggleTool) {
+      await performGlobalToggle(Number(pendingToggleTool.id), true);
+    }
+    setSecurityDisclaimerOpen(false);
+    setPendingToggleTool(null);
+  };
+
+  const handleSecurityDisclaimerClose = () => {
+    setSecurityDisclaimerOpen(false);
+    setPendingToggleTool(null);
   };
 
 
@@ -356,6 +404,14 @@ export default function ToolsConfiguration({ mode = 'auto' }: { mode?: 'system' 
       {!isSystemAdmin && !isWorkspaceAdmin && (
         <Typography variant="body2" color="text.secondary">You don’t have permissions to manage tools.</Typography>
       )}
+      {/* Security Disclaimer Dialog */}
+      <SecurityDisclaimer
+        open={securityDisclaimerOpen}
+        onClose={handleSecurityDisclaimerClose}
+        onConfirm={handleSecurityDisclaimerConfirm}
+        tool={pendingToggleTool}
+      />
+
       {/* Config Dialog */}
       <Dialog open={configOpen} onClose={closeConfigure} maxWidth="md" fullWidth>
         <DialogTitle>

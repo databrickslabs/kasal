@@ -96,10 +96,8 @@ const ToolSelectionDialog: React.FC<ToolSelectionDialogProps> = ({
   }, [selectedNodes]);
 
   // Filter tools based on search query
-  const filteredTools = tools
-    .filter(tool => tool.enabled !== false) // Only show enabled tools
-    .filter(tool => 
-      tool.title.toLowerCase().includes(searchQuery.toLowerCase()) || 
+  const filteredTools = tools.filter(tool =>
+      tool.title.toLowerCase().includes(searchQuery.toLowerCase()) ||
       tool.description.toLowerCase().includes(searchQuery.toLowerCase())
     );
 
@@ -119,7 +117,7 @@ const ToolSelectionDialog: React.FC<ToolSelectionDialogProps> = ({
   const fetchTools = async () => {
     setIsLoading(true);
     try {
-      const toolsList = await ToolService.listTools();
+      const toolsList = await ToolService.listEnabledTools();
       setTools(toolsList);
     } catch (error) {
       console.error('Error fetching tools:', error);

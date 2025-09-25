@@ -42,15 +42,27 @@ export async function calculateDurationFromTraces(run: Run): Promise<string> {
     }
     
     // Sort traces by timestamp
-    const traces = response.data.traces.sort((a, b) => 
-      new Date(a.created_at || '').getTime() - 
+    const traces = response.data.traces.sort((a, b) =>
+      new Date(a.created_at || '').getTime() -
       new Date(b.created_at || '').getTime()
     );
-    
-    // Calculate duration from first to last trace
+
+    // Calculate duration from first trace to crew completion (not last trace)
     const firstTrace = traces[0];
-    const lastTrace = traces[traces.length - 1];
-    
+
+    // Find the crew_completed or execution_completed event to use as end time
+    // This prevents duration from growing as post-completion traces are added
+    const crewCompletedEvent = traces
+      .slice()
+      .reverse()
+      .find(t =>
+        t.event_type === 'crew_completed' ||
+        t.event_type === 'execution_completed'
+      );
+
+    // Use crew completion event if found, otherwise use last trace (for running jobs)
+    const lastTrace = crewCompletedEvent || traces[traces.length - 1];
+
     const startTime = new Date(firstTrace.created_at);
     const endTime = new Date(lastTrace.created_at);
     

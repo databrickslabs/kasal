@@ -45,7 +45,7 @@ const AgentDialog: React.FC<AgentDialogProps> = ({
 
   const loadTools = useCallback(async () => {
     try {
-      const toolsList = await ToolService.listTools();
+      const toolsList = await ToolService.listEnabledTools();
       setTools(toolsList.map(tool => ({
         ...tool,
         id: String(tool.id)

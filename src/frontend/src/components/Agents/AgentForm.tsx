@@ -786,9 +786,7 @@ const AgentForm: React.FC<AgentFormProps> = ({ initialData, onCancel, onAgentSav
                   </Box>
                 )}
               >
-                {tools
-                  .filter(tool => tool.enabled !== false) // Only show enabled tools
-                  .map((tool) => (
+                {tools.map((tool) => (
                     <MenuItem key={`tool-${tool.id}`} value={String(tool.id)}>
                       <Box sx={{ display: 'flex', flexDirection: 'column' }}>
                         <Typography>{tool.title}</Typography>

@@ -50,7 +50,7 @@ const TaskSelectionDialog: React.FC<TaskSelectionDialogProps> = ({
         if (open) {
           const [_, toolsData] = await Promise.all([
             fetchTasks(),
-            ToolService.listTools()
+            ToolService.listEnabledTools()
           ]);
           if (mounted) {
             setTools(toolsData);

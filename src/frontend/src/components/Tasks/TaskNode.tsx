@@ -562,6 +562,35 @@ const TaskNode: React.FC<TaskNodeProps> = ({ data, id }) => {
             <span style={{ color: 'orange' }}>Human Input</span>
           )}
         </Typography>
+
+        {Boolean((data as any)?.loading) && (
+          <Box
+            sx={{
+              position: 'absolute',
+              inset: 0,
+              borderRadius: '8px',
+              background: (theme: any) => theme.palette.mode === 'light'
+                ? 'linear-gradient(90deg, rgba(255,255,255,0.35) 25%, rgba(255,255,255,0.6) 37%, rgba(255,255,255,0.35) 63%)'
+                : 'linear-gradient(90deg, rgba(255,255,255,0.08) 25%, rgba(255,255,255,0.16) 37%, rgba(255,255,255,0.08) 63%)',
+              backgroundSize: '400% 100%',
+              animation: 'shimmer 1.6s linear infinite',
+              '@keyframes shimmer': {
+                '0%': { backgroundPosition: '-200% 0' },
+                '100%': { backgroundPosition: '200% 0' },
+              },
+              backdropFilter: 'blur(1px)',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              zIndex: 5,
+            }}
+          >
+            <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+              <CircularProgress size={16} sx={{ color: 'primary.main' }} />
+              <Typography variant="caption" color="textSecondary">Creating…</Typography>
+            </Box>
+          </Box>
+        )}
       </Box>
       <Handle
         type="source"

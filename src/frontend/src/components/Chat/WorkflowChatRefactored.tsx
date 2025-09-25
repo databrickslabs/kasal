@@ -698,13 +698,148 @@ const WorkflowChat: React.FC<WorkflowChatProps> = ({
 
     saveMessageToBackend(userMessage);
 
+    // Progressive canvas feedback: add temporary placeholder nodes/edges while generating
+    let cleanupPlaceholders: (() => void) | null = null;
+    const lower = userMessage.content.trim().toLowerCase();
+    let cleanupProgress: (() => void) | null = null;
+    const wantsCrewOrPlan = /\b(create|build|make|generate|draft|compose|design)\b.*\b(plan|crew|workflow)\b/.test(lower)
+      || /\b(plan|crew|workflow)\b.*\b(create|build|make|generate|draft|compose|design)\b/.test(lower)
+      || lower.includes('create a plan')
+      || lower.includes('create plan');
+    const wantsAgent = /\b(create|add|new|make|generate)\b.*\b(agent)\b/.test(lower) || lower.includes('create an agent') || lower.includes('create agent');
+    const wantsTask = /\b(create|add|new|make|generate)\b.*\b(task)\b/.test(lower) || lower.includes('create a task') || lower.includes('create task');
+
+    const addTempProgress = (text: string) => {
+      const msg: ChatMessage = {
+        id: `progress-${Date.now()}`,
+        type: 'assistant',
+        content: text,
+        timestamp: new Date(),
+        isIntermediate: true,
+      } as ChatMessage;
+      setMessages(prev => [...prev, msg]);
+      return () => setMessages(prev => prev.filter(m => m.id !== msg.id));
+    };
+
     try {
+      // Add placeholders based on intent keywords so users see progress immediately
+      if (wantsCrewOrPlan) {
+        cleanupProgress = addTempProgress('\u23f3 Generating plan/crew…');
+        // staged progress updates while waiting for dispatcher
+        const progressCleanups: Array<() => void> = [];
+        const timers: number[] = [];
+        // Keep initial cleanup too
+        const initialCleanup = cleanupProgress;
+        if (initialCleanup) progressCleanups.push(initialCleanup);
+        const addStage = (delay: number, text: string) => {
+          const t = window.setTimeout(() => {
+            const c = addTempProgress(text);
+            progressCleanups.push(c);
+          }, delay);
+          timers.push(t);
+        };
+        addStage(1000, '🧠 Analyzing request…');
+        addStage(3000, '🤖 Drafting agent…');
+        addStage(4500, '📝 Drafting task…');
+        // redefine cleanup to clear timers and remove staged messages
+        cleanupProgress = () => {
+          timers.forEach((t) => window.clearTimeout(t));
+          progressCleanups.forEach((fn) => fn());
+        };
+
+        const now = Date.now();
+        const tempAgentId = `agent-temp-${now}`;
+        const tempTaskId = `task-temp-${now}`;
+
+        // Add agent placeholder
+        setNodes((cur) => {
+          const pos = layoutManagerRef.current.getAgentNodePosition(cur as FlowNode[], 'crew') || { x: 100, y: 100 };
+          const n: FlowNode = {
+            id: tempAgentId,
+            type: 'agentNode',
+            position: pos,
+            data: { label: 'Creating agent…', loading: true },
+          } as any;
+          return [...(cur as FlowNode[]), n];
+        });
+        // Add task placeholder slightly after (subtle motion/progression)
+        setTimeout(() => {
+          setNodes((cur) => {
+            const pos = layoutManagerRef.current.getTaskNodePosition(cur as FlowNode[], 'crew') || { x: 380, y: 100 };
+            const n: FlowNode = {
+              id: tempTaskId,
+              type: 'taskNode',
+              position: pos,
+              data: { label: 'Creating task…', taskId: tempTaskId, loading: true },
+            } as any;
+            return [...(cur as FlowNode[]), n];
+          });
+          // Connect placeholders with animated edge
+          setEdges((cur) => [
+            ...cur,
+            {
+              id: `edge-${tempAgentId}-${tempTaskId}`,
+              source: tempAgentId,
+              target: tempTaskId,
+              type: 'default',
+              animated: true,
+              sourceHandle: 'right',
+              targetHandle: 'left',
+            },
+          ]);
+        }, 5000);
+
+        cleanupPlaceholders = () => {
+          setEdges((cur) => cur.filter((e) => e.id !== `edge-${tempAgentId}-${tempTaskId}`));
+          setNodes((cur) => (cur as FlowNode[]).filter((n) => n.id !== tempAgentId && n.id !== tempTaskId));
+        };
+      } else if (wantsAgent) {
+        cleanupProgress = addTempProgress('\u23f3 Creating agent…');
+        const now = Date.now();
+        const tempAgentId = `agent-temp-${now}`;
+        setNodes((cur) => {
+          const pos = layoutManagerRef.current.getAgentNodePosition(cur as FlowNode[], 'crew') || { x: 100, y: 100 };
+          const n: FlowNode = {
+            id: tempAgentId,
+            type: 'agentNode',
+            position: pos,
+            data: { label: 'Creating agent…', loading: true },
+          } as any;
+          return [...(cur as FlowNode[]), n];
+        });
+        cleanupPlaceholders = () => {
+          setNodes((cur) => (cur as FlowNode[]).filter((n) => n.id !== tempAgentId));
+        };
+      } else if (wantsTask) {
+        cleanupProgress = addTempProgress('\u23f3 Creating task\u2026');
+        const now = Date.now();
+        const tempTaskId = `task-temp-${now}`;
+        setNodes((cur) => {
+          const pos = layoutManagerRef.current.getTaskNodePosition(cur as FlowNode[], 'crew') || { x: 380, y: 100 };
+          const n: FlowNode = {
+            id: tempTaskId,
+            type: 'taskNode',
+            position: pos,
+            data: { label: 'Creating task…', taskId: tempTaskId, loading: true },
+          } as any;
+          return [...(cur as FlowNode[]), n];
+        });
+        cleanupPlaceholders = () => {
+          setNodes((cur) => (cur as FlowNode[]).filter((n) => n.id !== tempTaskId));
+        };
+      }
 
       const result: DispatchResult = await DispatcherService.dispatch({
         message: userMessage.content,
         model: selectedModel,
         tools: selectedTools,
       });
+
+      // Remove any temporary progress message
+      if (cleanupProgress) {
+        cleanupProgress();
+        cleanupProgress = null;
+      }
 
 
       const assistantMessage: ChatMessage = {
@@ -719,6 +854,12 @@ const WorkflowChat: React.FC<WorkflowChatProps> = ({
 
       setMessages(prev => [...prev, assistantMessage]);
       saveMessageToBackend(assistantMessage);
+
+      // Remove any temporary placeholders before rendering final nodes
+      if (cleanupPlaceholders) {
+        cleanupPlaceholders();
+        cleanupPlaceholders = null;
+      }
 
       if (result.generation_result) {
         switch (result.dispatcher.intent) {
@@ -753,6 +894,15 @@ const WorkflowChat: React.FC<WorkflowChatProps> = ({
       setMessages(prev => [...prev, errorMessage]);
       saveMessageToBackend(errorMessage);
     } finally {
+      // Ensure placeholders/progress are removed on error/cancellation
+      if (cleanupPlaceholders) {
+        cleanupPlaceholders();
+        cleanupPlaceholders = null;
+      }
+      if (cleanupProgress) {
+        cleanupProgress();
+        cleanupProgress = null;
+      }
       setIsLoading(false);
       const focusDelays = [0, 50, 100, 200, 300, 500, 800, 1200];
       focusDelays.forEach(delay => {

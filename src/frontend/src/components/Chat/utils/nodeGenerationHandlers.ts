@@ -275,6 +275,8 @@ export const createTaskGenerationHandler = (
               target: taskNodeId,
               type: 'default',
               animated: true,
+              sourceHandle: 'right',
+              targetHandle: 'left',
             };
             return [...edges, newEdge];
           });
@@ -431,6 +433,8 @@ export const createCrewGenerationHandler = (
               target: taskNodeId,
               type: 'default',
               animated: true,
+              sourceHandle: 'right',
+              targetHandle: 'left',
             });
           }
         }

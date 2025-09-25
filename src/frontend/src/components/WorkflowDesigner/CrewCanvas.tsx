@@ -63,6 +63,8 @@ interface CrewCanvasProps {
   onSelectionChange?: (params: OnSelectionChangeParams) => void;
   onPaneContextMenu?: (event: React.MouseEvent) => void;
   onInit?: (instance: ReactFlowInstance) => void;
+  // FitView handler
+  handleUIAwareFitView: () => void;
   // Runtime features props
   planningEnabled: boolean;
   setPlanningEnabled: (enabled: boolean) => void;
@@ -98,6 +100,7 @@ const CrewCanvas: React.FC<CrewCanvasProps> = ({
   onSelectionChange,
   onPaneContextMenu,
   onInit,
+  handleUIAwareFitView,
   planningEnabled,
   setPlanningEnabled,
   reasoningEnabled,
@@ -191,8 +194,8 @@ const CrewCanvas: React.FC<CrewCanvasProps> = ({
 
   const {
     selectedModel: _selectedModel,
-    processType,
-    setProcessType
+    processType: _processType,
+    setProcessType: _setProcessType
   } = useCrewExecutionStore();
   const { handleExecuteCrew, isExecuting: _isExecuting } = useCrewExecution();
 
@@ -264,8 +267,8 @@ const CrewCanvas: React.FC<CrewCanvasProps> = ({
     setShowSuccess
   });
 
-  const { 
-    isGeneratingConnections, 
+  const {
+    isGeneratingConnections: _isGeneratingConnections,
     handleGenerateConnections 
   } = useConnectionGenerator({
     reactFlowInstanceRef,
@@ -390,38 +393,13 @@ const CrewCanvas: React.FC<CrewCanvasProps> = ({
     reactFlowInstanceRef.current = instance;
     
     try {
-      const attemptFitView = (attempt = 1, maxAttempts = 3) => {
-        try {
-          if (instance && attempt <= maxAttempts) {
-            const delay = 100 * attempt;
-            
-            setTimeout(() => {
-              // Use requestAnimationFrame to avoid ResizeObserver loops
-              window.requestAnimationFrame(() => {
-                try {
-                  instance.fitView({
-                    padding: 0.2,
-                    includeHiddenNodes: false,
-                    duration: 800
-                  });
-                } catch (error) {
-                  // Log error and retry if needed
+      // Defer to UI-aware fit view handled by useWorkflowLayoutEvents
+      // Fire a signal that the crew flow has initialized; listeners will center with chat-aware bounds
+      setTimeout(() => {
+        window.dispatchEvent(new Event('crewFlowInitialized'));
+        window.dispatchEvent(new Event('fitViewToNodesInternal'));
+      }, 150);
 
-                  if (attempt < maxAttempts) {
-                    attemptFitView(attempt + 1, maxAttempts);
-                  }
-                }
-              });
-            }, delay);
-          }
-        } catch (error) {
-          // Log any other errors
-
-        }
-      };
-      
-      attemptFitView();
-      
       if (onInit) {
         onInit(instance);
       }
@@ -496,7 +474,7 @@ const CrewCanvas: React.FC<CrewCanvasProps> = ({
     onClearCanvas: handleClear,
     onZoomIn: () => reactFlowInstanceRef.current?.zoomIn(),
     onZoomOut: () => reactFlowInstanceRef.current?.zoomOut(),
-    onFitView: () => reactFlowInstanceRef.current?.fitView({ padding: 0.2 }),
+    onFitView: handleUIAwareFitView,
     // Don't override onExecuteCrew - let useShortcuts use its default handler with workflow store
     onExecuteFlow: () => {
       if (nodes.length > 0 || edges.length > 0) {
@@ -547,7 +525,7 @@ const CrewCanvas: React.FC<CrewCanvasProps> = ({
   const fetchTools = async () => {
     _setIsUpdatingAgents(true);
     try {
-      const toolsList = await ToolService.listTools();
+      const toolsList = await ToolService.listEnabledTools();
       const formattedTools: ToolType[] = toolsList.map(tool => ({
         id: tool.id.toString(),
         title: tool.title,
@@ -808,7 +786,9 @@ const CrewCanvas: React.FC<CrewCanvasProps> = ({
                 id: `edge-${task.id}`,
                 source: sourceNodeId,
                 target: targetNodeId,
-                type: 'default'
+                type: 'default',
+                sourceHandle: 'right',
+                targetHandle: 'left'
               });
             }
           });
