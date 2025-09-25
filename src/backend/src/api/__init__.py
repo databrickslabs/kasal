@@ -16,6 +16,7 @@ from src.api.templates_router import router as templates_router
 from src.api.schemas_router import router as schemas_router
 from src.api.tools_router import router as tools_router
 from src.api.group_tools_router import router as group_tools_router
+from src.api.mlflow_router import router as mlflow_router
 
 # DISABLED: Local file uploads are not allowed - use Databricks volumes instead
 # from src.api.upload_router import router as upload_router
@@ -61,6 +62,7 @@ api_router.include_router(api_keys_router)
 api_router.include_router(tasks_router)
 api_router.include_router(templates_router)
 api_router.include_router(group_tools_router)
+api_router.include_router(mlflow_router)
 
 api_router.include_router(schemas_router)
 api_router.include_router(tools_router)
@@ -132,5 +134,6 @@ __all__ = [
     "memory_backend_router",
     "documentation_embeddings_router",
     "database_management_router",
-    "genie_router"
+    "genie_router",
+    "mlflow_router",
 ]
