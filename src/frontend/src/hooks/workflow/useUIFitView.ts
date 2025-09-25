@@ -14,11 +14,20 @@ export function useUIFitView(params: {
   const handleUIAwareFitView = React.useCallback(() => {
     if (!crewFlowInstanceRef.current || nodes.length === 0) return;
 
+    // Create layout manager and get the most current UI state
     const layoutManager = new CanvasLayoutManager();
     const currentUIState = useUILayoutStore.getState().getUILayoutState();
-    layoutManager.updateUIState(currentUIState);
 
+    // Force update screen dimensions to current window size
+    currentUIState.screenWidth = window.innerWidth;
+    currentUIState.screenHeight = window.innerHeight;
+
+    layoutManager.updateUIState(currentUIState);
     const canvasArea = layoutManager.getAvailableCanvasArea('crew');
+
+    console.log('[FitView] Canvas area:', canvasArea);
+    console.log('[FitView] Chat panel width:', currentUIState.chatPanelWidth);
+    console.log('[FitView] Chat panel side:', currentUIState.chatPanelSide);
 
     // Calculate bounds of all nodes
     let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
@@ -39,13 +48,17 @@ export function useUIFitView(params: {
     const padding = 20;
     const zoomX = (canvasArea.width - 2 * padding) / nodesWidth;
     const zoomY = (canvasArea.height - 2 * padding) / nodesHeight;
-    const baseZoom = Math.min(zoomX, zoomY, 2.5);
-    const zoom = baseZoom * 1.5; // Zoom in 50% more
+    const zoom = Math.min(zoomX, zoomY, 2.0); // Fit to area without extra amplification
 
-    // Dynamic offset based on chat panel position
-    const chatOffset = currentUIState.chatPanelVisible && currentUIState.chatPanelSide === 'right' ? 250 : -150;
+    // Calculate viewport position to center nodes within the available canvas area
+    // The CanvasLayoutManager already accounts for chat panel position in canvasArea.x and canvasArea.width
+    // Increase left bias when chat is docked left (move content further left)
+    const leftBias = currentUIState.chatPanelVisible && currentUIState.chatPanelSide === 'left'
+      ? -(40 + Math.min(240, Math.max(0, (currentUIState.chatPanelWidth || 0) - 300) * 0.6))
+      : 0;
+
     const viewportX =
-      canvasArea.x + (canvasArea.width - nodesWidth * zoom) / 2 - minX * zoom + chatOffset;
+      canvasArea.x + (canvasArea.width - nodesWidth * zoom) / 2 - minX * zoom + leftBias;
     const viewportY =
       canvasArea.y + (canvasArea.height - nodesHeight * zoom) / 2 - minY * zoom;
 

@@ -10,6 +10,7 @@ import {
 } from 'reactflow';
 import { useTranslation } from 'react-i18next';
 import { useWorkflowStore } from '../../store/workflow';
+import { useUILayoutStore } from '../../store/uiLayout';
 
 interface UseFlowManagerProps {
   showErrorMessage: (message: string) => void;
@@ -159,7 +160,20 @@ export const useFlowManager = ({ showErrorMessage }: UseFlowManagerProps) => {
         return;
       }
 
-      storeAddEdge(params);
+      // Enforce connectors per layout orientation for Agent -> Task edges
+      let enforcedParams = params;
+      if (sourceNode.type === 'agentNode' && targetNode.type === 'taskNode') {
+        const orientation = useUILayoutStore.getState().getUILayoutState().layoutOrientation;
+        if (orientation === 'vertical') {
+          // Vertical: agent right -> task left
+          enforcedParams = { ...params, sourceHandle: 'right', targetHandle: 'left' };
+        } else {
+          // Horizontal: agent bottom -> task top
+          enforcedParams = { ...params, sourceHandle: 'bottom', targetHandle: 'top' };
+        }
+      }
+
+      storeAddEdge(enforcedParams);
     }
   }, [nodes, storeAddEdge, t, showErrorMessage]);
 

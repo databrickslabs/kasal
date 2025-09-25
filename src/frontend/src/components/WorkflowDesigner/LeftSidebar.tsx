@@ -25,6 +25,7 @@ import {
   AccountTree as GenerateConnectionsIcon,
   Keyboard as KeyboardIcon,
   Tune as TuneIcon,
+  SwapHoriz as SwapHorizIcon,
 
   Settings as SettingsIcon,
   InfoOutlined as InfoOutlinedIcon,
@@ -109,6 +110,18 @@ const LeftSidebar: React.FC<LeftSidebarProps> = ({
   const [isLoadingModels, setIsLoadingModels] = useState(true);
   const [planningModel, setPlanningModel] = useState<string>('');
   const [reasoningModel, setReasoningModel] = useState<string>('');
+  const { layoutOrientation, setLayoutOrientation } = useUILayoutStore();
+
+  const toggleLayoutOrientation = useCallback(() => {
+    const next = (layoutOrientation === 'horizontal') ? 'vertical' : 'horizontal';
+    setLayoutOrientation(next);
+    // Trigger node repositioning and fit view
+    setTimeout(() => {
+      window.dispatchEvent(new CustomEvent('recalculateNodePositions', { detail: { reason: 'layout-orientation-toggle' } }));
+      window.dispatchEvent(new Event('fitViewToNodesInternal'));
+    }, 50);
+  }, [layoutOrientation, setLayoutOrientation]);
+
   const [managerModel, setManagerModel] = useState<string>('');
   const { setLeftSidebarExpanded } = useUILayoutStore();
 
@@ -837,6 +850,25 @@ const LeftSidebar: React.FC<LeftSidebarProps> = ({
                         }}
                       >
                         <FitViewIcon fontSize="small" />
+                      </IconButton>
+                    </Tooltip>
+                    <Tooltip title="Toggle Layout (Vertical/Horizontal)" placement="right">
+                      <IconButton
+                        onClick={toggleLayoutOrientation}
+                        sx={{
+                          width: 40,
+                          height: 40,
+                          mb: 1,
+                          color: 'text.secondary',
+                          borderRadius: 0,
+                          transition: 'all 0.2s ease-in-out',
+                          '&:hover': {
+                            backgroundColor: 'action.hover',
+                            color: 'text.primary'
+                          }
+                        }}
+                      >
+                        <SwapHorizIcon fontSize="small" />
                       </IconButton>
                     </Tooltip>
                     <Tooltip title="Zoom In" placement="right">

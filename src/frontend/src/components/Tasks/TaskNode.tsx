@@ -84,52 +84,52 @@ const TaskNode: React.FC<TaskNodeProps> = ({ data, id }) => {
   const [availableTools, setAvailableTools] = useState<Tool[]>([]);
   const [editTooltipOpen, setEditTooltipOpen] = useState(false);
   const [deleteTooltipOpen, setDeleteTooltipOpen] = useState(false);
-  
+
   // Local selection state
   const [isSelected, setIsSelected] = useState(false);
 
   // Tab dirty state management
   const { markCurrentTabDirty } = useTabDirtyState();
-  
+
   // Task execution state - try multiple ID formats for compatibility
   const taskStatus = useTaskExecutionStore(state => {
     // DEBUG: Log what we're looking for
-    
+
     let status = null;
-    
+
     // Try with the label first (most reliable match with backend task names)
     if (data.label) {
       status = state.getTaskStatus(data.label);
-      
+
       // Try lowercase version of label
       if (!status) {
         status = state.getTaskStatus(data.label.toLowerCase());
       }
-      
+
       // Try with underscores replaced by spaces
       if (!status) {
         const labelWithSpaces = data.label.replace(/_/g, ' ');
         status = state.getTaskStatus(labelWithSpaces);
       }
-      
+
       // Try with task_ prefix and label
       if (!status) {
         const labelBasedId = `task_${data.label.replace(/\s+/g, '_').toLowerCase()}`;
         status = state.getTaskStatus(labelBasedId);
       }
-      
+
       // Check if any task state key contains keywords from the label
       // This handles cases where backend sends full description but label is short
       if (!status) {
         const labelLower = data.label.toLowerCase();
         const labelWords = labelLower.split(/\s+/).filter(word => word.length > 2); // Get significant words
         const allKeys = Array.from(state.taskStates.keys());
-        
+
         for (const key of allKeys) {
           const keyLower = key.toLowerCase();
-          
+
           // Check if key starts with the label
-          if (keyLower.startsWith(labelLower) || 
+          if (keyLower.startsWith(labelLower) ||
               keyLower.startsWith(labelLower.replace(/\s+/g, '_')) ||
               keyLower.startsWith(labelLower.replace(/\s+/g, '-'))) {
             status = state.getTaskStatus(key);
@@ -137,7 +137,7 @@ const TaskNode: React.FC<TaskNodeProps> = ({ data, id }) => {
               break;
             }
           }
-          
+
           // Check if all significant words from label are in the key
           if (!status && labelWords.length > 0) {
             const allWordsFound = labelWords.every(word => keyLower.includes(word));
@@ -151,21 +151,21 @@ const TaskNode: React.FC<TaskNodeProps> = ({ data, id }) => {
         }
       }
     }
-    
+
     // Try exact taskId if provided and no match found yet
     if (!status && data.taskId) {
       status = state.getTaskStatus(data.taskId);
-      
+
       // If taskId starts with "task-", also try just the UUID part
       if (!status && data.taskId.startsWith('task-')) {
         const uuidOnly = data.taskId.substring(5); // Remove "task-" prefix
         status = state.getTaskStatus(uuidOnly);
       }
     }
-    
+
     return status;
   });
-  
+
   // Add debugging logs on component mount
   useEffect(() => {
     // Monitor edge connections
@@ -224,15 +224,15 @@ const TaskNode: React.FC<TaskNodeProps> = ({ data, id }) => {
     const nodes = getNodes();
     const edges = getEdges();
     const currentNode = nodes.find(node => node.id === id);
-    
-    
+
+
     if (!currentNode) {
       return;
     }
 
     // Get all task nodes
     const taskNodes = nodes.filter(node => node.type === 'taskNode');
-    
+
     // Find the task node that's directly below this one
     const taskNodeBelow = taskNodes.find(taskNode => {
       // Check if the node is below (higher y value)
@@ -246,20 +246,20 @@ const TaskNode: React.FC<TaskNodeProps> = ({ data, id }) => {
         const isOtherCloser = otherNode.position.y < taskNode.position.y;
         return otherNode.id !== taskNode.id && isOtherBelow && isOtherAligned && isOtherCloser;
       });
-      
+
       return isBelow && isAligned && isClosest;
     });
 
     // If we found a task node below, create a connection
     if (taskNodeBelow) {
-      
+
       // Check if this connection already exists
       const connectionExists = edges.some(
         edge => edge.source === id && edge.target === taskNodeBelow.id
       );
 
       if (!connectionExists) {
-        
+
         const newEdge = {
           id: `${id}-${taskNodeBelow.id}`,
           source: id,
@@ -324,13 +324,13 @@ const TaskNode: React.FC<TaskNodeProps> = ({ data, id }) => {
     if (data.icon) {
       return <Box component="span" sx={iconStyles}>{data.icon}</Box>;
     }
-    
+
     return <AddTaskIcon sx={iconStyles} />;
   };
-  
+
   const getStatusIcon = () => {
     if (!taskStatus) return null;
-    
+
     switch (taskStatus.status) {
       case 'running':
         return <CircularProgress size={14} sx={{ color: 'info.main' }} />;
@@ -347,7 +347,7 @@ const TaskNode: React.FC<TaskNodeProps> = ({ data, id }) => {
     const isRunning = taskStatus?.status === 'running';
     const isCompleted = taskStatus?.status === 'completed';
     const isFailed = taskStatus?.status === 'failed';
-    
+
     const baseStyles = {
       minWidth: 160,
       minHeight: 120,
@@ -366,7 +366,7 @@ const TaskNode: React.FC<TaskNodeProps> = ({ data, id }) => {
         if (isFailed) {
           return `linear-gradient(135deg, ${theme.palette.error.light}15, ${theme.palette.error.main}10)`;
         }
-        return isSelected 
+        return isSelected
           ? `${theme.palette.primary.light}20`
           : theme.palette.background.paper;
       },
@@ -376,12 +376,12 @@ const TaskNode: React.FC<TaskNodeProps> = ({ data, id }) => {
         if (isRunning) return theme.palette.info.main;
         if (isCompleted) return theme.palette.success.main;
         if (isFailed) return theme.palette.error.main;
-        return isSelected 
-          ? theme.palette.primary.main 
+        return isSelected
+          ? theme.palette.primary.main
           : theme.palette.grey[300];
       },
-      boxShadow: (theme: Theme) => isSelected 
-        ? `0 0 0 2px ${theme.palette.primary.main}` 
+      boxShadow: (theme: Theme) => isSelected
+        ? `0 0 0 2px ${theme.palette.primary.main}`
         : `0 2px 4px ${theme.palette.mode === 'light' ? 'rgba(0, 0, 0, 0.05)' : 'rgba(0, 0, 0, 0.2)'}`,
       animation: isRunning ? 'pulse 2s infinite' : 'none',
       '@keyframes pulse': {
@@ -404,7 +404,7 @@ const TaskNode: React.FC<TaskNodeProps> = ({ data, id }) => {
         pointerEvents: 'all'
       }
     };
-    
+
     return baseStyles;
   };
 
@@ -442,7 +442,7 @@ const TaskNode: React.FC<TaskNodeProps> = ({ data, id }) => {
         markdown: data.config?.markdown || false
       }
     };
-    
+
     return taskData;
   };
 
@@ -450,7 +450,15 @@ const TaskNode: React.FC<TaskNodeProps> = ({ data, id }) => {
     <>
       <Handle
         type="target"
+        position={Position.Top}
+        id="top"
+        style={{ background: '#2196f3', width: '7px', height: '7px' }}
+      />
+
+      <Handle
+        type="target"
         position={Position.Left}
+        id="left"
         style={{ background: '#2196f3', width: '7px', height: '7px' }}
       />
       <Box
@@ -465,9 +473,9 @@ const TaskNode: React.FC<TaskNodeProps> = ({ data, id }) => {
       >
         {taskStatus && (
           <Box
-            sx={{ 
-              position: 'absolute', 
-              top: 8, 
+            sx={{
+              position: 'absolute',
+              top: 8,
               right: 8,
               display: 'flex',
               alignItems: 'center',
@@ -484,9 +492,9 @@ const TaskNode: React.FC<TaskNodeProps> = ({ data, id }) => {
               onClick={handleEditClick}
               onMouseEnter={() => setEditTooltipOpen(true)}
               onMouseLeave={() => setEditTooltipOpen(false)}
-              sx={{ 
+              sx={{
                 mr: 0.5,
-                backgroundColor: 'rgba(255, 255, 255, 0.3)', 
+                backgroundColor: 'rgba(255, 255, 255, 0.3)',
                 '&:hover': { backgroundColor: 'rgba(255, 255, 255, 0.5)' },
                 zIndex: 20
               }}
@@ -500,8 +508,8 @@ const TaskNode: React.FC<TaskNodeProps> = ({ data, id }) => {
               onClick={handleDelete}
               onMouseEnter={() => setDeleteTooltipOpen(true)}
               onMouseLeave={() => setDeleteTooltipOpen(false)}
-              sx={{ 
-                backgroundColor: 'rgba(255, 255, 255, 0.3)', 
+              sx={{
+                backgroundColor: 'rgba(255, 255, 255, 0.3)',
                 '&:hover': { backgroundColor: 'rgba(255, 255, 255, 0.5)' },
                 zIndex: 20
               }}
@@ -512,7 +520,7 @@ const TaskNode: React.FC<TaskNodeProps> = ({ data, id }) => {
         </div>
         <Box sx={{ display: 'flex', alignItems: 'center', mb: 1 }}>
           {getTaskIcon()}
-          <Typography variant="body2" sx={{ 
+          <Typography variant="body2" sx={{
             fontWeight: 500,
             color: (theme: Theme) => theme.palette.primary.main,
             fontSize: '0.9rem'
@@ -521,11 +529,11 @@ const TaskNode: React.FC<TaskNodeProps> = ({ data, id }) => {
           </Typography>
         </Box>
 
-        <Typography 
-          variant="body2" 
-          color="textSecondary" 
-          sx={{ 
-            fontSize: '0.8rem', 
+        <Typography
+          variant="body2"
+          color="textSecondary"
+          sx={{
+            fontSize: '0.8rem',
             overflow: 'hidden',
             textOverflow: 'ellipsis',
             display: '-webkit-box',
@@ -536,17 +544,17 @@ const TaskNode: React.FC<TaskNodeProps> = ({ data, id }) => {
           {data.description}
         </Typography>
 
-        <Typography 
-          variant="caption" 
-          color="textSecondary" 
-          sx={{ 
-            mt: 'auto', 
-            pt: 1, 
-            fontSize: '0.7rem', 
-            display: 'flex', 
+        <Typography
+          variant="caption"
+          color="textSecondary"
+          sx={{
+            mt: 'auto',
+            pt: 1,
+            fontSize: '0.7rem',
+            display: 'flex',
             alignItems: 'center',
             justifyContent: 'space-between',
-            width: '100%' 
+            width: '100%'
           }}
         >
           <span>Tools: {Array.isArray(data.tools) ? data.tools.length : 0}</span>
@@ -597,9 +605,9 @@ const TaskNode: React.FC<TaskNodeProps> = ({ data, id }) => {
               onTaskSaved={(savedTask) => {
                 // Mark tab as dirty since task was modified
                 markCurrentTabDirty();
-                
+
                 // Update the node with the saved task data
-                setNodes(nodes => 
+                setNodes(nodes =>
                   nodes.map(node => {
                     if (node.id === id) {
                       const updatedData = {
@@ -627,7 +635,7 @@ const TaskNode: React.FC<TaskNodeProps> = ({ data, id }) => {
                           markdown: savedTask.markdown !== undefined ? savedTask.markdown : (savedTask.config?.markdown || false)
                         }
                       };
-                      
+
                       return {
                         ...node,
                         data: updatedData

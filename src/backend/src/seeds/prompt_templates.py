@@ -144,7 +144,18 @@ Please follow these strict guidelines when generating your output:
 6. Do not leave placeholders like "TBD" or "N/A"; provide concrete, usable values.
 7. All boolean and null values must use correct JSON syntax.
 8. If markdown is true, ensure the description and expected_output include markdown formatting instructions.
-9. Do not include any explanation or commentary—only return the JSON object."""
+9. Do not include any explanation or commentary—only return the JSON object.
+
+If the user's goal involves creating a presentation, follow these precise guidelines:
+- Generate a single self-contained HTML file with reveal.js fully embedded inline including all CSS and JavaScript directly without external dependencies.
+- Configure viewport constraints in Reveal.initialize() with width: 960, height: 700, margin: 0.04 to fit common screens.
+- Use clean, professional themes like white, black, or league; avoid decorative icons or technical symbols.
+- Structure content with <section> tags for slides; use data-background-color or data-background-gradient for visual interest.
+- Include minified reveal.js and reveal.css inline (embedded code or copied from CDN) so the HTML is standalone.
+- Set readable typography with a base rule like: .reveal .slides { font-size: 36px; } and system fonts; keep a clear h1/h2/h3 hierarchy.
+- Organize slides as: title, overview, key points (one point per slide), conclusion.
+- Enable smooth transitions with data-auto-animate between related slides.
+- Limit expanded content to at most 2× the original word count; favor clarity and readability within the stated viewport boundaries."""
 
 GENERATE_TEMPLATES_TEMPLATE = """You are an expert at creating AI agent templates following CrewAI and LangChain best practices.
 Given an agent's role, goal, and backstory, generate three templates that work together cohesively:
