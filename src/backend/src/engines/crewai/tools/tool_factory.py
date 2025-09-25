@@ -622,10 +622,10 @@ class ToolFactory:
             if tool_name == "PerplexityTool":
                 # Use parameters directly from tool config
                 api_key = tool_config.get('api_key', '')
-                
+
                 # Try to get the key from environment first
                 perplexity_api_key = os.environ.get("PERPLEXITY_API_KEY")
-                
+
                 # If not found in environment, try to get it from the service
                 if not perplexity_api_key and not api_key:
                     # Use the API keys service if provided, otherwise use the normal methods
@@ -675,7 +675,7 @@ class ToolFactory:
                 
                 # Use tool configuration or environment
                 final_api_key = api_key or perplexity_api_key
-                
+
                 # Add api key to config and create with all parameters from config
                 tool_config_with_key = {**tool_config}
                 if final_api_key:
@@ -684,11 +684,11 @@ class ToolFactory:
                     # Remove 'perplexity_api_key' if it exists to avoid unexpected keyword arg error
                     if 'perplexity_api_key' in tool_config_with_key:
                         del tool_config_with_key['perplexity_api_key']
-                
+
                 # Add result_as_answer to tool configuration (only for tools that support it)
                 if tool_name != "LinkupSearchTool":
                     tool_config_with_key['result_as_answer'] = result_as_answer
-                
+
                 logger.info(f"Creating PerplexityTool with config: {tool_config_with_key}")
                 return tool_class(**tool_config_with_key)
             

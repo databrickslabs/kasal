@@ -553,14 +553,14 @@ def extract_user_context_from_request(request: Request) -> Dict[str, Any]:
 async def user_context_middleware(request: Request, call_next):
     """
     Middleware to extract and set user and group context from HTTP headers.
-    
+
     This middleware extracts both user context and group context from Databricks Apps headers.
     It works whether or not Databricks Apps is enabled, but provides richer context when it is.
-    
+
     Args:
         request: FastAPI Request object
         call_next: Next middleware/handler in the chain
-        
+
     Returns:
         Response from the next handler
     """
@@ -568,37 +568,47 @@ async def user_context_middleware(request: Request, call_next):
     try:
         # Check if Databricks Apps is enabled before processing user context
         apps_enabled = await _is_databricks_apps_enabled()
-        
+
         # Extract group context from X-Forwarded-Email if present
-        group_context = await extract_group_context_from_request(request)
-        if group_context:
-            UserContext.set_group_context(group_context)
-            logger.debug(f"Group context middleware: Set group groups {group_context.group_ids}")
-        
+        # Wrap in try-catch to handle async context initialization issues in Databricks Apps
+        try:
+            group_context = await extract_group_context_from_request(request)
+            if group_context:
+                UserContext.set_group_context(group_context)
+                logger.debug(f"Group context middleware: Set group groups {group_context.group_ids}")
+        except Exception as group_error:
+            # Handle greenlet_spawn errors during Databricks Apps startup
+            error_msg = str(group_error)
+            if "greenlet_spawn" in error_msg or "await_only" in error_msg:
+                logger.warning(f"Async context not ready for group context extraction (likely startup): {group_error}")
+            else:
+                logger.error(f"Error extracting group context: {group_error}")
+            # Continue without group context - it will be created on next request
+
         if apps_enabled:
             # Extract user context from request
             user_context = extract_user_context_from_request(request)
-            
+
             # Set context for this request
             if user_context:
                 UserContext.set_user_context(user_context)
-                
+
                 # Set user token separately for easy access
                 if 'access_token' in user_context:
                     UserContext.set_user_token(user_context['access_token'])
                     logger.debug("User context middleware: Set user token from X-Forwarded-Access-Token")
-        
+
         # Process the request
         response = await call_next(request)
-        
+
         return response
-        
+
     except Exception as e:
         logger.error(f"Error in user context middleware: {e}")
         # Clear context and continue
         UserContext.clear_context()
         return await call_next(request)
-    
+
     finally:
         # Clear context after request processing
         UserContext.clear_context()
@@ -607,7 +617,7 @@ async def user_context_middleware(request: Request, call_next):
 async def _is_databricks_apps_enabled() -> bool:
     """
     Check if Databricks Apps is enabled in the configuration.
-    
+
     Returns:
         True if apps_enabled is true in Databricks config, False otherwise
     """
@@ -618,14 +628,19 @@ async def _is_databricks_apps_enabled() -> bool:
         async with async_session_factory() as session:
             service = DatabricksService(session)
             config = await service.get_databricks_config()
-            
+
             if config and hasattr(config, 'apps_enabled'):
                 return config.apps_enabled
-            
+
             return False
-            
+
     except Exception as e:
-        logger.debug(f"Could not check Databricks apps_enabled status: {e}")
+        error_msg = str(e)
+        # Suppress greenlet_spawn errors during startup - async context not ready yet
+        if "greenlet_spawn" in error_msg or "await_only" in error_msg:
+            logger.debug(f"Async context not ready for Databricks config check (likely startup): {e}")
+        else:
+            logger.debug(f"Could not check Databricks apps_enabled status: {e}")
         return False
 
 

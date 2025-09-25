@@ -61,6 +61,9 @@ class DatabricksService:
                 "is_active": True,
                 "is_enabled": config_in.enabled,
                 "apps_enabled": config_in.apps_enabled,
+                "mlflow_enabled": getattr(config_in, "mlflow_enabled", False),
+                "evaluation_enabled": getattr(config_in, "evaluation_enabled", False),
+                "evaluation_judge_model": getattr(config_in, "evaluation_judge_model", None),
                 "group_id": self.group_id,
                 "created_by_email": created_by_email,
                 # Volume configuration fields
@@ -89,6 +92,9 @@ class DatabricksService:
                     schema=new_config.schema,
                     enabled=new_config.is_enabled,
                     apps_enabled=new_config.apps_enabled,
+                    mlflow_enabled=new_config.mlflow_enabled if hasattr(new_config, 'mlflow_enabled') else False,
+                    evaluation_enabled=new_config.evaluation_enabled if hasattr(new_config, 'evaluation_enabled') else False,
+                    evaluation_judge_model=new_config.evaluation_judge_model if hasattr(new_config, 'evaluation_judge_model') else None,
                     # Volume configuration fields
                     volume_enabled=new_config.volume_enabled if hasattr(new_config, 'volume_enabled') else False,
                     volume_path=new_config.volume_path if hasattr(new_config, 'volume_path') else None,
@@ -127,6 +133,10 @@ class DatabricksService:
                 schema=config.schema,
                 enabled=config.is_enabled,
                 apps_enabled=config.apps_enabled,
+                # MLflow configuration
+                mlflow_enabled=config.mlflow_enabled if hasattr(config, 'mlflow_enabled') else False,
+                evaluation_enabled=config.evaluation_enabled if hasattr(config, 'evaluation_enabled') else False,
+                evaluation_judge_model=config.evaluation_judge_model if hasattr(config, 'evaluation_judge_model') else None,
                 # Volume configuration fields
                 volume_enabled=config.volume_enabled if hasattr(config, 'volume_enabled') else False,
                 volume_path=config.volume_path if hasattr(config, 'volume_path') else None,

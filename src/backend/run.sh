@@ -22,6 +22,9 @@ fi
 export OTEL_SDK_DISABLED=true
 export CREWAI_DISABLE_TELEMETRY=true
 
+# Set log level to suppress DEBUG logs from third-party libraries
+export LOG_LEVEL=WARNING
+
 # CRITICAL: Use NullPool to prevent asyncpg connection issues with multiple event loops
 # This is needed for Databricks memory operations that run in separate event loops
 export USE_NULLPOOL=true

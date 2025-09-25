@@ -122,10 +122,15 @@ async def get_databricks_config(
                 schema="",
                 enabled=False,
                 apps_enabled=False,
+                # MLflow configuration defaults
+                mlflow_enabled=False,
+                evaluation_enabled=False,
+                # Volume configuration defaults
                 volume_enabled=False,
                 volume_path=None,
                 volume_file_format="json",
                 volume_create_date_dirs=True,
+                # Knowledge source volume configuration defaults
                 knowledge_volume_enabled=False,
                 knowledge_volume_path=None,
                 knowledge_chunk_size=1000,

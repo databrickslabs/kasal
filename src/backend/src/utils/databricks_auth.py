@@ -473,32 +473,44 @@ async def validate_databricks_connection() -> Tuple[bool, Optional[str]]:
         return False, str(e)
 
 
-def setup_environment_variables() -> bool:
+def setup_environment_variables(user_token: Optional[str] = None) -> bool:
     """
     Set up Databricks environment variables for compatibility with other libraries.
-    
+    Prefer the caller-provided user_token (OBO) when available so downstream
+    libraries (MLflow, LiteLLM) act as the end user.
+
     Returns:
         bool: True if successful, False otherwise
     """
     try:
         import asyncio
-        
+
         async def _setup():
             if not await _databricks_auth._load_config():
                 return False
-            
-            # Set environment variables
-            if _databricks_auth._api_token:
-                os.environ["DATABRICKS_TOKEN"] = _databricks_auth._api_token
-                os.environ["DATABRICKS_API_KEY"] = _databricks_auth._api_token
-                
+
+            # Set environment variables for host first
             if _databricks_auth._workspace_host:
                 os.environ["DATABRICKS_HOST"] = _databricks_auth._workspace_host
                 # Also set API_BASE for LiteLLM compatibility - must include /serving-endpoints
                 os.environ["DATABRICKS_API_BASE"] = f"{_databricks_auth._workspace_host}/serving-endpoints"
-                
+
+            # Prefer OBO user token if provided
+            if user_token:
+                try:
+                    _databricks_auth.set_user_access_token(user_token)
+                except Exception:
+                    # Best-effort; still export token to env for SDKs
+                    pass
+                os.environ["DATABRICKS_TOKEN"] = user_token
+                os.environ["DATABRICKS_API_KEY"] = user_token
+            elif _databricks_auth._api_token:
+                # Fall back to service PAT
+                os.environ["DATABRICKS_TOKEN"] = _databricks_auth._api_token
+                os.environ["DATABRICKS_API_KEY"] = _databricks_auth._api_token
+
             return True
-        
+
         # Check if we're already in an event loop
         try:
             asyncio.get_running_loop()
@@ -510,7 +522,7 @@ def setup_environment_variables() -> bool:
         except RuntimeError:
             # No event loop running, safe to use asyncio.run
             return asyncio.run(_setup())
-        
+
     except Exception as e:
         logger.error(f"Error setting up environment variables: {e}")
         return False

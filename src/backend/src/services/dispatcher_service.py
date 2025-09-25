@@ -478,7 +478,8 @@ Please analyze this message and provide your intent classification, considering 
                     prompt_text=dispatcher_response.suggested_prompt or request.message,
                     model=request.model,
                     tools=request.tools,
-                    group_context=group_context
+                    group_context=group_context,
+                    fast_planning=True
                 )
                 
             elif dispatcher_response.intent == IntentType.GENERATE_TASK:
@@ -487,7 +488,7 @@ Please analyze this message and provide your intent classification, considering 
                     text=dispatcher_response.suggested_prompt or request.message,
                     model=request.model
                 )
-                generation_result = await self.task_service.generate_and_save_task(task_request, group_context)
+                generation_result = await self.task_service.generate_and_save_task(task_request, group_context, fast_planning=True)
                 
             elif dispatcher_response.intent == IntentType.GENERATE_CREW:
                 # Call crew generation service
@@ -496,7 +497,7 @@ Please analyze this message and provide your intent classification, considering 
                     model=request.model,
                     tools=request.tools
                 )
-                generation_result = await self.crew_service.create_crew_complete(crew_request, group_context)
+                generation_result = await self.crew_service.create_crew_complete(crew_request, group_context, fast_planning=True)
                 
 
                 

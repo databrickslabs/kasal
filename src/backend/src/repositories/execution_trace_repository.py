@@ -47,8 +47,20 @@ class ExecutionTraceRepository(BaseRepository[ExecutionTrace]):
         try:
             trace = ExecutionTrace(**trace_data)
             self.session.add(trace)
+            # Flush to assign primary key before commit (important for some backends)
+            await self.session.flush()
+            # Capture id early in case refresh fails post-commit
+            _trace_id = getattr(trace, 'id', None)
             await self.session.commit()
-            await self.session.refresh(trace)
+            # Best-effort refresh; not strictly needed with expire_on_commit=False
+            try:
+                if getattr(trace, 'id', None) is None and _trace_id is not None:
+                    # If PK wasn’t populated, set it from pre-commit value
+                    trace.id = _trace_id
+                else:
+                    await self.session.refresh(trace)
+            except Exception as refresh_err:
+                logger.debug(f"Refresh after trace insert failed (non-fatal): {refresh_err}")
             return trace
         except SQLAlchemyError as e:
             await self.session.rollback()
