@@ -9,6 +9,13 @@ export interface DatabricksConfig {
 
   enabled: boolean;
   apps_enabled: boolean;
+
+  // MLflow configuration
+  mlflow_enabled?: boolean;
+  // MLflow Evaluation configuration
+  evaluation_enabled?: boolean;
+  evaluation_judge_model?: string; // Databricks judge endpoint route, e.g., "databricks:/<endpoint>"
+
   // Volume configuration fields
   volume_enabled?: boolean;
   volume_path?: string;

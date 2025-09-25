@@ -28,6 +28,9 @@ import { MemoryBackendType, isValidMemoryBackendConfig } from '../../types/memor
 import { useKnowledgeConfigStore } from '../../store/knowledgeConfigStore';
 import { ToolService } from '../../api/ToolService';
 
+import apiClient from '../../config/api/ApiConfig';
+import { AxiosError } from 'axios';
+
 interface DatabricksConfigurationProps {
   onSaved?: () => void;
 }
@@ -42,6 +45,13 @@ const DatabricksConfiguration: React.FC<DatabricksConfigurationProps> = ({ onSav
 
     enabled: false,
     apps_enabled: false,
+
+    // MLflow configuration
+    mlflow_enabled: false,
+    evaluation_enabled: false,
+    evaluation_judge_model: '',
+
+    // Volume configuration fields
     volume_enabled: false,
     volume_path: 'main.default.task_outputs',
     volume_file_format: 'json',
@@ -242,7 +252,7 @@ const DatabricksConfiguration: React.FC<DatabricksConfigurationProps> = ({ onSav
       ...prev,
       enabled: newEnabled
     }));
-    
+
     // Check token status when enabling Databricks
     if (newEnabled) {
       try {
@@ -262,6 +272,50 @@ const DatabricksConfiguration: React.FC<DatabricksConfigurationProps> = ({ onSav
       ...prev,
       apps_enabled: event.target.checked
     }));
+  };
+
+  const handleMlflowToggle = async (event: React.ChangeEvent<HTMLInputElement>) => {
+    const newEnabled = event.target.checked;
+    // Optimistically update UI state
+    setConfig(prev => ({ ...prev, mlflow_enabled: newEnabled }));
+
+    // Try to persist immediately via MLflow endpoint (doesn't require full config payload)
+    try {
+      await apiClient.post('/mlflow/status', { enabled: newEnabled });
+    } catch (error) {
+      const axErr = error as AxiosError;
+      // If no Databricks config exists yet, backend returns 404; advise user to save main config
+      if (axErr?.response?.status === 404) {
+        setNotification({
+          open: true,
+          message: t('configuration.databricks.mlflow.saveFirst', { defaultValue: 'Please save Databricks settings first to persist MLflow.' }),
+          severity: 'error',
+        });
+      } else {
+        console.error('Failed to persist MLflow toggle:', error);
+      }
+    }
+  };
+
+  const handleEvaluationToggle = async (event: React.ChangeEvent<HTMLInputElement>) => {
+    const newEnabled = event.target.checked;
+    // Optimistically update UI state
+    setConfig(prev => ({ ...prev, evaluation_enabled: newEnabled }));
+
+    try {
+      await apiClient.post('/mlflow/evaluation-status', { enabled: newEnabled });
+    } catch (error) {
+      const axErr = error as AxiosError;
+      if (axErr?.response?.status === 404) {
+        setNotification({
+          open: true,
+          message: t('configuration.databricks.mlflow.saveFirst', { defaultValue: 'Please save Databricks settings first to persist MLflow Evaluation.' }),
+          severity: 'error',
+        });
+      } else {
+        console.error('Failed to persist MLflow evaluation toggle:', error);
+      }
+    }
   };
 
   const handleCloseNotification = () => {
@@ -288,11 +342,11 @@ const DatabricksConfiguration: React.FC<DatabricksConfigurationProps> = ({ onSav
 
   return (
     <Box>
-      <Box sx={{ 
-        display: 'flex', 
-        alignItems: 'center', 
-        justifyContent: 'space-between', 
-        mb: 2 
+      <Box sx={{
+        display: 'flex',
+        alignItems: 'center',
+        justifyContent: 'space-between',
+        mb: 2
       }}>
         <Typography variant="subtitle1" fontWeight="medium">
           {t('configuration.databricks.title')}
@@ -308,19 +362,19 @@ const DatabricksConfiguration: React.FC<DatabricksConfigurationProps> = ({ onSav
           label={config.enabled ? t('common.enabled') : t('common.disabled')}
         />
       </Box>
-      
+
       {tokenStatus && tokenStatus.personal_token_required && (
         <Alert severity="warning" sx={{ mb: 2 }}>
           {tokenStatus.message}
         </Alert>
       )}
-      
+
       <Stack spacing={2} sx={{ mb: 3 }}>
-        <Box sx={{ 
-          display: 'flex', 
-          alignItems: 'center', 
-          justifyContent: 'space-between', 
-          mb: 1 
+        <Box sx={{
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'space-between',
+          mb: 1
         }}>
           <Typography variant="subtitle2" color="text.secondary">
             {t('configuration.databricks.apps.title', { defaultValue: 'Databricks Apps Integration' })}
@@ -337,6 +391,65 @@ const DatabricksConfiguration: React.FC<DatabricksConfigurationProps> = ({ onSav
             label={config.apps_enabled ? t('common.enabled') : t('common.disabled')}
           />
         </Box>
+
+        <Divider sx={{ my: 2 }} />
+
+        {/* MLflow Tracking Section */}
+        <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+          <Typography variant="subtitle2" color="text.secondary">
+            {t('configuration.databricks.mlflow.title', { defaultValue: 'MLflow Tracking' })}
+          </Typography>
+          <FormControlLabel
+            control={
+              <Switch
+                checked={!!config.mlflow_enabled}
+                onChange={handleMlflowToggle}
+                color="primary"
+                disabled={!config.enabled}
+              />
+            }
+            label={config.mlflow_enabled ? t('common.enabled') : t('common.disabled')}
+          />
+        </Box>
+
+
+        {/* MLflow Evaluation Section */}
+        {config.mlflow_enabled && (
+          <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', mt: 1 }}>
+          <Typography variant="subtitle2" color="text.secondary">
+            {t('configuration.databricks.evaluation.title', { defaultValue: 'MLflow Evaluation' })}
+          </Typography>
+          <FormControlLabel
+            control={
+              <Switch
+                checked={!!config.evaluation_enabled}
+                onChange={handleEvaluationToggle}
+                color="primary"
+                disabled={!config.enabled || !config.mlflow_enabled}
+              />
+            }
+            label={config.evaluation_enabled ? t('common.enabled') : t('common.disabled')}
+          />
+
+        {/* Databricks Judge Model for MLflow Evaluation */}
+        {config.mlflow_enabled && config.evaluation_enabled && (
+          <TextField
+            sx={{ mt: 1 }}
+            label={t('configuration.databricks.evaluation.judgeModel', { defaultValue: 'Databricks Judge Endpoint (databricks:/...)' })}
+            value={config.evaluation_judge_model || ''}
+            onChange={handleInputChange('evaluation_judge_model')}
+            fullWidth
+            disabled={loading || !config.enabled}
+            size="small"
+            placeholder="databricks:/your-judge-endpoint"
+            helperText={t('configuration.databricks.evaluation.judgeModelHelp', { defaultValue: 'Route for the judge model served on Databricks. Must start with databricks:/. Used to score evaluations.' })}
+          />
+        )}
+
+        </Box>
+        )}
+
+        <Divider sx={{ my: 2 }} />
 
         <TextField
           label={t('configuration.databricks.workspaceUrl')}
@@ -380,7 +493,7 @@ const DatabricksConfiguration: React.FC<DatabricksConfigurationProps> = ({ onSav
 
       {/* Volume Configuration Section */}
       <Divider sx={{ my: 3 }} />
-      
+
       <Box sx={{ mb: 3 }}>
         <Box sx={{ display: 'flex', alignItems: 'center', mb: 2 }}>
           <StorageIcon sx={{ mr: 1, color: 'primary.main' }} />
@@ -390,7 +503,7 @@ const DatabricksConfiguration: React.FC<DatabricksConfigurationProps> = ({ onSav
         </Box>
 
         <Alert severity="info" sx={{ mb: 2 }}>
-          {t('configuration.databricks.volume.description', { 
+          {t('configuration.databricks.volume.description', {
             defaultValue: 'Configure Databricks Volume settings for task outputs. When enabled, all task outputs will be automatically uploaded to the specified volume path. Tasks can override these settings individually.'
           })}
         </Alert>
@@ -424,7 +537,7 @@ const DatabricksConfiguration: React.FC<DatabricksConfigurationProps> = ({ onSav
             fullWidth
             disabled={loading || !config.enabled || !config.volume_enabled}
             size="small"
-            helperText={t('configuration.databricks.volume.pathHelp', { 
+            helperText={t('configuration.databricks.volume.pathHelp', {
               defaultValue: 'Format: catalog.schema.volume (e.g., main.default.task_outputs)'
             })}
             placeholder="catalog.schema.volume"
@@ -469,9 +582,9 @@ const DatabricksConfiguration: React.FC<DatabricksConfigurationProps> = ({ onSav
               <Typography variant="body2" sx={{ mb: 1 }}>
                 <strong>{t('configuration.databricks.volume.example', { defaultValue: 'Example output path:' })}</strong>
               </Typography>
-              <Typography variant="body2" component="code" sx={{ 
-                display: 'block', 
-                p: 1, 
+              <Typography variant="body2" component="code" sx={{
+                display: 'block',
+                p: 1,
                 bgcolor: 'grey.100',
                 borderRadius: 1,
                 fontFamily: 'monospace',
@@ -482,7 +595,7 @@ const DatabricksConfiguration: React.FC<DatabricksConfigurationProps> = ({ onSav
                 /task_output.{config.volume_file_format || 'json'}
               </Typography>
               <Typography variant="caption" color="text.secondary" sx={{ mt: 1, display: 'block' }}>
-                {t('configuration.databricks.volume.executionNote', { 
+                {t('configuration.databricks.volume.executionNote', {
                   defaultValue: 'Note: [execution_name] will be replaced with the actual execution or run name'
                 })}
               </Typography>
@@ -493,7 +606,7 @@ const DatabricksConfiguration: React.FC<DatabricksConfigurationProps> = ({ onSav
 
       {/* Knowledge Source Volume Configuration Section */}
       <Divider sx={{ my: 3 }} />
-      
+
       <Box sx={{ mb: 3 }}>
         <Box sx={{ display: 'flex', alignItems: 'center', mb: 2 }}>
           <StorageIcon sx={{ mr: 1, color: 'secondary.main' }} />
@@ -503,7 +616,7 @@ const DatabricksConfiguration: React.FC<DatabricksConfigurationProps> = ({ onSav
         </Box>
 
         <Alert severity="info" sx={{ mb: 2 }}>
-          {t('configuration.databricks.knowledge.description', { 
+          {t('configuration.databricks.knowledge.description', {
             defaultValue: 'Configure Databricks Volume settings for knowledge sources (RAG). When enabled, uploaded knowledge files will be stored in the specified volume and made available to AI agents during execution.'
           })}
         </Alert>
@@ -552,7 +665,7 @@ const DatabricksConfiguration: React.FC<DatabricksConfigurationProps> = ({ onSav
             fullWidth
             disabled={loading || !config.enabled || !config.knowledge_volume_enabled || !isMemoryBackendConfigured}
             size="small"
-            helperText={t('configuration.databricks.knowledge.pathHelp', { 
+            helperText={t('configuration.databricks.knowledge.pathHelp', {
               defaultValue: 'Format: catalog.schema.volume (e.g., main.default.knowledge)'
             })}
             placeholder="catalog.schema.volume"
@@ -566,7 +679,7 @@ const DatabricksConfiguration: React.FC<DatabricksConfigurationProps> = ({ onSav
             disabled={loading || !config.enabled || !config.knowledge_volume_enabled || !isMemoryBackendConfigured}
             size="small"
             type="number"
-            helperText={t('configuration.databricks.knowledge.chunkSizeHelp', { 
+            helperText={t('configuration.databricks.knowledge.chunkSizeHelp', {
               defaultValue: 'Size of text chunks for knowledge processing (default: 1000 characters)'
             })}
           />
@@ -579,7 +692,7 @@ const DatabricksConfiguration: React.FC<DatabricksConfigurationProps> = ({ onSav
             disabled={loading || !config.enabled || !config.knowledge_volume_enabled || !isMemoryBackendConfigured}
             size="small"
             type="number"
-            helperText={t('configuration.databricks.knowledge.chunkOverlapHelp', { 
+            helperText={t('configuration.databricks.knowledge.chunkOverlapHelp', {
               defaultValue: 'Overlap between chunks to maintain context (default: 200 characters)'
             })}
           />
@@ -589,9 +702,9 @@ const DatabricksConfiguration: React.FC<DatabricksConfigurationProps> = ({ onSav
               <Typography variant="body2" sx={{ mb: 1 }}>
                 <strong>{t('configuration.databricks.knowledge.structure', { defaultValue: 'Knowledge files will be organized as:' })}</strong>
               </Typography>
-              <Typography variant="body2" component="code" sx={{ 
-                display: 'block', 
-                p: 1, 
+              <Typography variant="body2" component="code" sx={{
+                display: 'block',
+                p: 1,
                 bgcolor: 'white',
                 border: '1px solid',
                 borderColor: 'grey.300',
@@ -602,7 +715,7 @@ const DatabricksConfiguration: React.FC<DatabricksConfigurationProps> = ({ onSav
                 /Volumes/{(config.knowledge_volume_path || 'main.default.knowledge').replace(/\./g, '/')}/[group_id]/[execution_id]/[files]
               </Typography>
               <Typography variant="caption" color="text.secondary" sx={{ mt: 1, display: 'block' }}>
-                {t('configuration.databricks.knowledge.structureNote', { 
+                {t('configuration.databricks.knowledge.structureNote', {
                   defaultValue: 'Files are organized by group and execution ID for proper isolation and access control'
                 })}
               </Typography>
@@ -611,8 +724,8 @@ const DatabricksConfiguration: React.FC<DatabricksConfigurationProps> = ({ onSav
         </Stack>
       </Box>
 
-      <Box sx={{ 
-        display: 'flex', 
+      <Box sx={{
+        display: 'flex',
         justifyContent: 'space-between',
         mt: 2,
         mb: 2
@@ -626,7 +739,7 @@ const DatabricksConfiguration: React.FC<DatabricksConfigurationProps> = ({ onSav
         >
           {checkingConnection ? t('common.checking') : t('configuration.databricks.checkConnection', { defaultValue: 'Check Connection' })}
         </Button>
-        
+
         <Button
           variant="contained"
           startIcon={loading ? <CircularProgress size={18} /> : <SaveIcon fontSize="small" />}
@@ -637,10 +750,10 @@ const DatabricksConfiguration: React.FC<DatabricksConfigurationProps> = ({ onSav
           {loading ? t('common.loading') : t('common.save')}
         </Button>
       </Box>
-      
+
       {connectionStatus && (
-        <Alert 
-          severity={connectionStatus.connected ? "success" : "error"} 
+        <Alert
+          severity={connectionStatus.connected ? "success" : "error"}
           sx={{ mb: 2 }}
           icon={connectionStatus.connected ? <CheckCircleOutlineIcon /> : undefined}
         >
@@ -666,4 +779,4 @@ const DatabricksConfiguration: React.FC<DatabricksConfigurationProps> = ({ onSav
   );
 };
 
-export default DatabricksConfiguration; 
+export default DatabricksConfiguration;
