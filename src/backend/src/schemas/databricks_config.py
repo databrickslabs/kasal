@@ -11,13 +11,19 @@ class DatabricksConfigBase(BaseModel):
     db_schema: str = Field("", alias="schema")
     enabled: bool = True
     apps_enabled: bool = False
-    
+
+    # MLflow configuration
+    mlflow_enabled: bool = False
+    # MLflow Evaluation configuration
+    evaluation_enabled: bool = False
+    evaluation_judge_model: Optional[str] = None  # Databricks judge endpoint route, e.g., "databricks:/<endpoint>"
+
     # Volume configuration fields
     volume_enabled: bool = False
     volume_path: Optional[str] = None
     volume_file_format: str = "json"
     volume_create_date_dirs: bool = True
-    
+
     # Knowledge source volume configuration
     knowledge_volume_enabled: bool = False
     knowledge_volume_path: Optional[str] = None
@@ -74,13 +80,19 @@ class DatabricksConfigUpdate(DatabricksConfigBase):
     db_schema: Optional[str] = Field(None, alias="schema")
     enabled: Optional[bool] = None
     apps_enabled: Optional[bool] = None
-    
+
+    # MLflow configuration
+    mlflow_enabled: Optional[bool] = None
+    # MLflow Evaluation configuration
+    evaluation_enabled: Optional[bool] = None
+    evaluation_judge_model: Optional[str] = None
+
     # Volume configuration fields
     volume_enabled: Optional[bool] = None
     volume_path: Optional[str] = None
     volume_file_format: Optional[str] = None
     volume_create_date_dirs: Optional[bool] = None
-    
+
     # Knowledge source volume configuration
     knowledge_volume_enabled: Optional[bool] = None
     knowledge_volume_path: Optional[str] = None
