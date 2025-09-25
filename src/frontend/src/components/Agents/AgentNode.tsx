@@ -99,7 +99,7 @@ const AgentNode: React.FC<{ data: AgentNodeData; id: string }> = ({ data, id }) 
 
   const handleDelete = useCallback(() => {
     setNodes(nodes => nodes.filter(node => node.id !== id));
-    setEdges(edges => edges.filter(edge => 
+    setEdges(edges => edges.filter(edge =>
       edge.source !== id && edge.target !== id
     ));
   }, [id, setNodes, setEdges]);
@@ -108,10 +108,10 @@ const AgentNode: React.FC<{ data: AgentNodeData; id: string }> = ({ data, id }) 
     try {
       // Don't manually close tooltips - let them close naturally
       document.activeElement && (document.activeElement as HTMLElement).blur();
-      
+
       // Try different sources for the agent ID
       const agentIdToUse = data.agentId || data.id || data.agent_id;
-      
+
       if (!agentIdToUse) {
         console.warn('Agent ID is missing in node data, using data directly:', data);
         // If there's no ID, use the data directly (might be a new unsaved agent)
@@ -163,9 +163,9 @@ const AgentNode: React.FC<{ data: AgentNodeData; id: string }> = ({ data, id }) 
   const handleDoubleClick = useCallback(() => {
     const nodes = getNodes();
     const edges = getEdges();
-    
+
     const taskNodes = nodes.filter(node => node.type === 'taskNode');
-    
+
     const availableTaskNodes = taskNodes.filter(taskNode => {
       const hasIncomingEdge = edges.some(edge => edge.target === taskNode.id);
       return !hasIncomingEdge;
@@ -292,17 +292,17 @@ const AgentNode: React.FC<{ data: AgentNodeData; id: string }> = ({ data, id }) 
       justifyContent: 'space-between',
       gap: 0.1,
       position: 'relative',
-      background: (theme: Theme) => isSelected 
+      background: (theme: Theme) => isSelected
         ? `${theme.palette.primary.light}20` // Light background when selected
         : theme.palette.background.paper,
       borderRadius: '12px',
-      boxShadow: (theme: Theme) => isSelected 
-        ? `0 0 0 2px ${theme.palette.primary.main}` 
-        : `0 2px 4px ${theme.palette.mode === 'light' 
-          ? 'rgba(0, 0, 0, 0.1)' 
+      boxShadow: (theme: Theme) => isSelected
+        ? `0 0 0 2px ${theme.palette.primary.main}`
+        : `0 2px 4px ${theme.palette.mode === 'light'
+          ? 'rgba(0, 0, 0, 0.1)'
           : 'rgba(0, 0, 0, 0.4)'}`,
-      border: (theme: Theme) => `1px solid ${isSelected 
-        ? theme.palette.primary.main 
+      border: (theme: Theme) => `1px solid ${isSelected
+        ? theme.palette.primary.main
         : theme.palette.primary.light}`,
       transition: 'all 0.3s ease',
       padding: '16px 8px',
@@ -349,7 +349,7 @@ const AgentNode: React.FC<{ data: AgentNodeData; id: string }> = ({ data, id }) 
         }
       };
     }
-    
+
     if (data.isCompleted) {
       return {
         ...baseStyles,
@@ -441,14 +441,22 @@ const AgentNode: React.FC<{ data: AgentNodeData; id: string }> = ({ data, id }) 
           </Tooltip>
         </Box>
       )}
-      
+
       <Handle
         type="source"
-        position={Position.Right}
+        position={Position.Bottom}
+        id="bottom"
         style={{ background: '#2196f3', width: '7px', height: '7px' }}
         onDoubleClick={handleDoubleClick}
       />
-      
+      <Handle
+        type="source"
+        position={Position.Right}
+        id="right"
+        style={{ background: '#2196f3', width: '7px', height: '7px' }}
+      />
+
+
       <Box sx={{
         backgroundColor: (theme: Theme) => `${theme.palette.primary.main}20`,
         borderRadius: '50%',
@@ -460,7 +468,7 @@ const AgentNode: React.FC<{ data: AgentNodeData; id: string }> = ({ data, id }) 
       }}>
         <PersonIcon sx={{ color: (theme: Theme) => theme.palette.primary.main, fontSize: '1.5rem' }} />
       </Box>
-      
+
       <Typography variant="body2" sx={{
         fontWeight: 500,
         textAlign: 'center',
@@ -491,7 +499,7 @@ const AgentNode: React.FC<{ data: AgentNodeData; id: string }> = ({ data, id }) 
           boxShadow: (theme: Theme) => `0 2px 4px ${theme.palette.primary.main}15`,
         }
       }}>
-        <MemoryIcon sx={{ 
+        <MemoryIcon sx={{
           fontSize: '0.65rem',
           mr: 0.25,
           color: (theme: Theme) => theme.palette.primary.main,
@@ -513,9 +521,9 @@ const AgentNode: React.FC<{ data: AgentNodeData; id: string }> = ({ data, id }) 
 
       <Box sx={{ display: 'flex', gap: 1, mt: 1 }}>
         {data.allow_code_execution && (
-          <Tooltip 
-            title="Code Execution Enabled" 
-            disableInteractive 
+          <Tooltip
+            title="Code Execution Enabled"
+            disableInteractive
             placement="top"
           >
             <div>
@@ -524,10 +532,10 @@ const AgentNode: React.FC<{ data: AgentNodeData; id: string }> = ({ data, id }) 
           </Tooltip>
         )}
         {data.memory && (
-          <Tooltip 
+          <Tooltip
             title={`Memory: ${
-              data.embedder_config?.provider 
-                ? `${data.embedder_config.provider} embeddings` 
+              data.embedder_config?.provider
+                ? `${data.embedder_config.provider} embeddings`
                 : 'OpenAI embeddings (default)'
             }`}
             disableInteractive
@@ -541,9 +549,9 @@ const AgentNode: React.FC<{ data: AgentNodeData; id: string }> = ({ data, id }) 
       </Box>
 
       <Box className="action-buttons">
-        <Tooltip 
-          title="Edit Agent" 
-          disableInteractive 
+        <Tooltip
+          title="Edit Agent"
+          disableInteractive
           placement="top"
         >
           <IconButton
@@ -561,9 +569,9 @@ const AgentNode: React.FC<{ data: AgentNodeData; id: string }> = ({ data, id }) 
             <EditIcon sx={{ fontSize: '1rem', color: '#2196f3' }} />
           </IconButton>
         </Tooltip>
-        <Tooltip 
-          title="Delete Agent" 
-          disableInteractive 
+        <Tooltip
+          title="Delete Agent"
+          disableInteractive
           placement="top"
         >
           <IconButton
@@ -590,11 +598,11 @@ const AgentNode: React.FC<{ data: AgentNodeData; id: string }> = ({ data, id }) 
           maxWidth="md"
           fullWidth
           PaperProps={{
-            sx: { 
-              display: 'flex', 
+            sx: {
+              display: 'flex',
               flexDirection: 'column',
-              height: '85vh', 
-              maxHeight: '85vh' 
+              height: '85vh',
+              maxHeight: '85vh'
             }
           }}
         >

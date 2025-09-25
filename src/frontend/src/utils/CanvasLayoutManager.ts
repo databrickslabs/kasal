@@ -16,20 +16,20 @@ export interface UILayoutState {
   // Screen dimensions
   screenWidth: number;
   screenHeight: number;
-  
+
   // Fixed UI elements
   tabBarHeight: number;
-  
+
   // Left sidebar
   leftSidebarVisible: boolean;
   leftSidebarExpanded: boolean;
   leftSidebarBaseWidth: number;    // Activity bar width (48px)
   leftSidebarExpandedWidth: number; // Full expanded width (280px)
-  
+
   // Right sidebar
   rightSidebarVisible: boolean;
   rightSidebarWidth: number;       // Fixed width (48px)
-  
+
   // Chat panel
   chatPanelVisible: boolean;
   chatPanelCollapsed: boolean;
@@ -44,6 +44,9 @@ export interface UILayoutState {
   // Panel splits (for dual canvas mode)
   panelPosition: number;           // 0-100% split between crew/flow panels
   areFlowsVisible: boolean;        // Whether flows panel is shown
+
+  // Layout orientation for crew canvas
+  layoutOrientation?: 'vertical' | 'horizontal';
 }
 
 export interface LayoutOptions {
@@ -54,7 +57,7 @@ export interface LayoutOptions {
 
 /**
  * Enhanced CanvasLayoutManager - Comprehensive UI-aware node positioning system
- * 
+ *
  * This class calculates optimal node positions while considering ALL UI elements:
  * - TabBar at top
  * - Left sidebar (activity bar + expandable panel)
@@ -62,7 +65,7 @@ export interface LayoutOptions {
  * - Chat panel (overlay, resizable)
  * - Execution history (bottom overlay, resizable)
  * - Panel splits for dual canvas mode
- * 
+ *
  * Features:
  * - Real-time UI state tracking
  * - Accurate available space calculation
@@ -87,26 +90,26 @@ export class CanvasLayoutManager {
   constructor(options: LayoutOptions = { margin: 20, minNodeSpacing: 50 }) {
     this.margin = options.margin;
     this.minNodeSpacing = options.minNodeSpacing;
-    
+
     // Initialize with default UI state
     this.uiState = {
       // Screen dimensions (will be updated)
       screenWidth: typeof window !== 'undefined' ? window.innerWidth : 1200,
       screenHeight: typeof window !== 'undefined' ? window.innerHeight : 800,
-      
+
       // Fixed UI elements
       tabBarHeight: 48,
-      
+
       // Left sidebar defaults
       leftSidebarVisible: true,
       leftSidebarExpanded: false,
       leftSidebarBaseWidth: 48,
       leftSidebarExpandedWidth: 280,
-      
+
       // Right sidebar defaults
       rightSidebarVisible: true,
       rightSidebarWidth: 48,
-      
+
       // Chat panel defaults
       chatPanelVisible: true,
       chatPanelCollapsed: false,
@@ -117,11 +120,14 @@ export class CanvasLayoutManager {
       // Execution history defaults
       executionHistoryVisible: false,
       executionHistoryHeight: 60,
-      
+
       // Panel splits
       panelPosition: 50,
       areFlowsVisible: true,
-      
+
+      // Layout orientation
+      layoutOrientation: 'vertical',
+
       // Override with provided defaults
       ...options.defaultUIState
     };
@@ -157,8 +163,8 @@ export class CanvasLayoutManager {
 
     // Subtract left sidebar
     if (this.uiState.leftSidebarVisible) {
-      const leftSidebarWidth = this.uiState.leftSidebarExpanded 
-        ? this.uiState.leftSidebarExpandedWidth 
+      const leftSidebarWidth = this.uiState.leftSidebarExpanded
+        ? this.uiState.leftSidebarExpandedWidth
         : this.uiState.leftSidebarBaseWidth;
       availableX += leftSidebarWidth;
       availableWidth -= leftSidebarWidth;
@@ -252,7 +258,7 @@ export class CanvasLayoutManager {
         // Position first task in the tasks column (to the right of agents)
         return this.getFirstTaskPosition(agentNodes, availableArea, spacing, isNarrow);
       }
-      
+
       // No agents, position task in left area
       return {
         x: availableArea.x + spacing,
@@ -304,7 +310,7 @@ export class CanvasLayoutManager {
     // Check if we have a very narrow canvas
     const isNarrowCanvas = availableArea.width < 600;
     const reducedSpacing = isNarrowCanvas ? Math.max(20, this.minNodeSpacing / 2) : this.minNodeSpacing;
-    
+
     console.log(`[CanvasLayout] Available area: ${availableArea.width}x${availableArea.height}, isNarrow: ${isNarrowCanvas}, spacing: ${reducedSpacing}`);
 
     // For narrow canvases, use a more compact layout strategy
@@ -314,75 +320,75 @@ export class CanvasLayoutManager {
 
     // Calculate how many nodes can fit vertically with normal spacing
     const maxAgentsPerColumn = Math.max(1, Math.floor(availableArea.height / (agentDims.height + reducedSpacing)));
-    
+
     // Calculate number of columns needed
     const agentColumns = Math.ceil(agents / maxAgentsPerColumn);
     const taskColumns = tasks > 0 ? 1 : 0; // Tasks always in single column
-    
+
     // Calculate total layout width needed
     const agentAreaWidth = agentColumns * (agentDims.width + reducedSpacing);
     const taskAreaWidth = taskColumns * (taskDims.width + reducedSpacing);
     const totalLayoutWidth = agentAreaWidth + taskAreaWidth;
-    
+
     // Start positioning from left side of available area
     const startX = availableArea.x;
-    
+
     // Position agents in columns (left side)
     for (let i = 0; i < agents; i++) {
       const col = Math.floor(i / maxAgentsPerColumn);
       const row = i % maxAgentsPerColumn;
-      
+
       const x = startX + col * (agentDims.width + reducedSpacing);
       const y = availableArea.y + row * (agentDims.height + reducedSpacing);
-      
+
       agentPositions.push({ x, y });
     }
-    
+
     // Position tasks in single column to the right of agents (always stacked vertically)
     const taskStartX = startX + agentAreaWidth;
     for (let i = 0; i < tasks; i++) {
       const x = taskStartX; // All tasks in same column
       const y = availableArea.y + i * (taskDims.height + reducedSpacing);
-      
+
       taskPositions.push({ x, y });
     }
-    
+
     // Calculate actual layout bounds
     const allPositions = [...agentPositions, ...taskPositions];
     if (allPositions.length === 0) {
-      return { 
-        agentPositions: [], 
-        taskPositions: [], 
+      return {
+        agentPositions: [],
+        taskPositions: [],
         layoutBounds: { x: availableArea.x, y: availableArea.y, width: 0, height: 0 },
         shouldAutoFit: false
       };
     }
-    
+
     const minX = Math.min(...allPositions.map(p => p.x));
-    const maxX = Math.max(...allPositions.map(p => p.x), 
+    const maxX = Math.max(...allPositions.map(p => p.x),
                          ...agentPositions.map(p => p.x + agentDims.width),
                          ...taskPositions.map(p => p.x + taskDims.width));
     const minY = Math.min(...allPositions.map(p => p.y));
     const maxY = Math.max(...allPositions.map(p => p.y),
                          ...agentPositions.map(p => p.y + agentDims.height),
                          ...taskPositions.map(p => p.y + taskDims.height));
-    
+
     const layoutBounds = {
       x: minX,
       y: minY,
       width: maxX - minX,
       height: maxY - minY
     };
-    
+
     // Determine if auto-fit is needed (layout extends beyond available area)
-    const shouldAutoFit = totalLayoutWidth > availableArea.width || 
+    const shouldAutoFit = totalLayoutWidth > availableArea.width ||
                          layoutBounds.height > availableArea.height;
 
     console.log(`[CanvasLayout] Layout bounds: ${layoutBounds.width}x${layoutBounds.height}, shouldAutoFit: ${shouldAutoFit}`);
 
-    return { 
-      agentPositions, 
-      taskPositions, 
+    return {
+      agentPositions,
+      taskPositions,
       layoutBounds,
       shouldAutoFit
     };
@@ -393,9 +399,9 @@ export class CanvasLayoutManager {
    * Agents in left column, tasks in right column, both stacked vertically
    */
   private getCompactCrewLayout(
-    agents: number, 
-    tasks: number, 
-    availableArea: CanvasArea, 
+    agents: number,
+    tasks: number,
+    availableArea: CanvasArea,
     spacing: number
   ): {
     agentPositions: { x: number; y: number }[];
@@ -413,10 +419,10 @@ export class CanvasLayoutManager {
     const totalColumns = (agents > 0 ? 1 : 0) + (tasks > 0 ? 1 : 0);
     const availableWidth = availableArea.width - (spacing * (totalColumns + 1));
     const columnWidth = totalColumns > 0 ? availableWidth / totalColumns : availableArea.width;
-    
+
     // Ensure minimum viable width
     const nodeWidth = Math.max(140, Math.min(200, columnWidth));
-    
+
     // Position agents in left column (vertically stacked)
     if (agents > 0) {
       const agentX = availableArea.x + spacing;
@@ -425,30 +431,30 @@ export class CanvasLayoutManager {
         agentPositions.push({ x: agentX, y });
       }
     }
-    
+
     // Position tasks in right column (vertically stacked)
     if (tasks > 0) {
-      const taskX = agents > 0 
+      const taskX = agents > 0
         ? availableArea.x + spacing + nodeWidth + spacing  // After agents column
         : availableArea.x + spacing;  // First column if no agents
-      
+
       for (let i = 0; i < tasks; i++) {
         const y = availableArea.y + i * (taskDims.height + spacing);
         taskPositions.push({ x: taskX, y });
       }
     }
-    
+
     // Calculate layout bounds
     const allPositions = [...agentPositions, ...taskPositions];
     if (allPositions.length === 0) {
-      return { 
-        agentPositions: [], 
-        taskPositions: [], 
+      return {
+        agentPositions: [],
+        taskPositions: [],
         layoutBounds: { x: availableArea.x, y: availableArea.y, width: 0, height: 0 },
         shouldAutoFit: false
       };
     }
-    
+
     const minX = Math.min(...allPositions.map(p => p.x));
     const maxX = Math.max(...allPositions.map(p => p.x + nodeWidth));
     const minY = Math.min(...allPositions.map(p => p.y));
@@ -456,23 +462,23 @@ export class CanvasLayoutManager {
       ...agentPositions.map(p => p.y + agentDims.height),
       ...taskPositions.map(p => p.y + taskDims.height)
     );
-    
+
     const layoutBounds = {
       x: minX,
       y: minY,
       width: maxX - minX,
       height: maxY - minY
     };
-    
+
     // Auto-fit if layout still doesn't fit
-    const shouldAutoFit = layoutBounds.width > availableArea.width || 
+    const shouldAutoFit = layoutBounds.width > availableArea.width ||
                          layoutBounds.height > availableArea.height;
 
     console.log(`[CompactLayout] Agents column, tasks column vertically stacked: ${layoutBounds.width}x${layoutBounds.height}, shouldAutoFit: ${shouldAutoFit}`);
 
-    return { 
-      agentPositions, 
-      taskPositions, 
+    return {
+      agentPositions,
+      taskPositions,
       layoutBounds,
       shouldAutoFit
     };
@@ -482,19 +488,19 @@ export class CanvasLayoutManager {
    * Find smart agent position for narrow screens
    */
   private findSmartAgentPosition(
-    agentNodes: Node[], 
-    availableArea: CanvasArea, 
+    agentNodes: Node[],
+    availableArea: CanvasArea,
     spacing: number
   ): { x: number; y: number } {
     const agentDims = CanvasLayoutManager.NODE_DIMENSIONS.agentNode;
-    
+
     // Find the lowest agent to stack below it
-    const lowestAgent = agentNodes.reduce((lowest, current) => 
+    const lowestAgent = agentNodes.reduce((lowest, current) =>
       current.position.y > lowest.position.y ? current : lowest
     );
-    
+
     const newY = lowestAgent.position.y + agentDims.height + spacing;
-    
+
     // Check if we can fit another agent vertically
     if (newY + agentDims.height <= availableArea.y + availableArea.height) {
       return {
@@ -502,12 +508,12 @@ export class CanvasLayoutManager {
         y: newY
       };
     }
-    
+
     // Need to start a new column
-    const rightmostAgent = agentNodes.reduce((rightmost, current) => 
+    const rightmostAgent = agentNodes.reduce((rightmost, current) =>
       current.position.x > rightmost.position.x ? current : rightmost
     );
-    
+
     return {
       x: rightmostAgent.position.x + agentDims.width + spacing,
       y: availableArea.y + spacing
@@ -518,32 +524,32 @@ export class CanvasLayoutManager {
    * Get position for first task relative to agents
    */
   private getFirstTaskPosition(
-    agentNodes: Node[], 
-    availableArea: CanvasArea, 
-    spacing: number, 
+    agentNodes: Node[],
+    availableArea: CanvasArea,
+    spacing: number,
     isNarrow: boolean
   ): { x: number; y: number } {
     const agentDims = CanvasLayoutManager.NODE_DIMENSIONS.agentNode;
-    
+
     if (isNarrow) {
       // For narrow screens, find the rightmost agent and place task next to it
-      const rightmostAgent = agentNodes.reduce((rightmost, current) => 
+      const rightmostAgent = agentNodes.reduce((rightmost, current) =>
         current.position.x > rightmost.position.x ? current : rightmost
       );
-      
+
       return {
         x: rightmostAgent.position.x + agentDims.width + spacing,
         y: availableArea.y + spacing
       };
     }
-    
+
     // For wider screens, use standard logic
-    const rightmostAgent = agentNodes.reduce((rightmost, current) => 
+    const rightmostAgent = agentNodes.reduce((rightmost, current) =>
       current.position.x > rightmost.position.x ? current : rightmost
     );
-    
+
     const newX = rightmostAgent.position.x + agentDims.width + spacing;
-    
+
     return {
       x: newX,
       y: rightmostAgent.position.y
@@ -554,21 +560,21 @@ export class CanvasLayoutManager {
    * Find vertical position for new task (always stack vertically)
    */
   private findVerticalTaskPosition(
-    taskNodes: Node[], 
-    availableArea: CanvasArea, 
+    taskNodes: Node[],
+    availableArea: CanvasArea,
     spacing: number
   ): { x: number; y: number } {
     const taskDims = CanvasLayoutManager.NODE_DIMENSIONS.taskNode;
-    
+
     // Find the lowest task
-    const lowestTask = taskNodes.reduce((lowest, current) => 
+    const lowestTask = taskNodes.reduce((lowest, current) =>
       current.position.y > lowest.position.y ? current : lowest
     );
-    
+
     // Always use the same X position as existing tasks (same column)
     const taskX = taskNodes[0].position.x;
     const newY = lowestTask.position.y + taskDims.height + spacing;
-    
+
     // Check if we can fit vertically
     if (newY + taskDims.height <= availableArea.y + availableArea.height) {
       return {
@@ -576,7 +582,7 @@ export class CanvasLayoutManager {
         y: newY
       };
     }
-    
+
     // If we can't fit vertically, still stack in same column but let auto-fit handle it
     return {
       x: taskX,
@@ -588,29 +594,29 @@ export class CanvasLayoutManager {
    * Find optimal position for a new node among existing nodes of the same type
    */
   private findOptimalPosition(
-    existingNodes: Node[], 
-    nodeDims: NodeDimensions, 
+    existingNodes: Node[],
+    nodeDims: NodeDimensions,
     availableArea: CanvasArea,
     layout: 'vertical' | 'horizontal' | 'grid' = 'vertical'
   ): { x: number; y: number } {
-    
+
     if (layout === 'vertical') {
       // Stack nodes vertically
-      const lowestNode = existingNodes.reduce((lowest, current) => 
+      const lowestNode = existingNodes.reduce((lowest, current) =>
         current.position.y > lowest.position.y ? current : lowest
       );
-      
+
       const newY = lowestNode.position.y + nodeDims.height + this.minNodeSpacing;
-      
+
       // Check if we need to wrap to a new column
       if (newY + nodeDims.height > availableArea.y + availableArea.height) {
         // Start a new column
-        const rightmostNode = existingNodes.reduce((rightmost, current) => 
+        const rightmostNode = existingNodes.reduce((rightmost, current) =>
           current.position.x > rightmost.position.x ? current : rightmost
         );
-        
+
         const newX = rightmostNode.position.x + nodeDims.width + this.minNodeSpacing;
-        
+
         // Ensure we don't exceed available width
         if (newX + nodeDims.width <= availableArea.x + availableArea.width) {
           return { x: newX, y: availableArea.y };
@@ -619,34 +625,34 @@ export class CanvasLayoutManager {
           return { x: lowestNode.position.x, y: newY };
         }
       }
-      
+
       return { x: lowestNode.position.x, y: newY };
     }
-    
+
     if (layout === 'horizontal') {
       // Stack nodes horizontally
-      const rightmostNode = existingNodes.reduce((rightmost, current) => 
+      const rightmostNode = existingNodes.reduce((rightmost, current) =>
         current.position.x > rightmost.position.x ? current : rightmost
       );
-      
+
       const newX = rightmostNode.position.x + nodeDims.width + this.minNodeSpacing;
-      
+
       // Check if we need to wrap to a new row
       if (newX + nodeDims.width > availableArea.x + availableArea.width) {
         // Start a new row
-        const lowestNode = existingNodes.reduce((lowest, current) => 
+        const lowestNode = existingNodes.reduce((lowest, current) =>
           current.position.y > lowest.position.y ? current : lowest
         );
-        
+
         return {
           x: availableArea.x,
           y: lowestNode.position.y + nodeDims.height + this.minNodeSpacing
         };
       }
-      
+
       return { x: newX, y: rightmostNode.position.y };
     }
-    
+
     // Fallback to simple positioning
     return { x: availableArea.x, y: availableArea.y };
   }
@@ -655,8 +661,8 @@ export class CanvasLayoutManager {
    * Check if a position would cause overlap with existing nodes
    */
   private wouldOverlap(
-    position: { x: number; y: number }, 
-    nodeDims: NodeDimensions, 
+    position: { x: number; y: number },
+    nodeDims: NodeDimensions,
     existingNodes: Node[]
   ): boolean {
     const newNodeArea = {
@@ -667,9 +673,9 @@ export class CanvasLayoutManager {
     };
 
     return existingNodes.some(node => {
-      const existingNodeDims = CanvasLayoutManager.NODE_DIMENSIONS[node.type || 'default'] || 
+      const existingNodeDims = CanvasLayoutManager.NODE_DIMENSIONS[node.type || 'default'] ||
                               CanvasLayoutManager.NODE_DIMENSIONS.default;
-      
+
       const existingNodeArea = {
         left: node.position.x,
         right: node.position.x + existingNodeDims.width,
@@ -691,7 +697,7 @@ export class CanvasLayoutManager {
    * Get node dimensions for a specific node type
    */
   static getNodeDimensions(nodeType: string): NodeDimensions {
-    return CanvasLayoutManager.NODE_DIMENSIONS[nodeType] || 
+    return CanvasLayoutManager.NODE_DIMENSIONS[nodeType] ||
            CanvasLayoutManager.NODE_DIMENSIONS.default;
   }
 
@@ -707,42 +713,88 @@ export class CanvasLayoutManager {
 
     const reorganizedNodes: Node[] = [...otherNodes]; // Keep other nodes as-is
 
-    // Reorganize agents
     const agentDims = CanvasLayoutManager.NODE_DIMENSIONS.agentNode;
-    agentNodes.forEach((node, index) => {
-      reorganizedNodes.push({
-        ...node,
-        position: {
-          x: availableArea.x,
-          y: availableArea.y + index * (agentDims.height + this.minNodeSpacing)
-        }
-      });
-    });
-
-    // Reorganize tasks
     const taskDims = CanvasLayoutManager.NODE_DIMENSIONS.taskNode;
-    const taskStartX = availableArea.x + agentDims.width + this.minNodeSpacing;
-    taskNodes.forEach((node, index) => {
-      reorganizedNodes.push({
-        ...node,
-        position: {
-          x: taskStartX,
-          y: availableArea.y + index * (taskDims.height + this.minNodeSpacing)
-        }
-      });
-    });
-
-    // Reorganize flow nodes
     const flowDims = CanvasLayoutManager.NODE_DIMENSIONS.flowNode;
-    flowNodes.forEach((node, index) => {
-      reorganizedNodes.push({
-        ...node,
-        position: {
-          x: availableArea.x + index * (flowDims.width + this.minNodeSpacing),
-          y: availableArea.y + 50
-        }
+
+    const orientation = this.uiState.layoutOrientation || 'vertical';
+
+    if (orientation === 'horizontal') {
+      // Use generous spacing in horizontal layout to ensure clear separation between tasks
+      const agentSpacing = Math.max(this.minNodeSpacing, 80);
+      const taskSpacing = Math.max(this.minNodeSpacing, 120);
+      const flowSpacing = Math.max(this.minNodeSpacing, 80);
+
+      // Agents in a top row (left -> right)
+      const agentStartX = availableArea.x;
+      const agentY = availableArea.y;
+      agentNodes.forEach((node, index) => {
+        reorganizedNodes.push({
+          ...node,
+          position: {
+            x: agentStartX + index * (agentDims.width + agentSpacing),
+            y: agentY
+          }
+        });
       });
-    });
+
+      // Tasks in a bottom row (left -> right) under agents
+      const taskY = agentY + agentDims.height + this.minNodeSpacing;
+      const taskStartX = availableArea.x;
+      taskNodes.forEach((node, index) => {
+        reorganizedNodes.push({
+          ...node,
+          position: {
+            x: taskStartX + index * (taskDims.width + taskSpacing),
+            y: taskY
+          }
+        });
+      });
+
+      // Flow nodes below tasks as a separate row (optional minor offset)
+      const flowY = taskY + taskDims.height + this.minNodeSpacing;
+      flowNodes.forEach((node, index) => {
+        reorganizedNodes.push({
+          ...node,
+          position: {
+            x: availableArea.x + index * (flowDims.width + flowSpacing),
+            y: flowY
+          }
+        });
+      });
+    } else {
+      // Default vertical layout: agents column (top -> bottom), tasks column to the right
+      agentNodes.forEach((node, index) => {
+        reorganizedNodes.push({
+          ...node,
+          position: {
+            x: availableArea.x,
+            y: availableArea.y + index * (agentDims.height + this.minNodeSpacing)
+          }
+        });
+      });
+
+      const taskStartX = availableArea.x + agentDims.width + this.minNodeSpacing;
+      taskNodes.forEach((node, index) => {
+        reorganizedNodes.push({
+          ...node,
+          position: {
+            x: taskStartX,
+            y: availableArea.y + index * (taskDims.height + this.minNodeSpacing)
+          }
+        });
+      });
+
+      flowNodes.forEach((node, index) => {
+        reorganizedNodes.push({
+          ...node,
+          position: {
+            x: availableArea.x + index * (flowDims.width + this.minNodeSpacing),
+            y: availableArea.y + 50
+          }
+        });
+      });
+    }
 
     return reorganizedNodes;
   }
@@ -751,31 +803,31 @@ export class CanvasLayoutManager {
    * Scale positions to fit within available area if needed
    */
   scalePositionsToFit(
-    positions: { x: number; y: number }[], 
+    positions: { x: number; y: number }[],
     nodeDimensions: NodeDimensions,
     canvasType: 'crew' | 'flow' | 'full' = 'full'
   ): { x: number; y: number }[] {
     if (positions.length === 0) return positions;
-    
+
     const availableArea = this.getAvailableCanvasArea(canvasType);
-    
+
     // Find bounds of current positions
     const minX = Math.min(...positions.map(p => p.x));
     const maxX = Math.max(...positions.map(p => p.x + nodeDimensions.width));
     const minY = Math.min(...positions.map(p => p.y));
     const maxY = Math.max(...positions.map(p => p.y + nodeDimensions.height));
-    
+
     const currentWidth = maxX - minX;
     const currentHeight = maxY - minY;
-    
+
     // Calculate scale factors
     const scaleX = currentWidth > availableArea.width ? availableArea.width / currentWidth : 1;
     const scaleY = currentHeight > availableArea.height ? availableArea.height / currentHeight : 1;
     const scale = Math.min(scaleX, scaleY, 1); // Never scale up, only down
-    
+
     // If no scaling needed, just return original positions
     if (scale >= 1) return positions;
-    
+
     // Scale and reposition
     return positions.map(pos => ({
       x: availableArea.x + (pos.x - minX) * scale,
@@ -788,34 +840,34 @@ export class CanvasLayoutManager {
    */
   getAutoFitZoom(layoutBounds: { x: number; y: number; width: number; height: number }, canvasType: 'crew' | 'flow' | 'full' = 'full'): number {
     const availableArea = this.getAvailableCanvasArea(canvasType);
-    
+
     // Use smaller padding for narrow screens
     const isNarrow = availableArea.width < 600;
     const padding = isNarrow ? 20 : 50;
     const usableWidth = Math.max(100, availableArea.width - (padding * 2));
     const usableHeight = Math.max(100, availableArea.height - (padding * 2));
-    
+
     // Calculate zoom to fit both width and height
     const zoomX = layoutBounds.width > 0 ? usableWidth / layoutBounds.width : 1;
     const zoomY = layoutBounds.height > 0 ? usableHeight / layoutBounds.height : 1;
-    
+
     // Use the smaller zoom to ensure everything fits, but allow more aggressive zoom for narrow screens
     const minZoom = isNarrow ? 0.3 : 0.5; // Allow smaller zoom for narrow screens
     const maxZoom = 1.0; // Never zoom in beyond 100%
     const calculatedZoom = Math.min(zoomX, zoomY);
-    
+
     const finalZoom = Math.max(minZoom, Math.min(maxZoom, calculatedZoom));
-    
+
     console.log(`[AutoFit] Available: ${availableArea.width}x${availableArea.height}, Layout: ${layoutBounds.width}x${layoutBounds.height}, Zoom: ${finalZoom}`);
-    
+
     return finalZoom;
   }
 
   /**
    * Get debug information about current layout state
    */
-  getLayoutDebugInfo(): { 
-    uiState: UILayoutState; 
+  getLayoutDebugInfo(): {
+    uiState: UILayoutState;
     availableAreas: Record<string, CanvasArea>;
     recommendations: string[];
   } {
@@ -824,39 +876,39 @@ export class CanvasLayoutManager {
       crew: this.getAvailableCanvasArea('crew'),
       flow: this.getAvailableCanvasArea('flow')
     };
-    
+
     const recommendations: string[] = [];
-    
+
     // Check for potential issues and provide specific recommendations
     if (availableAreas.crew.width < 400) {
       recommendations.push('❌ CRITICAL: Canvas is extremely narrow. Collapse chat panel immediately!');
     } else if (availableAreas.crew.width < 600) {
       recommendations.push('⚠️ Canvas width is narrow - collapse chat panel or reduce window elements');
     }
-    
+
     if (availableAreas.crew.height < 300) {
       recommendations.push('❌ CRITICAL: Canvas height is too small. Reduce execution history height!');
     } else if (availableAreas.crew.height < 400) {
       recommendations.push('⚠️ Canvas height is limited - consider reducing execution history height');
     }
-    
+
     if (this.uiState.chatPanelVisible && !this.uiState.chatPanelCollapsed && this.uiState.chatPanelWidth > 350) {
       recommendations.push('💡 TIP: Reduce chat panel width or collapse it temporarily for better node visibility');
     }
-    
+
     if (this.uiState.executionHistoryVisible && this.uiState.executionHistoryHeight > 200) {
       recommendations.push('💡 TIP: Reduce execution history height to give more space for nodes');
     }
-    
+
     // Add specific action suggestions
-    const totalUIOverhead = this.uiState.leftSidebarBaseWidth + this.uiState.rightSidebarWidth + 
+    const totalUIOverhead = this.uiState.leftSidebarBaseWidth + this.uiState.rightSidebarWidth +
                            (this.uiState.chatPanelVisible ? this.uiState.chatPanelWidth : 0);
     const uiOverheadPercentage = (totalUIOverhead / this.uiState.screenWidth) * 100;
-    
+
     if (uiOverheadPercentage > 60) {
       recommendations.push(`🔧 ACTION: UI elements take ${Math.round(uiOverheadPercentage)}% of screen width. Consider larger screen or hide panels.`);
     }
-    
+
     return {
       uiState: this.uiState,
       availableAreas,

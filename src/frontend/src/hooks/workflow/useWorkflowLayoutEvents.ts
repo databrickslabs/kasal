@@ -1,11 +1,14 @@
 import React from 'react';
-import type { ReactFlowInstance, Node } from 'reactflow';
+import type { ReactFlowInstance, Node, Edge, Connection } from 'reactflow';
 import { CanvasLayoutManager } from '../../utils/CanvasLayoutManager';
 import { useUILayoutStore } from '../../store/uiLayout';
+import { generateEdgeId } from '../../utils/edgeUtils';
 
 export function useWorkflowLayoutEvents(params: {
   nodes: Node[];
+  edges: Edge[];
   setNodes: React.Dispatch<React.SetStateAction<Node[]>>;
+  setEdges: React.Dispatch<React.SetStateAction<Edge[]>>;
   crewFlowInstanceRef: React.MutableRefObject<ReactFlowInstance | null>;
   flowFlowInstanceRef: React.MutableRefObject<ReactFlowInstance | null>;
   handleUIAwareFitView: () => void;
@@ -13,7 +16,9 @@ export function useWorkflowLayoutEvents(params: {
 }) {
   const {
     nodes,
+    edges,
     setNodes,
+    setEdges,
     crewFlowInstanceRef,
     flowFlowInstanceRef: _flowFlowInstanceRef,
     handleUIAwareFitView,
@@ -36,16 +41,19 @@ export function useWorkflowLayoutEvents(params: {
         const padding = 20;
         const zoomX = (canvasArea.width - 2 * padding) / layoutBounds.width;
         const zoomY = (canvasArea.height - 2 * padding) / layoutBounds.height;
-        const baseZoom = Math.min(zoomX, zoomY, 2.2);
-        const zoom = baseZoom * 1.5; // Zoom in 50% more
+        const zoom = Math.min(zoomX, zoomY, 2.0); // Fit to area without extra amplification
 
-        // Dynamic offset based on chat panel position
-        const chatOffset = currentUIState.chatPanelVisible && currentUIState.chatPanelSide === 'right' ? 240 : -150;
+        // Calculate viewport position to center nodes within the available canvas area
+        // The CanvasLayoutManager already accounts for chat panel position in canvasArea.x and canvasArea.width
+        // Add a slight left bias when chat is docked left to keep content visually centered
+        const leftBias = currentUIState.chatPanelVisible && currentUIState.chatPanelSide === 'left'
+          ? -(40 + Math.min(240, Math.max(0, (currentUIState.chatPanelWidth || 0) - 300) * 0.6))
+          : 0;
+
         const viewportX =
           canvasArea.x +
           (canvasArea.width - layoutBounds.width * zoom) / 2 -
-          layoutBounds.x * zoom +
-          chatOffset;
+          layoutBounds.x * zoom + leftBias;
         const viewportY =
           canvasArea.y +
           (canvasArea.height - layoutBounds.height * zoom) / 2 -
@@ -79,23 +87,54 @@ export function useWorkflowLayoutEvents(params: {
       const reason = customEvent?.detail?.reason as string | undefined;
 
       // Only reorganize for specific reasons, not general UI changes
-      if (reason !== 'chat-panel-resize' && reason !== 'execution-history-resize') {
+      if (
+        reason !== 'chat-panel-resize' &&
+        reason !== 'execution-history-resize' &&
+        reason !== 'layout-orientation-toggle'
+      ) {
         return;
       }
 
       const layoutManager = new CanvasLayoutManager({ margin: 20, minNodeSpacing: 50 });
       const currentUIState = useUILayoutStore.getState().getUILayoutState();
+
+      // Force update screen dimensions to current window size
+      currentUIState.screenWidth = window.innerWidth;
+      currentUIState.screenHeight = window.innerHeight;
+
       layoutManager.updateUIState(currentUIState);
 
       const reorganizedNodes = layoutManager.reorganizeNodes(nodes, 'crew');
       setNodes(reorganizedNodes);
+
+      // If layout orientation changed, retarget agent->task edge handles to match orientation
+      if (reason === 'layout-orientation-toggle') {
+        const orientation = currentUIState.layoutOrientation;
+        const sourceHandle = orientation === 'vertical' ? 'right' : 'bottom';
+        const targetHandle = orientation === 'vertical' ? 'left' : 'top';
+
+        setEdges(prevEdges => prevEdges.map(e => {
+          const sourceNode = reorganizedNodes.find(n => n.id === e.source);
+          const targetNode = reorganizedNodes.find(n => n.id === e.target);
+          if (sourceNode?.type === 'agentNode' && targetNode?.type === 'taskNode') {
+            const newId = generateEdgeId({
+              source: e.source,
+              target: e.target,
+              sourceHandle,
+              targetHandle
+            } as Connection);
+            return { ...e, sourceHandle, targetHandle, id: newId };
+          }
+          return e;
+        }));
+      }
 
       // Trigger UI-aware fit view after repositioning
       setTimeout(() => {
         handleUIAwareFitView();
       }, 100);
     },
-    [nodes, setNodes, handleUIAwareFitView]
+    [nodes, setNodes, setEdges, handleUIAwareFitView]
   );
 
   // Register global event listeners

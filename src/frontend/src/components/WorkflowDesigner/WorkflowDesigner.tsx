@@ -878,7 +878,9 @@ const WorkflowDesigner: React.FC<WorkflowDesignerProps> = (): JSX.Element => {
   // Register layout-related global events and initial viewport behavior
   useWorkflowLayoutEvents({
     nodes,
+    edges,
     setNodes,
+    setEdges,
     crewFlowInstanceRef,
     flowFlowInstanceRef,
     handleUIAwareFitView,

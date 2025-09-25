@@ -14,6 +14,7 @@ interface UILayoutStore extends UILayoutState {
   setPanelPosition: (position: number) => void;
   setAreFlowsVisible: (visible: boolean) => void;
   setChatPanelSide: (side: 'left' | 'right') => void;
+  setLayoutOrientation: (orientation: 'vertical' | 'horizontal') => void;
 
   // Computed getters
   getUILayoutState: () => UILayoutState;
@@ -67,6 +68,7 @@ export const useUILayoutStore = create<UILayoutStore>((set, get) => ({
   executionHistoryHeight: persistedState.executionHistoryHeight || 60,
   panelPosition: persistedState.panelPosition || 50,
   areFlowsVisible: persistedState.areFlowsVisible !== undefined ? persistedState.areFlowsVisible : true,
+  layoutOrientation: persistedState.layoutOrientation || 'vertical',
 
   // Actions
   updateScreenDimensions: (width: number, height: number) =>
@@ -117,6 +119,11 @@ export const useUILayoutStore = create<UILayoutStore>((set, get) => ({
     set({ chatPanelSide: side });
     saveToLocalStorage({ chatPanelSide: side });
   },
+  setLayoutOrientation: (orientation: 'vertical' | 'horizontal') => {
+    set({ layoutOrientation: orientation });
+    saveToLocalStorage({ layoutOrientation: orientation });
+  },
+
 
   // Computed getter that returns the current UI layout state
   getUILayoutState: (): UILayoutState => {
@@ -140,6 +147,7 @@ export const useUILayoutStore = create<UILayoutStore>((set, get) => ({
       executionHistoryHeight: state.executionHistoryHeight,
       panelPosition: state.panelPosition,
       areFlowsVisible: state.areFlowsVisible,
+      layoutOrientation: state.layoutOrientation,
     };
   },
 }));
