@@ -1,10 +1,11 @@
-# Kasal API Reference
+# 🟦 Kasal API Reference
 
 > **RESTful API v1** - Complete endpoint documentation with examples
 
 ---
 
-## Getting Started
+## 🟩 Getting Started
+Base URLs, authentication, and rate limits you need before calling endpoints.
 
 ### Base URL
 ```
@@ -34,7 +35,8 @@ curl -X GET https://api.example.com/v1/crews \
 
 ---
 
-## Authentication Endpoints
+## 🟨 Authentication Endpoints
+Login, refresh, and logout flows to manage tokens.
 
 ### POST /auth/login
 **Login with credentials**
@@ -76,7 +78,8 @@ Response: 204 No Content
 
 ---
 
-## Crew Management
+## 🟪 Crew Management
+Create and manage multi-agent crews and their configurations.
 
 ### GET /crews
 **List all crews**
@@ -159,7 +162,8 @@ Response: 204 No Content
 
 ---
 
-## Agent Management
+## 🟧 Agent Management
+Create and list individual agents with roles, models, and tools.
 
 ### GET /agents
 **List all agents**
@@ -200,7 +204,8 @@ Response: 201 Created
 
 ---
 
-## Execution Management
+## 🟦 Execution Management
+Start executions, get status, retrieve traces, and stop runs.
 
 ### POST /executions
 **Start crew execution**
@@ -263,7 +268,8 @@ Response: 200 OK
 
 ---
 
-## Task Management
+## 🟩 Task Management
+Create and list tasks assigned to agents.
 
 ### GET /tasks
 **List tasks**
@@ -301,7 +307,8 @@ Response: 201 Created
 
 ---
 
-## Tool Management
+## 🟨 Tool Management
+Discover built-in tools and register custom tools.
 
 ### GET /tools
 **List available tools**
@@ -343,7 +350,8 @@ Response: 201 Created
 
 ---
 
-## Memory Management
+## 🟪 Memory Management
+Fetch and clear short/long-term memory for a crew.
 
 ### GET /memory/{crew_id}
 **Get crew memory**
@@ -378,7 +386,8 @@ Response: 204 No Content
 
 ---
 
-## Analytics
+## 🟧 Analytics
+Usage and performance metrics to monitor your workflows.
 
 ### GET /analytics/usage
 **Get usage statistics**
@@ -411,7 +420,8 @@ Response: 200 OK
 
 ---
 
-## WebSocket Events
+## 🟦 WebSocket Events
+Real-time updates for task lifecycle, errors, and progress.
 
 ### Connection
 ```javascript
@@ -454,7 +464,8 @@ ws.onopen = () => {
 
 ---
 
-## Error Codes
+## 🟩 Error Codes
+Standardized error responses and meanings.
 
 | Code | Message | Description |
 |------|---------|-------------|
@@ -482,7 +493,8 @@ ws.onopen = () => {
 
 ---
 
-## Testing
+## 🟨 Testing
+Sandbox, Postman collection, and OpenAPI spec.
 
 ### Sandbox Environment
 ```bash
@@ -501,7 +513,8 @@ curl -X POST https://sandbox-api.kasal.ai/v1/crews \
 
 ---
 
-## SDKs & Libraries
+## 🟪 SDKs & Libraries
+Client libraries to integrate in Python, JS/TS, and Go.
 
 ### Python
 ```python
@@ -536,7 +549,8 @@ result, _ := client.Execute(crew.ID, inputs)
 
 ---
 
-## API Support
+## 🟧 API Support
+Where to check status and get help for API issues.
 
 - **Status Page**: [status.kasal.ai](https://status.kasal.ai)
 - **API Console**: [console.kasal.ai](https://console.kasal.ai)

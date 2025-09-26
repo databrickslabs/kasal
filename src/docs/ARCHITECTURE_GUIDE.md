@@ -1,10 +1,11 @@
-# Kasal Solution Architecture
+# 🟦 Kasal Solution Architecture
 
 > **Enterprise AI Orchestration Platform** - Scalable, secure, cloud-native
 
 ---
 
-## System Overview
+## 🟩 System Overview
+What the platform aims to achieve and core design principles.
 
 ### Platform Vision
 **Transform business workflows with autonomous AI agents** - Zero infrastructure complexity
@@ -20,7 +21,8 @@
 
 ---
 
-## High-Level Architecture
+## 🟨 High-Level Architecture
+A big-picture view of the client, application, AI, and data layers.
 
 ```mermaid
 graph TB
@@ -69,7 +71,8 @@ graph TB
 
 ---
 
-## Architecture Pattern
+## 🟪 Architecture Pattern
+The layered approach and how requests flow through components.
 
 ### High-level
 - Layered architecture:
@@ -78,14 +81,16 @@ graph TB
 - Config via environment (`src/backend/src/config/settings.py`)
 - Pluggable orchestration engine (`src/backend/src/engines/` with CrewAI)
 
-### Request lifecycle (CRUD path)
+### 🟦 Request lifecycle (CRUD path)
+From HTTP request to response: validation, business logic, and persistence.
 1) Router in `api/` receives request, validates using `schemas/`
 2) Router calls `services/` for business logic
 3) Service uses `repositories/` for DB/external I/O
 4) Data persisted via `db/session.py`
 5) Response serialized with Pydantic schemas
 
-### Orchestration lifecycle (AI execution)
+### 🟩 Orchestration lifecycle (AI execution)
+How executions are prepared, run, and observed using the engine.
 - Entry via `executions_router.py` → `execution_service.py`
 - Service prepares agents/tools/memory and selects engine (`engines/engine_factory.py`)
 - CrewAI path:
@@ -94,12 +99,14 @@ graph TB
   - Observability: `execution_logs_service.py`, `execution_trace_service.py`
 - Persist status/history: `execution_repository.py`, `execution_history_repository.py`
 
-### Background processing
+### 🟨 Background processing
+Schedulers and queues for recurring and long-running tasks.
 - Scheduler at startup: `scheduler_service.py`
 - Embedding queue (SQLite): `embedding_queue_service.py` (batches writes)
 - Startup/shutdown cleanup: `execution_cleanup_service.py`
 
-### Data modeling
+### 🟪 Data modeling
+ORM entities, Pydantic schemas, and repository boundaries.
 - ORM in `models/*` mirrors `schemas/*`
 - Repositories encapsulate all SQL/external calls (Databricks APIs, Vector Search, MLflow)
 - `db/session.py`:
@@ -107,14 +114,16 @@ graph TB
   - SQLite lock retry w/ backoff
   - Optional SQL logging via `SQL_DEBUG=true`
 
-### Auth, identity, and tenancy
+### 🟧 Auth, identity, and tenancy
+User context, group isolation, and authorization controls.
 - Databricks Apps headers parsed by `utils/user_context.py`
 - Group-aware multi-tenant context propagated via middleware
 - JWT/basic auth routes in `auth_router.py`, users in `users_router.py`
 - Authorization checks in `core/permissions.py`
 
 
-### Security Controls
+### 🟦 Security Controls
+Defense-in-depth across network, API, data, secrets, and compliance.
 | Layer | Control | Implementation |
 |-------|---------|----------------|
 | **Network** | TLS 1.3 | End-to-end encryption |
@@ -125,7 +134,8 @@ graph TB
 
 ---
 
-### Storage Strategy
+### 🟩 Storage Strategy
+Where different data types live and why.
 | Data Type | Storage | Purpose |
 |-----------|---------|---------|
 | **Transactional** | PostgreSQL | ACID compliance |
@@ -136,12 +146,14 @@ graph TB
 
 ---
 
-### Observability
+### 🟨 Observability
+Logs, traces, metrics, and how to access them.
 - Central log manager: `core/logger.py` (writes to `LOG_DIR`)
 - API/SQL logging toggles (`LOG_LEVEL`, `SQL_DEBUG`)
 - Execution logs/traces persisted and queryable via dedicated routes/services
 
-### Configuration flags (selected)
+### 🟪 Configuration flags (selected)
+Important toggles that affect developer and runtime experience.
 - `DOCS_ENABLED`: enables `/api-docs`, `/api-redoc`, `/api-openapi.json`
 - `AUTO_SEED_DATABASE`: async background seeders post DB init
 - `DATABASE_TYPE`: `postgres` (default) or `sqlite` with `SQLITE_DB_PATH`

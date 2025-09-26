@@ -1,6 +1,8 @@
-## Code Structure
+## 🟦 Code Structure
+A map of folders and files to help you find what you need quickly.
 
-### Top-level
+### 🟩 Top-level
+Core project files, app metadata, and documentation.
 - `README.md`: Overview and documentation index
 - `src/entrypoint.py`: App entry for Databricks Apps
 - `src/build.py`: Frontend build pipeline and docs copy
@@ -10,7 +12,8 @@
 - `src/frontend/`: React SPA
 - `src/backend/`: FastAPI backend service
 
-### Backend (`src/backend/src`)
+### 🟨 Backend (`src/backend/src`)
+FastAPI backend: entrypoint, routers, services, repositories, and DB.
 - `main.py`: FastAPI app bootstrap, CORS, middleware, startup/shutdown, scheduler, seeds, API router registration
 ```273:301:/Users/anshu.roy/Documents/kasal/src/backend/src/main.py
 # Initialize FastAPI app
@@ -78,7 +81,8 @@ api_router.include_router(mlflow_router)
   - `databricks_url_utils.py`, `databricks_auth.py`, rate limiting, crypto, prompts
 - `seeds/`, `scripts/`, `dependencies/`: Seeders, scripts, DI helpers
 
-### Frontend (`src/frontend`)
+### 🟪 Frontend (`src/frontend`)
+React + TypeScript application, API client, components, and state.
 - React + TypeScript (CRA + Craco)
 - `src/config/api/ApiConfig.ts`: API base URL selection and Axios client
 ```1:16:/Users/anshu.roy/Documents/kasal/src/frontend/src/config/api/ApiConfig.ts

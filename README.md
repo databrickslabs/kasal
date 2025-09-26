@@ -50,20 +50,16 @@ Create your first agent workflow in under 2 minutes:
 
 | Topic | Description |
 |-------|-------------|
-| **[Getting Started](src/docs/GETTING_STARTED.md)** | Complete setup guide for development and deployment |
-| **[Deployment Guide](src/docs/DEPLOYMENT_GUIDE.md)** | Build, deployment, and OAuth configuration |
-| **[Architecture](src/docs/ARCHITECTURE.md)** | System architecture and design patterns |
-| **[CrewAI Engine](src/docs/CREWAI_ENGINE.md)** | AI agent orchestration engine documentation |
-| **[Database Migrations](src/docs/DATABASE_MIGRATIONS.md)** | Database schema management with Alembic |
-| **[Models & Schemas](src/docs/MODELS.md)** | SQLAlchemy models and Pydantic schemas |
-| **[Repository Pattern](src/docs/REPOSITORY_PATTERN.md)** | Data access layer implementation |
-| **[LLM Manager](src/docs/LLM_MANAGER.md)** | Multi-provider LLM configuration and management |
-| **[Embeddings](src/docs/EMBEDDINGS.md)** | Documentation embeddings for enhanced crew generation |
+| **[Why Kasal](src/docs/WHY_KASAL.md)** | What problems it solves and who it's for |
+| **[Code Structure](src/docs/CODE_STRUCTURE_GUIDE.md)** | Where things live and how to navigate the repo |
+| **[Developer Guide](src/docs/DEVELOPER_GUIDE.md)** | Local setup, config, and extension patterns |
+| **[Solution Architecture](src/docs/ARCHITECTURE_GUIDE.md)** | Layers, lifecycles, and platform integration |
+| **[API Reference](src/docs/API_REFERENCE.md)** | REST endpoints, payloads, and errors |
 
 ### More Documentation
-- **[API Documentation](src/docs/)** - Complete API reference
-- **[Best Practices](src/docs/BEST_PRACTICES.md)** - Development guidelines
-- **[Security Model](src/docs/SECURITY_MODEL.md)** - Authentication and authorization
+- **[Docs Hub](src/docs/README.md)** - Documentation index
+- **[Business User Guide](src/docs/BUSINESS_USER_GUIDE.md)** - Non-technical intro and ROI
+- **[End‑User Tutorial Catalog](src/docs/END_USER_TUTORIAL_CATALOG.md)** - Screenshot-ready walkthroughs
 - **[Testing Guide](src/backend/tests/README.md)** - Testing strategy and coverage
 
 ---

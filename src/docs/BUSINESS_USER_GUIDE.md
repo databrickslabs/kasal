@@ -1,10 +1,11 @@
-# Kasal Business User Guide
+# 🟦 Kasal Business User Guide
 
 > **AI Workers for Your Business** - No coding required
 
 ---
 
-## What is Kasal?
+## 🟩 What is Kasal?
+A simple way to get AI workers handling common business workflows, safely and at scale.
 
 **Your AI workforce that never sleeps.** Kasal orchestrates AI agents to handle complex workflows automatically, 24/7.
 
@@ -23,7 +24,8 @@
 
 ---
 
-## Quick Start (15 Minutes)
+## 🟨 Quick Start (15 Minutes)
+Pick a template, describe your goal, connect tools, and go live.
 
 ### Step 1: Choose Your Use Case
 Click the template that matches your need:
@@ -53,7 +55,8 @@ Press **Start** and watch your AI team work!
 
 ---
 
-## Success Metrics
+## 🟪 Success Metrics
+Real customer outcomes you can benchmark against.
 
 ### Real Customer Results
 
@@ -77,7 +80,8 @@ Press **Start** and watch your AI team work!
 
 ---
 
-## Control Center
+## 🟧 Control Center
+Monitor, start/stop flows, and pick the right safety mode.
 
 ### Dashboard Overview
 ![Dashboard](dashboard-preview.png)
@@ -102,7 +106,8 @@ Press **Start** and watch your AI team work!
 
 ---
 
-## Advanced Features
+## 🟦 Advanced Features
+Multi-agent collaboration, visual builder, and an integration marketplace.
 
 ### Multi-Agent Collaboration
 Your AI workers can work as a team:
@@ -128,7 +133,8 @@ Build complex processes visually:
 
 ---
 
-## Common Questions
+## 🟩 Common Questions
+Pricing, security, reliability, and setup speed—straight answers.
 
 <details>
 <summary><strong>How much does it cost?</strong></summary>
@@ -181,7 +187,8 @@ Build complex processes visually:
 
 ---
 
-## Ready to Start?
+## 🟨 Ready to Start?
+Book a demo, estimate ROI, or try it free.
 
 <div align="center">
 
@@ -195,7 +202,8 @@ Build complex processes visually:
 
 ---
 
-## Need Help?
+## 🟪 Need Help?
+Ways to reach us and additional resources.
 
 - **Chat**: Available 24/7 in-app
 - **Email**: support@kasal.ai
