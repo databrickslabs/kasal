@@ -26,6 +26,16 @@ Get started with Kasal without any technical knowledge. Learn how to create AI w
 ---
 
 ## Technical Documentation
+### [Code structure Guide](./CODE_STRUCTURE_GUIDE.md)
+**For Software Engineers and Developers**
+
+Build and integrate with Kasal's powerful AI orchestration platform. From quick starts to advanced implementations.
+
+**Key Topics:**
+- High level code structure
+- Different folders and underlying components
+
+---
 
 ### [Developer Guide](./DEVELOPER_GUIDE.md)
 **For Software Engineers and Developers**
@@ -105,6 +115,7 @@ Access the application at `http://localhost:3000`
 docs/
 ├── README.md                    # This file - Documentation hub
 ├── BUSINESS_USER_GUIDE.md       # Business user documentation
+├── CODE_STRUCTURE_GUIDE.md      # Code structure documentation
 ├── DEVELOPER_GUIDE.md           # Developer documentation
 ├── ARCHITECTURE_GUIDE.md        # Architecture documentation
 ├── API_REFERENCE.md             # API reference

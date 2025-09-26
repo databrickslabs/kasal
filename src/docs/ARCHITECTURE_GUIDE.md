@@ -70,55 +70,50 @@ graph TB
 
 ---
 
-## Component Architecture
+## Architecture Pattern
 
-### Frontend (React SPA)
-```
-components/
-├── Workflow/        # Visual designer
-├── Execution/       # Real-time monitoring
-├── Configuration/   # System settings
-└── Analytics/       # Performance metrics
-```
+### High-level
+- Layered architecture:
+  - Frontend (React SPA) → API (FastAPI) → Services → Repositories → Database
+- Async-first (async SQLAlchemy, background tasks, queues)
+- Config via environment (`src/backend/src/config/settings.py`)
+- Pluggable orchestration engine (`src/backend/src/engines/` with CrewAI)
 
-**Key Technologies**: React 18, TypeScript, Material-UI, ReactFlow, Zustand
+### Request lifecycle (CRUD path)
+1) Router in `api/` receives request, validates using `schemas/`
+2) Router calls `services/` for business logic
+3) Service uses `repositories/` for DB/external I/O
+4) Data persisted via `db/session.py`
+5) Response serialized with Pydantic schemas
 
-### Backend Services
-```
-services/
-├── AuthService         # JWT + OAuth
-├── CrewService         # Agent orchestration
-├── ExecutionService    # Workflow execution
-├── MemoryService       # Persistent context
-└── IntegrationService  # External systems
-```
+### Orchestration lifecycle (AI execution)
+- Entry via `executions_router.py` → `execution_service.py`
+- Service prepares agents/tools/memory and selects engine (`engines/engine_factory.py`)
+- CrewAI path:
+  - Prep: `engines/crewai/crew_preparation.py` and `flow_preparation.py`
+  - Run: `engines/crewai/execution_runner.py` with callbacks/guardrails
+  - Observability: `execution_logs_service.py`, `execution_trace_service.py`
+- Persist status/history: `execution_repository.py`, `execution_history_repository.py`
 
-**Key Technologies**: FastAPI, SQLAlchemy 2.0, Pydantic, AsyncIO
+### Background processing
+- Scheduler at startup: `scheduler_service.py`
+- Embedding queue (SQLite): `embedding_queue_service.py` (batches writes)
+- Startup/shutdown cleanup: `execution_cleanup_service.py`
 
-### AI Engine
-```
-engine/
-├── AgentFactory        # Agent creation
-├── TaskProcessor       # Task execution
-├── ToolRegistry        # Tool management
-└── MemoryBackend       # Context persistence
-```
+### Data modeling
+- ORM in `models/*` mirrors `schemas/*`
+- Repositories encapsulate all SQL/external calls (Databricks APIs, Vector Search, MLflow)
+- `db/session.py`:
+  - Async engine and session factory
+  - SQLite lock retry w/ backoff
+  - Optional SQL logging via `SQL_DEBUG=true`
 
-**Key Technologies**: CrewAI, LangChain, Vector Embeddings
+### Auth, identity, and tenancy
+- Databricks Apps headers parsed by `utils/user_context.py`
+- Group-aware multi-tenant context propagated via middleware
+- JWT/basic auth routes in `auth_router.py`, users in `users_router.py`
+- Authorization checks in `core/permissions.py`
 
----
-
-## Security Architecture
-
-### Authentication & Authorization
-```python
-# Multi-layer security
-1. API Gateway → Rate limiting, DDoS protection
-2. JWT Tokens → Stateless authentication
-3. RBAC → Role-based permissions
-4. Row-Level → Tenant data isolation
-5. Audit Logs → Complete traceability
-```
 
 ### Security Controls
 | Layer | Control | Implementation |
@@ -131,26 +126,6 @@ engine/
 
 ---
 
-## Data Architecture
-
-### Data Model
-```sql
--- Core entities
-crews (id, name, config, owner_id, group_id)
-agents (id, crew_id, role, capabilities)
-tasks (id, agent_id, description, status)
-executions (id, crew_id, job_id, status)
-traces (id, execution_id, timestamp, data)
-```
-
-### Data Flow
-```
-User Request → API → Service → Repository → Database
-     ↓           ↓        ↓          ↓          ↓
-  Validation  Business  Domain    Data      Storage
-              Logic     Model     Access    Engine
-```
-
 ### Storage Strategy
 | Data Type | Storage | Purpose |
 |-----------|---------|---------|
@@ -162,192 +137,16 @@ User Request → API → Service → Repository → Database
 
 ---
 
-## Performance Architecture
+### Observability
+- Central log manager: `core/logger.py` (writes to `LOG_DIR`)
+- API/SQL logging toggles (`LOG_LEVEL`, `SQL_DEBUG`)
+- Execution logs/traces persisted and queryable via dedicated routes/services
 
-### Scaling Strategy
-```yaml
-Horizontal Scaling:
-  - API: Auto-scale 2-100 pods
-  - Workers: Queue-based scaling
-  - Database: Read replicas
-  - Cache: Redis cluster
+### Configuration flags (selected)
+- `DOCS_ENABLED`: enables `/api-docs`, `/api-redoc`, `/api-openapi.json`
+- `AUTO_SEED_DATABASE`: async background seeders post DB init
+- `DATABASE_TYPE`: `postgres` (default) or `sqlite` with `SQLITE_DB_PATH`
 
-Vertical Scaling:
-  - LLM Gateway: GPU instances
-  - Vector Search: Memory-optimized
-```
 
-### Performance Metrics
-| Component | Target | Current |
-|-----------|--------|---------|
-| **API Latency** | <100ms | 45ms |
-| **Execution Start** | <1s | 0.3s |
-| **Throughput** | 10K req/s | 15K req/s |
-| **Availability** | 99.99% | 99.995% |
-
-### Optimization Techniques
-- **Connection Pooling**: 20 connections, 40 overflow
-- **Batch Processing**: 50-item chunks
-- **Async Everything**: Non-blocking I/O
-- **Caching**: Redis with 15min TTL
-- **CDN**: Static assets via CloudFront
-
----
-
-## Integration Architecture
-
-### API Gateway Pattern
-```nginx
-location /api/v1/ {
-    rate_limit 100/s;
-    auth_jwt on;
-    proxy_pass backend_cluster;
-}
-```
-
-### External Integrations
-| System | Method | Use Case |
-|--------|--------|----------|
-| **Databricks** | OAuth + REST | ML models, compute |
-| **Slack/Teams** | Webhooks | Notifications |
-| **Salesforce** | REST API | CRM data |
-| **GitHub** | GraphQL | Code repos |
-| **S3/Azure** | SDK | File storage |
-
-### Event-Driven Architecture
-```python
-# Event bus pattern
-EventBus.publish("execution.started", {
-    "crew_id": "abc123",
-    "job_id": "job456",
-    "timestamp": datetime.now()
-})
-
-# Subscribers
-- NotificationService → Send alerts
-- AnalyticsService → Track metrics
-- AuditService → Log activity
-```
-
----
-
-## Deployment Architecture
-
-### Container Strategy
-```dockerfile
-# Multi-stage build
-FROM python:3.9-slim AS builder
-# Build dependencies
-
-FROM python:3.9-slim
-# Runtime only
-```
-
-### Kubernetes Deployment
-```yaml
-apiVersion: apps/v1
-kind: Deployment
-spec:
-  replicas: 3
-  strategy:
-    type: RollingUpdate
-    rollingUpdate:
-      maxSurge: 1
-      maxUnavailable: 0
-```
-
-### CI/CD Pipeline
-```
-1. Code Push → GitHub
-2. Tests → GitHub Actions
-3. Build → Docker
-4. Deploy → Kubernetes
-5. Monitor → Datadog
-```
-
----
-
-## Monitoring & Observability
-
-### Three Pillars
-```python
-# 1. Metrics (Prometheus)
-execution_duration_seconds.observe(duration)
-active_crews_gauge.set(count)
-
-# 2. Logs (ELK Stack)
-logger.info("Execution completed",
-    crew_id=crew_id,
-    duration=duration)
-
-# 3. Traces (Jaeger)
-with tracer.start_span("crew_execution"):
-    result = await crew.execute()
-```
-
-### SLO/SLA Targets
-| Service | SLO | SLA |
-|---------|-----|-----|
-| **API Availability** | 99.95% | 99.9% |
-| **Execution Success** | 98% | 95% |
-| **Response Time P95** | 200ms | 500ms |
-| **Data Durability** | 99.999999% | 99.9999% |
-
----
-
-## Disaster Recovery
-
-### Backup Strategy
-- **Database**: Daily snapshots, 30-day retention
-- **File Storage**: Cross-region replication
-- **Configuration**: Git-backed, versioned
-
-### RTO/RPO Targets
-- **RTO** (Recovery Time): 4 hours
-- **RPO** (Point Objective): 1 hour
-
-### Failover Process
-```
-1. Health check fails → 3 retries
-2. Trigger failover → DNS update
-3. Activate standby → Warm replicas
-4. Verify services → Health checks
-5. Resume traffic → Gradual rollout
-```
-
----
-
-## Technology Roadmap
-
-### Q1 2025
-- Core platform launch
-- Databricks integration
-- Kubernetes deployment
-
-### Q2 2025
-- Multi-region support
-- Advanced analytics
-- Mobile SDK
-
-### Q3 2025
-- GraphQL API
-- Edge computing
-- AI marketplace
-
-### Q4 2025
-- Quantum-ready encryption
-- Autonomous optimization
-- Enterprise marketplace
-
----
-
-## Architecture Support
-
-- **Architecture Review Board**: Weekly Thursdays
-- **Design Docs**: Confluence/architecture
-- **Slack**: #architecture-decisions
-- **Email**: architecture@example.com
-
----
 
 *Architected for scale, built for the future*
