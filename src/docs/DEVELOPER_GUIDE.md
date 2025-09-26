@@ -1,328 +1,148 @@
-# Kasal Developer Documentation
+## Developer Guide
 
-> **Build AI Workflows in 30 Seconds** - Production-ready from the start
+### Requirements
+- Python 3.9+
+- Node.js 18+
+- Postgres (recommended) or SQLite for local dev
+- Databricks access if exercising Databricks features
 
----
-
-## Quick Start
-
-### Install & Run
+### Quick start
 ```bash
-# Clone and setup
-git clone https://github.com/youorg/kasal
-cd kasal && pip install -r src/requirements.txt
+# Backend
+cd src/backend
+python -m venv .venv && source .venv/bin/activate
+pip install -r ../requirements.txt
+./run.sh  # http://localhost:8000 (OpenAPI at /api-docs if enabled)
 
-# Start services
-cd src/backend && ./run.sh  # Backend: http://localhost:8000
-cd src/frontend && npm start # Frontend: http://localhost:3000
+# Frontend
+cd ../frontend
+npm install
+npm start  # http://localhost:3000
 ```
 
-### Your First AI Agent (30 seconds)
-```python
-from kasal import Agent, Task, Crew
-
-# Create agent
-researcher = Agent(
-    role="Research Analyst",
-    goal="Find market insights",
-    model="gpt-4"
-)
-
-# Define task
-task = Task(
-    description="Analyze competitor pricing",
-    agent=researcher
-)
-
-# Run workflow
-crew = Crew(agents=[researcher], tasks=[task])
-result = crew.kickoff()
-```
-
-**That's it!** Your AI agent is running.
-
----
-
-## Architecture
-
-### Clean Architecture Pattern
-```
-Frontend → API → Service → Repository → Database
-   ↓        ↓       ↓          ↓           ↓
-React   FastAPI  Business  Data Layer  PostgreSQL
-```
-
-### Tech Stack
-| Layer | Technology | Purpose |
-|-------|------------|---------|
-| **Frontend** | React 18 + TypeScript | Interactive UI |
-| **API** | FastAPI + Pydantic | Type-safe endpoints |
-| **AI Engine** | CrewAI + LangChain | Agent orchestration |
-| **Database** | PostgreSQL/SQLite | Data persistence |
-| **Auth** | JWT + Databricks OAuth | Security |
-
----
-
-## Core Concepts
-
-### Agents
-```python
-agent = Agent(
-    role="Data Scientist",
-    goal="Analyze patterns",
-    backstory="Expert in ML",
-    tools=[SearchTool(), AnalysisTool()],
-    model="databricks-llama-70b"
-)
-```
-
-### Tasks
-```python
-task = Task(
-    description="Generate weekly report",
-    expected_output="Markdown report with insights",
-    agent=analyst_agent,
-    async_execution=True
-)
-```
-
-### Crews
-```python
-crew = Crew(
-    agents=[researcher, writer, reviewer],
-    tasks=[research_task, write_task, review_task],
-    process="hierarchical",  # or "sequential"
-    memory=True  # Enable persistent memory
-)
-```
-
-### Tools
-```python
-# Built-in tools
-from kasal.tools import (
-    WebSearchTool,
-    FileReadTool,
-    DatabaseQueryTool,
-    CodeExecutionTool
-)
-
-# Custom tool
-class CustomAPITool(BaseTool):
-    name = "api_caller"
-    description = "Call external APIs"
-
-    def _run(self, query: str) -> str:
-        # Your implementation
-        return api_response
-```
-
----
-
-## API Reference
-
-### Authentication
+Health check:
 ```bash
-# Get token
-POST /api/v1/auth/login
-{
-  "username": "user@example.com",
-  "password": "secure_password"
-}
-
-# Use token
-GET /api/v1/crews
-Authorization: Bearer <token>
+curl http://localhost:8000/health
+# {"status":"healthy"}
 ```
 
-### Core Endpoints
-| Method | Endpoint | Description |
-|--------|----------|-------------|
-| GET | `/api/v1/crews` | List all crews |
-| POST | `/api/v1/crews` | Create new crew |
-| POST | `/api/v1/executions` | Start execution |
-| GET | `/api/v1/executions/{id}` | Get status |
-| GET | `/api/v1/traces/{job_id}` | Get execution trace |
+### Configuration
+Backend settings: `src/backend/src/config/settings.py`
+- Core: `DEBUG_MODE`, `LOG_LEVEL`, `DOCS_ENABLED`, `AUTO_SEED_DATABASE`
+- Database:
+  - `DATABASE_TYPE=postgres|sqlite` (default: `postgres`)
+  - Postgres: `POSTGRES_SERVER`, `POSTGRES_PORT`, `POSTGRES_DB`, `POSTGRES_USER`, `POSTGRES_PASSWORD`
+  - SQLite: `SQLITE_DB_PATH=./app.db`
+  - SQL logging: `SQL_DEBUG=true|false`
+- Notes:
+  - `USE_NULLPOOL` is set early in `main.py` to avoid asyncpg pool issues
+  - Logs written under `src/backend/src/logs/`
 
-### WebSocket Events
-```javascript
-// Connect to real-time updates
-const ws = new WebSocket('ws://localhost:8000/ws');
+Frontend API base URL (`REACT_APP_API_URL`) at build-time:
+```bash
+# Option A: dev default already points to http://localhost:8000/api/v1
+# Option B: override explicitly for a build (Unix/macOS)
+REACT_APP_API_URL="http://localhost:8000/api/v1" npm run build
 
-ws.onmessage = (event) => {
-  const data = JSON.parse(event.data);
-  // Handle: task_start, task_complete, error, etc.
+# When using the top-level build script:
+# The env var will propagate into the "npm run build" it runs
+cd src
+REACT_APP_API_URL="http://localhost:8000/api/v1" python build.py
+```
+
+### Conventions
+- Routers (`api/*`): Validate with `schemas/*`, delegate to `services/*`
+- Services: Business logic only; use repositories for I/O
+- Repositories: All SQL/external I/O; don’t leak ORM to services
+- Models: SQLAlchemy in `models/*`; Schemas: Pydantic in `schemas/*`
+
+### Add a new API resource (“widgets” example)
+1) Model: `models/widget.py`; import in `db/all_models.py`
+2) Schemas: `schemas/widget.py` (Create/Update/Read DTOs)
+3) Repository: `repositories/widget_repository.py`
+4) Service: `services/widget_service.py`
+5) Router: `api/widgets_router.py` (validate → call service)
+6) Register router in `api/__init__.py`
+7) Frontend: add `src/frontend/src/api/widgets.ts` + components/views/state
+8) Tests: `src/backend/tests/`
+
+### Add a new CrewAI tool
+- Implement under `engines/crewai/tools/` (follow existing patterns)
+- Expose configuration via service/router if user-configurable
+- Ensure discovery/registration in the execution path (e.g., prep or service)
+
+### Executions and tracing
+- Start executions via `executions_router.py` endpoints
+- Services invoke engine flow (`engines/crewai/*`)
+- Logs/traces:
+  - Execution logs via `execution_logs_*`
+  - Traces via `execution_trace_*`
+```bash
+# Kick off an execution
+curl -X POST http://localhost:8000/api/v1/executions -H "Content-Type: application/json" -d '{...}'
+
+# Get execution status
+curl http://localhost:8000/api/v1/executions/<id>
+
+# Fetch logs/trace
+curl http://localhost:8000/api/v1/execution-logs/<id>
+curl http://localhost:8000/api/v1/execution-trace/<job_id>
+```
+
+### Background processing
+- Scheduler: starts on DB-ready startup (`scheduler_service.py`)
+- Embedding queue (SQLite): `embedding_queue_service.py` batches writes
+- Cleanup on startup/shutdown: `execution_cleanup_service.py`
+
+### Database & migrations
+- SQLite for quick local dev (`DATABASE_TYPE=sqlite`), Postgres for multi-user
+- Alembic:
+```bash
+# after model changes
+alembic revision --autogenerate -m "add widgets"
+alembic upgrade head
+```
+
+### Auth, identity, tenancy
+- Databricks headers parsed by `utils/user_context.py`
+- Group-aware tenants; selected group passed in `group_id` header
+- JWT/basic auth in `auth_router.py`, users in `users_router.py`
+- Authorization checks in `core/permissions.py`
+
+### Logging & debugging
+- App logs: `src/backend/src/logs/` (managed by `core/logger.py`)
+- Verbose SQL: `export SQL_DEBUG=true`
+- SQLite “database is locked”: mitigated via retry/backoff; reduce writers or use Postgres
+
+### Frontend notes
+- Axios client and base URL:
+```1:13:/Users/anshu.roy/Documents/kasal/src/frontend/src/config/api/ApiConfig.ts
+export const config = {
+  apiUrl:
+    process.env.REACT_APP_API_URL ||
+    (process.env.NODE_ENV === 'development'
+      ? 'http://localhost:8000/api/v1'
+      : '/api/v1'),
 };
+export const apiClient = axios.create({ baseURL: config.apiUrl, headers: { 'Content-Type': 'application/json' } });
 ```
 
----
-
-## Testing
-
-### Unit Tests
-```python
-# tests/test_agent.py
-async def test_agent_execution():
-    agent = Agent(role="Tester", goal="Validate")
-    result = await agent.execute("Test task")
-    assert result.success == True
-```
-
-### Run Tests
+### Testing
 ```bash
-# All tests with coverage
-python run_tests.py --coverage
+# Backend
+python run_tests.py
 
-# Specific test file
-python -m pytest tests/unit/test_file.py -v
-
-# With HTML report
-python run_tests.py --coverage --html-coverage
+# Frontend
+cd src/frontend
+npm test
 ```
 
----
-
-## Deployment
-
-### Docker
-```dockerfile
-FROM python:3.9-slim
-WORKDIR /app
-COPY src/requirements.txt .
-RUN pip install -r requirements.txt
-COPY . .
-CMD ["uvicorn", "src.backend.main:app"]
-```
-
-### Environment Variables
-```bash
-# .env file
-DATABASE_URL=postgresql://user:pass@localhost/kasal
-DATABRICKS_TOKEN=your_token
-OPENAI_API_KEY=your_key
-JWT_SECRET=your_secret
-```
-
-### Production Checklist
-- Enable CORS for your domain
-- Set secure JWT secret
-- Configure rate limiting
-- Enable SSL/TLS
-- Set up monitoring (Datadog/New Relic)
-- Configure backup strategy
-
----
-
-## Advanced Topics
-
-<details>
-<summary><strong>Custom Memory Backends</strong></summary>
-
-```python
-class DatabricksMemory(BaseMemory):
-    def __init__(self, index_name: str):
-        self.client = DatabricksVectorSearch()
-        self.index = index_name
-
-    async def store(self, data: dict):
-        await self.client.upsert(self.index, data)
-
-    async def retrieve(self, query: str, k: int = 5):
-        return await self.client.search(self.index, query, k)
-```
-</details>
-
-<details>
-<summary><strong>Async Operations</strong></summary>
-
-```python
-# CRITICAL: All I/O must be async
-async def process_crew_execution(crew_id: str):
-    async with get_db_session() as session:
-        repo = CrewRepository(session)
-        crew = await repo.get(crew_id)
-
-        # Parallel execution
-        tasks = [process_task(t) for t in crew.tasks]
-        results = await asyncio.gather(*tasks)
-
-        return results
-```
-</details>
-
-<details>
-<summary><strong>Error Handling</strong></summary>
-
-```python
-from kasal.exceptions import KasalError
-
-try:
-    result = await crew.kickoff()
-except AgentExecutionError as e:
-    logger.error(f"Agent failed: {e.agent_name}")
-    # Retry logic
-except TaskTimeoutError as e:
-    logger.error(f"Task timeout: {e.task_id}")
-    # Fallback strategy
-```
-</details>
-
-<details>
-<summary><strong>Performance Optimization</strong></summary>
-
-```python
-# Connection pooling
-engine = create_async_engine(
-    DATABASE_URL,
-    pool_size=20,
-    max_overflow=40,
-    pool_pre_ping=True
-)
-
-# Batch operations
-async def bulk_create_tasks(tasks: List[TaskSchema]):
-    async with UnitOfWork() as uow:
-        await uow.tasks.bulk_create(tasks)
-        await uow.commit()
-
-# Caching
-from functools import lru_cache
-
-@lru_cache(maxsize=100)
-def get_model_config(model_name: str):
-    return ModelConfig.get(model_name)
-```
-</details>
-
----
-
-## Security
-
-### Authentication Flow
-```python
-# JWT token generation
-def create_access_token(user_id: str) -> str:
-    payload = {
-        "sub": user_id,
-        "exp": datetime.utcnow() + timedelta(hours=24)
-    }
-    return jwt.encode(payload, JWT_SECRET, algorithm="HS256")
-
-# Protected endpoint
-@router.get("/protected")
-async def protected_route(
-    current_user: User = Depends(get_current_user)
-):
-    return {"user": current_user.email}
-```
-
-### Best Practices
-- **Never commit secrets** - Use environment variables
-- **Input validation** - Pydantic schemas everywhere
-- **SQL injection prevention** - SQLAlchemy ORM only
-- **Rate limiting** - Implement per-user limits
-- **Audit logging** - Track all mutations
-
----
+### Production checklist
+- Use Postgres (or managed DB), not SQLite
+- Harden secrets/tokens; externalize (e.g., Databricks Secrets/Vault)
+- Enforce TLS and CORS
+- Monitor logs/traces; set alerts
+- Review `DOCS_ENABLED`, `LOG_LEVEL`, `DEBUG_MODE`
 
 ## Resources
 
