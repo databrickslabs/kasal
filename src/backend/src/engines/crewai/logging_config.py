@@ -540,6 +540,7 @@ def configure_subprocess_logging(execution_id: str):
         'src.engines.crewai.trace_management',
         'src.services.trace_queue',  # Add trace queue logger
         'src.engines.crewai.execution_runner',  # Add execution runner logger
+        'src.services.databricks_knowledge_service',  # Add knowledge service logger for search debugging
         '__main__'  # For any direct logging in subprocess
     ]:
         module_logger = get_logger(logger_name)

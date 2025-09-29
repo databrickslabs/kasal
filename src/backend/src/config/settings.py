@@ -79,7 +79,8 @@ class Settings(BaseSettings):
     DOCS_ENABLED: bool = True
     
     # Logging
-    LOG_LEVEL: str = "INFO"
+    # Support both old LOG_LEVEL and new KASAL_LOG_LEVEL environment variables
+    LOG_LEVEL: str = os.getenv("KASAL_LOG_LEVEL", os.getenv("LOG_LEVEL", "INFO"))
 
     # Server settings
     SERVER_HOST: str = "0.0.0.0"

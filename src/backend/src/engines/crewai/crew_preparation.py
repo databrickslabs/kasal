@@ -458,28 +458,76 @@ class CrewPreparation:
                     logger.warning(f"Invalid agent '{agent_name}' specified for task. Using '{fallback_agent_name}' instead.")
 
                 # Define task_name first so it can be used in logging
-                # If this is the first task and the agent has the Databricks knowledge tool, add a gentle nudge
+                # If this is the first task and it has the Databricks knowledge tool, add context
                 try:
                     if i == 0 and agent is not None:
-                        tools_list = getattr(agent, 'tools', []) or []
-                        has_db_knowledge_tool = False
-                        for _t in tools_list:
-                            t_name = getattr(_t, 'name', None) or type(_t).__name__
-                            if t_name in ['DatabricksKnowledgeSearchTool', 'Databricks Knowledge Search Tool']:
-                                has_db_knowledge_tool = True
-                                break
+                        # Check if DatabricksKnowledgeSearchTool is in the task's tools list
+                        task_tools = task_config.get('tools', [])
+                        has_db_knowledge_tool = (
+                            'DatabricksKnowledgeSearchTool' in task_tools or
+                            '36' in [str(t) for t in task_tools]
+                        )
+
                         if has_db_knowledge_tool:
-                            # Prepend a short instruction to encourage tool use
+                            # Extract available file information from the task's assigned agent's knowledge_sources
+                            available_files = []
+
+                            # Find the agent config that matches the current task's agent
+                            task_agent_ref = task_config.get('agent', '')
+                            agent_config_for_files = None
+
+                            for agent_cfg in self.config.get('agents', []):
+                                agent_id = agent_cfg.get('id', '')
+                                agent_role = agent_cfg.get('role', '')
+                                # Match by ID or role
+                                if agent_id == task_agent_ref or agent_role == task_agent_ref:
+                                    agent_config_for_files = agent_cfg
+                                    break
+
+                            if not agent_config_for_files:
+                                # Fallback to first agent if no match found
+                                agent_config_for_files = self.config.get('agents', [{}])[0]
+
+                            knowledge_sources = agent_config_for_files.get('knowledge_sources', [])
+
+                            for ks in knowledge_sources:
+                                if isinstance(ks, dict):
+                                    # Extract filename from fileInfo or metadata
+                                    file_info = ks.get('fileInfo', {})
+                                    metadata = ks.get('metadata', {})
+                                    filename = file_info.get('filename') or metadata.get('filename')
+
+                                    if filename:
+                                        available_files.append(filename)
+
+                            # Build file list string
+                            files_info = ""
+                            if available_files:
+                                files_list = "\n".join([f"  - {fname}" for fname in available_files])
+                                files_info = f"\n\n**Available Knowledge Files:**\n{files_list}\n"
+
+                            # Prepend a STRONG instruction to REQUIRE tool use with file context
                             nudge = (
-                                "Use the Databricks Knowledge Search Tool to look up relevant passages from the uploaded "
-                                "documents and ground your answer. Cite the specific passages you used.\n\n"
+                                "**CRITICAL INSTRUCTION**: You MUST use the DatabricksKnowledgeSearchTool BEFORE answering. "
+                                f"{files_info}"
+                                "Search the uploaded documents for relevant information first, then use ONLY the retrieved content "
+                                "to formulate your answer. DO NOT proceed without calling this tool. "
+                                "Formulate your search query to find specific information from these files. "
+                                "Cite the specific passages you found.\n\n"
                             )
                             # Only inject once, and keep original description intact after the nudge
                             original_desc = task_config.get('description', '') or ''
                             if nudge.strip() not in original_desc:
                                 task_config['description'] = f"{nudge}{original_desc}"
                                 t_name_for_log = task_config.get('name', 'first_task')
-                                logger.info(f"[CrewPreparation] Injected knowledge-search nudge into first task '{t_name_for_log}' for agent '{agent_name}'")
+                                logger.info(f"[CrewPreparation] Injected STRONG knowledge-search requirement with {len(available_files)} files into first task '{t_name_for_log}' for agent '{agent_name}'")
+
+                            # Also ensure DatabricksKnowledgeSearchTool is in the task's tools list
+                            task_tools = task_config.get('tools', [])
+                            if 'DatabricksKnowledgeSearchTool' not in task_tools and '36' not in [str(t) for t in task_tools]:
+                                task_tools.append('DatabricksKnowledgeSearchTool')
+                                task_config['tools'] = task_tools
+                                logger.info(f"[CrewPreparation] Added DatabricksKnowledgeSearchTool to task '{t_name_for_log}' tools list")
                 except Exception as _nudge_err:
                     logger.warning(f"[CrewPreparation] Failed to inject knowledge-search nudge: {_nudge_err}")
 
