@@ -26,7 +26,7 @@ interface GraphData {
 
 interface EntityGraphState {
   // Graph instance
-  graphInstance: any | null; // ForceGraph2D doesn't export proper types
+  graphInstance: unknown | null; // ForceGraph2D doesn't export proper types
   
   // Data states
   graphData: GraphData;
@@ -232,8 +232,8 @@ const useEntityGraphStore = create<EntityGraphState>((set, get) => ({
     if (graphInstance) {
       console.log('[EntityGraphStore] Cleaning up graph instance');
       try {
-        if (typeof graphInstance._destructor === 'function') {
-          graphInstance._destructor();
+        if (typeof (graphInstance as any)._destructor === 'function') {
+          (graphInstance as any)._destructor();
         }
       } catch (err) {
         console.error('[EntityGraphStore] Error during cleanup:', err);
@@ -254,7 +254,7 @@ const useEntityGraphStore = create<EntityGraphState>((set, get) => ({
     
     if (graphInstance && data.nodes.length > 0) {
       console.log('[EntityGraphStore] Updating graph with', data.nodes.length, 'nodes');
-      graphInstance.graphData(data);
+      (graphInstance as any).graphData(data);
     }
   },
 
@@ -289,53 +289,53 @@ const useEntityGraphStore = create<EntityGraphState>((set, get) => ({
     
     if (graphInstance) {
       // Update forces
-      graphInstance.d3Force('charge')?.strength(strength);
-      graphInstance.d3Force('link')?.distance(distance);
+      (graphInstance as any).d3Force('charge')?.strength(strength);
+      (graphInstance as any).d3Force('link')?.distance(distance);
       
       // Update center and position forces based on centerForce value
       if (centerForce !== undefined) {
-        const width = graphInstance.width();
-        const height = graphInstance.height();
+        const width = (graphInstance as any).width();
+        const height = (graphInstance as any).height();
         const centerX = width / 2;
         const centerY = height / 2;
         
         // Adjust center force
-        graphInstance.d3Force('center')?.strength(newCenterForce);
-        
+        (graphInstance as any).d3Force('center')?.strength(newCenterForce);
+
         // For spread mode (low values), weaken or remove position forces
         if (newCenterForce < 0.3) {
           // Weak or no position forces for spread mode
-          graphInstance.d3Force('x', null);
-          graphInstance.d3Force('y', null);
-          graphInstance.d3Force('center')?.strength(0.01);
-        } 
+          (graphInstance as any).d3Force('x', null);
+          (graphInstance as any).d3Force('y', null);
+          (graphInstance as any).d3Force('center')?.strength(0.01);
+        }
         // For balanced mode
         else if (newCenterForce < 0.7) {
           // Moderate position forces
-          graphInstance.d3Force('x', d3.forceX(centerX).strength(0.1));
-          graphInstance.d3Force('y', d3.forceY(centerY).strength(0.1));
-        } 
+          (graphInstance as any).d3Force('x', d3.forceX(centerX).strength(0.1));
+          (graphInstance as any).d3Force('y', d3.forceY(centerY).strength(0.1));
+        }
         // For compact mode (high values), use strong position forces
         else {
           // Create strong forceX and forceY to pull to center
-          graphInstance.d3Force('x', d3.forceX(centerX).strength(0.5));
-          graphInstance.d3Force('y', d3.forceY(centerY).strength(0.5));
-          
+          (graphInstance as any).d3Force('x', d3.forceX(centerX).strength(0.5));
+          (graphInstance as any).d3Force('y', d3.forceY(centerY).strength(0.5));
+
           // Also reduce charge force to allow nodes to come closer
-          graphInstance.d3Force('charge')?.strength(-100);
+          (graphInstance as any).d3Force('charge')?.strength(-100);
         }
-        
+
         // Reheat simulation very aggressively for compact mode
         const alphaTarget = newCenterForce > 0.7 ? 1 : 0.8;
-        graphInstance.d3ReheatSimulation(alphaTarget);
-        
+        (graphInstance as any).d3ReheatSimulation(alphaTarget);
+
         // Reset charge force if not in compact mode
         if (newCenterForce < 0.7) {
-          graphInstance.d3Force('charge')?.strength(strength);
+          (graphInstance as any).d3Force('charge')?.strength(strength);
         }
       } else {
         // Regular force updates (when not changing cluster spacing)
-        graphInstance.d3ReheatSimulation(0.3);
+        (graphInstance as any).d3ReheatSimulation(0.3);
       }
     }
   },
@@ -346,7 +346,7 @@ const useEntityGraphStore = create<EntityGraphState>((set, get) => ({
     set({ linkCurvature: curvature });
     
     if (graphInstance) {
-      graphInstance.linkCurvature(curvature);
+      (graphInstance as any).linkCurvature(curvature);
     }
   },
 
@@ -379,23 +379,23 @@ const useEntityGraphStore = create<EntityGraphState>((set, get) => ({
   zoomToFit: () => {
     const { graphInstance } = get();
     if (graphInstance) {
-      graphInstance.zoomToFit(400, 50);
+      (graphInstance as any).zoomToFit(400, 50);
     }
   },
 
   zoomIn: () => {
     const { graphInstance } = get();
     if (graphInstance) {
-      const currentZoom = graphInstance.zoom();
-      graphInstance.zoom(currentZoom * 1.2, 300);
+      const currentZoom = (graphInstance as any).zoom();
+      (graphInstance as any).zoom(currentZoom * 1.2, 300);
     }
   },
 
   zoomOut: () => {
     const { graphInstance } = get();
     if (graphInstance) {
-      const currentZoom = graphInstance.zoom();
-      graphInstance.zoom(currentZoom * 0.8, 300);
+      const currentZoom = (graphInstance as any).zoom();
+      (graphInstance as any).zoom(currentZoom * 0.8, 300);
     }
   },
 }));

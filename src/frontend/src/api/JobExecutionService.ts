@@ -424,13 +424,13 @@ export class JobExecutionService {
       console.log('[JobExecutionService] agents_yaml keys:', Object.keys(config.agents_yaml));
       
       // Log each agent's knowledge_sources
-      Object.entries(config.agents_yaml).forEach(([agentId, agentData]: [string, any]) => {
+      Object.entries(config.agents_yaml).forEach(([agentId, agentData]: [string, AgentYaml]) => {
         console.log(`[JobExecutionService] Agent ${agentId}:`);
         console.log(`  - Has knowledge_sources field: ${'knowledge_sources' in agentData}`);
         console.log(`  - knowledge_sources value:`, agentData.knowledge_sources);
         console.log(`  - knowledge_sources length:`, agentData.knowledge_sources?.length || 0);
         if (agentData.knowledge_sources && agentData.knowledge_sources.length > 0) {
-          agentData.knowledge_sources.forEach((ks: any, idx: number) => {
+          (agentData.knowledge_sources as unknown[] || []).forEach((ks: unknown, idx: number) => {
             console.log(`  - knowledge_source[${idx}]:`, ks);
           });
         }

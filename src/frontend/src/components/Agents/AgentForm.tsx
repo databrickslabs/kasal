@@ -372,19 +372,8 @@ const AgentForm: React.FC<AgentFormProps> = ({ initialData, onCancel, onAgentSav
     // Create a new set of tools, ensuring all IDs are strings
     const newTools = selectedValues.map(id => String(id));
 
-    // Check if DatabricksKnowledgeSearchTool (ID 36) was removed
-    const hadKnowledgeTool = formData.tools.some(
-      id => String(id) === '36' || String(id) === 'DatabricksKnowledgeSearchTool'
-    );
-    const hasKnowledgeTool = newTools.some(
-      id => String(id) === '36' || String(id) === 'DatabricksKnowledgeSearchTool'
-    );
-
-    if (hadKnowledgeTool && !hasKnowledgeTool) {
-      console.log('[AgentForm] DatabricksKnowledgeSearchTool was unchecked - clearing knowledge sources');
-      // Clear knowledge sources when tool is removed
-      handleInputChange('knowledge_sources', []);
-    }
+    // NOTE: Knowledge sources are now managed at task level, not agent level
+    // Previously, we tracked DatabricksKnowledgeSearchTool changes here
 
     // Check if any tools appear to be duplicated (different format but same ID)
     // This helps detect potential issues
@@ -762,7 +751,7 @@ const AgentForm: React.FC<AgentFormProps> = ({ initialData, onCancel, onAgentSav
                       const tool = tools.find(t => String(t.id) === String(toolId));
                       // If it's DatabricksKnowledgeSearchTool (not in DB), show friendly name
                       const label = tool ? tool.title :
-                                   (String(toolId) === 'DatabricksKnowledgeSearchTool' ? 'Knowledge Search' : String(toolId));
+                                   (String(toolId) === 'DatabricksKnowledgeSearchTool' ? 'Databricks Knowledge Search Tool' : String(toolId));
                       return (
                         <Chip
                           key={`selected-tool-${toolId}-${index}`}
@@ -984,74 +973,7 @@ const AgentForm: React.FC<AgentFormProps> = ({ initialData, onCancel, onAgentSav
               />
             </Box>
 
-            {/* Knowledge Sources */}
-            <Accordion defaultExpanded={(formData.knowledge_sources?.length || 0) > 0}>
-              <AccordionSummary expandIcon={<ExpandMoreIcon />}>
-                <Typography>
-                  Knowledge Sources ({formData.knowledge_sources?.length || 0})
-                </Typography>
-              </AccordionSummary>
-              <AccordionDetails>
-                <Box sx={{ display: 'flex', flexDirection: 'column', gap: 1 }}>
-                  {formData.knowledge_sources && formData.knowledge_sources.length > 0 ? (
-                    <>
-                      {formData.knowledge_sources.map((source: any, index: number) => (
-                        <Box 
-                          key={index} 
-                          sx={{ 
-                            p: 1.5, 
-                            border: '1px solid',
-                            borderColor: 'divider',
-                            borderRadius: 1,
-                            backgroundColor: 'background.paper'
-                          }}
-                        >
-                          <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
-                            <Chip 
-                              label={source.type === 'databricks_volume' ? 'Databricks Volume' : source.type}
-                              size="small"
-                              color="primary"
-                              variant="outlined"
-                            />
-                            <Typography variant="body2" sx={{ flex: 1 }}>
-                              {source.metadata?.filename || source.source || 'Unknown source'}
-                            </Typography>
-                            <IconButton
-                              size="small"
-                              onClick={() => {
-                                const newSources = (formData.knowledge_sources || []).filter((_: any, i: number) => i !== index);
-                                handleInputChange('knowledge_sources', newSources);
-                              }}
-                              title="Remove knowledge source"
-                            >
-                              <DeleteIcon fontSize="small" />
-                            </IconButton>
-                          </Box>
-                          {source.metadata && (
-                            <Box sx={{ mt: 1, pl: 2 }}>
-                              <Typography variant="caption" color="text.secondary">
-                                Uploaded: {new Date(source.metadata.uploaded_at).toLocaleString()}
-                              </Typography>
-                            </Box>
-                          )}
-                        </Box>
-                      ))}
-                    </>
-                  ) : (
-                    <Box sx={{ py: 2, textAlign: 'center' }}>
-                      <Typography variant="body2" color="text.secondary">
-                        No knowledge sources configured for this agent
-                      </Typography>
-                    </Box>
-                  )}
-                  <Typography variant="caption" color="text.secondary" sx={{ mt: 2, display: 'block' }}>
-                    Knowledge sources can be uploaded through the chat panel. Select this agent when uploading files
-                    to automatically configure them as knowledge sources. Files are stored in Databricks volumes
-                    and enable retrieval-augmented generation (RAG) for improved agent responses.
-                  </Typography>
-                </Box>
-              </AccordionDetails>
-            </Accordion>
+            {/* Knowledge Sources section removed - now managed at task level */}
 
             {/* LLM Configuration */}
             <Accordion>

@@ -26,7 +26,7 @@ export type ConditionType = 'is_data_missing';
 const TaskAdvancedConfigComponent: React.FC<TaskAdvancedConfigProps> = ({
   advancedConfig,
   onConfigChange,
-  availableTasks,
+  availableTasks: _availableTasks,
 }) => {
   const [selectedCallback, setSelectedCallback] = useState<TaskCallbackOption | null>(
     advancedConfig.callback 
@@ -146,7 +146,7 @@ const TaskAdvancedConfigComponent: React.FC<TaskAdvancedConfigProps> = ({
         setDatabricksConfig(null);
       }
     }
-  }, [advancedConfig.callback, advancedConfig.callback_config]);
+  }, [advancedConfig.callback, advancedConfig.callback_config, databricksConfig, selectedCallback]);
 
   // Handle guardrail type changes
   const handleGuardrailTypeChange = useCallback((value: string) => {

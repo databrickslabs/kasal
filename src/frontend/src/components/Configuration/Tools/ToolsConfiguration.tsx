@@ -114,8 +114,8 @@ export default function ToolsConfiguration({ mode = 'auto' }: { mode?: 'system' 
         return;
       }
       closeConfigure();
-    } catch (e: any) {
-      setConfigError(e?.message ?? 'Invalid JSON');
+    } catch (e: unknown) {
+      setConfigError((e as Error)?.message ?? 'Invalid JSON');
     }
   };
 

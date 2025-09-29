@@ -7,6 +7,8 @@ import ShortcutsCircle from './components/ShortcutsCircle';
 import { LanguageService } from './api/LanguageService';
 import DatabaseManagementService from './api/DatabaseManagementService';
 import { usePermissionLoader } from './hooks/usePermissions';
+import { useUserStore } from './store/user';
+import { useGroupStore } from './store/groups';
 import './config/i18n/config';
 
 // Lazy load heavy components to reduce initial bundle size
@@ -32,12 +34,16 @@ function App() {
   // Load and maintain user permissions throughout the app
   usePermissionLoader();
 
+  // Get stores for group initialization (same logic as GroupSelector)
+  const { currentUser, fetchCurrentUser } = useUserStore();
+  const { fetchMyGroups } = useGroupStore();
+
   useEffect(() => {
     const initialize = async () => {
       // Initialize language
       const languageService = LanguageService.getInstance();
       await languageService.initializeLanguage();
-      
+
       // Check Database Management permission early and cache it
       if (!databaseManagementPermissionCache.checked) {
         try {
@@ -55,10 +61,21 @@ function App() {
           };
         }
       }
+
+      // Initialize user and groups (same logic as GroupSelector)
+      if (!currentUser) {
+        await fetchCurrentUser();
+      }
+
+      // Fetch groups to create personal workspace and set selectedGroupId
+      const updatedUser = useUserStore.getState().currentUser;
+      if (updatedUser?.email) {
+        await fetchMyGroups();
+      }
     };
 
     initialize();
-  }, []);
+  }, [currentUser, fetchCurrentUser, fetchMyGroups]);
 
   return (
     <ThemeProvider>

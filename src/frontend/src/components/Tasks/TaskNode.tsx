@@ -8,6 +8,7 @@ import EditIcon from '@mui/icons-material/Edit';
 import CloseIcon from '@mui/icons-material/Close';
 import CheckCircleIcon from '@mui/icons-material/CheckCircle';
 import ErrorIcon from '@mui/icons-material/Error';
+import AttachFileIcon from '@mui/icons-material/AttachFile';
 import { Task } from '../../api/TaskService';
 import { ToolService, Tool } from '../../api/ToolService';
 import TaskForm from './TaskForm';
@@ -303,7 +304,7 @@ const TaskNode: React.FC<TaskNodeProps> = ({ data, id }) => {
         toggleSelection();
       }
     }
-  }, [toggleSelection, handleEditClick]);
+  }, [id, toggleSelection, handleEditClick]);
 
   // Handle context menu (right-click) to prevent browser default menu
   const handleContextMenu = useCallback((event: React.MouseEvent) => {
@@ -446,13 +447,24 @@ const TaskNode: React.FC<TaskNodeProps> = ({ data, id }) => {
     return taskData;
   };
 
+  // Check if task has DatabricksKnowledgeSearchTool
+  const hasKnowledgeSearchTool = data.tools?.includes('DatabricksKnowledgeSearchTool') ||
+                                  data.tools?.includes('36'); // Also check for tool ID
+
   return (
     <>
       <Handle
         type="target"
         position={Position.Top}
-        id="top"
-        style={{ background: '#2196f3', width: '7px', height: '7px' }}
+        id="top-target"
+        style={{ background: '#2196f3', width: '7px', height: '7px', left: '30%' }}
+      />
+
+      <Handle
+        type="source"
+        position={Position.Top}
+        id="top-source"
+        style={{ background: '#4caf50', width: '7px', height: '7px', left: '70%' }}
       />
 
       <Handle
@@ -471,6 +483,28 @@ const TaskNode: React.FC<TaskNodeProps> = ({ data, id }) => {
         data-nodetype="task"
         data-selected={isSelected ? 'true' : 'false'}
       >
+        {/* Knowledge source indicator - shows when task has knowledge search tool */}
+        {hasKnowledgeSearchTool && (
+          <Box
+            sx={{
+              position: 'absolute',
+              top: 4,
+              left: 4,
+              color: 'primary.main',
+              display: 'flex',
+              zIndex: 5
+            }}
+          >
+            <Tooltip
+              title="Task has knowledge search capability"
+              disableInteractive
+              placement="top"
+            >
+              <AttachFileIcon fontSize="small" />
+            </Tooltip>
+          </Box>
+        )}
+
         {taskStatus && (
           <Box
             sx={{
@@ -563,13 +597,13 @@ const TaskNode: React.FC<TaskNodeProps> = ({ data, id }) => {
           )}
         </Typography>
 
-        {Boolean((data as any)?.loading) && (
+        {Boolean((data as Record<string, unknown>)?.loading) && (
           <Box
             sx={{
               position: 'absolute',
               inset: 0,
               borderRadius: '8px',
-              background: (theme: any) => theme.palette.mode === 'light'
+              background: (theme: { palette: { mode: string } }) => theme.palette.mode === 'light'
                 ? 'linear-gradient(90deg, rgba(255,255,255,0.35) 25%, rgba(255,255,255,0.6) 37%, rgba(255,255,255,0.35) 63%)'
                 : 'linear-gradient(90deg, rgba(255,255,255,0.08) 25%, rgba(255,255,255,0.16) 37%, rgba(255,255,255,0.08) 63%)',
               backgroundSize: '400% 100%',

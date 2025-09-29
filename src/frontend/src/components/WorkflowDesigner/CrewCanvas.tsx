@@ -101,14 +101,14 @@ const CrewCanvas: React.FC<CrewCanvasProps> = ({
   onPaneContextMenu,
   onInit,
   handleUIAwareFitView,
-  planningEnabled,
-  setPlanningEnabled,
-  reasoningEnabled,
-  setReasoningEnabled,
-  schemaDetectionEnabled,
-  setSchemaDetectionEnabled,
-  selectedModel,
-  setSelectedModel,
+  planningEnabled: _planningEnabled,
+  setPlanningEnabled: _setPlanningEnabled,
+  reasoningEnabled: _reasoningEnabled,
+  setReasoningEnabled: _setReasoningEnabled,
+  schemaDetectionEnabled: _schemaDetectionEnabled,
+  setSchemaDetectionEnabled: _setSchemaDetectionEnabled,
+  selectedModel: _selectedModelProp,
+  setSelectedModel: _setSelectedModelProp,
   onOpenLogsDialog,
   onToggleChat,
   isChatOpen,
@@ -117,8 +117,8 @@ const CrewCanvas: React.FC<CrewCanvasProps> = ({
   setIsFlowDialogOpen,
   showRunHistory,
   executionHistoryHeight = 200,
-  onOpenTutorial,
-  onOpenConfiguration
+  onOpenTutorial: _onOpenTutorial,
+  onOpenConfiguration: _onOpenConfiguration
 }) => {
 
   const [isRendering, setIsRendering] = useState(true);
@@ -801,7 +801,7 @@ const CrewCanvas: React.FC<CrewCanvasProps> = ({
             handleExecuteCrewButtonClick();
           }
         }}
-        selectedModel={selectedModel}
+        selectedModel={_selectedModel}
         tools={tools.map(tool => ({
           ...tool,
           icon: tool.icon || ''
