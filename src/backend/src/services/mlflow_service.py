@@ -5,8 +5,11 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.repositories.mlflow_repository import MLflowRepository
 from src.repositories.execution_history_repository import ExecutionHistoryRepository
+from src.services.model_config_service import ModelConfigService
+from src.core.logger import LoggerManager
 
-logger = logging.getLogger(__name__)
+# Route MLflowService logs to system.log for user visibility
+logger = LoggerManager.get_instance().system
 
 
 class MLflowService:
@@ -19,6 +22,9 @@ class MLflowService:
         self.group_id = group_id
         self.repo = MLflowRepository(session)
         self.exec_repo = ExecutionHistoryRepository(session)
+        self.model_config_service = ModelConfigService(session)
+        # Optional per-request user token for OBO; set via router when available
+        self._user_token: Optional[str] = None
 
     async def is_enabled(self) -> bool:
         return await self.repo.is_enabled(group_id=self.group_id)
@@ -34,6 +40,167 @@ class MLflowService:
     async def set_evaluation_enabled(self, enabled: bool) -> bool:
         ok = await self.repo.set_evaluation_enabled(enabled=enabled, group_id=self.group_id)
         return ok
+
+    # Optional OBO token setter (router can inject per-request user token)
+    def set_user_token(self, token: Optional[str]) -> None:
+        try:
+            self._user_token = token if (isinstance(token, str) and token.strip()) else None
+        except Exception:
+            self._user_token = None
+
+    async def _resolve_judge_model(self, configured_judge_model: Optional[str] = None) -> str:
+        """
+        Resolve the judge model using the model configuration system.
+        This ensures proper provider prefixing and authentication setup.
+
+        Args:
+            configured_judge_model: Optional configured judge model key
+
+        Returns:
+            Properly formatted model name for LiteLLM (e.g., "databricks/databricks-claude-sonnet-4")
+        """
+        import os
+
+        # Get configured judge model from database if not provided
+        if not configured_judge_model:
+            configured_judge_model = await self.repo.get_evaluation_judge_model(group_id=self.group_id)
+
+        # Fall back to environment variable
+        if not configured_judge_model:
+            configured_judge_model = os.getenv("MLFLOW_EVAL_JUDGE_MODEL")
+
+        # Default to databricks-claude-sonnet-4 if nothing configured
+        if not configured_judge_model:
+            configured_judge_model = "databricks-claude-sonnet-4"
+            logger.info(f"[MLflowService] Using default judge model: {configured_judge_model}")
+        else:
+            logger.info(f"[MLflowService] Using configured judge model: {configured_judge_model}")
+
+        # Clean up the model key - remove any provider prefixes or URI schemes
+        model_key = configured_judge_model
+        if "://" in model_key:
+            # Remove URI schemes like "endpoints://" or "databricks://"
+            model_key = model_key.split("://", 1)[1]
+        if "/" in model_key and not model_key.startswith("databricks/"):
+            # Remove provider prefixes except for the final databricks/ prefix we'll add
+            parts = model_key.split("/")
+            model_key = parts[-1]
+
+        try:
+            # Get model configuration to determine provider
+            model_config = await self.model_config_service.get_model_config(model_key)
+            provider = model_config.get("provider", "").lower()
+
+            # Format model name according to provider requirements
+            if provider == "databricks":
+                # For Databricks models, LiteLLM requires the databricks/ prefix
+                if not model_key.startswith("databricks/"):
+                    formatted_model = f"databricks/{model_key}"
+                else:
+                    formatted_model = model_key
+                logger.info(f"[MLflowService] Resolved Databricks judge model: {formatted_model}")
+                return formatted_model
+            else:
+                # For other providers, use the model key as-is or with appropriate prefix
+                logger.info(f"[MLflowService] Resolved {provider} judge model: {model_key}")
+                return model_key
+
+        except Exception as e:
+            logger.warning(f"[MLflowService] Could not resolve model config for {model_key}: {e}")
+            # Fallback: assume it's a Databricks model and add prefix if needed
+            if not model_key.startswith("databricks/"):
+                fallback_model = f"databricks/{model_key}"
+            else:
+                fallback_model = model_key
+            logger.info(f"[MLflowService] Using fallback judge model format: {fallback_model}")
+            return fallback_model
+
+    async def _setup_databricks_environment_for_evaluation(self):
+        """
+        Set up Databricks authentication and environment variables for MLflow evaluation.
+        This ensures that LiteLLM can properly authenticate with Databricks endpoints.
+        """
+        import os
+
+        try:
+            # Use the same authentication setup as the LLM manager
+            from src.utils.databricks_auth import is_databricks_apps_environment, setup_environment_variables
+            from src.services.api_keys_service import ApiKeysService
+            from src.utils.databricks_url_utils import DatabricksURLUtils
+
+            # Check if running in Databricks Apps environment
+            if is_databricks_apps_environment():
+                logger.info("[MLflowService] Using Databricks Apps OAuth authentication for evaluation")
+                # Prefer OBO user token if available; fall back to SP OAuth if configured inside util
+                try:
+                    setup_environment_variables(user_token=self._user_token)
+                except TypeError:
+                    # Backward compatibility with older signature
+                    setup_environment_variables()
+                try:
+                    if self._user_token:
+                        logger.info("[MLflowService] OBO user token supplied for evaluation (Apps env)")
+                except Exception:
+                    pass
+            else:
+                # Prefer per-request user token if provided (acts like PAT)
+                if getattr(self, "_user_token", None):
+                    os.environ["DATABRICKS_TOKEN"] = self._user_token
+                    os.environ["DATABRICKS_API_KEY"] = self._user_token
+                    logger.info("[MLflowService] Using provided user token for evaluation (non-Apps)")
+                else:
+                    # Use API key service for authentication
+                    token = await ApiKeysService.get_api_key_value(key_name="DATABRICKS_TOKEN")
+                    if not token:
+                        token = await ApiKeysService.get_api_key_value(key_name="DATABRICKS_API_KEY")
+
+                    if token:
+                        os.environ["DATABRICKS_TOKEN"] = token
+                        logger.info("[MLflowService] Set Databricks token for evaluation")
+                    else:
+                        logger.warning("[MLflowService] No Databricks token found for evaluation")
+
+            # Set up workspace URL for API base
+            workspace_url = os.getenv("DATABRICKS_HOST", "")
+            if workspace_url:
+                # Normalize and set all commonly used env vars for Databricks integrations
+                from src.utils.databricks_url_utils import DatabricksURLUtils as _URL
+                normalized = _URL.normalize_workspace_url(workspace_url)
+                if normalized:
+                    os.environ["DATABRICKS_HOST"] = normalized
+                    api_base = _URL.construct_serving_endpoints_url(normalized) or ""
+                    if api_base:
+                        os.environ["DATABRICKS_BASE_URL"] = api_base
+                        os.environ["DATABRICKS_API_BASE"] = api_base
+                        os.environ["DATABRICKS_ENDPOINT"] = api_base
+                    logger.info(f"[MLflowService] Using Databricks workspace for evaluation: host={normalized}")
+            else:
+                # Try to get from database configuration
+                from src.services.databricks_service import DatabricksService
+                from src.db.session import async_session_factory
+                try:
+                    async with async_session_factory() as session:
+                        databricks_service = DatabricksService(session)
+                        config = await databricks_service.get_databricks_config()
+                        if config and config.workspace_url:
+                            w = config.workspace_url
+                            from src.utils.databricks_url_utils import DatabricksURLUtils as _URL
+                            normalized = _URL.normalize_workspace_url(w)
+                            if normalized:
+                                os.environ["DATABRICKS_HOST"] = normalized
+                                api_base = _URL.construct_serving_endpoints_url(normalized) or ""
+                                if api_base:
+                                    os.environ["DATABRICKS_BASE_URL"] = api_base
+                                    os.environ["DATABRICKS_API_BASE"] = api_base
+                                    os.environ["DATABRICKS_ENDPOINT"] = api_base
+                                logger.info(f"[MLflowService] Set Databricks host/base from config: host={normalized}, base={api_base}")
+                except Exception as e:
+                    logger.warning(f"[MLflowService] Could not get workspace URL from config: {e}")
+
+        except ImportError:
+            logger.warning("[MLflowService] Enhanced Databricks auth not available for evaluation")
+        except Exception as e:
+            logger.warning(f"[MLflowService] Error setting up Databricks environment for evaluation: {e}")
 
     async def trigger_evaluation(self, job_id: str) -> Dict[str, Any]:
         """
@@ -99,116 +266,117 @@ class MLflowService:
         import asyncio
 
         # Run blocking MLflow 3.x evaluation code in a thread to keep API async/non-blocking
-        # Resolve judge model preference and normalize URI prefixes
-        # Accept: endpoints:/, gateway:/, openai:/, anthropic:/, bedrock:/, mistral:/
-        # Normalize legacy databricks:/<endpoint> to endpoints:/<endpoint> (required by mlflow.metrics.genai)
-        judge_model_defaulted = False
-        judge_model_route = await self.repo.get_evaluation_judge_model(group_id=self.group_id)
+        # Resolve judge model using the model configuration system
+        judge_model_route = await self._resolve_judge_model()
+        judge_model_defaulted = judge_model_route.endswith("databricks-claude-sonnet-4")
 
-        import os as _os
-        def _normalize_judge_uri(uri: Optional[str]) -> Optional[str]:
-            if not uri:
-                return None
-            s = str(uri).strip()
-            low = s.lower()
-            if low.startswith("databricks:/"):
-                # map to MLflow Deployments endpoints URI expected by metrics
-                return "endpoints:/" + s.split(":/", 1)[1].lstrip("/")
-            if low.startswith("endpoints:/") or low.startswith("gateway:/") or low.startswith("openai:/") or low.startswith("anthropic:/") or low.startswith("bedrock:/") or low.startswith("mistral:/"):
-                return s
-            return s
-
-        if not isinstance(judge_model_route, str) or not judge_model_route.strip():
-            env_judge = _os.getenv("MLFLOW_EVAL_JUDGE_MODEL")
-            judge_model_route = env_judge if isinstance(env_judge, str) and env_judge.strip() else None
-
-        judge_model_route = _normalize_judge_uri(judge_model_route)
-        if not judge_model_route:
-            # Default to Databricks Claude Sonnet 4 endpoint name (must exist in workspace)
-            judge_model_route = "endpoints:/databricks-claude-sonnet-4"
-            judge_model_defaulted = True
+        # Set up Databricks environment for evaluation if using Databricks models
+        if judge_model_route.startswith("databricks/"):
+            await self._setup_databricks_environment_for_evaluation()
 
         def _create_run_sync() -> Dict[str, Any]:
             import mlflow
             import pandas as pd
 
-            # Ensure Databricks tracking and target experiments
+            # Ensure Databricks tracking and target experiments (consolidated: use traces experiment)
             mlflow.set_tracking_uri("databricks")
-            eval_exp_name = os.getenv("MLFLOW_CREW_EVALUATIONS_EXPERIMENT", "/Shared/kasal-crew-evaluations")
+            eval_exp_name = os.getenv("MLFLOW_CREW_TRACES_EXPERIMENT", "/Shared/kasal-crew-execution-traces")
             eval_exp = mlflow.set_experiment(eval_exp_name)
 
             # Discover related traces and build a trace-derived evaluation dataset (best-effort)
             related_trace_ids = []
             records = []
+
+            # First, try to get the trace ID directly from the execution history
+            stored_trace_id = None
             try:
-                search_traces = getattr(mlflow, "search_traces", None)
-                if callable(search_traces):
-                    # Determine crew traces experiment
-                    traces_exp_name = os.getenv("MLFLOW_CREW_TRACES_EXPERIMENT", "/Shared/kasal-crew-execution-traces")
-                    traces_exp = mlflow.get_experiment_by_name(traces_exp_name)
-                    traces_exp_id = str(getattr(traces_exp, "experiment_id", "")) if traces_exp else ""
-                    df = search_traces(experiment_ids=[traces_exp_id]) if traces_exp_id else search_traces()
-                    # Heuristic filter: match spans that carry our execution_id/job_id
-                    # Different MLflow versions expose different column shapes; guard accordingly
-                    if df is not None and len(df) > 0:
-                        df_sel = df
-                        if "attributes" in df.columns:
+                stored_trace_id = getattr(exec_obj, 'mlflow_trace_id', None)
+                if stored_trace_id:
+                    logger.info(f"[MLflowService] Found stored trace ID: {stored_trace_id}")
+                    related_trace_ids = [stored_trace_id]
+            except Exception as e:
+                logger.warning(f"[MLflowService] Could not retrieve stored trace ID: {e}")
+
+            # If no stored trace ID, fall back to searching for traces
+            if not stored_trace_id:
+                logger.info("[MLflowService] No stored trace ID found, searching for traces by execution_id")
+                try:
+                    search_traces = getattr(mlflow, "search_traces", None)
+                    if callable(search_traces):
+                        # Determine crew traces experiment
+                        traces_exp_name = os.getenv("MLFLOW_CREW_TRACES_EXPERIMENT", "/Shared/kasal-crew-execution-traces")
+                        traces_exp = mlflow.get_experiment_by_name(traces_exp_name)
+                        traces_exp_id = str(getattr(traces_exp, "experiment_id", "")) if traces_exp else ""
+                        df = search_traces(experiment_ids=[traces_exp_id]) if traces_exp_id else search_traces()
+                        # Heuristic filter: match spans that carry our execution_id/job_id
+                        # Different MLflow versions expose different column shapes; guard accordingly
+                        if df is not None and len(df) > 0:
+                            df_sel = df
+                            if "attributes" in df.columns:
+                                try:
+                                    mask = df["attributes"].apply(
+                                        lambda attrs: isinstance(attrs, dict)
+                                        and (attrs.get("execution_id") == getattr(exec_obj, "id", None)
+                                             or attrs.get("execution_id") == job_id)
+                                    )
+                                    df_sel = df.loc[mask]
+                                    related_trace_ids = [str(x) for x in df_sel.get("trace_id", []).tolist()]
+                                except Exception:
+                                    pass
+                            # Build records from selected trace rows
                             try:
-                                mask = df["attributes"].apply(
-                                    lambda attrs: isinstance(attrs, dict)
-                                    and (attrs.get("execution_id") == getattr(exec_obj, "id", None)
-                                         or attrs.get("execution_id") == job_id)
-                                )
-                                df_sel = df.loc[mask]
-                                related_trace_ids = [str(x) for x in df_sel.get("trace_id", []).tolist()]
+                                import json as _json
+                                max_rows = int(os.getenv("MLFLOW_EVAL_MAX_ROWS", "200"))
+                                for _, r in df_sel.head(max_rows).iterrows():
+                                    attrs = r.get("attributes", {}) if isinstance(r.get("attributes", {}), dict) else {}
+                                    def _pick(keys):
+                                        # Search attrs first, then row columns
+                                        for kk in keys:
+                                            v = attrs.get(kk) if isinstance(attrs, dict) else None
+                                            if (v is None) and (kk in r):
+                                                v = r[kk]
+                                            if isinstance(v, (dict, list)):
+                                                try:
+                                                    v = _json.dumps(v, ensure_ascii=False)
+                                                except Exception:
+                                                    v = str(v)
+                                            if isinstance(v, str) and v.strip():
+                                                return v.strip()
+                                        return None
+                                    msg = _pick(["prompt", "question", "query", "input", "messages", "user_input", "task", "request"])
+                                    pred = _pick(["output", "response", "content", "answer", "final_answer", "text"])
+                                    ctx = _pick(["contexts", "context", "retrieved_contexts", "docs", "documents"])
+                                    ref = _pick(["reference", "ground_truth", "expected_answer", "label"])
+                                    if msg is None and pred is None:
+                                        continue
+                                    rec = {"messages": msg or "", "predictions": pred or ""}
+                                    if isinstance(ctx, str) and ctx.strip():
+                                        rec["contexts"] = ctx
+                                    if isinstance(ref, str) and ref.strip():
+                                        rec["references"] = ref
+                                    records.append(rec)
                             except Exception:
                                 pass
-                        # Build records from selected trace rows
-                        try:
-                            import json as _json
-                            max_rows = int(os.getenv("MLFLOW_EVAL_MAX_ROWS", "200"))
-                            for _, r in df_sel.head(max_rows).iterrows():
-                                attrs = r.get("attributes", {}) if isinstance(r.get("attributes", {}), dict) else {}
-                                def _pick(keys):
-                                    # Search attrs first, then row columns
-                                    for kk in keys:
-                                        v = attrs.get(kk) if isinstance(attrs, dict) else None
-                                        if (v is None) and (kk in r):
-                                            v = r[kk]
-                                        if isinstance(v, (dict, list)):
-                                            try:
-                                                v = _json.dumps(v, ensure_ascii=False)
-                                            except Exception:
-                                                v = str(v)
-                                        if isinstance(v, str) and v.strip():
-                                            return v.strip()
-                                    return None
-                                msg = _pick(["prompt", "question", "query", "input", "messages", "user_input", "task", "request"])
-                                pred = _pick(["output", "response", "content", "answer", "final_answer", "text"])
-                                ctx = _pick(["contexts", "context", "retrieved_contexts", "docs", "documents"])
-                                ref = _pick(["reference", "ground_truth", "expected_answer", "label"])
-                                if msg is None and pred is None:
-                                    continue
-                                rec = {"messages": msg or "", "predictions": pred or ""}
-                                if isinstance(ctx, str) and ctx.strip():
-                                    rec["contexts"] = ctx
-                                if isinstance(ref, str) and ref.strip():
-                                    rec["references"] = ref
-                                records.append(rec)
-                        except Exception:
-                            pass
-            except Exception:
-                pass
+                except Exception:
+                    pass
 
             # Fallback to single-record dataset from execution if trace-derived dataset is empty
             if not records:
                 records = [{"messages": inputs_text or "", "predictions": prediction_text or ""}]
             eval_df = pd.DataFrame.from_records(records)
+            try:
+                logger.info(f"[MLflowService] Built evaluation dataset for job_id={job_id}: rows={len(eval_df)}, columns={list(eval_df.columns)}")
+            except Exception:
+                pass
 
             # Ensure we are back on the evaluation experiment before starting the run
             mlflow.set_experiment(eval_exp_name)
             with mlflow.start_run(run_name=f"evaluation-{job_id}") as run:
                 run_id = run.info.run_id
+                try:
+                    logger.info(f"[MLflowService] Started evaluation run: experiment='{eval_exp_name}', run_id={run_id}, job_id={job_id}")
+                except Exception:
+                    pass
                 # Log linkage and context
                 try:
                     mlflow.log_params({
@@ -295,63 +463,101 @@ class MLflowService:
 
             # Attempt to rebuild eval dataset (same logic)
             records = []
+            related_trace_ids = []
+
+            # First, try to get the trace ID directly from the execution history
+            stored_trace_id = None
             try:
-                search_traces = getattr(mlflow, "search_traces", None)
-                if callable(search_traces):
-                    traces_exp_name = os.getenv("MLFLOW_CREW_TRACES_EXPERIMENT", "/Shared/kasal-crew-execution-traces")
-                    traces_exp = mlflow.get_experiment_by_name(traces_exp_name)
-                    traces_exp_id = str(getattr(traces_exp, "experiment_id", "")) if traces_exp else ""
-                    df = search_traces(experiment_ids=[traces_exp_id]) if traces_exp_id else search_traces()
-                    if df is not None and len(df) > 0:
-                        df_sel = df
-                        if "attributes" in df.columns:
+                stored_trace_id = getattr(exec_obj, 'mlflow_trace_id', None)
+                if stored_trace_id:
+                    logger.info(f"[MLflowService] Found stored trace ID for evaluation: {stored_trace_id}")
+                    related_trace_ids = [stored_trace_id]
+            except Exception as e:
+                logger.warning(f"[MLflowService] Could not retrieve stored trace ID for evaluation: {e}")
+
+            # If no stored trace ID, fall back to searching for traces
+            if not stored_trace_id:
+                logger.info("[MLflowService] No stored trace ID found for evaluation, searching by execution_id")
+                try:
+                    search_traces = getattr(mlflow, "search_traces", None)
+                    if callable(search_traces):
+                        traces_exp_name = os.getenv("MLFLOW_CREW_TRACES_EXPERIMENT", "/Shared/kasal-crew-execution-traces")
+                        traces_exp = mlflow.get_experiment_by_name(traces_exp_name)
+                        traces_exp_id = str(getattr(traces_exp, "experiment_id", "")) if traces_exp else ""
+                        df = search_traces(experiment_ids=[traces_exp_id]) if traces_exp_id else search_traces()
+                        if df is not None and len(df) > 0:
+                            df_sel = df
+                            if "attributes" in df.columns:
+                                try:
+                                    mask = df["attributes"].apply(
+                                        lambda attrs: isinstance(attrs, dict)
+                                        and (attrs.get("execution_id") == getattr(exec_obj, "id", None)
+                                             or attrs.get("execution_id") == job_id)
+                                    )
+                                    df_sel = df.loc[mask]
+                                    # Extract trace IDs from the filtered results
+                                    if len(df_sel) > 0 and "trace_id" in df_sel.columns:
+                                        related_trace_ids = [str(x) for x in df_sel["trace_id"].tolist() if x]
+                                        logger.info(f"[MLflowService] Found {len(related_trace_ids)} trace IDs from search")
+                                except Exception:
+                                    pass
                             try:
-                                mask = df["attributes"].apply(
-                                    lambda attrs: isinstance(attrs, dict)
-                                    and (attrs.get("execution_id") == getattr(exec_obj, "id", None)
-                                         or attrs.get("execution_id") == job_id)
-                                )
-                                df_sel = df.loc[mask]
+                                import json as _json
+                                max_rows = int(os.getenv("MLFLOW_EVAL_MAX_ROWS", "200"))
+                                for _, r in df_sel.head(max_rows).iterrows():
+                                    attrs = r.get("attributes", {}) if isinstance(r.get("attributes", {}), dict) else {}
+                                    def _pick(keys):
+                                        for kk in keys:
+                                            v = attrs.get(kk) if isinstance(attrs, dict) else None
+                                            if (v is None) and (kk in r):
+                                                v = r[kk]
+                                            if isinstance(v, (dict, list)):
+                                                try:
+                                                    v = _json.dumps(v, ensure_ascii=False)
+                                                except Exception:
+                                                    v = str(v)
+                                            if isinstance(v, str) and v.strip():
+                                                return v.strip()
+                                        return None
+                                    msg = _pick(["prompt", "question", "query", "input", "messages", "user_input", "task", "request"])
+                                    pred = _pick(["output", "response", "content", "answer", "final_answer", "text"])
+                                    ctx = _pick(["contexts", "context", "retrieved_contexts", "docs", "documents"])
+                                    ref = _pick(["reference", "ground_truth", "expected_answer", "label"])
+                                    if msg is None and pred is None:
+                                        continue
+                                    rec = {"messages": msg or "", "predictions": pred or ""}
+                                    if isinstance(ctx, str) and ctx.strip():
+                                        rec["contexts"] = ctx
+                                    if isinstance(ref, str) and ref.strip():
+                                        rec["references"] = ref
+                                    records.append(rec)
                             except Exception:
                                 pass
-                        try:
-                            import json as _json
-                            max_rows = int(os.getenv("MLFLOW_EVAL_MAX_ROWS", "200"))
-                            for _, r in df_sel.head(max_rows).iterrows():
-                                attrs = r.get("attributes", {}) if isinstance(r.get("attributes", {}), dict) else {}
-                                def _pick(keys):
-                                    for kk in keys:
-                                        v = attrs.get(kk) if isinstance(attrs, dict) else None
-                                        if (v is None) and (kk in r):
-                                            v = r[kk]
-                                        if isinstance(v, (dict, list)):
-                                            try:
-                                                v = _json.dumps(v, ensure_ascii=False)
-                                            except Exception:
-                                                v = str(v)
-                                        if isinstance(v, str) and v.strip():
-                                            return v.strip()
-                                    return None
-                                msg = _pick(["prompt", "question", "query", "input", "messages", "user_input", "task", "request"])
-                                pred = _pick(["output", "response", "content", "answer", "final_answer", "text"])
-                                ctx = _pick(["contexts", "context", "retrieved_contexts", "docs", "documents"])
-                                ref = _pick(["reference", "ground_truth", "expected_answer", "label"])
-                                if msg is None and pred is None:
-                                    continue
-                                rec = {"messages": msg or "", "predictions": pred or ""}
-                                if isinstance(ctx, str) and ctx.strip():
-                                    rec["contexts"] = ctx
-                                if isinstance(ref, str) and ref.strip():
-                                    rec["references"] = ref
-                                records.append(rec)
-                        except Exception:
-                            pass
-            except Exception:
-                pass
+                except Exception:
+                    pass
 
             if not records:
                 records = [{"messages": inputs_text or "", "predictions": prediction_text or ""}]
             eval_df = pd.DataFrame.from_records(records)
+
+            # Detect whether the constructed records include contexts/references
+            # We will prefer record-based evaluation when enriched data is present to unlock more scorers
+            has_ctx_col = False
+            has_ref_col = False
+            try:
+                if "contexts" in eval_df.columns:
+                    try:
+                        has_ctx_col = eval_df["contexts"].astype(str).str.strip().astype(bool).any()
+                    except Exception:
+                        has_ctx_col = any(isinstance(v, str) and v.strip() for v in eval_df["contexts"].tolist())
+                if "references" in eval_df.columns:
+                    try:
+                        has_ref_col = eval_df["references"].astype(str).str.strip().astype(bool).any()
+                    except Exception:
+                        has_ref_col = any(isinstance(v, str) and v.strip() for v in eval_df["references"].tolist())
+            except Exception:
+                pass
+
 
             # Build scorers/metrics and run evaluate within the existing run
             try:
@@ -359,60 +565,202 @@ class MLflowService:
                 metrics_ns = getattr(_ml, "metrics", None)
                 m_genai_metrics = getattr(metrics_ns, "genai", None) if metrics_ns else None
 
-                # Prepare answer-sheet style data for mlflow.genai.evaluate (inputs/outputs/expectations)
+                # Prepare evaluation data for mlflow.genai.evaluate
+                # If we have trace IDs, fetch the actual trace objects for better scorer performance
                 eval_data = []
                 try:
-                    for _, r in eval_df.iterrows():
-                        inp = {}
-                        # Map our 'messages' string to a 'question' input for best scorer compatibility
-                        msg_val = r.get("messages", "")
-                        if msg_val:
-                            inp["question"] = msg_val
-                        # Include context if available
-                        ctx_val = r.get("contexts") if "contexts" in eval_df.columns else None
-                        if isinstance(ctx_val, str) and ctx_val.strip():
-                            inp["context"] = ctx_val
-                        out = {"response": r.get("predictions", "")}
-                        rec = {"inputs": inp, "outputs": out}
-                        # Map references to expectations (support both correctness and sufficiency)
-                        ref_val = r.get("references") if "references" in eval_df.columns else None
-                        if isinstance(ref_val, str) and ref_val.strip():
-                            rec["expectations"] = {
-                                "expected_response": ref_val,
-                                # Provide a facts list as a best-effort mapping for sufficiency scorers
-                                "expected_facts": [ref_val],
-                            }
-                        eval_data.append(rec)
-                except Exception:
+                    # Try to fetch trace objects if we have trace IDs
+                    trace_objects = []
+                    if related_trace_ids:
+                        logger.info(f"[MLflowService] Fetching trace objects for evaluation: {related_trace_ids}")
+                        for trace_id in related_trace_ids:
+                            try:
+                                trace_obj = mlflow.get_trace(trace_id)
+                                if trace_obj:
+                                    trace_objects.append(trace_obj)
+                                    logger.debug(f"[MLflowService] Successfully fetched trace: {trace_id}")
+                            except Exception as e:
+                                logger.warning(f"[MLflowService] Failed to fetch trace {trace_id}: {e}")
+
+                        # Attempt to extract contexts/query directly from trace request/response JSON
+                        # to enable retrieval metrics even when search_traces attributes lack them
+                        try:
+                            import json as _json
+                            enriched_records = []
+                            for t in trace_objects:
+                                data = getattr(t, "data", None)
+                                req = getattr(data, "request", None) if data is not None else None
+                                resp = getattr(data, "response", None) if data is not None else None
+                                if isinstance(req, str) and req.strip():
+                                    try:
+                                        req_obj = _json.loads(req)
+                                    except Exception:
+                                        req_obj = {}
+                                else:
+                                    req_obj = {}
+                                if isinstance(resp, str) and resp.strip():
+                                    try:
+                                        resp_obj = _json.loads(resp)
+                                    except Exception:
+                                        resp_obj = {}
+                                else:
+                                    resp_obj = {}
+
+                                # Heuristics to extract query and contexts from request JSON
+                                def _find_text(d: dict, keys):
+                                    for k in keys:
+                                        v = d.get(k)
+                                        if isinstance(v, str) and v.strip():
+                                            return v
+                                    return None
+
+                                def _find_list_or_str(d: dict, keys):
+                                    for k in keys:
+                                        v = d.get(k)
+                                        if isinstance(v, list) and v:
+                                            return [str(x) for x in v]
+                                        if isinstance(v, str) and v.strip():
+                                            return [v]
+                                    return None
+
+                                inputs_obj = req_obj.get("inputs", {}) if isinstance(req_obj.get("inputs", {}), dict) else {}
+                                params_obj = req_obj.get("parameters", {}) if isinstance(req_obj.get("parameters", {}), dict) else {}
+                                top_ctx = _find_list_or_str(req_obj, ["contexts", "context", "retrieved_contexts", "docs", "documents"]) or []
+                                in_ctx = _find_list_or_str(inputs_obj, ["contexts", "context", "retrieved_contexts", "docs", "documents"]) or []
+                                p_ctx = _find_list_or_str(params_obj, ["contexts", "context", "retrieved_contexts", "docs", "documents"]) or []
+                                all_ctx = [c for c in (top_ctx + in_ctx + p_ctx) if isinstance(c, str) and c.strip()]
+
+                                # query
+                                query = (
+                                    _find_text(inputs_obj, ["query", "question", "prompt", "messages", "input", "user_input", "task"]) or
+                                    _find_text(req_obj, ["query", "question", "prompt", "messages", "input", "user_input", "task"]) or
+                                    _find_text(params_obj, ["query", "question", "prompt"]) or
+                                    ""
+                                )
+                                # response
+                                response = (
+                                    _find_text(resp_obj, ["response", "output", "answer", "final_answer", "content", "text"]) or ""
+                                )
+
+                                if query or response or all_ctx:
+                                    rec = {"inputs": {"query": query}, "outputs": {"response": response}}
+                                    if all_ctx:
+                                        rec["contexts"] = all_ctx
+                                    enriched_records.append(rec)
+
+                            if enriched_records:
+                                eval_data = enriched_records
+                                has_ctx_col = True
+                                logger.info(f"[MLflowService] Built {len(enriched_records)} enriched records from trace JSON (contexts present)")
+                        except Exception:
+                            pass
+                    # If we have trace objects, validate they contain request/response JSON strings; otherwise fall back
+                    # Skip if we already constructed enriched records from trace JSON
+                    if trace_objects and not eval_data:
+                        valid_traces = []
+                        try:
+                            for t in trace_objects:
+                                # Some traces (schema v3) may have missing request/response; MLflow expects JSON strings
+                                data = getattr(t, "data", None)
+                                req = getattr(data, "request", None) if data is not None else None
+                                if isinstance(req, str) and req.strip():
+                                    valid_traces.append(t)
+                                else:
+                                    logger.debug("[MLflowService] Skipping trace without request JSON; falling back to record for this row")
+                        except Exception:
+                            pass
+                        # Prefer record-based evaluation when enriched with contexts/references; otherwise use traces
+                        prefer_records = bool(has_ctx_col or has_ref_col)
+                        if valid_traces and not prefer_records:
+                            logger.info(f"[MLflowService] Using trace-based evaluation with {len(valid_traces)} traces (filtered from {len(trace_objects)})")
+                            for trace_obj in valid_traces:
+                                eval_data.append({"trace": trace_obj})
+                        else:
+                            logger.info("[MLflowService] Using inputs/outputs/expectations format for evaluation (enriched records preferred)")
+                            for _, r in eval_df.iterrows():
+                                inp = {}
+                                # Map our 'messages' string to 'query' for MLflow scorers (per docs)
+                                msg_val = r.get("messages", "")
+                                if msg_val:
+                                    inp["query"] = msg_val
+                                # Include contexts if available (as a list at top-level)
+                                ctx_val = r.get("contexts") if "contexts" in eval_df.columns else None
+                                out = {"response": r.get("predictions", "")}
+                                rec = {"inputs": inp, "outputs": out}
+                                if isinstance(ctx_val, str) and ctx_val.strip():
+                                    rec["contexts"] = [ctx_val]
+                                # Map references to expectations (support both correctness and sufficiency)
+                                ref_val = r.get("references") if "references" in eval_df.columns else None
+                                if isinstance(ref_val, str) and ref_val.strip():
+                                    rec["expectations"] = {
+                                        "expected_response": ref_val,
+                                        # Provide a facts list as a best-effort mapping for sufficiency scorers
+                                        "expected_facts": [ref_val],
+                                    }
+                                eval_data.append(rec)
+                    if not eval_data:
+                        # Absolute fallback: minimal shaping
+                        eval_data = [{"inputs": {"query": inputs_text or ""}, "outputs": {"response": prediction_text or ""}}]
+                except Exception as e:
+                    logger.warning(f"[MLflowService] Error preparing evaluation data: {e}")
                     # Fall back to minimal shaping
-                    eval_data = [{"inputs": {"question": inputs_text or ""}, "outputs": {"response": prediction_text or ""}}]
+                    eval_data = [{"inputs": {"query": inputs_text or ""}, "outputs": {"response": prediction_text or ""}}]
 
                 # Build GenAI scorers (preferred)
                 scorers = []
                 try:
                     genai_ns = getattr(mlflow, "genai", None)
                     m_scorers = getattr(genai_ns, "scorers", None) if genai_ns else None
+                    def _to_scorer_model_uri(route: Optional[str]) -> Optional[str]:
+                        if not route:
+                            return None
+                        try:
+                            # Accept already formatted URIs
+                            if ":/" in route:
+                                return route
+                            # Convert provider/model -> provider:/model
+                            if "/" in route:
+                                provider, model = route.split("/", 1)
+                                return f"{provider}:/" + model
+                            # Allow bare 'databricks' to use managed judges
+                            if route == "databricks":
+                                return route
+                        except Exception:
+                            pass
+                        return route
+
                     def _add_scorer(name: str):
                         if m_scorers is None:
                             return
                         cls = getattr(m_scorers, name, None)
                         if cls is not None:
                             try:
-                                # Use configured judge model route when available
-                                kw = {"model": judge_model_route} if judge_model_route else {}
+                                # Use configured judge model route when available; map to scorer URI format
+                                model_uri = _to_scorer_model_uri(judge_model_route)
+                                kw = {"model": model_uri} if model_uri else {}
                                 scorers.append(cls(**kw))
-                            except Exception:
+                            except Exception as _e:
+                                logger.debug(f"[MLflowService] Failed to init scorer {name} with model={judge_model_route}: {_e}")
                                 pass
                     _add_scorer("RelevanceToQuery")
                     _add_scorer("Safety")
-                    if "references" in eval_df.columns:
+                    # General quality scorers (best-effort; available in recent MLflow versions)
+                    _add_scorer("Helpfulness")
+                    _add_scorer("Coherence")
+                    _add_scorer("Conciseness")
+                    if has_ref_col:
                         _add_scorer("Correctness")
-                    if "contexts" in eval_df.columns:
+                    if has_ctx_col:
                         _add_scorer("RetrievalGroundedness")
                         _add_scorer("RetrievalRelevance")
                         # RetrievalSufficiency typically benefits from ground-truth; add when references exist
-                        if "references" in eval_df.columns:
+                        if has_ref_col:
                             _add_scorer("RetrievalSufficiency")
+                    try:
+                        scorer_names = [type(s).__name__ for s in scorers]
+                        logger.info(f"[MLflowService] Using genai scorers: {scorer_names}, judge_model='{judge_model_route}'")
+                    except Exception:
+                        pass
                 except Exception:
                     pass
 
@@ -470,47 +818,112 @@ class MLflowService:
                     pass
 
                 with mlflow.start_run(run_id=run_id):
-                    # Prefer MLflow 3.x GenAI evaluation API (no deprecated warnings)
-                    eval_result = None
+                    # Use MLflow 3.x GenAI evaluation API (recommended for LLM/GenAI applications)
                     try:
-                        genai_ns = getattr(mlflow, "genai", None)
-                        eval_genai = getattr(genai_ns, "evaluate", None) if genai_ns else None
-                        if callable(eval_genai):
-                            try:
-                                eval_result = eval_genai(
-                                    data=eval_data,
-                                    scorers=scorers if scorers else None,
-                                )
-                            except Exception as e:
-                                logger.warning(f"mlflow.genai.evaluate failed for job_id={job_id}: {e}")
-                    except Exception:
-                        pass
+                        import mlflow.genai
+                        logger.info(f"[MLflowService] Running mlflow.genai.evaluate for job_id={job_id}, run_id={run_id}")
 
-                    # Fallback to mlflow.evaluate for compatibility
-                    if eval_result is None:
-                        evaluate_fn = getattr(mlflow, "evaluate", None)
-                        if callable(evaluate_fn):
-                            try:
-                                eval_result = evaluate_fn(
-                                    data=eval_df,
-                                    predictions="predictions",
-                                    extra_metrics=extra_metrics if extra_metrics else None,
-                                    evaluator_config={"col_mapping": {"inputs": "messages"}},
-                                )
-                            except Exception as e:
-                                logger.warning(f"Background evaluation (deprecated API) failed for job_id={job_id}: {e}")
+                        # For MLflow 3.0, trace information is included in the data parameter
+                        # The eval_data now contains either trace objects or inputs/outputs/expectations
+                        eval_kwargs = {
+                            "data": eval_data,
+                            "scorers": scorers if scorers else [],
+                        }
 
-                    # Log result table if available
+                        # Pre-evaluation debug: shape and scorers
+                        try:
+                            first_keys = list(eval_data[0].keys()) if eval_data else []
+                            scorer_names = [type(s).__name__ for s in (scorers or [])]
+                            from_types = ("trace" if (eval_data and "trace" in eval_data[0]) else "records")
+                            logger.info(f"[MLflowService] Eval mode={from_types}, rows={len(eval_data)}, first_keys={first_keys}")
+                            logger.info(f"[MLflowService] Scorers={scorer_names}, judge_model_route='{judge_model_route}'")
+                            print(f"EVAL_DEBUG mode={from_types} rows={len(eval_data)} first_keys={first_keys}")
+                            print(f"EVAL_DEBUG scorers={scorer_names} judge_model_route={judge_model_route}")
+                        except Exception:
+                            pass
+
+                        # Log the evaluation approach being used
+                        if eval_data and "trace" in eval_data[0]:
+                            logger.info(f"[MLflowService] Using trace-based evaluation with {len(eval_data)} trace objects")
+                        else:
+                            logger.info(f"[MLflowService] Using inputs/outputs/expectations evaluation with {len(eval_data)} records")
+
+                        import traceback
+                        try:
+                            eval_result = mlflow.genai.evaluate(**eval_kwargs)
+                        except Exception as e:
+                            logger.exception(f"[MLflowService] mlflow.genai.evaluate raised: {e}")
+                            print("EVAL_ERROR exception during mlflow.genai.evaluate:", str(e))
+                            print("EVAL_ERROR traceback:\n" + traceback.format_exc())
+                            raise
+                        logger.info("[MLflowService] mlflow.genai.evaluate completed successfully")
+                        print("EVAL_DEBUG evaluate completed successfully")
+
+                    except Exception as e:
+                        logger.error(f"mlflow.genai.evaluate failed for job_id={job_id}: {e}")
+                        raise
+
+                    # Persist aggregated judge metrics as run-level metrics for quick visibility
                     try:
+                        # Log which scorers were used and judge model
+                        try:
+                            # Also record the scorer model URI mapping for transparency
+                            def _to_scorer_model_uri(route):
+                                try:
+                                    if not route:
+                                        return None
+                                    if ":/" in route:
+                                        return route
+                                    if "/" in route:
+                                        p, m = route.split("/", 1)
+                                        return f"{p}:/" + m
+                                    return route
+                                except Exception:
+                                    return route
+                            mlflow.log_params({
+                                "genai_scorers": ",".join([type(s).__name__ for s in (scorers or [])]) or "",
+                                "genai_judge_model": str(judge_model_route or ""),
+                                "genai_judge_model_uri": str(_to_scorer_model_uri(judge_model_route) or ""),
+                            })
+                        except Exception:
+                            pass
+
+                        # Log result table if available and compute means for numeric columns
                         if eval_result is not None:
                             tbl = None
                             if hasattr(eval_result, "tables"):
                                 tbl = eval_result.tables.get("eval_results_table")
                             if tbl is not None:
                                 import io
+                                import pandas as _pd
                                 csv_buf = io.StringIO()
                                 tbl.to_csv(csv_buf, index=False)
                                 mlflow.log_text(csv_buf.getvalue(), artifact_file="eval_results.csv")
+
+                                # Compute means for judge metric columns and log as metrics
+                                try:
+                                    df = tbl if isinstance(tbl, _pd.DataFrame) else None
+                                    if df is None:
+                                        # Some mlflow versions return a dict-like; best-effort conversion
+                                        df = _pd.DataFrame(tbl)
+                                    numeric_cols = [c for c in df.columns if _pd.api.types.is_numeric_dtype(df[c])]
+                                    agg_logged = {}
+                                    for col in numeric_cols:
+                                        try:
+                                            mean_val = float(df[col].mean())
+                                            # Normalize metric name (replace slashes/spaces)
+                                            metric_name = str(col).replace("/", "_").replace(" ", "_").lower()
+                                            mlflow.log_metric(f"{metric_name}_mean", mean_val)
+                                            agg_logged[f"{metric_name}_mean"] = mean_val
+                                        except Exception:
+                                            continue
+                                    try:
+                                        if agg_logged:
+                                            logger.info(f"[MLflowService] Judge metrics (means): {agg_logged}")
+                                    except Exception:
+                                        pass
+                                except Exception as _agg_e:
+                                    logger.warning(f"[MLflowService] Failed to aggregate judge metrics: {_agg_e}")
                     except Exception:
                         pass
             except Exception as e:
@@ -521,29 +934,33 @@ class MLflowService:
         try:
             if isinstance(info, dict):
                 logger.info(
-                    f"MLflow evaluation run created for job_id={job_id}: "
+                    f"[MLflowService] MLflow evaluation run created for job_id={job_id}: "
                     f"experiment_id={info.get('experiment_id')}, run_id={info.get('run_id')}"
                 )
                 run_id_bg = info.get('run_id')
                 if run_id_bg:
                     # Fire-and-forget background evaluation metrics logging
+                    logger.info(f"[MLflowService] Scheduling background evaluation completion for run_id={run_id_bg}")
                     asyncio.create_task(asyncio.to_thread(_complete_eval_sync, run_id_bg))
         except Exception:
             pass
 
-        # Persist run_id reference on the execution (nest under result.mlflow_evaluation_run_id)
+        # Persist evaluation run ID in dedicated database field
         try:
-            current = exec_obj.result or {}
-            if isinstance(current, dict):
-                current.setdefault("mlflow", {})
-                current["mlflow"]["evaluation_run_id"] = info.get("run_id")
-                exec_obj.result = current
-            else:
-                exec_obj.result = {"value": str(current), "mlflow": {"evaluation_run_id": info.get("run_id")}}
-            await self.session.flush()
-            await self.session.commit()
+            from src.services.execution_status_service import ExecutionStatusService
+            evaluation_run_id = info.get("run_id")
+            if evaluation_run_id:
+                success = await ExecutionStatusService.update_mlflow_evaluation_run_id(
+                    session=self.session,
+                    job_id=job_id,
+                    evaluation_run_id=evaluation_run_id
+                )
+                if success:
+                    logger.info(f"[MLflowService] Successfully stored evaluation run ID {evaluation_run_id} for job_id={job_id}")
+                else:
+                    logger.warning(f"[MLflowService] Failed to store evaluation run ID for job_id={job_id}")
         except Exception as e:
-            logger.warning(f"Failed to persist evaluation_run_id for job_id={job_id}: {e}")
+            logger.warning(f"[MLflowService] Failed to persist evaluation_run_id for job_id={job_id}: {e}")
 
         return info
 
