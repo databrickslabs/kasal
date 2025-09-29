@@ -17,9 +17,20 @@ logger = logging.getLogger(__name__)
 # Input schema for DatabricksKnowledgeSearchTool
 class DatabricksKnowledgeSearchInput(BaseModel):
     """Input schema for DatabricksKnowledgeSearchTool."""
-    query: str = Field(..., description="The search query to find relevant information from uploaded knowledge documents.")
-    limit: Optional[int] = Field(default=5, description="Maximum number of results to return (default: 5).")
-    file_paths: Optional[List[str]] = Field(default=None, description="Optional list of file paths to filter search results.")
+    query: str = Field(
+        ...,
+        description="The search query to find relevant information from uploaded knowledge documents."
+    )
+    limit: Optional[int] = Field(
+        default=10,  # Increased from 5 for better context coverage
+        ge=1,
+        le=20,
+        description="Maximum number of results to return (default: 10, max: 20)."
+    )
+    file_paths: Optional[List[str]] = Field(
+        default=None,
+        description="Optional list of file paths to filter search results."
+    )
 
 class DatabricksKnowledgeSearchTool(BaseTool):
     """
@@ -70,7 +81,7 @@ class DatabricksKnowledgeSearchTool(BaseTool):
         logger.info(f"  Execution ID: {execution_id}")
         logger.info(f"  User token provided: {bool(user_token)}")
 
-    def _run(self, query: str, limit: int = 5, file_paths: Optional[List[str]] = None) -> str:
+    def _run(self, query: str, limit: int = 10, file_paths: Optional[List[str]] = None) -> str:
         """
         Run the knowledge search synchronously (required by CrewAI).
 
@@ -82,13 +93,26 @@ class DatabricksKnowledgeSearchTool(BaseTool):
         Returns:
             Formatted search results as a string
         """
+        logger.info("="*80)
+        logger.info("[TOOL DEBUG] DatabricksKnowledgeSearchTool._run() called")
+        logger.info(f"[TOOL DEBUG] Query: '{query}'")
+        logger.info(f"[TOOL DEBUG] Limit: {limit}")
+        logger.info(f"[TOOL DEBUG] File paths: {file_paths}")
+        logger.info(f"[TOOL DEBUG] Group ID: {self._group_id}")
+        logger.info(f"[TOOL DEBUG] Execution ID: {self._execution_id}")
+        logger.info("="*80)
+
         try:
             # Run the async search in a thread pool executor
+            logger.info("[TOOL DEBUG] Starting async search in thread pool...")
             with ThreadPoolExecutor() as executor:
                 future = executor.submit(self._run_async_search, query, limit, file_paths)
                 results = future.result(timeout=30)  # 30 second timeout
 
+            logger.info(f"[TOOL DEBUG] Async search completed, got {len(results) if results else 0} results")
+
             if not results:
+                logger.warning("[TOOL DEBUG] No results found, returning empty message")
                 return "No relevant information found in the knowledge base."
 
             # Format results for the agent
@@ -146,34 +170,75 @@ class DatabricksKnowledgeSearchTool(BaseTool):
         Returns:
             List of search results
         """
+        logger.info("[TOOL ASYNC DEBUG] _async_search started")
+        logger.info(f"[TOOL ASYNC DEBUG] Query: '{query}'")
+        logger.info(f"[TOOL ASYNC DEBUG] Group ID: {self._group_id}")
+        logger.info(f"[TOOL ASYNC DEBUG] Execution ID: {self._execution_id}")
+        logger.info(f"[TOOL ASYNC DEBUG] User token: {bool(self._user_token)}")
+
         try:
+            logger.info("[TOOL ASYNC DEBUG] Importing DatabricksKnowledgeService...")
             # Lazy import to avoid circular dependencies
+            import importlib
+            import sys
+
+            # CRITICAL FIX: Force remove from sys.modules and reload to get latest code
+            # Subprocess inherits cached modules from parent process
+            module_name = 'src.services.databricks_knowledge_service'
+            if module_name in sys.modules:
+                logger.info(f"[TOOL ASYNC DEBUG] Removing {module_name} from sys.modules...")
+                del sys.modules[module_name]
+                logger.info("[TOOL ASYNC DEBUG] Module removed, will import fresh from disk")
+
             from src.services.databricks_knowledge_service import DatabricksKnowledgeService
             from src.repositories.databricks_config_repository import DatabricksConfigRepository
             from src.db.session import async_session_factory
 
-            # Create a session and service if not already created
-            if not self._service:
-                async with async_session_factory() as session:
-                    databricks_repo = DatabricksConfigRepository(session)
-                    self._service = DatabricksKnowledgeService(
-                        databricks_repo,
-                        group_id=self._group_id
-                    )
+            logger.info("[TOOL ASYNC DEBUG] Imports successful")
+            logger.info("[TOOL ASYNC DEBUG] Creating async session...")
 
-            # Call the search_knowledge method
-            results = await self._service.search_knowledge(
-                query=query,
-                group_id=self._group_id,
-                execution_id=self._execution_id,
-                file_paths=file_paths,
-                limit=limit,
-                user_token=self._user_token
-            )
+            # Create a new session for each search (don't cache service with session)
+            async with async_session_factory() as session:
+                logger.info("[TOOL ASYNC DEBUG] Session created successfully")
+                logger.info("[TOOL ASYNC DEBUG] Creating DatabricksKnowledgeService...")
 
+                # Create service with session
+                service = DatabricksKnowledgeService(
+                    session=session,
+                    group_id=self._group_id
+                )
+
+                logger.info("[TOOL ASYNC DEBUG] Service created successfully")
+                logger.info("="*80)
+                logger.info("🎯🎯🎯 [TOOL] ABOUT TO CALL service.search_knowledge() 🎯🎯🎯")
+                logger.info("="*80)
+                logger.info("[TOOL ASYNC DEBUG] Calling search_knowledge method...")
+                logger.info(f"[TOOL ASYNC DEBUG] Parameters:")
+                logger.info(f"  - query: '{query}'")
+                logger.info(f"  - group_id: '{self._group_id}'")
+                logger.info(f"  - execution_id: '{self._execution_id}'")
+                logger.info(f"  - file_paths: {file_paths}")
+                logger.info(f"  - limit: {limit}")
+                logger.info(f"  - user_token: {bool(self._user_token)}")
+
+                # Call the search_knowledge method
+                results = await service.search_knowledge(
+                    query=query,
+                    group_id=self._group_id,
+                    execution_id=self._execution_id,
+                    file_paths=file_paths,
+                    limit=limit,
+                    user_token=self._user_token
+                )
+
+                logger.info("="*80)
+                logger.info("🎯🎯🎯 [TOOL] RETURNED FROM service.search_knowledge() 🎯🎯🎯")
+                logger.info("="*80)
+            logger.info(f"[TOOL ASYNC DEBUG] search_knowledge returned {len(results) if results else 0} results")
             logger.info(f"Knowledge search returned {len(results)} results")
             return results
 
         except Exception as e:
+            logger.error(f"[TOOL ASYNC DEBUG] ❌ EXCEPTION in async search: {e}", exc_info=True)
             logger.error(f"Error in async search: {e}", exc_info=True)
             return []

@@ -1512,6 +1512,7 @@ Summary (2-3 sentences):"""
         user_token: Optional[str] = None
     ) -> List[Dict[str, Any]]:
         """
+        VERSION: 2025-09-29-22-33-REFACTORED
         Search for knowledge in the Databricks Vector Index.
 
         This is an engine-agnostic method that can be used by any AI engine.
@@ -1528,6 +1529,22 @@ Summary (2-3 sentences):"""
             List of search results with content and metadata
         """
         logger.info("="*60)
+        logger.info("🔥🔥🔥 [ENTRY POINT] search_knowledge() METHOD CALLED 🔥🔥🔥")
+        logger.info("="*60)
+
+        try:
+            import inspect
+            # Check which version of the method is executing
+            source = inspect.getsource(self.search_knowledge)
+            if 'VERSION:' in source:
+                version = source.split('VERSION:')[1].split('\n')[0].strip()
+                logger.info(f"🔥🔥🔥 METHOD VERSION CHECK: {version}")
+            else:
+                logger.info("🔥🔥🔥 METHOD VERSION CHECK: OLD VERSION (no version tag)")
+        except Exception as version_error:
+            logger.error(f"🔥🔥🔥 VERSION CHECK FAILED: {version_error}", exc_info=True)
+
+        logger.info("🔥🔥🔥 [NEW CODE] REFACTORED SEARCH_KNOWLEDGE METHOD RUNNING 🔥🔥🔥")
         logger.info("[SEARCH DEBUG] KNOWLEDGE SEARCH STARTED")
         logger.info(f"[SEARCH DEBUG] Query: '{query}'")
         logger.info(f"[SEARCH DEBUG] Group ID: '{group_id}'")
@@ -1538,31 +1555,27 @@ Summary (2-3 sentences):"""
         logger.info("="*60)
 
         try:
-            # Get Databricks configuration
-            logger.info("[SEARCH DEBUG] Getting Databricks configuration...")
-            config = await self.repository.get_active_config(group_id=group_id)
-            if not config:
-                logger.warning("[SEARCH DEBUG] No Databricks config found, returning empty results")
+            # CRITICAL: Use _get_vector_storage() to ensure upload and search use the same configuration
+            # This matches the pattern used by DatabricksVectorStorage for long_term, short_term, entity memory
+            logger.info("[SEARCH DEBUG] Getting vector storage configuration (same as upload)...")
+
+            vector_storage = await self._get_vector_storage(user_token)
+            if not vector_storage:
+                logger.warning("[SEARCH DEBUG] Vector storage not configured, returning empty results")
                 return []
 
-            logger.info(f"[SEARCH DEBUG] Config found:")
-            logger.info(f"  - workspace_url: {getattr(config, 'workspace_url', 'NOT SET')}")
-            logger.info(f"  - document_index: {getattr(config, 'document_index', 'NOT SET')}")
-            logger.info(f"  - knowledge_volume_enabled: {getattr(config, 'knowledge_volume_enabled', 'NOT SET')}")
-            logger.info(f"  - knowledge_volume_path: {getattr(config, 'knowledge_volume_path', 'NOT SET')}")
+            document_index = vector_storage.index_name
+            endpoint_name = vector_storage.endpoint_name
+            workspace_url = vector_storage.workspace_url
 
-            # Use the document index for knowledge search
-            document_index = getattr(config, 'document_index', None)
-            if not document_index:
-                logger.error("[SEARCH DEBUG] No document index configured in Databricks config!")
-                logger.error("[SEARCH DEBUG] Please configure a document index in Databricks settings")
-                return []
-
-            logger.info(f"[SEARCH DEBUG] Using document index: '{document_index}'")
+            logger.info(f"[SEARCH DEBUG] Vector storage configuration:")
+            logger.info(f"  - document_index: {document_index}")
+            logger.info(f"  - endpoint_name: {endpoint_name}")
+            logger.info(f"  - workspace_url: {workspace_url}")
 
             # Import here to avoid circular dependencies
-            from src.repositories.databricks_vector_index_repository import DatabricksVectorIndexRepository
-            from src.schemas.databricks_schemas import DatabricksIndexSchemas
+            from src.schemas.databricks_index_schemas import DatabricksIndexSchemas
+            from src.core.llm_manager import LLMManager
 
             # Get the schema for document memory type
             logger.info("[SEARCH DEBUG] Getting schema for document memory type...")
@@ -1571,17 +1584,24 @@ Summary (2-3 sentences):"""
             logger.info(f"[SEARCH DEBUG] Schema fields: {list(schema_fields.keys())}")
             logger.info(f"[SEARCH DEBUG] Search columns: {search_columns}")
 
-            # Create the repository
-            logger.info("[SEARCH DEBUG] Creating DatabricksVectorIndexRepository...")
-            index_repo = DatabricksVectorIndexRepository(
-                index_name=document_index,
-                memory_type="document",
-                user_token=user_token
-            )
-            logger.info("[SEARCH DEBUG] Repository created successfully")
+            # Generate query embedding
+            logger.info(f"[SEARCH DEBUG] Generating embedding for query: '{query}'")
+            try:
+                query_embedding = await LLMManager.get_embedding(query, model="databricks-gte-large-en")
+                if not query_embedding:
+                    logger.error("[SEARCH DEBUG] Failed to generate query embedding!")
+                    return []
+                logger.info(f"[SEARCH DEBUG] Generated embedding with dimension: {len(query_embedding)}")
+            except Exception as embed_error:
+                logger.error(f"[SEARCH DEBUG] Error generating embedding: {embed_error}", exc_info=True)
+                return []
+
+            # Use the repository from vector_storage (same pattern as DatabricksVectorStorage.search())
+            logger.info("[SEARCH DEBUG] Using repository from vector_storage...")
+            index_repo = vector_storage.repository
+            logger.info("[SEARCH DEBUG] Repository retrieved successfully")
 
             # Quick readiness gate to avoid blocking when endpoint/index is provisioning
-            endpoint_name = getattr(config, 'document_endpoint_name', None) or getattr(config, 'endpoint_name', None)
             try:
                 index_info = await asyncio.wait_for(
                     index_repo.get_index(index_name=document_index, endpoint_name=endpoint_name, user_token=user_token),
@@ -1610,15 +1630,17 @@ Summary (2-3 sentences):"""
             }
             logger.info(f"[SEARCH DEBUG] Base filter - group_id: '{group_id}'")
 
-            # NOTE: Execution ID filtering is optional for knowledge search
-            # We typically want to search across ALL documents for a group, not just current execution
-            if execution_id:
-                logger.info(f"[SEARCH DEBUG] execution_id provided: '{execution_id}'")
-                logger.info("[SEARCH DEBUG] Note: This will filter to ONLY documents from this specific execution")
-                logger.info("[SEARCH DEBUG] To search all knowledge documents, don't pass execution_id")
-                filters["execution_id"] = execution_id
-            else:
-                logger.info("[SEARCH DEBUG] ✅ No execution_id filter - searching across ALL documents for this group")
+            # IMPORTANT: Search across ALL documents for the group by default
+            # This allows knowledge to persist and be reused across executions
+            logger.info("[SEARCH DEBUG] ✅ Searching across ALL knowledge documents for group (not execution-scoped)")
+            logger.info("[SEARCH DEBUG] This enables knowledge reuse across multiple workflow runs")
+
+            # NOTE: execution_id filtering is intentionally NOT applied by default
+            # If you need execution-scoped search, modify the filter manually
+            # Uncomment below if execution-specific filtering is needed:
+            # if execution_id:
+            #     filters["execution_id"] = execution_id
+            #     logger.info(f"[SEARCH DEBUG] Applied execution_id filter: '{execution_id}'")
 
             if file_paths:
                 logger.info(f"[SEARCH DEBUG] Adding file_paths filter: {file_paths}")
@@ -1630,7 +1652,9 @@ Summary (2-3 sentences):"""
 
             # Perform the search with a tight timeout to prevent blocking
             logger.info("[SEARCH DEBUG] Calling similarity_search with:")
-            logger.info(f"  - query_text: '{query}'")
+            logger.info(f"  - index_name: '{document_index}'")
+            logger.info(f"  - endpoint_name: '{endpoint_name}'")
+            logger.info(f"  - query_vector dimension: {len(query_embedding)}")
             logger.info(f"  - columns: {search_columns}")
             logger.info(f"  - filters: {filters}")
             logger.info(f"  - num_results: {limit}")
@@ -1638,14 +1662,18 @@ Summary (2-3 sentences):"""
             try:
                 search_results = await asyncio.wait_for(
                     index_repo.similarity_search(
-                        query_text=query,
+                        index_name=document_index,
+                        endpoint_name=endpoint_name,
+                        query_vector=query_embedding,
                         columns=search_columns,
                         filters=filters,
-                        num_results=limit
+                        num_results=limit,
+                        user_token=user_token
                     ),
-                    timeout=5
+                    timeout=10
                 )
-                logger.info(f"[SEARCH DEBUG] ✅ Search completed, got {len(search_results) if search_results else 0} results")
+                logger.info(f"[SEARCH DEBUG] ✅ Search completed successfully")
+                logger.info(f"[SEARCH DEBUG] Raw results: {search_results}")
             except asyncio.TimeoutError:
                 logger.warning("[SEARCH DEBUG] similarity_search timed out; returning empty results")
                 return []
@@ -1653,39 +1681,18 @@ Summary (2-3 sentences):"""
                 logger.error(f"[SEARCH DEBUG] ❌ Search failed with error: {search_error}", exc_info=True)
                 return []
 
-            if not search_results:
+            # Extract data_array from REST API response
+            # Repository returns: {'success': True, 'results': {'result': {'data_array': [...]}}}
+            data_array = search_results.get('results', {}).get('result', {}).get('data_array', [])
+            logger.info(f"[SEARCH DEBUG] Extracted {len(data_array)} results from data_array")
+
+            if not data_array:
                 logger.warning("[SEARCH DEBUG] ⚠️ No results found!")
                 logger.warning("[SEARCH DEBUG] Possible reasons:")
-                logger.warning("  1. ❌ Execution ID mismatch (most likely!)")
-                logger.warning("  2. Group ID doesn't match documents")
-                logger.warning("  3. Documents not properly indexed")
-                logger.warning("  4. Vector index is empty or not accessible")
-                logger.warning("[SEARCH DEBUG] 💡 TIP: Remove execution_id filter from the tool call!")
-                # Fallback: if execution_id filter is set, retry without it to search across all group documents
-                if execution_id:
-                    logger.info("[SEARCH DEBUG] Retrying search WITHOUT execution_id filter as fallback")
-                    try:
-                        filters_no_exec = {k: v for k, v in filters.items() if k != 'execution_id'}
-                        fallback_results = await asyncio.wait_for(
-                            index_repo.similarity_search(
-                                query_text=query,
-                                columns=search_columns,
-                                filters=filters_no_exec,
-                                num_results=limit
-                            ),
-                            timeout=5
-                        )
-                        logger.info(f"[SEARCH DEBUG] Fallback search returned {len(fallback_results) if fallback_results else 0} results")
-                        if not fallback_results:
-                            logger.warning("[SEARCH DEBUG] Fallback also returned no results")
-                            return []
-                        else:
-                            search_results = fallback_results
-                    except Exception as fb_err:
-                        logger.error(f"[SEARCH DEBUG] Fallback search failed: {fb_err}", exc_info=True)
-                        return []
-                else:
-                    return []
+                logger.warning("  1. Group ID doesn't match documents")
+                logger.warning("  2. Documents not properly indexed")
+                logger.warning("  3. Vector index is empty or not accessible")
+                return []
 
             # Get column positions for parsing results
             positions = DatabricksIndexSchemas.get_column_positions("document")
@@ -1693,19 +1700,19 @@ Summary (2-3 sentences):"""
 
             # Format results for return
             formatted_results = []
-            logger.info(f"[SEARCH DEBUG] Formatting {len(search_results)} results...")
+            logger.info(f"[SEARCH DEBUG] Formatting {len(data_array)} results...")
 
-            for idx, result in enumerate(search_results):
+            for idx, result in enumerate(data_array):
                 try:
                     logger.info(f"[SEARCH DEBUG] Processing result {idx + 1}:")
                     logger.info(f"  - Raw result type: {type(result)}")
                     logger.info(f"  - Raw result length: {len(result) if hasattr(result, '__len__') else 'N/A'}")
 
                     # Parse result based on schema positions
-                    content = result[positions['content']] if 'content' in positions else ""
-                    source = result[positions['source']] if 'source' in positions else ""
-                    title = result[positions['title']] if 'title' in positions else ""
-                    chunk_index = result[positions['chunk_index']] if 'chunk_index' in positions else 0
+                    content = result[positions['content']] if 'content' in positions and len(result) > positions['content'] else ""
+                    source = result[positions['source']] if 'source' in positions and len(result) > positions['source'] else ""
+                    title = result[positions['title']] if 'title' in positions and len(result) > positions['title'] else ""
+                    chunk_index = result[positions['chunk_index']] if 'chunk_index' in positions and len(result) > positions['chunk_index'] else 0
 
                     logger.info(f"  - Content preview: {content[:100]}..." if content else "  - No content")
                     logger.info(f"  - Source: {source}")
