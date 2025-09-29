@@ -23,9 +23,11 @@ def upgrade() -> None:
     inspector = sa.inspect(bind)
     columns = [c['name'] for c in inspector.get_columns('databricksconfig')]
     if 'evaluation_enabled' not in columns:
+        is_sqlite = 'sqlite' in bind.dialect.name.lower()
+        default_expr = sa.text('0') if is_sqlite else sa.text('false')
         op.add_column(
             'databricksconfig',
-            sa.Column('evaluation_enabled', sa.Boolean(), server_default=sa.text('0'), nullable=False)
+            sa.Column('evaluation_enabled', sa.Boolean(), server_default=default_expr, nullable=False)
         )
 
 
