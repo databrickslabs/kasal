@@ -3,19 +3,17 @@ Main entry point for running database seeders.
 """
 import asyncio
 import argparse
-import logging
 import traceback
 import os
 import sys
 import inspect
 from typing import List, Callable, Awaitable
 
-# Configure logging
-logging.basicConfig(
-    level=logging.INFO,
-    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
-)
-logger = logging.getLogger(__name__)
+# Use centralized logger - no need for basicConfig
+from src.core.logger import get_logger
+
+# Create module logger using centralized configuration
+logger = get_logger(__name__)
 
 # Log when this module is imported
 logger.info("⭐ seed_runner.py module imported")
@@ -23,7 +21,6 @@ logger.info("⭐ seed_runner.py module imported")
 # Set DEBUG to True to enable more detailed logging
 DEBUG = os.getenv("SEED_DEBUG", "False").lower() in ("true", "1", "yes")
 if DEBUG:
-    logger.setLevel(logging.DEBUG)
     logger.debug("Seed runner debug mode enabled")
 
 def debug_log(message):
@@ -37,7 +34,7 @@ def debug_log(message):
 try:
     debug_log("Importing seeders...")
     # Import all needed modules
-    from src.seeds import tools, schemas, prompt_templates, model_configs, documentation, groups, api_keys
+    from src.seeds import tools, schemas, prompt_templates, model_configs, documentation, groups, api_keys, dspy_examples
     from src.db.session import async_session_factory
     debug_log("Successfully imported all seeder modules")
 except ImportError as e:
@@ -93,6 +90,12 @@ try:
 except (NameError, AttributeError) as e:
     logger.error(f"Error adding api_keys seeder: {e}")
 
+try:
+    SEEDERS["dspy_examples"] = dspy_examples.seed
+    debug_log("Added dspy_examples.seed to SEEDERS")
+except (NameError, AttributeError) as e:
+    logger.error(f"Error adding dspy_examples seeder: {e}")
+
 # Log available seeders
 logger.info(f"Available seeders: {list(SEEDERS.keys())}")
 
@@ -122,7 +125,7 @@ async def run_all_seeders() -> None:
         return
     
     # Separate fast seeders from slow ones
-    fast_seeders = ['groups', 'api_keys', 'tools', 'schemas', 'prompt_templates', 'model_configs']
+    fast_seeders = ['groups', 'api_keys', 'tools', 'schemas', 'prompt_templates', 'model_configs', 'dspy_examples']
     slow_seeders = ['documentation']  # Documentation seeder is slow due to embeddings
 
     # Run fast seeders first (sequentially as they're quick)

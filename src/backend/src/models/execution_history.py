@@ -88,6 +88,11 @@ class ExecutionHistory(Base):
     partial_results = Column(JSON, nullable=True)  # Store partial results before stopping
     is_stopping = Column(Boolean, default=False, nullable=False)  # Flag to indicate execution is in stopping state
     
+    # MLflow integration fields
+    mlflow_trace_id = Column(String, nullable=True, index=True)  # MLflow trace ID for evaluation linking
+    mlflow_experiment_name = Column(String, nullable=True)  # MLflow experiment name for reference
+    mlflow_evaluation_run_id = Column(String, nullable=True, index=True)  # MLflow evaluation run ID
+
     # Multi-group fields
     group_id = Column(String(100), index=True, nullable=True)  # Group isolation
     group_email = Column(String(255), index=True, nullable=True)  # User email for audit

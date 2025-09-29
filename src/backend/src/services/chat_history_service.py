@@ -40,7 +40,7 @@ class ChatHistoryService(BaseService[ChatHistory, ChatHistoryCreate]):
     ) -> ChatHistoryResponse:
         """
         Save a chat message with group context.
-        
+
         Args:
             session_id: Chat session identifier
             user_id: User identifier
@@ -50,11 +50,16 @@ class ChatHistoryService(BaseService[ChatHistory, ChatHistoryCreate]):
             confidence: Confidence score (optional)
             generation_result: Generated data (optional)
             group_context: Group context for multi-tenant support
-            
+
         Returns:
-            Created ChatHistory instance
+            Created chat message response DTO (avoids async lazy-loading)
         """
+        # Generate ID and timestamp up-front so we can return a DTO without touching ORM lazy-loaders
+        message_id = str(uuid4())
+        ts = datetime.utcnow()
+
         message_data = {
+            'id': message_id,
             'session_id': session_id,
             'user_id': user_id,
             'message_type': message_type,
@@ -62,7 +67,7 @@ class ChatHistoryService(BaseService[ChatHistory, ChatHistoryCreate]):
             'intent': intent,
             'confidence': str(confidence) if confidence is not None else None,
             'generation_result': generation_result,
-            'timestamp': datetime.utcnow(),
+            'timestamp': ts,
         }
 
         # Add group context if available
@@ -72,16 +77,11 @@ class ChatHistoryService(BaseService[ChatHistory, ChatHistoryCreate]):
                 'group_email': group_context.group_email
             })
 
-        # Create the model and ensure attributes are fully loaded before validation
-        chat_history = await self.repository.create(message_data)
-        # Refresh to avoid async lazy-loading during Pydantic attribute access (MissingGreenlet)
-        try:
-            await self.repository.session.refresh(chat_history)
-        except Exception:
-            # Even if refresh fails, proceed with available attributes to avoid blocking
-            pass
-        # Convert SQLAlchemy model to Pydantic schema to avoid lazy loading issues
-        return ChatHistoryResponse.model_validate(chat_history)
+        # Persist to DB using the same ID/timestamp to keep DB and response consistent
+        await self.repository.create(message_data)
+
+        # Return a pure Pydantic DTO built from the explicit data (no ORM access -> no MissingGreenlet)
+        return ChatHistoryResponse(**message_data)
 
     async def get_chat_session(
         self,

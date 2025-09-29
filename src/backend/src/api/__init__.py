@@ -34,6 +34,7 @@ from src.api.execution_trace_router import router as execution_trace_router
 from src.api.flow_execution_router import router as flow_execution_router
 from src.api.mcp_router import router as mcp_router
 from src.api.dispatcher_router import router as dispatcher_router
+# from src.api.dspy_router import router as dspy_router  # Temporarily disabled
 from src.api.engine_config_router import router as engine_config_router
 # User management routers (simplified)
 from src.api.auth_router import router as auth_router
@@ -83,6 +84,7 @@ api_router.include_router(runs_router)
 api_router.include_router(execution_logs_router)
 api_router.include_router(mcp_router)
 api_router.include_router(dispatcher_router)
+# api_router.include_router(dspy_router)  # Temporarily disabled
 api_router.include_router(engine_config_router)
 # Include user management routers (simplified)
 api_router.include_router(auth_router)

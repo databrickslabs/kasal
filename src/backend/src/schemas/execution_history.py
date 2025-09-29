@@ -27,6 +27,11 @@ class ExecutionHistoryItem(BaseModel):
     execution_type: Optional[str] = Field(default=None, description="Type of execution (crew or flow)")
     result: Optional[Dict[str, Any]] = None
     group_email: Optional[str] = Field(None, description="Email of the user who submitted the execution")
+
+    # MLflow integration fields
+    mlflow_trace_id: Optional[str] = Field(None, description="MLflow trace ID for evaluation linking")
+    mlflow_experiment_name: Optional[str] = Field(None, description="MLflow experiment name for reference")
+    mlflow_evaluation_run_id: Optional[str] = Field(None, description="MLflow evaluation run ID")
     
 class ExecutionHistoryList(BaseModel):
     """Schema for a paginated list of execution history items."""

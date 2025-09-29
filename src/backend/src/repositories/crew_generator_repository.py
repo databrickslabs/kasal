@@ -150,19 +150,27 @@ class CrewGeneratorRepository:
         tasks_data = crew_dict.get('tasks', [])
         
         logger.info(f"Creating crew with {len(agents_data)} agents and {len(tasks_data)} tasks")
-        
+
         # Step 1: Create all agents first to get their IDs (with group context)
         created_agents = await self._create_agents(agents_data, group_context)
-        
+
+        # Commit agents to database so they exist for foreign key constraints
+        await self.session.commit()
+        logger.info("Committed agents to database for foreign key integrity")
+
         # Step 2: Create a mapping of agent names to their database IDs
         agent_name_to_id = {}
         for agent in created_agents:
             agent_name_to_id[agent.name] = agent.id
             logger.info(f"AGENT MAPPING: '{agent.name}' -> ID: {agent.id}")
-        
+
         # Step 3: Create all tasks with proper agent_id assignments (with group context)
         created_tasks = await self._create_tasks(tasks_data, agent_name_to_id, group_context)
-        
+
+        # Commit tasks to database before creating dependencies
+        await self.session.commit()
+        logger.info("Committed tasks to database before creating dependencies")
+
         # Step 4: Update task dependencies
         await self._create_task_dependencies(created_tasks, tasks_data)
         

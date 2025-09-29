@@ -41,3 +41,9 @@ mlflow==3.4.0  # For LLM observability and tracking in Databricks
 protobuf>=5.29.0,<6.0.0  # mem0ai compatibility
 databricks-agents>=1.4.0
 grpcio-status>=1.62.0,<1.71.0  # Compatible with protobuf <6.0.0
+
+# DSPy dependencies for prompt optimization
+dspy-ai>=2.5.0  # DSPy framework for prompt optimization
+optuna>=3.5.0  # For hyperparameter optimization with DSPy
+numpy>=1.24.0  # Required by DSPy for numerical operations
+redis>=5.0.0  # Optional: For distributed caching of optimized modules

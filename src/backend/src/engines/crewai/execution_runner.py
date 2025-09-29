@@ -613,17 +613,37 @@ async def run_crew_in_process(
             else:
                 logger.info("No user inputs found after filtering system inputs")
         
+        # Fetch debug tracing flag before spawning subprocess
+        debug_tracing_enabled = True  # Default value
+        try:
+            # Try to fetch debug tracing configuration
+            from src.services.engine_config_service import EngineConfigService
+            from src.db.session import get_db
+
+            async for session in get_db():
+                try:
+                    service = EngineConfigService(session)
+                    debug_tracing_enabled = await service.get_crewai_debug_tracing()
+                    logger.info(f"Fetched debug tracing flag for subprocess: {debug_tracing_enabled}")
+                    break
+                except Exception as e:
+                    logger.warning(f"Failed to fetch debug tracing flag, using default: {e}")
+                    break
+        except Exception as e:
+            logger.warning(f"Could not access database for debug tracing flag: {e}")
+
         # Use ProcessCrewExecutor for isolated execution
         logger.info(f"[run_crew_in_process] Starting process-based execution for {execution_id}")
-        logger.info(f"[run_crew_in_process] Calling process_crew_executor.run_crew_isolated")
-        
+        logger.info(f"[run_crew_in_process] Calling process_crew_executor.run_crew_isolated with debug_tracing={debug_tracing_enabled}")
+
         # Run the crew in an isolated process
         result = await process_crew_executor.run_crew_isolated(
             execution_id=execution_id,
             crew_config=config,
             group_context=group_context,  # MANDATORY for tenant isolation
             inputs=user_inputs,
-            timeout=3600  # 1 hour timeout
+            timeout=3600,  # 1 hour timeout
+            debug_tracing_enabled=debug_tracing_enabled  # Pass the debug tracing flag
         )
         
         logger.info(f"[run_crew_in_process] Process executor returned result for {execution_id}")

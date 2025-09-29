@@ -458,6 +458,31 @@ class CrewPreparation:
                     logger.warning(f"Invalid agent '{agent_name}' specified for task. Using '{fallback_agent_name}' instead.")
 
                 # Define task_name first so it can be used in logging
+                # If this is the first task and the agent has the Databricks knowledge tool, add a gentle nudge
+                try:
+                    if i == 0 and agent is not None:
+                        tools_list = getattr(agent, 'tools', []) or []
+                        has_db_knowledge_tool = False
+                        for _t in tools_list:
+                            t_name = getattr(_t, 'name', None) or type(_t).__name__
+                            if t_name in ['DatabricksKnowledgeSearchTool', 'Databricks Knowledge Search Tool']:
+                                has_db_knowledge_tool = True
+                                break
+                        if has_db_knowledge_tool:
+                            # Prepend a short instruction to encourage tool use
+                            nudge = (
+                                "Use the Databricks Knowledge Search Tool to look up relevant passages from the uploaded "
+                                "documents and ground your answer. Cite the specific passages you used.\n\n"
+                            )
+                            # Only inject once, and keep original description intact after the nudge
+                            original_desc = task_config.get('description', '') or ''
+                            if nudge.strip() not in original_desc:
+                                task_config['description'] = f"{nudge}{original_desc}"
+                                t_name_for_log = task_config.get('name', 'first_task')
+                                logger.info(f"[CrewPreparation] Injected knowledge-search nudge into first task '{t_name_for_log}' for agent '{agent_name}'")
+                except Exception as _nudge_err:
+                    logger.warning(f"[CrewPreparation] Failed to inject knowledge-search nudge: {_nudge_err}")
+
                 task_name = task_config.get('name', f"task_{len(self.tasks)}")
                 task_id = task_config.get('id', task_name)
 
