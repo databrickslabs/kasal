@@ -456,57 +456,17 @@ class TestToolFactory:
                         assert result == mock_instance
 
     # Tool creation tests - LinkupSearchTool (lines 1032-1034, 1059-1065)
+    # LinkupSearchTool has been removed from the codebase
+    # Skipping obsolete tests for removed functionality
+    @pytest.mark.skip(reason="LinkupSearchTool removed from codebase")
     def test_linkup_no_loop_cleanup(self, tool_factory):
-        """Test LinkupSearchTool no loop with cleanup"""
-        mock_tool = MagicMock()
-        mock_tool.title = "LinkupSearchTool"
-        mock_tool.config = {}
-        
-        class MockLinkupSearchTool:
-            def __init__(self, api_key=None):
-                self.api_key = api_key
-        
-        with patch('src.engines.crewai.tools.tool_factory.LinkupSearchTool', MockLinkupSearchTool):
-            tool_factory._tool_implementations["LinkupSearchTool"] = MockLinkupSearchTool
-            tool_factory.api_keys_service = MagicMock()
-            
-            with patch.object(tool_factory, 'get_tool_info', return_value=mock_tool):
-                with patch.dict('os.environ', {}, clear=True):
-                    with patch('asyncio.get_running_loop', side_effect=RuntimeError):
-                        with patch('asyncio.new_event_loop') as mock_new_loop:
-                            with patch('asyncio.set_event_loop'):
-                                mock_loop = MagicMock()
-                                mock_loop.run_until_complete = Mock(return_value="linkup_key")
-                                mock_loop.close = Mock()
-                                mock_new_loop.return_value = mock_loop
-                                
-                                result = tool_factory.create_tool("LinkupSearchTool")
-                                assert result is not None
-                                mock_loop.close.assert_called_once()
+        """Test LinkupSearchTool no loop with cleanup - OBSOLETE"""
+        pass
 
+    @pytest.mark.skip(reason="LinkupSearchTool removed from codebase")
     def test_linkup_validation(self, tool_factory):
-        """Test LinkupSearchTool validation"""
-        mock_tool = MagicMock()
-        mock_tool.title = "LinkupSearchTool"
-        mock_tool.config = {"depth": "invalid_depth", "output_type": "invalid_output"}
-        
-        class MockLinkupSearchTool:
-            def __init__(self, api_key=None):
-                self.api_key = api_key
-            
-            def _run(self, query, depth="standard", output_type="searchResults"):
-                return f"search result for {query}"
-        
-        with patch('src.engines.crewai.tools.tool_factory.LinkupSearchTool', MockLinkupSearchTool):
-            tool_factory._tool_implementations["LinkupSearchTool"] = MockLinkupSearchTool
-            tool_factory.api_keys_service = None
-            
-            with patch.object(tool_factory, 'get_tool_info', return_value=mock_tool):
-                with patch.dict('os.environ', {}, clear=True):
-                    with patch('asyncio.get_running_loop', side_effect=RuntimeError):
-                        with patch.object(tool_factory, '_get_api_key', return_value="linkup_key"):
-                            result = tool_factory.create_tool("LinkupSearchTool")
-                            assert result is not None
+        """Test LinkupSearchTool validation - OBSOLETE"""
+        pass
 
     # General exception handling test (line 641)
     def test_create_tool_general_exception(self, tool_factory):
