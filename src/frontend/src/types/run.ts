@@ -32,6 +32,10 @@ export interface Run {
   };
   result?: RunResult;
   error?: string;
+  // MLflow integration fields
+  mlflow_trace_id?: string;
+  mlflow_experiment_name?: string;
+  mlflow_evaluation_run_id?: string;
 }
 
 export interface ExtendedRun extends Run {

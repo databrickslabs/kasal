@@ -122,9 +122,9 @@ export class ToolService {
   }
 
 
-  static async getAllToolConfigurations(): Promise<Record<string, any>> {
+  static async getAllToolConfigurations(): Promise<Record<string, unknown>> {
     try {
-      const response = await apiClient.get<Record<string, any>>('/tools/configurations/all');
+      const response = await apiClient.get<Record<string, unknown>>('/tools/configurations/all');
       return response.data || {};
     } catch (error) {
       console.error('Error fetching all tool configurations:', error);
@@ -133,9 +133,9 @@ export class ToolService {
     }
   }
 
-  static async getToolConfiguration(title: string): Promise<Record<string, any>> {
+  static async getToolConfiguration(title: string): Promise<Record<string, unknown>> {
     try {
-      const response = await apiClient.get<Record<string, any>>(`/tools/configurations/${encodeURIComponent(title)}`);
+      const response = await apiClient.get<Record<string, unknown>>(`/tools/configurations/${encodeURIComponent(title)}`);
       return response.data || {};
     } catch (error) {
       console.error('Error fetching tool configuration:', error);
@@ -144,9 +144,9 @@ export class ToolService {
     }
   }
 
-  static async updateToolConfigurationForGroup(title: string, config: Record<string, any>): Promise<Record<string, any>> {
+  static async updateToolConfigurationForGroup(title: string, config: Record<string, unknown>): Promise<Record<string, unknown>> {
     try {
-      const response = await apiClient.put<Record<string, any>>(`/tools/configurations/${encodeURIComponent(title)}`, config);
+      const response = await apiClient.put<Record<string, unknown>>(`/tools/configurations/${encodeURIComponent(title)}`, config);
       return response.data || {};
     } catch (error) {
       console.error('Error updating group-scoped tool configuration:', error);
@@ -155,9 +155,9 @@ export class ToolService {
     }
   }
 
-  static async updateToolConfigurationInMemory(title: string, config: Record<string, any>): Promise<Record<string, any>> {
+  static async updateToolConfigurationInMemory(title: string, config: Record<string, unknown>): Promise<Record<string, unknown>> {
     try {
-      const response = await apiClient.patch<Record<string, any>>(`/tools/configurations/${encodeURIComponent(title)}/in-memory`, config);
+      const response = await apiClient.patch<Record<string, unknown>>(`/tools/configurations/${encodeURIComponent(title)}/in-memory`, config);
       return response.data || {};
     } catch (error) {
       console.error('Error updating in-memory tool configuration:', error);

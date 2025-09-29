@@ -759,7 +759,7 @@ const WorkflowChat: React.FC<WorkflowChatProps> = ({
             type: 'agentNode',
             position: pos,
             data: { label: 'Creating agent…', loading: true },
-          } as any;
+          };
           return [...(cur as FlowNode[]), n];
         });
         // Add task placeholder slightly after (subtle motion/progression)
@@ -771,7 +771,7 @@ const WorkflowChat: React.FC<WorkflowChatProps> = ({
               type: 'taskNode',
               position: pos,
               data: { label: 'Creating task…', taskId: tempTaskId, loading: true },
-            } as any;
+            };
             return [...(cur as FlowNode[]), n];
           });
           // Connect placeholders with animated edge
@@ -804,7 +804,7 @@ const WorkflowChat: React.FC<WorkflowChatProps> = ({
             type: 'agentNode',
             position: pos,
             data: { label: 'Creating agent…', loading: true },
-          } as any;
+          };
           return [...(cur as FlowNode[]), n];
         });
         cleanupPlaceholders = () => {
@@ -821,7 +821,7 @@ const WorkflowChat: React.FC<WorkflowChatProps> = ({
             type: 'taskNode',
             position: pos,
             data: { label: 'Creating task…', taskId: tempTaskId, loading: true },
-          } as any;
+          };
           return [...(cur as FlowNode[]), n];
         });
         cleanupPlaceholders = () => {
@@ -1383,7 +1383,16 @@ const WorkflowChat: React.FC<WorkflowChatProps> = ({
                     <KnowledgeFileUpload
                       executionId={sessionId || 'default'}
                       groupId={localStorage.getItem('groupId') || 'default'}
-                      disabled={isLoading || !!executingJobId || !isMemoryBackendConfigured || !isKnowledgeSourceEnabled}
+                      hasAgents={nodes.some(n => n.type === 'agentNode')}
+                      hasTasks={nodes.some(n => n.type === 'taskNode')}
+                      disabled={
+                        isLoading ||
+                        !!executingJobId ||
+                        !isMemoryBackendConfigured ||
+                        !isKnowledgeSourceEnabled ||
+                        !nodes.some(n => n.type === 'agentNode') ||
+                        !nodes.some(n => n.type === 'taskNode')
+                      }
                       onFilesUploaded={(files) => {
                         console.log('Knowledge files uploaded:', files);
                       }}
@@ -1394,16 +1403,14 @@ const WorkflowChat: React.FC<WorkflowChatProps> = ({
 
 
 
+// Check if any agent has knowledge sources
+                        const hasKnowledgeSources = updatedAgents.some(agent =>
+                          agent.knowledge_sources && agent.knowledge_sources.length > 0
+                        );
+
                         // Update the canvas nodes with the updated agent data
                         const updatedNodes = nodes.map(node => {
                           if (node.type === 'agentNode') {
-
-
-
-
-
-
-
                             const updatedAgent = updatedAgents.find(a => {
                               // Try multiple matching strategies
                               const matches =
@@ -1412,13 +1419,10 @@ const WorkflowChat: React.FC<WorkflowChatProps> = ({
                                 (a.id && `agent-${a.id}` === node.id) ||  // Match by node.id pattern
                                 `agent-${a.name}` === node.id;  // Match by name pattern
 
-
                               return matches;
                             });
 
                             if (updatedAgent) {
-
-
                               return {
                                 ...node,
                                 data: {
@@ -1431,10 +1435,28 @@ const WorkflowChat: React.FC<WorkflowChatProps> = ({
                               };
                             }
                           }
+
+                          // Update task nodes to add DatabricksKnowledgeSearchTool if knowledge sources exist
+                          if (node.type === 'taskNode' && hasKnowledgeSources) {
+                            const currentTools = node.data.tools || [];
+                            const hasKnowledgeTool = currentTools.includes('DatabricksKnowledgeSearchTool') ||
+                                                      currentTools.includes('36');
+
+                            // Add the tool if it doesn't exist
+                            if (!hasKnowledgeTool) {
+                              return {
+                                ...node,
+                                data: {
+                                  ...node.data,
+                                  tools: [...currentTools, 'DatabricksKnowledgeSearchTool']
+                                }
+                              };
+                            }
+                          }
+
                           return node;
                         });
                         setNodes(updatedNodes as FlowNode[]);
-
 
 
 

@@ -17,12 +17,6 @@ import {
   DialogContent,
   DialogActions,
   Tooltip,
-  Tabs,
-  Tab,
-  CircularProgress,
-  ListItemIcon,
-  ListItemButton,
-  Fade,
 } from '@mui/material';
 import {
   CloudUpload as UploadIcon,
@@ -31,7 +25,6 @@ import {
   InsertDriveFile as FileIcon,
   CheckCircle as CheckCircleIcon,
   Error as ErrorIcon,
-  Folder as FolderIcon,
 } from '@mui/icons-material';
 import { DatabricksService, DatabricksConfig } from '../../api/DatabricksService';
 import { AgentService, Agent } from '../../api/AgentService';
@@ -51,44 +44,37 @@ interface UploadedFile {
   source?: 'upload' | 'volume';
 }
 
-interface VolumeFile {
-  name: string;
-  path: string;
-  is_directory: boolean;
-  size?: number;
-  modified_at?: string;
-  type?: string;
-}
+
 
 interface KnowledgeFileUploadProps {
   executionId: string;
   groupId: string;
   onFilesUploaded?: (files: UploadedFile[]) => void;
-  onAgentsUpdated?: (updatedAgents: any[]) => void; // Callback to update canvas nodes
+  onAgentsUpdated?: (updatedAgents: Agent[]) => void; // Callback to update canvas nodes
   disabled?: boolean;
   compact?: boolean;
-  availableAgents?: any[]; // Agents currently on the canvas
+  availableAgents?: Agent[]; // Agents currently on the canvas
+  hasAgents?: boolean; // Whether there are agents on canvas
+  hasTasks?: boolean; // Whether there are tasks on canvas
 }
 
 export const KnowledgeFileUpload: React.FC<KnowledgeFileUploadProps> = ({
   executionId,
-  groupId,
+  groupId: _groupId,
   onFilesUploaded,
   onAgentsUpdated,
   disabled = false,
   compact = false,
   availableAgents: providedAgents,
+  hasAgents = false,
+  hasTasks = false,
 }) => {
   const [files, setFiles] = useState<UploadedFile[]>([]);
   const [isUploading, setIsUploading] = useState(false);
   const [showDialog, setShowDialog] = useState(false);
   const [databricksConfig, setDatabricksConfig] = useState<DatabricksConfig | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const [tabValue, setTabValue] = useState(0); // 0 = Upload, 1 = Browse Volume
-  const [volumeFiles, setVolumeFiles] = useState<VolumeFile[]>([]);
-  const [currentPath, setCurrentPath] = useState<string>('');
-  const [isLoadingVolume, setIsLoadingVolume] = useState(false);
-  const [selectedVolumeFiles, setSelectedVolumeFiles] = useState<Set<string>>(new Set());
+
   interface AgentOption {
     id?: string;  // Make id optional to match Agent type
     name: string;
@@ -101,36 +87,43 @@ export const KnowledgeFileUpload: React.FC<KnowledgeFileUploadProps> = ({
     verbose: boolean;
     allow_delegation: boolean;
     cache: boolean;
+    allow_code_execution: boolean;
+    code_execution_mode: 'safe' | 'unsafe';
     // knowledge_sources removed - using DatabricksKnowledgeSearchTool instead
   }
   const [availableAgents, setAvailableAgents] = useState<AgentOption[]>(providedAgents || []);
   const [selectedAgents, setSelectedAgents] = useState<string[]>([]);
-  const [isLoadingAgents, setIsLoadingAgents] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
-  // Update available agents when providedAgents changes
+  // Update available agents when providedAgents changes and auto-select first agent
   React.useEffect(() => {
-    if (providedAgents) {
+    if (providedAgents && providedAgents.length > 0) {
       setAvailableAgents(providedAgents);
-      setIsLoadingAgents(false);
+      if (selectedAgents.length === 0) {
+        const first = providedAgents[0];
+        const firstId = first.id || `agent-${first.name}`;
+        setSelectedAgents([firstId]);
+      }
     } else if (showDialog && availableAgents.length === 0) {
       // If no agents provided and dialog is open, load all agents as fallback
-      setIsLoadingAgents(true);
       const loadAgents = async () => {
         try {
           // Dynamic import to avoid circular dependencies
           const { AgentService } = await import('../../api/AgentService');
           const agents = await AgentService.listAgents();
           setAvailableAgents(agents);
+          if (selectedAgents.length === 0 && agents.length > 0) {
+            const first = agents[0];
+            const firstId = first.id || `agent-${first.name}`;
+            setSelectedAgents([firstId]);
+          }
         } catch (err) {
           console.error('Failed to load agents:', err);
-        } finally {
-          setIsLoadingAgents(false);
         }
       };
       loadAgents();
     }
-  }, [showDialog, providedAgents]);
+  }, [showDialog, providedAgents, availableAgents.length, selectedAgents.length]);
 
   // Load Databricks configuration
   React.useEffect(() => {
@@ -244,9 +237,9 @@ export const KnowledgeFileUpload: React.FC<KnowledgeFileUploadProps> = ({
           filename: file.name
         });
 
-        // If agents are selected, update their knowledge sources
-        if (selectedAgents.length > 0 && response.data.path) {
-          await updateAgentKnowledgeSources(response.data.path, file.name);
+        // If agents are selected, update their knowledge sources and tools
+        if (selectedAgents.length > 0 && response.data) {
+          await updateAgentKnowledgeSources(response.data);
         }
 
         // Update file status to success
@@ -290,8 +283,19 @@ export const KnowledgeFileUpload: React.FC<KnowledgeFileUploadProps> = ({
 
   const { updateAgent } = useAgentStore();
 
-  const updateAgentKnowledgeSources = async (filePath: string, fileName: string) => {
+  // Accept full upload response so we can persist metadata alongside the source path
+  const updateAgentKnowledgeSources = async (uploadResp: {
+    path: string;
+    filename: string;
+    size: number;
+    execution_id?: string;
+    uploaded_at?: string;
+    volume_info?: { full_path?: string; [key: string]: unknown };
+    upload_method?: string;
+    simulated?: boolean;
+  }) => {
     try {
+      const { path: filePath, filename: fileName, size, execution_id, uploaded_at, volume_info, upload_method, simulated } = uploadResp || {};
       // Dynamic import to avoid circular dependencies
       const { AgentService } = await import('../../api/AgentService');
 
@@ -299,11 +303,36 @@ export const KnowledgeFileUpload: React.FC<KnowledgeFileUploadProps> = ({
         selectedAgents,
         availableAgents: availableAgents.map(a => ({ id: a.id, name: a.name })),
         filePath,
-        fileName
+        fileName,
+        size,
+        execution_id,
+        uploaded_at
       });
 
+      // Build knowledge source entry to append
+      const newSource = {
+        type: 'databricks_volume',
+        source: filePath,
+        metadata: {
+          filename: fileName,
+          uploaded_at: uploaded_at || new Date().toISOString(),
+          execution_id,
+          upload_method,
+          simulated: Boolean(simulated),
+        },
+        fileInfo: {
+          filename: fileName,
+          path: filePath,
+          full_path: (volume_info && volume_info.full_path) || filePath,
+          file_size_bytes: size,
+          is_uploaded: true,
+          exists: true,
+          success: true,
+        }
+      } as unknown as import('../../types/agent').KnowledgeSource;
+
       // Collect updated agents to pass back to parent
-      const updatedAgents: any[] = [];
+      const updatedAgents: Agent[] = [];
 
       // Update each selected agent with the new knowledge source
       for (const agentId of selectedAgents) {
@@ -312,63 +341,70 @@ export const KnowledgeFileUpload: React.FC<KnowledgeFileUploadProps> = ({
         if (agent) {
           console.log(`[DEBUG] Found agent:`, { id: agent.id, name: agent.name, existingTools: agent.tools });
 
-          // Add DatabricksKnowledgeSearchTool to the agent's tools if not already present
-          const toolName = 'DatabricksKnowledgeSearchTool';
-          const currentTools = agent.tools || [];
+          // NOTE: We no longer add DatabricksKnowledgeSearchTool to agent's tools
+          // The tool should be added to the task's tools list instead
 
-          let updatedAgent = agent;
-          if (!currentTools.includes(toolName)) {
-            updatedAgent = {
-              ...agent,
-              tools: [...currentTools, toolName]
-            };
-            console.log(`[DEBUG] Added ${toolName} to agent ${agent.name}'s tools`);
-          } else {
-            console.log(`[DEBUG] Agent ${agent.name} already has ${toolName} in tools`);
-            updatedAgent = agent; // Keep the agent unchanged
-          }
+          // Start updatedAgent; we'll merge knowledge_sources from backend
+          let updatedAgent: Agent = { ...(agent as unknown as Agent) };
 
-          console.log(`[DEBUG] Updated agent with knowledge search tool:`, {
-            agentName: updatedAgent.name,
-            toolsCount: updatedAgent.tools?.length,
-            tools: updatedAgent.tools
-          });
-
-          // Add to collection of updated agents - ALWAYS add, even if no ID
-          updatedAgents.push(updatedAgent);
-
-          // Remove id and created_at for update
-          const { id, created_at, ...agentData } = updatedAgent as any;
-          // Only update if we have a valid agent ID
+          // Only persist to backend if we have a real agent ID
           if (agent.id) {
-            const savedAgent = await AgentService.updateAgentFull(agent.id, agentData as any);
-            if (savedAgent) {
-              // Update the agent in the collection with the saved version
-              updatedAgents[updatedAgents.length - 1] = savedAgent;
-              console.log(`[DEBUG] Successfully persisted agent ${agent.name} with knowledge source to backend`);
+            // Fetch latest agent to merge existing knowledge_sources safely
+            const current = await AgentService.getAgent(agent.id);
+            const existingSources = current?.knowledge_sources || [];
+            const alreadyHas = existingSources.some(s => s.source === filePath);
+            const mergedSources = alreadyHas ? existingSources : [...existingSources, newSource];
 
-              // Update the Zustand store to ensure consistency
+            const payload: Omit<Agent, 'id' | 'created_at'> = {
+              ...current,
+              // Explicitly set fields we may not have on the lightweight AgentOption
+              name: current?.name || agent.name,
+              role: current?.role || agent.role,
+              goal: current?.goal || agent.goal,
+              backstory: current?.backstory || agent.backstory,
+              llm: current?.llm || agent.llm,
+              tools: current?.tools || agent.tools || [],
+              max_iter: current?.max_iter ?? agent.max_iter ?? 25,
+              verbose: current?.verbose ?? agent.verbose ?? false,
+              allow_delegation: current?.allow_delegation ?? agent.allow_delegation ?? false,
+              cache: current?.cache ?? agent.cache ?? true,
+              allow_code_execution: current?.allow_code_execution ?? agent.allow_code_execution ?? false,
+              code_execution_mode: (current?.code_execution_mode || agent.code_execution_mode || 'safe') as 'safe' | 'unsafe',
+              knowledge_sources: mergedSources,
+              // Pass through other optional fields if present
+              function_calling_llm: current?.function_calling_llm,
+              max_rpm: current?.max_rpm,
+              max_execution_time: current?.max_execution_time,
+              memory: current?.memory,
+              embedder_config: current?.embedder_config,
+              tool_configs: current?.tool_configs,
+            };
+
+            const savedAgent = await AgentService.updateAgentFull(agent.id, payload);
+            if (savedAgent) {
+              updatedAgent = savedAgent;
+              console.log(`[DEBUG] Persisted knowledge source to agent ${agent.name}`);
               if (savedAgent.id) {
                 updateAgent(savedAgent.id, savedAgent);
               }
             }
           } else {
-            console.warn(`[DEBUG] Agent ${agent.name} has no ID, tool configuration will be in memory only until agent is saved`);
-            // Still update the local availableAgents array for in-memory agents
-            const agentIndex = availableAgents.findIndex(a => a.name === agent.name);
-            if (agentIndex !== -1) {
-              availableAgents[agentIndex] = updatedAgent;
-            }
+            // Unsaved agent: keep in-memory representation so canvas can reflect
+            const inMemSources = ((updatedAgent as Agent).knowledge_sources || []);
+            const alreadyHas = inMemSources.some(s => s.source === filePath);
+            (updatedAgent as Agent).knowledge_sources = alreadyHas ? inMemSources : [...inMemSources, newSource];
           }
+
+          updatedAgents.push(updatedAgent);
         }
       }
 
-      // Notify parent component about updated agents
+      // Notify parent so canvas nodes update immediately
       if (onAgentsUpdated && updatedAgents.length > 0) {
         onAgentsUpdated(updatedAgents);
       }
     } catch (err) {
-      console.error('Failed to update agent tools:', err);
+      console.error('Failed to update agent tools/knowledge sources:', err);
     }
   };
 
@@ -415,90 +451,21 @@ export const KnowledgeFileUpload: React.FC<KnowledgeFileUploadProps> = ({
 
   const handleOpenDialog = () => {
     setShowDialog(true);
+    // Auto-select first agent when opening
+    if (selectedAgents.length === 0 && availableAgents.length > 0) {
+      const first = availableAgents[0];
+      const firstId = first.id || `agent-${first.name}`;
+      setSelectedAgents([firstId]);
+    }
   };
 
   const handleCloseDialog = () => {
     setShowDialog(false);
   };
 
-  const toggleAgentSelection = async (agentId: string) => {
-    const agent = availableAgents.find(a => (a.id || `agent-${a.name}`) === agentId);
 
-    console.log('🎯 [AGENT DEBUG] Agent selection toggled:', {
-      agentId,
-      agentName: agent?.name,
-      currentSelectedAgents: selectedAgents
-    });
 
-    setSelectedAgents(prev => {
-      const isCurrentlySelected = prev.includes(agentId);
 
-      if (isCurrentlySelected) {
-        console.log('➖ [AGENT DEBUG] Deselecting agent:', agentId);
-        // Agent is being deselected - remove knowledge sources from this execution
-        if (agent) {
-          removeKnowledgeSourcesFromAgent(agent);
-        }
-        const newSelection = prev.filter(id => id !== agentId);
-        console.log('🔄 [AGENT DEBUG] New agent selection after deselect:', newSelection);
-        return newSelection;
-      } else {
-        console.log('➕ [AGENT DEBUG] Selecting agent:', agentId);
-        const newSelection = [...prev, agentId];
-        console.log('🔄 [AGENT DEBUG] New agent selection after select:', newSelection);
-        return newSelection;
-      }
-    });
-  };
-
-  const removeKnowledgeSourcesFromAgent = async (agent: any) => {
-    console.log('[DEBUG] Removing DatabricksKnowledgeSearchTool from deselected agent:', agent.name);
-
-    // Remove the tool from the agent's tools array
-    const toolName = 'DatabricksKnowledgeSearchTool';
-    const currentTools = agent.tools || [];
-
-    if (currentTools.includes(toolName)) {
-      const updatedTools = currentTools.filter((t: string) => t !== toolName);
-      const updatedAgent = {
-        ...agent,
-        tools: updatedTools
-      };
-
-      try {
-        if (agent.id) {
-          const { AgentService } = await import('../../api/AgentService');
-          const { id, created_at, ...agentData } = updatedAgent as any;
-          const savedAgent = await AgentService.updateAgentFull(agent.id, agentData as any);
-
-          if (savedAgent) {
-            // Update Zustand store
-            if (savedAgent.id) {
-              updateAgent(savedAgent.id, savedAgent);
-            }
-
-            if (onAgentsUpdated) {
-              onAgentsUpdated([savedAgent]);
-            }
-            console.log(`[DEBUG] Successfully removed ${toolName} from agent ${agent.name}`);
-          }
-        } else {
-          // For in-memory agents, update the local availableAgents array
-          const agentIndex = availableAgents.findIndex(a => a.name === agent.name);
-          if (agentIndex !== -1) {
-            availableAgents[agentIndex] = updatedAgent;
-            if (onAgentsUpdated) {
-              onAgentsUpdated([updatedAgent]);
-            }
-          }
-        }
-      } catch (err) {
-        console.error('Failed to update agent:', err);
-      }
-    } else {
-      console.log(`[DEBUG] Agent ${agent.name} does not have ${toolName} in tools`);
-    }
-  };
 
   const formatFileSize = (bytes: number) => {
     if (bytes === 0) return '0 Bytes';
@@ -508,198 +475,9 @@ export const KnowledgeFileUpload: React.FC<KnowledgeFileUploadProps> = ({
     return Math.round(bytes / Math.pow(k, i) * 100) / 100 + ' ' + sizes[i];
   };
 
-  const browseVolumeFiles = async (path = '') => {
-    setIsLoadingVolume(true);
-    setError(null);
-    
-    try {
-      // Use default volume path if not specified
-      const volumePath = path || databricksConfig?.knowledge_volume_path || 'main.default.knowledge';
-
-      console.log('[DEBUG] About to browse volume:', {
-        requestedPath: path,
-        databricksConfig: databricksConfig,
-        configKnowledgeVolumePath: databricksConfig?.knowledge_volume_path,
-        finalVolumePath: volumePath,
-        encodedPath: encodeURIComponent(volumePath),
-        fullUrl: `/databricks/knowledge/browse/${encodeURIComponent(volumePath)}`
-      });
-
-      const response = await apiClient.get<VolumeFile[]>(
-        `/databricks/knowledge/browse/${encodeURIComponent(volumePath)}`
-      );
-
-      console.log('[DEBUG] Volume files received:', {
-        path: volumePath,
-        responseData: response.data,
-        responseLength: response.data?.length || 0
-      });
-
-      // More lenient filtering - only exclude obviously invalid entries
-      const validFiles = response.data.filter(file => {
-        // Must have a name that's not empty, '.', or '..'
-        const hasValidName = file.name &&
-                           file.name.trim() !== '' &&
-                           file.name !== '.' &&
-                           file.name !== '..';
-
-        // Path can be empty for root level items, just needs to exist
-        const hasPath = file.path !== undefined && file.path !== null;
-
-        const isValid = hasValidName && hasPath;
-
-        if (!isValid) {
-          console.log('[DEBUG] Filtering out invalid file:', {
-            name: file.name,
-            path: file.path,
-            hasValidName,
-            hasPath,
-            file
-          });
-        }
-
-        return isValid;
-      });
-
-      console.log('[DEBUG] Valid files after filtering:', {
-        validFiles,
-        validCount: validFiles.length,
-        originalCount: response.data?.length || 0
-      });
-
-      setVolumeFiles(validFiles);
-      setCurrentPath(volumePath);
-    } catch (err) {
-      console.error('Failed to browse volume:', {
-        error: err,
-        volumePath: path || databricksConfig?.knowledge_volume_path || 'main.default.knowledge',
-        errorMessage: err instanceof Error ? err.message : String(err),
-        errorResponse: (err as any)?.response?.data,
-        errorStatus: (err as any)?.response?.status
-      });
-      setError(`Failed to browse Databricks Volume: ${err instanceof Error ? err.message : String(err)}`);
-      setVolumeFiles([]);
-    } finally {
-      setIsLoadingVolume(false);
-    }
-  };
-
-  const navigateToFolder = (folderPath: string) => {
-    browseVolumeFiles(folderPath);
-  };
 
 
-  const toggleFileSelection = (filePath: string) => {
-    const newSelection = new Set(selectedVolumeFiles);
-    if (newSelection.has(filePath)) {
-      newSelection.delete(filePath);
-    } else {
-      newSelection.add(filePath);
-    }
-    setSelectedVolumeFiles(newSelection);
-  };
 
-  const selectVolumeFiles = async () => {
-    if (selectedVolumeFiles.size === 0) return;
-    
-    setIsUploading(true);
-    setError(null);
-    
-    const selectedFilesList = Array.from(selectedVolumeFiles);
-    const newFiles: UploadedFile[] = [];
-    
-    for (const filePath of selectedFilesList) {
-      const filename = filePath.split('/').pop() || 'unknown';
-      const fileEntry: UploadedFile = {
-        id: `${Date.now()}-${Math.random()}`,
-        filename,
-        path: filePath,
-        size: 0,
-        status: 'uploading' as const,
-        source: 'volume',
-      };
-      
-      newFiles.push(fileEntry);
-      
-      try {
-        // Register the file from volume
-        const formData = new FormData();
-        formData.append('file_path', filePath);
-        formData.append('selected_agents', JSON.stringify(selectedAgents)); // Send agent IDs for volume selection
-
-        console.log('📁 [VOLUME DEBUG] Selecting volume file:', {
-          filePath,
-          selectedAgents,
-          selectedAgentsJson: JSON.stringify(selectedAgents),
-          executionId
-        });
-        
-        const response = await apiClient.post(
-          `/databricks/knowledge/select-from-volume/${executionId}`,
-          formData
-        );
-
-        console.log('✅ [VOLUME DEBUG] Volume selection response:', {
-          responseData: response.data,
-          sentSelectedAgents: JSON.stringify(selectedAgents),
-          filePath
-        });
-
-        // Update file status
-        setFiles((prev) =>
-          prev.map((f) =>
-            f.id === fileEntry.id
-              ? {
-                  ...f,
-                  status: 'success',
-                  path: response.data.path,
-                }
-              : f
-          )
-        );
-
-        // If agents are selected, update their knowledge sources
-        if (selectedAgents.length > 0 && response.data.path) {
-          await updateAgentKnowledgeSources(response.data.path, filename);
-        }
-      } catch (err) {
-        console.error(`Failed to select ${filename}:`, err);
-        
-        // Update file status with error
-        setFiles((prev) =>
-          prev.map((f) =>
-            f.id === fileEntry.id
-              ? {
-                  ...f,
-                  status: 'error',
-                  error: err instanceof Error ? err.message : 'Selection failed',
-                }
-              : f
-          )
-        );
-      }
-    }
-    
-    setFiles((prev) => [...prev, ...newFiles]);
-    setIsUploading(false);
-    setSelectedVolumeFiles(new Set());
-    
-    // Notify parent component
-    if (onFilesUploaded) {
-      onFilesUploaded(newFiles);
-    }
-  };
-
-  // Load volume files when switching to browse tab
-  React.useEffect(() => {
-    if (tabValue === 1 && showDialog && databricksConfig?.knowledge_volume_enabled) {
-      // Only load if we don't have a current path or if we're at the root and have no files
-      if (!currentPath || (currentPath === (databricksConfig.knowledge_volume_path || 'main.default.knowledge') && volumeFiles.length === 0)) {
-        browseVolumeFiles();
-      }
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [tabValue, showDialog, databricksConfig]);
 
   // Use global knowledge configuration store
   const { isMemoryBackendConfigured, isKnowledgeSourceEnabled, refreshConfiguration } = useKnowledgeConfigStore();
@@ -728,7 +506,11 @@ export const KnowledgeFileUpload: React.FC<KnowledgeFileUploadProps> = ({
             ? !isMemoryBackendConfigured
               ? 'Knowledge sources require Databricks Vector Search memory backend configuration'
               : 'Knowledge volume is not enabled in Databricks configuration'
-            : 'Upload knowledge files for RAG'
+            : !hasAgents
+            ? 'Add at least one agent to the canvas before uploading knowledge files'
+            : !hasTasks
+            ? 'Add at least one task to the canvas before uploading knowledge files'
+            : 'Upload knowledge files for tasks to search and reference'
         }
       >
         <span>
@@ -758,14 +540,23 @@ export const KnowledgeFileUpload: React.FC<KnowledgeFileUploadProps> = ({
         maxWidth="sm"
         fullWidth
       >
-        <DialogTitle>
-          <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
-            <UploadIcon />
-            <Typography variant="h6">Upload Knowledge Files</Typography>
+        <DialogTitle sx={{ pb: 1 }}>
+          <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+            <Box sx={{ display: 'flex', alignItems: 'center', gap: 1.5 }}>
+              <UploadIcon color="primary" />
+              <Box>
+                <Typography variant="h6" sx={{ fontWeight: 600 }}>
+                  Upload Knowledge Files
+                </Typography>
+                <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mt: 0.5 }}>
+                  Add files for tasks to search and reference
+                </Typography>
+              </Box>
+            </Box>
           </Box>
         </DialogTitle>
 
-        <DialogContent>
+        <DialogContent sx={{ pt: 2 }}>
           {error && (
             <Alert severity="error" sx={{ mb: 2 }}>
               {error}
@@ -782,137 +573,9 @@ export const KnowledgeFileUpload: React.FC<KnowledgeFileUploadProps> = ({
 
           {isKnowledgeEnabled && (
             <>
-              {/* Agent Selection Section */}
-              <Paper
-                elevation={0}
-                sx={{
-                  p: 3,
-                  mb: 3,
-                  bgcolor: 'grey.50',
-                  borderRadius: 2,
-                  border: '1px solid',
-                  borderColor: 'grey.200'
-                }}
-              >
-                <Typography
-                  variant="h6"
-                  sx={{
-                    mb: 1,
-                    fontWeight: 600,
-                    color: 'text.primary'
-                  }}
-                >
-                  Select Agents
-                </Typography>
-                <Typography
-                  variant="body2"
-                  sx={{
-                    mb: 3,
-                    color: 'text.secondary',
-                    lineHeight: 1.5
-                  }}
-                >
-                  Choose which agents will have access to these knowledge files
-                </Typography>
-
-                {isLoadingAgents ? (
-                  <Box sx={{ display: 'flex', justifyContent: 'center', py: 3 }}>
-                    <CircularProgress size={28} />
-                  </Box>
-                ) : availableAgents.length > 0 ? (
-                  <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 1.5 }}>
-                    {availableAgents.map((agent) => {
-                      const agentId = agent.id || `agent-${agent.name}`;
-                      const isSelected = selectedAgents.includes(agentId);
-                      const hasKnowledgeTool = agent.tools?.includes('DatabricksKnowledgeSearchTool');
-
-                      return (
-                        <Chip
-                          key={agentId}
-                          label={
-                            <span>
-                              {agent.name}
-                              {hasKnowledgeTool && (
-                                <span style={{ marginLeft: '4px', fontSize: '0.9em' }}>
-                                  📚
-                                </span>
-                              )}
-                            </span>
-                          }
-                          onClick={() => toggleAgentSelection(agentId)}
-                          color={isSelected ? 'primary' : 'default'}
-                          variant={isSelected ? 'filled' : 'outlined'}
-                          clickable
-                          title={hasKnowledgeTool ?
-                            `${agent.name} - Has Knowledge Search capability` :
-                            `${agent.name} - Click to add Knowledge Search capability`}
-                          sx={{
-                            py: 1,
-                            px: 0.5,
-                            fontSize: '0.875rem',
-                            fontWeight: 500,
-                            transition: 'all 0.2s ease',
-                            '&:hover': {
-                              transform: 'translateY(-1px)',
-                              boxShadow: 1
-                            },
-                            ...(isSelected && {
-                              boxShadow: 2
-                            })
-                          }}
-                        />
-                      );
-                    })}
-                  </Box>
-                ) : (
-                  <Alert severity="info" sx={{ mt: 1 }}>
-                    No agents available. Add agents to the canvas first.
-                  </Alert>
-                )}
-              </Paper>
-
-              {/* File Upload Section - Appears with smooth transition */}
-              {selectedAgents.length > 0 && (
-                <Fade in={selectedAgents.length > 0} timeout={300}>
-                  <Paper
-                    elevation={0}
-                    sx={{
-                      p: 3,
-                      borderRadius: 2,
-                      border: '1px solid',
-                      borderColor: 'grey.200'
-                    }}
-                  >
-                    <Typography
-                      variant="h6"
-                      sx={{
-                        mb: 2,
-                        fontWeight: 600,
-                        color: 'text.primary'
-                      }}
-                    >
-                      Upload Knowledge Files
-                    </Typography>
-
-                    <Tabs
-                      value={tabValue}
-                      onChange={(_, v) => setTabValue(v)}
-                      sx={{
-                        mb: 3,
-                        '& .MuiTab-root': {
-                          fontWeight: 500,
-                          textTransform: 'none',
-                          fontSize: '0.9rem'
-                        }
-                      }}
-                    >
-                      <Tab label="Upload Files" icon={<UploadIcon />} iconPosition="start" />
-                      <Tab label="Browse Volume" icon={<FolderIcon />} iconPosition="start" />
-                    </Tabs>
-
-              {/* Tab Panel: Upload */}
-              {tabValue === 0 && (
-                <>
+              {/* File Upload Section */}
+              {availableAgents.length > 0 ? (
+                <Box>
                   {/* File Input */}
                   <input
                     ref={fileInputRef}
@@ -929,22 +592,16 @@ export const KnowledgeFileUpload: React.FC<KnowledgeFileUploadProps> = ({
                     onClick={() => fileInputRef.current?.click()}
                     disabled={isUploading}
                     fullWidth
+                    size="large"
                     sx={{
-                      mb: 3,
-                      py: 2,
+                      mb: 2,
+                      py: 1.5,
                       borderRadius: 2,
                       textTransform: 'none',
-                      fontSize: '1rem',
-                      fontWeight: 500,
-                      boxShadow: 'none',
-                      '&:hover': {
-                        boxShadow: 2,
-                        transform: 'translateY(-1px)'
-                      },
-                      transition: 'all 0.2s ease'
+                      fontWeight: 500
                     }}
                   >
-                    Choose Files to Upload
+                    Choose Files
                   </Button>
 
               {/* File List */}
@@ -1025,143 +682,11 @@ export const KnowledgeFileUpload: React.FC<KnowledgeFileUploadProps> = ({
                   </List>
                 </Paper>
               )}
-
-                </>
-              )}
-
-              {/* Tab Panel: Browse Volume */}
-              {tabValue === 1 && (
-                <>
-                  {/* Volume Browser Header */}
-                  <Box sx={{ mb: 2, p: 2, bgcolor: 'grey.50', borderRadius: 1, border: '1px solid', borderColor: 'grey.200' }}>
-                    <Typography variant="body2" color="text.secondary" sx={{ mb: 1 }}>
-                      Browsing: {currentPath || 'Default volume'}
-                    </Typography>
-                    <Typography variant="caption" color="text.secondary" sx={{ mb: 1, display: 'block' }}>
-                      Config volume path: {databricksConfig?.knowledge_volume_path || 'Not set'}
-                    </Typography>
-                    <Button
-                      variant="text"
-                      size="small"
-                      onClick={() => {
-                        console.log('[DEBUG] Manual refresh clicked');
-                        setVolumeFiles([]); // Clear current files to force reload
-                        browseVolumeFiles();
-                      }}
-                      disabled={isLoadingVolume}
-                      sx={{ textTransform: 'none', fontSize: '0.8rem' }}
-                    >
-                      {isLoadingVolume ? 'Loading...' : 'Refresh'}
-                    </Button>
-                  </Box>
-
-                  {/* Simple File Browser */}
-                  {isLoadingVolume ? (
-                    <Box sx={{ display: 'flex', justifyContent: 'center', p: 4 }}>
-                      <CircularProgress />
-                    </Box>
-                  ) : volumeFiles.length > 0 ? (
-                    <List>
-                      {volumeFiles
-                        .filter((item) => item.name && item.name.trim() !== '')
-                        .map((item) => (
-                          <ListItem
-                            key={item.path}
-                            disablePadding
-                            sx={{ mb: 1 }}
-                          >
-                            <ListItemButton
-                              onClick={() => {
-                                if (item.is_directory) {
-                                  navigateToFolder(item.path);
-                                } else {
-                                  toggleFileSelection(item.path);
-                                }
-                              }}
-                              selected={!item.is_directory && selectedVolumeFiles.has(item.path)}
-                              sx={{
-                                borderRadius: 1,
-                                '&:hover': {
-                                  bgcolor: 'action.hover'
-                                }
-                              }}
-                            >
-                              <ListItemIcon>
-                                {item.is_directory ? (
-                                  <FolderIcon color="primary" />
-                                ) : (
-                                  <FileIcon />
-                                )}
-                              </ListItemIcon>
-                              <ListItemText
-                                primary={item.name}
-                                secondary={
-                                  !item.is_directory
-                                    ? `${formatFileSize(item.size || 0)}`
-                                    : undefined
-                                }
-                              />
-                              {!item.is_directory && (
-                                <Chip
-                                  label={selectedVolumeFiles.has(item.path) ? 'Selected' : 'Select'}
-                                  size="small"
-                                  color={selectedVolumeFiles.has(item.path) ? 'primary' : 'default'}
-                                  variant={selectedVolumeFiles.has(item.path) ? 'filled' : 'outlined'}
-                                />
-                              )}
-                            </ListItemButton>
-                          </ListItem>
-                        ))}
-                    </List>
-                  ) : (
-                    <Box sx={{ textAlign: 'center', py: 4 }}>
-                      <Alert severity="info" sx={{ mb: 2 }}>
-                        No files or folders found in this location.
-                        <br />
-                        <Typography variant="caption" sx={{ mt: 1, display: 'block' }}>
-                          Current path: {currentPath || 'Not set'}
-                        </Typography>
-                      </Alert>
-                      <Button
-                        variant="outlined"
-                        onClick={() => browseVolumeFiles()}
-                        disabled={isLoadingVolume}
-                        sx={{
-                          textTransform: 'none',
-                          borderRadius: 2
-                        }}
-                      >
-                        {isLoadingVolume ? 'Loading...' : 'Refresh'}
-                      </Button>
-                    </Box>
-                  )}
-
-                  {/* Select Files Button */}
-                  {selectedVolumeFiles.size > 0 && (
-                    <Button
-                      variant="contained"
-                      onClick={selectVolumeFiles}
-                      disabled={isUploading}
-                      fullWidth
-                      sx={{
-                        py: 1.5,
-                        borderRadius: 2,
-                        textTransform: 'none',
-                        fontWeight: 500,
-                        transition: 'all 0.2s ease',
-                        '&:hover': {
-                          transform: 'translateY(-1px)',
-                          boxShadow: 2
-                        }
-                      }}
-                    >
-                      Use Selected Files ({selectedVolumeFiles.size})
-                    </Button>
-                  )}
-                </>
-              )}
-                  </Paper>
-                </Fade>
+            </Box>
+              ) : (
+                <Alert severity="info">
+                  No agents available on the canvas. Please add at least one agent before uploading knowledge files.
+                </Alert>
               )}
             </>
           )}

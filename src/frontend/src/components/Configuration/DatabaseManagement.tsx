@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import {
   Box,
   Button,
@@ -218,7 +218,7 @@ const DatabaseManagement: React.FC = () => {
     }
   };
 
-  const loadLakebaseConfig = async () => {
+  const loadLakebaseConfig = useCallback(async () => {
     try {
       const response = await apiClient.get<LakebaseConfig>('/database-management/lakebase/config');
       setLakebaseConfig(response.data);
@@ -232,7 +232,7 @@ const DatabaseManagement: React.FC = () => {
     } catch (err) {
       console.error('Failed to load Lakebase configuration:', err);
     }
-  };
+  }, []);
 
   const checkLakebaseInstance = async (instanceName: string) => {
     try {
@@ -264,8 +264,8 @@ const DatabaseManagement: React.FC = () => {
         endpoint: response.data.read_write_dns,
         created_at: response.data.created_at
       }));
-    } catch (err: any) {
-      if (err.response?.status === 404) {
+    } catch (err: unknown) {
+      if (err instanceof Error && 'response' in err && (err as any).response?.status === 404) {
         setLakebaseConfig(prev => ({ ...prev, instance_status: 'NOT_CREATED' }));
       } else {
         console.error('Failed to check Lakebase instance:', err);
@@ -299,8 +299,8 @@ const DatabaseManagement: React.FC = () => {
 
       // Save configuration
       await saveLakebaseConfig();
-    } catch (err: any) {
-      setError(err.response?.data?.detail || 'Failed to create Lakebase instance');
+    } catch (err: unknown) {
+      setError((err as any)?.response?.data?.detail || 'Failed to create Lakebase instance');
     } finally {
       setCreatingInstance(false);
     }
@@ -319,14 +319,14 @@ const DatabaseManagement: React.FC = () => {
       const response = await apiClient.post<LakebaseConfig>('/database-management/lakebase/config', configToSave);
       setLakebaseConfig(response.data);
       setSuccess('Lakebase configuration saved successfully!');
-    } catch (err: any) {
-      setError(err.response?.data?.detail || 'Failed to save Lakebase configuration');
+    } catch (err: unknown) {
+      setError((err as any)?.response?.data?.detail || 'Failed to save Lakebase configuration');
     } finally {
       setLoading(false);
     }
   };
 
-  const handleTabChange = (event: React.SyntheticEvent, newValue: number) => {
+  const handleTabChange = (_event: React.SyntheticEvent, newValue: number) => {
     setTabValue(newValue);
   };
 
@@ -364,8 +364,8 @@ const DatabaseManagement: React.FC = () => {
         volume_name: volumeName
       });
       setBackups(response.data);
-    } catch (err: any) {
-      setError(err.response?.data?.error || 'Failed to load backups');
+    } catch (err: unknown) {
+      setError((err as any)?.response?.data?.error || 'Failed to load backups');
     } finally {
       setLoading(false);
     }
@@ -389,8 +389,8 @@ const DatabaseManagement: React.FC = () => {
       } else {
         setError(response.data.error || 'Export failed');
       }
-    } catch (err: any) {
-      setError(err.response?.data?.error || 'Failed to export database');
+    } catch (err: unknown) {
+      setError((err as any)?.response?.data?.error || 'Failed to export database');
     } finally {
       setLoading(false);
     }
@@ -419,8 +419,8 @@ const DatabaseManagement: React.FC = () => {
       } else {
         setError(response.data.error || 'Import failed');
       }
-    } catch (err: any) {
-      setError(err.response?.data?.error || 'Failed to import database');
+    } catch (err: unknown) {
+      setError((err as any)?.response?.data?.error || 'Failed to import database');
     } finally {
       setLoading(false);
     }
@@ -451,8 +451,8 @@ const DatabaseManagement: React.FC = () => {
 
       await apiClient.post<LakebaseConfig>('/database-management/lakebase/config', configToSave);
       setSuccess('Lakebase disabled and configuration deleted. System now using SQLite (or PostgreSQL in local development).');
-    } catch (err: any) {
-      setError(err.response?.data?.detail || 'Failed to disable Lakebase');
+    } catch (err: unknown) {
+      setError((err as any)?.response?.data?.detail || 'Failed to disable Lakebase');
       // Revert the UI state on error
       setLakebaseBackend('lakebase');
       setLakebaseConfig(prev => ({ ...prev, enabled: true }));
@@ -717,8 +717,8 @@ const DatabaseManagement: React.FC = () => {
                   } else {
                     setSuccess('Lakebase enabled. System will use Lakebase when available.');
                   }
-                } catch (err: any) {
-                  setError(err.response?.data?.detail || 'Failed to update Lakebase configuration');
+                } catch (err: unknown) {
+                  setError((err as any)?.response?.data?.detail || 'Failed to update Lakebase configuration');
                   // Revert the UI state on error
                   setLakebaseBackend(newValue === 'lakebase' ? 'disabled' : 'lakebase');
                   setLakebaseConfig(prev => ({ ...prev, enabled: newValue !== 'lakebase' }));
@@ -1058,8 +1058,8 @@ const DatabaseManagement: React.FC = () => {
                               setSuccess('Migration started successfully');
                               // Refresh config to get migration status
                               await loadLakebaseConfig();
-                            } catch (err: any) {
-                              setError(err.response?.data?.detail || 'Failed to start migration');
+                            } catch (err: unknown) {
+                              setError((err as any)?.response?.data?.detail || 'Failed to start migration');
                             } finally {
                               setLoading(false);
                             }
@@ -1160,8 +1160,13 @@ const DatabaseManagement: React.FC = () => {
                 {backups.backups.map((backup) => (
                   <ListItem
                     key={backup.filename}
-                    button
-                    selected={selectedBackup === backup.filename}
+                    sx={{
+                      cursor: 'pointer',
+                      backgroundColor: selectedBackup === backup.filename ? 'action.selected' : 'transparent',
+                      '&:hover': {
+                        backgroundColor: 'action.hover'
+                      }
+                    }}
                     onClick={() => setSelectedBackup(backup.filename)}
                   >
                     <ListItemText

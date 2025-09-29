@@ -7,7 +7,7 @@ export interface GroupToolMapping {
   tool_id: number;
   group_id: string;
   enabled: boolean;
-  config?: Record<string, any>;
+  config?: Record<string, unknown>;
   credentials_status: string;
   created_at: string;
   updated_at: string;
@@ -56,7 +56,7 @@ export class GroupToolService {
     }
   }
 
-  static async updateConfig(toolId: number, config: Record<string, any>): Promise<GroupToolMapping> {
+  static async updateConfig(toolId: number, config: Record<string, unknown>): Promise<GroupToolMapping> {
     try {
       const res = await apiClient.patch<GroupToolMapping>(`/group-tools/${toolId}/config`, config);
       return res.data;

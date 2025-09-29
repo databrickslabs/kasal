@@ -123,9 +123,9 @@ export const GenieSpaceSelector: React.FC<GenieSpaceSelectorProps> = ({
               if (selected) {
                 // Add to options if not already there
                 setOptions(prev => {
-                  const exists = prev.some(opt => opt.id === selected!.id);
-                  if (!exists) {
-                    return [...prev, selected!];
+                  const exists = prev.some(opt => opt.id === selected?.id);
+                  if (!exists && selected) {
+                    return [...prev, selected];
                   }
                   return prev;
                 });
@@ -143,7 +143,7 @@ export const GenieSpaceSelector: React.FC<GenieSpaceSelectorProps> = ({
     };
 
     loadSelectedSpace();
-  }, [value, multiple]); // Removed options from dependencies to avoid infinite loop
+  }, [value, multiple, options]); // Added options back to dependencies
 
   // Load spaces function
   const loadSpaces = async (search?: string, pageToken?: string, append = false) => {
@@ -223,7 +223,7 @@ export const GenieSpaceSelector: React.FC<GenieSpaceSelectorProps> = ({
     if (open && options.length === 0 && !loading) {
       loadSpaces();
     }
-  }, [open, options.length, value]);
+  }, [open, options.length, value, loading]);
 
   // Cleanup timeout on unmount
   useEffect(() => {

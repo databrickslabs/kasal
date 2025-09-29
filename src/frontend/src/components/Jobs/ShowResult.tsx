@@ -66,7 +66,7 @@ const ShowResult = memo<ShowResultProps>(({ open, onClose, result, run }) => {
   }, [open, result, run]);
 
   // Function to check for Databricks volume information from configuration
-  const checkForDatabricksVolumeInfo = async (resultData: any) => {
+  const checkForDatabricksVolumeInfo = async (resultData: Record<string, unknown>) => {
     try {
       // Check if we have run information with task configuration
       if (!run) {

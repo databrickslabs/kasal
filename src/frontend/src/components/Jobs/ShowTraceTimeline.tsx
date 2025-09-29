@@ -27,7 +27,7 @@ import PreviewIcon from '@mui/icons-material/Preview';
 import TimelineIcon from '@mui/icons-material/Timeline';
 import TerminalIcon from '@mui/icons-material/Terminal';
 import RefreshIcon from '@mui/icons-material/Refresh';
-import InsightsIcon from '@mui/icons-material/Insights';
+import PlayArrowIcon from '@mui/icons-material/PlayArrow';
 import { ShowTraceProps, Trace } from '../../types/trace';
 
 import apiClient from '../../config/api/ApiConfig';
@@ -101,6 +101,7 @@ const ShowTraceTimeline: React.FC<ShowTraceProps> = ({
   const [logsError, setLogsError] = useState<string | null>(null);
   const [isRefreshing, setIsRefreshing] = useState(false);
   const [evaluationEnabled, setEvaluationEnabled] = useState<boolean>(false);
+  const [isEvaluationRunning, setIsEvaluationRunning] = useState(false);
 
   // Handle opening logs dialog
   const handleOpenLogs = async () => {
@@ -193,6 +194,90 @@ const ShowTraceTimeline: React.FC<ShowTraceProps> = ({
     }
   };
 
+  // Get specific trace URL with trace ID if available
+  const getSpecificTraceUrl = async (): Promise<string> => {
+    if (!run) return '#';
+
+    // Prefer backend-built deep link (handles workspace url/id and selectedEvaluationId)
+    try {
+      const resp = await apiClient.get('/mlflow/trace-link', { params: { job_id: run.job_id } });
+      const url = resp?.data?.url as string | undefined;
+      if (url) return url;
+    } catch (e) {
+      // ignore and fallback to frontend construction below
+    }
+
+    try {
+      // 1) Get workspace URL and ID
+      let workspaceUrl = '';
+      let workspaceId: string | undefined;
+      try {
+        const envResp = await apiClient.get('/databricks/environment');
+        workspaceId = envResp?.data?.workspace_id || undefined;
+        const envHost = envResp?.data?.databricks_host;
+        if (!workspaceUrl && envHost) {
+          workspaceUrl = envHost.startsWith('http') ? envHost : `https://${envHost}`;
+        }
+      } catch (e) {
+        console.warn('Unable to get Databricks environment info');
+      }
+
+      if (!workspaceUrl || workspaceUrl === 'compute' || !workspaceUrl.includes('.')) {
+        if (typeof window !== 'undefined' && window.location.hostname.includes('databricks')) {
+          workspaceUrl = `https://${window.location.hostname}`;
+        } else {
+          try {
+            const resp = await apiClient.get('/databricks/workspace-url');
+            workspaceUrl = resp.data?.workspace_url || '';
+          } catch (e) {
+            console.warn('Unable to determine Databricks workspace URL');
+          }
+        }
+      }
+
+      if (!workspaceUrl) return '#';
+
+      // Normalize
+      if (workspaceUrl.endsWith('/')) workspaceUrl = workspaceUrl.slice(0, -1);
+      if (!workspaceUrl.startsWith('http')) workspaceUrl = `https://${workspaceUrl}`;
+
+      // 2) Get experiment ID
+      let experimentId: string | undefined;
+      try {
+        const expResp = await apiClient.get('/mlflow/experiment-info');
+        experimentId = expResp?.data?.experiment_id || undefined;
+      } catch (e) {
+        console.warn('Unable to resolve MLflow experiment id');
+      }
+
+      if (!experimentId) {
+        // Fallback to general traces URL
+        return getMlflowTracesUrl();
+      }
+
+      // 3) Check if the execution has a stored MLflow trace ID
+      let traceId: string | undefined;
+
+      // Check if there's a mlflow_trace_id field directly on the run
+      if (run.mlflow_trace_id) {
+        traceId = run.mlflow_trace_id;
+      }
+
+      if (traceId) {
+        // Build URL with specific trace ID
+        const o = workspaceId ? `?o=${encodeURIComponent(workspaceId)}` : '';
+        const selectedParam = `&selectedEvaluationId=${encodeURIComponent(traceId)}`;
+        const url = `${workspaceUrl}/ml/experiments/${encodeURIComponent(experimentId)}/traces${o}${selectedParam}`;
+        return url;
+      }
+
+      // Fallback to general traces URL if no trace ID
+      return getMlflowTracesUrl();
+    } catch (err) {
+      console.error('Failed to build specific trace URL:', err);
+      return getMlflowTracesUrl();
+    }
+  };
 
   // Process traces into hierarchical structure
   const processTraces = useCallback((rawTraces: Trace[]): ProcessedTraces => {
@@ -698,7 +783,9 @@ const ShowTraceTimeline: React.FC<ShowTraceProps> = ({
 
   // Trigger evaluation and open the MLflow run page
   const triggerEvaluationAndOpen = async () => {
-    if (!run) return;
+    if (!run || isEvaluationRunning) return;
+
+    setIsEvaluationRunning(true);
     try {
       // 1) Trigger evaluation
       const ev = await apiClient.post('/mlflow/evaluate', { job_id: run.job_id });
@@ -745,6 +832,9 @@ const ShowTraceTimeline: React.FC<ShowTraceProps> = ({
       window.open(url, '_blank', 'noopener');
     } catch (e) {
       console.error('Failed to trigger evaluation:', e);
+      setError('Failed to trigger MLflow evaluation. Please check backend logs.');
+    } finally {
+      setIsEvaluationRunning(false);
     }
   };
 
@@ -967,7 +1057,7 @@ const ShowTraceTimeline: React.FC<ShowTraceProps> = ({
                     <IconButton
                       size="small"
                       onClick={async () => {
-                        const url = await getMlflowTracesUrl();
+                        const url = await getSpecificTraceUrl();
                         if (url && url !== '#') {
                           window.open(url, '_blank', 'noopener');
                         }
@@ -980,21 +1070,7 @@ const ShowTraceTimeline: React.FC<ShowTraceProps> = ({
                   </span>
                 </Tooltip>
 
-                {/* MLflow Evaluation trigger/view */}
-                <Tooltip title={evaluationEnabled ? 'MLflow Evaluation' : 'Enable MLflow Evaluation in Configuration'}>
-                  <span>
-                    <IconButton
-                      size="small"
-                      onClick={triggerEvaluationAndOpen}
-                      color="primary"
-                      disabled={!evaluationEnabled || ['running', 'pending', 'queued', 'in_progress'].includes(run?.status?.toLowerCase() || '')}
-                    >
-                      <InsightsIcon fontSize="small" />
-                    </IconButton>
-                  </span>
-                </Tooltip>
-
-
+                {/* Grouped result/logs/trace actions */}
                 <Tooltip title={t('runHistory.actions.viewLogs')}>
                   <span>
                     <IconButton
@@ -1008,7 +1084,22 @@ const ShowTraceTimeline: React.FC<ShowTraceProps> = ({
                   </span>
                 </Tooltip>
 
-
+                {/* MLflow Evaluation trigger/view (separated, with play icon + text) */}
+                <Divider orientation="vertical" flexItem sx={{ mx: 1 }} />
+                <Button
+                  size="small"
+                  variant="outlined"
+                  startIcon={isEvaluationRunning ? <CircularProgress size={16} /> : <PlayArrowIcon fontSize="small" />}
+                  onClick={triggerEvaluationAndOpen}
+                  color="primary"
+                  disabled={
+                    isEvaluationRunning ||
+                    !evaluationEnabled ||
+                    ['running', 'pending', 'queued', 'in_progress'].includes(run?.status?.toLowerCase() || '')
+                  }
+                >
+                  {isEvaluationRunning ? 'Running Evaluation...' : 'Run MLflow Evaluation'}
+                </Button>
                 <Divider orientation="vertical" flexItem sx={{ mx: 1 }} />
               </>
             )}
