@@ -3,6 +3,10 @@ Core logging functionality for the application.
 
 This module provides a centralized logging system with domain-specific loggers
 for different parts of the application, supporting both file and console output.
+
+USAGE:
+    from src.core.logger import get_logger
+    logger = get_logger(__name__)
 """
 
 import logging
@@ -157,6 +161,56 @@ class LoggerManager:
         # Log initialization success
         self._system_logger.info(f"Logging system initialized. Log directory: {self._log_dir}")
     
+    def _get_logger_level(self, name: str) -> int:
+        """Get the log level for a logger based on environment variables.
+
+        Priority:
+        1. KASAL_DEBUG_ALL=true -> DEBUG
+        2. KASAL_LOG_{NAME} environment variable
+        3. KASAL_LOG_LEVEL global setting
+        4. None (use default)
+        """
+        import os
+
+        # Check if debug all is enabled
+        if os.environ.get("KASAL_DEBUG_ALL", "").lower() in ["true", "1", "yes"]:
+            return logging.DEBUG
+
+        # Check domain-specific environment variable
+        env_var = f"KASAL_LOG_{name.upper().replace('_', '')}"
+        domain_level = self._parse_log_level(os.environ.get(env_var))
+        if domain_level is not None:
+            return domain_level
+
+        # Check global log level
+        global_level = self._parse_log_level(os.environ.get("KASAL_LOG_LEVEL"))
+        if global_level is not None:
+            return global_level
+
+        return None
+
+    def _parse_log_level(self, level_str: str) -> int:
+        """Parse a log level string to a logging level constant."""
+        if not level_str:
+            return None
+
+        level_str = level_str.upper().strip()
+
+        if level_str == "OFF":
+            return logging.CRITICAL + 1
+        elif level_str == "DEBUG":
+            return logging.DEBUG
+        elif level_str == "INFO":
+            return logging.INFO
+        elif level_str in ["WARNING", "WARN"]:
+            return logging.WARNING
+        elif level_str == "ERROR":
+            return logging.ERROR
+        elif level_str == "CRITICAL":
+            return logging.CRITICAL
+        else:
+            return None
+
     def _configure_uvicorn_logging(self):
         """Configure Uvicorn logging to redirect to our loggers."""
         # Set up Uvicorn access logging
@@ -218,7 +272,19 @@ class LoggerManager:
     def _setup_logger(self, name: str, formatter: logging.Formatter, suppress_stdout=False, debug_level=False) -> logging.Logger:
         """Set up a specific logger with both file and console handlers."""
         logger = logging.getLogger(name)
-        logger.setLevel(logging.DEBUG if debug_level else logging.INFO)
+
+        # Determine the log level based on environment variables
+        env_level = self._get_logger_level(name)
+        if env_level is not None:
+            logger.setLevel(env_level)
+        elif os.environ.get("KASAL_LOG_APP"):
+            # Apply app-level setting if this is an app logger
+            app_level = self._parse_log_level(os.environ.get("KASAL_LOG_APP"))
+            if app_level:
+                logger.setLevel(app_level)
+        else:
+            logger.setLevel(logging.DEBUG if debug_level else logging.INFO)
+
         logger.propagate = False
         logger.handlers = []  # Clear any existing handlers
         
@@ -232,8 +298,12 @@ class LoggerManager:
         file_handler.setFormatter(formatter)
         logger.addHandler(file_handler)
         
+        # Create console handler if console output is enabled
+        # Check environment variable for console output
+        console_enabled = os.environ.get("KASAL_LOG_CONSOLE", "true").lower() in ["true", "1", "yes"]
+
         # Create console handler for all loggers except scheduler and when not suppressed
-        if name != 'scheduler' and not suppress_stdout:
+        if console_enabled and name != 'scheduler' and not suppress_stdout:
             console_handler = logging.StreamHandler()
             console_handler.setFormatter(formatter)
             logger.addHandler(console_handler)
@@ -273,18 +343,33 @@ class LoggerManager:
         
         # Special handling for API logger
         elif name == 'api':
-            for api_logger_name in [
+            # Configure all API-related loggers
+            api_logger_names = [
+                'src.api',  # All API routers under src.api
                 'backendcrew.api.runs',
                 'backendcrew.api.jobs',
                 'backendcrew.api.tools',
                 'backendcrew.api.keys',
                 'backendcrew.api.uc_tools'
-            ]:
+            ]
+
+            for api_logger_name in api_logger_names:
                 api_logger = logging.getLogger(api_logger_name)
                 api_logger.handlers = []
                 api_logger.propagate = False
-                api_logger.setLevel(logging.INFO)
+
+                # Respect environment variable for API log level
+                api_env_level = self._get_logger_level('api')
+                if api_env_level is not None:
+                    api_logger.setLevel(api_env_level)
+                else:
+                    api_logger.setLevel(logging.INFO)
+
                 api_logger.addHandler(file_handler)
+
+                # Also add console handler if enabled
+                if console_enabled and not suppress_stdout:
+                    api_logger.addHandler(console_handler)
         
         # Special handling for access logger
         elif name == 'access':
@@ -419,4 +504,74 @@ class LoggerManager:
         """Get the database logger for SQL and transaction debugging."""
         if not self._database_logger:
             self.initialize()
-        return self._database_logger 
+        return self._database_logger
+
+    def get_logger(self, name: str) -> logging.Logger:
+        """
+        Get a logger with the given name, properly configured according to environment variables.
+        This is the main method that should be used by all modules.
+
+        Args:
+            name: The name of the logger (typically __name__)
+
+        Returns:
+            A properly configured logger
+        """
+        logger = logging.getLogger(name)
+
+        # Apply configuration based on environment variables
+        if os.environ.get("KASAL_DEBUG_ALL", "").lower() in ["true", "1", "yes"]:
+            logger.setLevel(logging.DEBUG)
+        elif name.startswith("src."):
+            # This is an application module
+            app_level = self._parse_log_level(os.environ.get("KASAL_LOG_APP"))
+            if app_level:
+                logger.setLevel(app_level)
+            else:
+                global_level = self._parse_log_level(os.environ.get("KASAL_LOG_LEVEL", "INFO"))
+                if global_level:
+                    logger.setLevel(global_level)
+        else:
+            # Check if it's a third-party library
+            third_party_patterns = ["sqlalchemy", "uvicorn", "httpx", "crewai", "mlflow", "litellm"]
+            is_third_party = any(pattern in name.lower() for pattern in third_party_patterns)
+
+            if is_third_party:
+                third_party_level = self._parse_log_level(os.environ.get("KASAL_LOG_THIRD_PARTY", "WARNING"))
+                if third_party_level:
+                    logger.setLevel(third_party_level)
+            else:
+                # Default to global level
+                global_level = self._parse_log_level(os.environ.get("KASAL_LOG_LEVEL", "INFO"))
+                if global_level:
+                    logger.setLevel(global_level)
+
+        return logger
+
+
+# Create a singleton instance
+_logger_manager = LoggerManager.get_instance()
+
+
+def get_logger(name: str) -> logging.Logger:
+    """
+    Get a logger with proper configuration based on environment variables.
+
+    This is the main function that should be used by all modules to get their loggers.
+    It ensures consistent configuration across the application.
+
+    Args:
+        name: The name of the logger (typically __name__)
+
+    Returns:
+        A properly configured logger
+
+    Example:
+        from src.core.logger import get_logger
+        logger = get_logger(__name__)
+    """
+    # Initialize if not already done
+    if not _logger_manager._initialized:
+        _logger_manager.initialize()
+
+    return _logger_manager.get_logger(name) 
