@@ -614,7 +614,7 @@ class TestTaskTrackingService:
         task_id = "task-456"
         test_error = Exception("Test error")
         callbacks = task_tracking_service.create_task_callbacks(job_id, task_id)
-        
+
         # Set up service with db attribute
         mock_db = Mock(spec=Session)
         mock_execution = MockExecutionHistory(id=1, job_id=job_id)
@@ -622,9 +622,9 @@ class TestTaskTrackingService:
         task_tracking_service.db = mock_db
 
         # Act & Assert
-        with patch('src.services.task_tracking_service.asyncio.run') as mock_run, \
+        with patch('src.services.task_tracking_service.asyncio.run', side_effect=lambda coro: None) as mock_run, \
              patch('src.services.task_tracking_service.crew_logger') as mock_logger:
-            
+
             result = callbacks["on_error"](test_error)
             assert result == test_error
             mock_logger.error.assert_called()
@@ -638,16 +638,16 @@ class TestTaskTrackingService:
         task_id = "task-456"
         test_error = Exception("Test error")
         callbacks = task_tracking_service.create_task_callbacks(job_id, task_id)
-        
+
         # Set up service with db attribute but no execution history
         mock_db = Mock(spec=Session)
         mock_db.query.return_value.filter.return_value.first.return_value = None
         task_tracking_service.db = mock_db
 
         # Act & Assert
-        with patch('src.services.task_tracking_service.asyncio.run') as mock_run, \
+        with patch('src.services.task_tracking_service.asyncio.run', side_effect=lambda coro: None) as mock_run, \
              patch('src.services.task_tracking_service.crew_logger') as mock_logger:
-            
+
             result = callbacks["on_error"](test_error)
             assert result == test_error
             mock_logger.error.assert_called()

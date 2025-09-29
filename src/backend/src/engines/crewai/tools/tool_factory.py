@@ -58,9 +58,9 @@ except ImportError:
         DatabricksKnowledgeSearchTool = None
         logging.warning("Could not import DatabricksKnowledgeSearchTool")
 
-# MCPTool - Import from mcp_handler if it exists
+# MCPTool - Import from mcp_adapter
 try:
-    from .mcp_handler import MCPTool
+    from src.engines.common.mcp_adapter import MCPTool
 except ImportError:
     MCPTool = None
     logging.warning("Could not import MCPTool - MCP integration may not be available")

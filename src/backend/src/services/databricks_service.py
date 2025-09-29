@@ -306,26 +306,43 @@ class DatabricksService:
                         logger.warning("Personal access token needed but not found or empty")
                 
                 # If we get here, either we don't need a personal token or it wasn't found
-                logger.info("Trying to set up provider API key")
-                
-                # Try to get the provider API key
-                api_key = await instance.secrets_service.get_provider_api_key("databricks")
-                if api_key:
-                    os.environ["DATABRICKS_TOKEN"] = api_key
-                    os.environ["DATABRICKS_API_KEY"] = api_key  # Set both for compatibility
-                    logger.info("Successfully set up DATABRICKS_TOKEN from provider API key")
+                # Follow authentication hierarchy: OBO -> API Keys Service -> Environment Variables
+
+                # 2. Try API keys service
+                if instance.secrets_service:
+                    logger.info("Trying to set up provider API key from API keys service")
+                    try:
+                        api_key = await instance.secrets_service.get_provider_api_key("databricks")
+                        if api_key:
+                            os.environ["DATABRICKS_TOKEN"] = api_key
+                            os.environ["DATABRICKS_API_KEY"] = api_key  # Set both for compatibility
+                            logger.info("Successfully set up DATABRICKS_TOKEN from provider API key")
+                            return True
+                    except Exception as e:
+                        logger.warning(f"API keys service failed: {e}")
+
+                    # Try other token types as fallback from API keys service
+                    try:
+                        tokens = await instance.secrets_service.get_all_databricks_tokens()
+                        if tokens:
+                            # Use the first valid token found
+                            os.environ["DATABRICKS_TOKEN"] = tokens[0]
+                            os.environ["DATABRICKS_API_KEY"] = tokens[0]  # Set both for compatibility
+                            logger.info(f"Successfully set DATABRICKS_TOKEN from API keys service fallback")
+                            return True
+                    except Exception as e:
+                        logger.warning(f"API keys service fallback failed: {e}")
+                else:
+                    logger.info("API keys service not initialized, skipping")
+
+                # 3. Try environment variables as last resort
+                logger.info("Trying environment variables as last resort")
+                env_token = os.environ.get("DATABRICKS_TOKEN") or os.environ.get("DATABRICKS_API_KEY")
+                if env_token:
+                    logger.info("Successfully using DATABRICKS_TOKEN from environment variables")
                     return True
-                
-                # Try other token types as fallback
-                tokens = await instance.secrets_service.get_all_databricks_tokens()
-                if tokens:
-                    # Use the first valid token found
-                    os.environ["DATABRICKS_TOKEN"] = tokens[0]
-                    os.environ["DATABRICKS_API_KEY"] = tokens[0]  # Set both for compatibility
-                    logger.info(f"Successfully set DATABRICKS_TOKEN from fallback method")
-                    return True
-                
-                logger.warning("Failed to set up DATABRICKS_TOKEN - no token found")
+
+                logger.warning("Failed to set up DATABRICKS_TOKEN - no token found in OBO, API keys service, or environment")
                 return False
         except Exception as e:
             logger.error(f"Error setting up Databricks token: {str(e)}")
