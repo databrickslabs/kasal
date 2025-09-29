@@ -19,7 +19,7 @@ import litellm
 from src.utils.prompt_utils import robust_json_parser
 from src.services.template_service import TemplateService
 from src.services.tool_service import ToolService
-from src.services.documentation_embedding_service import DocumentationEmbeddingService
+
 from src.schemas.crew import CrewGenerationRequest, CrewGenerationResponse
 from src.repositories.log_repository import LLMLogRepository
 from src.services.log_service import LLMLogService
@@ -451,7 +451,7 @@ class CrewGenerationService:
             logger.error(traceback.format_exc())
             return ""
 
-    async def create_crew_complete(self, request: CrewGenerationRequest, group_context: Optional[GroupContext] = None, fast_planning: bool = False) -> Dict[str, Any]:
+    async def create_crew_complete(self, request: CrewGenerationRequest, group_context: Optional[GroupContext] = None, fast_planning: bool = True) -> Dict[str, Any]:
         """
         Create a crew with agents and tasks.
 
@@ -506,21 +506,13 @@ class CrewGenerationService:
             system_message = await self._prepare_prompt_template(tools_with_details, group_context)
             logger.info("CREATE CREW: Prepared prompt template with detailed tool information")
 
-            # Get relevant documentation based on the user's prompt
-            documentation_context = await self._get_relevant_documentation(request.prompt)
-
+            # Documentation context disabled: skip vector search/embedding for crew generation
             # Prepare messages for the LLM
             messages = [
                 {"role": "system", "content": system_message}
             ]
 
-            # Add documentation context if available
-            if documentation_context:
-                messages.append({
-                    "role": "system",
-                    "content": "Here is some relevant documentation about CrewAI that may help you generate a better crew:\n\n" + documentation_context
-                })
-                logger.info("Added relevant documentation to enhance context")
+            # (No documentation context injected)
 
             # Add the user's prompt
             messages.append({"role": "user", "content": request.prompt})
@@ -532,11 +524,20 @@ class CrewGenerationService:
             # Generate completion with litellm
             try:
                 logger.info("CREATE CREW: Calling LLM API...")
+                # Adjust max_tokens dynamically: Anthropic/Claude tends to produce longer JSON
+                _model_id = model_params.get("model", "")
+                _model_id_l = _model_id.lower() if isinstance(_model_id, str) else ""
+                _max_tokens = 1500 if fast_planning else 4000
+                # Claude/Anthropic models tend to produce longer JSON; don't truncate them in fast mode
+                if isinstance(_model_id, str) and ("claude" in _model_id_l or _model_id_l.startswith("anthropic/")):
+                    _max_tokens = 4000  # even in fast_planning, allow more room for valid JSON
+                logger.info(f"CREATE CREW: Using max_tokens={_max_tokens} for model={_model_id} fast_planning={fast_planning}")
+
                 response = await litellm.acompletion(
                     **model_params,
                     messages=messages,
                     temperature=0.2 if fast_planning else 0.7,
-                    max_tokens=1500 if fast_planning else 4000
+                    max_tokens=_max_tokens
                 )
 
                 # Extract and parse the content
@@ -546,7 +547,7 @@ class CrewGenerationService:
                 # Log the LLM interaction
                 await self._log_llm_interaction(
                     endpoint='generate-crew',
-                    prompt=f"System: {system_message}\nDocumentation: {documentation_context}\nUser: {request.prompt}",
+                    prompt=f"System: {system_message}\nUser: {request.prompt}",
                     response=content,
                     model=model,
                     group_context=group_context

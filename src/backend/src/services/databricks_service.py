@@ -124,7 +124,7 @@ class DatabricksService:
             if not config:
                 return None
             
-            logger.info(f"Databricks config from DB: schema={config.schema}, catalog={config.catalog}")
+            logger.debug(f"Databricks config from DB: schema={config.schema}, catalog={config.catalog}")
             
             return DatabricksConfigResponse(
                 workspace_url=config.workspace_url,

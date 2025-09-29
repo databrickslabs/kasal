@@ -211,8 +211,11 @@ class ModelConfigService:
             HTTPException: If model configuration is not found
         """
         try:
-            # Try to get from repository first
-            model_config = await self.repository.find_by_key(model)
+            # Normalize model key (handle provider-prefixed routes like "databricks/model-key")
+            normalized_key = model.rsplit('/', 1)[-1] if isinstance(model, str) else model
+
+            # Try to get from repository first using normalized key
+            model_config = await self.repository.find_by_key(normalized_key)
             if model_config:
                 config = {
                     "key": model_config.key,
@@ -225,8 +228,8 @@ class ModelConfigService:
                     "enabled": model_config.enabled
                 }
             else:
-                # Fall back to utility function
-                config = get_model_config(model)
+                # Fall back to utility function with normalized key (best-effort; may be None without a sync DB session)
+                config = get_model_config(normalized_key)
                 if not config:
                     raise ValueError(f"Model configuration not found for model: {model}")
 

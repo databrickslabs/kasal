@@ -16,7 +16,7 @@ import litellm
 
 from src.utils.prompt_utils import robust_json_parser
 from src.services.template_service import TemplateService
-from src.services.documentation_embedding_service import DocumentationEmbeddingService
+
 from src.repositories.log_repository import LLMLogRepository
 from src.services.log_service import LLMLogService
 from src.core.llm_manager import LLMManager
@@ -121,7 +121,7 @@ class AgentGenerationService:
             # Format the documentation for context, emphasizing agent patterns
             docs_context = "\n\n## Agent Generation Best Practices and Examples\n\n"
 
-            for i, doc in enumerate(similar_docs):
+            for doc in similar_docs:
                 # Prioritize agent and tool best practices
                 if 'agent' in doc.title.lower() or 'tool' in doc.source.lower() or 'best_practices' in doc.source:
                     docs_context = f"### {doc.title}\n\n{doc.content}\n\n" + docs_context
@@ -137,7 +137,7 @@ class AgentGenerationService:
             return ""
     
     async def generate_agent(self, prompt_text: str, model: str = None, tools: List[str] = None,
-                            group_context: Optional[GroupContext] = None, fast_planning: bool = False) -> Dict[str, Any]:
+                            group_context: Optional[GroupContext] = None, fast_planning: bool = True) -> Dict[str, Any]:
         """
         Generate agent configuration from natural language description.
         
@@ -169,10 +169,10 @@ class AgentGenerationService:
             # Get and prepare prompt template (composed with group/user overrides)
             system_message = await self._prepare_prompt_template(tools, group_context)
 
-            # Get relevant documentation based on the agent request
-            documentation_context = await self._get_relevant_documentation(prompt_text, tools)
+            # Documentation context disabled: skip vector search/embedding for agent generation
+            documentation_context = None
 
-            # Generate agent configuration with enhanced context
+            # Generate agent configuration without external documentation context
             agent_config = await self._generate_agent_config(
                 prompt_text, system_message, model, documentation_context, fast_planning=fast_planning
             )
@@ -242,13 +242,7 @@ class AgentGenerationService:
             {"role": "system", "content": system_message}
         ]
 
-        # Add documentation context if available
-        if documentation_context:
-            messages.append({
-                "role": "system",
-                "content": "Here is relevant documentation about agent creation best practices and examples:\n\n" + documentation_context
-            })
-            logger.info("Added relevant documentation to enhance agent generation context")
+        # (No documentation context injected)
 
         # Add the user's prompt
         messages.append({"role": "user", "content": prompt_text})

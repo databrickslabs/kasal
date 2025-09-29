@@ -449,28 +449,28 @@ class ExecutionService:
             # Get executions from database using ExecutionRepository
             from src.repositories.execution_repository import ExecutionRepository
 
-            logger.info(f"[list_executions] Starting database query - group_ids: {group_ids}, user_email: {user_email}")
+            logger.debug(f"[list_executions] Starting database query - group_ids: {group_ids}, user_email: {user_email}")
 
             if self.session:
-                logger.info(f"[list_executions] Using injected database session: {self.session}")
+                logger.debug(f"[list_executions] Using injected database session: {self.session}")
                 repo = ExecutionRepository(self.session)
-                logger.info(f"[list_executions] Created repository: {repo}")
+                logger.debug(f"[list_executions] Created repository: {repo}")
 
                 # Get executions with group and user filtering using the correct repository method
-                logger.info(f"[list_executions] Calling repo.get_execution_history with group_ids={group_ids}")
+                logger.debug(f"[list_executions] Calling repo.get_execution_history with group_ids={group_ids}")
                 db_executions_list, total_count = await repo.get_execution_history(
                     limit=limit,
                     offset=offset,
                     group_ids=group_ids,
                     user_email=user_email
                 )
-                logger.info(f"[list_executions] Repository returned {len(db_executions_list)} items, total_count={total_count}")
+                logger.debug(f"[list_executions] Repository returned {len(db_executions_list)} items, total_count={total_count}")
                 
-                logger.info(f"[list_executions] Database returned {len(db_executions_list)} executions for group_ids: {group_ids}")
+                logger.debug(f"[list_executions] Database returned {len(db_executions_list)} executions for group_ids: {group_ids}")
 
                 # Debug what we got
                 if db_executions_list:
-                    logger.info(f"[list_executions] First execution: job_id={db_executions_list[0].job_id}, group_id={db_executions_list[0].group_id}, run_name={db_executions_list[0].run_name}")
+                    logger.debug(f"[list_executions] First execution: job_id={db_executions_list[0].job_id}, group_id={db_executions_list[0].group_id}, run_name={db_executions_list[0].run_name}")
                 else:
                     logger.warning(f"[list_executions] No executions found for group_ids: {group_ids}")
                 
@@ -517,7 +517,7 @@ class ExecutionService:
                     execution_data["execution_id"] = execution_id
                 results.append(execution_data)
             
-            logger.info(f"Returning {len(results)} total executions ({len(db_executions)} from DB, {len(memory_executions)} from memory)")
+            logger.debug(f"Returning {len(results)} total executions ({len(db_executions)} from DB, {len(memory_executions)} from memory)")
             return results
                 
         except Exception as e:
@@ -679,7 +679,11 @@ class ExecutionService:
                 "created_at": execution.created_at,
                 "result": execution.result,
                 "run_name": execution.run_name,
-                "error": execution.error
+                "error": execution.error,
+                # MLflow integration fields
+                "mlflow_trace_id": execution.mlflow_trace_id,
+                "mlflow_experiment_name": execution.mlflow_experiment_name,
+                "mlflow_evaluation_run_id": execution.mlflow_evaluation_run_id
             }
         except Exception as e:
             exec_logger.error(f"Error getting execution status for {execution_id}: {str(e)}")

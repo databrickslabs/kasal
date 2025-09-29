@@ -54,14 +54,14 @@ async def generate_connections(
     """
     try:
         # Use injected service
-        logger.info(f"Generating connections for {len(request.agents)} agents and {len(request.tasks)} tasks")
+        logging.getLogger().info(f"Generating connections for {len(request.agents)} agents and {len(request.tasks)} tasks")
         connections = await service.generate_connections(request)
-        
+
         # Log the number of assignments and dependencies
-        logger.info(f"Generated {len(connections.assignments)} assignments and {len(connections.dependencies)} dependencies")
-        
+        logging.getLogger().info(f"Generated {len(connections.assignments)} assignments and {len(connections.dependencies)} dependencies")
+
         return connections
-        
+
     except ValueError as e:
         # Handle validation errors with a 400 response
         error_msg = str(e)
@@ -87,11 +87,11 @@ async def test_api_key(
     """
     try:
         # Use injected service
-        logger.info("Testing API keys")
+        logging.getLogger().info("Testing API keys")
         results = await service.test_api_keys()
-        
+
         return results
-        
+
     except Exception as e:
         # Handle errors with a 500 response
         error_msg = f"Error testing API keys: {str(e)}"

@@ -1,14 +1,20 @@
 import os
 import sys
+
+# CRITICAL: Set USE_NULLPOOL BEFORE any database imports to prevent asyncpg connection pool issues
+# This must be done before importing any modules that might create database connections
+os.environ["USE_NULLPOOL"] = "true"
+
+# Configure logging BEFORE any other imports to ensure all loggers respect configuration
+from src.config.logging import configure_early_logging, CentralizedLoggingConfig
+configure_early_logging()
+
+# Now import everything else
 import logging
 import asyncio
 from datetime import datetime
 from contextlib import asynccontextmanager
 from sqlalchemy import text
-
-# CRITICAL: Set USE_NULLPOOL BEFORE any database imports to prevent asyncpg connection pool issues
-# This must be done before importing any modules that might create database connections
-os.environ["USE_NULLPOOL"] = "true"
 
 from fastapi import FastAPI, HTTPException, Request, Depends
 from fastapi.middleware.cors import CORSMiddleware
@@ -22,25 +28,13 @@ from src.services.scheduler_service import SchedulerService
 from src.services.execution_cleanup_service import ExecutionCleanupService
 from src.utils.databricks_url_utils import DatabricksURLUtils
 
-# Set up basic logging initially, will be enhanced in lifespan
-# Use LOG_LEVEL from environment to control all loggers including third-party libraries
-log_level = os.environ.get("LOG_LEVEL", "INFO").upper()
-logging.basicConfig(
-    level=getattr(logging, log_level, logging.INFO),
-    format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
-)
-
-
-# Optionally suppress console logs entirely (root handlers)
-if os.environ.get("SUPPRESS_CONSOLE_LOGS", "false").lower() == "true":
-    root_logger = logging.getLogger()
-    root_logger.handlers = [h for h in root_logger.handlers if not isinstance(h, logging.StreamHandler)]
-
-# Suppress DEBUG logs from third-party libraries
-for lib_logger in ["aiosqlite", "sqlalchemy.engine", "sqlalchemy.pool", "httpx", "httpcore"]:
-    logging.getLogger(lib_logger).setLevel(logging.WARNING)
-
+# Get logger after configuration
 logger = logging.getLogger(__name__)
+
+# Print logging configuration if in debug mode
+if os.environ.get("KASAL_DEBUG_ALL", "").lower() in ["true", "1", "yes"] or \
+   os.environ.get("KASAL_LOG_LEVEL", "").upper() == "DEBUG":
+    print(CentralizedLoggingConfig.get_configuration_summary())
 
 # Set debug flag for seeders
 os.environ["SEED_DEBUG"] = "True"
@@ -91,7 +85,10 @@ async def lifespan(app: FastAPI):
     # Import needed for DB init
     # pylint: disable=unused-import,import-outside-toplevel
     import src.db.all_models  # noqa
-    from src.db.session import init_db
+    from src.db.session import init_db, set_main_event_loop
+
+    # Capture the main event loop for smart engine selection
+    set_main_event_loop()
 
     # Initialize database first - this creates both the file and tables
     system_logger.info("Initializing database during lifespan...")
@@ -267,6 +264,15 @@ async def lifespan(app: FastAPI):
                 system_logger.info("Scheduler shut down successfully.")
             except Exception as e:
                 system_logger.error(f"Error during scheduler shutdown: {e}")
+
+        # Dispose database engines before event loop shuts down to prevent asyncpg loop mismatch
+        try:
+            from src.db.session import dispose_engines
+            await dispose_engines()
+            system_logger.info("Database engines disposed successfully.")
+        except Exception as e:
+            system_logger.warning(f"Error disposing database engines: {e}")
+
 
         system_logger.info("Application shutdown complete.")
 

@@ -30,11 +30,15 @@ if not logger_manager._initialized or not logger_manager._log_dir:
     else:
         logger_manager.initialize()
 
-# Get a logger from the LoggerManager system
+# Get module logger
 logger = logging.getLogger(__name__)
 
-# Check if SQL debugging is enabled via environment variable
-SQL_DEBUG = os.environ.get("SQL_DEBUG", "false").lower() == "true"
+# Check if SQL debugging is enabled via environment variable or debug all
+SQL_DEBUG = (
+    os.environ.get("SQL_DEBUG", "false").lower() == "true" or
+    os.environ.get("KASAL_DEBUG_ALL", "false").lower() == "true" or
+    os.environ.get("KASAL_LOG_DATABASE", "").upper() == "DEBUG"
+)
 if SQL_DEBUG:
     logger.warning("=" * 80)
     logger.warning("SQL_DEBUG is ENABLED - All SQL queries will be logged!")
@@ -97,24 +101,39 @@ class SQLAlchemyLogger:
         self.formatter = logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s')
         self.log_dir = logger_manager._log_dir
         self.setup_logger()
-    
+
     def setup_logger(self):
         # Create sqlalchemy.log file handler
         sqlalchemy_log_file = self.log_dir / "sqlalchemy.log"
 
-        # Ensure the sqlalchemy engine logger doesn't propagate logs to stdout
+        # Get the sqlalchemy engine logger
         engine_logger = logging.getLogger('sqlalchemy.engine')
-        engine_logger.propagate = False
 
-        # Set logging level based on SQL_DEBUG flag
+        # When SQL_DEBUG is enabled, we want both console and file output
         if SQL_DEBUG:
             engine_logger.setLevel(logging.INFO)
-            # Also log to console when debugging
+            # Clear existing handlers to avoid duplicates
+            engine_logger.handlers = []
+            engine_logger.propagate = False
+
+            # Add console handler for immediate visibility
             console_handler = logging.StreamHandler()
-            console_handler.setFormatter(logging.Formatter('%(message)s'))
+            console_handler.setFormatter(logging.Formatter('[SQL] %(message)s'))
             engine_logger.addHandler(console_handler)
+
+            # Also add file handler for persistent logging
+            file_handler = logging.handlers.RotatingFileHandler(
+                sqlalchemy_log_file,
+                maxBytes=10*1024*1024,  # 10MB
+                backupCount=5,
+                encoding='utf-8'
+            )
+            file_handler.setFormatter(self.formatter)
+            engine_logger.addHandler(file_handler)
         else:
-            engine_logger.setLevel(logging.WARNING)
+            # In non-debug mode, respect centralized configuration
+            # but ensure file handler exists
+            engine_logger.propagate = False
 
         # Ensure handlers are set up properly
         if not engine_logger.handlers:
@@ -132,7 +151,7 @@ class SQLAlchemyLogger:
         logger.info(f"SQLAlchemy logs will be written to {sqlalchemy_log_file}")
         if SQL_DEBUG:
             logger.info("SQL_DEBUG enabled: SQL queries will also be shown in console")
-        
+
 # Initialize SQLAlchemy logging
 sql_logger = SQLAlchemyLogger()
 
@@ -143,6 +162,29 @@ from sqlalchemy.pool import NullPool, AsyncAdaptedQueuePool, StaticPool
 # This is necessary when running in environments with multiple event loops
 # such as with CrewAI memory backends or during testing
 use_nullpool = os.environ.get("USE_NULLPOOL", "false").lower() == "true"
+
+# Track the main event loop for intelligent engine selection
+main_event_loop = None
+
+def set_main_event_loop():
+    """
+    Capture the main event loop when the FastAPI app starts.
+    This should be called from the lifespan/startup event.
+    """
+    global main_event_loop
+    try:
+        main_event_loop = asyncio.get_running_loop()
+        logger.info(f"Main event loop captured: {id(main_event_loop)}")
+    except RuntimeError:
+        logger.warning("Failed to capture main event loop")
+
+# Try to detect early if we're in an async context
+try:
+    main_event_loop = asyncio.get_running_loop()
+    logger.info(f"Main event loop detected during import: {id(main_event_loop)}")
+except RuntimeError:
+    # No event loop running yet - will be set later by set_main_event_loop()
+    logger.info("No event loop during module import - will capture during app startup")
 
 # Determine isolation level based on database type
 def get_isolation_level(database_uri: str) -> str:
@@ -168,48 +210,69 @@ def get_sqlite_connect_args(database_uri: str) -> dict:
 isolation_level = get_isolation_level(str(settings.DATABASE_URI))
 connect_args = get_sqlite_connect_args(str(settings.DATABASE_URI))
 
-# Create async engine for the database
-# Use StaticPool for SQLite to reuse single connection (better for SQLite)
+# Create intelligent dual-engine setup for optimal performance
+# Strategy: Use pooled connections for main app, NullPool for background tasks
+
 if str(settings.DATABASE_URI).startswith('sqlite'):
-    logger.info("Using StaticPool for SQLite to reuse single connection")
+    # SQLite: Use StaticPool for both contexts (single connection)
+    logger.info("SQLite detected - using StaticPool for single connection reuse")
     engine = create_async_engine(
         str(settings.DATABASE_URI),
-        echo=SQL_DEBUG,  # Control SQL logging via SQL_DEBUG env var
+        echo=SQL_DEBUG,
         future=True,
-        poolclass=StaticPool,  # Single connection reuse for SQLite
-        # Don't set isolation_level for SQLite - let it use default
+        poolclass=StaticPool,
         connect_args={
             **connect_args,
-            "check_same_thread": False,  # Allow cross-thread usage
+            "check_same_thread": False,
         },
     )
-elif use_nullpool:
-    logger.info("Using NullPool as requested")
-    engine_opts = {
-        "echo": SQL_DEBUG,  # Control SQL logging via SQL_DEBUG env var
-        "future": True,
-        "poolclass": NullPool,
-        "connect_args": connect_args,
-    }
-    # Only set isolation_level for non-SQLite databases
-    if not str(settings.DATABASE_URI).startswith('sqlite'):
-        engine_opts["isolation_level"] = isolation_level
-    engine = create_async_engine(str(settings.DATABASE_URI), **engine_opts)
+    # For SQLite, both engines are the same
+    pooled_engine = engine
+    nullpool_engine = engine
+
 else:
-    # Use the default async pool (AsyncAdaptedQueuePool is automatically used)
-    engine_opts = {
-        "echo": SQL_DEBUG,  # Control SQL logging via SQL_DEBUG env var
+    # PostgreSQL: Create TWO engines for different contexts
+    logger.info("=" * 80)
+    logger.info("PostgreSQL detected - creating dual-engine setup for optimal performance")
+    logger.info("Main app will use pooled connections, background tasks will use NullPool")
+    logger.info("=" * 80)
+
+    # 1. Create POOLED engine for main FastAPI application (best performance)
+    pooled_engine_opts = {
+        "echo": SQL_DEBUG,
         "future": True,
-        "pool_pre_ping": True,
-        "pool_size": 5,
-        "max_overflow": 10,
-        "echo_pool": SQL_DEBUG,  # Control pool logging via SQL_DEBUG env var
-        "connect_args": connect_args,  # SQLite-specific connection arguments
+        "poolclass": AsyncAdaptedQueuePool,
+        "pool_size": 20,  # Keep 20 connections ready for web requests
+        "max_overflow": 10,  # Allow 10 more during peak
+        "pool_pre_ping": True,  # Check connection health
+        "pool_recycle": 3600,  # Recycle after 1 hour
+        "echo_pool": SQL_DEBUG,
+        "connect_args": connect_args,
+        "isolation_level": isolation_level
     }
-    # Only set isolation_level for non-SQLite databases
-    if not str(settings.DATABASE_URI).startswith('sqlite'):
-        engine_opts["isolation_level"] = isolation_level
-    engine = create_async_engine(str(settings.DATABASE_URI), **engine_opts)
+    pooled_engine = create_async_engine(str(settings.DATABASE_URI), **pooled_engine_opts)
+    logger.info("Created pooled engine for main FastAPI app (20x better performance)")
+
+    # 2. Create NULLPOOL engine for background tasks/CrewAI (event loop isolation)
+    nullpool_engine_opts = {
+        "echo": SQL_DEBUG,
+        "future": True,
+        "poolclass": NullPool,  # No pooling - new connection per query
+        "connect_args": connect_args,
+        "isolation_level": isolation_level
+    }
+    nullpool_engine = create_async_engine(str(settings.DATABASE_URI), **nullpool_engine_opts)
+    logger.info("Created NullPool engine for background tasks (CrewAI compatibility)")
+
+    # Default engine selection
+    # When USE_NULLPOOL=true, default to NullPool to avoid cross-loop issues under reload
+    # get_db() still routes to pooled sessions where safe (main app loop) when USE_NULLPOOL=false
+    if use_nullpool:
+        logger.info("USE_NULLPOOL=true - Event loop isolation mode enabled (defaulting to NullPool engine)")
+        engine = nullpool_engine
+    else:
+        logger.info("USE_NULLPOOL=false - Full pooling mode enabled for maximum performance")
+        engine = pooled_engine
 
 # Configure SQLite for better concurrent access
 def configure_sqlite(dbapi_connection, connection_record):
@@ -238,22 +301,51 @@ def configure_sqlite(dbapi_connection, connection_record):
         except Exception as e:
             logger.error(f"Failed to configure SQLite connection: {e}")
 
-# Apply SQLite configuration to both engines
+# Apply SQLite configuration to all engines
 if str(settings.DATABASE_URI).startswith('sqlite'):
     # For async engine, we need to listen to the sync_engine property
     event.listen(engine.sync_engine, "connect", configure_sqlite)
-    logger.info("Applied SQLite configuration event listener to async engine")
+    logger.info("Applied SQLite configuration event listener to main engine")
+
+    # Also apply to pooled and nullpool engines if they exist (PostgreSQL only)
+    if 'pooled_engine' in locals():
+        event.listen(pooled_engine.sync_engine, "connect", configure_sqlite)
+        logger.info("Applied SQLite configuration to pooled engine")
+    if 'nullpool_engine' in locals():
+        event.listen(nullpool_engine.sync_engine, "connect", configure_sqlite)
+        logger.info("Applied SQLite configuration to nullpool engine")
 
 # Sync engine removed - everything is async now
 # All database operations must use async sessions
 
-# Create async session factory with optimized settings for SQLite
+# Create session factories for both engines (avoid recreating on each request)
+# Main session factory (uses default engine based on USE_NULLPOOL setting)
 async_session_factory = async_sessionmaker(
     engine,
     expire_on_commit=False,
     autoflush=False,  # Disable autoflush to prevent SQLite locking issues
     autocommit=False,  # Explicit transaction control
 )
+
+# Create separate session factories for pooled and nullpool engines
+pooled_session_factory = None
+nullpool_session_factory = None
+
+if not str(settings.DATABASE_URI).startswith('sqlite'):
+    # For PostgreSQL, create session factories for both engines
+    pooled_session_factory = async_sessionmaker(
+        pooled_engine,
+        expire_on_commit=False,
+        autoflush=False,
+        autocommit=False,
+    )
+
+    nullpool_session_factory = async_sessionmaker(
+        nullpool_engine,
+        expire_on_commit=False,
+        autoflush=False,
+        autocommit=False,
+    )
 
 # SessionLocal removed - use async_session_factory instead
 # All database operations must be async
@@ -267,18 +359,18 @@ async def init_db() -> None:
         import src.db.all_models
         importlib.reload(src.db.all_models)  # Ensure models are freshly loaded
         from src.db.all_models import Base
-        
+
         # For PostgreSQL, check if database exists and create if not
         if str(settings.DATABASE_URI).startswith('postgresql'):
             import asyncpg
-            
+
             # Extract connection parameters
             db_name = settings.POSTGRES_DB
             host = settings.POSTGRES_SERVER
             port = settings.POSTGRES_PORT
             user = settings.POSTGRES_USER
             password = settings.POSTGRES_PASSWORD
-            
+
             try:
                 # First, try to connect to the specified database
                 test_conn = await asyncpg.connect(
@@ -293,7 +385,7 @@ async def init_db() -> None:
             except asyncpg.InvalidCatalogNameError:
                 # Database doesn't exist, create it
                 logger.info(f"Database '{db_name}' does not exist. Creating it...")
-                
+
                 # Connect to postgres database to create the new database
                 admin_conn = await asyncpg.connect(
                     host=host,
@@ -302,7 +394,7 @@ async def init_db() -> None:
                     password=password,
                     database='postgres'  # Connect to default postgres database
                 )
-                
+
                 try:
                     # Create the database
                     await admin_conn.execute(f'CREATE DATABASE "{db_name}"')
@@ -314,60 +406,42 @@ async def init_db() -> None:
                     raise
                 finally:
                     await admin_conn.close()
-            
-            # Ensure pgvector extension is installed
-            try:
-                logger.info("Checking pgvector extension...")
-                async with engine.connect() as conn:
-                    # Check if pgvector extension exists
-                    result = await conn.execute(text("SELECT 1 FROM pg_extension WHERE extname = 'vector'"))
-                    extension_exists = result.fetchone() is not None
-                    
-                    if not extension_exists:
-                        logger.info("Installing pgvector extension...")
-                        # Create the extension
-                        await conn.execute(text("CREATE EXTENSION IF NOT EXISTS vector"))
-                        await conn.commit()
-                        logger.info("pgvector extension installed successfully")
-                    else:
-                        logger.info("pgvector extension already installed")
-            except Exception as e:
-                logger.warning(f"Could not install pgvector extension: {e}")
-                logger.warning("The database will work but documentation embeddings table will not be created")
-        
+
+
+
         # For SQLite, ensure database file exists
         if str(settings.DATABASE_URI).startswith('sqlite'):
             db_path = settings.SQLITE_DB_PATH
-            
+
             # Get absolute path if relative
             if not os.path.isabs(db_path):
                 # If it's a relative path, make it absolute from current directory
                 db_path = os.path.abspath(db_path)
-            
+
             logger.info(f"Database path: {db_path}")
-            
+
             # Create directory if it doesn't exist
             db_dir = os.path.dirname(db_path)
             if db_dir and not os.path.exists(db_dir):
                 logger.info(f"Creating database directory: {db_dir}")
                 os.makedirs(db_dir, exist_ok=True)
-            
+
             # Create empty database file if it doesn't exist
             if not os.path.exists(db_path):
                 logger.info(f"Creating new SQLite database file: {db_path}")
                 # Create the file and initialize it
                 with open(db_path, 'w') as f:
                     pass  # Create empty file
-                
+
                 # Initialize it as a sqlite database
                 import sqlite3
                 conn = sqlite3.connect(db_path)
                 conn.close()
                 logger.info(f"Empty database file created at {db_path}")
-        
+
         # Create all tables in a completely separate, isolated transaction
         logger.info("Creating database tables...")
-        
+
         # For SQLite, we can verify if tables already exist first
         tables_exist = False
         if str(settings.DATABASE_URI).startswith('sqlite'):
@@ -378,13 +452,13 @@ async def init_db() -> None:
                 cursor.execute("SELECT name FROM sqlite_master WHERE type='table';")
                 tables = cursor.fetchall()
                 conn.close()
-                
+
                 if len(tables) > 1:  # SQLite has a sqlite_master table by default
                     logger.info(f"Tables already exist: {', '.join([t[0] for t in tables])}")
                     tables_exist = True
             except Exception as e:
                 logger.error(f"Error checking existing tables: {e}")
-        
+
         # Only create tables if they don't already exist
         if not tables_exist:
             # Use a fresh engine for initialization with settings optimized for table creation
@@ -395,18 +469,37 @@ async def init_db() -> None:
 
             # For SQLite, don't set isolation_level to avoid errors
             if not str(settings.DATABASE_URI).startswith('sqlite'):
-                init_engine_opts["isolation_level"] = "AUTOCOMMIT"  # Use AUTOCOMMIT for table creation
+                init_engine_opts['isolation_level'] = 'AUTOCOMMIT'  # Use AUTOCOMMIT for table creation
+                init_engine_opts['poolclass'] = NullPool  # Avoid pooling during init to isolate loop
 
             # Create a dedicated engine just for initialization
             engine_for_init = create_async_engine(
                 str(settings.DATABASE_URI),
                 **init_engine_opts
             )
-            
+
             # First ensure connection works
             async with engine_for_init.connect() as conn:
                 logger.info("Database connection established")
-            
+
+            # Ensure pgvector extension (PostgreSQL) before table creation
+            if not str(settings.DATABASE_URI).startswith('sqlite'):
+                try:
+                    logger.info("Checking pgvector extension...")
+                    async with engine_for_init.connect() as conn:
+                        result = await conn.execute(text("SELECT 1 FROM pg_extension WHERE extname = 'vector'"))
+                        extension_exists = result.fetchone() is not None
+                        if not extension_exists:
+                            logger.info("Installing pgvector extension...")
+                            await conn.execute(text("CREATE EXTENSION IF NOT EXISTS vector"))
+                            await conn.commit()
+                            logger.info("pgvector extension installed successfully")
+                        else:
+                            logger.info("pgvector extension already installed")
+                except Exception as e:
+                    logger.warning(f"Could not install pgvector extension: {e}")
+                    logger.warning("The database will work but documentation embeddings table will not be created")
+
             # Then create tables
             try:
                 async with engine_for_init.begin() as conn:
@@ -417,26 +510,27 @@ async def init_db() -> None:
                 import traceback
                 logger.error(traceback.format_exc())
                 raise
-            
+
             # Close the engine after use
             await engine_for_init.dispose()
-            
+
             logger.info("Database tables initialized successfully")
-        
+
         # Verify tables were created for SQLite
         if str(settings.DATABASE_URI).startswith('sqlite'):
+
             import sqlite3
             try:
-                db_path_to_check = os.path.abspath(settings.SQLITE_DB_PATH) 
+                db_path_to_check = os.path.abspath(settings.SQLITE_DB_PATH)
                 logger.info(f"Verifying tables in: {db_path_to_check}")
-                
+
                 if os.path.exists(db_path_to_check) and os.path.getsize(db_path_to_check) > 0:
                     conn = sqlite3.connect(db_path_to_check)
                     cursor = conn.cursor()
                     cursor.execute("SELECT name FROM sqlite_master WHERE type='table';")
                     tables = cursor.fetchall()
                     conn.close()
-                    
+
                     table_count = len(tables)
                     logger.info(f"Verified {table_count} tables in database: {', '.join([t[0] for t in tables])}")
                     if table_count == 0:
@@ -454,19 +548,86 @@ async def init_db() -> None:
         logger.error(traceback.format_exc())
         raise
 
+def get_smart_engine():
+    """
+    Intelligently select the right engine based on the current context.
+
+    Returns:
+        - Pooled engine for main FastAPI app (best performance)
+        - NullPool engine for background tasks/CrewAI (event loop isolation)
+    """
+    # If SQLite, always return the same engine
+    if str(settings.DATABASE_URI).startswith('sqlite'):
+        return engine
+
+    # For PostgreSQL, check if we can detect the context
+    try:
+        current_loop = asyncio.get_running_loop()
+
+        # Check if we're in a background task (different event loop)
+        if main_event_loop and current_loop != main_event_loop:
+            logger.debug(f"Background task detected (loop {id(current_loop)} != main {id(main_event_loop)}) - using NullPool")
+            return nullpool_engine
+        else:
+            # We're in the main event loop - use pooled engine for performance
+            logger.debug(f"Main app context detected (loop {id(current_loop)}) - using pooled engine")
+            return pooled_engine
+    except RuntimeError:
+        # No event loop running - probably sync context
+        logger.debug("No event loop detected - using NullPool for safety")
+        return nullpool_engine
+    except Exception as e:
+        logger.warning(f"Error detecting context: {e} - falling back to default engine")
+        return engine
+
+
 async def get_db() -> AsyncGenerator[AsyncSession, None]:
     """
-    Dependency function that yields db sessions with retry logic for SQLite locks.
+    Dependency function that yields db sessions with smart engine selection.
+
+    Uses the appropriate session factory based on context:
+    - Pooled session for FastAPI requests (best performance)
+    - NullPool session for background tasks (event loop isolation)
 
     Yields:
         AsyncSession: SQLAlchemy async session
     """
+    # Default to async_session_factory; in tests (pytest), this allows monkeypatching
+    smart_session_factory = async_session_factory
+
+    # In normal runtime (not under pytest), select appropriate factory by context
+    if not os.environ.get("PYTEST_CURRENT_TEST"):
+        if str(settings.DATABASE_URI).startswith('sqlite'):
+            # SQLite always uses the same session factory
+            smart_session_factory = async_session_factory
+        else:
+            # PostgreSQL: ALWAYS use smart selection regardless of USE_NULLPOOL setting
+            try:
+                current_loop = asyncio.get_running_loop()
+
+                # Check if we're in a background task (different event loop)
+                if main_event_loop and current_loop != main_event_loop:
+                    logger.debug(f"Background context (loop {id(current_loop)}) - using NullPool session")
+                    smart_session_factory = nullpool_session_factory
+                else:
+                    # We're in the main event loop - ALWAYS use pooled sessions for performance!
+                    logger.debug(f"Main app context (loop {id(current_loop)}) - using POOLED session")
+                    # CRITICAL: Always use pooled_session_factory for main app, not async_session_factory
+                    smart_session_factory = pooled_session_factory
+            except RuntimeError:
+                # No event loop running - use NullPool for safety
+                logger.debug("No event loop - using NullPool session")
+                smart_session_factory = nullpool_session_factory
+            except Exception as e:
+                logger.warning(f"Error detecting context: {e} - using NullPool for safety")
+                # Fallback to NullPool for safety (not the default factory which might be wrong)
+                smart_session_factory = nullpool_session_factory
+
     max_retries = 3
     for attempt in range(max_retries):
         try:
-            # async_session_factory is a sessionmaker, call it to get a session
-            # Using async with ensures proper cleanup
-            async with async_session_factory() as session:
+            # Use the selected session factory
+            async with smart_session_factory() as session:
                 try:
                     yield session
                     # Commit the transaction if no exception occurred
@@ -497,4 +658,45 @@ async def get_db() -> AsyncGenerator[AsyncSession, None]:
             raise
 
 # get_sync_db removed - use get_db() instead
-# All database operations must be async 
+# All database operations must be async
+
+# Graceful engine disposal to avoid event-loop mismatch on shutdown
+async def dispose_engines() -> None:
+    """
+    Dispose all async engines/pools while the FastAPI event loop is still alive.
+    This prevents asyncpg from attempting to close connections on a different
+    loop during interpreter shutdown ("Future attached to a different loop").
+    """
+    try:
+        engines = []
+        try:
+            engines.append(engine)
+        except Exception:
+            pass
+        try:
+            if 'pooled_engine' in globals():
+                engines.append(pooled_engine)
+        except Exception:
+            pass
+        try:
+            if 'nullpool_engine' in globals():
+                engines.append(nullpool_engine)
+        except Exception:
+            pass
+
+        # De-duplicate in case some references are the same (e.g., SQLite)
+        seen = set()
+        unique_engines = []
+        for eng in engines:
+            if eng is not None and id(eng) not in seen:
+                seen.add(id(eng))
+                unique_engines.append(eng)
+
+        for eng in unique_engines:
+            try:
+                logger.info(f"Disposing SQLAlchemy engine {eng}...")
+                await eng.dispose()
+            except Exception as e:
+                logger.warning(f"Error disposing engine {eng}: {e}")
+    except Exception as outer_e:
+        logger.warning(f"dispose_engines encountered an error: {outer_e}")

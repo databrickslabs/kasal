@@ -293,6 +293,45 @@ class ExecutionHistoryRepository:
         stmt = select(ExecutionHistory).where(ExecutionHistory.job_id == job_id)
         result = await session.execute(stmt)
         return result.scalars().first()
+
+    async def update_mlflow_evaluation_run_id(self, job_id: str, evaluation_run_id: str) -> bool:
+        """
+        Update the MLflow evaluation run ID for an execution.
+
+        Args:
+            job_id: Job ID of the execution
+            evaluation_run_id: MLflow evaluation run ID to set
+
+        Returns:
+            True if successful, False otherwise
+        """
+        if not self.session:
+            raise RuntimeError("ExecutionHistoryRepository requires a session")
+
+        import logging
+        logger = logging.getLogger(__name__)
+
+        try:
+            # Find the execution by job_id
+            stmt = select(ExecutionHistory).where(ExecutionHistory.job_id == job_id)
+            result = await self.session.execute(stmt)
+            execution = result.scalar_one_or_none()
+
+            if not execution:
+                logger.warning(f"No execution found with job_id: {job_id}")
+                return False
+
+            # Update the MLflow evaluation run ID
+            execution.mlflow_evaluation_run_id = evaluation_run_id
+
+            # Flush changes to database
+            await self.session.flush()
+            logger.info(f"Successfully updated MLflow evaluation run ID for job_id: {job_id}")
+            return True
+
+        except Exception as e:
+            logger.error(f"Error updating MLflow evaluation run ID for job_id {job_id}: {str(e)}", exc_info=True)
+            return False
     
     async def delete_all_executions(self) -> Dict[str, int]:
         """

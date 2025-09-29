@@ -435,31 +435,189 @@ class DatabricksKnowledgeService:
             logger.error(f"[FILE READ] Full traceback: {traceback.format_exc()}")
             return None
 
-    def _chunk_text(self, text: str, chunk_size: int = 1000, overlap: int = 200) -> List[str]:
+    async def _chunk_with_context(
+        self,
+        content: str,
+        file_path: str,
+        chunk_size: int = 1000,
+        overlap: int = 200
+    ) -> List[Dict[str, Any]]:
         """
-        Split text into overlapping chunks for better context preservation.
-        Same logic as DatabricksVectorKnowledgeSource.
+        Create chunks with document-level context prepended.
+        Implements Anthropic's Contextual Retrieval approach.
+
+        Args:
+            content: Full document content
+            file_path: Path to the file
+            chunk_size: Maximum chunk size in characters
+            overlap: Overlap between chunks
+
+        Returns:
+            List of chunk dictionaries with context
         """
+        filename = file_path.split('/')[-1]
+
+        # Generate document summary for context
+        document_summary = await self._generate_document_summary(content, filename)
+        logger.info(f"[CHUNKING] Generated summary for {filename}: {document_summary[:100]}...")
+
+        # Split content into paragraphs for semantic boundaries
+        paragraphs = [p.strip() for p in content.split('\n\n') if p.strip()]
+
         chunks = []
-        start = 0
-        text_length = len(text)
+        current_chunk = ""
+        chunk_index = 0
 
-        while start < text_length:
-            end = min(start + chunk_size, text_length)
-            chunk = text[start:end]
+        for paragraph in paragraphs:
+            # Check if adding this paragraph exceeds chunk size
+            if current_chunk and len(current_chunk) + len(paragraph) > chunk_size:
+                # Create contextual chunk
+                contextual_content = self._create_contextual_chunk(
+                    raw_content=current_chunk.strip(),
+                    filename=filename,
+                    document_summary=document_summary,
+                    chunk_index=chunk_index,
+                    total_chunks_estimate=len(paragraphs) // 2
+                )
 
-            # Add chunk if it has meaningful content
-            if chunk.strip():
-                chunks.append(chunk)
+                chunks.append({
+                    'content': contextual_content,  # For embedding (with context)
+                    'raw_content': current_chunk.strip(),  # For display
+                    'chunk_index': chunk_index,
+                    'section': f"Section {chunk_index + 1}",
+                    'document_summary': document_summary
+                })
 
-            # Move to next chunk with overlap
-            start += chunk_size - overlap
+                # Start new chunk with overlap
+                overlap_text = current_chunk[-overlap:] if len(current_chunk) > overlap else current_chunk
+                current_chunk = overlap_text + "\n\n" + paragraph
+                chunk_index += 1
+            else:
+                current_chunk = f"{current_chunk}\n\n{paragraph}" if current_chunk else paragraph
 
-            # Avoid infinite loop on small texts
-            if start <= 0 and len(chunks) > 0:
-                break
+        # Add final chunk
+        if current_chunk.strip():
+            contextual_content = self._create_contextual_chunk(
+                raw_content=current_chunk.strip(),
+                filename=filename,
+                document_summary=document_summary,
+                chunk_index=chunk_index,
+                total_chunks_estimate=chunk_index + 1
+            )
 
-        return chunks if chunks else [text]  # Return original if no chunks created
+            chunks.append({
+                'content': contextual_content,
+                'raw_content': current_chunk.strip(),
+                'chunk_index': chunk_index,
+                'section': f"Section {chunk_index + 1}",
+                'document_summary': document_summary
+            })
+
+        # Ensure at least one chunk
+        if not chunks and content.strip():
+            contextual_content = self._create_contextual_chunk(
+                raw_content=content.strip(),
+                filename=filename,
+                document_summary=document_summary,
+                chunk_index=0,
+                total_chunks_estimate=1
+            )
+            chunks.append({
+                'content': contextual_content,
+                'raw_content': content.strip(),
+                'chunk_index': 0,
+                'section': "Section 1",
+                'document_summary': document_summary
+            })
+
+        logger.info(f"[CHUNKING] Created {len(chunks)} context-enriched chunks for {filename}")
+        return chunks
+
+    def _create_contextual_chunk(
+        self,
+        raw_content: str,
+        filename: str,
+        document_summary: str,
+        chunk_index: int,
+        total_chunks_estimate: int
+    ) -> str:
+        """
+        Create a chunk with prepended document context.
+
+        This context helps the embedding model understand where this chunk
+        fits in the larger document, improving retrieval accuracy by 49-67%.
+        """
+        return f"""Document: {filename}
+Summary: {document_summary}
+Section: {chunk_index + 1} of ~{total_chunks_estimate}
+
+Content:
+{raw_content}"""
+
+    async def _generate_document_summary(self, content: str, filename: str) -> str:
+        """
+        Generate a brief summary of the document for contextual retrieval.
+        Uses a fast model with prompt caching for efficiency.
+
+        Args:
+            content: Full document content
+            filename: Name of the file
+
+        Returns:
+            2-3 sentence summary of the document
+        """
+        try:
+            from src.core.llm_manager import LLMManager
+
+            # Use first 3000 chars for summary generation
+            content_preview = content[:3000]
+
+            prompt = f"""Provide a concise 2-3 sentence summary that describes the main topic and purpose of this document.
+
+Document: {filename}
+Content preview:
+{content_preview}
+
+Summary (2-3 sentences):"""
+
+            # Use fast, efficient model
+            llm = LLMManager.get_llm(model_name="databricks-meta-llama-3-3-70b-instruct")
+            response = await llm.ainvoke(prompt)
+
+            summary = response.content.strip()
+            logger.info(f"[SUMMARY] Generated summary for {filename}")
+            return summary
+
+        except Exception as e:
+            logger.warning(f"[SUMMARY] Failed to generate summary for {filename}: {e}")
+            # Fallback to simple description
+            return f"Content from {filename}"
+
+    def _detect_content_type(self, filename: str) -> str:
+        """
+        Detect content type from file extension.
+
+        Args:
+            filename: Name of the file
+
+        Returns:
+            Content type string
+        """
+        ext = filename.lower().split('.')[-1] if '.' in filename else ''
+
+        type_map = {
+            'pdf': 'application/pdf',
+            'txt': 'text/plain',
+            'md': 'text/markdown',
+            'json': 'application/json',
+            'csv': 'text/csv',
+            'xml': 'application/xml',
+            'html': 'text/html',
+            'doc': 'application/msword',
+            'docx': 'application/vnd.openxmlformats-officedocument.wordprocessingml.document'
+        }
+
+        return type_map.get(ext, 'application/octet-stream')
 
     async def read_knowledge_file(
         self,
@@ -1091,13 +1249,13 @@ class DatabricksKnowledgeService:
 
             logger.info(f"[EMBEDDING] Read {len(content)} characters from file")
 
-            # 2. Chunk the content
-            chunks = await self._chunk_text(content, file_path)
+            # 2. Chunk the content with context enrichment
+            chunks = await self._chunk_with_context(content, file_path)
             if not chunks:
                 logger.warning(f"[EMBEDDING] No chunks generated for file: {file_path}")
                 return {"status": "skipped", "reason": "No chunks generated"}
 
-            logger.info(f"[EMBEDDING] Generated {len(chunks)} chunks")
+            logger.info(f"[EMBEDDING] Generated {len(chunks)} context-enriched chunks")
 
             # 3. Get Vector Search storage (same pattern as DocumentationEmbeddingService)
             vector_storage = await self._get_vector_storage(user_token)
@@ -1109,20 +1267,31 @@ class DatabricksKnowledgeService:
 
             # 4. Process each chunk
             embedded_chunks = 0
-            for i, chunk in enumerate(chunks):
+            filename = file_path.split('/')[-1]
+
+            for i, chunk_data in enumerate(chunks):
                 try:
-                    # Prepare metadata for this chunk
+                    # Extract chunk information
+                    chunk_content = chunk_data['content']  # Contextual content (for embedding)
+                    raw_content = chunk_data.get('raw_content', chunk_content)  # Raw content (for display)
+                    section = chunk_data.get('section', f'Section {i+1}')
+                    document_summary = chunk_data.get('document_summary', '')
+
+                    # Prepare enhanced metadata for this chunk
                     metadata = {
                         'source': file_path,
+                        'filename': filename,
                         'execution_id': execution_id,
                         'group_id': group_id,
                         'chunk_index': i,
                         'total_chunks': len(chunks),
+                        'section': section,  # NEW: Section information
+                        'parent_document_id': f"{group_id}:{execution_id}:{filename}",  # NEW: Parent document ID
+                        'document_summary': document_summary,  # NEW: Document summary for context
                         'file_path': file_path,
-                        'filename': file_path.split('/')[-1],
                         'created_at': datetime.utcnow().isoformat(),
-                        'type': 'knowledge_source',  # IMPORTANT: Sets document_type to "knowledge_source" for crew execution compatibility
-                        'content_type': 'knowledge_file'
+                        'type': 'knowledge_source',  # IMPORTANT: Sets document_type to "knowledge_source"
+                        'content_type': self._detect_content_type(filename)  # NEW: Detected content type
                     }
 
                     # Generate embedding for the chunk (vector storage will handle this)
@@ -1136,9 +1305,10 @@ class DatabricksKnowledgeService:
                     logger.info(f"[EMBEDDING]   - agent_ids: {agent_ids}")
                     logger.info(f"[EMBEDDING]   - agent_ids_json: {agent_ids_json}")
                     logger.info(f"[EMBEDDING]   - group_id: {group_id}")
+                    logger.info(f"[EMBEDDING]   - section: {section}")
 
                     data = {
-                        'content': chunk,
+                        'content': chunk_content,  # Contextual content with document summary
                         'agent_ids': agent_ids_json,  # JSON array of agent IDs for access control
                         'group_id': group_id,  # Top-level field for document schema
                         'metadata': metadata,
@@ -1491,7 +1661,31 @@ class DatabricksKnowledgeService:
                 logger.warning("  3. Documents not properly indexed")
                 logger.warning("  4. Vector index is empty or not accessible")
                 logger.warning("[SEARCH DEBUG] 💡 TIP: Remove execution_id filter from the tool call!")
-                return []
+                # Fallback: if execution_id filter is set, retry without it to search across all group documents
+                if execution_id:
+                    logger.info("[SEARCH DEBUG] Retrying search WITHOUT execution_id filter as fallback")
+                    try:
+                        filters_no_exec = {k: v for k, v in filters.items() if k != 'execution_id'}
+                        fallback_results = await asyncio.wait_for(
+                            index_repo.similarity_search(
+                                query_text=query,
+                                columns=search_columns,
+                                filters=filters_no_exec,
+                                num_results=limit
+                            ),
+                            timeout=5
+                        )
+                        logger.info(f"[SEARCH DEBUG] Fallback search returned {len(fallback_results) if fallback_results else 0} results")
+                        if not fallback_results:
+                            logger.warning("[SEARCH DEBUG] Fallback also returned no results")
+                            return []
+                        else:
+                            search_results = fallback_results
+                    except Exception as fb_err:
+                        logger.error(f"[SEARCH DEBUG] Fallback search failed: {fb_err}", exc_info=True)
+                        return []
+                else:
+                    return []
 
             # Get column positions for parsing results
             positions = DatabricksIndexSchemas.get_column_positions("document")

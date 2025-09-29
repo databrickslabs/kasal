@@ -692,9 +692,9 @@ class AgentTraceEventListener(BaseEventListener):
                     logger.info(f"{log_prefix} Crew Completed - Total Tokens: {extra_data.get('total_tokens', 'N/A')}, Execution Time: {extra_data.get('execution_time_seconds', 'N/A')} seconds")
                     # Also enqueue as a separate log for visibility
                     enqueue_log(
-                        self.job_id,
-                        f"📊 Crew Statistics: Total Tokens: {extra_data.get('total_tokens', 'N/A')}, Execution Time: {extra_data.get('execution_time_seconds', 'N/A')} seconds",
-                        "info"
+                        execution_id=self.job_id,
+                        content=f"📊 Crew Statistics: Total Tokens: {extra_data.get('total_tokens', 'N/A')}, Execution Time: {extra_data.get('execution_time_seconds', 'N/A')} seconds",
+                        group_context=self.group_context
                     )
                 
                 # Create trace for crew completion

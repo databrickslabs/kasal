@@ -302,23 +302,30 @@ def _configure_databricks_mlflow():
                     exp = mlflow.set_experiment(experiment_name)
                     logger.info(f"MLflow experiment set to: {experiment_name} (ID: {getattr(exp, 'experiment_id', 'unknown')})")
                     # Explicitly configure MLflow 3.x tracing destination and enable it
+                    tracing_ok = False
                     try:
                         from mlflow.tracing.destination import Databricks as _Dest
                         mlflow.tracing.set_destination(_Dest(experiment_id=str(getattr(exp, "experiment_id", ""))))
                         mlflow.tracing.enable()
                         logger.info("MLflow tracing destination set and tracing enabled")
+                        tracing_ok = True
                     except Exception as te:
                         logger.warning(f"Could not configure MLflow tracing destination: {te}")
+                        tracing_ok = False
                 except Exception as e:
                     logger.warning(f"Could not set MLflow experiment '{experiment_name}': {e}")
                     # Continue with default experiment
+                    tracing_ok = False
 
                 # Enable comprehensive MLflow autolog for both LiteLLM and CrewAI
                 # This dual approach ensures maximum coverage of LLM calls
 
                 # 1. Enable LiteLLM autolog (captures underlying LLM calls)
-                mlflow.litellm.autolog(log_traces=True)
-                logger.info("✅ MLflow LiteLLM autolog enabled (log_traces=True)")
+                try:
+                    mlflow.litellm.autolog(log_traces=tracing_ok)
+                    logger.info(f"✅ MLflow LiteLLM autolog enabled (log_traces={tracing_ok})")
+                except Exception as e:
+                    logger.warning(f"Failed to enable MLflow LiteLLM autolog: {e}")
 
                 # 2. Enable CrewAI autolog (captures CrewAI workflow structure)
                 try:
@@ -1031,8 +1038,9 @@ class LLMManager:
                         "input": [text] if isinstance(text, str) else text
                     }
                     
-                    async with aiohttp.ClientSession() as session:
-                        async with session.post(endpoint_url, headers=request_headers, json=payload) as response:
+                    timeout = aiohttp.ClientTimeout(total=float(os.getenv("EMBEDDING_HTTP_TIMEOUT_SECONDS", "30")))
+                    async with aiohttp.ClientSession(timeout=timeout) as session:
+                        async with session.post(endpoint_url, headers=request_headers, json=payload, timeout=timeout) as response:
                             if response.status == 200:
                                 result = await response.json()
                                 # Databricks embedding API returns embeddings in 'data' field
@@ -1063,7 +1071,8 @@ class LLMManager:
                 response = await litellm.aembedding(
                     model=embedding_model,
                     input=text,
-                    api_base=api_base
+                    api_base=api_base,
+                    timeout=float(os.getenv("EMBEDDING_TIMEOUT_SECONDS","60"))
                 )
                 
             elif provider == 'google':
@@ -1081,7 +1090,8 @@ class LLMManager:
                 response = await litellm.aembedding(
                     model=embedding_model,
                     input=text,
-                    api_key=api_key
+                    api_key=api_key,
+                    timeout=float(os.getenv("EMBEDDING_TIMEOUT_SECONDS","60"))
                 )
                 
             else:
@@ -1096,7 +1106,8 @@ class LLMManager:
                 response = await litellm.aembedding(
                     model=embedding_model,
                     input=text,
-                    api_key=api_key
+                    api_key=api_key,
+                    timeout=float(os.getenv("EMBEDDING_TIMEOUT_SECONDS","60"))
                 )
             
             # Extract the embedding vector

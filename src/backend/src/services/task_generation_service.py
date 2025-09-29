@@ -9,13 +9,11 @@ import logging
 import os
 from typing import Optional
 import re
-import json
 import traceback
 import litellm
 
 from typing import Any
 
-from src.schemas.model_provider import ModelProvider
 from src.schemas.task_generation import TaskGenerationRequest, TaskGenerationResponse
 from src.services.template_service import TemplateService
 from src.services.documentation_embedding_service import DocumentationEmbeddingService
@@ -128,7 +126,7 @@ class TaskGenerationService:
             # Format the documentation for context, emphasizing task patterns
             docs_context = "\n\n## Task Generation Best Practices and Examples\n\n"
 
-            for i, doc in enumerate(similar_docs):
+            for doc in similar_docs:
                 # Prioritize best practices and template documentation
                 if 'best_practices' in doc.source or 'task' in doc.title.lower():
                     docs_context = f"### {doc.title}\n\n{doc.content}\n\n" + docs_context
@@ -143,16 +141,18 @@ class TaskGenerationService:
             logger.error(traceback.format_exc())
             return ""
     
-    async def generate_task(self, request: TaskGenerationRequest, group_context: Optional[GroupContext] = None) -> TaskGenerationResponse:
+    async def generate_task(self, request: TaskGenerationRequest, group_context: Optional[GroupContext] = None, fast_planning: bool = True) -> TaskGenerationResponse:
         """
         Generate a task based on the provided prompt and context.
-        
+
         Args:
             request: Task generation request with prompt text, model, and agent context
-            
+            group_context: Optional group context for multi-tenant isolation
+            fast_planning: Whether to use fast planning mode (lower temperature and fewer tokens)
+
         Returns:
             TaskGenerationResponse with generated task details
-            
+
         Raises:
             ValueError: If required prompt template is not found
             Exception: For other errors
@@ -171,11 +171,9 @@ class TaskGenerationService:
         
         logger.info("Using prompt template for generate_task from database")
 
-        # Build agent context string if agent is provided
-        agent_context_str = None
+        # Include agent context inline in the system prompt if provided (no external retrieval)
         if request.agent:
             agent = request.agent
-            agent_context_str = f"Agent: {agent.name}, Role: {agent.role}, Goal: {agent.goal}"
             base_message += f"\n\nCreate a task specifically for an agent with the following profile:\n"
             base_message += f"Name: {agent.name}\n"
             base_message += f"Role: {agent.role}\n"
@@ -183,21 +181,13 @@ class TaskGenerationService:
             base_message += f"Backstory: {agent.backstory}\n"
             base_message += "\nEnsure the task aligns with this agent's expertise and goals."
 
-        # Get relevant documentation based on the task request
-        documentation_context = await self._get_relevant_documentation(request.text, agent_context_str)
+        # Documentation context disabled: skip vector search/embedding for task generation
+        # (No documentation context injected)
 
         # Prepare messages for LLM
         messages = [
             {"role": "system", "content": base_message}
         ]
-
-        # Add documentation context if available
-        if documentation_context:
-            messages.append({
-                "role": "system",
-                "content": "Here is relevant documentation about task creation best practices and examples:\n\n" + documentation_context
-            })
-            logger.info("Added relevant documentation to enhance task generation context")
 
         # Add the user's prompt
         messages.append({"role": "user", "content": request.text})
@@ -388,22 +378,9 @@ class TaskGenerationService:
             Dictionary containing the generation response (same format as agent generation)
         """
         # Generate the task using LLM (same as AgentGenerationService pattern)
-        generation_response = await self.generate_task(request, group_context)
+        generation_response = await self.generate_task(request, group_context, fast_planning)
         
-        # Log the interaction (same as AgentGenerationService pattern)
-        try:
-            await self._log_llm_interaction(
-                endpoint='generate-task',
-                prompt=f"User: {request.text}",
-                response=json.dumps(generation_response.model_dump()),
-                model=request.model or "databricks-llama-4-maverick",
-                group_context=group_context
-            )
-        except Exception as e:
-            # Just log the error, don't fail the request (same as AgentGenerationService)
-            logger.error(f"Failed to log interaction: {str(e)}")
-        
-        # Return the task config (same as AgentGenerationService pattern)
+        # Return the task config (logging already performed in generate_task)
         return generation_response.model_dump()
     
     def convert_to_task_create(self, generation_response: TaskGenerationResponse) -> TaskCreate:
