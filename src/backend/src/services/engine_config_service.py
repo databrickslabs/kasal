@@ -226,13 +226,13 @@ class EngineConfigService:
         Get the CrewAI debug tracing enabled status.
 
         Returns:
-            True if debug tracing is enabled, False otherwise (defaults to True if not found)
+            True if debug tracing is enabled, False otherwise (defaults to False if not found)
         """
         try:
             return await self.repository.get_crewai_debug_tracing()
         except Exception as e:
             logger.error(f"Error getting CrewAI debug tracing status: {str(e)}")
-            return True  # Default to enabled on error
+            return False  # Default to disabled on error
 
     async def set_crewai_debug_tracing(self, enabled: bool) -> bool:
         """

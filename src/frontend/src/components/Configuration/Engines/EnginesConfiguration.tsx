@@ -29,7 +29,7 @@ const EnginesConfiguration: React.FC = () => {
   const [error, setError] = useState<string | null>(null);
   const [syncing, setSyncing] = useState(false);
   const [debugSyncing, setDebugSyncing] = useState(false);
-  const [debugTracingEnabled, setDebugTracingEnabled] = useState<boolean>(true);
+  const [debugTracingEnabled, setDebugTracingEnabled] = useState<boolean>(false);
 
   // Load initial state from backend
   useEffect(() => {

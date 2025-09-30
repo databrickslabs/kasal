@@ -350,7 +350,7 @@ class AgentTraceEventListener(BaseEventListener):
         "llm_guardrail",
     }
 
-    def __init__(self, job_id: str, group_context=None, debug_tracing: bool = True, register_global_events=False):
+    def __init__(self, job_id: str, group_context=None, debug_tracing: bool = False, register_global_events=False):
         """Initialize the agent trace event listener.
         
         Args:
