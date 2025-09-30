@@ -1378,9 +1378,9 @@ class ProcessCrewExecutor:
 
         start_time = datetime.now()
 
-        # Use provided debug tracing flag or default to True
+        # Use provided debug tracing flag or default to False
         if debug_tracing_enabled is None:
-            debug_tracing_enabled = True
+            debug_tracing_enabled = False
             logger.info(f"Debug tracing flag not provided, using default: {debug_tracing_enabled}")
         else:
             logger.info(f"Using provided debug tracing flag: {debug_tracing_enabled}")
