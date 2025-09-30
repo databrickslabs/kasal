@@ -21,7 +21,7 @@ logger = logging.getLogger(__name__)
 
 class DatabricksAuth:
     """Enhanced Databricks authentication class supporting PAT and OAuth OBO."""
-    
+
     def __init__(self):
         self._api_token: Optional[str] = None
         self._workspace_host: Optional[str] = None
@@ -30,6 +30,11 @@ class DatabricksAuth:
         self._user_access_token: Optional[str] = None
         self._client_id: Optional[str] = None
         self._client_secret: Optional[str] = None
+        # Token expiration tracking
+        self._service_token: Optional[str] = None
+        self._service_token_fetched_at: Optional[float] = None
+        self._service_token_expires_in: int = 3600  # Default 1 hour
+        self._token_refresh_buffer: int = 300  # Refresh 5 minutes before expiration
 
     async def _load_config(self) -> bool:
         """Load configuration from services if not already loaded."""
@@ -181,6 +186,35 @@ class DatabricksAuth:
         self._user_access_token = user_token
         logger.info("User access token set for OBO authentication")
 
+    def _is_service_token_expired(self) -> bool:
+        """Check if the cached service principal token is expired or about to expire."""
+        if not self._service_token or not self._service_token_fetched_at:
+            return True
+
+        import time
+        elapsed = time.time() - self._service_token_fetched_at
+        # Consider token expired if it's within the refresh buffer of actual expiration
+        return elapsed >= (self._service_token_expires_in - self._token_refresh_buffer)
+
+    async def _refresh_service_token(self) -> Optional[str]:
+        """Refresh the service principal OAuth token."""
+        logger.info("Refreshing service principal OAuth token")
+        try:
+            # Get a new token using the service principal credentials
+            new_token = await self._get_service_principal_token()
+            if new_token:
+                self._service_token = new_token
+                import time
+                self._service_token_fetched_at = time.time()
+                logger.info("Service principal token refreshed successfully")
+                return new_token
+            else:
+                logger.error("Failed to refresh service principal token")
+                return None
+        except Exception as e:
+            logger.error(f"Error refreshing service principal token: {e}")
+            return None
+
     async def get_auth_headers(self, mcp_server_url: str = None, user_token: str = None) -> Tuple[Optional[Dict[str, str]], Optional[str]]:
         """
         Get authentication headers for Databricks API calls.
@@ -219,11 +253,15 @@ class DatabricksAuth:
                 logger.info("Using user access token for OBO authentication")
                 token = self._user_access_token
             else:
-                # Use service principal OAuth token
-                logger.info("Using service principal OAuth token")
-                token = await self._get_service_principal_token()
-                if not token:
-                    return None, "Failed to obtain service principal OAuth token"
+                # Check if cached service token is expired
+                if self._is_service_token_expired():
+                    logger.info("Service token expired or not cached, refreshing...")
+                    token = await self._refresh_service_token()
+                    if not token:
+                        return None, "Failed to obtain or refresh service principal OAuth token"
+                else:
+                    logger.info("Using cached service principal OAuth token")
+                    token = self._service_token
             
             # Create headers
             headers = {
@@ -282,7 +320,7 @@ class DatabricksAuth:
             if not self._client_id or not self._client_secret:
                 logger.error("Missing client credentials for service principal authentication")
                 return None
-            
+
             # Use Databricks SDK for OAuth token
             try:
                 # Create config with client credentials
@@ -291,22 +329,28 @@ class DatabricksAuth:
                     client_secret=self._client_secret,
                     host=self._workspace_host
                 )
-                
+
                 # Get access token through OAuth flow
                 auth_result = config.authenticate()
                 if hasattr(auth_result, 'access_token'):
-                    logger.info("Successfully obtained service principal OAuth token")
+                    import time
+                    self._service_token = auth_result.access_token
+                    self._service_token_fetched_at = time.time()
+                    # Try to get expires_in from response, default to 3600 (1 hour)
+                    if hasattr(auth_result, 'expires_in'):
+                        self._service_token_expires_in = auth_result.expires_in
+                    logger.info(f"Successfully obtained service principal OAuth token (expires in {self._service_token_expires_in}s)")
                     return auth_result.access_token
                 else:
                     logger.error("No access token in authentication result")
                     return None
-                    
+
             except Exception as sdk_error:
                 logger.error(f"SDK OAuth failed, trying manual approach: {sdk_error}")
-                
+
                 # Manual OAuth client credentials flow as fallback
                 return await self._manual_oauth_flow()
-                
+
         except Exception as e:
             logger.error(f"Error getting service principal token: {e}")
             return None
@@ -345,7 +389,12 @@ class DatabricksAuth:
                 token_data = response.json()
                 access_token = token_data.get('access_token')
                 if access_token:
-                    logger.info("Successfully obtained OAuth token via manual flow")
+                    import time
+                    self._service_token = access_token
+                    self._service_token_fetched_at = time.time()
+                    # Get expires_in from response, default to 3600 (1 hour)
+                    self._service_token_expires_in = token_data.get('expires_in', 3600)
+                    logger.info(f"Successfully obtained OAuth token via manual flow (expires in {self._service_token_expires_in}s)")
                     return access_token
                 else:
                     logger.error("No access token in OAuth response")
