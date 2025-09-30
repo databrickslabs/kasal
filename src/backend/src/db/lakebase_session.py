@@ -13,6 +13,7 @@ from databricks.sdk import WorkspaceClient
 
 from src.core.logger import LoggerManager
 from src.utils.databricks_auth import is_databricks_apps_environment, get_current_databricks_user
+from src.repositories.databricks_auth_helper import DatabricksAuthHelper
 
 logger_manager = LoggerManager.get_instance()
 logger = logging.getLogger(__name__)
@@ -37,18 +38,41 @@ class LakebaseSessionFactory:
         self._engine = None
         self._session_factory = None
 
-    @property
-    def workspace_client(self) -> WorkspaceClient:
-        """Get or create Databricks workspace client."""
-        if not self._workspace_client:
-            if self.user_token:
-                self._workspace_client = WorkspaceClient(
-                    host=os.getenv("DATABRICKS_HOST"),
-                    token=self.user_token
-                )
-            else:
-                self._workspace_client = WorkspaceClient()
-        return self._workspace_client
+    async def _get_workspace_client(self) -> WorkspaceClient:
+        """
+        Get or create Databricks workspace client with proper authentication hierarchy.
+
+        Authentication priority:
+        1. OBO (On-Behalf-Of) with user token
+        2. PAT from database (encrypted storage)
+        3. PAT from environment variables
+
+        Returns:
+            WorkspaceClient configured with appropriate authentication
+        """
+        if self._workspace_client:
+            return self._workspace_client
+
+        try:
+            # Get authentication token using the established hierarchy
+            auth_token = await DatabricksAuthHelper.get_auth_token(
+                workspace_url=os.getenv("DATABRICKS_HOST"),
+                user_token=self.user_token
+            )
+
+            # Create workspace client with explicit authentication
+            # This prevents SDK auto-detection from mixing OAuth and PAT
+            self._workspace_client = WorkspaceClient(
+                host=os.getenv("DATABRICKS_HOST"),
+                token=auth_token
+            )
+
+            logger.info("Successfully created workspace client with authenticated token")
+            return self._workspace_client
+
+        except Exception as e:
+            logger.error(f"Failed to create workspace client: {e}")
+            raise
 
 
     async def get_connection_string(self) -> str:
@@ -60,7 +84,7 @@ class LakebaseSessionFactory:
         """
         try:
             # Get instance details
-            w = self.workspace_client
+            w = await self._get_workspace_client()
             instance = w.database.get_database_instance(name=self.instance_name)
 
             # Check if instance is ready - handle both string and enum states

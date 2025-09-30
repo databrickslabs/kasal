@@ -8,6 +8,7 @@ from typing import Dict, List, Optional, Any, TYPE_CHECKING
 from concurrent.futures import ThreadPoolExecutor
 
 from src.core.logger import LoggerManager
+from src.utils.databricks_auth import get_workspace_client, get_databricks_auth_headers
 
 if TYPE_CHECKING:
     from databricks.sdk import WorkspaceClient
@@ -17,154 +18,44 @@ logger = LoggerManager.get_instance().system
 
 class DatabricksVolumeRepository:
     """Repository for Databricks Unity Catalog Volume operations using WorkspaceClient."""
-    
+
     def __init__(self, user_token: Optional[str] = None):
         """Initialize the repository with Databricks authentication.
-        
+
         Args:
             user_token: Optional user access token for OBO authentication
         """
         self._workspace_client: Optional["WorkspaceClient"] = None
-        self._workspace_url = None
         self._user_token = user_token
         self._executor = ThreadPoolExecutor(max_workers=1)
-        
+
         # Log what authentication method will be used
         if user_token:
             logger.info(f"DatabricksVolumeRepository: Initialized with user token (length: {len(user_token)})")
         else:
             logger.warning("DatabricksVolumeRepository: No user token provided, will use fallback authentication")
-    
+
     async def _ensure_client(self) -> bool:
-        """Ensure we have a WorkspaceClient instance."""
+        """Ensure we have a WorkspaceClient instance using centralized authentication."""
         if self._workspace_client:
             return True
-            
+
         try:
             logger.info(f"DatabricksVolumeRepository._ensure_client: Creating WorkspaceClient with user_token={bool(self._user_token)}")
-            
-            # Get workspace URL from environment or config
-            workspace_url = os.environ.get("DATABRICKS_HOST", "")
-            if not workspace_url:
-                # Try to get from Databricks config
-                from src.services.databricks_service import DatabricksService
-                from src.db.session import async_session_factory
-                try:
-                    async with async_session_factory() as session:
-                        service = DatabricksService(session)
-                        config = await service.get_databricks_config()
-                        if config and config.workspace_url:
-                            workspace_url = config.workspace_url
-                except Exception as e:
-                    logger.warning(f"Could not get workspace URL from config: {e}")
-            
-            if workspace_url:
-                if not workspace_url.startswith('https://'):
-                    workspace_url = f"https://{workspace_url}"
-                self._workspace_url = workspace_url.rstrip('/')
-            
-            # Create WorkspaceClient using the factory pattern
-            self._workspace_client = await self._create_workspace_client()
-            
+
+            # Use centralized authentication from databricks_auth module
+            self._workspace_client = await get_workspace_client(self._user_token)
+
             if self._workspace_client:
-                logger.info("Successfully created WorkspaceClient")
+                logger.info("Successfully created WorkspaceClient using centralized authentication")
                 return True
             else:
-                logger.error("Failed to create WorkspaceClient")
+                logger.error("Failed to create WorkspaceClient using centralized authentication")
                 return False
-                
+
         except Exception as e:
             logger.error(f"Error ensuring WorkspaceClient: {e}")
             return False
-    
-    async def _create_workspace_client(self) -> Optional["WorkspaceClient"]:
-        """Create a WorkspaceClient with proper authentication.
-        
-        Authentication priority:
-        1. OBO with user token (primary)
-        2. PAT from database
-        3. PAT from environment variables
-        4. Default SDK authentication chain
-        """
-        try:
-            from databricks.sdk import WorkspaceClient
-            
-            # Priority 1: OBO with user token (primary strategy)
-            if self._user_token:
-                try:
-                    logger.info("Creating WorkspaceClient with OBO authentication (user token)")
-                    # Use user's token for true OBO
-                    client = WorkspaceClient(
-                        host=self._workspace_url,
-                        token=self._user_token,
-                        auth_type="pat"
-                    )
-                    logger.info("Successfully created WorkspaceClient with OBO authentication")
-                    return client
-                except Exception as e:
-                    logger.warning(f"OBO authentication failed: {e}")
-            
-            # Priority 2: PAT from database
-            try:
-                from src.services.api_keys_service import ApiKeysService
-
-                pat_token = None
-                for key_name in ["DATABRICKS_TOKEN", "DATABRICKS_API_KEY"]:
-                    # Use the class method that handles session internally
-                    decrypted_token = await ApiKeysService.get_api_key_value(key_name=key_name)
-                    if decrypted_token:
-                        pat_token = decrypted_token
-                        logger.info(f"Found PAT token from database: {key_name}")
-                        break
-                
-                if pat_token:
-                    logger.info("Creating WorkspaceClient with PAT from database")
-                    client = WorkspaceClient(
-                        host=self._workspace_url,
-                        token=pat_token,
-                        auth_type="pat"
-                    )
-                    logger.info("Successfully created WorkspaceClient with PAT from database")
-                    return client
-                    
-            except Exception as e:
-                logger.warning(f"Database PAT authentication failed: {e}")
-            
-            # Priority 3: PAT from environment variables
-            try:
-                pat_token = os.getenv("DATABRICKS_TOKEN") or os.getenv("DATABRICKS_API_KEY")
-                
-                if pat_token:
-                    logger.info("Creating WorkspaceClient with PAT from environment")
-                    client = WorkspaceClient(
-                        host=self._workspace_url,
-                        token=pat_token,
-                        auth_type="pat"
-                    )
-                    logger.info("Successfully created WorkspaceClient with PAT from environment")
-                    return client
-                    
-            except Exception as e:
-                logger.warning(f"Environment PAT authentication failed: {e}")
-            
-            # Priority 4: Default authentication (will use SDK's auth chain)
-            try:
-                logger.info("Creating WorkspaceClient with default SDK authentication")
-                client = WorkspaceClient(
-                    host=self._workspace_url if self._workspace_url else None
-                )
-                logger.info("Successfully created WorkspaceClient with default authentication")
-                return client
-            except Exception as e:
-                logger.error(f"Default authentication failed: {e}")
-                return None
-                
-        except ImportError:
-            logger.error("databricks-sdk package not found. Please install it with: pip install databricks-sdk")
-            return None
-        except Exception as e:
-            logger.error(f"Failed to create WorkspaceClient: {e}")
-            return None
     
     async def create_volume_if_not_exists(
         self,
@@ -657,7 +548,7 @@ class DatabricksVolumeRepository:
                 "error": str(e)
             }
     
-    def get_databricks_url(
+    async def get_databricks_url(
         self,
         catalog: str,
         schema: str,
@@ -666,21 +557,26 @@ class DatabricksVolumeRepository:
     ) -> str:
         """
         Generate a Databricks workspace URL for viewing a volume or file.
-        
+
         Args:
             catalog: Unity Catalog name
             schema: Schema name
             volume_name: Volume name
             file_name: Optional file name
-            
+
         Returns:
             Databricks workspace URL
         """
-        if self._workspace_url:
-            base_url = self._workspace_url
-        else:
-            base_url = os.environ.get("DATABRICKS_HOST", "https://your-workspace.databricks.com").rstrip('/')
-        
+        # Import here to avoid circular dependency
+        from src.utils.databricks_auth import _databricks_auth
+
+        # Get workspace URL from centralized auth
+        workspace_url = await _databricks_auth.get_workspace_url()
+        if not workspace_url:
+            workspace_url = os.environ.get("DATABRICKS_HOST", "https://your-workspace.databricks.com").rstrip('/')
+
+        base_url = workspace_url.rstrip('/')
+
         if file_name:
             return f"{base_url}/explore/data/volumes/{catalog}/{schema}/{volume_name}/{file_name}"
         else:

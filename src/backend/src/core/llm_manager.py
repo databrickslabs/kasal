@@ -1022,7 +1022,7 @@ class LLMManager:
                     # Extract workspace URL from api_base (which contains /serving-endpoints)
                     workspace_url = DatabricksURLUtils.extract_workspace_from_endpoint(api_base)
                     endpoint_url = DatabricksURLUtils.construct_model_invocation_url(workspace_url, embedding_model)
-                    
+
                     # Use OAuth headers if available, otherwise fall back to API key
                     if headers:
                         request_headers = headers.copy()
@@ -1033,11 +1033,11 @@ class LLMManager:
                             "Authorization": f"Bearer {api_key}",
                             "Content-Type": "application/json"
                         }
-                    
+
                     payload = {
                         "input": [text] if isinstance(text, str) else text
                     }
-                    
+
                     timeout = aiohttp.ClientTimeout(total=float(os.getenv("EMBEDDING_HTTP_TIMEOUT_SECONDS", "30")))
                     async with aiohttp.ClientSession(timeout=timeout) as session:
                         async with session.post(endpoint_url, headers=request_headers, json=payload, timeout=timeout) as response:
@@ -1051,11 +1051,45 @@ class LLMManager:
                                 else:
                                     embedding_logger.warning("No embedding data found in Databricks response")
                                     return None
+                            elif response.status == 401:
+                                # Token expired, try to refresh and retry once
+                                embedding_logger.warning("Received 401 error, attempting to refresh token and retry")
+                                try:
+                                    # Refresh token and get new headers
+                                    headers_result, error = await get_databricks_auth_headers()
+                                    if headers_result and not error:
+                                        # Update request headers with refreshed token
+                                        if headers_result:
+                                            request_headers = headers_result.copy()
+                                            if "Content-Type" not in request_headers:
+                                                request_headers["Content-Type"] = "application/json"
+
+                                        # Retry the request with new token
+                                        async with session.post(endpoint_url, headers=request_headers, json=payload, timeout=timeout) as retry_response:
+                                            if retry_response.status == 200:
+                                                result = await retry_response.json()
+                                                if 'data' in result and len(result['data']) > 0:
+                                                    embedding = result['data'][0].get('embedding', result['data'][0])
+                                                    embedding_logger.info(f"Successfully created embedding after token refresh")
+                                                    return embedding
+                                                else:
+                                                    embedding_logger.warning("No embedding data found in Databricks response after retry")
+                                                    return None
+                                            else:
+                                                error_text = await retry_response.text()
+                                                embedding_logger.error(f"Databricks embedding API error after retry {retry_response.status}: {error_text}")
+                                                return None
+                                    else:
+                                        embedding_logger.error(f"Failed to refresh token: {error}")
+                                        return None
+                                except Exception as refresh_error:
+                                    embedding_logger.error(f"Error refreshing token: {refresh_error}")
+                                    return None
                             else:
                                 error_text = await response.text()
                                 embedding_logger.error(f"Databricks embedding API error {response.status}: {error_text}")
                                 return None
-                                
+
                 except Exception as e:
                     embedding_logger.error(f"Error calling Databricks embedding API directly: {str(e)}")
                     return None

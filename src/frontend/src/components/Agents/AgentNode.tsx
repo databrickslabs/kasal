@@ -6,8 +6,6 @@ import DeleteIcon from '@mui/icons-material/Delete';
 import EditIcon from '@mui/icons-material/Edit';
 import CodeIcon from '@mui/icons-material/Code';
 import MemoryIcon from '@mui/icons-material/Memory';
-import FileIcon from '@mui/icons-material/FileUpload';
-import AttachFileIcon from '@mui/icons-material/AttachFile';
 import { Agent } from '../../api/AgentService';
 import AgentForm from './AgentForm';
 import { ToolService } from '../../api/ToolService';
