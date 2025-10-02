@@ -63,17 +63,7 @@ export class TaskService {
       const taskWithAgent = task as TaskWithAssignedAgent;
       const assignedAgent = taskWithAgent.assigned_agent;
       
-      console.log('TaskService - Initial task data received:', {
-        name: task.name,
-        config: task.config,
-        markdown: task.markdown,
-        configMarkdown: task.config?.markdown,
-        tool_configs: task.tool_configs
-      });
-      console.log('TaskService - Initial output_pydantic value:', task.config?.output_pydantic);
-      if (task.tool_configs) {
-        console.log('TaskService - Creating task with tool_configs:', task.tool_configs);
-      }
+
       
       // Validate and format the task data
       const taskData = {
@@ -107,12 +97,7 @@ export class TaskService {
         }
       };
 
-      console.log('TaskService - Formatted task data:', {
-        name: taskData.name,
-        markdown: taskData.markdown,
-        config: JSON.stringify(taskData.config)
-      });
-      console.log('TaskService - Formatted output_pydantic value:', taskData.config.output_pydantic);
+
 
       // Add assigned_agent to the final taskData if it exists
       const finalTaskData: TaskWithAssignedAgent = assignedAgent ? { 
@@ -120,13 +105,7 @@ export class TaskService {
         assigned_agent: assignedAgent 
       } : taskData;
 
-      console.log('TaskService - Creating task with data:', {
-        name: finalTaskData.name,
-        agent_id: finalTaskData.agent_id,
-        assigned_agent: finalTaskData.assigned_agent,
-        tools: finalTaskData.tools,
-        config: JSON.stringify(finalTaskData.config)
-      });
+
 
       const response = await apiClient.post<Task>('/tasks', finalTaskData);
       
@@ -139,13 +118,7 @@ export class TaskService {
         responseData.agent_id = finalTaskData.agent_id;
       }
       
-      console.log('TaskService - Created task response:', {
-        id: responseData.id,
-        name: responseData.name,
-        agent_id: responseData.agent_id,
-        config: JSON.stringify(responseData.config)
-      });
-      console.log('TaskService - Response output_pydantic value:', responseData.config?.output_pydantic);
+
       
       return responseData;
     } catch (error) {
