@@ -1,4 +1,4 @@
-![Kasal Logo](src/docs/images/logo.png)
+![Kasal Logo](src/images/logo.png)
 
 # 🟦 Kasal Documentation Hub
 
