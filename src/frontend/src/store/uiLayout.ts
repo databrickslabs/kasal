@@ -68,7 +68,7 @@ export const useUILayoutStore = create<UILayoutStore>((set, get) => ({
   executionHistoryHeight: persistedState.executionHistoryHeight || 60,
   panelPosition: persistedState.panelPosition || 50,
   areFlowsVisible: persistedState.areFlowsVisible !== undefined ? persistedState.areFlowsVisible : true,
-  layoutOrientation: persistedState.layoutOrientation || 'vertical',
+  layoutOrientation: persistedState.layoutOrientation || 'horizontal',
 
   // Actions
   updateScreenDimensions: (width: number, height: number) =>
@@ -156,3 +156,8 @@ export const useUILayoutStore = create<UILayoutStore>((set, get) => ({
 export const useUILayoutState = (): UILayoutState => {
   return useUILayoutStore(state => state.getUILayoutState());
 };
+
+// Expose store on window for debugging
+if (typeof window !== 'undefined') {
+  (window as any).useUILayoutStore = useUILayoutStore;
+}

@@ -78,11 +78,15 @@ class DatabaseManagementService:
             timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
             
             if db_type == 'sqlite':
-                # Get database path for SQLite
+                # Get SQLite database path from settings, fallback to default
                 db_path = settings.SQLITE_DB_PATH
+                if not db_path:
+                    db_path = "./app.db"  # Default SQLite path
+
+                # Ensure absolute path
                 if not os.path.isabs(db_path):
                     db_path = os.path.abspath(db_path)
-                
+
                 if not os.path.exists(db_path):
                     return {
                         "success": False,
@@ -272,8 +276,12 @@ class DatabaseManagementService:
                 }
             
             if db_type == 'sqlite':
-                # Get current database path
+                # Get SQLite database path from settings, fallback to default
                 db_path = settings.SQLITE_DB_PATH
+                if not db_path:
+                    db_path = "./app.db"  # Default SQLite path
+
+                # Ensure absolute path
                 if not os.path.isabs(db_path):
                     db_path = os.path.abspath(db_path)
                 
@@ -397,62 +405,117 @@ class DatabaseManagementService:
     async def get_database_info(self, session: Optional[AsyncSession] = None) -> Dict[str, Any]:
         """
         Get information about the current database.
-        
+
         Args:
             session: Optional database session (for PostgreSQL)
-            
+
         Returns:
             Database information and statistics
         """
         try:
+            # Check if Lakebase is enabled
+            # IMPORTANT: Read config directly from database_router to avoid circular dependency
+            lakebase_enabled = False
+            lakebase_instance = None
+            lakebase_config = {}
+            try:
+                from src.db.database_router import get_lakebase_config_from_db
+
+                # Use database_router's function which properly handles fallback DB
+                lakebase_config = await get_lakebase_config_from_db()
+                if lakebase_config:
+                    lakebase_enabled = lakebase_config.get("enabled", False)
+                    lakebase_instance = lakebase_config.get("instance_name")
+            except Exception as e:
+                logger.warning(f"Could not check Lakebase status: {e}")
+
             db_type = DatabaseBackupRepository.get_database_type()
-            
-            if db_type == 'sqlite':
+
+            # Check Lakebase FIRST - if enabled, ignore underlying db_type
+            if lakebase_enabled:
+                # Use provided session or injected session for Lakebase
+                db_session = session if session else self.session
+
+                # Use repository to get database info from Lakebase
+                info_result = await self.repository.get_database_info(session=db_session)
+
+                if not info_result["success"]:
+                    return info_result
+
+                # Format result for Lakebase
+                result = {
+                    "success": True,
+                    "database_type": "lakebase",
+                    "tables": info_result.get("tables", {}),
+                    "total_tables": info_result.get("total_tables", 0),
+                    "memory_backends": info_result.get("memory_backends", []),
+                    "lakebase_enabled": True,
+                    "lakebase_instance": lakebase_instance
+                }
+
+                # Lakebase-specific information (no file path/size like SQLite)
+                lakebase_endpoint = lakebase_config.get("endpoint", "")
+                if lakebase_endpoint:
+                    result["lakebase_endpoint"] = lakebase_endpoint
+
+            elif db_type == 'sqlite':
+                # Get SQLite database path from settings, fallback to default
                 db_path = settings.SQLITE_DB_PATH
+                if not db_path:
+                    db_path = "./app.db"  # Default SQLite path
+
+                # Ensure absolute path
                 if not os.path.isabs(db_path):
                     db_path = os.path.abspath(db_path)
-                
+
                 # Use repository to get database info
                 info_result = await self.repository.get_database_info(db_path=db_path)
-                
+
+                if not info_result["success"]:
+                    return info_result
+
+                result = {
+                    "success": True,
+                    "database_type": "sqlite",
+                    "tables": info_result.get("tables", {}),
+                    "total_tables": info_result.get("total_tables", 0),
+                    "memory_backends": info_result.get("memory_backends", [])
+                }
+
+                # Add SQLite-specific information
+                if 'size' in info_result:
+                    result["size_mb"] = round(info_result["size"] / (1024 * 1024), 2)
+                if 'created_at' in info_result:
+                    result["created_at"] = info_result["created_at"].isoformat()
+                if 'modified_at' in info_result:
+                    result["modified_at"] = info_result["modified_at"].isoformat()
+                if 'path' in info_result:
+                    result["database_path"] = info_result["path"]
+
             elif db_type == 'postgres':
                 # Use provided session or injected session for PostgreSQL
                 db_session = session if session else self.session
 
                 # Use repository to get database info
                 info_result = await self.repository.get_database_info(session=db_session)
+
+                if not info_result["success"]:
+                    return info_result
+
+                result = {
+                    "success": True,
+                    "database_type": "postgres",
+                    "tables": info_result.get("tables", {}),
+                    "total_tables": info_result.get("total_tables", 0),
+                    "memory_backends": info_result.get("memory_backends", [])
+                }
+
             else:
                 return {
                     "success": False,
                     "error": f"Unsupported database type: {db_type}"
                 }
-            
-            if not info_result["success"]:
-                return info_result
-            
-            # Format the result for the API
-            result = {
-                "success": True,
-                "database_type": db_type,
-                "tables": info_result.get("tables", {}),
-                "total_tables": info_result.get("total_tables", 0),
-                "memory_backends": info_result.get("memory_backends", [])
-            }
-            
-            # Add size information
-            if 'size' in info_result:
-                result["size_mb"] = round(info_result["size"] / (1024 * 1024), 2)
-            
-            # Add timestamps for SQLite
-            if 'created_at' in info_result:
-                result["created_at"] = info_result["created_at"].isoformat()
-            if 'modified_at' in info_result:
-                result["modified_at"] = info_result["modified_at"].isoformat()
-            
-            # Add path for SQLite
-            if 'path' in info_result:
-                result["database_path"] = info_result["path"]
-            
+
             return result
             
         except Exception as e:

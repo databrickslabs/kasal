@@ -56,12 +56,12 @@ class DatabricksAuth:
                 try:
                     # Get databricks configuration from database
                     from src.services.databricks_service import DatabricksService
-                    from src.db.session import get_db
+                    from src.db.session import async_session_factory
 
-                    # Get a session directly
-                    async for session in get_db():
+                    # Use async context manager properly to ensure session cleanup
+                    async with async_session_factory() as session:
                         service = DatabricksService(session)
-                        
+
                         # Get workspace config
                         try:
                             config = await service.get_databricks_config()
@@ -71,16 +71,15 @@ class DatabricksAuth:
                                     if not self._workspace_host.startswith('https://'):
                                         self._workspace_host = f"https://{self._workspace_host}"
                                     logger.info(f"Loaded workspace host from database: {self._workspace_host}")
-                                
+
                                 # Check if Databricks Apps is enabled in config
                                 if hasattr(config, 'apps_enabled') and config.apps_enabled and not self._use_databricks_apps:
                                     self._use_databricks_apps = True
                                     logger.info("Databricks Apps authentication enabled via database config")
-                            
+
                         except Exception as e:
                             logger.warning(f"Failed to get databricks config from database: {e}")
-                        break  # Exit the async generator after first iteration
-                            
+
                 except Exception as e:
                     logger.warning(f"Could not load database configuration: {e}")
             
@@ -369,7 +368,7 @@ class DatabricksAuth:
             auth = (self._client_id, self._client_secret)
             data = {
                 'grant_type': 'client_credentials',
-                'scope': 'all-apis'
+                'scope': 'all-apis sql'
             }
             
             headers = {
@@ -630,13 +629,24 @@ def is_databricks_apps_environment() -> bool:
     return has_oauth_creds or has_app_vars
 
 
-async def get_workspace_client(user_token: str = None) -> Optional[WorkspaceClient]:
+async def get_workspace_client(user_token: str = None, service: str = None) -> Optional[WorkspaceClient]:
     """
     Get a Databricks WorkspaceClient with appropriate authentication.
-    
+
+    Default Priority:
+    1. User token (OBO) if provided
+    2. PAT token
+    3. Service principal OAuth (Databricks Apps)
+
+    Lakebase Priority (service="lakebase"):
+    1. User token (OBO) if provided
+    2. Service principal OAuth (Databricks Apps)
+    3. PAT token
+
     Args:
         user_token: Optional user access token for OBO authentication
-        
+        service: Optional service name to customize auth priority (e.g., "lakebase")
+
     Returns:
         Optional[WorkspaceClient]: Configured workspace client
     """
@@ -644,28 +654,56 @@ async def get_workspace_client(user_token: str = None) -> Optional[WorkspaceClie
         if not await _databricks_auth._load_config():
             logger.error("Failed to load Databricks configuration")
             return None
-        
-        if _databricks_auth._use_databricks_apps:
-            if user_token:
-                # Use user token for OBO
-                return WorkspaceClient(
-                    host=_databricks_auth._workspace_host,
-                    token=user_token
-                )
-            else:
-                # Use service principal OAuth
+
+        # Priority 1: Use user token if provided (OBO) - always first
+        if user_token:
+            logger.info("Creating WorkspaceClient with OBO user token")
+            return WorkspaceClient(
+                host=_databricks_auth._workspace_host,
+                token=user_token
+            )
+
+        # Service-specific priority handling
+        if service == "lakebase":
+            # For Lakebase: Prefer service principal OAuth over PAT
+            # Priority 2: Service principal OAuth (Databricks Apps)
+            if _databricks_auth._client_id and _databricks_auth._client_secret:
+                logger.info("Creating WorkspaceClient with service principal OAuth for Lakebase")
                 return WorkspaceClient(
                     host=_databricks_auth._workspace_host,
                     client_id=_databricks_auth._client_id,
                     client_secret=_databricks_auth._client_secret
                 )
+
+            # Priority 3: PAT token as fallback
+            if _databricks_auth._api_token:
+                logger.info("Creating WorkspaceClient with PAT token for Lakebase")
+                return WorkspaceClient(
+                    host=_databricks_auth._workspace_host,
+                    token=_databricks_auth._api_token
+                )
         else:
-            # Use traditional PAT
-            return WorkspaceClient(
-                host=_databricks_auth._workspace_host,
-                token=_databricks_auth._api_token
-            )
-            
+            # Default behavior for other services
+            # Priority 2: Use PAT token
+            if _databricks_auth._api_token:
+                logger.info("Creating WorkspaceClient with PAT token")
+                return WorkspaceClient(
+                    host=_databricks_auth._workspace_host,
+                    token=_databricks_auth._api_token
+                )
+
+            # Priority 3: Use service principal OAuth (Databricks Apps)
+            if _databricks_auth._client_id and _databricks_auth._client_secret:
+                logger.info("Creating WorkspaceClient with service principal OAuth")
+                return WorkspaceClient(
+                    host=_databricks_auth._workspace_host,
+                    client_id=_databricks_auth._client_id,
+                    client_secret=_databricks_auth._client_secret
+                )
+
+        logger.error("No authentication method available for WorkspaceClient")
+        return None
+
     except Exception as e:
         logger.error(f"Error creating workspace client: {e}")
         return None

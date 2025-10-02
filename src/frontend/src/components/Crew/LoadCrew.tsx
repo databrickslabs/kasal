@@ -21,6 +21,8 @@ import { AgentService } from '../../api/AgentService';
 import { TaskService } from '../../api/TaskService';
 import { AgentYaml, TaskYaml } from '../../types/crew';
 import { createEdge, edgeExists } from '../../utils/edgeUtils';
+import { CanvasLayoutManager } from '../../utils/CanvasLayoutManager';
+import { useUILayoutStore } from '../../store/uiLayout';
 
 // Style for JSON formatting
 const jsonStyles = {
@@ -44,279 +46,32 @@ interface LoadCrewProps {
 }
 
 /**
- * Organizes node positions in a clean layout with agents on the left and tasks on the right
+ * Organizes node positions using the centralized CanvasLayoutManager
+ * This ensures consistent layout behavior across all components
  */
 const organizeNodesPositions = (nodes: Node[], edges: Edge[]): Node[] => {
-  // Canvas dimensions for positioning
-  const _canvasWidth = 1200;
-  const canvasHeight = 1000; // Increased height for more vertical space
-  
-  // Separate agents and tasks
-  const agentNodes = nodes.filter(node => node.type === 'agentNode');
-  const taskNodes = nodes.filter(node => node.type === 'taskNode');
-  
-  // Fixed positioning for better alignment
-  const leftSideWidth = 250; // Fixed position for agents (left side)
-  const columnPositions = [550, 850, 1150]; // Fixed positions for task columns
-  
-  // Spacing between nodes - ensure adequate vertical spacing
-  const agentYSpacing = Math.min(180, (canvasHeight - 200) / Math.max(1, agentNodes.length));
-  
-  // Position agent nodes on the left side with equal spacing
-  agentNodes.forEach((node, index) => {
-    const yPosition = 150 + (index * agentYSpacing);
-    node.position = {
-      x: leftSideWidth,
-      y: yPosition
-    };
+  // Use the centralized CanvasLayoutManager for consistent layout
+  const layoutManager = new CanvasLayoutManager({ margin: 20, minNodeSpacing: 50 });
+
+  // Get current UI state
+  const currentUIState = useUILayoutStore.getState().getUILayoutState();
+
+  // Update screen dimensions to current window size
+  currentUIState.screenWidth = window.innerWidth;
+  currentUIState.screenHeight = window.innerHeight;
+
+  layoutManager.updateUIState(currentUIState);
+
+  // Use the reorganizeNodes method which respects layout orientation
+  const organizedNodes = layoutManager.reorganizeNodes(nodes, 'crew', edges);
+
+  console.log('📐 LoadCrew: Organized nodes using CanvasLayoutManager', {
+    layoutOrientation: currentUIState.layoutOrientation,
+    nodeCount: organizedNodes.length,
+    edgeCount: edges.length
   });
-  
-  // Create a map of tasks connected to each agent
-  const agentTaskMap: Record<string, string[]> = {};
-  
-  // Initialize the map
-  agentNodes.forEach(node => {
-    agentTaskMap[node.id] = [];
-  });
-  
-  // Find agent-to-task connections
-  edges.forEach(edge => {
-    if (edge.source.startsWith('agent-') && edge.target.startsWith('task-')) {
-      if (!agentTaskMap[edge.source]) {
-        agentTaskMap[edge.source] = [];
-      }
-      agentTaskMap[edge.source].push(edge.target);
-    }
-  });
-  
-  // Find task-to-task dependencies
-  const taskIncomingDeps: Record<string, string[]> = {};
-  const taskOutgoingDeps: Record<string, string[]> = {};
-  
-  // Initialize task dependency maps
-  taskNodes.forEach(node => {
-    taskIncomingDeps[node.id] = [];
-    taskOutgoingDeps[node.id] = [];
-  });
-  
-  // Populate dependency maps
-  edges.forEach(edge => {
-    if (edge.source.startsWith('task-') && edge.target.startsWith('task-')) {
-      if (!taskOutgoingDeps[edge.source]) {
-        taskOutgoingDeps[edge.source] = [];
-      }
-      taskOutgoingDeps[edge.source].push(edge.target);
-      
-      if (!taskIncomingDeps[edge.target]) {
-        taskIncomingDeps[edge.target] = [];
-      }
-      taskIncomingDeps[edge.target].push(edge.source);
-    }
-  });
-  
-  // Find root tasks (tasks with no incoming dependencies)
-  const rootTasks = taskNodes.filter(node => taskIncomingDeps[node.id].length === 0);
-  
-  // Function to organize tasks in a topological sort
-  const organizeTasksByDependencies = () => {
-    // Create layers for tasks based on dependency depth
-    const taskLayers: Record<string, number> = {};
-    
-    // Initialize with root tasks at layer 0
-    rootTasks.forEach(node => {
-      taskLayers[node.id] = 0;
-    });
-    
-    // Assign layers to other tasks
-    let changed = true;
-    while (changed) {
-      changed = false;
-      
-      taskNodes.forEach(node => {
-        // Skip if already assigned
-        if (taskLayers[node.id] !== undefined) return;
-        
-        // Check if all incoming dependencies have a layer assigned
-        const allDepsAssigned = taskIncomingDeps[node.id].every(depId => 
-          taskLayers[depId] !== undefined
-        );
-        
-        if (allDepsAssigned && taskIncomingDeps[node.id].length > 0) {
-          // Find the max layer of dependencies
-          const maxDepLayer = Math.max(
-            ...taskIncomingDeps[node.id].map(depId => taskLayers[depId])
-          );
-          
-          // Assign this task to the next layer
-          taskLayers[node.id] = maxDepLayer + 1;
-          changed = true;
-        }
-      });
-    }
-    
-    // For any tasks not assigned (might be in a cycle), assign layer 0
-    taskNodes.forEach(node => {
-      if (taskLayers[node.id] === undefined) {
-        taskLayers[node.id] = 0;
-      }
-    });
-    
-    return taskLayers;
-  };
-  
-  const taskLayers = organizeTasksByDependencies();
-  
-  // Get the maximum layer
-  const maxLayer = Math.max(...Object.values(taskLayers), 0);
-  
-  // Ensure we have enough column positions
-  while (columnPositions.length <= maxLayer) {
-    // Add more column positions if needed
-    const lastPosition = columnPositions[columnPositions.length - 1];
-    columnPositions.push(lastPosition + 300);
-  }
-  
-  // Count tasks per layer for better spacing calculations
-  const tasksPerLayer: Record<number, number> = {};
-  for (let i = 0; i <= maxLayer; i++) {
-    tasksPerLayer[i] = 0;
-  }
-  
-  // Count tasks in each layer
-  Object.values(taskLayers).forEach(layer => {
-    tasksPerLayer[layer] = (tasksPerLayer[layer] || 0) + 1;
-  });
-  
-  // Calculate optimal vertical spacing for each layer
-  const layerSpacings: Record<number, number> = {};
-  for (let i = 0; i <= maxLayer; i++) {
-    // Use more space for layers with more tasks
-    const count = tasksPerLayer[i];
-    if (count <= 1) {
-      layerSpacings[i] = 100; // Single task in layer
-    } else {
-      // Distribute tasks evenly in the available height
-      // Ensure minimum spacing of 120px between tasks
-      layerSpacings[i] = Math.max(120, (canvasHeight - 300) / (count - 1));
-    }
-  }
-  
-  // Position tasks by layer with improved spacing
-  const taskPositions: Record<string, { x: number, y: number }> = {};
-  
-  // First, assign initial positions by layer
-  for (let layer = 0; layer <= maxLayer; layer++) {
-    const tasksInLayer = Object.entries(taskLayers)
-      .filter(([, l]) => l === layer)
-      .map(([id]) => id);
-    
-    const layerX = columnPositions[layer]; // Use fixed position from column positions array
-    const spacing = layerSpacings[layer];
-    
-    // Position tasks in this layer with proper spacing
-    tasksInLayer.forEach((taskId, index) => {
-      const centerOffset = ((tasksInLayer.length - 1) * spacing) / 2;
-      const yPos = (canvasHeight / 2) - centerOffset + (index * spacing);
-      
-      taskPositions[taskId] = {
-        x: layerX,
-        y: yPos
-      };
-    });
-  }
-  
-  // Special handling for tasks connected to agents - always in first column
-  Object.entries(agentTaskMap).forEach(([agentId, taskIds]) => {
-    if (taskIds.length === 0) return;
-    
-    const agentNode = agentNodes.find(node => node.id === agentId);
-    if (!agentNode) return;
-    
-    // Get the agent's y position
-    const agentY = agentNode.position.y;
-    
-    // Find root tasks connected to this agent
-    const rootTasksForAgent = taskIds.filter(taskId => taskLayers[taskId] === 0);
-    if (rootTasksForAgent.length === 0) return;
-    
-    // Calculate total height needed
-    const totalHeight = (rootTasksForAgent.length - 1) * 120;
-    
-    // Position tasks vertically centered around the agent's y position
-    rootTasksForAgent.forEach((taskId, index) => {
-      const startY = agentY - (totalHeight / 2);
-      
-      // Update the position in our taskPositions map
-      taskPositions[taskId] = {
-        x: columnPositions[0], // Always use first column position
-        y: startY + (index * 120)
-      };
-    });
-  });
-  
-  // Apply positions to task nodes
-  taskNodes.forEach(node => {
-    if (taskPositions[node.id]) {
-      node.position = taskPositions[node.id];
-    }
-  });
-  
-  // Final adjustment for overlapping nodes
-  const resolveOverlaps = () => {
-    const nodeSize = { width: 180, height: 100 }; // Approximate node dimensions
-    const minDistanceX = nodeSize.width + 20;
-    const minDistanceY = nodeSize.height + 20;
-    let iterations = 0;
-    let hasOverlap = true;
-    
-    // Maximum 10 iterations to prevent infinite loops
-    while (hasOverlap && iterations < 10) {
-      hasOverlap = false;
-      iterations++;
-      
-      // Check each pair of task nodes for overlap
-      for (let i = 0; i < taskNodes.length; i++) {
-        for (let j = i + 1; j < taskNodes.length; j++) {
-          const nodeA = taskNodes[i];
-          const nodeB = taskNodes[j];
-          
-          // Skip if nodes aren't in the same column (not likely to overlap)
-          if (Math.abs(nodeA.position.x - nodeB.position.x) > minDistanceX) continue;
-          
-          // Check vertical distance
-          const verticalDistance = Math.abs(nodeA.position.y - nodeB.position.y);
-          
-          if (verticalDistance < minDistanceY) {
-            hasOverlap = true;
-            
-            // Calculate adjustment needed (half for each node plus extra spacing)
-            const adjustment = ((minDistanceY - verticalDistance) / 2) + 10;
-            
-            // Move nodes apart vertically
-            if (nodeA.position.y < nodeB.position.y) {
-              nodeA.position.y -= adjustment;
-              nodeB.position.y += adjustment;
-            } else {
-              nodeA.position.y += adjustment;
-              nodeB.position.y -= adjustment;
-            }
-          }
-        }
-      }
-    }
-    
-    // Final sanity check - ensure no node is positioned off canvas
-    taskNodes.forEach(node => {
-      // Ensure node is within canvas boundaries
-      node.position.y = Math.max(50, Math.min(canvasHeight - 50, node.position.y));
-    });
-  };
-  
-  // Run the overlap resolution
-  resolveOverlaps();
-  
-  // Return all nodes with updated positions
-  return [...agentNodes, ...taskNodes];
+
+  return organizedNodes;
 };
 
 /**
@@ -617,7 +372,8 @@ const LoadCrew: React.FC<LoadCrewProps> = ({ open, onClose, onCrewLoad, inputs, 
               };
 
               if (!edgeExists(edges, connection)) {
-                edges.push(createEdge(connection, 'animated', true, { stroke: '#9c27b0' }));
+                // Agent-to-task edge: solid blue line, not animated
+                edges.push(createEdge(connection, 'default', false, {}));
               }
             }
           }
@@ -649,7 +405,8 @@ const LoadCrew: React.FC<LoadCrewProps> = ({ open, onClose, onCrewLoad, inputs, 
               };
 
               if (!edgeExists(edges, connection)) {
-                edges.push(createEdge(connection, 'animated', true, { stroke: '#9c27b0' }));
+                // Task-to-task edge: dashed blue line, animated
+                edges.push(createEdge(connection, 'default', true, {}));
               }
               
               console.log(`Created dependency edge from ${dependencyName} to ${taskName}`);

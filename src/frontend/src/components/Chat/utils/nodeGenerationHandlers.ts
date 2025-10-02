@@ -6,6 +6,7 @@ import { Task } from '../../../types/task';
 import { GeneratedAgent, GeneratedTask, GeneratedCrew, ChatMessage } from '../types';
 import { CanvasLayoutManager } from '../../../utils/CanvasLayoutManager';
 import { useWorkflowStore } from '../../../store/workflow';
+import { useUILayoutStore } from '../../../store/uiLayout';
 import { ConfigureCrewResult } from '../../../api/DispatcherService';
 
 export const createAgentGenerationHandler = (
@@ -55,7 +56,20 @@ export const createAgentGenerationHandler = (
       
       if (savedAgent) {
         setNodes((nodes) => {
-          const position = layoutManagerRef?.current.getAgentNodePosition(nodes, 'crew') || { x: 100, y: 100 };
+          // Get fresh nodes from the store to ensure we have the latest state
+          const currentNodes = useWorkflowStore.getState().nodes;
+
+          console.log('[Agent Generation] Current nodes from store:', {
+            storeNodes: currentNodes.length,
+            paramNodes: nodes.length,
+            storeAgents: currentNodes.filter(n => n.type === 'agentNode').length,
+            storeTasks: currentNodes.filter(n => n.type === 'taskNode').length
+          });
+
+          const position = layoutManagerRef?.current.getAgentNodePosition(currentNodes, 'crew') || { x: 100, y: 100 };
+
+          console.log('[Agent Generation] Calculated position:', position);
+
           const newNode: Node = {
             id: `agent-${savedAgent.id}`,
             type: 'agentNode',
@@ -72,15 +86,15 @@ export const createAgentGenerationHandler = (
             },
           };
 
-          const updated = [...nodes, newNode];
+          const updated = [...currentNodes, newNode];
           setTimeout(() => {
             window.dispatchEvent(new Event('fitViewToNodesInternal'));
           }, 100);
-          
+
           if (onNodesGenerated) {
             onNodesGenerated([newNode], []);
           }
-          
+
           return updated;
         });
         
@@ -127,7 +141,18 @@ export const createAgentGenerationHandler = (
       
       // Still create the node even if saving failed
       setNodes((nodes) => {
-        const position = layoutManagerRef?.current.getAgentNodePosition(nodes, 'crew') || { x: 100, y: 100 };
+        // Get fresh nodes from the store to ensure we have the latest state
+        const currentNodes = useWorkflowStore.getState().nodes;
+
+        console.log('[Agent Generation - Error Case] Current nodes from store:', {
+          storeNodes: currentNodes.length,
+          paramNodes: nodes.length
+        });
+
+        const position = layoutManagerRef?.current.getAgentNodePosition(currentNodes, 'crew') || { x: 100, y: 100 };
+
+        console.log('[Agent Generation - Error Case] Calculated position:', position);
+
         const newNode: Node = {
           id: `agent-${Date.now()}`,
           type: 'agentNode',
@@ -143,15 +168,15 @@ export const createAgentGenerationHandler = (
           },
         };
 
-        const updated = [...nodes, newNode];
+        const updated = [...currentNodes, newNode];
         setTimeout(() => {
           window.dispatchEvent(new Event('fitViewToNodesInternal'));
         }, 100);
-        
+
         if (onNodesGenerated) {
           onNodesGenerated([newNode], []);
         }
-        
+
         return updated;
       });
     }
@@ -236,7 +261,20 @@ export const createTaskGenerationHandler = (
       
       if (savedTask) {
         setNodes((nodes) => {
-          const position = layoutManagerRef?.current.getTaskNodePosition(nodes, 'crew') || { x: 400, y: 100 };
+          // Get fresh nodes from the store to ensure we have the latest state
+          const currentNodes = useWorkflowStore.getState().nodes;
+
+          console.log('[Task Generation] Current nodes from store:', {
+            storeNodes: currentNodes.length,
+            paramNodes: nodes.length,
+            storeAgents: currentNodes.filter(n => n.type === 'agentNode').length,
+            storeTasks: currentNodes.filter(n => n.type === 'taskNode').length
+          });
+
+          const position = layoutManagerRef?.current.getTaskNodePosition(currentNodes, 'crew') || { x: 400, y: 100 };
+
+          console.log('[Task Generation] Calculated position:', position);
+
           const newNode: Node = {
             id: `task-${savedTask.id}`,
             type: 'taskNode',
@@ -253,15 +291,15 @@ export const createTaskGenerationHandler = (
             },
           };
 
-          const updated = [...nodes, newNode];
+          const updated = [...currentNodes, newNode];
           setTimeout(() => {
             window.dispatchEvent(new Event('fitViewToNodesInternal'));
           }, 100);
-          
+
           if (onNodesGenerated) {
             onNodesGenerated([newNode], []);
           }
-          
+
           return updated;
         });
         
@@ -269,14 +307,34 @@ export const createTaskGenerationHandler = (
           setEdges((edges) => {
             const agentNodeId = `agent-${assignedAgentId}`;
             const taskNodeId = `task-${savedTask.id}`;
+
+            // Get current layout orientation
+            const { layoutOrientation } = useUILayoutStore.getState();
+            const sourceHandle = layoutOrientation === 'vertical' ? 'bottom' : 'right';
+            const targetHandle = layoutOrientation === 'vertical' ? 'top' : 'left';
+
+            console.log('🔧 Creating agent-to-task edge:', {
+              layoutOrientation,
+              sourceHandle,
+              targetHandle,
+              source: agentNodeId,
+              target: taskNodeId
+            });
+
+            // Create edge with proper styling
             const newEdge: Edge = {
               id: `edge-${agentNodeId}-${taskNodeId}`,
               source: agentNodeId,
               target: taskNodeId,
               type: 'default',
-              animated: true,
-              sourceHandle: 'right',
-              targetHandle: 'left',
+              animated: false,
+              sourceHandle,
+              targetHandle,
+              style: {
+                stroke: '#2196f3',
+                strokeWidth: 2,
+                // No strokeDasharray = solid line
+              }
             };
             return [...edges, newEdge];
           });
@@ -325,7 +383,18 @@ export const createTaskGenerationHandler = (
       
       // Still create the node even if saving failed
       setNodes((nodes) => {
-        const position = layoutManagerRef?.current.getTaskNodePosition(nodes, 'crew') || { x: 400, y: 100 };
+        // Get fresh nodes from the store to ensure we have the latest state
+        const currentNodes = useWorkflowStore.getState().nodes;
+
+        console.log('[Task Generation - Error Case] Current nodes from store:', {
+          storeNodes: currentNodes.length,
+          paramNodes: nodes.length
+        });
+
+        const position = layoutManagerRef?.current.getTaskNodePosition(currentNodes, 'crew') || { x: 400, y: 100 };
+
+        console.log('[Task Generation - Error Case] Calculated position:', position);
+
         const newNode: Node = {
           id: `task-${Date.now()}`,
           type: 'taskNode',
@@ -341,15 +410,15 @@ export const createTaskGenerationHandler = (
           },
         };
 
-        const updated = [...nodes, newNode];
+        const updated = [...currentNodes, newNode];
         setTimeout(() => {
           window.dispatchEvent(new Event('fitViewToNodesInternal'));
         }, 100);
-        
+
         if (onNodesGenerated) {
           onNodesGenerated([newNode], []);
         }
-        
+
         return updated;
       });
     }
@@ -427,14 +496,27 @@ export const createCrewGenerationHandler = (
         if (task.agent_id) {
           const agentNodeId = agentIdMap.get(task.agent_id.toString());
           if (agentNodeId) {
+            // Get current layout orientation
+            const { layoutOrientation } = useUILayoutStore.getState();
+            const sourceHandle = layoutOrientation === 'vertical' ? 'bottom' : 'right';
+            const targetHandle = layoutOrientation === 'vertical' ? 'top' : 'left';
+
+            console.log('🔧 Creating agent-to-task edge (crew generation):', {
+              layoutOrientation,
+              sourceHandle,
+              targetHandle,
+              source: agentNodeId,
+              target: taskNodeId
+            });
+
             edges.push({
               id: `edge-${agentNodeId}-${taskNodeId}`,
               source: agentNodeId,
               target: taskNodeId,
               type: 'default',
-              animated: true,
-              sourceHandle: 'right',
-              targetHandle: 'left',
+              animated: false,
+              sourceHandle,
+              targetHandle,
             });
           }
         }
@@ -447,6 +529,8 @@ export const createCrewGenerationHandler = (
                 id: `edge-${sourceTaskId}-${taskNodeId}`,
                 source: sourceTaskId,
                 target: taskNodeId,
+                sourceHandle: 'right',
+                targetHandle: 'left',
                 type: 'default',
                 animated: true,
                 style: { stroke: '#ff9800' },
