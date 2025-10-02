@@ -13,6 +13,8 @@ interface WorkflowPanelsProps {
   isDarkMode: boolean;
   nodes: Node[];
   edges: Edge[];
+  setNodes: (nodes: Node[] | ((nodes: Node[]) => Node[])) => void;
+  setEdges: (edges: Edge[] | ((edges: Edge[]) => Edge[])) => void;
   onNodesChange: (changes: NodeChange[]) => void;
   onEdgesChange: (changes: EdgeChange[]) => void;
   onConnect: (connection: Connection) => void;
@@ -52,6 +54,8 @@ const WorkflowPanels: React.FC<WorkflowPanelsProps> = ({
   isDarkMode,
   nodes,
   edges,
+  setNodes,
+  setEdges,
   onNodesChange,
   onEdgesChange,
   onConnect,
@@ -108,6 +112,8 @@ const WorkflowPanels: React.FC<WorkflowPanelsProps> = ({
           <CrewCanvas
             nodes={nodes}
             edges={edges}
+            setNodes={setNodes}
+            setEdges={setEdges}
             onNodesChange={onNodesChange}
             onEdgesChange={onEdgesChange}
             onConnect={onConnect}
@@ -221,6 +227,8 @@ const WorkflowPanels: React.FC<WorkflowPanelsProps> = ({
         <CrewCanvas
           nodes={nodes}
           edges={edges}
+          setNodes={setNodes}
+          setEdges={setEdges}
           onNodesChange={onNodesChange}
           onEdgesChange={onEdgesChange}
           onConnect={onConnect}

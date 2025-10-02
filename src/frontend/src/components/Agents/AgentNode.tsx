@@ -14,6 +14,7 @@ import { Theme } from '@mui/material/styles';
 import { useTabDirtyState } from '../../hooks/workflow/useTabDirtyState';
 import { useAgentStore } from '../../store/agent';
 import { useUILayoutStore } from '../../store/uiLayout';
+import { useCrewExecutionStore } from '../../store/crewExecution';
 
 interface AgentNodeData {
   agentId: string;
@@ -63,8 +64,9 @@ const AgentNode: React.FC<{ data: AgentNodeData; id: string }> = ({ data, id }) 
   const { getAgent, updateAgent } = useAgentStore();
   const [agentData, setAgentData] = useState<Agent | null>(null);
 
-  // Get current layout orientation
+  // Get current layout orientation and process type
   const layoutOrientation = useUILayoutStore(state => state.layoutOrientation);
+  const processType = useCrewExecutionStore(state => state.processType);
 
   // Load agent data using store
   useEffect(() => {
@@ -412,6 +414,36 @@ const AgentNode: React.FC<{ data: AgentNodeData; id: string }> = ({ data, id }) 
       data-selected={isSelected ? 'true' : 'false'}
     >
 
+      {/* Target handles - only visible in hierarchical mode */}
+      {/* Top handle - for manager connections in vertical layout */}
+      <Handle
+        type="target"
+        position={Position.Top}
+        id="top"
+        style={{
+          background: '#ff9800',
+          width: '7px',
+          height: '7px',
+          opacity: (layoutOrientation === 'vertical' && processType === 'hierarchical') ? 1 : 0,
+          pointerEvents: (layoutOrientation === 'vertical' && processType === 'hierarchical') ? 'all' : 'none'
+        }}
+      />
+
+      {/* Left handle - for manager connections in horizontal layout */}
+      <Handle
+        type="target"
+        position={Position.Left}
+        id="left"
+        style={{
+          background: '#ff9800',
+          width: '7px',
+          height: '7px',
+          opacity: (layoutOrientation === 'horizontal' && processType === 'hierarchical') ? 1 : 0,
+          pointerEvents: (layoutOrientation === 'horizontal' && processType === 'hierarchical') ? 'all' : 'none'
+        }}
+      />
+
+      {/* Source handles - for task connections */}
       {/* Bottom handle - visible only in vertical layout */}
       <Handle
         type="source"

@@ -46,32 +46,17 @@ interface LoadCrewProps {
 }
 
 /**
- * Organizes node positions using the centralized CanvasLayoutManager
- * This ensures consistent layout behavior across all components
+ * Preserve saved node positions - do not reorganize
+ * Nodes are loaded with their saved positions from the database
  */
 const organizeNodesPositions = (nodes: Node[], edges: Edge[]): Node[] => {
-  // Use the centralized CanvasLayoutManager for consistent layout
-  const layoutManager = new CanvasLayoutManager({ margin: 20, minNodeSpacing: 50 });
-
-  // Get current UI state
-  const currentUIState = useUILayoutStore.getState().getUILayoutState();
-
-  // Update screen dimensions to current window size
-  currentUIState.screenWidth = window.innerWidth;
-  currentUIState.screenHeight = window.innerHeight;
-
-  layoutManager.updateUIState(currentUIState);
-
-  // Use the reorganizeNodes method which respects layout orientation
-  const organizedNodes = layoutManager.reorganizeNodes(nodes, 'crew', edges);
-
-  console.log('📐 LoadCrew: Organized nodes using CanvasLayoutManager', {
-    layoutOrientation: currentUIState.layoutOrientation,
-    nodeCount: organizedNodes.length,
+  // Return nodes as-is to preserve their saved positions
+  console.log('📐 LoadCrew: Preserving saved node positions', {
+    nodeCount: nodes.length,
     edgeCount: edges.length
   });
 
-  return organizedNodes;
+  return nodes;
 };
 
 /**
