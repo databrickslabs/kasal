@@ -27,6 +27,7 @@ import { useAPIKeysStore as _useAPIKeysStore } from '../../store/apiKeys';
 import { FlowFormData as _FlowFormData, FlowConfiguration as _FlowConfiguration } from '../../types/flow';
 import { ConnectionAgent, ConnectionTask } from '../../types/connection';
 import { createEdge as _createEdge } from '../../utils/edgeUtils';
+import { handleNodesGenerated } from '../Chat/utils/chatHelpers';
 import CloseIcon from '@mui/icons-material/Close';
 
 // Component Imports
@@ -969,8 +970,7 @@ const WorkflowDesigner: React.FC<WorkflowDesignerProps> = (): JSX.Element => {
                 <ChatPanel
                   chatSide={chatPanelSide}
                   onNodesGenerated={(newNodes, newEdges) => {
-                    setNodes(currentNodes => [...currentNodes, ...newNodes]);
-                    setEdges(currentEdges => [...currentEdges, ...newEdges]);
+                    handleNodesGenerated(newNodes, newEdges, setNodes, setEdges);
                   }}
                   onLoadingStateChange={setIsChatProcessing}
                   isVisible={showChatPanel}
@@ -1059,6 +1059,8 @@ const WorkflowDesigner: React.FC<WorkflowDesignerProps> = (): JSX.Element => {
               isDarkMode={isDarkMode}
               nodes={nodes}
               edges={edges}
+              setNodes={setNodes}
+              setEdges={setEdges}
               onNodesChange={onNodesChange}
               onEdgesChange={onEdgesChange}
               onConnect={onConnect}
@@ -1175,8 +1177,7 @@ const WorkflowDesigner: React.FC<WorkflowDesignerProps> = (): JSX.Element => {
                 <Box sx={{ flex: 1, display: 'flex', flexDirection: 'column' }}>
                   <ChatPanel
                     onNodesGenerated={(newNodes, newEdges) => {
-                      setNodes(currentNodes => [...currentNodes, ...newNodes]);
-                      setEdges(currentEdges => [...currentEdges, ...newEdges]);
+                      handleNodesGenerated(newNodes, newEdges, setNodes, setEdges);
                     }}
                     onLoadingStateChange={setIsChatProcessing}
                     isVisible={showChatPanel}
