@@ -669,11 +669,57 @@ async def get_workspace_client(user_token: str = None, service: str = None) -> O
             # Priority 2: Service principal OAuth (Databricks Apps)
             if _databricks_auth._client_id and _databricks_auth._client_secret:
                 logger.info("Creating WorkspaceClient with service principal OAuth for Lakebase")
-                return WorkspaceClient(
-                    host=_databricks_auth._workspace_host,
-                    client_id=_databricks_auth._client_id,
-                    client_secret=_databricks_auth._client_secret
-                )
+
+                # Log current environment state BEFORE removal
+                logger.info(f"Environment BEFORE cleanup: DATABRICKS_TOKEN={'SET' if os.environ.get('DATABRICKS_TOKEN') else 'NOT SET'}, "
+                           f"DATABRICKS_API_KEY={'SET' if os.environ.get('DATABRICKS_API_KEY') else 'NOT SET'}")
+
+                # Temporarily remove PAT tokens to avoid SDK conflicts
+                # Keep OAuth credentials (CLIENT_ID/SECRET) for other services like liteLLM
+                old_env = {}
+                env_vars_to_remove = [
+                    "DATABRICKS_TOKEN",
+                    "DATABRICKS_API_KEY",
+                    "DATABRICKS_CONFIG_FILE",
+                    "DATABRICKS_CONFIG_PROFILE"
+                ]
+                # DO NOT remove DATABRICKS_CLIENT_ID or DATABRICKS_CLIENT_SECRET
+                # They are needed by liteLLM and other services
+                for var in env_vars_to_remove:
+                    if var in os.environ:
+                        old_env[var] = os.environ.pop(var)
+                        logger.info(f"Removed {var} from environment")
+
+                try:
+                    logger.info(f"Removed {len(old_env)} env vars to prevent auth conflicts: {list(old_env.keys())}")
+
+                    # In Databricks Apps, DATABRICKS_HOST is automatically set
+                    # Don't pass host explicitly - let SDK read from environment
+                    # This avoids any ambiguity about authentication method
+                    logger.info(f"Creating WorkspaceClient with OAuth from environment")
+                    logger.info(f"  DATABRICKS_HOST: {os.environ.get('DATABRICKS_HOST', 'NOT SET')}")
+                    logger.info(f"  client_id: {_databricks_auth._client_id[:20] if _databricks_auth._client_id else 'NOT SET'}...")
+
+                    # Create client with ONLY OAuth credentials explicitly provided
+                    # Let host come from DATABRICKS_HOST environment variable
+                    client = WorkspaceClient(
+                        client_id=_databricks_auth._client_id,
+                        client_secret=_databricks_auth._client_secret
+                    )
+                    logger.info("WorkspaceClient created successfully with OAuth for Lakebase")
+                    return client
+                except Exception as e:
+                    logger.error(f"Failed to create WorkspaceClient for Lakebase: {e}")
+                    # Log what the environment looks like at time of failure
+                    logger.error(f"Environment at failure: {[k for k in os.environ.keys() if 'DATABRICKS' in k]}")
+                    raise
+                finally:
+                    # Restore environment variables for other services
+                    for var, value in old_env.items():
+                        os.environ[var] = value
+                        logger.info(f"Restored {var} to environment")
+                    if old_env:
+                        logger.info(f"Restored {len(old_env)} env vars after WorkspaceClient creation")
 
             # Priority 3: PAT token as fallback
             if _databricks_auth._api_token:
