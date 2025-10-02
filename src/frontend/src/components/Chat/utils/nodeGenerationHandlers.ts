@@ -8,6 +8,7 @@ import { CanvasLayoutManager } from '../../../utils/CanvasLayoutManager';
 import { useWorkflowStore } from '../../../store/workflow';
 import { useUILayoutStore } from '../../../store/uiLayout';
 import { ConfigureCrewResult } from '../../../api/DispatcherService';
+import { EdgeCategory, getEdgeStyleConfig } from '../../../config/edgeConfig';
 
 export const createAgentGenerationHandler = (
   setNodes: React.Dispatch<React.SetStateAction<Node[]>>,
@@ -86,16 +87,18 @@ export const createAgentGenerationHandler = (
             },
           };
 
-          const updated = [...currentNodes, newNode];
           setTimeout(() => {
             window.dispatchEvent(new Event('fitViewToNodesInternal'));
           }, 100);
 
           if (onNodesGenerated) {
+            // Let the callback handle adding the node to prevent duplicates
             onNodesGenerated([newNode], []);
+            return currentNodes; // Don't modify nodes here
+          } else {
+            // Fallback: add node if no callback provided
+            return [...currentNodes, newNode];
           }
-
-          return updated;
         });
         
         // Focus restoration
@@ -291,20 +294,13 @@ export const createTaskGenerationHandler = (
             },
           };
 
-          const updated = [...currentNodes, newNode];
           setTimeout(() => {
             window.dispatchEvent(new Event('fitViewToNodesInternal'));
           }, 100);
 
-          if (onNodesGenerated) {
-            onNodesGenerated([newNode], []);
-          }
-
-          return updated;
-        });
-        
-        if (assignedAgentId) {
-          setEdges((edges) => {
+          // Create edge if agent is assigned
+          let newEdge: Edge | null = null;
+          if (assignedAgentId) {
             const agentNodeId = `agent-${assignedAgentId}`;
             const taskNodeId = `task-${savedTask.id}`;
 
@@ -313,16 +309,10 @@ export const createTaskGenerationHandler = (
             const sourceHandle = layoutOrientation === 'vertical' ? 'bottom' : 'right';
             const targetHandle = layoutOrientation === 'vertical' ? 'top' : 'left';
 
-            console.log('🔧 Creating agent-to-task edge:', {
-              layoutOrientation,
-              sourceHandle,
-              targetHandle,
-              source: agentNodeId,
-              target: taskNodeId
-            });
+            // Create edge with centralized styling
+            const edgeStyle = getEdgeStyleConfig(EdgeCategory.AGENT_TO_TASK, false);
 
-            // Create edge with proper styling
-            const newEdge: Edge = {
+            newEdge = {
               id: `edge-${agentNodeId}-${taskNodeId}`,
               source: agentNodeId,
               target: taskNodeId,
@@ -330,15 +320,22 @@ export const createTaskGenerationHandler = (
               animated: false,
               sourceHandle,
               targetHandle,
-              style: {
-                stroke: '#2196f3',
-                strokeWidth: 2,
-                // No strokeDasharray = solid line
-              }
+              style: edgeStyle
             };
-            return [...edges, newEdge];
-          });
-        }
+          }
+
+          if (onNodesGenerated) {
+            // Let the callback handle adding the node and edge to prevent duplicates
+            onNodesGenerated([newNode], newEdge ? [newEdge] : []);
+            return currentNodes; // Don't modify nodes here
+          } else {
+            // Fallback: add node if no callback provided
+            if (newEdge) {
+              setEdges((edges) => [...edges, newEdge!]);
+            }
+            return [...currentNodes, newNode];
+          }
+        });
         
         // Focus restoration
         const focusDelays = [100, 300, 500, 800, 1200];
@@ -410,16 +407,18 @@ export const createTaskGenerationHandler = (
           },
         };
 
-        const updated = [...currentNodes, newNode];
         setTimeout(() => {
           window.dispatchEvent(new Event('fitViewToNodesInternal'));
         }, 100);
 
         if (onNodesGenerated) {
+          // Let the callback handle adding the node to prevent duplicates
           onNodesGenerated([newNode], []);
+          return currentNodes; // Don't modify nodes here
+        } else {
+          // Fallback: add node if no callback provided
+          return [...currentNodes, newNode];
         }
-
-        return updated;
       });
     }
   };
@@ -436,18 +435,23 @@ export const createCrewGenerationHandler = (
   inputRef?: React.RefObject<HTMLInputElement>
 ) => {
   return (crewData: GeneratedCrew) => {
+    // Clear the canvas before generating new crew
+    console.log('[CrewGeneration] Clearing canvas before generating new crew');
+    setNodes([]);
+    setEdges([]);
+
     const nodes: Node[] = [];
     const edges: Edge[] = [];
     const agentIdMap = new Map<string, string>();
-    
+
     setLastExecutionJobId(null);
     setExecutingJobId(null);
 
     const agentCount = crewData.agents?.length || 0;
     const taskCount = crewData.tasks?.length || 0;
-    const layoutResult = layoutManagerRef?.current.getCrewLayoutPositions(agentCount, taskCount, 'crew') || 
+    const layoutResult = layoutManagerRef?.current.getCrewLayoutPositions(agentCount, taskCount, 'crew') ||
       { agentPositions: [], taskPositions: [], layoutBounds: null, shouldAutoFit: false };
-    const { agentPositions, taskPositions, layoutBounds, shouldAutoFit } = layoutResult;
+    const { agentPositions, taskPositions } = layoutResult;
 
     if (crewData.agents) {
       crewData.agents.forEach((agent: Agent, index: number) => {
@@ -501,13 +505,8 @@ export const createCrewGenerationHandler = (
             const sourceHandle = layoutOrientation === 'vertical' ? 'bottom' : 'right';
             const targetHandle = layoutOrientation === 'vertical' ? 'top' : 'left';
 
-            console.log('🔧 Creating agent-to-task edge (crew generation):', {
-              layoutOrientation,
-              sourceHandle,
-              targetHandle,
-              source: agentNodeId,
-              target: taskNodeId
-            });
+            // Agent-to-task edge: use centralized edge configuration
+            const edgeStyle = getEdgeStyleConfig(EdgeCategory.AGENT_TO_TASK, false);
 
             edges.push({
               id: `edge-${agentNodeId}-${taskNodeId}`,
@@ -517,6 +516,7 @@ export const createCrewGenerationHandler = (
               animated: false,
               sourceHandle,
               targetHandle,
+              style: edgeStyle
             });
           }
         }
@@ -525,6 +525,9 @@ export const createCrewGenerationHandler = (
           task.context.forEach((depTaskId: string) => {
             const sourceTaskId = `task-${depTaskId}`;
             if (nodes.some(n => n.id === sourceTaskId)) {
+              // Task-to-task edge: use centralized edge configuration
+              const edgeStyle = getEdgeStyleConfig(EdgeCategory.TASK_TO_TASK, true);
+
               edges.push({
                 id: `edge-${sourceTaskId}-${taskNodeId}`,
                 source: sourceTaskId,
@@ -533,7 +536,7 @@ export const createCrewGenerationHandler = (
                 targetHandle: 'left',
                 type: 'default',
                 animated: true,
-                style: { stroke: '#ff9800' },
+                style: edgeStyle
               });
             }
           });
@@ -541,28 +544,22 @@ export const createCrewGenerationHandler = (
       });
     }
 
-    setNodes((currentNodes) => [...currentNodes, ...nodes]);
-    setEdges((currentEdges) => [...currentEdges, ...edges]);
-
+    // Don't add nodes here - let the onNodesGenerated callback handle it
+    // This prevents duplicate nodes when the callback also adds them
     if (onNodesGenerated) {
       onNodesGenerated(nodes, edges);
+    } else {
+      // Fallback: only add nodes if no callback is provided
+      setNodes((currentNodes) => [...currentNodes, ...nodes]);
+      setEdges((currentEdges) => [...currentEdges, ...edges]);
     }
 
-    if (shouldAutoFit) {
-      console.log('[CrewGeneration] Auto-fitting view to show all nodes');
-      setTimeout(() => {
-        window.dispatchEvent(new CustomEvent('autoFitCrewNodes', {
-          detail: { 
-            layoutBounds,
-            zoom: layoutManagerRef?.current.getAutoFitZoom(layoutBounds, 'crew')
-          }
-        }));
-      }, 400);
-    } else {
-      setTimeout(() => {
-        window.dispatchEvent(new Event('fitViewToNodesInternal'));
-      }, 100);
-    }
+    // Always use standard fitView for consistency
+    // Increased timeout to ensure nodes are fully rendered in DOM
+    console.log('[CrewGeneration] Triggering fitView after node creation');
+    setTimeout(() => {
+      window.dispatchEvent(new Event('fitViewToNodesInternal'));
+    }, 500);
 
     // Focus restoration
     const focusDelays = [300, 500, 800, 1200];
