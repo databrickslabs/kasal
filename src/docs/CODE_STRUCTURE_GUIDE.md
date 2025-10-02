@@ -15,46 +15,8 @@ Core project files, app metadata, and documentation.
 ### 🟨 Backend (`src/backend/src`)
 FastAPI backend: entrypoint, routers, services, repositories, and DB.
 - `main.py`: FastAPI app bootstrap, CORS, middleware, startup/shutdown, scheduler, seeds, API router registration
-```273:301:/Users/anshu.roy/Documents/kasal/src/backend/src/main.py
-# Initialize FastAPI app
-app = FastAPI(
-    title=settings.PROJECT_NAME,
-    description=settings.PROJECT_DESCRIPTION,
-    version=settings.VERSION,
-    lifespan=lifespan,
-    docs_url="/api-docs" if settings.DOCS_ENABLED else None,
-    redoc_url="/api-redoc" if settings.DOCS_ENABLED else None,
-    openapi_url="/api-openapi.json" if settings.DOCS_ENABLED else None,
-    openapi_version="3.1.0"
-)
 
-# Add user context middleware and include API
-app.add_middleware(BaseHTTPMiddleware, dispatch=user_context_middleware)
-app.include_router(api_router, prefix=settings.API_V1_STR)
-```
-- `api/`: HTTP route modules (per domain)
-  - Examples: `executions_router.py`, `execution_logs_router.py`, `execution_trace_router.py`, `engine_config_router.py`, `agents_router.py`, `crews_router.py`, `databricks_*_router.py`, `memory_backend_router.py`, `schemas_router.py`, `tools_router.py`
-```48:66:/Users/anshu.roy/Documents/kasal/src/backend/src/api/__init__.py
-# Create the main API router
-api_router = APIRouter()
-
-# Include all the sub-routers
-api_router.include_router(agents_router)
-api_router.include_router(crews_router)
-api_router.include_router(databricks_router)
-api_router.include_router(databricks_knowledge_router)
-api_router.include_router(flows_router)
-api_router.include_router(healthcheck_router)
-api_router.include_router(logs_router)
-api_router.include_router(models_router)
-api_router.include_router(databricks_secrets_router)
-api_router.include_router(api_keys_router)
-api_router.include_router(tasks_router)
-api_router.include_router(templates_router)
-api_router.include_router(group_tools_router)
-api_router.include_router(mlflow_router)
-```
-- `services/`: Business logic/orchestration and integrations
+ - `services/`: Business logic/orchestration and integrations
   - Orchestration: `execution_service.py`, `crewai_execution_service.py`, `process_crew_executor.py`, `scheduler_service.py`
   - Integrations: `databricks_*_service.py`, `mlflow_service.py`
   - Observability/aux: `execution_logs_service.py`, `execution_trace_service.py`, `documentation_embedding_service.py`
@@ -85,24 +47,211 @@ api_router.include_router(mlflow_router)
 React + TypeScript application, API client, components, and state.
 - React + TypeScript (CRA + Craco)
 - `src/config/api/ApiConfig.ts`: API base URL selection and Axios client
-```1:16:/Users/anshu.roy/Documents/kasal/src/frontend/src/config/api/ApiConfig.ts
-import axios from 'axios';
 
-export const config = {
-  apiUrl:
-    process.env.REACT_APP_API_URL ||
-    (process.env.NODE_ENV === 'development'
-      ? 'http://localhost:8000/api/v1'
-      : '/api/v1'),
-};
 
-export const apiClient = axios.create({
-  baseURL: config.apiUrl,
-  headers: {
-    'Content-Type': 'application/json',
-  },
-});
+---  
+
+# Alembic Migrations  
+All scripts live in `src/backend/migrations/versions`. They evolve the database schema over time. Two core files support them:  
+
+## src/backend/migrations/env.py  
+Sets up the Alembic context, reading DB URLs from SQLAlchemy models. It:  
+- Imports metadata from `all_models`.  
+- Configures offline/online migration modes.  
+
+## src/backend/migrations/script.py.mako  
+A Jinja template used by Alembic to generate new revision files. It defines boilerplate for `upgrade()` and `downgrade()`.  
+
+## src/backend/scripts/migrations/migrate_mcp_group_id.py  
+A custom Python script (outside Alembic) that migrates existing MCP server records to a new `group_id` structure.  
+
+---
+# REST API Routers  
+Each file under `src/backend/src/api` defines a FastAPI router. They follow a common pattern:  
+
+```python
+router = APIRouter(prefix="/v1/resource", tags=["resource"])
+@router.get("/", response_model=List[ResourceSchema])
+async def list_resources(...):
+    return await service.list()
 ```
-- `src/api/*Service.ts`: API clients per domain (Agents, Crews, Executions, Models, Tools, etc.)
-- `src/components/`, `src/app/`, `src/store/`, `src/types/`, `src/utils/`, `src/hooks/`, `src/theme/`
-- `public/` assets; `craco.config.js`, `tsconfig.json`
+
+Below is an example for **Agents**. All other routers mirror this structure.
+
+```api
+{
+  "title": "List Agents",
+  "description": "Retrieve all agents for the current group.",
+  "method": "GET",
+  "baseUrl": "https://api.kasal.ai",
+  "endpoint": "/v1/agents",
+  "headers": [
+    {"key": "Authorization", "value": "Bearer <token>", "required": true}
+  ],
+  "queryParams": [
+    {"key": "limit", "value": "Max items to return", "required": false},
+    {"key": "offset", "value": "Pagination offset", "required": false}
+  ],
+  "pathParams": [],
+  "bodyType": "none",
+  "responses": {
+    "200": {
+      "description": "List of agents",
+      "body": "[{ \"id\": \"...\", \"name\": \"Support Bot\" }]"
+    }
+  }
+}
+```
+
+- **agent_generation_router.py**: Endpoints to trigger agent‐based content generation.  
+- **agents_router.py**: CRUD for `Agent` entities.  
+- **api_keys_router.py**: Manage API keys.  
+- **auth_router.py**: Login, logout, token refresh.  
+- **chat_history_router.py**: Query past chat logs.  
+- **connections_router.py**: Database/MCP connection configs.  
+- **crew_generation_router.py**: Generate multi‐agent crews.  
+- **crews_router.py**: CRUD for `Crew` entities.  
+- **database_management_router.py**: DB backup/restore.  
+- **databricks_knowledge_router.py**: Manage Databricks knowledge sources.  
+- **databricks_router.py**: Databricks environment config.  
+- **databricks_secrets_router.py**: Vault secrets for Databricks.  
+- **dispatcher_router.py**: Dispatch flows to MCP servers.  
+- **documentation_embeddings_router.py**: CRUD for doc embeddings.  
+- **dspy_router.py**: DSPy optimization endpoints.  
+- **engine_config_router.py**: Manage LLM engine settings.  
+- **execution_history_router.py**: Query past execution metadata.  
+- **execution_logs_router.py**: Stream logs for executions.  
+- **execution_trace_router.py**: Retrieve trace timeline.  
+- **executions_router.py**: Trigger and control executions.  
+- **flow_execution_router.py**: Read flow‐execution mappings.  
+- **flows_router.py**: CRUD for `Flow` entities.  
+- **genie_router.py**: “Genie” autocomplete endpoints.  
+- **group_router.py**: Manage user groups.  
+- **group_tools_router.py**: Assign tools to groups.  
+- **healthcheck_router.py**: Liveness and readiness probes.  
+- **logs_router.py**: Aggregate application logs.  
+- **mcp_router.py**: MCP server CRUD and health.  
+- **memory_backend_router.py**: Manage memory backends.  
+- **mlflow_router.py**: MLflow experiment tracking endpoints.  
+- **models_router.py**: List and select provider models.  
+- **scheduler_router.py**: Job scheduling endpoints.  
+- **schemas_router.py**: Dynamically serve JSON schemas.  
+- **task_generation_router.py**: Generate tasks via AI.  
+- **task_tracking_router.py**: Track running tasks.  
+- **tasks_router.py**: CRUD for `Task` entities.  
+- **template_generation_router.py**: Generate prompt templates.  
+- **templates_router.py**: CRUD for `Template` entities.  
+- **tools_router.py**: CRUD for `Tool` definitions.  
+- **users_router.py**: User profile and permissions management.  
+
+---
+# Configuration  
+These modules centralize app settings and logging.
+
+## src/backend/src/config/logging.py  
+Sets up Python `logging` with:  
+- Console and file handlers.  
+- JSON-formatted logs when in structured mode.  
+- Integrates with Sentry if DSN provided.  
+
+## src/backend/src/config/settings.py  
+Defines Pydantic `Settings` for:  
+- Database URLs  
+- Secret keys  
+- Third-party API endpoints  
+- Feature toggles (e.g., multitenancy)  
+
+```python
+class Settings(BaseSettings):
+    database_url: PostgresDsn
+    sentry_dsn: Optional[HttpUrl] = None
+    multi_tenant: bool = True
+```
+
+---
+
+# Core LLM Handlers  
+These classes wrap interactions with large language models.
+
+## src/backend/src/core/llm_handlers/databricks_gpt_oss_handler.py  
+- Interfaces with Databricks’ open‐source GPT endpoint.  
+- Formats requests and parses streaming tokens.  
+- Applies rate limits via `asyncio_utils`.  
+
+## src/backend/src/core/llm_handlers/gpt5_handler.py  
+- Native handler for GPT-5 provider.  
+- Supports function calling and chunked streaming.  
+
+## src/backend/src/core/llm_handlers/gpt5_llm_wrapper.py  
+- Adapts the `gpt5_handler` to the generic `LLM` interface.  
+- Adds retry logic and exponential backoff.  
+
+---
+
+# Core Infrastructure  
+
+## src/backend/src/core/base_repository.py  
+Abstracts basic CRUD operations for any SQLAlchemy model:  
+- `get()`, `list()`, `create()`, `update()`, `delete()`.  
+
+## src/backend/src/core/base_service.py  
+Provides transaction scoping and error handling around repositories.  
+
+## src/backend/src/core/dependencies.py  
+Defines FastAPI dependencies for injecting:  
+- `UnitOfWork`  
+- Service instances  
+- Current user context  
+
+## src/backend/src/core/entity_extraction_fallback.py  
+Fallback logic for extracting entities when NLP fails.  
+
+## src/backend/src/core/llm_manager.py  
+Centralizes LLM calls:  
+- Chooses correct handler based on config.  
+- Orchestrates streaming vs. non-streaming modes.  
+
+## src/backend/src/core/logger.py  
+Wraps Python logger to include request IDs and user context.  
+
+## src/backend/src/core/permissions.py  
+Decorators and functions enforcing RBAC at service/router level.  
+
+## src/backend/src/core/unit_of_work.py  
+Coordinator for DB sessions:  
+- Begins/commits/rolls back transactions.  
+- Exposes repositories for each entity.  
+
+---
+
+# Database Layer  
+
+## src/backend/src/db/alembic/versions/create_data_processing_table.py  
+Alembic script creating the `data_processing` table and its indexes.  
+
+## src/backend/src/db/all_models.py  
+Imports and registers all SQLAlchemy `Base` models used by Alembic.  
+
+## src/backend/src/db/base.py  
+Defines `Base = declarative_base()` and common mixins (e.g., `TimestampMixin`).  
+
+## src/backend/src/db/database_router.py  
+Routes DB calls to either the primary or read-replica based on query type.  
+
+## src/backend/src/db/lakebase_session.py  
+Creates SQLAlchemy sessions for “lake” database (analytics).  
+
+## src/backend/src/db/session.py  
+Configures the main application DB session pool and event listeners.  
+
+---
+
+# Authentication Dependencies  
+
+## src/backend/src/dependencies/admin_auth.py  
+Ensures the current user has admin privileges before proceeding.  
+
+## src/backend/src/dependencies/auth.py  
+Validates JWT tokens, extracts user info, and enforces login.  
+
+---

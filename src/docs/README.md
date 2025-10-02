@@ -1,3 +1,5 @@
+![Kasal Logo](src/docs/images/logo.png)
+
 # 🟦 Kasal Documentation Hub
 
 **Enterprise AI Agent Orchestration Platform**
