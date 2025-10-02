@@ -2,8 +2,12 @@
 Database Management API Router.
 """
 from fastapi import APIRouter, HTTPException, Response, Request, Depends, Header
+from fastapi.responses import StreamingResponse
 from typing import Dict, Any, Optional, Annotated
+from datetime import datetime
 import os
+import asyncio
+import json
 
 from src.services.database_management_service import DatabaseManagementService
 from src.services.lakebase_service import LakebaseService
@@ -177,24 +181,31 @@ async def list_backups(
 
 @router.get("/info", response_model=DatabaseInfoResponse)
 async def get_database_info(
-    service: DatabaseManagementServiceDep,
+    raw_request: Request,
     group_context: GroupContextDep
 ) -> DatabaseInfoResponse:
     """
     Get information about the current database.
-    
+
     Returns:
-        Database statistics and information
+        Database statistics and information about the SOURCE database (not Lakebase)
     """
     try:
-        # Use the injected service
-        result = await service.get_database_info()
-        
-        if not result["success"]:
-            raise HTTPException(status_code=500, detail=result.get("error", "Failed to get database info"))
-        
-        return DatabaseInfoResponse(**result)
-        
+        # ALWAYS use fallback session to get info about source database
+        # Never route to Lakebase for database info endpoint
+        from src.db.session import async_session_factory
+        from src.utils.databricks_auth import extract_user_token_from_request
+
+        async with async_session_factory() as session:
+            user_token = extract_user_token_from_request(raw_request)
+            service = DatabaseManagementService(session=session, user_token=user_token)
+            result = await service.get_database_info()
+
+            if not result["success"]:
+                raise HTTPException(status_code=500, detail=result.get("error", "Failed to get database info"))
+
+            return DatabaseInfoResponse(**result)
+
     except HTTPException:
         raise
     except Exception as e:
@@ -438,7 +449,6 @@ async def get_lakebase_config(
 @router.post("/lakebase/config")
 async def save_lakebase_config(
     config: Dict[str, Any],
-    session: LegacySessionDep,  # Always use fallback DB for config
     group_context: GroupContextDep
 ) -> Dict[str, Any]:
     """
@@ -451,10 +461,14 @@ async def save_lakebase_config(
         Saved configuration
     """
     try:
-        user_email = group_context.group_email if group_context else None
-        service = LakebaseService(session=session, user_email=user_email)
-        saved_config = await service.save_config(config)
-        return saved_config
+        # ALWAYS use fallback session factory for config operations
+        # Never route to Lakebase when saving Lakebase config itself
+        from src.db.session import async_session_factory
+        async with async_session_factory() as session:
+            user_email = group_context.group_email if group_context else None
+            service = LakebaseService(session=session, user_email=user_email)
+            saved_config = await service.save_config(config)
+            return saved_config
 
     except Exception as e:
         logger.error(f"Error saving Lakebase config: {e}")
@@ -595,19 +609,34 @@ async def migrate_to_lakebase(
         # Trigger migration
         instance_name = request.get("instance_name", "kasal-lakebase")
         endpoint = request.get("endpoint")
+        recreate_schema = request.get("recreate_schema", False)
 
         if not endpoint:
             raise HTTPException(status_code=400, detail="Endpoint is required for migration")
 
-        logger.info(f"🚀 Migration to Lakebase requested by {user_email}")
-        result = await service.migrate_existing_data(instance_name, endpoint)
+        logger.info(f"🚀 Migration to Lakebase requested by {user_email} (recreate_schema={recreate_schema})")
+
+        # Log to frontend-visible logger
+        logger.info("=" * 80)
+        logger.info("🚀 LAKEBASE MIGRATION STARTED")
+        logger.info(f"Instance: {instance_name}")
+        logger.info(f"Recreate Schema: {recreate_schema}")
+        logger.info("=" * 80)
+
+        result = await service.migrate_existing_data(instance_name, endpoint, recreate_schema=recreate_schema)
 
         # Update configuration to mark migration as complete
         config = await service.get_config()
-        config["migration_completed"] = True
-        config["migration_status"] = "completed"
+        config["migration_completed"] = result.get("success", False)
+        config["migration_status"] = "completed" if result.get("success") else "failed"
         config["migration_result"] = result
         await service.save_config(config)
+
+        # If migration succeeded, dispose existing connections to switch to Lakebase
+        if result.get("success", False):
+            from src.db.session import dispose_engines
+            await dispose_engines()
+            logger.info("🔄 Disposed existing database connections to switch to Lakebase")
 
         logger.info("✅ Migration configuration saved. Next API calls will use Lakebase.")
         return result
@@ -615,6 +644,112 @@ async def migrate_to_lakebase(
     except Exception as e:
         logger.error(f"Error migrating to Lakebase: {e}")
         raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.post("/lakebase/migrate/stream")
+async def migrate_to_lakebase_stream(
+    request: Dict[str, Any],
+    raw_request: Request,
+    group_context: GroupContextDep
+):
+    """
+    Stream migration progress to Lakebase using Server-Sent Events.
+
+    Args:
+        request: Migration parameters (instance_name, endpoint, recreate_schema)
+
+    Returns:
+        StreamingResponse with SSE events
+    """
+    async def event_generator():
+        migration_succeeded = False
+        try:
+            # Extract user token for authentication
+            from src.utils.databricks_auth import extract_user_token_from_request
+            from src.db.session import async_session_factory
+
+            user_token = extract_user_token_from_request(raw_request)
+            user_email = group_context.group_email if group_context else None
+
+            # Get migration parameters
+            instance_name = request.get("instance_name", "kasal-lakebase")
+            endpoint = request.get("endpoint")
+            recreate_schema = request.get("recreate_schema", False)
+            migrate_data = request.get("migrate_data", True)  # Default to migrating data
+
+            # Send initial event
+            action = "schema creation" if not migrate_data else "migration"
+            yield f"data: {json.dumps({'type': 'start', 'message': f'🚀 Starting Lakebase {action}...', 'instance': instance_name, 'recreate_schema': recreate_schema, 'migrate_data': migrate_data})}\n\n"
+
+            # Auto-fetch endpoint if needed using a separate session context
+            if not endpoint:
+                yield f"data: {json.dumps({'type': 'progress', 'message': '🔍 Auto-detecting Lakebase endpoint...', 'step': 'detect_endpoint'})}\n\n"
+                try:
+                    from src.db.session import async_session_factory as fallback_session_factory
+                    async with fallback_session_factory() as temp_session:
+                        service_temp = LakebaseService(session=temp_session, user_token=user_token, user_email=user_email)
+                        instance_info = await service_temp.get_instance(instance_name)
+                        if instance_info and instance_info.get("read_write_dns"):
+                            endpoint = instance_info["read_write_dns"]
+                            yield f"data: {json.dumps({'type': 'success', 'message': f'✅ Detected endpoint: {endpoint}'})}\n\n"
+                        else:
+                            yield f"data: {json.dumps({'type': 'error', 'message': f'Could not auto-detect endpoint for instance {instance_name}'})}\n\n"
+                            return
+                except Exception as e:
+                    yield f"data: {json.dumps({'type': 'error', 'message': f'Failed to auto-detect endpoint: {str(e)}'})}\n\n"
+                    return
+
+            # Create service WITHOUT a session since migration creates its own engines
+            # Pass None for session - migration doesn't use it
+            service = LakebaseService(session=None, user_token=user_token, user_email=user_email)
+
+            # Stream migration progress
+            async for event in service.migrate_existing_data_stream(instance_name, endpoint, recreate_schema=recreate_schema, migrate_data=migrate_data):
+                yield f"data: {json.dumps(event)}\n\n"
+                await asyncio.sleep(0)  # Allow other tasks to run
+
+                # Track if migration succeeded
+                if event.get('type') == 'result' and event.get('success'):
+                    migration_succeeded = True
+
+            # If migration succeeded, update config and dispose existing connections
+            if migration_succeeded:
+                # Update Lakebase configuration to mark migration as complete and enable it
+                try:
+                    from src.db.session import async_session_factory as fallback_session_factory
+                    async with fallback_session_factory() as config_session:
+                        config_service = LakebaseService(session=config_session, user_token=user_token, user_email=user_email)
+                        config = await config_service.get_config()
+                        config["migration_completed"] = True
+                        config["migration_date"] = datetime.utcnow().isoformat()
+                        config["enabled"] = True
+                        config["instance_name"] = instance_name
+                        config["endpoint"] = endpoint
+                        await config_service.save_config(config)
+                        yield f"data: {json.dumps({'type': 'success', 'message': '✅ Lakebase configuration updated and enabled'})}\n\n"
+                except Exception as config_error:
+                    logger.error(f"Error updating Lakebase config after migration: {config_error}")
+                    yield f"data: {json.dumps({'type': 'warning', 'message': f'Migration succeeded but config update failed: {config_error}'})}\n\n"
+
+                # Dispose existing connections to switch to Lakebase
+                from src.db.session import dispose_engines
+                await dispose_engines()
+                logger.info("🔄 Disposed existing database connections to switch to Lakebase")
+                yield f"data: {json.dumps({'type': 'info', 'message': '🔄 Switched all connections to Lakebase'})}\n\n"
+
+        except Exception as e:
+            logger.error(f"Error in migration stream: {e}")
+            yield f"data: {json.dumps({'type': 'error', 'message': str(e)})}\n\n"
+
+    return StreamingResponse(
+        event_generator(),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "Connection": "keep-alive",
+            "X-Accel-Buffering": "no"
+        }
+    )
 
 
 @router.post("/lakebase/start")
@@ -648,6 +783,141 @@ async def start_lakebase_instance(
         raise HTTPException(status_code=500, detail=str(e))
 
 
+@router.get("/lakebase/test/{instance_name}")
+async def test_lakebase_connection_get(
+    instance_name: str,
+    session: SessionDep,
+    raw_request: Request,
+    group_context: GroupContextDep
+) -> Dict[str, Any]:
+    """
+    Test connection to Lakebase instance (GET endpoint).
+
+    Args:
+        instance_name: Name of the Lakebase instance
+
+    Returns:
+        Connection test result
+    """
+    try:
+        # Extract user token for authentication
+        from src.utils.databricks_auth import extract_user_token_from_request
+        user_token = extract_user_token_from_request(raw_request)
+        user_email = group_context.group_email if group_context else None
+
+        service = LakebaseService(session=session, user_token=user_token, user_email=user_email)
+        result = await service.test_connection(instance_name)
+
+        return result
+
+    except Exception as e:
+        logger.error(f"Error testing Lakebase connection: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.get("/lakebase/workspace-info")
+async def get_lakebase_workspace_info(
+    session: SessionDep,
+    raw_request: Request,
+    group_context: GroupContextDep
+) -> Dict[str, Any]:
+    """
+    Get Databricks workspace URL and organization ID for Lakebase links.
+
+    Returns:
+        Dictionary with workspace_url and organization_id
+    """
+    try:
+        # Extract user token for authentication
+        from src.utils.databricks_auth import extract_user_token_from_request
+        user_token = extract_user_token_from_request(raw_request)
+        user_email = group_context.group_email if group_context else None
+
+        service = LakebaseService(session=session, user_token=user_token, user_email=user_email)
+
+        # Get workspace client
+        w = await service.get_workspace_client()
+
+        # Get workspace ID (organization ID)
+        workspace_id = w.get_workspace_id()
+
+        # Get workspace URL from config
+        workspace_url = w.config.host
+
+        # Clean up the URL
+        if workspace_url.endswith('/'):
+            workspace_url = workspace_url[:-1]
+
+        return {
+            "success": True,
+            "workspace_url": workspace_url,
+            "organization_id": str(workspace_id)
+        }
+
+    except Exception as e:
+        logger.error(f"Error getting workspace info: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.post("/lakebase/enable")
+async def enable_lakebase_without_migration(
+    request: Dict[str, Any],
+    session: LegacySessionDep,  # Always use fallback DB for config
+    group_context: GroupContextDep
+) -> Dict[str, Any]:
+    """
+    Enable Lakebase without performing data migration.
+    This sets the 'enabled' flag in configuration, allowing connection to Lakebase
+    where schema will be created on first use.
+
+    Args:
+        request: Must contain instance_name and endpoint
+
+    Returns:
+        Success status and message
+    """
+    try:
+        user_email = group_context.group_email if group_context else None
+        service = LakebaseService(session=session, user_email=user_email)
+
+        # Get current config
+        config = await service.get_config()
+
+        # Extract required parameters
+        instance_name = request.get("instance_name")
+        endpoint = request.get("endpoint")
+
+        if not instance_name or not endpoint:
+            raise HTTPException(
+                status_code=400,
+                detail="instance_name and endpoint are required to enable Lakebase"
+            )
+
+        # Update config with instance details
+        config["instance_name"] = instance_name
+        config["endpoint"] = endpoint
+        config["enabled"] = True
+        config["migration_completed"] = True  # Mark as ready even without migration
+
+        # Save updated config
+        await service.save_config(config)
+
+        # Dispose existing database connections to force reconnection to Lakebase
+        from src.db.session import dispose_engines
+        await dispose_engines()
+        logger.info("Disposed existing database connections to switch to Lakebase")
+
+        return {
+            "success": True,
+            "message": "Lakebase enabled successfully. All connections switched to Lakebase.",
+            "config": config
+        }
+
+    except Exception as e:
+        logger.error(f"Error enabling Lakebase: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
 @router.post("/lakebase/test-connection")
 async def test_lakebase_connection(
     request: Dict[str, Any],
@@ -656,7 +926,7 @@ async def test_lakebase_connection(
     group_context: GroupContextDep
 ) -> Dict[str, Any]:
     """
-    Test connection to Lakebase instance.
+    Test connection to Lakebase instance (POST endpoint).
 
     Args:
         request: Instance name in request body

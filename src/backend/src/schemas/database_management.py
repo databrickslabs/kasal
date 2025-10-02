@@ -11,7 +11,7 @@ class ExportRequest(BaseModel):
     catalog: str = Field(default="users", description="Databricks catalog name")
     schema_name: str = Field(default="default", description="Databricks schema name", alias="schema")
     volume_name: str = Field(default="kasal_backups", description="Volume name for backups")
-    export_format: str = Field(default="sql", description="Export format: 'sql' (SQL dump) or 'sqlite' (SQLite DB)")
+    export_format: str = Field(default="sqlite", description="Export format: 'sql' (SQL dump) or 'sqlite' (SQLite DB)")
     
     @field_validator('catalog', 'schema_name', 'volume_name')
     @classmethod

@@ -2,6 +2,7 @@ import React from 'react';
 import { BaseEdge, EdgeProps, getSmoothStepPath } from 'reactflow';
 import { Box } from '@mui/material';
 import { FlowConfiguration } from '../../types/flow';
+import { edgeColors, EdgeCategory, getEdgeStyleConfig } from '../../config/edgeConfig';
 
 interface CrewEdgeData {
   label?: string;
@@ -31,18 +32,15 @@ const CrewEdge: React.FC<EdgeProps<CrewEdgeData>> = ({
     borderRadius: 16,
   });
 
+  // Get crew edge style from centralized config
+  const crewEdgeStyle = getEdgeStyleConfig(EdgeCategory.CREW_TO_CREW, false, style);
+
   return (
     <g>
       <BaseEdge
         path={edgePath}
         markerEnd={markerEnd}
-        style={{
-          ...style,
-          strokeWidth: 2,
-          stroke: '#2196f3',  // Blue color for better visibility
-          filter: 'drop-shadow(0 1px 2px rgba(33, 150, 243, 0.3))',
-          zIndex: 0,
-        }}
+        style={crewEdgeStyle}
       />
       
       {/* Edge label with improved visibility */}
@@ -73,7 +71,7 @@ const CrewEdge: React.FC<EdgeProps<CrewEdgeData>> = ({
               fontWeight: 'bold',
               wordBreak: 'break-word',
               overflow: 'hidden',
-              color: '#1976d2',  // Blue text color
+              color: edgeColors.hover,
               transition: 'all 0.2s ease',
               '&:hover': {
                 backgroundColor: 'rgba(255, 255, 255, 1)',

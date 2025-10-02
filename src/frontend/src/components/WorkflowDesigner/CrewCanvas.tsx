@@ -158,7 +158,7 @@ const CrewCanvas: React.FC<CrewCanvasProps> = ({
   }, []);
   
   const errorStore = useErrorStore();
-  const runStatusStore = useRunStatusStore();
+  const _runStatusStore = useRunStatusStore();
   
   const fetchAgents = useCallback(async () => {
     try {
@@ -411,45 +411,56 @@ const CrewCanvas: React.FC<CrewCanvasProps> = ({
   const crewEdges = React.useMemo(() => {
     try {
       const crewNodeIds = new Set(nodes.map(node => node.id));
-      
+
       // First, deduplicate edges by creating a Map with edge key
       const edgeMap = new Map<string, Edge>();
-      
+
       edges.forEach(edge => {
-        if (edge && 
+        if (edge &&
             typeof edge === 'object' &&
-            edge.source && 
-            edge.target && 
-            crewNodeIds.has(edge.source) && 
+            edge.source &&
+            edge.target &&
+            crewNodeIds.has(edge.source) &&
             crewNodeIds.has(edge.target)) {
-          
+
           // Create a unique key for the edge
           const edgeKey = `${edge.source}-${edge.target}-${edge.sourceHandle || 'default'}-${edge.targetHandle || 'default'}`;
-          
+
           // Only keep the first occurrence of each edge
           if (!edgeMap.has(edgeKey)) {
-            edgeMap.set(edgeKey, edge);
+            // Ensure all edges have animated property set correctly
+            // Task-to-task edges should always be animated
+            const isTaskToTask = edge.source.startsWith('task-') && edge.target.startsWith('task-');
+            const isAgentToTask = edge.source.startsWith('agent-') && edge.target.startsWith('task-');
+
+            // Set animated to true for all agent-task and task-task edges
+            const enhancedEdge = {
+              ...edge,
+              animated: isTaskToTask || isAgentToTask ? true : (edge.animated || false)
+            };
+
+            edgeMap.set(edgeKey, enhancedEdge);
           }
         }
       });
       
       // Convert map back to array
       const uniqueEdges = Array.from(edgeMap.values());
-      
-      // Apply animation to edges when jobs are running
-      const edgesWithAnimation = uniqueEdges.map(edge => ({
+
+      // Ensure edge type is set and preserve animated property
+      const edgesWithType = uniqueEdges.map(edge => ({
         ...edge,
         type: edge.type || 'default', // Ensure edge type is set
-        animated: runStatusStore.hasRunningJobs // Make edges animated when jobs are running
+        // Preserve the animated property from the edge (don't override it)
       }));
-      
-      
-      return edgesWithAnimation;
+
+
+      return edgesWithType;
     } catch (error) {
 
       return [];
     }
-  }, [edges, nodes, runStatusStore.hasRunningJobs]); // Add hasRunningJobs to dependencies
+  }, [edges, nodes]); // Removed runStatusStore.hasRunningJobs dependency
 
   const _handleDeleteSelected = useCallback((selectedNodes: Node[], selectedEdges: Edge[]) => {
     // First, remove the selected nodes
@@ -787,6 +798,7 @@ const CrewCanvas: React.FC<CrewCanvasProps> = ({
                 source: sourceNodeId,
                 target: targetNodeId,
                 type: 'default',
+                animated: true,
                 sourceHandle: 'right',
                 targetHandle: 'left'
               });

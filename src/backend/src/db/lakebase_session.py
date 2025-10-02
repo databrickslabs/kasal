@@ -12,8 +12,7 @@ from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine, async_sess
 from databricks.sdk import WorkspaceClient
 
 from src.core.logger import LoggerManager
-from src.utils.databricks_auth import is_databricks_apps_environment, get_current_databricks_user
-from src.repositories.databricks_auth_helper import DatabricksAuthHelper
+from src.utils.databricks_auth import is_databricks_apps_environment, get_current_databricks_user, get_workspace_client
 
 logger_manager = LoggerManager.get_instance()
 logger = logging.getLogger(__name__)
@@ -44,8 +43,11 @@ class LakebaseSessionFactory:
 
         Authentication priority:
         1. OBO (On-Behalf-Of) with user token
-        2. PAT from database (encrypted storage)
-        3. PAT from environment variables
+        2. PAT from API keys service
+        3. PAT from environment variables (DATABRICKS_TOKEN)
+
+        Uses the centralized get_workspace_client() function which properly handles
+        authentication without mixing OAuth and PAT methods.
 
         Returns:
             WorkspaceClient configured with appropriate authentication
@@ -54,20 +56,15 @@ class LakebaseSessionFactory:
             return self._workspace_client
 
         try:
-            # Get authentication token using the established hierarchy
-            auth_token = await DatabricksAuthHelper.get_auth_token(
-                workspace_url=os.getenv("DATABRICKS_HOST"),
-                user_token=self.user_token
-            )
+            # Use centralized workspace client creation from databricks_auth
+            # This handles the authentication hierarchy correctly and avoids
+            # mixing OAuth (SPN) with token authentication
+            self._workspace_client = await get_workspace_client(user_token=self.user_token)
 
-            # Create workspace client with explicit authentication
-            # This prevents SDK auto-detection from mixing OAuth and PAT
-            self._workspace_client = WorkspaceClient(
-                host=os.getenv("DATABRICKS_HOST"),
-                token=auth_token
-            )
+            if not self._workspace_client:
+                raise ValueError("Failed to create workspace client - no authentication available")
 
-            logger.info("Successfully created workspace client with authenticated token")
+            logger.info("Successfully created workspace client using centralized auth")
             return self._workspace_client
 
         except Exception as e:
@@ -161,7 +158,8 @@ class LakebaseSessionFactory:
                 connect_args={
                     "ssl": "require",  # Enable SSL for asyncpg
                     "server_settings": {
-                        "jit": "off"  # Disable JIT for compatibility
+                        "jit": "off",  # Disable JIT for compatibility
+                        "search_path": "kasal"  # Set schema search path to kasal only
                     }
                 }
             )
@@ -180,9 +178,10 @@ class LakebaseSessionFactory:
             logger.error(f"Error creating Lakebase engine: {e}")
             raise
 
-    async def get_session(self) -> AsyncGenerator[AsyncSession, None]:
+    @asynccontextmanager
+    async def get_session(self):
         """
-        Get a database session with Lakebase.
+        Get a database session with Lakebase as an async context manager.
         Transaction management should be handled by the caller.
 
         Yields:
@@ -263,8 +262,8 @@ async def get_lakebase_session(
         # Force engine recreation with new email
         await _lakebase_factory.create_engine()
 
-    # Get session and manage its lifecycle
-    async for session in _lakebase_factory.get_session():
+    # Get session and manage its lifecycle using async context manager
+    async with _lakebase_factory.get_session() as session:
         try:
             yield session
             await session.commit()

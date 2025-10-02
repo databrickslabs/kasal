@@ -44,7 +44,7 @@ const SaveCrew: React.FC<SaveCrewComponentProps> = ({ nodes, edges, trigger, dis
         }
         
         setIsSaving(true);
-        
+
         // Remove duplicate edges before saving - use tab edges not component edges
         const uniqueEdges = tab.edges.reduce((acc: Edge[], edge) => {
           const edgeKey = `${edge.source}-${edge.target}`;
@@ -54,11 +54,19 @@ const SaveCrew: React.FC<SaveCrewComponentProps> = ({ nodes, edges, trigger, dis
           return acc;
         }, []);
 
+        // Filter edges to only include those that reference existing nodes
+        const nodeIds = new Set(tab.nodes.map(n => n.id));
+        const validEdges = uniqueEdges.filter(edge =>
+          nodeIds.has(edge.source) && nodeIds.has(edge.target)
+        );
+
         console.log('SaveCrew: About to update crew with data:', {
           crewId,
           name: tab.savedCrewName || tab.name,
           nodes: tab.nodes.length,
-          edges: uniqueEdges.length
+          totalEdges: uniqueEdges.length,
+          validEdges: validEdges.length,
+          removedEdges: uniqueEdges.length - validEdges.length
         });
 
         // Use the current tab's nodes and edges for update
@@ -67,7 +75,7 @@ const SaveCrew: React.FC<SaveCrewComponentProps> = ({ nodes, edges, trigger, dis
           agent_ids: [], // Will be calculated in the service
           task_ids: [], // Will be calculated in the service
           nodes: tab.nodes,
-          edges: uniqueEdges
+          edges: validEdges
         });
         
         console.log('SaveCrew: Update successful', updatedCrew);
@@ -305,6 +313,18 @@ const SaveCrew: React.FC<SaveCrewComponentProps> = ({ nodes, edges, trigger, dis
 
       console.log('SaveCrew: Processed IDs', { agent_ids, task_ids });
 
+      // Filter edges to only include those that reference existing nodes
+      const nodeIds = new Set(nodes.map(n => n.id));
+      const validEdges = uniqueEdges.filter(edge =>
+        nodeIds.has(edge.source) && nodeIds.has(edge.target)
+      );
+
+      console.log('SaveCrew: Filtered edges', {
+        totalEdges: uniqueEdges.length,
+        validEdges: validEdges.length,
+        removedEdges: uniqueEdges.length - validEdges.length
+      });
+
       // Ensure task nodes have complete config with markdown field
       const processedNodes = nodes.map(node => {
         if (node.type === 'taskNode') {
@@ -344,7 +364,7 @@ const SaveCrew: React.FC<SaveCrewComponentProps> = ({ nodes, edges, trigger, dis
         agent_ids,
         task_ids,
         nodes: processedNodes,
-        edges: uniqueEdges
+        edges: validEdges
       });
       
       console.log('SaveCrew: Save successful, closing dialog', savedCrew);

@@ -47,7 +47,8 @@ export const useGroupStore = create<GroupState>()(
         const currentUserEmail = currentUser.email;
         const emailDomain = currentUserEmail.split('@')[1] || '';
         const emailUser = currentUserEmail.split('@')[0] || '';
-        const primaryGroupId = `user_${emailUser}_${emailDomain.replace(/\./g, '_')}`;
+        // Keep dots in domain to match backend format (e.g., user_nehme.tohme_databricks.com)
+        const primaryGroupId = `user_${emailUser.replace(/\./g, '_')}_${emailDomain.replace(/\./g, '_')}`;
 
         const personalGroup: GroupWithRole = {
           id: primaryGroupId,

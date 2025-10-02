@@ -15,6 +15,7 @@ import TaskForm from './TaskForm';
 import { Theme } from '@mui/material/styles';
 import { useTabDirtyState } from '../../hooks/workflow/useTabDirtyState';
 import { useTaskExecutionStore } from '../../store/taskExecutionStore';
+import { useUILayoutStore } from '../../store/uiLayout';
 
 export interface TaskNodeData {
   label?: string;
@@ -91,6 +92,9 @@ const TaskNode: React.FC<TaskNodeProps> = ({ data, id }) => {
 
   // Tab dirty state management
   const { markCurrentTabDirty } = useTabDirtyState();
+
+  // Get current layout orientation
+  const layoutOrientation = useUILayoutStore(state => state.layoutOrientation);
 
   // Task execution state - try multiple ID formats for compatibility
   const taskStatus = useTaskExecutionStore(state => {
@@ -265,6 +269,8 @@ const TaskNode: React.FC<TaskNodeProps> = ({ data, id }) => {
           id: `${id}-${taskNodeBelow.id}`,
           source: id,
           target: taskNodeBelow.id,
+          sourceHandle: 'right',
+          targetHandle: 'left',
           type: 'default',
           animated: true, // This will make it look different from agent-task connections
         };
@@ -453,25 +459,32 @@ const TaskNode: React.FC<TaskNodeProps> = ({ data, id }) => {
 
   return (
     <>
+      {/* Top handle - visible only in vertical layout */}
       <Handle
         type="target"
         position={Position.Top}
-        id="top-target"
-        style={{ background: '#2196f3', width: '7px', height: '7px', left: '30%' }}
+        id="top"
+        style={{
+          background: '#2196f3',
+          width: '7px',
+          height: '7px',
+          opacity: layoutOrientation === 'vertical' ? 1 : 0,
+          pointerEvents: layoutOrientation === 'vertical' ? 'all' : 'none'
+        }}
       />
 
-      <Handle
-        type="source"
-        position={Position.Top}
-        id="top-source"
-        style={{ background: '#4caf50', width: '7px', height: '7px', left: '70%' }}
-      />
-
+      {/* Left handle - visible only in horizontal layout */}
       <Handle
         type="target"
         position={Position.Left}
         id="left"
-        style={{ background: '#2196f3', width: '7px', height: '7px' }}
+        style={{
+          background: '#2196f3',
+          width: '7px',
+          height: '7px',
+          opacity: layoutOrientation === 'horizontal' ? 1 : 0,
+          pointerEvents: layoutOrientation === 'horizontal' ? 'all' : 'none'
+        }}
       />
       <Box
         sx={getTaskStyles()}

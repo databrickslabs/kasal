@@ -248,33 +248,32 @@ class CrewAIEngineService(BaseEngineService):
                     api_keys_service = ApiKeysService(session)
                 else:
                     # Fallback: create a new session if none provided
-                    from src.db.session import get_db
-                    async for db_session in get_db():
+                    from src.db.session import async_session_factory
+                    async with async_session_factory() as db_session:
                         tool_service = ToolService(db_session)
                         api_keys_service = ApiKeysService(db_session)
-                        break
-                    
-                    # Extract user token from group context for tool factory
-                    user_token = group_context.access_token if group_context else None
-                    
-                    # Create a tool factory instance with API keys service and user token
-                    tool_factory = await ToolFactory.create(execution_config, api_keys_service, user_token)
-                    logger.info(f"[CrewAIEngineService] Created ToolFactory for {execution_id} with user token: {bool(user_token)}")
-                    
-                    # IMPORTANT: Do NOT prepare crew in main process when using subprocess execution
-                    # The subprocess will prepare its own crew with the full config including knowledge_sources
-                    # Preparing here would modify the config and remove knowledge_sources before subprocess gets them
-                    
-                    # Debug log to check if knowledge_sources are still present
-                    logger.info(f"[CrewAIEngineService] DEBUG: Config before subprocess for {execution_id}:")
-                    for idx, agent_config in enumerate(execution_config.get("agents", [])):
-                        agent_id = agent_config.get('id', f'agent_{idx}')
-                        ks = agent_config.get('knowledge_sources', [])
-                        logger.info(f"[CrewAIEngineService] Agent {agent_id} has {len(ks)} knowledge_sources: {ks}")
-                    
-                    # Skip crew preparation in main process - let subprocess handle it
-                    # This preserves the original config with knowledge_sources intact
-                    crew = None  # No crew object needed in main process for subprocess execution
+
+                # Extract user token from group context for tool factory
+                user_token = group_context.access_token if group_context else None
+
+                # Create a tool factory instance with API keys service and user token
+                tool_factory = await ToolFactory.create(execution_config, api_keys_service, user_token)
+                logger.info(f"[CrewAIEngineService] Created ToolFactory for {execution_id} with user token: {bool(user_token)}")
+
+                # IMPORTANT: Do NOT prepare crew in main process when using subprocess execution
+                # The subprocess will prepare its own crew with the full config including knowledge_sources
+                # Preparing here would modify the config and remove knowledge_sources before subprocess gets them
+
+                # Debug log to check if knowledge_sources are still present
+                logger.info(f"[CrewAIEngineService] DEBUG: Config before subprocess for {execution_id}:")
+                for idx, agent_config in enumerate(execution_config.get("agents", [])):
+                    agent_id = agent_config.get('id', f'agent_{idx}')
+                    ks = agent_config.get('knowledge_sources', [])
+                    logger.info(f"[CrewAIEngineService] Agent {agent_id} has {len(ks)} knowledge_sources: {ks}")
+
+                # Skip crew preparation in main process - let subprocess handle it
+                # This preserves the original config with knowledge_sources intact
+                crew = None  # No crew object needed in main process for subprocess execution
             
             except Exception as e:
                 logger.error(f"[CrewAIEngineService] Error running CrewAI execution {execution_id}: {str(e)}", exc_info=True)
@@ -559,57 +558,56 @@ class CrewAIEngineService(BaseEngineService):
                     api_keys_service = ApiKeysService(session)
                 else:
                     # Fallback: create a new session if none provided
-                    from src.db.session import get_db
-                    async for db_session in get_db():
+                    from src.db.session import async_session_factory
+                    async with async_session_factory() as db_session:
                         tool_service = ToolService(db_session)
                         api_keys_service = ApiKeysService(db_session)
-                        break
-                    
-                    # Create a tool factory instance with API keys service
-                    tool_factory = await ToolFactory.create(flow_config, api_keys_service)
-                    logger.info(f"[CrewAIEngineService] Created ToolFactory for flow {execution_id}")
-                    
-                    # Use the FlowPreparation class for flow setup
-                    from pathlib import Path
-                    output_path = Path(flow_config.get('output_dir', '/tmp'))
-                    flow_preparation = FlowPreparation(flow_config, output_path)
-                    try:
-                        prepared_flow = flow_preparation.prepare()
-                        flow = prepared_flow.get('flow')  # Extract the flow from prepared components
-                    except Exception as prep_error:
-                        logger.error(f"[CrewAIEngineService] Flow preparation failed: {prep_error}")
-                        prepared_flow = None
-                        
-                    if not prepared_flow:
-                        logger.error(f"[CrewAIEngineService] Failed to prepare flow for {execution_id}")
-                        await self._update_execution_status(
-                            execution_id, 
-                            ExecutionStatus.FAILED.value,
-                            "Failed to prepare flow"
-                        )
-                        return execution_id
-                    
-                    # Flow was already extracted from prepared_flow above
-                    
-                    # Store flow configuration and instance in running jobs
-                    self._running_jobs[execution_id] = {
-                        "type": "flow",
-                        "config": flow_config,
-                        "flow": flow,
-                        "start_time": datetime.now(UTC)
-                    }
-                    
-                    # Update status to RUNNING
+
+                # Create a tool factory instance with API keys service
+                tool_factory = await ToolFactory.create(flow_config, api_keys_service)
+                logger.info(f"[CrewAIEngineService] Created ToolFactory for flow {execution_id}")
+
+                # Use the FlowPreparation class for flow setup
+                from pathlib import Path
+                output_path = Path(flow_config.get('output_dir', '/tmp'))
+                flow_preparation = FlowPreparation(flow_config, output_path)
+                try:
+                    prepared_flow = flow_preparation.prepare()
+                    flow = prepared_flow.get('flow')  # Extract the flow from prepared components
+                except Exception as prep_error:
+                    logger.error(f"[CrewAIEngineService] Flow preparation failed: {prep_error}")
+                    prepared_flow = None
+
+                if not prepared_flow:
+                    logger.error(f"[CrewAIEngineService] Failed to prepare flow for {execution_id}")
                     await self._update_execution_status(
                         execution_id,
-                        ExecutionStatus.RUNNING.value,
-                        "Flow execution started"
+                        ExecutionStatus.FAILED.value,
+                        "Failed to prepare flow"
                     )
-                    
-                    # Execute the flow asynchronously
-                    asyncio.create_task(self._execute_flow(execution_id, flow))
-                    
                     return execution_id
+
+                # Flow was already extracted from prepared_flow above
+
+                # Store flow configuration and instance in running jobs
+                self._running_jobs[execution_id] = {
+                    "type": "flow",
+                    "config": flow_config,
+                    "flow": flow,
+                    "start_time": datetime.now(UTC)
+                }
+
+                # Update status to RUNNING
+                await self._update_execution_status(
+                    execution_id,
+                    ExecutionStatus.RUNNING.value,
+                    "Flow execution started"
+                )
+
+                # Execute the flow asynchronously
+                asyncio.create_task(self._execute_flow(execution_id, flow))
+
+                return execution_id
                     
             except Exception as e:
                 logger.error(f"[CrewAIEngineService] Error running flow execution {execution_id}: {str(e)}", exc_info=True)

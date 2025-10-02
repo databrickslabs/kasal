@@ -7,6 +7,7 @@ backend based on configuration stored in the database itself.
 import os
 import logging
 from typing import AsyncGenerator, Optional, Dict, Any
+from contextlib import asynccontextmanager
 
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
@@ -28,10 +29,11 @@ async def get_lakebase_config_from_db() -> Optional[Dict[str, Any]]:
     """
     try:
         # Use direct session factory to avoid circular dependency
-        from src.db.session import get_db
-        async for session in get_db():
-            from src.models.database_config import LakebaseConfig
+        from src.db.session import async_session_factory
+        from src.models.database_config import LakebaseConfig
 
+        # Use async context manager properly to ensure session cleanup
+        async with async_session_factory() as session:
             # Query for Lakebase configuration
             stmt = select(LakebaseConfig).where(
                 LakebaseConfig.key == "lakebase"
@@ -44,7 +46,6 @@ async def get_lakebase_config_from_db() -> Optional[Dict[str, Any]]:
 
             # No configuration found means Lakebase is disabled
             return None
-            # Note: The async for loop will automatically close the session
     except Exception as e:
         logger.debug(f"Could not read Lakebase config from database: {e}")
         return None
@@ -115,7 +116,7 @@ async def get_smart_db_session() -> AsyncGenerator[AsyncSession, None]:
             # It will handle its own session lifecycle
             logger.debug(f"  • Instance: {instance_name}")
             logger.debug(f"  • Endpoint: {config.get('endpoint') if config else 'N/A'}")
-            async for session in get_lakebase_session(instance_name, user_token, user_email):
+            async with get_lakebase_session(instance_name, user_token, user_email) as session:
                 yield session
             return
         except Exception as e:

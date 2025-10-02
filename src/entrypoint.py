@@ -58,6 +58,16 @@ def create_parser():
         action="store_true",
         help="Enable auto-reload for development"
     )
+    parser.add_argument(
+        "-d", "--debug",
+        action="store_true",
+        help="Enable debug mode for all loggers (including SQLAlchemy)"
+    )
+    parser.add_argument(
+        "--environment",
+        choices=["dev", "prod"],
+        help="Environment mode (dev or prod)"
+    )
     return parser
 
 class SPAMiddleware(BaseHTTPMiddleware):
@@ -220,6 +230,17 @@ def run_app():
     # Parse command line arguments
     parser = create_parser()
     args = parser.parse_args()
+
+    # Enable debug mode if requested
+    if args.debug:
+        os.environ["KASAL_DEBUG_ALL"] = "true"
+        os.environ["SQL_DEBUG"] = "true"
+        os.environ["KASAL_LOG_DATABASE"] = "DEBUG"
+
+    # Set DATABRICKS_APP_NAME for dev environment
+    if args.environment == "dev":
+        os.environ["DATABRICKS_APP_NAME"] = "kasal-local-test"
+        logger.info("Development environment detected - setting DATABRICKS_APP_NAME=kasal-local-test")
 
     logger.info("Starting Kasal application")
 

@@ -141,10 +141,10 @@ async def run_crew(execution_id: str, crew: Crew, running_jobs: Dict, group_cont
     # Fetch debug tracing flag from engine configuration (default False on errors)
     debug_tracing_enabled = False
     try:
-        async for session in get_db():
+        from src.db.session import async_session_factory
+        async with async_session_factory() as session:
             service = EngineConfigService(session)
             debug_tracing_enabled = await service.get_crewai_debug_tracing()
-            break
     except Exception as e:
         logger.warning(f"Failed to read CrewAI debug tracing flag; defaulting to False. Error: {e}")
 
@@ -618,17 +618,15 @@ async def run_crew_in_process(
         try:
             # Try to fetch debug tracing configuration
             from src.services.engine_config_service import EngineConfigService
-            from src.db.session import get_db
+            from src.db.session import async_session_factory
 
-            async for session in get_db():
+            async with async_session_factory() as session:
                 try:
                     service = EngineConfigService(session)
                     debug_tracing_enabled = await service.get_crewai_debug_tracing()
                     logger.info(f"Fetched debug tracing flag for subprocess: {debug_tracing_enabled}")
-                    break
                 except Exception as e:
                     logger.warning(f"Failed to fetch debug tracing flag, using default: {e}")
-                    break
         except Exception as e:
             logger.warning(f"Could not access database for debug tracing flag: {e}")
 

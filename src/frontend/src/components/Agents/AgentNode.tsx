@@ -13,6 +13,7 @@ import { Tool, KnowledgeSource } from '../../types/agent';
 import { Theme } from '@mui/material/styles';
 import { useTabDirtyState } from '../../hooks/workflow/useTabDirtyState';
 import { useAgentStore } from '../../store/agent';
+import { useUILayoutStore } from '../../store/uiLayout';
 
 interface AgentNodeData {
   agentId: string;
@@ -61,6 +62,9 @@ const AgentNode: React.FC<{ data: AgentNodeData; id: string }> = ({ data, id }) 
   // Use agent store instead of local state
   const { getAgent, updateAgent } = useAgentStore();
   const [agentData, setAgentData] = useState<Agent | null>(null);
+
+  // Get current layout orientation
+  const layoutOrientation = useUILayoutStore(state => state.layoutOrientation);
 
   // Load agent data using store
   useEffect(() => {
@@ -174,10 +178,17 @@ const AgentNode: React.FC<{ data: AgentNodeData; id: string }> = ({ data, id }) 
     if (sortedTaskNodes.length > 0) {
       const targetNode = sortedTaskNodes[0];
 
+      // Get current layout orientation from store
+      const { layoutOrientation } = useUILayoutStore.getState();
+      const sourceHandle = layoutOrientation === 'vertical' ? 'bottom' : 'right';
+      const targetHandle = layoutOrientation === 'vertical' ? 'top' : 'left';
+
       const newEdge = {
         id: `${id}-${targetNode.id}`,
         source: id,
         target: targetNode.id,
+        sourceHandle,
+        targetHandle,
         type: 'default',
       };
 
@@ -401,18 +412,34 @@ const AgentNode: React.FC<{ data: AgentNodeData; id: string }> = ({ data, id }) 
       data-selected={isSelected ? 'true' : 'false'}
     >
 
+      {/* Bottom handle - visible only in vertical layout */}
       <Handle
         type="source"
         position={Position.Bottom}
         id="bottom"
-        style={{ background: '#2196f3', width: '7px', height: '7px' }}
+        style={{
+          background: '#2196f3',
+          width: '7px',
+          height: '7px',
+          opacity: layoutOrientation === 'vertical' ? 1 : 0,
+          pointerEvents: layoutOrientation === 'vertical' ? 'all' : 'none'
+        }}
         onDoubleClick={handleDoubleClick}
       />
+
+      {/* Right handle - visible only in horizontal layout */}
       <Handle
         type="source"
         position={Position.Right}
         id="right"
-        style={{ background: '#2196f3', width: '7px', height: '7px' }}
+        style={{
+          background: '#2196f3',
+          width: '7px',
+          height: '7px',
+          opacity: layoutOrientation === 'horizontal' ? 1 : 0,
+          pointerEvents: layoutOrientation === 'horizontal' ? 'all' : 'none'
+        }}
+        onDoubleClick={handleDoubleClick}
       />
 
 
