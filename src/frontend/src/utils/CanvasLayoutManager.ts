@@ -81,6 +81,7 @@ export class CanvasLayoutManager {
   // Standard node dimensions (can be customized per node type)
   private static readonly NODE_DIMENSIONS: Record<string, NodeDimensions> = {
     agentNode: { width: 200, height: 150 },
+    managerNode: { width: 200, height: 150 },
     taskNode: { width: 220, height: 180 },
     flowNode: { width: 180, height: 120 },
     crewNode: { width: 240, height: 200 },
@@ -563,6 +564,92 @@ export class CanvasLayoutManager {
   }
 
   /**
+   * Get optimal position for manager node in hierarchical mode
+   */
+  getManagerNodePosition(existingNodes: Node[], canvasType: 'crew' | 'full' = 'crew'): { x: number; y: number } {
+    const availableArea = this.getAvailableCanvasArea(canvasType);
+    const managerDims = CanvasLayoutManager.NODE_DIMENSIONS.managerNode;
+    const agentNodes = existingNodes.filter(node => node.type === 'agentNode');
+    const spacing = this.minNodeSpacing;
+
+    const currentLayout = this.uiState?.layoutOrientation || 'horizontal';
+
+    console.log('[CanvasLayoutManager] Getting manager node position:', {
+      layout: currentLayout,
+      agentCount: agentNodes.length,
+      availableArea
+    });
+
+    if (agentNodes.length === 0) {
+      // No agents yet - place manager at default position
+      if (currentLayout === 'vertical') {
+        // Vertical: center horizontally at top
+        return {
+          x: Math.round(availableArea.x + spacing),
+          y: Math.round(availableArea.y + spacing)
+        };
+      } else {
+        // Horizontal: place at left
+        return {
+          x: Math.round(availableArea.x + spacing),
+          y: Math.round(availableArea.y + spacing)
+        };
+      }
+    }
+
+    if (currentLayout === 'vertical') {
+      // Vertical layout: Manager above all agents (centered horizontally)
+      const minAgentY = Math.min(...agentNodes.map(n => n.position.y));
+      const avgAgentX = agentNodes.reduce((sum, n) => sum + n.position.x, 0) / agentNodes.length;
+
+      // Position manager above the topmost agent with generous spacing
+      // Use spacing * 4 to ensure clear separation
+      const managerY = minAgentY - managerDims.height - spacing * 4;
+
+      // Don't clamp the Y position - allow negative values to position manager above agents
+      // The manager MUST be above the agents in hierarchical mode
+
+      console.log('[CanvasLayoutManager] Vertical manager position calculation:', {
+        minAgentY,
+        avgAgentX,
+        managerHeight: managerDims.height,
+        spacing,
+        calculatedY: managerY,
+        finalY: Math.round(managerY)
+      });
+
+      return {
+        x: Math.round(avgAgentX),
+        y: Math.round(managerY)
+      };
+    } else {
+      // Horizontal layout: Manager to the left of all agents (centered vertically)
+      const minAgentX = Math.min(...agentNodes.map(n => n.position.x));
+      const avgAgentY = agentNodes.reduce((sum, n) => sum + n.position.y, 0) / agentNodes.length;
+
+      // Position manager to the left of the leftmost agent with generous spacing
+      // Use spacing * 4 to ensure clear separation
+      const managerX = minAgentX - managerDims.width - spacing * 4;
+
+      // Don't clamp the X position - allow negative values to position manager to the left
+
+      console.log('[CanvasLayoutManager] Horizontal manager position calculation:', {
+        minAgentX,
+        avgAgentY,
+        managerWidth: managerDims.width,
+        spacing,
+        calculatedX: managerX,
+        finalX: Math.round(managerX)
+      });
+
+      return {
+        x: Math.round(managerX),
+        y: Math.round(avgAgentY)
+      };
+    }
+  }
+
+  /**
    * Get optimal position for a new flow node
    */
   getFlowNodePosition(existingNodes: Node[], canvasType: 'flow' | 'full' = 'flow'): { x: number; y: number } {
@@ -999,11 +1086,13 @@ export class CanvasLayoutManager {
   reorganizeNodes(nodes: Node[], canvasType: 'crew' | 'flow' | 'full' = 'full', edges: any[] = []): Node[] {
     const availableArea = this.getAvailableCanvasArea(canvasType);
     const agentNodes = nodes.filter(n => n.type === 'agentNode');
+    const managerNodes = nodes.filter(n => n.type === 'managerNode');
     const taskNodes = nodes.filter(n => n.type === 'taskNode');
     const flowNodes = nodes.filter(n => n.type === 'flowNode');
-    const otherNodes = nodes.filter(n => !['agentNode', 'taskNode', 'flowNode'].includes(n.type || ''));
+    const otherNodes = nodes.filter(n => !['agentNode', 'managerNode', 'taskNode', 'flowNode'].includes(n.type || ''));
 
-    const reorganizedNodes: Node[] = [...otherNodes]; // Keep other nodes as-is
+    // Keep manager nodes as-is (their position is managed by useManagerNode hook)
+    const reorganizedNodes: Node[] = [...otherNodes, ...managerNodes];
 
     const agentDims = CanvasLayoutManager.NODE_DIMENSIONS.agentNode;
     const taskDims = CanvasLayoutManager.NODE_DIMENSIONS.taskNode;
@@ -1107,6 +1196,8 @@ export class CanvasLayoutManager {
         currentTaskY += taskDims.height + taskSpacing;
       });
 
+      // Manager node position is handled by useManagerNode hook, not here
+
       // Flow nodes (if any)
       flowNodes.forEach((node, index) => {
         reorganizedNodes.push({
@@ -1185,6 +1276,8 @@ export class CanvasLayoutManager {
         });
         currentTaskX += taskDims.width + taskSpacing;
       });
+
+      // Manager node position is handled by useManagerNode hook, not here
 
       // Flow nodes (if any)
       flowNodes.forEach((node, index) => {

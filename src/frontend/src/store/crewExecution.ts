@@ -31,6 +31,7 @@ interface CrewExecutionState {
   schemaDetectionEnabled: boolean;
   processType: 'sequential' | 'hierarchical';
   managerLLM: string;
+  managerNodeId: string | null;  // ID of the manager node (if exists)
   isCrewPlanningOpen: boolean;
   isScheduleDialogOpen: boolean;
   inputMode: 'dialog' | 'chat';
@@ -61,6 +62,7 @@ interface CrewExecutionState {
   setSchemaDetectionEnabled: (enabled: boolean) => void;
   setProcessType: (type: 'sequential' | 'hierarchical') => void;
   setManagerLLM: (model: string) => void;
+  setManagerNodeId: (id: string | null) => void;
   setCrewPlanningOpen: (open: boolean) => void;
   setScheduleDialogOpen: (open: boolean) => void;
   setSelectedTools: (tools: Tool[]) => void;
@@ -104,6 +106,7 @@ export const useCrewExecutionStore = create<CrewExecutionState>((set, get) => ({
   schemaDetectionEnabled: true,
   processType: (localStorage.getItem('crewai-process-type') as 'sequential' | 'hierarchical') || 'sequential',
   managerLLM: localStorage.getItem('crewai-manager-llm') || '',
+  managerNodeId: null,
   isCrewPlanningOpen: false,
   isScheduleDialogOpen: false,
   inputMode: (localStorage.getItem('crewai-input-mode') as 'dialog' | 'chat') || 'dialog',
@@ -140,6 +143,7 @@ export const useCrewExecutionStore = create<CrewExecutionState>((set, get) => ({
     localStorage.setItem('crewai-manager-llm', model);
     set({ managerLLM: model });
   },
+  setManagerNodeId: (id) => set({ managerNodeId: id }),
   setCrewPlanningOpen: (open) => set({ isCrewPlanningOpen: open }),
   setScheduleDialogOpen: (open) => set({ isScheduleDialogOpen: open }),
   setSelectedTools: (tools) => set({ selectedTools: tools }),
@@ -771,4 +775,9 @@ export const useCrewExecutionStore = create<CrewExecutionState>((set, get) => ({
       set({ isExecuting: false });
     }
   }
-})); 
+}));
+
+// Expose store on window for debugging
+if (typeof window !== 'undefined') {
+  (window as any).useCrewExecutionStore = useCrewExecutionStore;
+}

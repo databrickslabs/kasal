@@ -45,6 +45,20 @@ const SaveCrew: React.FC<SaveCrewComponentProps> = ({ nodes, edges, trigger, dis
         
         setIsSaving(true);
 
+        // Remove duplicate nodes before processing
+        const uniqueNodes = tab.nodes.reduce((acc: typeof tab.nodes, node) => {
+          if (!acc.some(n => n.id === node.id)) {
+            acc.push(node);
+          }
+          return acc;
+        }, []);
+
+        console.log('SaveCrew: Deduplicated nodes for update:', {
+          originalCount: tab.nodes.length,
+          uniqueCount: uniqueNodes.length,
+          duplicatesRemoved: tab.nodes.length - uniqueNodes.length
+        });
+
         // Remove duplicate edges before saving - use tab edges not component edges
         const uniqueEdges = tab.edges.reduce((acc: Edge[], edge) => {
           const edgeKey = `${edge.source}-${edge.target}`;
@@ -55,7 +69,7 @@ const SaveCrew: React.FC<SaveCrewComponentProps> = ({ nodes, edges, trigger, dis
         }, []);
 
         // Filter edges to only include those that reference existing nodes
-        const nodeIds = new Set(tab.nodes.map(n => n.id));
+        const nodeIds = new Set(uniqueNodes.map(n => n.id));
         const validEdges = uniqueEdges.filter(edge =>
           nodeIds.has(edge.source) && nodeIds.has(edge.target)
         );
@@ -63,7 +77,7 @@ const SaveCrew: React.FC<SaveCrewComponentProps> = ({ nodes, edges, trigger, dis
         console.log('SaveCrew: About to update crew with data:', {
           crewId,
           name: tab.savedCrewName || tab.name,
-          nodes: tab.nodes.length,
+          nodes: uniqueNodes.length,
           totalEdges: uniqueEdges.length,
           validEdges: validEdges.length,
           removedEdges: uniqueEdges.length - validEdges.length
@@ -74,7 +88,7 @@ const SaveCrew: React.FC<SaveCrewComponentProps> = ({ nodes, edges, trigger, dis
           name: tab.savedCrewName || tab.name,
           agent_ids: [], // Will be calculated in the service
           task_ids: [], // Will be calculated in the service
-          nodes: tab.nodes,
+          nodes: uniqueNodes,
           edges: validEdges
         });
         
@@ -130,7 +144,21 @@ const SaveCrew: React.FC<SaveCrewComponentProps> = ({ nodes, edges, trigger, dis
         }
         
         console.log('SaveCrew: Found matching crew:', matchingCrew.id, 'for name:', crewName);
-        
+
+        // Remove duplicate nodes before processing
+        const uniqueNodes = tab.nodes.reduce((acc: typeof tab.nodes, node) => {
+          if (!acc.some(n => n.id === node.id)) {
+            acc.push(node);
+          }
+          return acc;
+        }, []);
+
+        console.log('SaveCrew: Deduplicated nodes for update by name:', {
+          originalCount: tab.nodes.length,
+          uniqueCount: uniqueNodes.length,
+          duplicatesRemoved: tab.nodes.length - uniqueNodes.length
+        });
+
         // Remove duplicate edges before saving
         const uniqueEdges = tab.edges.reduce((acc: Edge[], edge) => {
           const edgeKey = `${edge.source}-${edge.target}`;
@@ -145,7 +173,7 @@ const SaveCrew: React.FC<SaveCrewComponentProps> = ({ nodes, edges, trigger, dis
           name: crewName,
           agent_ids: [], // Will be calculated in the service
           task_ids: [], // Will be calculated in the service
-          nodes: tab.nodes,
+          nodes: uniqueNodes,
           edges: uniqueEdges
         });
         
@@ -250,6 +278,20 @@ const SaveCrew: React.FC<SaveCrewComponentProps> = ({ nodes, edges, trigger, dis
         edges: edges.length
       });
 
+      // Remove duplicate nodes before processing
+      const uniqueNodes = nodes.reduce((acc: typeof nodes, node) => {
+        if (!acc.some(n => n.id === node.id)) {
+          acc.push(node);
+        }
+        return acc;
+      }, []);
+
+      console.log('SaveCrew: Deduplicated nodes:', {
+        originalCount: nodes.length,
+        uniqueCount: uniqueNodes.length,
+        duplicatesRemoved: nodes.length - uniqueNodes.length
+      });
+
       // Remove duplicate edges before saving
       const uniqueEdges = edges.reduce((acc: Edge[], edge) => {
         const edgeKey = `${edge.source}-${edge.target}`;
@@ -260,7 +302,7 @@ const SaveCrew: React.FC<SaveCrewComponentProps> = ({ nodes, edges, trigger, dis
       }, []);
 
       // Filter agent nodes and ensure agentId is a valid number
-      const agentNodes = nodes.filter(node => node.type === 'agentNode');
+      const agentNodes = uniqueNodes.filter(node => node.type === 'agentNode');
       const agent_ids = agentNodes
         .filter(node => {
           // First try to get ID directly from data.agentId
@@ -285,8 +327,11 @@ const SaveCrew: React.FC<SaveCrewComponentProps> = ({ nodes, edges, trigger, dis
         })
         .filter(Boolean) as string[];
 
+      // Deduplicate agent_ids
+      const uniqueAgentIds = Array.from(new Set(agent_ids));
+
       // Filter task nodes and ensure taskId is a valid number
-      const taskNodes = nodes.filter(node => node.type === 'taskNode');
+      const taskNodes = uniqueNodes.filter(node => node.type === 'taskNode');
       const task_ids = taskNodes
         .filter(node => {
           // First try to get ID directly from data.taskId
@@ -311,10 +356,20 @@ const SaveCrew: React.FC<SaveCrewComponentProps> = ({ nodes, edges, trigger, dis
         })
         .filter(Boolean) as string[];
 
-      console.log('SaveCrew: Processed IDs', { agent_ids, task_ids });
+      // Deduplicate task_ids
+      const uniqueTaskIds = Array.from(new Set(task_ids));
+
+      console.log('SaveCrew: Processed IDs', {
+        agent_ids: uniqueAgentIds,
+        task_ids: uniqueTaskIds,
+        originalAgentIds: agent_ids.length,
+        uniqueAgentIds: uniqueAgentIds.length,
+        originalTaskIds: task_ids.length,
+        uniqueTaskIds: uniqueTaskIds.length
+      });
 
       // Filter edges to only include those that reference existing nodes
-      const nodeIds = new Set(nodes.map(n => n.id));
+      const nodeIds = new Set(uniqueNodes.map(n => n.id));
       const validEdges = uniqueEdges.filter(edge =>
         nodeIds.has(edge.source) && nodeIds.has(edge.target)
       );
@@ -326,7 +381,7 @@ const SaveCrew: React.FC<SaveCrewComponentProps> = ({ nodes, edges, trigger, dis
       });
 
       // Ensure task nodes have complete config with markdown field
-      const processedNodes = nodes.map(node => {
+      const processedNodes = uniqueNodes.map(node => {
         if (node.type === 'taskNode') {
           // Ensure we have a config object, create one if it doesn't exist
           const existingConfig = node.data?.config || {};
@@ -361,8 +416,8 @@ const SaveCrew: React.FC<SaveCrewComponentProps> = ({ nodes, edges, trigger, dis
 
       const savedCrew = await CrewService.saveCrew({
         name,
-        agent_ids,
-        task_ids,
+        agent_ids: uniqueAgentIds,
+        task_ids: uniqueTaskIds,
         nodes: processedNodes,
         edges: validEdges
       });
