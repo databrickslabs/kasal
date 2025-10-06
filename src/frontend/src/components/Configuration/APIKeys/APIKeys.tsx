@@ -109,7 +109,10 @@ function APIKeys(): JSX.Element {
     'QWEN_API_KEY',
     'DEEPSEEK_API_KEY',
     'GROK_API_KEY',
-    'GEMINI_API_KEY'
+    'GEMINI_API_KEY',
+    'POWERBI_USERNAME',
+    'POWERBI_PASSWORD',
+    'POWERBI_CLIENT_SECRET'
   ];
 
   // Map provider names to API key names with proper typing

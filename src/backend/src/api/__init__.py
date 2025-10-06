@@ -5,6 +5,7 @@ from src.api.agents_router import router as agents_router
 from src.api.crews_router import router as crews_router
 from src.api.databricks_router import router as databricks_router
 from src.api.databricks_knowledge_router import router as databricks_knowledge_router
+from src.api.powerbi_router import router as powerbi_router
 from src.api.flows_router import router as flows_router
 from src.api.healthcheck_router import router as healthcheck_router
 from src.api.logs_router import router as logs_router
@@ -54,6 +55,7 @@ api_router.include_router(agents_router)
 api_router.include_router(crews_router)
 api_router.include_router(databricks_router)
 api_router.include_router(databricks_knowledge_router)
+api_router.include_router(powerbi_router)
 api_router.include_router(flows_router)
 api_router.include_router(healthcheck_router)
 api_router.include_router(logs_router)
@@ -102,6 +104,7 @@ __all__ = [
     "crews_router",
     "databricks_router",
     "databricks_knowledge_router",
+    "powerbi_router",
     "flows_router",
     "healthcheck_router",
     "logs_router",

@@ -30,6 +30,7 @@ import CloseIcon from '@mui/icons-material/Close';
 import MemoryIcon from '@mui/icons-material/Memory';
 import StorageIcon from '@mui/icons-material/Storage';
 import WorkspacesIcon from '@mui/icons-material/Workspaces';
+import BarChartIcon from '@mui/icons-material/BarChart';
 // import AutoFixHighIcon from '@mui/icons-material/AutoFixHigh';
 import { useTranslation } from 'react-i18next';
 import { LanguageService } from '../../api/LanguageService';
@@ -43,6 +44,7 @@ import ObjectManagement from './ObjectManagement';
 import ToolsConfiguration from './Tools/ToolsConfiguration';
 import PromptConfiguration from './PromptConfiguration';
 import DatabricksConfiguration from './DatabricksConfiguration';
+import PowerBIConfiguration from './PowerBIConfiguration';
 import MCPConfiguration from './MCP/MCPConfiguration';
 import EnginesConfiguration from './Engines';
 import { DatabricksOneClickSetup } from '../MemoryBackend';
@@ -230,6 +232,12 @@ function Configuration({ onClose }: ConfigurationProps): JSX.Element {
       baseNavItems.push({
         label: t('configuration.databricks.tab', { defaultValue: 'Databricks' }),
         icon: <CloudIcon fontSize="small" />,
+        index: currentIndex++,
+        group: 'workspace'
+      });
+      baseNavItems.push({
+        label: t('configuration.powerbi.tab', { defaultValue: 'Power BI' }),
+        icon: <BarChartIcon fontSize="small" />,
         index: currentIndex++,
         group: 'workspace'
       });
@@ -738,6 +746,15 @@ function Configuration({ onClose }: ConfigurationProps): JSX.Element {
               return (
                 <ContentPanel key={item.index} value={activeSection} index={item.index}>
                   <DatabricksConfiguration onSaved={onClose} />
+                </ContentPanel>
+              );
+            }
+
+            // Power BI
+            if (item.label === t('configuration.powerbi.tab', { defaultValue: 'Power BI' })) {
+              return (
+                <ContentPanel key={item.index} value={activeSection} index={item.index}>
+                  <PowerBIConfiguration onSaved={onClose} />
                 </ContentPanel>
               );
             }

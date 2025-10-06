@@ -38,6 +38,7 @@ rich>=13.7.0,<14.0.0  # Required by embedchain 0.1.128
 pytest-cov
 psutil  # For process management and cleanup in ProcessCrewExecutor
 mlflow==3.4.0  # For LLM observability and tracking in Databricks
+azure-identity>=1.15.0  # For Power BI authentication (UsernamePasswordCredential)
 protobuf>=5.29.0,<6.0.0  # mem0ai compatibility
 databricks-agents>=1.4.0
 grpcio-status>=1.62.0,<1.71.0  # Compatible with protobuf <6.0.0

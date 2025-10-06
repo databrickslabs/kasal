@@ -61,7 +61,9 @@ export const customTools = [
   'PerplexityTool',
   'DatabricksCustomTool',
   'DatabricksJobsTool',
-  'PythonPPTXTool'
+  'PythonPPTXTool',
+  'PowerBIDAXTool',
+  'PowerBIAnalysisTool'
 ];
 
 const convertServiceToolToTool = (serviceTool: ServiceTool): Tool => {

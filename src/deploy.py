@@ -345,7 +345,11 @@ starlette==0.40.0
             backend_src = root_dir / "backend"
             backend_dst = databricks_dist / "backend"
             if backend_src.exists():
-                shutil.copytree(backend_src, backend_dst, ignore=shutil.ignore_patterns('__pycache__', '*.pyc', '*.pyo', 'logs', '*.log', '.mypy_cache', '.pytest_cache'))
+                shutil.copytree(backend_src, backend_dst, ignore=shutil.ignore_patterns(
+                    '__pycache__', '*.pyc', '*.pyo', 'logs', '*.log',
+                    '.mypy_cache', '.pytest_cache', 'htmlcov', 'tests',
+                    '*.db', '*.db-shm', '*.db-wal', '.coverage'
+                ))
                 logger.info(f"Copied backend folder")
             else:
                 logger.error("Backend folder not found!")

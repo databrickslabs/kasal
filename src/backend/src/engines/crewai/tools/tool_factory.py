@@ -58,6 +58,24 @@ except ImportError:
         DatabricksKnowledgeSearchTool = None
         logging.warning("Could not import DatabricksKnowledgeSearchTool")
 
+try:
+    from .custom.powerbi_dax_tool import PowerBIDAXTool
+except ImportError:
+    try:
+        from .custom.powerbi_dax_tool import PowerBIDAXTool
+    except ImportError:
+        PowerBIDAXTool = None
+        logging.warning("Could not import PowerBIDAXTool")
+
+try:
+    from .custom.powerbi_analysis_tool import PowerBIAnalysisTool
+except ImportError:
+    try:
+        from .custom.powerbi_analysis_tool import PowerBIAnalysisTool
+    except ImportError:
+        PowerBIAnalysisTool = None
+        logging.warning("Could not import PowerBIAnalysisTool")
+
 # MCPTool - Import from mcp_adapter
 try:
     from src.engines.common.mcp_adapter import MCPTool
@@ -102,6 +120,8 @@ class ToolFactory:
             "DatabricksCustomTool": DatabricksCustomTool,
             "DatabricksJobsTool": DatabricksJobsTool,
             "DatabricksKnowledgeSearchTool": DatabricksKnowledgeSearchTool,
+            "PowerBIDAXTool": PowerBIDAXTool,
+            "PowerBIAnalysisTool": PowerBIAnalysisTool,
         }
 
         # Add MCPTool if it was successfully imported
@@ -1036,6 +1056,42 @@ class ToolFactory:
                 logger.info(f"Creating DatabricksKnowledgeSearchTool with group_id: {tool_args['group_id']} (no execution_id filter)")
                 tool = DatabricksKnowledgeSearchTool(**tool_args)
                 return tool
+
+            elif tool_name == "PowerBIDAXTool":
+                # Create PowerBIDAXTool with group_id for multi-tenant support
+                group_id = None
+                try:
+                    if isinstance(self.config, dict):
+                        group_id = self.config.get("group_id")
+                except Exception:
+                    group_id = None
+
+                logger.info(f"Creating PowerBIDAXTool with group_id: {group_id}")
+                return tool_class(
+                    group_id=group_id or "default"
+                )
+
+            elif tool_name == "PowerBIAnalysisTool":
+                # Create PowerBIAnalysisTool with group_id and optional databricks_job_id
+                group_id = None
+                databricks_job_id = None
+                try:
+                    if isinstance(self.config, dict):
+                        group_id = self.config.get("group_id")
+                    # Check for databricks_job_id in tool_config or tool_config_override
+                    if tool_config and isinstance(tool_config, dict):
+                        databricks_job_id = tool_config.get("databricks_job_id")
+                    if not databricks_job_id and isinstance(tool_config_override, dict):
+                        databricks_job_id = tool_config_override.get("databricks_job_id")
+                except Exception:
+                    group_id = None
+                    databricks_job_id = None
+
+                logger.info(f"Creating PowerBIAnalysisTool with group_id: {group_id}, databricks_job_id: {databricks_job_id}")
+                return tool_class(
+                    group_id=group_id or "default",
+                    databricks_job_id=databricks_job_id
+                )
 
             elif tool_name == "MCPTool":
                 # MCPTool might need special configuration
