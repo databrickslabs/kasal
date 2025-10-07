@@ -66,7 +66,7 @@ export const AutomaticSetupForm: React.FC<AutomaticSetupFormProps> = ({
 
       {!detectedWorkspaceUrl && (
         <Alert severity="warning" sx={{ mb: 2 }}>
-          No Databricks workspace detected. Please set DATABRICKS_HOST environment variable.
+          No Databricks workspace detected. Please configure your Databricks workspace in the Databricks section first.
         </Alert>
       )}
 

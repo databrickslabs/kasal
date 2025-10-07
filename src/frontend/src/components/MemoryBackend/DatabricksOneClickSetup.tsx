@@ -216,10 +216,11 @@ export const DatabricksOneClickSetup: React.FC = () => {
   
   const detectWorkspaceUrl = async () => {
     try {
-      const response = await apiClient.get('/memory-backend/databricks/workspace-url');
-      if (response.data?.detected && response.data?.workspace_url) {
-        setDetectedWorkspaceUrl(response.data.workspace_url);
-        console.log(`Detected workspace URL from ${response.data.source}: ${response.data.workspace_url}`);
+      // Use the same approach as DatabricksConfiguration to get workspace URL from environment
+      const response = await apiClient.get('/databricks/environment');
+      if (response.data?.databricks_host) {
+        setDetectedWorkspaceUrl(response.data.databricks_host);
+        console.log(`Detected workspace URL from environment: ${response.data.databricks_host}`);
       }
     } catch (error) {
       console.log('Could not detect workspace URL from environment:', error);
@@ -366,9 +367,9 @@ export const DatabricksOneClickSetup: React.FC = () => {
   const handleSetup = async () => {
     // Use detected workspace URL
     const finalWorkspaceUrl = detectedWorkspaceUrl;
-    
+
     if (!finalWorkspaceUrl) {
-      setError('No Databricks workspace detected. Please set DATABRICKS_HOST environment variable and reload.');
+      setError('No Databricks workspace detected. Please configure your Databricks workspace in the Databricks section first.');
       return;
     }
 
