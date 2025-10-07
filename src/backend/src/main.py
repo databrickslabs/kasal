@@ -78,7 +78,7 @@ async def lifespan(app: FastAPI):
     # Validate and fix Databricks environment variables early in startup
     try:
         system_logger.info("Validating Databricks environment configuration...")
-        DatabricksURLUtils.validate_and_fix_environment()
+        await DatabricksURLUtils.validate_and_fix_environment()
     except Exception as e:
         system_logger.warning(f"Error validating Databricks environment: {e}")
 

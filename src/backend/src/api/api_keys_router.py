@@ -19,21 +19,27 @@ logger = logging.getLogger(__name__)
 
 # Dependency to get ApiKeyService
 def get_api_key_service(
-    session: SessionDep
+    session: SessionDep,
+    group_context: GroupContextDep
 ) -> ApiKeysService:
     """
-    Dependency provider for ApiKeysService.
+    Dependency provider for ApiKeysService with multi-tenant isolation.
 
-    Creates service with session following the pattern:
+    Creates service with session and group_id following the pattern:
     Router → Service → Repository → DB
+
+    SECURITY: group_id is REQUIRED for multi-tenant isolation.
+    All API key operations are scoped to the user's group.
 
     Args:
         session: Database session from FastAPI DI (from core.dependencies)
+        group_context: Group context from FastAPI DI (provides group_id)
 
     Returns:
-        ApiKeysService instance with session
+        ApiKeysService instance with session and group_id
     """
-    return ApiKeysService(session)
+    group_id = group_context.primary_group_id if group_context else None
+    return ApiKeysService(session, group_id=group_id)
 
 # Type alias for cleaner function signatures
 ApiKeysServiceDep = Annotated[ApiKeysService, Depends(get_api_key_service)]
@@ -41,23 +47,20 @@ ApiKeysServiceDep = Annotated[ApiKeysService, Depends(get_api_key_service)]
 
 @router.get("", response_model=List[ApiKeyResponse])
 async def get_api_keys_metadata(
-    group_context: GroupContextDep,
     service: ApiKeysServiceDep,
 ):
     """
     Get API keys metadata (names, descriptions) without actual values.
-    
+
     Returns only safe metadata - no actual key values are returned.
-    
+
     Args:
-        service: API key service injected by dependency
-        
+        service: API key service injected by dependency (with group_id)
+
     Returns:
         List of API keys with empty values (metadata only)
     """
     try:
-        # Set group_id in service
-        service.group_id = group_context.primary_group_id if group_context else None
         api_keys = await service.get_api_keys_metadata()
         return api_keys
     except Exception as e:
@@ -77,7 +80,8 @@ async def create_api_key(
 
     Args:
         api_key_data: API key data for creation
-        service: API key service injected by dependency
+        group_context: Group context for permission checking
+        service: API key service injected by dependency (with group_id)
 
     Returns:
         Created API key
@@ -90,9 +94,6 @@ async def create_api_key(
         )
 
     try:
-        # Set group_id in service
-        service.group_id = group_context.primary_group_id if group_context else None
-        
         # Check if API key already exists
         existing_key = await service.find_by_name(api_key_data.name)
         if existing_key:
@@ -100,10 +101,10 @@ async def create_api_key(
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail=f"API key with name '{api_key_data.name}' already exists"
             )
-            
+
         # Get user email from group context
         created_by_email = group_context.group_email if group_context else None
-            
+
         # Create in database
         return await service.create_api_key(api_key_data, created_by_email=created_by_email)
     except HTTPException:
@@ -127,7 +128,8 @@ async def update_api_key(
     Args:
         api_key_name: Name of the API key to update
         api_key_data: API key data for update
-        service: API key service injected by dependency
+        group_context: Group context for permission checking
+        service: API key service injected by dependency (with group_id)
 
     Returns:
         Updated API key
@@ -140,15 +142,12 @@ async def update_api_key(
         )
 
     try:
-        # Set group_id in service
-        service.group_id = group_context.primary_group_id if group_context else None
-        
         # Log the request for debugging
         logger.info(f"Attempting to update API key: {api_key_name}")
-        
+
         # Check if API key exists in database
         existing_key = await service.find_by_name(api_key_name)
-        
+
         if not existing_key:
             error_msg = f"API key '{api_key_name}' not found"
             logger.error(error_msg)
@@ -156,7 +155,7 @@ async def update_api_key(
                 status_code=status.HTTP_404_NOT_FOUND,
                 detail=error_msg
             )
-            
+
         # Update in database
         updated_key = await service.update_api_key(api_key_name, api_key_data)
         if not updated_key:
@@ -166,7 +165,7 @@ async def update_api_key(
                 status_code=status.HTTP_404_NOT_FOUND,
                 detail=error_msg
             )
-            
+
         logger.info(f"API key updated successfully: {api_key_name}")
         return updated_key
     except HTTPException:
@@ -189,7 +188,8 @@ async def delete_api_key(
 
     Args:
         api_key_name: Name of the API key to delete
-        service: API key service injected by dependency
+        group_context: Group context for permission checking
+        service: API key service injected by dependency (with group_id)
     """
     # Check permissions - only admins and editors can delete API keys
     if not check_role_in_context(group_context, ["admin", "editor"]):
@@ -199,18 +199,15 @@ async def delete_api_key(
         )
 
     try:
-        # Set group_id in service
-        service.group_id = group_context.primary_group_id if group_context else None
-        
         # Check if API key exists in database
         existing_key = await service.find_by_name(api_key_name)
-        
+
         if not existing_key:
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND,
                 detail=f"API key '{api_key_name}' not found"
             )
-            
+
         # Delete from database
         deleted = await service.delete_api_key(api_key_name)
         if not deleted:

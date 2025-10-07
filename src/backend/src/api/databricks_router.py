@@ -9,7 +9,6 @@ from src.services.databricks_service import DatabricksService
 from src.services.api_keys_service import ApiKeysService
 from src.core.dependencies import SessionDep, GroupContextDep
 from src.core.permissions import check_role_in_context, is_workspace_admin
-from src.utils.databricks_auth import is_databricks_apps_environment
 
 router = APIRouter(
     prefix="/databricks",
@@ -121,7 +120,6 @@ async def get_databricks_config(
                 catalog="",
                 schema="",
                 enabled=False,
-                apps_enabled=False,
                 # MLflow configuration defaults
                 mlflow_enabled=False,
                 evaluation_enabled=False,
@@ -192,19 +190,29 @@ async def check_databricks_connection(
 async def get_databricks_environment():
     """
     Get information about the Databricks environment.
-    
+
     Returns:
-        Dictionary containing environment information including whether we're in Databricks Apps
+        Dictionary containing environment information including workspace URL and authentication status
     """
     try:
-        is_apps = is_databricks_apps_environment()
+        # Get workspace URL directly from DatabricksAuth config
+        # This works even if full authentication isn't available
+        from src.utils.databricks_auth import _databricks_auth, get_auth_context
+
+        # Load config to get workspace URL from environment/database
+        await _databricks_auth._load_config()
+        databricks_host = _databricks_auth._workspace_host
+
+        # Try to get full auth context for additional info
+        auth = await get_auth_context()
+        auth_method = auth.auth_method if auth else None
+        user_identity = auth.user_identity if auth else None
+
         return {
-            "is_databricks_apps": is_apps,
-            "databricks_app_name": os.getenv("DATABRICKS_APP_NAME"),
-            "databricks_host": os.getenv("DATABRICKS_HOST"),
-            "workspace_id": os.getenv("DATABRICKS_WORKSPACE_ID"),
-            "has_oauth_credentials": bool(os.getenv("DATABRICKS_CLIENT_ID") and os.getenv("DATABRICKS_CLIENT_SECRET")),
-            "message": "Running in Databricks Apps environment" if is_apps else "Not running in Databricks Apps"
+            "databricks_host": databricks_host,
+            "auth_method": auth_method,
+            "user_identity": user_identity,
+            "authenticated": bool(auth)
         }
     except Exception as e:
         logger.error(f"Error getting Databricks environment info: {str(e)}")

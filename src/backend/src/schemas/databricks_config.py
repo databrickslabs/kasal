@@ -10,7 +10,6 @@ class DatabricksConfigBase(BaseModel):
     catalog: str = ""
     db_schema: str = Field("", alias="schema")
     enabled: bool = True
-    apps_enabled: bool = False
 
     # MLflow configuration
     mlflow_enabled: bool = False
@@ -33,23 +32,19 @@ class DatabricksConfigBase(BaseModel):
 
 class DatabricksConfigCreate(DatabricksConfigBase):
     """Schema for creating Databricks configuration."""
-    
+
     @property
     def required_fields(self) -> List[str]:
         """Get list of required fields based on configuration"""
-        if self.enabled and not self.apps_enabled:
+        if self.enabled:
             return ["warehouse_id", "catalog", "db_schema"]
         return []
-    
+
     @model_validator(mode='after')
     def validate_required_fields(self):
         """Validate required fields based on configuration."""
         # Only validate if Databricks is enabled
         if not self.enabled:
-            return self
-
-        # If apps are enabled, skip validation
-        if self.apps_enabled:
             return self
 
         # Check required fields
@@ -67,8 +62,8 @@ class DatabricksConfigCreate(DatabricksConfigBase):
                 empty_fields.append(field)
 
         if empty_fields:
-            raise ValueError(f"Invalid configuration: {', '.join(empty_fields)} must be non-empty when Databricks is enabled and apps are disabled")
-            
+            raise ValueError(f"Invalid configuration: {', '.join(empty_fields)} must be non-empty when Databricks is enabled")
+
         return self
 
 
@@ -79,7 +74,6 @@ class DatabricksConfigUpdate(DatabricksConfigBase):
     catalog: Optional[str] = None
     db_schema: Optional[str] = Field(None, alias="schema")
     enabled: Optional[bool] = None
-    apps_enabled: Optional[bool] = None
 
     # MLflow configuration
     mlflow_enabled: Optional[bool] = None

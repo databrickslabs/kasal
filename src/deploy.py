@@ -102,6 +102,13 @@ def configure_oauth_scopes(app_name, exclude_dataplane=True):
 
             # Dashboards/Genie
             "dashboards.genie",
+
+            # Unity Catalog - CRITICAL for volumes and catalog operations
+            "catalog.connections",
+            "catalog.catalogs:read",
+            "catalog.tables:read",
+            "catalog.schemas:read",
+            "catalog.volumes",
         ]
 
         # Add data-plane scope only if explicitly requested
