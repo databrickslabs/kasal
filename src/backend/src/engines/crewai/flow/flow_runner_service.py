@@ -247,11 +247,14 @@ class FlowRunnerService:
             
             # Initialize API keys before execution
             try:
+                # SECURITY: Get group_id from config for multi-tenant isolation
+                group_id = config.get('group_id') if config else None
+
                 # Initialize all the API keys needed for execution
                 for provider in ["OPENAI", "ANTHROPIC", "PERPLEXITY", "SERPER"]:
                     try:
                         # Since this is an async method in a sync context, use sync approach
-                        provider_key = await ApiKeysService.get_provider_api_key(provider)
+                        provider_key = await ApiKeysService.get_provider_api_key(provider, group_id=group_id)
                         if not provider_key:
                             logger.warning(f"No API key found for provider: {provider}")
                         else:
@@ -349,11 +352,14 @@ class FlowRunnerService:
             
             # Initialize API keys before execution
             try:
+                # SECURITY: Get group_id from config for multi-tenant isolation
+                group_id = config.get('group_id') if config else None
+
                 # Initialize all the API keys needed for execution
                 for provider in ["OPENAI", "ANTHROPIC", "PERPLEXITY", "SERPER"]:
                     try:
                         # Since this is an async method in a sync context, use sync approach
-                        provider_key = await ApiKeysService.get_provider_api_key(provider)
+                        provider_key = await ApiKeysService.get_provider_api_key(provider, group_id=group_id)
                         if not provider_key:
                             logger.warning(f"No API key found for provider: {provider}")
                         else:

@@ -217,7 +217,11 @@ async def run_crew(execution_id: str, crew: Crew, running_jobs: Dict, group_cont
                         for agent in crew.agents:
                             if not hasattr(agent, 'llm') or agent.llm is None:
                                 # Use LLMManager to configure CrewAI LLM
-                                crewai_llm = await LLMManager.configure_crewai_llm(model)
+                                # SECURITY: Pass group_id for multi-tenant isolation
+                                group_id = config.get('group_id') if config else None
+                                if not group_id:
+                                    raise ValueError("group_id is REQUIRED for LLM configuration")
+                                crewai_llm = await LLMManager.configure_crewai_llm(model, group_id)
                                 agent.llm = crewai_llm
                                 logger.info(f"Updated agent {agent.role} with global LLM {model}")
                     else:
@@ -234,29 +238,26 @@ async def run_crew(execution_id: str, crew: Crew, running_jobs: Dict, group_cont
             try:
                 # Import ApiKeysService to ensure API keys are in environment
                 from src.services.api_keys_service import ApiKeysService
-                
+
+                # SECURITY: Get group_id for multi-tenant isolation
+                group_id = group_context.primary_group_id if group_context else None
+
                 # Explicitly set up API keys for common providers
-                # Handle OpenAI API key properly in Databricks Apps environment
+                # Handle OpenAI API key properly
                 try:
-                    from src.utils.databricks_auth import is_databricks_apps_environment
-                    if not is_databricks_apps_environment():
-                        await ApiKeysService.setup_openai_api_key()
+                    openai_key = await ApiKeysService.get_provider_api_key("openai", group_id=group_id)
+                    if openai_key:
+                        # OpenAI key is configured, set it up
+                        os.environ["OPENAI_API_KEY"] = openai_key
+                        logger.info("OpenAI API key configured and set up")
                     else:
-                        # In Databricks Apps, check if OpenAI key is configured
-                        openai_key = await ApiKeysService.get_provider_api_key("openai")
-                        if openai_key:
-                            # OpenAI key is configured, set it up normally
-                            os.environ["OPENAI_API_KEY"] = openai_key
-                            logger.info("OpenAI API key configured and set up in Databricks Apps environment")
-                        else:
-                            # No OpenAI key configured, set dummy key to satisfy CrewAI validation
-                            os.environ["OPENAI_API_KEY"] = "sk-dummy-databricks-apps-validation-key"
-                            logger.info("No OpenAI API key configured, set dummy key for validation in Databricks Apps environment")
-                except ImportError:
-                    await ApiKeysService.setup_openai_api_key()
-                
-                await ApiKeysService.setup_anthropic_api_key()
-                await ApiKeysService.setup_gemini_api_key()  # Ensure Gemini API key is properly set
+                        # No OpenAI key configured, set dummy key to satisfy CrewAI validation
+                        os.environ["OPENAI_API_KEY"] = "sk-dummy-validation-key"
+                        logger.info("No OpenAI API key configured, set dummy key for validation")
+                except Exception as e:
+                    logger.warning(f"Error setting up OpenAI API key: {e}")
+                    # Set dummy key to satisfy CrewAI validation
+                    os.environ["OPENAI_API_KEY"] = "sk-dummy-validation-key"
                 
                 # Log API key status (don't log the actual keys)
                 logger.info("Verified API keys are set in environment variables")

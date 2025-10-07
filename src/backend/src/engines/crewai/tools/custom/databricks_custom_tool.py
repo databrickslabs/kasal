@@ -11,6 +11,9 @@ logger = logging.getLogger(__name__)
 if TYPE_CHECKING:
     from databricks.sdk import WorkspaceClient
 
+# Import centralized auth middleware
+from src.utils.databricks_auth import get_workspace_client
+
 class DatabricksCustomToolSchema(BaseModel):
     """Input schema for DatabricksCustomTool."""
 
@@ -199,31 +202,33 @@ class DatabricksCustomTool(BaseTool):
             self._host = databricks_host
             logger.info(f"Final host after processing: {self._host}")
         
-        # Try enhanced authentication if not using OAuth
-        if not self._use_oauth:
+        # Try unified authentication if not using OAuth
+        if not self._use_oauth and not self._token:
             try:
-                # Try to get authentication through enhanced auth system
-                from src.utils.databricks_auth import is_databricks_apps_environment
-                if is_databricks_apps_environment():
-                    self._use_oauth = True
-                    logger.info("Detected Databricks Apps environment - using OAuth authentication")
-                elif not self._token:
-                    # Fall back to environment variables for PAT
-                    self._token = os.getenv("DATABRICKS_API_KEY") or os.getenv("DATABRICKS_TOKEN")
-                    if self._token:
-                        logger.info("Using DATABRICKS_API_KEY/TOKEN from environment")
-            except ImportError as e:
-                logger.debug(f"Enhanced auth not available: {e}")
-                # Fall back to environment variables
-                if not self._token:
-                    self._token = os.getenv("DATABRICKS_API_KEY") or os.getenv("DATABRICKS_TOKEN")
-                    if self._token:
-                        logger.info("Using DATABRICKS_API_KEY/TOKEN from environment")
+                # Try to get authentication through unified auth system
+                from src.utils.databricks_auth import get_auth_context
+                import asyncio
+                loop = asyncio.new_event_loop()
+                try:
+                    asyncio.set_event_loop(loop)
+                    auth = loop.run_until_complete(get_auth_context(user_token=user_token))
+                    if auth:
+                        if auth.auth_method == "obo":
+                            self._use_oauth = True
+                            logger.info("Detected OBO authentication - using OAuth")
+                        self._token = auth.token
+                        if not self._host:
+                            self._host = auth.workspace_url.rstrip('/')
+                        logger.info(f"Using unified auth: {auth.auth_method}")
+                finally:
+                    loop.close()
+            except Exception as e:
+                logger.warning(f"Unified auth failed: {e}")
         
-        # Set fallback values from environment if not set from config
+        # Set default host if still not set
         if not self._host:
-            self._host = os.getenv("DATABRICKS_HOST", "your-workspace.cloud.databricks.com")
-            logger.info(f"Using host from environment or default: {self._host}")
+            self._host = "your-workspace.cloud.databricks.com"
+            logger.info(f"Using default host: {self._host}")
         
         # Check authentication requirements
         if token_required and not self._use_oauth and not self._token:
@@ -251,17 +256,24 @@ class DatabricksCustomTool(BaseTool):
         # Skip validation if using OAuth/OBO
         if self._use_oauth and self._user_token:
             return
-            
+
         # Skip validation if we have a token configured
         if self._token:
             return
-            
-        # Check environment variables
-        has_profile = "DATABRICKS_CONFIG_PROFILE" in os.environ
-        has_direct_auth = ("DATABRICKS_HOST" in os.environ and 
-                          ("DATABRICKS_TOKEN" in os.environ or "DATABRICKS_API_KEY" in os.environ))
 
-        if not (has_profile or has_direct_auth or self._use_oauth):
+        # Check if unified auth is available
+        has_unified_auth = False
+        try:
+            from src.utils.databricks_auth import get_auth_context
+            auth = asyncio.run(get_auth_context())
+            has_unified_auth = auth is not None
+        except Exception:
+            pass
+
+        # Check environment variables for legacy support
+        has_profile = "DATABRICKS_CONFIG_PROFILE" in os.environ
+
+        if not (has_profile or has_unified_auth or self._use_oauth):
             logger.warning(
                 "Databricks authentication credentials are not fully configured. "
                 "Tool will attempt to use enhanced authentication when executed."
@@ -444,38 +456,35 @@ class DatabricksCustomTool(BaseTool):
 
     @property
     def workspace_client(self) -> "WorkspaceClient":
-        """Get or create a Databricks WorkspaceClient instance."""
+        """Get or create a Databricks WorkspaceClient instance using centralized auth."""
         if self._workspace_client is None:
             try:
-                from databricks.sdk import WorkspaceClient
-                
-                # If using OAuth, create client with the token
-                if self._use_oauth and self._user_token:
-                    # Try to get headers synchronously for SDK initialization
-                    import asyncio
-                    loop = asyncio.new_event_loop()
-                    asyncio.set_event_loop(loop)
-                    headers = loop.run_until_complete(self._get_auth_headers())
-                    loop.close()
-                    
-                    if headers and "Authorization" in headers:
-                        token = headers["Authorization"].replace("Bearer ", "")
-                        self._workspace_client = WorkspaceClient(
-                            host=f"https://{self._host}",
-                            token=token
-                        )
+                # Use centralized auth middleware
+                # Determine user token based on OAuth settings
+                user_token = self._user_token if self._use_oauth else self._token
+
+                # Get workspace client from centralized auth
+                # This supports OBO, PAT, and Service Principal OAuth
+                try:
+                    loop = asyncio.get_event_loop()
+                    if loop.is_running():
+                        # Already in async context, need to run in executor
+                        import concurrent.futures
+                        with concurrent.futures.ThreadPoolExecutor() as executor:
+                            future = executor.submit(asyncio.run, get_workspace_client(user_token=user_token))
+                            self._workspace_client = future.result()
                     else:
-                        # Fall back to default initialization
-                        self._workspace_client = WorkspaceClient()
-                elif self._token:
-                    # Use PAT token
-                    self._workspace_client = WorkspaceClient(
-                        host=f"https://{self._host}",
-                        token=self._token
+                        # Not in event loop, can use asyncio.run
+                        self._workspace_client = asyncio.run(get_workspace_client(user_token=user_token))
+                except RuntimeError:
+                    # No event loop, use asyncio.run
+                    self._workspace_client = asyncio.run(get_workspace_client(user_token=user_token))
+
+                if not self._workspace_client:
+                    raise ValueError(
+                        "Failed to get Databricks workspace client. "
+                        "Ensure authentication is properly configured via databricks_auth middleware."
                     )
-                else:
-                    # Use default initialization (will use env vars or config)
-                    self._workspace_client = WorkspaceClient()
             except ImportError:
                 raise ImportError(
                     "`databricks-sdk` package not found, please run `uv add databricks-sdk`"

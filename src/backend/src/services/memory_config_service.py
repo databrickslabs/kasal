@@ -14,7 +14,6 @@ from src.schemas.memory_backend import (
 )
 from src.core.logger import LoggerManager
 from src.repositories.memory_backend_repository import MemoryBackendRepository
-from src.utils.databricks_auth import is_databricks_apps_environment
 
 logger = LoggerManager.get_instance().system
 
@@ -71,13 +70,17 @@ class MemoryConfigService:
                 if latest_backend.databricks_config and latest_backend.backend_type == MemoryBackendType.DATABRICKS:
                     config_dict = latest_backend.databricks_config.copy()
                     
-                    # In Databricks Apps, override workspace_url with DATABRICKS_HOST if not set
-                    if is_databricks_apps_environment() and not config_dict.get('workspace_url'):
-                        databricks_host = os.getenv("DATABRICKS_HOST")
-                        if databricks_host:
-                            workspace_url = databricks_host if databricks_host.startswith("http") else f"https://{databricks_host}"
-                            config_dict['workspace_url'] = workspace_url
-                            logger.info(f"Auto-populating workspace_url from DATABRICKS_HOST: {workspace_url}")
+                    # Get workspace_url from unified auth if not set
+                    if not config_dict.get('workspace_url'):
+                        try:
+                            from src.utils.databricks_auth import get_auth_context
+                            import asyncio
+                            auth = asyncio.run(get_auth_context())
+                            if auth and auth.workspace_url:
+                                config_dict['workspace_url'] = auth.workspace_url
+                                logger.info(f"Auto-populating workspace_url from unified {auth.auth_method} auth: {auth.workspace_url}")
+                        except Exception as e:
+                            logger.warning(f"Failed to get workspace URL from unified auth: {e}")
                     
                     databricks_config = DatabricksMemoryConfig(**config_dict)
                 
@@ -111,13 +114,17 @@ class MemoryConfigService:
                     if backend.databricks_config and backend.backend_type == MemoryBackendType.DATABRICKS:
                         config_dict = backend.databricks_config.copy()
 
-                        # In Databricks Apps, override workspace_url with DATABRICKS_HOST if not set
-                        if is_databricks_apps_environment() and not config_dict.get('workspace_url'):
-                            databricks_host = os.getenv("DATABRICKS_HOST")
-                            if databricks_host:
-                                workspace_url = databricks_host if databricks_host.startswith("http") else f"https://{databricks_host}"
-                                config_dict['workspace_url'] = workspace_url
-                                logger.info(f"Auto-populating workspace_url from DATABRICKS_HOST: {workspace_url}")
+                        # Get workspace_url from unified auth if not set
+                        if not config_dict.get('workspace_url'):
+                            try:
+                                from src.utils.databricks_auth import get_auth_context
+                                import asyncio
+                                auth = asyncio.run(get_auth_context())
+                                if auth and auth.workspace_url:
+                                    config_dict['workspace_url'] = auth.workspace_url
+                                    logger.info(f"Auto-populating workspace_url from unified {auth.auth_method} auth: {auth.workspace_url}")
+                            except Exception as e:
+                                logger.warning(f"Failed to get workspace URL from unified auth: {e}")
 
                         databricks_config = DatabricksMemoryConfig(**config_dict)
 
