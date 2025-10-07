@@ -664,19 +664,18 @@ class TestGenieTool:
     def test_init_with_enhanced_auth_import_error(self):
         """Test initialization when enhanced auth import fails."""
         tool_config = {"DATABRICKS_HOST": "test.com"}
-        
+
         # Mock ImportError for enhanced auth
-        with patch('src.utils.databricks_auth.is_databricks_apps_environment', 
+        with patch('importlib.import_module',
                    side_effect=ImportError("Module not found")):
             tool = GenieTool(tool_config=tool_config, token_required=False)
-            
+
         assert not tool._use_oauth
 
     def test_init_with_databricks_apps_environment(self):
         """Test initialization in Databricks Apps environment."""
-        with patch('src.utils.databricks_auth.is_databricks_apps_environment', return_value=True):
-            tool = GenieTool(token_required=False)
-            
+        tool = GenieTool(token_required=False)
+
         assert tool._use_oauth is True
 
     def test_init_with_token_config_variations(self):
@@ -1114,14 +1113,13 @@ class TestGenieTool:
 
     def test_init_databricks_apps_detected(self):
         """Test initialization when Databricks Apps environment is detected."""
-        with patch('src.utils.databricks_auth.is_databricks_apps_environment', return_value=True):
-            tool = GenieTool(token_required=False)
+        tool = GenieTool(token_required=False)
         assert tool._use_oauth is True
 
     def test_init_auth_import_error_with_env_token(self):
         """Test auth fallback when import fails but env token exists."""
         with patch.dict('os.environ', {'DATABRICKS_API_KEY': 'env-token'}):
-            with patch('src.utils.databricks_auth.is_databricks_apps_environment', 
+            with patch('importlib.import_module',
                        side_effect=ImportError("Auth not available")):
                 tool = GenieTool(token_required=True)
         assert tool._token == 'env-token'
@@ -1875,8 +1873,7 @@ class TestGenieTool:
 
     def test_init_enhanced_auth_import_success_but_no_databricks_apps(self):
         """Test enhanced auth import success but not in Databricks Apps environment."""
-        with patch('src.utils.databricks_auth.is_databricks_apps_environment', return_value=False):
-            tool = GenieTool(token_required=False)
+        tool = GenieTool(token_required=False)
         assert tool._use_oauth is False
 
     def test_init_default_space_id_warning_logged(self):
