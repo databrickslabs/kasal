@@ -54,30 +54,38 @@ async def get_lakebase_config_from_db() -> Optional[Dict[str, Any]]:
 async def is_lakebase_enabled() -> bool:
     """
     Check if Lakebase is enabled and configured.
+    Database is the single source of truth - no environment variable overrides.
     """
-    # Check environment variable first (highest priority)
-    if os.environ.get("USE_LAKEBASE", "").lower() == "true":
-        return True
-
-    if os.environ.get("DISABLE_LAKEBASE", "").lower() == "true":
-        return False
-
     # For fresh deployments or when database tables don't exist yet,
     # default to regular database to avoid circular dependency
     try:
-        # Get configuration from database
+        # Get configuration from database - this is the ONLY source of truth
         config = await get_lakebase_config_from_db()
 
-        if config:
-            return (
-                config.get("enabled", False) and
-                config.get("endpoint") and
-                config.get("migration_completed", False)
-            )
+        if not config:
+            logger.debug("🔴 Lakebase DISABLED - No configuration found in database")
+            return False
+
+        is_enabled = (
+            config.get("enabled", False) and
+            config.get("endpoint") and
+            config.get("migration_completed", False)
+        )
+
+        if is_enabled:
+            logger.info(f"🔵 Lakebase ENABLED via database config (endpoint: {config.get('endpoint')})")
+        else:
+            logger.debug(f"🔴 Lakebase DISABLED - Config incomplete: "
+                        f"enabled={config.get('enabled')}, "
+                        f"has_endpoint={bool(config.get('endpoint'))}, "
+                        f"migration_completed={config.get('migration_completed')}")
+
+        return is_enabled
+
     except Exception as e:
         # If we can't read the database config (e.g., tables don't exist yet),
         # default to regular database
-        logger.debug(f"Cannot read Lakebase config from database, using regular DB: {e}")
+        logger.debug(f"🔴 Lakebase DISABLED - Cannot read config from database: {e}")
 
     return False
 
@@ -107,9 +115,18 @@ async def get_smart_db_session() -> AsyncGenerator[AsyncSession, None]:
         if not instance_name:
             instance_name = os.environ.get("LAKEBASE_INSTANCE_NAME", "kasal-lakebase")
 
-        # Try to get user token and email from environment or context
-        user_token = os.environ.get("DATABRICKS_USER_TOKEN")
-        user_email = os.environ.get("DATABRICKS_USER_EMAIL")
+        # Get user token and email from unified auth
+        user_token = None
+        user_email = None
+        try:
+            from src.utils.databricks_auth import get_auth_context
+            auth = await get_auth_context()
+            if auth:
+                user_token = auth.token
+                user_email = auth.user_identity
+                logger.debug(f"Using unified {auth.auth_method} auth for Lakebase session")
+        except Exception as e:
+            logger.warning(f"Failed to get unified auth for Lakebase: {e}")
 
         try:
             # Simply delegate to lakebase session provider

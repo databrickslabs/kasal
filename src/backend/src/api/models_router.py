@@ -24,7 +24,10 @@ router = APIRouter(
 # Set up logging
 logger = logging.getLogger(__name__)
 
-async def get_model_config_service(session: SessionDep) -> ModelConfigService:
+async def get_model_config_service(
+    session: SessionDep,
+    group_context: GroupContextDep
+) -> ModelConfigService:
     """
     Dependency provider for ModelConfigService.
 
@@ -33,11 +36,21 @@ async def get_model_config_service(session: SessionDep) -> ModelConfigService:
 
     Args:
         session: Database session from FastAPI DI
+        group_context: Group context for multi-tenant isolation (REQUIRED for security)
 
     Returns:
-        ModelConfigService instance with session
+        ModelConfigService instance with session and group_id
+
+    Raises:
+        ValueError: If group_context is None or has no primary_group_id
     """
-    return ModelConfigService(session)
+    # SECURITY: group_id is REQUIRED for ModelConfigService
+    if not group_context or not group_context.primary_group_id:
+        raise ValueError(
+            "SECURITY: group_id is REQUIRED for ModelConfigService. "
+            "All API key operations must be scoped to a group for multi-tenant isolation."
+        )
+    return ModelConfigService(session, group_id=group_context.primary_group_id)
 
 
 # Type alias for cleaner function signatures

@@ -581,22 +581,24 @@ async def one_click_databricks_setup(
         Setup result with created resources
     """
     try:
-        # In Databricks Apps, prefer DATABRICKS_HOST over user-provided URL
+        # Get workspace URL from unified auth or user request
         workspace_url = request.get("workspace_url")
-        
-        # Check if we're in Databricks Apps environment
-        databricks_host = os.environ.get("DATABRICKS_HOST")
-        if databricks_host:
-            # Override with the correct workspace URL from environment
-            if not databricks_host.startswith("http"):
-                workspace_url = f"https://{databricks_host}"
-            else:
-                workspace_url = databricks_host
-            logger.info(f"Using DATABRICKS_HOST from environment: {workspace_url}")
-        elif not workspace_url:
+
+        # Try to get from unified auth first
+        if not workspace_url:
+            try:
+                from src.utils.databricks_auth import get_auth_context
+                auth = await get_auth_context()
+                if auth and auth.workspace_url:
+                    workspace_url = auth.workspace_url
+                    logger.info(f"Using workspace URL from unified {auth.auth_method} auth: {workspace_url}")
+            except Exception as e:
+                logger.warning(f"Failed to get unified auth: {e}")
+
+        if not workspace_url:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
-                detail="workspace_url is required (DATABRICKS_HOST not found in environment)"
+                detail="workspace_url is required and not available from unified auth"
             )
         
         catalog = request.get("catalog", "ml")
