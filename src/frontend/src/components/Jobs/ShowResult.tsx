@@ -1,4 +1,4 @@
-import React, { useMemo, useState, useRef, useEffect, memo } from 'react';
+import React, { useMemo, useState, useRef, useEffect, memo, useCallback } from 'react';
 import {
   Dialog,
   DialogTitle,
@@ -46,27 +46,8 @@ const ShowResult = memo<ShowResultProps>(({ open, onClose, result, run }) => {
   // Track if the dialog has been opened at least once
   const hasOpenedRef = useRef(false);
 
-  // Update the hasOpened ref when dialog opens and set view mode based on content
-  useEffect(() => {
-    if (open) {
-      hasOpenedRef.current = true;
-      // Set view mode to 'html' if HTML content is detected
-      if (result) {
-        const resultString = JSON.stringify(result);
-        if (/<[^>]*>/.test(resultString) || resultString.includes('<!DOCTYPE') || resultString.includes('<html')) {
-          setViewMode('html');
-        } else {
-          setViewMode('code');
-        }
-
-        // Check for Databricks volume information from configuration
-        checkForDatabricksVolumeInfo(result);
-      }
-    }
-  }, [open, result, run]);
-
   // Function to check for Databricks volume information from configuration
-  const checkForDatabricksVolumeInfo = async (resultData: Record<string, unknown>) => {
+  const checkForDatabricksVolumeInfo = useCallback(async (resultData: Record<string, unknown>) => {
     try {
       // Check if we have run information with task configuration
       if (!run) {
@@ -77,9 +58,20 @@ const ShowResult = memo<ShowResultProps>(({ open, onClose, result, run }) => {
       const databricksService = DatabricksService.getInstance();
       const globalConfig = await databricksService.getDatabricksConfig();
 
-      if (!globalConfig || !globalConfig.workspace_url) {
+      if (!globalConfig) {
         console.log('No Databricks configuration found');
         return;
+      }
+
+      // Fetch workspace URL from backend environment
+      let workspaceUrl: string | undefined;
+      try {
+        const envInfo = await databricksService.getDatabricksEnvironment();
+        if (envInfo.databricks_host) {
+          workspaceUrl = envInfo.databricks_host;
+        }
+      } catch (error) {
+        console.error('Error fetching Databricks environment:', error);
       }
 
       let volumePath: string | null = null;
@@ -136,12 +128,12 @@ const ShowResult = memo<ShowResultProps>(({ open, onClose, result, run }) => {
 
         setDatabricksVolumeInfo({
           path: fullVolumePath,
-          workspaceUrl: globalConfig.workspace_url
+          workspaceUrl: workspaceUrl
         });
 
         console.log('Databricks volume detected:', {
           path: fullVolumePath,
-          workspaceUrl: globalConfig.workspace_url
+          workspaceUrl: workspaceUrl
         });
       } else {
         console.log('No volume configuration detected');
@@ -149,7 +141,26 @@ const ShowResult = memo<ShowResultProps>(({ open, onClose, result, run }) => {
     } catch (error) {
       console.error('Error checking for Databricks volume info:', error);
     }
-  };
+  }, [run]);
+
+  // Update the hasOpened ref when dialog opens and set view mode based on content
+  useEffect(() => {
+    if (open) {
+      hasOpenedRef.current = true;
+      // Set view mode to 'html' if HTML content is detected
+      if (result) {
+        const resultString = JSON.stringify(result);
+        if (/<[^>]*>/.test(resultString) || resultString.includes('<!DOCTYPE') || resultString.includes('<html')) {
+          setViewMode('html');
+        } else {
+          setViewMode('code');
+        }
+
+        // Check for Databricks volume information from configuration
+        checkForDatabricksVolumeInfo(result);
+      }
+    }
+  }, [open, result, checkForDatabricksVolumeInfo]);
 
   // URL detection regex pattern
   const urlPattern = /(https?:\/\/[^\s]+)/g;
@@ -1151,7 +1162,7 @@ const ShowResult = memo<ShowResultProps>(({ open, onClose, result, run }) => {
                   }
                 } else {
                   // If no workspace URL, show alert
-                  alert('Databricks workspace URL not configured. Please configure Databricks to access the volume.');
+                  alert('Unable to retrieve Databricks workspace URL. Please ensure Databricks is properly configured.');
                 }
               }}
               variant="outlined"

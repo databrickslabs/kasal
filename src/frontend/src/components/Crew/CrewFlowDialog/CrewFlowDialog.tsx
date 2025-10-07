@@ -798,21 +798,36 @@ const CrewFlowSelectionDialog: React.FC<CrewFlowSelectionDialogProps> = ({
 
   const handleBulkImport = async (event: ChangeEvent<HTMLInputElement>) => {
     if (!event.target.files || event.target.files.length === 0) return;
-    
+
     try {
       setLoading(true);
       setError(null);
       setImportSuccess(null);
-      
+
       const file = event.target.files[0];
       const fileContents = await file.text();
-      const bulkData = JSON.parse(fileContents);
-      
+      let bulkData = JSON.parse(fileContents);
+
+      // Auto-detect single crew object and wrap it
+      // A single crew has: name, nodes, edges, and optionally agent_ids/task_ids
+      const isSingleCrew = bulkData.name &&
+                          bulkData.nodes &&
+                          Array.isArray(bulkData.nodes) &&
+                          bulkData.edges &&
+                          Array.isArray(bulkData.edges) &&
+                          !bulkData.crews &&
+                          !bulkData.flows;
+
+      if (isSingleCrew) {
+        console.log('Detected single crew object, wrapping in crews array');
+        bulkData = { crews: [bulkData] };
+      }
+
       // Validate bulk data
       if (!bulkData.crews && !bulkData.flows && !bulkData.agents && !bulkData.tasks) {
         throw new Error('Invalid import data: no valid data found');
       }
-      
+
       let importedCrews = 0;
       let importedFlows = 0;
       let importedAgents = 0;

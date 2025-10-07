@@ -122,6 +122,7 @@ const TaskForm: React.FC<TaskFormProps> = ({ initialData, onCancel, onTaskSaved,
   const [selectedMcpServers, setSelectedMcpServers] = useState<string[]>([]);
   const [toolConfigs, setToolConfigs] = useState<Record<string, unknown>>(initialData?.tool_configs || {});
   const [showBestPractices, setShowBestPractices] = useState(false);
+  const [workspaceUrlFromBackend, setWorkspaceUrlFromBackend] = useState<string>('');
 
   useEffect(() => {
     if (initialData?.tools) {
@@ -181,6 +182,23 @@ const TaskForm: React.FC<TaskFormProps> = ({ initialData, onCancel, onTaskSaved,
     };
 
     void fetchTasks();
+  }, []);
+
+  useEffect(() => {
+    // Fetch workspace URL from backend environment
+    const fetchWorkspaceUrl = async () => {
+      try {
+        const databricksService = DatabricksService.getInstance();
+        const envInfo = await databricksService.getDatabricksEnvironment();
+        if (envInfo.databricks_host) {
+          setWorkspaceUrlFromBackend(envInfo.databricks_host);
+        }
+      } catch (error) {
+        console.error('Error fetching Databricks environment:', error);
+      }
+    };
+
+    void fetchWorkspaceUrl();
   }, []);
 
 
@@ -447,11 +465,14 @@ const TaskForm: React.FC<TaskFormProps> = ({ initialData, onCancel, onTaskSaved,
       const config = await databricksService.getDatabricksConfig();
       console.log('Databricks config:', config);
 
-      if (config && config.workspace_url) {
+      // Use workspaceUrlFromBackend if available, otherwise fall back to config.workspace_url
+      const workspaceUrlSource = workspaceUrlFromBackend || config?.workspace_url;
+
+      if (workspaceUrlSource) {
         // Ensure the URL has https:// and remove trailing slash if present
-        let workspaceUrl = config.workspace_url.startsWith('https://')
-          ? config.workspace_url
-          : `https://${config.workspace_url}`;
+        let workspaceUrl = workspaceUrlSource.startsWith('https://')
+          ? workspaceUrlSource
+          : `https://${workspaceUrlSource}`;
 
         // Remove trailing slash to avoid double slashes
         workspaceUrl = workspaceUrl.replace(/\/$/, '');

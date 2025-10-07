@@ -54,53 +54,50 @@ export const createAgentGenerationHandler = (
       };
 
       const savedAgent = await AgentService.createAgent(agentToCreate);
-      
+
       if (savedAgent) {
-        setNodes((nodes) => {
-          // Get fresh nodes from the store to ensure we have the latest state
-          const currentNodes = useWorkflowStore.getState().nodes;
+        // Get fresh nodes from the store to ensure we have the latest state
+        const currentNodes = useWorkflowStore.getState().nodes;
 
-          console.log('[Agent Generation] Current nodes from store:', {
-            storeNodes: currentNodes.length,
-            paramNodes: nodes.length,
-            storeAgents: currentNodes.filter(n => n.type === 'agentNode').length,
-            storeTasks: currentNodes.filter(n => n.type === 'taskNode').length
-          });
-
-          const position = layoutManagerRef?.current.getAgentNodePosition(currentNodes, 'crew') || { x: 100, y: 100 };
-
-          console.log('[Agent Generation] Calculated position:', position);
-
-          const newNode: Node = {
-            id: `agent-${savedAgent.id}`,
-            type: 'agentNode',
-            position,
-            data: {
-              label: savedAgent.name,
-              agentId: savedAgent.id,
-              role: savedAgent.role,
-              goal: savedAgent.goal,
-              backstory: savedAgent.backstory,
-              llm: savedAgent.llm,
-              tools: savedAgent.tools || [],
-              agent: savedAgent,
-            },
-          };
-
-          setTimeout(() => {
-            window.dispatchEvent(new Event('fitViewToNodesInternal'));
-          }, 100);
-
-          if (onNodesGenerated) {
-            // Let the callback handle adding the node to prevent duplicates
-            onNodesGenerated([newNode], []);
-            return currentNodes; // Don't modify nodes here
-          } else {
-            // Fallback: add node if no callback provided
-            return [...currentNodes, newNode];
-          }
+        console.log('[Agent Generation] Current nodes from store:', {
+          storeNodes: currentNodes.length,
+          storeAgents: currentNodes.filter(n => n.type === 'agentNode').length,
+          storeTasks: currentNodes.filter(n => n.type === 'taskNode').length
         });
-        
+
+        const position = layoutManagerRef?.current.getAgentNodePosition(currentNodes, 'crew') || { x: 100, y: 100 };
+
+        console.log('[Agent Generation] Calculated position:', position);
+
+        const newNode: Node = {
+          id: `agent-${savedAgent.id}`,
+          type: 'agentNode',
+          position,
+          data: {
+            label: savedAgent.name,
+            agentId: savedAgent.id,
+            role: savedAgent.role,
+            goal: savedAgent.goal,
+            backstory: savedAgent.backstory,
+            llm: savedAgent.llm,
+            tools: savedAgent.tools || [],
+            agent: savedAgent,
+          },
+        };
+
+        setTimeout(() => {
+          window.dispatchEvent(new Event('fitViewToNodesInternal'));
+        }, 100);
+
+        // Call onNodesGenerated directly without nesting in setNodes
+        // This prevents the race condition where setNodes returns unchanged nodes
+        if (onNodesGenerated) {
+          onNodesGenerated([newNode], []);
+        } else {
+          // Fallback: add node directly if no callback provided
+          setNodes((currentNodes) => [...currentNodes, newNode]);
+        }
+
         // Focus restoration
         const focusDelays = [100, 300, 500, 800, 1200];
         focusDelays.forEach(delay => {
@@ -141,47 +138,45 @@ export const createAgentGenerationHandler = (
           inputRef?.current?.focus();
         }, delay);
       });
-      
+
       // Still create the node even if saving failed
-      setNodes((nodes) => {
-        // Get fresh nodes from the store to ensure we have the latest state
-        const currentNodes = useWorkflowStore.getState().nodes;
+      // Get fresh nodes from the store to ensure we have the latest state
+      const currentNodes = useWorkflowStore.getState().nodes;
 
-        console.log('[Agent Generation - Error Case] Current nodes from store:', {
-          storeNodes: currentNodes.length,
-          paramNodes: nodes.length
-        });
-
-        const position = layoutManagerRef?.current.getAgentNodePosition(currentNodes, 'crew') || { x: 100, y: 100 };
-
-        console.log('[Agent Generation - Error Case] Calculated position:', position);
-
-        const newNode: Node = {
-          id: `agent-${Date.now()}`,
-          type: 'agentNode',
-          position,
-          data: {
-            label: agentData.name,
-            role: agentData.role,
-            goal: agentData.goal,
-            backstory: agentData.backstory,
-            llm: agentData.advanced_config?.llm || selectedModel,
-            tools: agentData.tools || [],
-            agent: agentData,
-          },
-        };
-
-        const updated = [...currentNodes, newNode];
-        setTimeout(() => {
-          window.dispatchEvent(new Event('fitViewToNodesInternal'));
-        }, 100);
-
-        if (onNodesGenerated) {
-          onNodesGenerated([newNode], []);
-        }
-
-        return updated;
+      console.log('[Agent Generation - Error Case] Current nodes from store:', {
+        storeNodes: currentNodes.length
       });
+
+      const position = layoutManagerRef?.current.getAgentNodePosition(currentNodes, 'crew') || { x: 100, y: 100 };
+
+      console.log('[Agent Generation - Error Case] Calculated position:', position);
+
+      const newNode: Node = {
+        id: `agent-${Date.now()}`,
+        type: 'agentNode',
+        position,
+        data: {
+          label: agentData.name,
+          role: agentData.role,
+          goal: agentData.goal,
+          backstory: agentData.backstory,
+          llm: agentData.advanced_config?.llm || selectedModel,
+          tools: agentData.tools || [],
+          agent: agentData,
+        },
+      };
+
+      setTimeout(() => {
+        window.dispatchEvent(new Event('fitViewToNodesInternal'));
+      }, 100);
+
+      // Call onNodesGenerated directly without nesting in setNodes
+      if (onNodesGenerated) {
+        onNodesGenerated([newNode], []);
+      } else {
+        // Fallback: add node directly if no callback provided
+        setNodes((currentNodes) => [...currentNodes, newNode]);
+      }
     }
   };
 };
@@ -261,82 +256,80 @@ export const createTaskGenerationHandler = (
       };
 
       const savedTask = await TaskService.createTask(taskToCreate);
-      
+
       if (savedTask) {
-        setNodes((nodes) => {
-          // Get fresh nodes from the store to ensure we have the latest state
-          const currentNodes = useWorkflowStore.getState().nodes;
+        // Get fresh nodes from the store to ensure we have the latest state
+        const currentNodes = useWorkflowStore.getState().nodes;
 
-          console.log('[Task Generation] Current nodes from store:', {
-            storeNodes: currentNodes.length,
-            paramNodes: nodes.length,
-            storeAgents: currentNodes.filter(n => n.type === 'agentNode').length,
-            storeTasks: currentNodes.filter(n => n.type === 'taskNode').length
-          });
-
-          const position = layoutManagerRef?.current.getTaskNodePosition(currentNodes, 'crew') || { x: 400, y: 100 };
-
-          console.log('[Task Generation] Calculated position:', position);
-
-          const newNode: Node = {
-            id: `task-${savedTask.id}`,
-            type: 'taskNode',
-            position,
-            data: {
-              label: savedTask.name,
-              taskId: savedTask.id,
-              description: savedTask.description,
-              expected_output: savedTask.expected_output,
-              tools: savedTask.tools || [],
-              human_input: savedTask.config?.human_input || false,
-              async_execution: savedTask.async_execution || false,
-              task: savedTask,
-            },
-          };
-
-          setTimeout(() => {
-            window.dispatchEvent(new Event('fitViewToNodesInternal'));
-          }, 100);
-
-          // Create edge if agent is assigned
-          let newEdge: Edge | null = null;
-          if (assignedAgentId) {
-            const agentNodeId = `agent-${assignedAgentId}`;
-            const taskNodeId = `task-${savedTask.id}`;
-
-            // Get current layout orientation
-            const { layoutOrientation } = useUILayoutStore.getState();
-            const sourceHandle = layoutOrientation === 'vertical' ? 'bottom' : 'right';
-            const targetHandle = layoutOrientation === 'vertical' ? 'top' : 'left';
-
-            // Create edge with centralized styling
-            const edgeStyle = getEdgeStyleConfig(EdgeCategory.AGENT_TO_TASK, false);
-
-            newEdge = {
-              id: `edge-${agentNodeId}-${taskNodeId}`,
-              source: agentNodeId,
-              target: taskNodeId,
-              type: 'default',
-              animated: false,
-              sourceHandle,
-              targetHandle,
-              style: edgeStyle
-            };
-          }
-
-          if (onNodesGenerated) {
-            // Let the callback handle adding the node and edge to prevent duplicates
-            onNodesGenerated([newNode], newEdge ? [newEdge] : []);
-            return currentNodes; // Don't modify nodes here
-          } else {
-            // Fallback: add node if no callback provided
-            if (newEdge) {
-              setEdges((edges) => [...edges, newEdge!]);
-            }
-            return [...currentNodes, newNode];
-          }
+        console.log('[Task Generation] Current nodes from store:', {
+          storeNodes: currentNodes.length,
+          storeAgents: currentNodes.filter(n => n.type === 'agentNode').length,
+          storeTasks: currentNodes.filter(n => n.type === 'taskNode').length
         });
-        
+
+        const position = layoutManagerRef?.current.getTaskNodePosition(currentNodes, 'crew') || { x: 400, y: 100 };
+
+        console.log('[Task Generation] Calculated position:', position);
+
+        const newNode: Node = {
+          id: `task-${savedTask.id}`,
+          type: 'taskNode',
+          position,
+          data: {
+            label: savedTask.name,
+            taskId: savedTask.id,
+            description: savedTask.description,
+            expected_output: savedTask.expected_output,
+            tools: savedTask.tools || [],
+            human_input: savedTask.config?.human_input || false,
+            async_execution: savedTask.async_execution || false,
+            task: savedTask,
+          },
+        };
+
+        setTimeout(() => {
+          window.dispatchEvent(new Event('fitViewToNodesInternal'));
+        }, 100);
+
+        // Create edge if agent is assigned
+        let newEdge: Edge | null = null;
+        if (assignedAgentId) {
+          const agentNodeId = `agent-${assignedAgentId}`;
+          const taskNodeId = `task-${savedTask.id}`;
+
+          // Get current layout orientation
+          const { layoutOrientation } = useUILayoutStore.getState();
+          const sourceHandle = layoutOrientation === 'vertical' ? 'bottom' : 'right';
+          const targetHandle = layoutOrientation === 'vertical' ? 'top' : 'left';
+
+          // Create edge with centralized styling
+          const edgeStyle = getEdgeStyleConfig(EdgeCategory.AGENT_TO_TASK, false);
+
+          newEdge = {
+            id: `edge-${agentNodeId}-${taskNodeId}`,
+            source: agentNodeId,
+            target: taskNodeId,
+            type: 'default',
+            animated: false,
+            sourceHandle,
+            targetHandle,
+            style: edgeStyle
+          };
+        }
+
+        // Call onNodesGenerated directly without nesting in setNodes
+        // This prevents the race condition where setNodes returns unchanged nodes
+        if (onNodesGenerated) {
+          onNodesGenerated([newNode], newEdge ? [newEdge] : []);
+        } else {
+          // Fallback: add node and edge directly if no callback provided
+          setNodes((currentNodes) => [...currentNodes, newNode]);
+          if (newEdge !== null) {
+            const edgeToAdd = newEdge;
+            setEdges((edges) => [...edges, edgeToAdd]);
+          }
+        }
+
         // Focus restoration
         const focusDelays = [100, 300, 500, 800, 1200];
         focusDelays.forEach(delay => {
@@ -377,49 +370,45 @@ export const createTaskGenerationHandler = (
           inputRef?.current?.focus();
         }, delay);
       });
-      
+
       // Still create the node even if saving failed
-      setNodes((nodes) => {
-        // Get fresh nodes from the store to ensure we have the latest state
-        const currentNodes = useWorkflowStore.getState().nodes;
+      // Get fresh nodes from the store to ensure we have the latest state
+      const currentNodes = useWorkflowStore.getState().nodes;
 
-        console.log('[Task Generation - Error Case] Current nodes from store:', {
-          storeNodes: currentNodes.length,
-          paramNodes: nodes.length
-        });
-
-        const position = layoutManagerRef?.current.getTaskNodePosition(currentNodes, 'crew') || { x: 400, y: 100 };
-
-        console.log('[Task Generation - Error Case] Calculated position:', position);
-
-        const newNode: Node = {
-          id: `task-${Date.now()}`,
-          type: 'taskNode',
-          position,
-          data: {
-            label: taskData.name,
-            description: taskData.description,
-            expected_output: taskData.expected_output,
-            tools: taskData.tools || [],
-            human_input: taskData.advanced_config?.human_input || false,
-            async_execution: taskData.advanced_config?.async_execution || false,
-            task: taskData,
-          },
-        };
-
-        setTimeout(() => {
-          window.dispatchEvent(new Event('fitViewToNodesInternal'));
-        }, 100);
-
-        if (onNodesGenerated) {
-          // Let the callback handle adding the node to prevent duplicates
-          onNodesGenerated([newNode], []);
-          return currentNodes; // Don't modify nodes here
-        } else {
-          // Fallback: add node if no callback provided
-          return [...currentNodes, newNode];
-        }
+      console.log('[Task Generation - Error Case] Current nodes from store:', {
+        storeNodes: currentNodes.length
       });
+
+      const position = layoutManagerRef?.current.getTaskNodePosition(currentNodes, 'crew') || { x: 400, y: 100 };
+
+      console.log('[Task Generation - Error Case] Calculated position:', position);
+
+      const newNode: Node = {
+        id: `task-${Date.now()}`,
+        type: 'taskNode',
+        position,
+        data: {
+          label: taskData.name,
+          description: taskData.description,
+          expected_output: taskData.expected_output,
+          tools: taskData.tools || [],
+          human_input: taskData.advanced_config?.human_input || false,
+          async_execution: taskData.advanced_config?.async_execution || false,
+          task: taskData,
+        },
+      };
+
+      setTimeout(() => {
+        window.dispatchEvent(new Event('fitViewToNodesInternal'));
+      }, 100);
+
+      // Call onNodesGenerated directly without nesting in setNodes
+      if (onNodesGenerated) {
+        onNodesGenerated([newNode], []);
+      } else {
+        // Fallback: add node directly if no callback provided
+        setNodes((currentNodes) => [...currentNodes, newNode]);
+      }
     }
   };
 };

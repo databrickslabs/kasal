@@ -1396,6 +1396,70 @@ const WorkflowChat: React.FC<WorkflowChatProps> = ({
                       onFilesUploaded={(files) => {
                         console.log('Knowledge files uploaded:', files);
                       }}
+                      onTasksUpdated={async (uploadedFilePath) => {
+                        console.log('[WorkflowChat] Updating task nodes with file path:', uploadedFilePath);
+
+                        // Find the agent connected to tasks (for agent_id in tool_configs)
+                        const agentNode = nodes.find(n => n.type === 'agentNode');
+                        const agentId = agentNode?.data?.agentId || agentNode?.id;
+                        console.log('[WorkflowChat] Found agent for access control:', agentId);
+
+                        // Update all task nodes to include DatabricksKnowledgeSearchTool with file path in tool_configs
+                        const updatedNodes = nodes.map(node => {
+                          if (node.type === 'taskNode') {
+                            const currentTools = node.data.tools || [];
+                            const currentToolConfigs = node.data.tool_configs || {};
+
+                            // Add DatabricksKnowledgeSearchTool to tools array if not present
+                            const hasKnowledgeTool = currentTools.includes('DatabricksKnowledgeSearchTool') ||
+                                                      currentTools.includes('36');
+                            const updatedTools = hasKnowledgeTool ? currentTools : [...currentTools, 'DatabricksKnowledgeSearchTool'];
+
+                            // Add file path AND agent_id to tool_configs for DatabricksKnowledgeSearchTool
+                            const existingFilePaths = currentToolConfigs.DatabricksKnowledgeSearchTool?.file_paths || [];
+                            const updatedToolConfigs = {
+                              ...currentToolConfigs,
+                              DatabricksKnowledgeSearchTool: {
+                                ...currentToolConfigs.DatabricksKnowledgeSearchTool,
+                                file_paths: existingFilePaths.includes(uploadedFilePath)
+                                  ? existingFilePaths
+                                  : [...existingFilePaths, uploadedFilePath],
+                                agent_id: agentId  // Add agent_id for access control filtering
+                              }
+                            };
+
+                            console.log(`[WorkflowChat] Updated task ${node.data.label}:`, {
+                              tools: updatedTools,
+                              tool_configs: updatedToolConfigs
+                            });
+
+                            // Update the task in the backend
+                            if (node.data.taskId) {
+                              import('../../api/TaskService').then(({ TaskService }) => {
+                                TaskService.updateTask(node.data.taskId, {
+                                  tools: updatedTools,
+                                  tool_configs: updatedToolConfigs
+                                }).catch(err => {
+                                  console.error(`Failed to update task ${node.data.taskId}:`, err);
+                                });
+                              });
+                            }
+
+                            return {
+                              ...node,
+                              data: {
+                                ...node.data,
+                                tools: updatedTools,
+                                tool_configs: updatedToolConfigs
+                              }
+                            };
+                          }
+                          return node;
+                        });
+
+                        setNodes(updatedNodes as FlowNode[]);
+                        console.log('[WorkflowChat] Task nodes updated successfully');
+                      }}
                       onAgentsUpdated={(updatedAgents) => {
 
 
