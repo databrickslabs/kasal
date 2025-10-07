@@ -79,7 +79,8 @@ def mock_uow():
 @pytest.fixture
 def model_config_service(mock_repository):
     """Create a ModelConfigService instance with mock repository."""
-    return ModelConfigService(mock_repository)
+    # SECURITY: Pass test group_id for multi-tenant isolation
+    return ModelConfigService(mock_repository, group_id="test_group_id")
 
 
 @pytest.fixture
@@ -549,7 +550,7 @@ class TestModelConfigService:
 
     @pytest.mark.asyncio
     async def test_get_model_config_databricks_provider_in_apps(self, model_config_service):
-        """Test getting Databricks model configuration in Databricks Apps environment."""
+        """Test getting Databricks model configuration with unified auth."""
         databricks_model = MockModelConfig(
             key="databricks-llama",
             name="Databricks Llama",
@@ -557,41 +558,40 @@ class TestModelConfigService:
         )
         model_config_service.repository.find_by_key = AsyncMock(return_value=databricks_model)
 
-        with patch('src.utils.databricks_auth.is_databricks_apps_environment', return_value=True):
-            result = await model_config_service.get_model_config("databricks-llama")
+        # Unified auth handles Databricks providers automatically
+        # No need for environment-specific mocking
+        result = await model_config_service.get_model_config("databricks-llama")
 
-            # Should not include API key for Databricks Apps environment
-            assert "api_key" not in result
-            assert result["provider"] == "databricks"
+        # Databricks provider should work with unified auth
+        assert result["provider"] == "databricks"
 
     @pytest.mark.asyncio
-    async def test_get_model_config_non_databricks_in_apps_no_api_key(self, model_config_service, mock_model_config):
-        """Test getting non-Databricks model in Apps environment without API key."""
+    async def test_get_model_config_non_databricks_no_api_key(self, model_config_service, mock_model_config):
+        """Test getting non-Databricks model without API key."""
         model_config_service.repository.find_by_key = AsyncMock(return_value=mock_model_config)
 
         with patch('src.services.model_config_service.ApiKeysService.get_provider_api_key', return_value=None):
-            with patch('src.utils.databricks_auth.is_databricks_apps_environment', return_value=True):
-                with patch('src.services.model_config_service.logger') as mock_logger:
-                    result = await model_config_service.get_model_config("gpt-4")
+            with patch('src.services.model_config_service.logger') as mock_logger:
+                result = await model_config_service.get_model_config("gpt-4")
 
-                    # Should allow the request to proceed with warning
-                    assert result["provider"] == "openai"
-                    assert "api_key" not in result
-                    mock_logger.warning.assert_called()
+                # Should allow the request to proceed with warning
+                assert result["provider"] == "openai"
+                assert "api_key" not in result
+                mock_logger.warning.assert_called()
 
     @pytest.mark.asyncio
-    async def test_get_model_config_databricks_import_error(self, model_config_service):
-        """Test getting model configuration when Databricks auth import fails."""
+    async def test_get_model_config_databricks_no_api_key(self, model_config_service):
+        """Test getting Databricks model configuration when no API key is available."""
         databricks_model = MockModelConfig(
             key="databricks-llama",
             provider="databricks"
         )
         model_config_service.repository.find_by_key = AsyncMock(return_value=databricks_model)
 
-        with patch('src.utils.databricks_auth.is_databricks_apps_environment', side_effect=ImportError):
-            with patch('src.services.model_config_service.ApiKeysService.get_provider_api_key', return_value=None):
-                with pytest.raises(HTTPException):
-                    await model_config_service.get_model_config("databricks-llama")
+        # Unified auth should handle Databricks authentication
+        with patch('src.services.model_config_service.ApiKeysService.get_provider_api_key', return_value=None):
+            with pytest.raises(HTTPException):
+                await model_config_service.get_model_config("databricks-llama")
 
     @pytest.mark.asyncio
     async def test_get_model_config_general_exception(self, model_config_service):

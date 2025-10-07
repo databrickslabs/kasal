@@ -187,65 +187,107 @@ class TestDatabricksURLUtils:
         result = DatabricksURLUtils.extract_workspace_from_endpoint("")
         assert result is None
     
+    @pytest.mark.asyncio
     @patch.dict(os.environ, {"DATABRICKS_HOST": "https://workspace.databricks.com/serving-endpoints"})
     @patch('src.utils.databricks_url_utils.logger')
-    def test_validate_and_fix_environment_fixes_host(self, mock_logger):
+    @patch('src.utils.databricks_auth.get_auth_context')
+    async def test_validate_and_fix_environment_fixes_host(self, mock_get_auth, mock_logger):
         """Test that DATABRICKS_HOST with path is auto-corrected."""
-        result = DatabricksURLUtils.validate_and_fix_environment()
-        
+        # Mock auth context
+        mock_auth = Mock()
+        mock_auth.workspace_url = "https://workspace.databricks.com"
+        mock_get_auth.return_value = mock_auth
+
+        result = await DatabricksURLUtils.validate_and_fix_environment()
+
         assert result is True
         assert os.environ["DATABRICKS_HOST"] == "https://workspace.databricks.com"
         mock_logger.warning.assert_called()
         mock_logger.info.assert_any_call("Auto-correcting DATABRICKS_HOST to base workspace URL")
     
+    @pytest.mark.asyncio
     @patch.dict(os.environ, {"DATABRICKS_HOST": "https://workspace.databricks.com"})
     @patch('src.utils.databricks_url_utils.logger')
-    def test_validate_and_fix_environment_host_already_correct(self, mock_logger):
+    @patch('src.utils.databricks_auth.get_auth_context')
+    async def test_validate_and_fix_environment_host_already_correct(self, mock_get_auth, mock_logger):
         """Test that correct DATABRICKS_HOST is not changed."""
-        result = DatabricksURLUtils.validate_and_fix_environment()
-        
+        # Mock auth context
+        mock_auth = Mock()
+        mock_auth.workspace_url = "https://workspace.databricks.com"
+        mock_get_auth.return_value = mock_auth
+
+        result = await DatabricksURLUtils.validate_and_fix_environment()
+
         assert result is True
         assert os.environ["DATABRICKS_HOST"] == "https://workspace.databricks.com"
         mock_logger.debug.assert_called_with("Databricks environment variables are properly formatted")
     
+    @pytest.mark.asyncio
     @patch.dict(os.environ, {"DATABRICKS_ENDPOINT": "https://workspace.databricks.com/serving-endpoints/serving-endpoints"})
     @patch('src.utils.databricks_url_utils.logger')
-    def test_validate_and_fix_environment_fixes_duplicate_endpoint(self, mock_logger):
+    @patch('src.utils.databricks_auth.get_auth_context')
+    async def test_validate_and_fix_environment_fixes_duplicate_endpoint(self, mock_get_auth, mock_logger):
         """Test that duplicate /serving-endpoints in DATABRICKS_ENDPOINT is fixed."""
-        result = DatabricksURLUtils.validate_and_fix_environment()
-        
+        # Mock auth context
+        mock_auth = Mock()
+        mock_auth.workspace_url = "https://workspace.databricks.com"
+        mock_get_auth.return_value = mock_auth
+
+        result = await DatabricksURLUtils.validate_and_fix_environment()
+
         assert result is True
         assert os.environ["DATABRICKS_ENDPOINT"] == "https://workspace.databricks.com/serving-endpoints"
         mock_logger.warning.assert_called()
     
+    @pytest.mark.asyncio
     @patch.dict(os.environ, {"DATABRICKS_HOST": "!!!invalid!!!/serving-endpoints"})
     @patch('src.utils.databricks_url_utils.logger')
-    def test_validate_and_fix_environment_cannot_fix_invalid(self, mock_logger):
+    @patch('src.utils.databricks_auth.get_auth_context')
+    async def test_validate_and_fix_environment_cannot_fix_invalid(self, mock_get_auth, mock_logger):
         """Test that unfixable URLs cause the method to return False."""
-        result = DatabricksURLUtils.validate_and_fix_environment()
-        
+        # Mock auth context
+        mock_auth = Mock()
+        mock_auth.workspace_url = "https://workspace.databricks.com"
+        mock_get_auth.return_value = mock_auth
+
+        result = await DatabricksURLUtils.validate_and_fix_environment()
+
         assert result is True  # Changed to True - the function normalizes even invalid URLs by adding https://
         mock_logger.warning.assert_called()  # It will log a warning about the path
         mock_logger.info.assert_any_call("Auto-correcting DATABRICKS_HOST to base workspace URL")
     
+    @pytest.mark.asyncio
     @patch.dict(os.environ, {}, clear=True)
     @patch('src.utils.databricks_url_utils.logger')
-    def test_validate_and_fix_environment_no_vars(self, mock_logger):
+    @patch('src.utils.databricks_auth.get_auth_context')
+    async def test_validate_and_fix_environment_no_vars(self, mock_get_auth, mock_logger):
         """Test behavior when no Databricks environment variables are set."""
-        result = DatabricksURLUtils.validate_and_fix_environment()
-        
+        # Mock auth context
+        mock_auth = Mock()
+        mock_auth.workspace_url = "https://workspace.databricks.com"
+        mock_get_auth.return_value = mock_auth
+
+        result = await DatabricksURLUtils.validate_and_fix_environment()
+
         assert result is True
-        mock_logger.debug.assert_called_with("Databricks environment variables are properly formatted")
+        mock_logger.info.assert_any_call("Setting DATABRICKS_HOST from auth context: https://workspace.databricks.com")
     
+    @pytest.mark.asyncio
     @patch.dict(os.environ, {
         "DATABRICKS_HOST": "https://workspace.databricks.com/api",
         "DATABRICKS_ENDPOINT": "https://workspace.databricks.com/serving-endpoints/serving-endpoints"
     })
     @patch('src.utils.databricks_url_utils.logger')
-    def test_validate_and_fix_environment_fixes_multiple(self, mock_logger):
+    @patch('src.utils.databricks_auth.get_auth_context')
+    async def test_validate_and_fix_environment_fixes_multiple(self, mock_get_auth, mock_logger):
         """Test that multiple issues are fixed in one call."""
-        result = DatabricksURLUtils.validate_and_fix_environment()
-        
+        # Mock auth context
+        mock_auth = Mock()
+        mock_auth.workspace_url = "https://workspace.databricks.com"
+        mock_get_auth.return_value = mock_auth
+
+        result = await DatabricksURLUtils.validate_and_fix_environment()
+
         assert result is True
         assert os.environ["DATABRICKS_HOST"] == "https://workspace.databricks.com"
         assert os.environ["DATABRICKS_ENDPOINT"] == "https://workspace.databricks.com/serving-endpoints"
