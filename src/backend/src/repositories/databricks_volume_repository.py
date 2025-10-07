@@ -8,7 +8,12 @@ from typing import Dict, List, Optional, Any, TYPE_CHECKING
 from concurrent.futures import ThreadPoolExecutor
 
 from src.core.logger import LoggerManager
-from src.utils.databricks_auth import get_workspace_client, get_databricks_auth_headers
+from src.utils.databricks_auth import (
+    get_workspace_client,
+    get_workspace_client_with_fallback,
+    is_scope_error,
+    get_databricks_auth_headers
+)
 
 if TYPE_CHECKING:
     from databricks.sdk import WorkspaceClient
@@ -44,6 +49,7 @@ class DatabricksVolumeRepository:
             logger.info(f"DatabricksVolumeRepository._ensure_client: Creating WorkspaceClient with user_token={bool(self._user_token)}")
 
             # Use centralized authentication from databricks_auth module
+            # Unified priority: OBO (user_token) → PAT → SPN
             self._workspace_client = await get_workspace_client(self._user_token)
 
             if self._workspace_client:
@@ -65,61 +71,66 @@ class DatabricksVolumeRepository:
     ) -> Dict[str, Any]:
         """
         Create a Unity Catalog volume if it doesn't exist.
-        
+        Automatically falls back to PAT if OBO token lacks required scopes.
+
         Args:
             catalog: Unity Catalog name
             schema: Schema name
             volume_name: Volume name
-            
+
         Returns:
             Creation result
         """
-        try:
-            if not await self._ensure_client():
-                return {
-                    "success": False,
-                    "error": "Failed to create Databricks client"
-                }
-            
-            # Check if volume exists and create if not using SDK
+        # Helper to perform the actual volume creation
+        async def _try_create_with_client(client, retry_token):
             def _create_volume():
                 try:
-                    # Check if volume exists
                     full_name = f"{catalog}.{schema}.{volume_name}"
+
+                    # Check if volume exists
                     try:
-                        volume = self._workspace_client.volumes.read(full_name)
+                        volume = client.volumes.read(full_name)
                         if volume:
-                            logger.info(f"Volume {full_name} already exists")
+                            logger.info(f"[VOLUME] Volume {full_name} already exists")
                             return {
                                 "success": True,
                                 "exists": True,
                                 "message": "Volume already exists"
                             }
                     except Exception as e:
-                        # Volume doesn't exist, continue to create it
-                        logger.debug(f"Volume check returned: {e}")
-                    
+                        logger.debug(f"[VOLUME] Volume check returned: {e}")
+
                     # Create the volume
                     from databricks.sdk.service.catalog import VolumeType
-                    
-                    logger.info(f"Creating volume {full_name}")
-                    volume = self._workspace_client.volumes.create(
-                        catalog_name=catalog,
-                        schema_name=schema,
-                        name=volume_name,
-                        volume_type=VolumeType.MANAGED,
-                        comment="Created by Kasal for database backups"
-                    )
-                    
-                    logger.info(f"Successfully created volume {full_name}")
+                    logger.info(f"[VOLUME] Creating volume {full_name}")
+
+                    try:
+                        volume = client.volumes.create(
+                            catalog_name=catalog,
+                            schema_name=schema,
+                            name=volume_name,
+                            volume_type=VolumeType.MANAGED,
+                            comment="Created by Kasal for database backups"
+                        )
+                        logger.info(f"[VOLUME] Successfully created volume {full_name}")
+                    except Exception as create_error:
+                        logger.error(f"[VOLUME] Failed to create volume: {str(create_error)}")
+                        raise
+
                     return {
                         "success": True,
                         "created": True,
                         "message": f"Volume {full_name} created successfully"
                     }
-                    
+
                 except Exception as e:
                     error_msg = str(e)
+
+                    # Check if this is a scope error and we can retry
+                    if retry_token is not None and is_scope_error(e):
+                        # Return special marker to trigger retry
+                        return {"_scope_error": True, "error": error_msg}
+
                     # Check if error is because catalog or schema doesn't exist
                     if "does not exist" in error_msg.lower():
                         if f"catalog '{catalog}'" in error_msg.lower() or f"catalog `{catalog}`" in error_msg.lower():
@@ -132,19 +143,55 @@ class DatabricksVolumeRepository:
                                 "success": False,
                                 "error": f"Schema '{catalog}.{schema}' does not exist. Please create it first in Databricks."
                             }
-                    
-                    logger.error(f"Failed to create volume: {error_msg}")
+
+                    logger.error(f"[VOLUME] Failed to create volume: {error_msg}")
                     return {
                         "success": False,
                         "error": f"Failed to create volume: {error_msg}"
                     }
-            
-            # Run synchronously in executor
+
             loop = asyncio.get_event_loop()
             return await loop.run_in_executor(self._executor, _create_volume)
-            
+
+        try:
+            # First attempt: Try with OBO if available
+            client, retry_token = await get_workspace_client_with_fallback(
+                self._user_token,
+                operation_name="volume_create"
+            )
+
+            if not client:
+                return {
+                    "success": False,
+                    "error": "Failed to create Databricks client"
+                }
+
+            result = await _try_create_with_client(client, retry_token)
+
+            # Check if we got a scope error and should retry with PAT
+            if result.get("_scope_error") and retry_token is not None:
+                logger.warning(f"[VOLUME] OBO token lacks required scopes: {result.get('error')}")
+                logger.info("[VOLUME] Retrying with PAT/SPN authentication (skipping OBO)")
+
+                # Retry with PAT by passing user_token=None
+                client_pat, _ = await get_workspace_client_with_fallback(
+                    user_token=None,
+                    operation_name="volume_create_retry"
+                )
+
+                if not client_pat:
+                    return {
+                        "success": False,
+                        "error": "Failed to create Databricks client with PAT fallback"
+                    }
+
+                # Retry with PAT (no retry_token this time)
+                result = await _try_create_with_client(client_pat, None)
+
+            return result
+
         except Exception as e:
-            logger.error(f"Error creating volume: {e}")
+            logger.error(f"[VOLUME] Error creating volume: {e}")
             return {
                 "success": False,
                 "error": str(e)
@@ -573,7 +620,11 @@ class DatabricksVolumeRepository:
         # Get workspace URL from centralized auth
         workspace_url = await _databricks_auth.get_workspace_url()
         if not workspace_url:
-            workspace_url = os.environ.get("DATABRICKS_HOST", "https://your-workspace.databricks.com").rstrip('/')
+            # Use unified auth instead of environment variables
+            from src.utils.databricks_auth import get_auth_context
+            auth = await get_auth_context()
+            workspace_url = auth.workspace_url if auth else "https://your-workspace.databricks.com"
+            workspace_url = workspace_url.rstrip('/')
 
         base_url = workspace_url.rstrip('/')
 

@@ -12,15 +12,14 @@ import json
 import uuid
 from datetime import datetime
 try:
-    from databricks.sdk import WorkspaceClient
     from databricks.sdk.service.files import FileInfo
 except ImportError:
     # Databricks SDK not installed, will use REST API
-    WorkspaceClient = None
     FileInfo = None
 
 from sqlalchemy.ext.asyncio import AsyncSession
 from src.repositories.databricks_config_repository import DatabricksConfigRepository
+from src.utils.databricks_auth import get_workspace_client
 
 logger = logging.getLogger(__name__)
 
@@ -89,13 +88,25 @@ class DatabricksKnowledgeService:
             # Get Databricks configuration
             config = await self.repository.get_active_config(group_id=group_id)
             if not config:
-                # Use default configuration if none exists
-                logger.warning("No Databricks config found in database, using environment defaults")
+                # Use default configuration if none exists - get from unified auth
+                logger.warning("No Databricks config found in database, using unified auth defaults")
+                workspace_url = 'https://example.databricks.com'
+                token = ''
+                try:
+                    from src.utils.databricks_auth import get_auth_context
+                    auth = await get_auth_context()
+                    if auth:
+                        workspace_url = auth.workspace_url
+                        token = auth.token
+                        logger.debug(f"Using unified {auth.auth_method} auth for default config")
+                except Exception as e:
+                    logger.warning(f"Failed to get unified auth for default config: {e}")
+
                 config = type('obj', (object,), {
                     'knowledge_volume_enabled': True,
                     'knowledge_volume_path': 'main.default.knowledge',
-                    'workspace_url': os.getenv('DATABRICKS_HOST', 'https://example.databricks.com'),
-                    'encrypted_personal_access_token': os.getenv('DATABRICKS_TOKEN', '')
+                    'workspace_url': workspace_url,
+                    'encrypted_personal_access_token': token
                 })()
                 logger.info(f"Default config - workspace_url: {config.workspace_url}")
                 logger.info(f"Default config - volume_path: {config.knowledge_volume_path}")
@@ -144,30 +155,27 @@ class DatabricksKnowledgeService:
             file_size = len(content)
             logger.info(f"File size: {file_size} bytes ({file_size/1024:.2f} KB)")
 
-            # Get workspace URL first (needed for authentication)
-            workspace_url = getattr(config, 'workspace_url', os.getenv('DATABRICKS_HOST'))
+            # Get Databricks token using unified authentication system
+            from src.utils.databricks_auth import get_auth_context
+
+            # Get workspace URL from config or unified auth
+            workspace_url = getattr(config, 'workspace_url', None)
+            if not workspace_url:
+                auth = await get_auth_context()
+                if auth:
+                    workspace_url = auth.workspace_url
+                    logger.debug(f"Using workspace URL from unified {auth.auth_method} auth")
             logger.info(f"Workspace URL: {workspace_url}")
 
-            # Get Databricks token using proper authentication hierarchy
-            # Use DatabricksAuthHelper to get token following proper hierarchy
-            from src.repositories.databricks_auth_helper import DatabricksAuthHelper
-
             try:
-                # This will try:
-                # 1. OBO with user token (if provided)
-                # 2. PAT from database (DATABRICKS_TOKEN or DATABRICKS_API_KEY)
-                # 3. PAT from environment variables
-                token = await DatabricksAuthHelper.get_auth_token(
-                    workspace_url=workspace_url,
-                    user_token=user_token  # Pass the user_token from the method parameter
-                )
-                logger.info("Successfully obtained Databricks authentication token")
-            except Exception as auth_error:
-                logger.warning(f"Primary auth failed: {auth_error}")
+                # Unified auth handles: OBO, OAuth, PAT from database, PAT from environment
+                auth = await get_auth_context(user_token=user_token)
+                if not auth:
+                    raise Exception("Failed to get authentication context")
 
-                # Fallback: Try OAuth with client credentials if available
-                client_id = os.getenv('DATABRICKS_CLIENT_ID')
-                client_secret = os.getenv('DATABRICKS_CLIENT_SECRET')
+                token = auth.token
+                workspace_url = auth.workspace_url
+                logger.info(f"Successfully obtained Databricks authentication: {auth.auth_method}")
 
                 if client_id and client_secret:
                     logger.info("Attempting OAuth authentication with client credentials")
@@ -192,6 +200,10 @@ class DatabricksKnowledgeService:
                 else:
                     logger.debug("No OAuth credentials available")
                     token = None
+            except Exception as auth_error:
+                logger.error(f"Authentication failed: {auth_error}")
+                token = None
+                workspace_url = None
 
             if token:
                 logger.info("Databricks token found (length: %d)", len(token))
@@ -208,13 +220,10 @@ class DatabricksKnowledgeService:
                 logger.info("Attempting REAL upload to Databricks")
 
                 try:
-                    # Try using Databricks SDK if available
-                    if WorkspaceClient:
-                        logger.info("Databricks SDK is available, attempting SDK upload")
-                        workspace_client = WorkspaceClient(
-                            host=workspace_url,
-                            token=token
-                        )
+                    # Try using Databricks SDK via centralized auth
+                    workspace_client = await get_workspace_client(user_token=token)
+                    if workspace_client:
+                        logger.info("Using WorkspaceClient from databricks_auth middleware")
 
                         # Upload using SDK - same as DatabricksVolumeCallback
                         try:
@@ -648,39 +657,55 @@ Summary (2-3 sentences):"""
             # Get Databricks configuration
             config = await self.repository.get_active_config(group_id=group_id)
             if not config:
+                # Get from unified auth
+                workspace_url = 'https://example.databricks.com'
+                token = ''
+                try:
+                    from src.utils.databricks_auth import get_auth_context
+                    auth = await get_auth_context()
+                    if auth:
+                        workspace_url = auth.workspace_url
+                        token = auth.token
+                except Exception as e:
+                    logger.warning(f"Failed to get unified auth: {e}")
+
                 config = type('obj', (object,), {
-                    'workspace_url': os.getenv('DATABRICKS_HOST', 'https://example.databricks.com'),
-                    'encrypted_personal_access_token': os.getenv('DATABRICKS_TOKEN', '')
+                    'workspace_url': workspace_url,
+                    'encrypted_personal_access_token': token
                 })()
-            
-            workspace_url = getattr(config, 'workspace_url', os.getenv('DATABRICKS_HOST'))
+
+            # Get workspace URL from config or unified auth
+            workspace_url = getattr(config, 'workspace_url', None)
+            if not workspace_url:
+                from src.utils.databricks_auth import get_auth_context
+                auth = await get_auth_context()
+                if auth:
+                    workspace_url = auth.workspace_url
             logger.info(f"Workspace URL: {workspace_url}")
-            
-            # Get authentication token
-            from src.repositories.databricks_auth_helper import DatabricksAuthHelper
-            
+
+            # Get authentication token using unified auth
+            from src.utils.databricks_auth import get_auth_context
+
             try:
-                token = await DatabricksAuthHelper.get_auth_token(
-                    workspace_url=workspace_url,
-                    user_token=user_token
-                )
-                logger.info("Successfully obtained Databricks authentication token")
+                auth = await get_auth_context(user_token=user_token)
+                if not auth:
+                    raise Exception("Failed to get authentication context")
+                token = auth.token
+                workspace_url = auth.workspace_url
+                logger.info(f"Successfully obtained Databricks authentication: {auth.auth_method}")
             except Exception as auth_error:
                 logger.warning(f"Auth failed: {auth_error}")
-                token = os.getenv('DATABRICKS_TOKEN')
+                token = None
             
             if token and workspace_url and workspace_url != 'https://example.databricks.com':
                 logger.info("Attempting REAL file read from Databricks")
                 
-                # Try using Databricks SDK if available
-                if WorkspaceClient:
+                # Try using Databricks SDK via centralized auth
+                workspace_client = await get_workspace_client(user_token=token)
+                if workspace_client:
                     try:
-                        logger.info("Using Databricks SDK to read file")
-                        workspace_client = WorkspaceClient(
-                            host=workspace_url,
-                            token=token
-                        )
-                        
+                        logger.info("Using WorkspaceClient from databricks_auth middleware to read file")
+
                         # Read file using SDK
                         download_response = workspace_client.files.download(file_path)
                         content = download_response.contents.read()
@@ -844,11 +869,23 @@ Summary (2-3 sentences):"""
             # Get Databricks configuration
             config = await self.repository.get_active_config(group_id=group_id)
             if not config:
+                # Get from unified auth
+                workspace_url = 'https://example.databricks.com'
+                token = ''
+                try:
+                    from src.utils.databricks_auth import get_auth_context
+                    auth = await get_auth_context()
+                    if auth:
+                        workspace_url = auth.workspace_url
+                        token = auth.token
+                except Exception as e:
+                    logger.warning(f"Failed to get unified auth: {e}")
+
                 config = type('obj', (object,), {
                     'knowledge_volume_enabled': True,
                     'knowledge_volume_path': 'main.default.knowledge',
-                    'workspace_url': os.getenv('DATABRICKS_HOST', 'https://example.databricks.com'),
-                    'encrypted_personal_access_token': os.getenv('DATABRICKS_TOKEN', '')
+                    'workspace_url': workspace_url,
+                    'encrypted_personal_access_token': token
                 })()
                 logger.info("Using default configuration")
             else:
@@ -894,19 +931,25 @@ Summary (2-3 sentences):"""
                         logger.error(f"Invalid volume path format: {configured_volume}")
                         return []
             
-            workspace_url = getattr(config, 'workspace_url', os.getenv('DATABRICKS_HOST'))
+            # Get authentication token using unified auth
+            from src.utils.databricks_auth import get_auth_context
+
+            # Get workspace URL from config or unified auth
+            workspace_url = getattr(config, 'workspace_url', None)
+            if not workspace_url:
+                auth = await get_auth_context()
+                if auth:
+                    workspace_url = auth.workspace_url
             logger.info(f"Workspace URL: {workspace_url}")
             logger.info(f"FINAL DIRECTORY PATH TO BROWSE: {directory_path}")
-            
-            # Get authentication token
-            from src.repositories.databricks_auth_helper import DatabricksAuthHelper
-            
+
             try:
-                token = await DatabricksAuthHelper.get_auth_token(
-                    workspace_url=workspace_url,
-                    user_token=user_token
-                )
-                logger.info(f"Successfully obtained Databricks authentication token (length: {len(token)})")
+                auth = await get_auth_context(user_token=user_token)
+                if not auth:
+                    raise Exception("Failed to get authentication context")
+                token = auth.token
+                workspace_url = auth.workspace_url
+                logger.info(f"Successfully obtained Databricks authentication: {auth.auth_method} (token length: {len(token)})")
             except Exception as auth_error:
                 logger.error(f"Authentication failed: {auth_error}")
                 return []
@@ -921,17 +964,14 @@ Summary (2-3 sentences):"""
             
             logger.info("Starting REAL Databricks API calls")
             
-            # Try using Databricks SDK if available
-            if WorkspaceClient:
+            # Try using Databricks SDK via centralized auth
+            workspace_client = await get_workspace_client(user_token=token)
+            if workspace_client:
                 try:
-                    logger.info("Attempting Databricks SDK method")
-                    workspace_client = WorkspaceClient(
-                        host=workspace_url,
-                        token=token
-                    )
-                    
+                    logger.info("Using WorkspaceClient from databricks_auth middleware for directory listing")
+
                     logger.info(f"SDK: Calling list_directory_contents('{directory_path}')")
-                    
+
                     # List directory contents using SDK
                     files_list = []
                     file_infos = workspace_client.files.list_directory_contents(directory_path)
@@ -1508,11 +1548,12 @@ Summary (2-3 sentences):"""
         group_id: str,
         execution_id: Optional[str] = None,
         file_paths: Optional[List[str]] = None,
+        agent_id: Optional[str] = None,
         limit: int = 5,
         user_token: Optional[str] = None
     ) -> List[Dict[str, Any]]:
         """
-        VERSION: 2025-09-29-22-33-REFACTORED
+        VERSION: 2025-10-03-AGENT-FILTER
         Search for knowledge in the Databricks Vector Index.
 
         This is an engine-agnostic method that can be used by any AI engine.
@@ -1522,6 +1563,7 @@ Summary (2-3 sentences):"""
             group_id: Group ID for tenant isolation
             execution_id: Optional execution ID for scoping
             file_paths: Optional list of file paths to filter search
+            agent_id: Optional agent ID for access control filtering
             limit: Maximum number of results to return
             user_token: Optional user token for OBO authentication
 
@@ -1647,6 +1689,16 @@ Summary (2-3 sentences):"""
                 filters["source"] = {"$in": file_paths}
             else:
                 logger.info("[SEARCH DEBUG] No file_paths filter - will search all documents")
+
+            # CRITICAL: Filter by agent_ids for access control
+            # The agent_ids column in the vector index is a JSON array like ["agent-uuid-1", "agent-uuid-2"]
+            # We need to check if the agent_id is in that array
+            if agent_id:
+                logger.info(f"[SEARCH DEBUG] Adding agent_ids filter for agent: {agent_id}")
+                # Use array_contains to check if agent_id is in the agent_ids JSON array
+                filters["agent_ids"] = {"$contains": agent_id}
+            else:
+                logger.info("[SEARCH DEBUG] No agent_id filter - will search all documents (no access control)")
 
             logger.info(f"[SEARCH DEBUG] Final search filters: {filters}")
 
