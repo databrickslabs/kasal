@@ -315,7 +315,7 @@ class DatabaseBackupRepository:
             
             for table_name in pg_tables:
                 # Get table columns info
-                col_result = await db_session.execute(
+                col_result = await session.execute(
                     text(f"""
                         SELECT column_name, data_type, is_nullable
                         FROM information_schema.columns 
@@ -865,21 +865,50 @@ class DatabaseBackupRepository:
     ) -> Dict[str, Any]:
         """
         Get information about the database.
-        
+
         Args:
             db_path: Path to the SQLite database file (for SQLite)
-            session: Database session (for PostgreSQL)
-            
+            session: Database session (for PostgreSQL/Lakebase)
+
         Returns:
             Database information
         """
         try:
-            db_type = self.get_database_type()
+            # Determine database type based on parameters
+            # Priority: explicit db_path (SQLite) > explicit session (PostgreSQL/Lakebase) > check settings
+            logger.debug(f"[DB INFO] get_database_info called with db_path={db_path}, session={session is not None}")
 
-            # Use provided session or stored session for PostgreSQL
+            if db_path is not None:
+                # Explicit SQLite path provided
+                db_type = 'sqlite'
+                logger.debug(f"[DB INFO] Using SQLite (explicit db_path provided: {db_path})")
+            elif session is not None:
+                # Explicit session provided - assume PostgreSQL/Lakebase
+                db_type = 'postgres'
+                logger.debug(f"[DB INFO] Using PostgreSQL/Lakebase (explicit session provided)")
+            else:
+                # No explicit parameters - check settings
+                db_type = self.get_database_type()
+                logger.debug(f"[DB INFO] Using database type from settings: {db_type}")
+
+            # Use provided session or stored session for PostgreSQL/Lakebase
             db_session = session if session else self.session
+            logger.debug(f"[DB INFO] Final db_type={db_type}, db_session={db_session is not None}")
 
             if db_type == 'sqlite':
+                # If db_path is None, try to get it from settings
+                if db_path is None:
+                    from src.config.settings import settings
+                    db_path = settings.SQLITE_DB_PATH
+                    if not db_path:
+                        db_path = "./app.db"  # Fallback default
+
+                    # Ensure absolute path
+                    if not os.path.isabs(db_path):
+                        db_path = os.path.abspath(db_path)
+
+                    logger.info(f"[DB INFO] db_path was None, using settings: {db_path}")
+
                 if not db_path or not os.path.exists(db_path):
                     return {
                         "success": False,
@@ -938,28 +967,28 @@ class DatabaseBackupRepository:
                 
             elif db_type == 'postgres' and db_session:
                 # Get all tables
-                result = await session.execute(
+                result = await db_session.execute(
                     text("SELECT tablename FROM pg_tables WHERE schemaname = 'public'")
                 )
                 tables = [row[0] for row in result.fetchall()]
-                
+
                 # Get row counts for each table
                 table_info = {}
                 for table in tables:
-                    result = await session.execute(text(f"SELECT COUNT(*) FROM {table}"))
+                    result = await db_session.execute(text(f"SELECT COUNT(*) FROM {table}"))
                     count = result.scalar()
                     table_info[table] = count
-                
+
                 # Get database size
-                result = await session.execute(
+                result = await db_session.execute(
                     text("SELECT pg_database_size(current_database())")
                 )
                 db_size = result.scalar()
-                
+
                 # Get memory backends if table exists
                 memory_backends = []
                 if 'memory_backends' in table_info:
-                    result = await session.execute(
+                    result = await db_session.execute(
                         text("""
                             SELECT id, name, backend_type, is_default, created_at, group_id
                             FROM memory_backends
