@@ -7,6 +7,8 @@ from typing import Any, Callable, List, TypeVar, Coroutine
 
 from src.core.logger import LoggerManager
 from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine, async_sessionmaker
+from sqlalchemy.pool import StaticPool, NullPool
+from sqlalchemy import event
 
 # Get logger from the centralized logging system
 logger = LoggerManager.get_instance().system
@@ -17,19 +19,25 @@ T = TypeVar('T')
 async def execute_db_operation_with_fresh_engine(operation: Callable[[AsyncSession], Coroutine[Any, Any, T]]) -> T:
     """
     Execute a database operation with a fresh engine and session to avoid event loop issues.
-    
+
+    IMPORTANT: Uses the same database configuration as the main application to prevent
+    SQLite locking issues and disk I/O errors. For SQLite, this means:
+    - StaticPool for single connection reuse
+    - WAL mode for better concurrency
+    - Increased timeout (60s) for heavy operations
+
     Args:
         operation: A callable that takes an AsyncSession and returns a coroutine
-        
+
     Returns:
         The result of the operation
-        
+
     Example:
         ```
         async def get_user(session, user_id):
             # Database operation
             return await session.execute(...)
-            
+
         result = await execute_db_operation_with_fresh_engine(
             lambda session: get_user(session, 123)
         )
@@ -37,29 +45,79 @@ async def execute_db_operation_with_fresh_engine(operation: Callable[[AsyncSessi
     """
     # Import here to avoid circular imports
     from src.config.settings import settings
-    
-    # Create a new engine for this operation
-    engine = create_async_engine(
-        str(settings.DATABASE_URI),
-        echo=False,
-        future=True,
-        pool_pre_ping=True,
-    )
-    
+    from src.db.session import get_isolation_level, get_sqlite_connect_args
+
+    database_uri = str(settings.DATABASE_URI)
+    is_sqlite = database_uri.startswith('sqlite')
+
+    # Get database-specific configuration
+    isolation_level = get_isolation_level(database_uri)
+    connect_args = get_sqlite_connect_args(database_uri)
+
+    # Create engine with proper configuration based on database type
+    if is_sqlite:
+        # SQLite: Use StaticPool to match main application configuration
+        # This prevents locking issues and disk I/O errors by reusing a single connection
+        logger.debug("Creating fresh SQLite engine with StaticPool and WAL mode")
+        engine = create_async_engine(
+            database_uri,
+            echo=False,
+            future=True,
+            poolclass=StaticPool,  # Single connection reuse - critical for SQLite
+            connect_args={
+                **connect_args,
+                "check_same_thread": False,  # Allow cross-thread access
+            },
+        )
+
+        # Configure SQLite connection with WAL mode and optimizations
+        # This matches the configuration in session.py
+        @event.listens_for(engine.sync_engine, "connect")
+        def configure_sqlite_connection(dbapi_connection, connection_record):
+            """Configure SQLite connection with WAL mode and performance optimizations."""
+            try:
+                # Enable foreign keys
+                dbapi_connection.execute("PRAGMA foreign_keys=ON")
+                # Use WAL mode for better concurrency
+                dbapi_connection.execute("PRAGMA journal_mode=WAL")
+                # Optimize for faster writes with NORMAL synchronous (safe with WAL)
+                dbapi_connection.execute("PRAGMA synchronous=NORMAL")
+                # Increase cache for better performance
+                dbapi_connection.execute("PRAGMA cache_size=-64000")  # 64MB cache
+                # Enable memory-mapped I/O for better performance
+                dbapi_connection.execute("PRAGMA mmap_size=268435456")  # 256MB mmap
+                # Auto checkpoint at 1000 pages to balance performance and WAL size
+                dbapi_connection.execute("PRAGMA wal_autocheckpoint=1000")
+                logger.debug("SQLite connection configured with WAL mode and optimizations")
+            except Exception as e:
+                logger.error(f"Failed to configure SQLite connection: {e}")
+    else:
+        # PostgreSQL: Use NullPool for event loop isolation
+        # NullPool creates a new connection for each checkout, avoiding cross-loop issues
+        logger.debug("Creating fresh PostgreSQL engine with NullPool")
+        engine = create_async_engine(
+            database_uri,
+            echo=False,
+            future=True,
+            poolclass=NullPool,  # No pooling - new connection per query
+            connect_args=connect_args,
+            isolation_level=isolation_level,
+        )
+
     # Create a new session factory
     session_factory = async_sessionmaker(
         engine,
         expire_on_commit=False,
-        autoflush=False,
+        autoflush=False,  # Disable autoflush to prevent SQLite locking issues
     )
-    
+
     try:
         # Create a session and execute the operation
         async with session_factory() as session:
             result = await operation(session)
             return result
     except Exception as e:
-        logger.error(f"Error executing DB operation with fresh engine: {str(e)}")
+        logger.error(f"Error executing DB operation with fresh engine: {str(e)}", exc_info=True)
         raise
     finally:
         # Always dispose the engine

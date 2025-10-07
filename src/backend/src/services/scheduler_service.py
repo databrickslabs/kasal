@@ -556,36 +556,24 @@ class SchedulerService:
                 await session.commit()
                 await session.refresh(db_run)
                 
-                # Ensure Databricks API key and host are loaded from service for scheduled jobs
+                # Ensure Databricks auth is available via unified auth for scheduled jobs
                 import os
-                if not os.getenv("DATABRICKS_API_KEY") and not os.getenv("DATABRICKS_TOKEN"):
-                    try:
-                        from src.services.api_keys_service import ApiKeysService
-
-                        # Try both common Databricks token names
-                        for key_name in ["DATABRICKS_API_KEY", "DATABRICKS_TOKEN"]:
-                            # Use the class method that handles session internally
-                            decrypted_token = await ApiKeysService.get_api_key_value(key_name=key_name)
-                            if decrypted_token:
-                                os.environ[key_name] = decrypted_token
-                                logger_manager.scheduler.info(f"Loaded {key_name} from API key service for scheduled job")
-                                break
-                    except Exception as e:
-                        logger_manager.scheduler.warning(f"Could not load Databricks API key from service: {e}")
-                
-                # Also ensure DATABRICKS_HOST is set from Databricks config
-                if not os.getenv("DATABRICKS_HOST"):
-                    try:
-                        from src.services.databricks_service import DatabricksService
-                        from src.db.session import async_session_factory
-                        async with async_session_factory() as session:
-                            databricks_service = DatabricksService(session)
-                            databricks_config = await databricks_service.get_databricks_config()
-                            if databricks_config and databricks_config.workspace_url:
-                                os.environ["DATABRICKS_HOST"] = databricks_config.workspace_url
-                                logger_manager.scheduler.info(f"Loaded DATABRICKS_HOST from config: {databricks_config.workspace_url}")
-                    except Exception as e:
-                        logger_manager.scheduler.warning(f"Could not load DATABRICKS_HOST from config: {e}")
+                try:
+                    from src.utils.databricks_auth import get_auth_context
+                    auth = await get_auth_context()
+                    if auth:
+                        # Set env vars for backward compatibility with scheduled jobs
+                        if auth.workspace_url:
+                            os.environ["DATABRICKS_HOST"] = auth.workspace_url
+                            logger_manager.scheduler.info(f"Loaded DATABRICKS_HOST from unified {auth.auth_method} auth for scheduled job")
+                        if auth.token:
+                            os.environ["DATABRICKS_TOKEN"] = auth.token
+                            os.environ["DATABRICKS_API_KEY"] = auth.token
+                            logger_manager.scheduler.info(f"Loaded DATABRICKS_TOKEN from unified {auth.auth_method} auth for scheduled job")
+                    else:
+                        logger_manager.scheduler.warning("No unified auth available for scheduled job")
+                except Exception as e:
+                    logger_manager.scheduler.warning(f"Could not load Databricks auth from unified auth: {e}")
                 
                 # Create an instance of CrewExecutionService
                 crew_execution_service = CrewAIExecutionService()
