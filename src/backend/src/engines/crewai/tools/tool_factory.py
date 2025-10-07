@@ -143,10 +143,21 @@ class ToolFactory:
                             # Use utility function to avoid event loop issues
                             from src.utils.asyncio_utils import execute_db_operation_with_fresh_engine
 
+                            # Get group_id from config or api_keys_service
+                            group_id = None
+                            try:
+                                group_id = self.config.get("group_id") if isinstance(self.config, dict) else None
+                            except Exception:
+                                pass
+
+                            # If not in config, try to get from api_keys_service
+                            if not group_id and self.api_keys_service:
+                                group_id = getattr(self.api_keys_service, 'group_id', None)
+
                             async def _get_key_operation(session):
-                                # Re-use the api_keys_service but with a fresh session
+                                # SECURITY: Re-use the api_keys_service with group_id for multi-tenant isolation
                                 from src.services.api_keys_service import ApiKeysService
-                                api_keys_service = ApiKeysService(session)
+                                api_keys_service = ApiKeysService(session, group_id=group_id)
                                 return await api_keys_service.find_by_name(key_name)
 
                             api_key_obj = await execute_db_operation_with_fresh_engine(_get_key_operation)
@@ -296,9 +307,21 @@ class ToolFactory:
             # Import necessary modules here to avoid circular imports
             from src.utils.asyncio_utils import execute_db_operation_with_fresh_engine
 
+            # Get group_id from config or api_keys_service
+            group_id = None
+            try:
+                group_id = self.config.get("group_id") if isinstance(self.config, dict) else None
+            except Exception:
+                pass
+
+            # If not in config, try to get from api_keys_service
+            if not group_id and self.api_keys_service:
+                group_id = getattr(self.api_keys_service, 'group_id', None)
+
             async def _get_key_with_fresh_engine(session):
                 from src.services.api_keys_service import ApiKeysService
-                api_keys_service = ApiKeysService(session)
+                # SECURITY: Create service with group_id for multi-tenant isolation
+                api_keys_service = ApiKeysService(session, group_id=group_id)
                 api_key = await api_keys_service.find_by_name(key_name)
 
                 if api_key and api_key.encrypted_value:
@@ -538,6 +561,12 @@ class ToolFactory:
                                 )
                             finally:
                                 loop.close()
+
+                        # Assign the retrieved key to perplexity_api_key
+                        if db_api_key:
+                            os.environ["PERPLEXITY_API_KEY"] = db_api_key
+                            perplexity_api_key = db_api_key
+                            logger.info("Retrieved PERPLEXITY_API_KEY from ApiKeysService")
                     else:
                         # Fallback to original method
                         logger.info("No ApiKeysService provided, using fallback method for PERPLEXITY_API_KEY")
@@ -694,10 +723,25 @@ class ToolFactory:
                 # Get DATABRICKS_HOST from tool_config or environment
                 databricks_host = tool_config.get('DATABRICKS_HOST')
 
-                # If DATABRICKS_HOST is not in tool_config, try to get it from environment or DatabricksService
+                # If DATABRICKS_HOST is not in tool_config, try to get it from unified auth
                 if not databricks_host:
-                    # First try environment variable
-                    databricks_host = os.environ.get('DATABRICKS_HOST')
+                    # Use unified authentication
+                    try:
+                        from src.utils.databricks_auth import get_auth_context
+                        # Check if we're in an async context
+                        try:
+                            asyncio.get_running_loop()
+                            # We're in an event loop, use thread pool
+                            import concurrent.futures
+                            with concurrent.futures.ThreadPoolExecutor() as pool:
+                                auth = pool.submit(self._run_in_new_loop, get_auth_context).result()
+                        except RuntimeError:
+                            # No running event loop, safe to use asyncio.run
+                            auth = asyncio.run(get_auth_context())
+                        databricks_host = auth.workspace_url if auth else None
+                    except Exception as e:
+                        logger.debug(f"Unified auth not available: {e}")
+                        databricks_host = None
 
                     # If not in environment, try to get from DatabricksService
                     if not databricks_host:
@@ -781,10 +825,25 @@ class ToolFactory:
                 # Get DATABRICKS_HOST from tool_config or environment
                 databricks_host = tool_config.get('DATABRICKS_HOST')
 
-                # If DATABRICKS_HOST is not in tool_config, try to get it from environment or DatabricksService
+                # If DATABRICKS_HOST is not in tool_config, try to get it from unified auth
                 if not databricks_host:
-                    # First try environment variable
-                    databricks_host = os.environ.get('DATABRICKS_HOST')
+                    # Use unified authentication
+                    try:
+                        from src.utils.databricks_auth import get_auth_context
+                        # Check if we're in an async context
+                        try:
+                            asyncio.get_running_loop()
+                            # We're in an event loop, use thread pool
+                            import concurrent.futures
+                            with concurrent.futures.ThreadPoolExecutor() as pool:
+                                auth = pool.submit(self._run_in_new_loop, get_auth_context).result()
+                        except RuntimeError:
+                            # No running event loop, safe to use asyncio.run
+                            auth = asyncio.run(get_auth_context())
+                        databricks_host = auth.workspace_url if auth else None
+                    except Exception as e:
+                        logger.debug(f"Unified auth not available: {e}")
+                        databricks_host = None
 
                     # If not in environment, try to get from DatabricksService
                     if not databricks_host:
@@ -914,8 +973,23 @@ class ToolFactory:
                     # Get API key from tool config
                     api_key = tool_config.get('api_key', '')
 
-                    # Try to get the key from environment first
-                    databricks_api_key = os.environ.get("DATABRICKS_API_KEY")
+                    # Get API key from unified auth
+                    databricks_api_key = None
+                    try:
+                        from src.utils.databricks_auth import get_auth_context
+                        # Check if we're in an async context
+                        try:
+                            asyncio.get_running_loop()
+                            # We're in an event loop, use thread pool
+                            import concurrent.futures
+                            with concurrent.futures.ThreadPoolExecutor() as pool:
+                                auth = pool.submit(self._run_in_new_loop, get_auth_context).result()
+                        except RuntimeError:
+                            # No running event loop, safe to use asyncio.run
+                            auth = asyncio.run(get_auth_context())
+                        databricks_api_key = auth.token if auth else None
+                    except Exception as e:
+                        logger.debug(f"Unified auth not available: {e}")
 
                     # If not found in environment, try to get it from the service
                     if not databricks_api_key and not api_key:
@@ -960,8 +1034,8 @@ class ToolFactory:
                                 db_api_key = self._get_api_key("DATABRICKS_API_KEY")
 
                             if db_api_key:
-                                # Set in environment for tools that read from there
-                                os.environ["DATABRICKS_API_KEY"] = db_api_key
+                                # NOTE: Do NOT set os.environ["DATABRICKS_API_KEY"] as it causes race conditions
+                                # The API key is passed directly to tool config below instead
                                 databricks_api_key = db_api_key
 
                     # Use tool configuration or environment
@@ -976,11 +1050,26 @@ class ToolFactory:
                     genie_tool_config['DATABRICKS_HOST'] = tool_config['DATABRICKS_HOST']
                     logger.info(f"Using DATABRICKS_HOST from config: {tool_config['DATABRICKS_HOST']}")
                 else:
-                    # Try to get from environment variable
-                    databricks_host = os.environ.get("DATABRICKS_HOST")
-                    if databricks_host:
-                        genie_tool_config['DATABRICKS_HOST'] = databricks_host
-                        logger.info(f"Using DATABRICKS_HOST from environment variable: {databricks_host}")
+                    # Try to get from unified auth
+                    try:
+                        from src.utils.databricks_auth import get_auth_context
+                        # Check if we're in an async context
+                        try:
+                            asyncio.get_running_loop()
+                            # We're in an event loop, use thread pool
+                            import concurrent.futures
+                            with concurrent.futures.ThreadPoolExecutor() as pool:
+                                auth = pool.submit(self._run_in_new_loop, get_auth_context).result()
+                        except RuntimeError:
+                            # No running event loop, safe to use asyncio.run
+                            auth = asyncio.run(get_auth_context())
+                        databricks_host = auth.workspace_url if auth else None
+                        if databricks_host:
+                            genie_tool_config['DATABRICKS_HOST'] = databricks_host
+                            logger.info(f"Using DATABRICKS_HOST from unified auth: {databricks_host}")
+                    except Exception as e:
+                        logger.debug(f"Unified auth not available: {e}")
+                        databricks_host = None
                     else:
                         logger.info("DATABRICKS_HOST not in config or environment - GenieTool will auto-detect if in Databricks Apps")
 
@@ -1023,17 +1112,32 @@ class ToolFactory:
                 # Create the tool with group_id and user_token
                 # NOTE: We do NOT pass execution_id as it prevents searching across all knowledge documents
                 # The tool should search ALL documents for the group, not just current execution
+
+                # CRITICAL DEBUG: Print to stdout
+                print(f"[TOOL_FACTORY] ========================================")
+                print(f"[TOOL_FACTORY] Creating DatabricksKnowledgeSearchTool")
+                print(f"[TOOL_FACTORY]   - tool_config received: {tool_config}")
+                print(f"[TOOL_FACTORY]   - tool_config type: {type(tool_config)}")
+
                 tool_args = {
                     "group_id": self.config.get('group_id', 'default'),
                     # DO NOT PASS execution_id - we want to search all documents!
                     # "execution_id": self.config.get('execution_id') or self.config.get('run_id'),
                     "user_token": self.user_token
                 }
-                # Add any tool-specific config
+                # Add any tool-specific config (includes file_paths and agent_id from task tool_configs)
                 if tool_config and isinstance(tool_config, dict):
+                    print(f"[TOOL_FACTORY]   - Merging tool_config into tool_args")
                     tool_args.update(tool_config)
+                else:
+                    print(f"[TOOL_FACTORY]   - tool_config is empty or not a dict, NOT merging")
 
-                logger.info(f"Creating DatabricksKnowledgeSearchTool with group_id: {tool_args['group_id']} (no execution_id filter)")
+                print(f"[TOOL_FACTORY] Final tool_args: {tool_args}")
+                print(f"[TOOL_FACTORY]   - group_id: {tool_args.get('group_id')}")
+                print(f"[TOOL_FACTORY]   - file_paths: {tool_args.get('file_paths')}")
+                print(f"[TOOL_FACTORY]   - agent_id: {tool_args.get('agent_id')}")
+                print(f"[TOOL_FACTORY] ========================================")
+
                 tool = DatabricksKnowledgeSearchTool(**tool_args)
                 return tool
 
@@ -1100,7 +1204,6 @@ class ToolFactory:
         # Make sure we run the cleanup safely with respect to event loops
         try:
             # Check if we're already in an event loop
-            import asyncio
             try:
                 # We're in an event loop, need to run cleanup carefully
                 running_loop = asyncio.get_running_loop()

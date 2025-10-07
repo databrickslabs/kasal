@@ -306,6 +306,47 @@ def run_crew_in_process(
 
         # Subprocess logger is now configured
 
+        # SECURITY: Set up UserContext with group_id for multi-tenant isolation in subprocess
+        # This is CRITICAL because the subprocess doesn't have request context
+        if crew_config and isinstance(crew_config, dict) and 'group_id' in crew_config:
+            try:
+                from src.utils.user_context import UserContext, GroupContext
+
+                group_id = crew_config['group_id']
+                subprocess_logger.info(f"[SUBPROCESS] Setting up UserContext with group_id={group_id}")
+
+                # Create a GroupContext for the subprocess
+                group_context_obj = GroupContext(
+                    group_ids=[group_id],
+                    group_email=crew_config.get('group_email', f"{group_id}@subprocess"),
+                    access_token=crew_config.get('user_token')  # Optional OBO token
+                )
+
+                # Set it in UserContext so LLMManager can access it
+                UserContext.set_group_context(group_context_obj)
+
+                # CRITICAL: Also set user_token separately for OBO authentication
+                # LLMManager.get_user_token() reads from this separate context variable
+                user_token = crew_config.get('user_token')
+                if user_token:
+                    UserContext.set_user_token(user_token)
+                    subprocess_logger.info(f"[SUBPROCESS] ✓ UserContext initialized with group_id={group_id} and OBO token")
+                else:
+                    subprocess_logger.info(f"[SUBPROCESS] ✓ UserContext initialized with group_id={group_id} (no OBO token)")
+
+                # Verify it was set correctly
+                verify_context = UserContext.get_group_context()
+                if verify_context and verify_context.primary_group_id == group_id:
+                    subprocess_logger.info(f"[SUBPROCESS] ✓ UserContext verification successful: {verify_context.primary_group_id}")
+                else:
+                    subprocess_logger.error(f"[SUBPROCESS] ✗ UserContext verification FAILED: got {verify_context}")
+                    subprocess_logger.error(f"[SUBPROCESS] This indicates a ContextVar issue in subprocess")
+            except Exception as e:
+                subprocess_logger.error(f"[SUBPROCESS] Failed to set up UserContext: {e}")
+                subprocess_logger.error(f"[SUBPROCESS] This will cause multi-tenant isolation failures!")
+        else:
+            subprocess_logger.error("[SUBPROCESS] SECURITY: No group_id in crew_config - multi-tenant isolation will fail")
+
         # Rebuild the crew from config using async context
         # We need to run the async crew preparation in the subprocess
         async def prepare_and_run():
@@ -336,6 +377,41 @@ def run_crew_in_process(
             import logging
             async_logger = logging.getLogger('crew')
 
+            # SECURITY: Re-initialize UserContext in async context for multi-tenant isolation
+            # ContextVars can sometimes not propagate properly across sync/async boundaries
+            if crew_config and isinstance(crew_config, dict) and 'group_id' in crew_config:
+                try:
+                    from src.utils.user_context import UserContext, GroupContext
+
+                    group_id = crew_config['group_id']
+                    async_logger.info(f"[ASYNC] Re-initializing UserContext with group_id={group_id}")
+
+                    # Re-create GroupContext in async context
+                    group_context_obj = GroupContext(
+                        group_ids=[group_id],
+                        group_email=crew_config.get('group_email', f"{group_id}@subprocess"),
+                        access_token=crew_config.get('user_token')
+                    )
+
+                    # Set it in UserContext
+                    UserContext.set_group_context(group_context_obj)
+
+                    # CRITICAL: Also set user_token separately for OBO authentication
+                    # LLMManager.get_user_token() reads from this separate context variable
+                    user_token = crew_config.get('user_token')
+                    if user_token:
+                        UserContext.set_user_token(user_token)
+                        async_logger.info(f"[ASYNC] ✓ UserContext set with OBO token")
+
+                    # Verify
+                    verify = UserContext.get_group_context()
+                    if verify and verify.primary_group_id == group_id:
+                        async_logger.info(f"[ASYNC] ✓ UserContext verified: {group_id}")
+                    else:
+                        async_logger.error(f"[ASYNC] ✗ UserContext verification failed: {verify}")
+                except Exception as e:
+                    async_logger.error(f"[ASYNC] Failed to initialize UserContext: {e}")
+
             # Always load Databricks config for the current group to determine MLflow status
             db_config = None
             try:
@@ -346,15 +422,18 @@ def run_crew_in_process(
                     databricks_service = DatabricksService(session, group_id=current_group_id)
                     db_config = await databricks_service.get_databricks_config()
 
-                    # Ensure DATABRICKS_HOST is available in subprocess
-                    if 'DATABRICKS_HOST' not in os.environ:
-                        from src.config.settings import settings
-                        if hasattr(settings, 'DATABRICKS_HOST') and settings.DATABRICKS_HOST:
-                            os.environ['DATABRICKS_HOST'] = settings.DATABRICKS_HOST
-                            async_logger.info(f"[SUBPROCESS] Set DATABRICKS_HOST from settings: {settings.DATABRICKS_HOST}")
-                        elif db_config and getattr(db_config, 'workspace_url', None):
-                            os.environ['DATABRICKS_HOST'] = db_config.workspace_url
-                            async_logger.info(f"[SUBPROCESS] Set DATABRICKS_HOST from database: {db_config.workspace_url}")
+                    # Ensure DATABRICKS_HOST is available in subprocess via unified auth
+                    try:
+                        from src.utils.databricks_auth import get_auth_context
+                        auth = await get_auth_context()
+                        if auth and auth.workspace_url:
+                            if 'DATABRICKS_HOST' not in os.environ:
+                                os.environ['DATABRICKS_HOST'] = auth.workspace_url
+                                async_logger.info(f"[SUBPROCESS] Set DATABRICKS_HOST from unified {auth.auth_method} auth: {auth.workspace_url}")
+                        else:
+                            async_logger.warning("[SUBPROCESS] No workspace URL available from unified auth")
+                    except Exception as e:
+                        async_logger.warning(f"[SUBPROCESS] Failed to get unified auth for DATABRICKS_HOST: {e}")
             except Exception as e:
                 async_logger.warning(f"[SUBPROCESS] Could not load Databricks config / host: {e}")
 
@@ -389,22 +468,20 @@ def run_crew_in_process(
                     except Exception as _otel_err:
                         async_logger.info(f"[SUBPROCESS] Could not adjust OTEL_SDK_DISABLED: {_otel_err}")
 
-                    # Import and configure MLflow using existing Databricks authentication
-                    from src.utils.databricks_auth import setup_environment_variables
+                    # Import and configure MLflow using unified Databricks authentication
+                    from src.utils.databricks_auth import get_auth_context
                     import mlflow
+                    import os
 
-                    # Setup Databricks authentication in subprocess (prefer OBO user token)
-                    user_token = getattr(group_context, 'access_token', None) if group_context else None
-                    if setup_environment_variables(user_token):
-                        async_logger.info(f"[SUBPROCESS] Databricks authentication successful (OBO={bool(user_token)})")
-                        if user_token:
-                            async_logger.info("[SUBPROCESS] Using OBO user token for Databricks auth")
-                        else:
-                            async_logger.info("[SUBPROCESS] Using PAT fallback (ApiKeysService/env) for Databricks auth")
-
-
-
-
+                    # Setup Databricks authentication in subprocess using service-level credentials
+                    # MLflow uses service-level auth (NO OBO) to avoid race conditions
+                    # Pass user_token=None to skip OBO and use PAT/SPN
+                    auth = await get_auth_context(user_token=None)
+                    if auth:
+                        # Set environment variables for MLflow (ONLY library that requires env vars)
+                        os.environ["DATABRICKS_HOST"] = auth.workspace_url
+                        os.environ["DATABRICKS_TOKEN"] = auth.token
+                        async_logger.info(f"[SUBPROCESS] MLflow configured with {auth.auth_method} authentication")
 
                         """
 
@@ -567,7 +644,7 @@ def run_crew_in_process(
 
                         async_logger.info(f"[SUBPROCESS] MLflow configuration completed successfully")
                     else:
-                        async_logger.warning(f"[SUBPROCESS] Databricks authentication failed - MLflow traces may not work")
+                        async_logger.warning("[SUBPROCESS] No Databricks authentication available for MLflow")
 
                 except Exception as mlflow_error:
                     async_logger.error(f"[SUBPROCESS] MLflow configuration failed: {mlflow_error}")
@@ -576,22 +653,41 @@ def run_crew_in_process(
             # Create services using session factory
             from src.db.session import async_session_factory
             async with async_session_factory() as session:
-                # Create services with the session
+                # Extract group_id first for service initialization
+                group_id = None
+                try:
+                    if group_context and getattr(group_context, 'primary_group_id', None):
+                        group_id = getattr(group_context, 'primary_group_id')
+                        async_logger.info(f"[SUBPROCESS] Using group_id for services: {group_id}")
+                except Exception as e:
+                    async_logger.warning(f"[SUBPROCESS] Could not extract group_id: {e}")
+
+                # Create services with the session and group_id
                 from src.services.tool_service import ToolService
                 from src.services.api_keys_service import ApiKeysService
                 tool_service = ToolService(session)
-                api_keys_service = ApiKeysService(session)
+                api_keys_service = ApiKeysService(session, group_id=group_id)
 
                 # Ensure group_id is present in config for group-aware tool loading
                 try:
-                    if isinstance(crew_config, dict) and group_context and getattr(group_context, 'primary_group_id', None):
-                        crew_config.setdefault('group_id', getattr(group_context, 'primary_group_id'))
+                    if isinstance(crew_config, dict) and group_id:
+                        crew_config.setdefault('group_id', group_id)
                         async_logger.info(f"[SUBPROCESS] Injected group_id into crew_config: {crew_config.get('group_id')}")
                 except Exception as e:
                     async_logger.warning(f"[SUBPROCESS] Could not inject group_id into crew_config: {e}")
 
-                # Create a tool factory instance
-                tool_factory = await ToolFactory.create(crew_config, api_keys_service, None)
+                # Extract user_token from crew_config for OBO authentication
+                # The user_token is passed from the parent process via crew_config
+                user_token = None
+                if isinstance(crew_config, dict):
+                    user_token = crew_config.get('user_token') or crew_config.get('access_token')
+                    if user_token:
+                        async_logger.info(f"[SUBPROCESS] Found user_token in crew_config for OBO authentication: {user_token[:10]}...")
+                    else:
+                        async_logger.warning("[SUBPROCESS] No user_token found in crew_config - tools requiring OBO will fall back to PAT/SPN auth")
+
+                # Create a tool factory instance with user_token
+                tool_factory = await ToolFactory.create(crew_config, api_keys_service, user_token)
 
                 # Log the JobConfiguration BEFORE crew preparation to ensure it's captured
                 import json
@@ -1412,6 +1508,29 @@ class ProcessCrewExecutor:
         # - execution_trace: Taps into CrewAI event bus for structured events
         # - execution_logs: Captures raw subprocess logs (crew.log, stdout)
         # DO NOT mix their implementations!
+
+        # Pass group_context data to crew_config for subprocess execution
+        # SECURITY: group_id is REQUIRED for multi-tenant isolation in subprocess
+        # The authentication priority chain (OBO → PAT → SPN) is handled by databricks_auth.py
+        if group_context:
+            if isinstance(crew_config, dict):
+                # Add group_id for multi-tenant isolation (REQUIRED)
+                if hasattr(group_context, 'primary_group_id') and group_context.primary_group_id:
+                    crew_config['group_id'] = group_context.primary_group_id
+                    logger.info(f"[ProcessCrewExecutor] Added group_id to crew_config: {group_context.primary_group_id}")
+                else:
+                    logger.error("[ProcessCrewExecutor] SECURITY: No group_id in group_context - multi-tenant isolation may fail")
+
+                # Add user_token for OBO authentication (optional, used by databricks_auth.py)
+                if hasattr(group_context, 'access_token') and group_context.access_token:
+                    crew_config['user_token'] = group_context.access_token
+                    logger.info(f"[ProcessCrewExecutor] Added user_token to crew_config for OBO authentication")
+                else:
+                    logger.info("[ProcessCrewExecutor] No user_token - databricks_auth.py will use PAT or SPN fallback")
+            else:
+                logger.warning("[ProcessCrewExecutor] Cannot add user_token/group_id to crew_config - not a dict")
+        else:
+            logger.error("[ProcessCrewExecutor] SECURITY: No group_context provided - multi-tenant isolation will fail")
 
         # Create a direct Process instead of using ProcessPoolExecutor
         # This gives us full control over the process lifecycle

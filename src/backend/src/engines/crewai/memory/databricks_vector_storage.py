@@ -21,10 +21,10 @@ import base64
 import time
 import random
 from src.schemas.databricks_index_schemas import DatabricksIndexSchemas
-from src.repositories.databricks_auth_helper import DatabricksAuthHelper
+# DatabricksAuthHelper removed - now using unified auth via get_auth_context()
 from src.repositories.databricks_vector_index_repository import DatabricksVectorIndexRepository
 from src.core.logger import LoggerManager
-from src.utils.databricks_auth import get_databricks_auth_headers, is_databricks_apps_environment
+from src.utils.databricks_auth import get_databricks_auth_headers
 import asyncio
 
 logger = LoggerManager.get_instance().crew
@@ -103,11 +103,24 @@ class DatabricksVectorStorage:
         self.trace_context: Optional[dict] = None
 
         # Store workspace URL and user token for repository
+        # Get workspace URL from unified auth if not provided
+        if not workspace_url:
+            try:
+                from src.utils.databricks_auth import get_auth_context
+                import asyncio
+                auth = asyncio.run(get_auth_context())
+                if auth:
+                    workspace_url = auth.workspace_url
+                    self.memory_logger.debug(f"Using unified {auth.auth_method} authentication for Vector Storage")
+            except Exception as e:
+                self.memory_logger.warning(f"Failed to get unified auth for Vector Storage: {e}")
+                workspace_url = ''
+
         self.workspace_url = workspace_url
         self.user_token = user_token
 
         # Initialize repository for clean architecture - this handles all operations
-        self.repository = DatabricksVectorIndexRepository(workspace_url or os.getenv('DATABRICKS_HOST', ''))
+        self.repository = DatabricksVectorIndexRepository(workspace_url)
         
         # IMPORTANT: Set USE_NULLPOOL environment variable to prevent asyncpg connection pool issues
         # This is needed because Databricks memory operations run async code in different event loops

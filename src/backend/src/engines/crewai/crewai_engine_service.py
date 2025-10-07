@@ -241,17 +241,20 @@ class CrewAIEngineService(BaseEngineService):
                 from src.services.tool_service import ToolService
                 from src.services.api_keys_service import ApiKeysService
 
+                # Extract group_id for API keys service
+                group_id = group_context.primary_group_id if group_context else None
+
                 # Use the passed session for services
                 if session:
                     # Create services directly with session
                     tool_service = ToolService(session)
-                    api_keys_service = ApiKeysService(session)
+                    api_keys_service = ApiKeysService(session, group_id=group_id)
                 else:
                     # Fallback: create a new session if none provided
                     from src.db.session import async_session_factory
                     async with async_session_factory() as db_session:
                         tool_service = ToolService(db_session)
-                        api_keys_service = ApiKeysService(db_session)
+                        api_keys_service = ApiKeysService(db_session, group_id=group_id)
 
                 # Extract user token from group context for tool factory
                 user_token = group_context.access_token if group_context else None
@@ -551,17 +554,20 @@ class CrewAIEngineService(BaseEngineService):
                 from src.services.tool_service import ToolService
                 from src.services.api_keys_service import ApiKeysService
 
+                # Extract group_id for API keys service
+                group_id = group_context.primary_group_id if group_context else None
+
                 # Use the passed session for services
                 if session:
                     # Create services directly with session
                     tool_service = ToolService(session)
-                    api_keys_service = ApiKeysService(session)
+                    api_keys_service = ApiKeysService(session, group_id=group_id)
                 else:
                     # Fallback: create a new session if none provided
                     from src.db.session import async_session_factory
                     async with async_session_factory() as db_session:
                         tool_service = ToolService(db_session)
-                        api_keys_service = ApiKeysService(db_session)
+                        api_keys_service = ApiKeysService(db_session, group_id=group_id)
 
                 # Create a tool factory instance with API keys service
                 tool_factory = await ToolFactory.create(flow_config, api_keys_service)

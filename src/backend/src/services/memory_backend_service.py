@@ -314,42 +314,28 @@ class MemoryBackendService:
     
     async def get_workspace_url(self) -> Dict[str, Any]:
         """
-        Get the Databricks workspace URL from environment variables.
-        Checks in order: DATABRICKS_HOST (for Databricks Apps), DATABRICKS_WORKSPACE_URL.
-        
+        Get the Databricks workspace URL from unified authentication system.
+        Uses databricks_auth.get_auth_context() for all authentication methods.
+
         Returns:
             Dict with workspace_url and source, or None values if not found
         """
-        import os
-        
-        # Check for DATABRICKS_HOST first (Databricks Apps environment)
-        databricks_host = os.getenv("DATABRICKS_HOST")
-        if databricks_host:
-            # Ensure it has https:// prefix
-            if not databricks_host.startswith("http"):
-                databricks_host = f"https://{databricks_host}"
-            logger.info(f"Detected workspace URL from DATABRICKS_HOST: {databricks_host}")
-            return {
-                "workspace_url": databricks_host,
-                "source": "DATABRICKS_HOST",
-                "detected": True
-            }
-        
-        # Check for DATABRICKS_WORKSPACE_URL (alternative env var for local dev)
-        workspace_url = os.getenv("DATABRICKS_WORKSPACE_URL")
-        if workspace_url:
-            # Ensure it has https:// prefix
-            if not workspace_url.startswith("http"):
-                workspace_url = f"https://{workspace_url}"
-            logger.info(f"Detected workspace URL from DATABRICKS_WORKSPACE_URL: {workspace_url}")
-            return {
-                "workspace_url": workspace_url,
-                "source": "DATABRICKS_WORKSPACE_URL",
-                "detected": True
-            }
-        
-        # No workspace URL found in environment
-        logger.info("No workspace URL detected in environment variables")
+        # Get from unified auth - handles all authentication methods
+        try:
+            from src.utils.databricks_auth import get_auth_context
+            auth = await get_auth_context()
+            if auth and auth.workspace_url:
+                logger.info(f"Detected workspace URL from unified {auth.auth_method} auth: {auth.workspace_url}")
+                return {
+                    "workspace_url": auth.workspace_url,
+                    "source": f"unified_auth_{auth.auth_method}",
+                    "detected": True
+                }
+        except Exception as e:
+            logger.debug(f"Could not get workspace URL from unified auth: {e}")
+
+        # No workspace URL found
+        logger.info("No workspace URL detected from unified authentication")
         return {
             "workspace_url": None,
             "source": None,

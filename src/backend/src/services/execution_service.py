@@ -382,14 +382,9 @@ class ExecutionService:
             elif execution_type.lower() == "crew":
                 exec_logger.debug(f"[run_crew_execution] This is a CREW execution - delegating to CrewAIExecutionService")
                 
-                # Set up Databricks configuration if needed for crew executions
-                if config.model and 'databricks' in config.model.lower():
-                    exec_logger.info(f"Setting up Databricks token for crew execution with model {config.model}")
-                    from src.services.databricks_service import DatabricksService
-                    setup_result = await DatabricksService.setup_token()
-                    if not setup_result:
-                        exec_logger.warning("Failed to set up Databricks token, crew execution may fail if it requires Databricks")
-                
+                # NOTE: Databricks authentication is now handled via get_auth_context() in databricks_auth.py
+                # No need to set up environment variables here - each component uses unified auth
+
                 exec_logger.debug(f"[run_crew_execution] Calling crew_execution_service.run_crew_execution for job_id: {execution_id}")
                 # This call should handle PREPARING/RUNNING updates internally
                 result = await crew_execution_service.run_crew_execution(
@@ -562,15 +557,9 @@ class ExecutionService:
         success = False
         
         try:
-            # Set up Databricks configuration if needed
-            # This is important for executions that might need to use Databricks services
-            if config.model and 'databricks' in config.model.lower():
-                exec_logger.info(f"Setting up Databricks token for execution with model {config.model}")
-                from src.services.databricks_service import DatabricksService
-                setup_result = DatabricksService.setup_token_sync()
-                if not setup_result:
-                    exec_logger.warning("Failed to set up Databricks token, execution may fail if it requires Databricks")
-            
+            # NOTE: Databricks authentication is now handled via get_auth_context() in databricks_auth.py
+            # No need to set up environment variables here - each component uses unified auth
+
             # Main execution logic would go here
             # For non-crew executions, such as flows
             if execution_type == "flow":

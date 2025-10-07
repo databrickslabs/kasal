@@ -59,6 +59,8 @@ class DatabricksKnowledgeSearchTool(BaseTool):
         group_id: str = "default",
         execution_id: Optional[str] = None,
         user_token: Optional[str] = None,
+        file_paths: Optional[List[str]] = None,
+        agent_id: Optional[str] = None,
         **kwargs
     ):
         """
@@ -68,18 +70,36 @@ class DatabricksKnowledgeSearchTool(BaseTool):
             group_id: Group ID for tenant isolation
             execution_id: Optional execution ID for scoping search
             user_token: Optional user token for OBO authentication
+            file_paths: Optional list of file paths to filter searches (from tool_configs)
+            agent_id: Optional agent ID for access control filtering
             **kwargs: Additional arguments for BaseTool
         """
+        # CRITICAL DEBUG: Print to stdout (will show in logs even before logging is configured)
+        print(f"[TOOL __INIT__] ========================================")
+        print(f"[TOOL __INIT__] DatabricksKnowledgeSearchTool created!")
+        print(f"[TOOL __INIT__]   - group_id: {group_id}")
+        print(f"[TOOL __INIT__]   - execution_id: {execution_id}")
+        print(f"[TOOL __INIT__]   - file_paths: {file_paths}")
+        print(f"[TOOL __INIT__]   - agent_id: {agent_id}")
+        print(f"[TOOL __INIT__]   - kwargs keys: {list(kwargs.keys()) if kwargs else 'None'}")
+        print(f"[TOOL __INIT__] ========================================")
+
         super().__init__(**kwargs)
 
         self._group_id = group_id
         self._execution_id = execution_id
         self._user_token = user_token
+        self._configured_file_paths = file_paths  # Store configured file paths from tool_configs
+        self._agent_id = agent_id  # Store agent ID for access control
 
         logger.info(f"Initialized DatabricksKnowledgeSearchTool")
+        logger.info(f"  - Configured file_paths: {self._configured_file_paths}")
+        logger.info(f"  - Configured agent_id: {self._agent_id}")
         logger.info(f"  Group ID: {group_id}")
         logger.info(f"  Execution ID: {execution_id}")
         logger.info(f"  User token provided: {bool(user_token)}")
+        logger.info(f"  Configured file paths (from tool_configs): {file_paths}")
+        logger.info(f"  Agent ID (for access control): {agent_id}")
 
     def _run(self, query: str, limit: int = 10, file_paths: Optional[List[str]] = None) -> str:
         """
@@ -88,16 +108,23 @@ class DatabricksKnowledgeSearchTool(BaseTool):
         Args:
             query: The search query
             limit: Maximum number of results
-            file_paths: Optional file paths filter
+            file_paths: Optional file paths filter (from agent call - IGNORED if tool has configured paths)
 
         Returns:
             Formatted search results as a string
         """
+        # CRITICAL: Use configured file paths from tool_configs, NOT what the agent passes
+        # The agent might pass just filenames, but we need full paths to match the vector index
+        effective_file_paths = self._configured_file_paths if self._configured_file_paths else file_paths
+
         logger.info("="*80)
         logger.info("[TOOL DEBUG] DatabricksKnowledgeSearchTool._run() called")
         logger.info(f"[TOOL DEBUG] Query: '{query}'")
         logger.info(f"[TOOL DEBUG] Limit: {limit}")
-        logger.info(f"[TOOL DEBUG] File paths: {file_paths}")
+        logger.info(f"[TOOL DEBUG] File paths from agent call: {file_paths}")
+        logger.info(f"[TOOL DEBUG] Configured file paths (tool_configs): {self._configured_file_paths}")
+        logger.info(f"[TOOL DEBUG] Effective file paths (will use): {effective_file_paths}")
+        logger.info(f"[TOOL DEBUG] Agent ID (for access control): {self._agent_id}")
         logger.info(f"[TOOL DEBUG] Group ID: {self._group_id}")
         logger.info(f"[TOOL DEBUG] Execution ID: {self._execution_id}")
         logger.info("="*80)
@@ -106,7 +133,7 @@ class DatabricksKnowledgeSearchTool(BaseTool):
             # Run the async search in a thread pool executor
             logger.info("[TOOL DEBUG] Starting async search in thread pool...")
             with ThreadPoolExecutor() as executor:
-                future = executor.submit(self._run_async_search, query, limit, file_paths)
+                future = executor.submit(self._run_async_search, query, limit, effective_file_paths)
                 results = future.result(timeout=30)  # 30 second timeout
 
             logger.info(f"[TOOL DEBUG] Async search completed, got {len(results) if results else 0} results")
@@ -218,6 +245,7 @@ class DatabricksKnowledgeSearchTool(BaseTool):
                 logger.info(f"  - group_id: '{self._group_id}'")
                 logger.info(f"  - execution_id: '{self._execution_id}'")
                 logger.info(f"  - file_paths: {file_paths}")
+                logger.info(f"  - agent_id: '{self._agent_id}'")
                 logger.info(f"  - limit: {limit}")
                 logger.info(f"  - user_token: {bool(self._user_token)}")
 
@@ -227,6 +255,7 @@ class DatabricksKnowledgeSearchTool(BaseTool):
                     group_id=self._group_id,
                     execution_id=self._execution_id,
                     file_paths=file_paths,
+                    agent_id=self._agent_id,
                     limit=limit,
                     user_token=self._user_token
                 )
