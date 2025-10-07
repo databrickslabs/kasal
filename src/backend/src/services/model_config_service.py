@@ -22,14 +22,23 @@ logger = LoggerManager.get_instance().crew
 class ModelConfigService:
     """Service for model configuration operations."""
 
-    def __init__(self, session: AsyncSession):
+    def __init__(self, session: AsyncSession, group_id: Optional[str] = None):
         """
         Initialize the service with session.
 
         Args:
             session: Database session
+            group_id: Group ID for multi-tenant isolation (optional for read operations,
+                     REQUIRED for API key operations)
+
+        Note:
+            group_id is optional for reading model configurations (which are not tenant-specific),
+            but REQUIRED for any operations involving API keys (multi-tenant isolation).
         """
         self.repository = ModelConfigRepository(session)
+        # SECURITY: Store group_id for multi-tenant API key isolation
+        # Will be validated when needed (e.g., in API key operations)
+        self.group_id = group_id
 
 
     async def find_all(self) -> List[ModelConfig]:
@@ -236,27 +245,28 @@ class ModelConfigService:
             # Get API key for the provider using class method
             provider = config["provider"].lower()
 
-            # Check if we're in Databricks Apps environment for Databricks provider
+            # Check if we're using Databricks provider - unified auth handles it
             if provider == "databricks":
-                try:
-                    from src.utils.databricks_auth import is_databricks_apps_environment
-                    if is_databricks_apps_environment():
-                        logger.info("Databricks Apps environment detected - skipping API key requirement")
-                        # Don't add API key for Databricks Apps OAuth
-                        return config
-                except ImportError:
-                    logger.warning("Enhanced Databricks auth not available")
+                logger.info("Databricks provider - unified auth will handle authentication")
+                # Don't add API key for Databricks - unified auth handles it
+                return config
 
-            # For non-Databricks providers or non-Apps environment, get API key
-            api_key = await ApiKeysService.get_provider_api_key(provider)
+            # For non-Databricks providers, get API key
+            # SECURITY: group_id is REQUIRED for API key operations (multi-tenant isolation)
+            if not self.group_id:
+                raise ValueError(
+                    f"SECURITY: group_id is REQUIRED for fetching API keys for provider '{provider}'. "
+                    "All API key operations must be scoped to a group for multi-tenant isolation."
+                )
+            api_key = await ApiKeysService.get_provider_api_key(provider, group_id=self.group_id)
             if not api_key:
-                # Check if we're in Databricks Apps environment for ANY provider
+                # Try to use unified auth for external providers if available
                 try:
-                    from src.utils.databricks_auth import is_databricks_apps_environment
-                    if is_databricks_apps_environment():
-                        logger.warning(f"No API key found for provider {provider} in Databricks Apps environment - this may cause issues if the model requires external API access")
-                        # In Databricks Apps, we might not have external API keys, but we should allow the request to proceed
-                        # The actual LLM call might fail, but that's better than failing here
+                    from src.utils.databricks_auth import get_auth_context
+                    auth = await get_auth_context()
+                    if auth and auth.auth_method in ["obo", "service_principal"]:
+                        logger.warning(f"No API key found for provider {provider} - this may cause issues if the model requires external API access")
+                        # Allow the request to proceed - the actual LLM call might fail, but that's better than failing here
                         return config
                 except ImportError:
                     pass

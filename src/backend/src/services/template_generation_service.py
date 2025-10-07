@@ -25,15 +25,25 @@ logger = logging.getLogger(__name__)
 
 class TemplateGenerationService:
     """Service for template generation operations."""
-    
-    def __init__(self, session):
+
+    def __init__(self, session, group_id: str):
         """
         Initialize the service with session.
 
         Args:
             session: Database session from FastAPI DI (from core.dependencies)
+            group_id: Group ID for multi-tenant isolation (REQUIRED for security)
+
+        Raises:
+            ValueError: If group_id is None or empty
         """
+        if not group_id:
+            raise ValueError(
+                "SECURITY: group_id is REQUIRED for TemplateGenerationService. "
+                "All API key operations must be scoped to a group for multi-tenant isolation."
+            )
         self.session = session
+        self.group_id = group_id  # SECURITY: Store for multi-tenant API key operations
         self.log_service = LLMLogService(session)
     
     
@@ -81,7 +91,8 @@ class TemplateGenerationService:
         """
         try:
             # Get model configuration from database using ModelConfigService
-            model_config_service = ModelConfigService(self.session)
+            # SECURITY: Pass group_id for multi-tenant isolation
+            model_config_service = ModelConfigService(self.session, group_id=self.group_id)
             model_config = await model_config_service.get_model_config(request.model)
             
             # Check if model configuration was found

@@ -86,15 +86,17 @@ class DispatcherService:
         'choose', 'pick', 'adjust', 'tune', 'customize', 'personalize'
     }
 
-    def __init__(self, log_service: LLMLogService, session):
+    def __init__(self, log_service: LLMLogService, template_service: TemplateService, session):
         """
         Initialize the service.
 
         Args:
             log_service: Service for logging LLM interactions
+            template_service: Service for template management
             session: Database session for generation services
         """
         self.log_service = log_service
+        self.template_service = template_service
         self.session = session
         self.agent_service = AgentGenerationService(session)
         self.task_service = TaskGenerationService(session)
@@ -124,7 +126,8 @@ class DispatcherService:
             An instance of DispatcherService with all required dependencies
         """
         log_service = LLMLogService.create(session)
-        return cls(log_service=log_service, session=session)
+        template_service = TemplateService(session)
+        return cls(log_service=log_service, template_service=template_service, session=session)
 
     async def _log_llm_interaction(self, endpoint: str, prompt: str, response: str, model: str,
                                   status: str = 'success', error_message: Optional[str] = None,
@@ -171,12 +174,21 @@ class DispatcherService:
             def _setup_mlflow_sync():
                 import os
                 import mlflow
-                # Ensure Databricks authentication env is set (PAT or OBO)
+                import asyncio
+                # Ensure Databricks authentication env is set using service-level credentials
+                # MLflow uses service-level auth (NO OBO) to avoid race conditions
                 try:
-                    from src.utils.databricks_auth import setup_environment_variables as _setup_env
-                    _setup_env(getattr(group_context, 'access_token', None) if group_context else None)
+                    from src.utils.databricks_auth import get_auth_context
+                    # Use service-level auth (no OBO) for MLflow
+                    auth = asyncio.run(get_auth_context(user_token=None))
+                    if auth:
+                        os.environ["DATABRICKS_HOST"] = auth.workspace_url
+                        os.environ["DATABRICKS_TOKEN"] = auth.token
+                        logger.info(f"[Dispatcher] MLflow configured with {auth.auth_method} authentication")
+                    else:
+                        logger.warning("[Dispatcher] No Databricks authentication available for MLflow")
                 except Exception as auth_e:
-                    logger.info(f"[Dispatcher] Databricks auth env setup issue (will attempt anyway): {auth_e}")
+                    logger.warning(f"[Dispatcher] Databricks auth setup failed: {auth_e}")
                 # Ensure Databricks tracking
                 mlflow.set_tracking_uri("databricks")
                 # Use the same experiment as crew traces
@@ -359,7 +371,7 @@ class DispatcherService:
         #         # Fall through to traditional method
 
         # Get prompt template from database
-        system_prompt = await TemplateService.get_template_content("detect_intent")
+        system_prompt = await self.template_service.get_template_content("detect_intent")
 
         if not system_prompt:
             # Use a default prompt if template not found
@@ -513,6 +525,17 @@ Please analyze this message and provide your intent classification, considering 
                 result["intent"] = semantic_analysis["suggested_intent"]
             if "confidence" not in result:
                 result["confidence"] = 0.5
+            else:
+                # Clamp confidence to valid range [0.0, 1.0]
+                # LLMs sometimes return values > 1.0 (e.g., 1.2 for 120%)
+                try:
+                    confidence_value = float(result["confidence"])
+                    result["confidence"] = max(0.0, min(1.0, confidence_value))
+                    if confidence_value != result["confidence"]:
+                        logger.warning(f"Clamped confidence from {confidence_value} to {result['confidence']}")
+                except (ValueError, TypeError) as e:
+                    logger.warning(f"Invalid confidence value: {result['confidence']}, defaulting to 0.5")
+                    result["confidence"] = 0.5
             if "extracted_info" not in result:
                 result["extracted_info"] = {}
             if "suggested_prompt" not in result:

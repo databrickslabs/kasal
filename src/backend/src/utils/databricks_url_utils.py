@@ -155,54 +155,82 @@ class DatabricksURLUtils:
         return normalized
     
     @staticmethod
-    def validate_and_fix_environment() -> bool:
+    async def validate_and_fix_environment() -> bool:
         """
         Validate and auto-fix Databricks environment variables.
-        
+
         This method checks common environment variables and ensures they
         contain the correct format. It will auto-fix issues when possible.
-        
+
+        Note: Now uses unified authentication via get_auth_context() instead of
+        directly reading environment variables.
+
         Returns:
             True if environment is valid (or was fixed), False otherwise
         """
         import os
-        
+
         issues_found = False
-        
-        # Check DATABRICKS_HOST
-        host = os.getenv("DATABRICKS_HOST")
-        if host:
-            if "/serving-endpoints" in host or "/api" in host:
-                logger.warning(f"DATABRICKS_HOST contains path components: {host}")
-                logger.info("Auto-correcting DATABRICKS_HOST to base workspace URL")
-                normalized = DatabricksURLUtils.normalize_workspace_url(host)
-                if normalized:
-                    os.environ["DATABRICKS_HOST"] = normalized
-                    logger.info(f"DATABRICKS_HOST corrected to: {normalized}")
-                    issues_found = True
-                else:
-                    logger.error("Could not auto-correct DATABRICKS_HOST")
-                    return False
-        
-        # Check DATABRICKS_ENDPOINT
-        endpoint = os.getenv("DATABRICKS_ENDPOINT")
-        if endpoint:
-            # This one might legitimately contain /serving-endpoints
-            # but let's ensure it's properly formatted
-            if endpoint.count("/serving-endpoints") > 1:
-                logger.warning(f"DATABRICKS_ENDPOINT has duplicate /serving-endpoints: {endpoint}")
-                # Try to fix by normalizing and reconstructing
-                workspace = DatabricksURLUtils.extract_workspace_from_endpoint(endpoint)
-                if workspace:
-                    fixed_endpoint = DatabricksURLUtils.construct_serving_endpoints_url(workspace)
-                    if fixed_endpoint:
-                        os.environ["DATABRICKS_ENDPOINT"] = fixed_endpoint
-                        logger.info(f"DATABRICKS_ENDPOINT corrected to: {fixed_endpoint}")
+
+        # Use unified authentication to get current workspace URL
+        try:
+            from src.utils.databricks_auth import get_auth_context
+            auth = await get_auth_context()
+
+            if not auth:
+                logger.warning("Failed to get authentication context for validation")
+                return False
+
+            workspace_url = auth.workspace_url
+
+            # Check DATABRICKS_HOST - ensure it matches the workspace URL from auth context
+            host = os.getenv("DATABRICKS_HOST")
+            if host:
+                if "/serving-endpoints" in host or "/api" in host:
+                    logger.warning(f"DATABRICKS_HOST contains path components: {host}")
+                    logger.info("Auto-correcting DATABRICKS_HOST to base workspace URL")
+                    normalized = DatabricksURLUtils.normalize_workspace_url(host)
+                    if normalized:
+                        os.environ["DATABRICKS_HOST"] = normalized
+                        logger.info(f"DATABRICKS_HOST corrected to: {normalized}")
                         issues_found = True
-        
-        if issues_found:
-            logger.info("Environment variables were auto-corrected")
-        else:
-            logger.debug("Databricks environment variables are properly formatted")
-            
-        return True
+                    else:
+                        logger.error("Could not auto-correct DATABRICKS_HOST")
+                        return False
+                elif host.rstrip('/') != workspace_url.rstrip('/'):
+                    logger.warning(f"DATABRICKS_HOST ({host}) differs from auth context ({workspace_url})")
+                    logger.info("Synchronizing DATABRICKS_HOST with auth context")
+                    os.environ["DATABRICKS_HOST"] = workspace_url
+                    issues_found = True
+            else:
+                # Set DATABRICKS_HOST from auth context if not present
+                logger.info(f"Setting DATABRICKS_HOST from auth context: {workspace_url}")
+                os.environ["DATABRICKS_HOST"] = workspace_url
+                issues_found = True
+
+            # Check DATABRICKS_ENDPOINT
+            endpoint = os.getenv("DATABRICKS_ENDPOINT")
+            if endpoint:
+                # This one might legitimately contain /serving-endpoints
+                # but let's ensure it's properly formatted
+                if endpoint.count("/serving-endpoints") > 1:
+                    logger.warning(f"DATABRICKS_ENDPOINT has duplicate /serving-endpoints: {endpoint}")
+                    # Try to fix by normalizing and reconstructing
+                    workspace = DatabricksURLUtils.extract_workspace_from_endpoint(endpoint)
+                    if workspace:
+                        fixed_endpoint = DatabricksURLUtils.construct_serving_endpoints_url(workspace)
+                        if fixed_endpoint:
+                            os.environ["DATABRICKS_ENDPOINT"] = fixed_endpoint
+                            logger.info(f"DATABRICKS_ENDPOINT corrected to: {fixed_endpoint}")
+                            issues_found = True
+
+            if issues_found:
+                logger.info("Environment variables were auto-corrected")
+            else:
+                logger.debug("Databricks environment variables are properly formatted")
+
+            return True
+
+        except Exception as e:
+            logger.error(f"Error validating environment: {str(e)}")
+            return False

@@ -152,15 +152,16 @@ class ConnectionService:
             ValueError: If there's a problem with the generation
             Exception: For any other errors during generation
         """
-        # Default model if not specified - use Databricks model in Apps environment, OpenAI otherwise
+        # Default model if not specified - use Databricks model if service principal auth, OpenAI otherwise
         default_model = "gpt-4o-mini"
         try:
-            from src.utils.databricks_auth import is_databricks_apps_environment
-            if is_databricks_apps_environment():
+            from src.utils.databricks_auth import get_auth_context
+            auth = await get_auth_context()
+            if auth and auth.auth_method == "service_principal":
                 default_model = "databricks-llama-4-maverick"
-                logger.info("Using Databricks model in Apps environment")
-        except ImportError:
-            logger.debug("Enhanced Databricks auth not available, using OpenAI default")
+                logger.info("Using Databricks model (service principal auth detected)")
+        except Exception:
+            logger.debug("Could not determine auth method, using OpenAI default")
         
         model = request.model or os.getenv("CONNECTION_MODEL", default_model)
         
