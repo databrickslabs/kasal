@@ -35,7 +35,6 @@ from src.schemas.genie import (
 )
 from src.utils.databricks_auth import (
     get_databricks_auth_headers,
-    is_databricks_apps_environment,
     extract_user_token_from_request
 )
 from src.core.unit_of_work import UnitOfWork
@@ -113,11 +112,13 @@ class GenieRepository:
             logger.info(f"Using host from config: {self._host}")
             return self._host
         
-        # Check environment
-        databricks_host = os.getenv("DATABRICKS_HOST")
-        
-        # If not in environment and in Databricks Apps, try SDK Config
-        if not databricks_host and is_databricks_apps_environment():
+        # Use unified auth to get host
+        from src.utils.databricks_auth import get_auth_context
+        auth = await get_auth_context()
+        databricks_host = auth.workspace_url if auth else None
+
+        # If not available from auth context, try SDK Config
+        if not databricks_host:
             try:
                 from databricks.sdk.config import Config
                 sdk_config = Config()
@@ -191,12 +192,12 @@ class GenieRepository:
             except Exception as e:
                 logger.debug(f"Could not get PAT from database: {e}")
             
-            # Priority 3: PAT from environment variables
-            pat_token = (
-                self.auth_config.pat_token or
-                os.getenv("DATABRICKS_TOKEN") or
-                os.getenv("DATABRICKS_API_KEY")
-            )
+            # Priority 3: PAT from unified auth
+            pat_token = self.auth_config.pat_token
+            if not pat_token:
+                from src.utils.databricks_auth import get_auth_context
+                auth = await get_auth_context()
+                pat_token = auth.token if auth else None
             
             if pat_token:
                 headers["Authorization"] = f"Bearer {pat_token}"
