@@ -12,7 +12,7 @@ from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine, async_sess
 from databricks.sdk import WorkspaceClient
 
 from src.core.logger import LoggerManager
-from src.utils.databricks_auth import is_databricks_apps_environment, get_current_databricks_user, get_workspace_client
+from src.utils.databricks_auth import get_current_databricks_user, get_workspace_client
 
 logger_manager = LoggerManager.get_instance()
 logger = logging.getLogger(__name__)
@@ -100,11 +100,10 @@ class LakebaseSessionFactory:
 
             # Build connection string
             # For asyncpg, don't use sslmode in URL - use connect_args instead
-            # Authentication depends on environment:
-            # - Databricks Apps with user email: Use provided email
+            # Determine username:
+            # - If user email provided (e.g., from request context), use it
             # - Otherwise: Get the actual authenticated user's identity
-            if is_databricks_apps_environment() and self.user_email:
-                # In Databricks Apps with provided email, use it
+            if self.user_email:
                 username = quote(self.user_email)
                 logger.info(f"Using provided email for Lakebase: {self.user_email}")
             else:
@@ -113,13 +112,7 @@ class LakebaseSessionFactory:
                 current_user_identity, error = await get_current_databricks_user(self.user_token)
                 if error or not current_user_identity:
                     logger.error(f"Failed to get current user identity: {error}")
-                    # Try environment variable as last resort
-                    env_email = os.getenv('DATABRICKS_USER_EMAIL')
-                    if env_email:
-                        username = quote(env_email)
-                        logger.warning(f"Using email from environment as fallback: {env_email}")
-                    else:
-                        raise Exception(f"Cannot determine Databricks user identity: {error}")
+                    raise Exception(f"Cannot determine Databricks user identity: {error}")
                 else:
                     username = quote(current_user_identity)
                     logger.info(f"Using authenticated user identity for Lakebase: {current_user_identity}")
@@ -221,6 +214,7 @@ class LakebaseSessionFactory:
 _lakebase_factory: Optional[LakebaseSessionFactory] = None
 
 
+@asynccontextmanager
 async def get_lakebase_session(
     instance_name: str = None,
     user_token: Optional[str] = None,
