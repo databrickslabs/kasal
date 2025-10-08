@@ -734,6 +734,18 @@ class ExecutionService:
                 else:
                     crew_logger.warning(f"[ExecutionService.create_execution] Agent {agent_id} has NO knowledge_sources field")
             
+            # Ensure GroupContext is available in UserContext for authentication
+            # This is critical for both OBO (user_token) and PAT (group_id) authentication
+            if group_context:
+                from src.utils.user_context import UserContext
+                UserContext.set_group_context(group_context)
+                crew_logger.info(f"[ExecutionService.create_execution] Set GroupContext for execution name generation: primary_group_id={group_context.primary_group_id}, has_access_token={bool(group_context.access_token)}")
+
+                # Also set user_token if available for OBO authentication
+                if hasattr(group_context, 'access_token') and group_context.access_token:
+                    UserContext.set_user_token(group_context.access_token)
+                    crew_logger.info("[ExecutionService.create_execution] Set user_token for OBO authentication")
+
             request = ExecutionNameGenerationRequest(
                 agents_yaml=agents_yaml,
                 tasks_yaml=tasks_yaml,
