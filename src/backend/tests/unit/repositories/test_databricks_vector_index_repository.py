@@ -438,3 +438,58 @@ class TestDatabricksVectorIndexRepository:
             # Check that filters were passed to similarity_search
             call_args = mock_search.call_args
             assert call_args[1]["filters"] == filters
+
+
+class TestDatabricksVectorIndexRepositoryUtilityMethods:
+    """Test utility methods of DatabricksVectorIndexRepository."""
+
+    def test_repository_initialization(self):
+        """Test repository initialization with workspace URL."""
+        workspace_url = "https://example.databricks.com"
+        repository = DatabricksVectorIndexRepository(workspace_url)
+
+        assert repository.workspace_url == workspace_url
+        assert hasattr(repository, '_get_auth_token')
+        assert callable(repository._get_auth_token)
+
+    def test_repository_has_expected_methods(self):
+        """Test repository has expected async methods."""
+        repository = DatabricksVectorIndexRepository("https://example.databricks.com")
+
+        # Test that all expected methods exist and are callable
+        expected_methods = [
+            '_get_auth_token',
+            'create_index',
+            'get_index',
+            'list_indexes',
+            'delete_index',
+            'empty_index',
+            'similarity_search',
+            'describe_index',
+            'upsert',
+            'delete_records',
+            'count_documents'
+        ]
+
+        for method_name in expected_methods:
+            assert hasattr(repository, method_name)
+            assert callable(getattr(repository, method_name))
+
+    def test_repository_workspace_url_property(self):
+        """Test repository workspace_url property."""
+        workspace_url = "https://test.databricks.com"
+        repository = DatabricksVectorIndexRepository(workspace_url)
+
+        assert repository.workspace_url == workspace_url
+
+    def test_repository_with_different_workspace_urls(self):
+        """Test repository with different workspace URLs."""
+        urls = [
+            "https://example.databricks.com",
+            "https://test.cloud.databricks.com",
+            "https://workspace.databricks.com"
+        ]
+
+        for url in urls:
+            repository = DatabricksVectorIndexRepository(url)
+            assert repository.workspace_url == url

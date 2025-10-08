@@ -22,17 +22,13 @@ class TestExecuteDbOperationWithFreshEngine:
     async def test_successful_operation(self):
         """Test successful database operation execution."""
         expected_result = "test_result"
-        
+
         async def mock_operation(session):
             return expected_result
-        
-        with patch('src.utils.asyncio_utils.create_async_engine') as mock_engine_create, \
-             patch('src.utils.asyncio_utils.async_sessionmaker') as mock_session_factory:
-            
-            # Mock engine
-            mock_engine = AsyncMock()
-            mock_engine_create.return_value = mock_engine
-            
+
+        with patch('src.utils.asyncio_utils.async_sessionmaker') as mock_session_factory, \
+             patch('src.db.session.nullpool_engine') as mock_engine:
+
             # Mock session factory and session
             mock_session = AsyncMock(spec=AsyncSession)
             mock_session_context = AsyncMock()
@@ -40,31 +36,24 @@ class TestExecuteDbOperationWithFreshEngine:
             mock_session_context.__aexit__ = AsyncMock(return_value=None)
             mock_factory = Mock(return_value=mock_session_context)
             mock_session_factory.return_value = mock_factory
-            
-            # Mock settings
-            with patch('src.config.settings.settings') as mock_settings:
-                mock_settings.DATABASE_URI = "sqlite+aiosqlite:///:memory:"
-                
-                result = await execute_db_operation_with_fresh_engine(mock_operation)
-                
-                assert result == expected_result
-                mock_engine.dispose.assert_called_once()
-    
+
+            result = await execute_db_operation_with_fresh_engine(mock_operation)
+
+            assert result == expected_result
+            # Engine should NOT be disposed (managed by session.py)
+            mock_engine.dispose.assert_not_called()
+
     @pytest.mark.asyncio
     async def test_operation_with_exception(self):
         """Test database operation that raises an exception."""
         test_exception = Exception("Test error")
-        
+
         async def mock_operation(session):
             raise test_exception
-        
-        with patch('src.utils.asyncio_utils.create_async_engine') as mock_engine_create, \
-             patch('src.utils.asyncio_utils.async_sessionmaker') as mock_session_factory:
-            
-            # Mock engine
-            mock_engine = AsyncMock()
-            mock_engine_create.return_value = mock_engine
-            
+
+        with patch('src.utils.asyncio_utils.async_sessionmaker') as mock_session_factory, \
+             patch('src.db.session.nullpool_engine') as mock_engine:
+
             # Mock session factory and session
             mock_session = AsyncMock(spec=AsyncSession)
             mock_session_context = AsyncMock()
@@ -72,16 +61,13 @@ class TestExecuteDbOperationWithFreshEngine:
             mock_session_context.__aexit__ = AsyncMock(return_value=None)
             mock_factory = Mock(return_value=mock_session_context)
             mock_session_factory.return_value = mock_factory
-            
-            # Mock settings
-            with patch('src.config.settings.settings') as mock_settings:
-                mock_settings.DATABASE_URI = "sqlite+aiosqlite:///:memory:"
-                
-                with pytest.raises(Exception) as exc_info:
-                    await execute_db_operation_with_fresh_engine(mock_operation)
-                
-                assert exc_info.value == test_exception
-                mock_engine.dispose.assert_called_once()
+
+            with pytest.raises(Exception) as exc_info:
+                await execute_db_operation_with_fresh_engine(mock_operation)
+
+            assert exc_info.value == test_exception
+            # Engine should NOT be disposed even on error (managed by session.py)
+            mock_engine.dispose.assert_not_called()
 
 
 class TestCreateAndRunLoop:
