@@ -99,6 +99,7 @@ dist/
 downloads/
 eggs/
 .eggs/
+src/test_ref*
 lib/
 lib64/
 parts/

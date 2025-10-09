@@ -118,6 +118,15 @@ except ImportError:
         PythonPPTXTool = None
         logging.warning("Could not import PythonPPTXTool")
 
+try:
+    from .custom.powerbi_tool import PowerBITool
+except ImportError:
+    try:
+        from .custom.powerbi_tool import PowerBITool
+    except ImportError:
+        PowerBITool = None
+        logging.warning("Could not import PowerBITool")
+
 
 # Setup logger
 logger = logging.getLogger(__name__)
@@ -209,7 +218,8 @@ class ToolFactory:
             "SerplyWebpageToMarkdownTool": SerplyWebpageToMarkdownTool,
             "SnowflakeSearchTool": SnowflakeSearchTool,
             "WeaviateVectorSearchTool": WeaviateVectorSearchTool,
-            "PythonPPTXTool": PythonPPTXTool
+            "PythonPPTXTool": PythonPPTXTool,
+            "PowerBITool": PowerBITool
         }
         
         # Initialize _initialized flag
