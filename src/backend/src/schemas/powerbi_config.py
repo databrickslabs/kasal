@@ -10,6 +10,7 @@ class PowerBIConfigBase(BaseModel):
     workspace_id: Optional[str] = None
     semantic_model_id: Optional[str] = None
     enabled: bool = True
+    auth_method: str = "username_password"  # "username_password" or "device_code"
 
 
 class PowerBIConfigCreate(PowerBIConfigBase):

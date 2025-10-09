@@ -3,7 +3,7 @@ import os
 import time
 from typing import Dict, List, Optional
 import requests
-from azure.identity import UsernamePasswordCredential
+from azure.identity import UsernamePasswordCredential, DeviceCodeCredential
 from fastapi import HTTPException
 
 from src.repositories.powerbi_config_repository import PowerBIConfigRepository
@@ -106,6 +106,10 @@ class PowerBIService:
         """
         Generate authentication token for Power BI API.
 
+        Supports two authentication methods:
+        1. device_code: Interactive browser/device code flow (recommended for testing/personal workspaces)
+        2. username_password: Username/password flow (requires credentials)
+
         Args:
             config: PowerBIConfig model instance
 
@@ -116,6 +120,68 @@ class PowerBIService:
             tenant_id = config.tenant_id
             client_id = config.client_id
 
+            # Get authentication method from config (default to username_password for backward compatibility)
+            auth_method = getattr(config, 'auth_method', 'username_password')
+
+            if auth_method == 'device_code':
+                # Device Code Flow - Interactive authentication
+                logger.info("Using Device Code Flow for authentication")
+                return await self._generate_token_device_code(tenant_id, client_id)
+            else:
+                # Username/Password Flow - Requires stored credentials
+                logger.info("Using Username/Password Flow for authentication")
+                return await self._generate_token_username_password(tenant_id, client_id, config)
+
+        except Exception as e:
+            logger.error(f"Error generating Power BI token: {e}", exc_info=True)
+            raise HTTPException(
+                status_code=401,
+                detail=f"Failed to authenticate with Power BI: {str(e)}"
+            )
+
+    async def _generate_token_device_code(self, tenant_id: str, client_id: str) -> str:
+        """
+        Generate token using device code flow (interactive authentication).
+        User will be prompted to visit microsoft.com/devicelogin with a code.
+
+        Args:
+            tenant_id: Azure AD tenant ID
+            client_id: Application (client) ID
+
+        Returns:
+            Authentication token string
+        """
+        try:
+            credential = DeviceCodeCredential(
+                client_id=client_id,
+                tenant_id=tenant_id,
+            )
+
+            logger.info("Device Code authentication initiated - user should follow authentication prompt")
+
+            # Get token for Power BI API
+            token = credential.get_token("https://analysis.windows.net/powerbi/api/.default")
+            logger.info("Device Code authentication successful")
+            return token.token
+
+        except Exception as e:
+            logger.error(f"Device Code authentication failed: {e}")
+            raise
+
+    async def _generate_token_username_password(self, tenant_id: str, client_id: str, config) -> str:
+        """
+        Generate token using username/password flow.
+        Requires POWERBI_USERNAME and POWERBI_PASSWORD from API Keys Service or environment.
+
+        Args:
+            tenant_id: Azure AD tenant ID
+            client_id: Application (client) ID
+            config: PowerBIConfig model instance
+
+        Returns:
+            Authentication token string
+        """
+        try:
             # Attempt to get credentials from different sources
             # Priority: API Keys Service > Environment Variables
             username = None
@@ -159,14 +225,12 @@ class PowerBIService:
 
             # Token generation for Power BI API
             token = credential.get_token("https://analysis.windows.net/powerbi/api/.default")
+            logger.info("Username/Password authentication successful")
             return token.token
 
         except Exception as e:
-            logger.error(f"Error generating Power BI token: {e}", exc_info=True)
-            raise HTTPException(
-                status_code=401,
-                detail=f"Failed to authenticate with Power BI: {str(e)}"
-            )
+            logger.error(f"Username/Password authentication failed: {e}")
+            raise
 
     async def _execute_query(self, token: str, semantic_model_id: str, dax_query: str) -> List:
         """

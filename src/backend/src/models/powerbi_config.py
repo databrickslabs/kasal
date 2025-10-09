@@ -23,6 +23,9 @@ class PowerBIConfig(Base):
     encrypted_username = Column(String, nullable=True)  # Encrypted username (e.g., sa_datamesh_powerbi@domain.com)
     encrypted_password = Column(String, nullable=True)  # Encrypted password
 
+    # Authentication method
+    auth_method = Column(String, default='username_password', nullable=False)  # 'username_password' or 'device_code'
+
     # Configuration flags
     is_active = Column(Boolean, default=True)  # Track the currently active configuration
     is_enabled = Column(Boolean, default=True)  # Enable/disable Power BI integration

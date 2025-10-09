@@ -59,15 +59,25 @@ The Power BI DAX integration enables Kasal to execute DAX queries against Power 
 
 The service supports two authentication methods:
 
-#### 1. Service Principal (Client Credentials)
-Best for production environments:
-- Requires: `tenant_id`, `client_id`, `client_secret`
-- Permissions: Power BI Service API access
+#### 1. Device Code Flow (Interactive) - **Recommended for Testing**
+Best for testing, development, and personal workspaces:
+- **Use Case**: When you don't have a service principal or need to test with your personal Power BI account
+- **Requirements**: `tenant_id`, `client_id` (can use Power BI public client: `1950a258-227b-4e31-a9cf-717495945fc2`)
+- **How it works**:
+  - User is prompted to visit `microsoft.com/devicelogin`
+  - Enter provided code to authenticate via browser
+  - Supports MFA and conditional access policies
+  - Token is cached for subsequent queries
+- **Permissions**: Uses the authenticated user's Power BI permissions
+- **Note**: Not suitable for automated/unattended workflows
 
-#### 2. Username/Password
-For development or specific scenarios:
-- Requires: `tenant_id`, `client_id`, `username`, `password`
-- Uses `UsernamePasswordCredential` from Azure Identity
+#### 2. Username/Password Flow - **For Automated Workflows**
+For production environments with service accounts:
+- **Use Case**: Automated workflows, scheduled jobs, production deployments
+- **Requirements**: `tenant_id`, `client_id`, `username`, `password` (stored in API Keys)
+- **How it works**: Authenticates with username/password programmatically
+- **Permissions**: Requires account without MFA
+- **Note**: Less secure than service principal, consider migrating to OAuth when possible
 
 ### Environment Variables
 
