@@ -77,14 +77,22 @@ class ManagerConfigBuilder:
         requested_model: Optional[str]
     ) -> Dict[str, Any]:
         """Configure manager for hierarchical process"""
+        group_id = self.config.get('group_id')
+
         # Check for manager_agent first
         if 'manager_agent' in crew_config and crew_config['manager_agent']:
             manager_config = crew_config['manager_agent']
             if isinstance(manager_config, dict):
                 logger.info("Creating custom manager agent from configuration")
+                agent_llm = None
+                if requested_model and group_id:
+                    try:
+                        agent_llm = await LLMManager.configure_crewai_llm(requested_model, group_id)
+                    except Exception:
+                        pass
                 manager_agent = await create_agent(
                     agent_config=manager_config,
-                    llm=await LLMManager.get_llm(requested_model) if requested_model else None,
+                    llm=agent_llm,
                     tool_service=self.tool_service,
                     tool_factory=self.tool_factory,
                     user_token=self.user_token
@@ -95,9 +103,9 @@ class ManagerConfigBuilder:
         # Check for manager_llm
         elif 'manager_llm' not in crew_config:
             logger.info("Hierarchical process detected - setting manager_llm")
-            if requested_model:
+            if requested_model and group_id:
                 try:
-                    manager_llm = await LLMManager.get_llm(requested_model)
+                    manager_llm = await LLMManager.configure_crewai_llm(requested_model, group_id)
                     crew_kwargs['manager_llm'] = manager_llm
                     logger.info(f"Set manager LLM for hierarchical process: {requested_model}")
                 except Exception as llm_error:
@@ -105,7 +113,8 @@ class ManagerConfigBuilder:
                     # Use fallback
                     crew_kwargs = await self._set_fallback_manager_llm(crew_kwargs)
             else:
-                logger.warning("Hierarchical process requires manager_llm or manager_agent")
+                logger.warning("Hierarchical process requires manager_llm or manager_agent - using fallback")
+                crew_kwargs = await self._set_fallback_manager_llm(crew_kwargs)
 
         else:
             # manager_llm already in crew_config
@@ -114,24 +123,28 @@ class ManagerConfigBuilder:
             # Check if it's a string that needs conversion
             if isinstance(provided_manager_llm, str):
                 logger.info(f"Converting manager_llm string '{provided_manager_llm}' to LLM object")
-                try:
-                    crew_kwargs['manager_llm'] = await LLMManager.get_llm(provided_manager_llm)
-                    logger.info(f"Successfully converted manager_llm '{provided_manager_llm}' to LLM object")
-                except Exception as llm_error:
-                    logger.error(f"Failed to convert manager_llm string to LLM object: {llm_error}")
+                if not group_id:
+                    logger.error("Cannot convert manager_llm string: no group_id in config")
+                    crew_kwargs = await self._set_fallback_manager_llm(crew_kwargs)
+                else:
+                    try:
+                        crew_kwargs['manager_llm'] = await LLMManager.configure_crewai_llm(provided_manager_llm, group_id)
+                        logger.info(f"Successfully converted manager_llm '{provided_manager_llm}' to LLM object")
+                    except Exception as llm_error:
+                        logger.error(f"Failed to convert manager_llm string to LLM object: {llm_error}")
 
-                    # Try with databricks/ prefix
-                    if 'databricks' in provided_manager_llm.lower() and not provided_manager_llm.startswith('databricks/'):
-                        prefixed_model = f"databricks/{provided_manager_llm}"
-                        logger.info(f"Retrying with databricks/ prefix: {prefixed_model}")
-                        try:
-                            crew_kwargs['manager_llm'] = await LLMManager.get_llm(prefixed_model)
-                            logger.info(f"Successfully created manager_llm with prefix: {prefixed_model}")
-                        except Exception as retry_error:
-                            logger.error(f"Failed to create manager_llm even with prefix: {retry_error}")
+                        # Try with databricks/ prefix
+                        if 'databricks' in provided_manager_llm.lower() and not provided_manager_llm.startswith('databricks/'):
+                            prefixed_model = f"databricks/{provided_manager_llm}"
+                            logger.info(f"Retrying with databricks/ prefix: {prefixed_model}")
+                            try:
+                                crew_kwargs['manager_llm'] = await LLMManager.configure_crewai_llm(prefixed_model, group_id)
+                                logger.info(f"Successfully created manager_llm with prefix: {prefixed_model}")
+                            except Exception as retry_error:
+                                logger.error(f"Failed to create manager_llm even with prefix: {retry_error}")
+                                crew_kwargs = await self._set_fallback_manager_llm(crew_kwargs)
+                        else:
                             crew_kwargs = await self._set_fallback_manager_llm(crew_kwargs)
-                    else:
-                        raise
             else:
                 # Already an LLM object
                 crew_kwargs['manager_llm'] = provided_manager_llm
@@ -149,10 +162,15 @@ class ManagerConfigBuilder:
         if 'manager_llm' in crew_config:
             return crew_kwargs
 
+        group_id = self.config.get('group_id')
+        if not group_id:
+            logger.warning("No group_id in config, cannot set planning LLM")
+            return crew_kwargs
+
         if requested_model:
             logger.info(f"Using submitted model for planning: {requested_model}")
             try:
-                planning_llm = await LLMManager.get_llm(requested_model)
+                planning_llm = await LLMManager.configure_crewai_llm(requested_model, group_id)
                 if crew_config.get('planning', False):
                     crew_kwargs['manager_llm'] = planning_llm
                     logger.info(f"Set planning LLM to: {requested_model}")
@@ -164,7 +182,7 @@ class ManagerConfigBuilder:
         else:
             logger.info("No model specified - trying Databricks default")
             try:
-                default_llm = await LLMManager.get_llm("databricks-llama-4-maverick")
+                default_llm = await LLMManager.configure_crewai_llm("databricks-llama-4-maverick", group_id)
                 if crew_config.get('planning', False):
                     crew_kwargs['manager_llm'] = default_llm
             except Exception:
@@ -175,10 +193,15 @@ class ManagerConfigBuilder:
     async def _set_fallback_manager_llm(self, crew_kwargs: Dict[str, Any]) -> Dict[str, Any]:
         """Set fallback manager LLM"""
         try:
-            fallback_llm = await LLMManager.get_llm("databricks-llama-4-maverick")
+            group_id = self.config.get('group_id')
+            if not group_id:
+                logger.warning("No group_id in config, cannot set fallback manager LLM")
+                return crew_kwargs
+
+            fallback_llm = await LLMManager.configure_crewai_llm("databricks-llama-4-maverick", group_id)
             crew_kwargs['manager_llm'] = fallback_llm
             logger.info("Using fallback Databricks model for manager_llm")
-        except Exception:
-            logger.warning("Could not set fallback manager LLM")
+        except Exception as e:
+            logger.warning(f"Could not set fallback manager LLM: {e}")
 
         return crew_kwargs
