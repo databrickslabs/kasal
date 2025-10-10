@@ -49,7 +49,13 @@ class MemoryBackendFactory:
                 # Create short-term memory storage
                 if config.enable_short_term and config.databricks_config.short_term_index:
                     logger.info(f"Creating Databricks short-term memory storage for crew {crew_id}")
-                    
+
+                    # Extract group_id from crew_id (format: group_id_crew_uuid)
+                    group_id = None
+                    if crew_id and "_crew_" in crew_id:
+                        group_id = crew_id.split("_crew_")[0]
+                        logger.info(f"Extracted group_id from crew_id: {group_id}")
+
                     # Build kwargs dynamically to avoid passing None values
                     storage_kwargs = {
                         "endpoint_name": config.databricks_config.endpoint_name,
@@ -59,7 +65,7 @@ class MemoryBackendFactory:
                         "embedding_dimension": config.databricks_config.embedding_dimension or 1024,
                         "workspace_url": config.databricks_config.workspace_url,
                     }
-                    
+
                     # Only add auth parameters if they have values
                     # This allows DatabricksVectorStorage to check env vars when these are None
                     if config.databricks_config.personal_access_token:
@@ -70,7 +76,10 @@ class MemoryBackendFactory:
                         storage_kwargs["service_principal_client_secret"] = config.databricks_config.service_principal_client_secret
                     if user_token:
                         storage_kwargs["user_token"] = user_token
-                    
+                    if group_id:
+                        storage_kwargs["group_id"] = group_id
+                        logger.info(f"Added group_id to short-term storage: {group_id}")
+
                     short_term_storage = DatabricksVectorStorage(**storage_kwargs)
                     # Wrap with CrewAI-compatible wrapper
                     memory_backends['short_term'] = CrewAIDatabricksWrapper(
@@ -82,7 +91,7 @@ class MemoryBackendFactory:
                 # Create long-term memory storage
                 if config.enable_long_term and config.databricks_config.long_term_index:
                     logger.info(f"Creating Databricks long-term memory storage for crew {crew_id}")
-                    
+
                     # Build kwargs dynamically to avoid passing None values
                     storage_kwargs = {
                         "endpoint_name": config.databricks_config.endpoint_name,
@@ -92,7 +101,7 @@ class MemoryBackendFactory:
                         "embedding_dimension": config.databricks_config.embedding_dimension or 1024,
                         "workspace_url": config.databricks_config.workspace_url,
                     }
-                    
+
                     # Only add auth parameters if they have values
                     if config.databricks_config.personal_access_token:
                         storage_kwargs["personal_access_token"] = config.databricks_config.personal_access_token
@@ -102,19 +111,21 @@ class MemoryBackendFactory:
                         storage_kwargs["service_principal_client_secret"] = config.databricks_config.service_principal_client_secret
                     if user_token:
                         storage_kwargs["user_token"] = user_token
-                    
+                    if group_id:
+                        storage_kwargs["group_id"] = group_id
+
                     long_term_storage = DatabricksVectorStorage(**storage_kwargs)
                     # Wrap with CrewAI-compatible wrapper
                     memory_backends['long_term'] = CrewAIDatabricksWrapper(
-                        long_term_storage, 
-                        embedder, 
+                        long_term_storage,
+                        embedder,
                         enable_relationship_retrieval=False  # Not applicable for long-term memory
                     )
-                
+
                 # Create entity memory storage
                 if config.enable_entity and config.databricks_config.entity_index:
                     logger.info(f"Creating Databricks entity memory storage for crew {crew_id}")
-                    
+
                     # Build kwargs dynamically to avoid passing None values
                     storage_kwargs = {
                         "endpoint_name": config.databricks_config.endpoint_name,
@@ -124,7 +135,7 @@ class MemoryBackendFactory:
                         "embedding_dimension": config.databricks_config.embedding_dimension or 1024,
                         "workspace_url": config.databricks_config.workspace_url,
                     }
-                    
+
                     # Only add auth parameters if they have values
                     if config.databricks_config.personal_access_token:
                         storage_kwargs["personal_access_token"] = config.databricks_config.personal_access_token
@@ -134,7 +145,9 @@ class MemoryBackendFactory:
                         storage_kwargs["service_principal_client_secret"] = config.databricks_config.service_principal_client_secret
                     if user_token:
                         storage_kwargs["user_token"] = user_token
-                    
+                    if group_id:
+                        storage_kwargs["group_id"] = group_id
+
                     entity_storage = DatabricksVectorStorage(**storage_kwargs)
                     # Wrap with CrewAI-compatible wrapper, passing relationship retrieval configuration
                     enable_relationship_retrieval = config.enable_relationship_retrieval

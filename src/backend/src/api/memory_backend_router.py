@@ -570,17 +570,23 @@ async def one_click_databricks_setup(
     """
     One-click setup for Databricks Vector Search.
     Creates all endpoints and indexes automatically.
-    
+
     Args:
         request: Request containing workspace_url, catalog, and schema
         req: FastAPI request for extracting user token
         group_context: Current group context
         service: Memory backend service
-        
+
     Returns:
         Setup result with created resources
     """
     try:
+        # CRITICAL: Set UserContext for authentication system to access group_id
+        # The authentication system needs group_id to look up PAT tokens from database
+        from src.utils.user_context import UserContext
+        UserContext.set_group_context(group_context)
+        logger.info(f"[ONE-CLICK-SETUP] Set UserContext with group_id: {group_context.primary_group_id}")
+
         # Get workspace URL from unified auth or user request
         workspace_url = request.get("workspace_url")
 
@@ -600,18 +606,18 @@ async def one_click_databricks_setup(
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail="workspace_url is required and not available from unified auth"
             )
-        
+
         catalog = request.get("catalog", "ml")
         schema = request.get("schema", "agents")
         embedding_dimension = request.get("embedding_dimension", 768)  # Default to 768 if not provided
-        
+
         # Extract user token for OBO authentication
         user_token = extract_user_token_from_request(req)
-        
+
         # Run one-click setup with user_id from group context
         logger.info(f"Starting one-click setup for group: {group_context.primary_group_id}")
         logger.info(f"Workspace URL: {workspace_url}, Catalog: {catalog}, Schema: {schema}, Embedding dimension: {embedding_dimension}")
-        
+
         result = await service.one_click_databricks_setup(
             workspace_url=workspace_url,
             catalog=catalog,
@@ -620,11 +626,11 @@ async def one_click_databricks_setup(
             user_token=user_token,
             group_id=group_context.primary_group_id  # Pass group_id from group context
         )
-        
+
         logger.info(f"One-click setup result: {result}")
-        
+
         return result
-        
+
     except HTTPException:
         raise
     except Exception as e:
