@@ -4,43 +4,102 @@ Transform your Databricks environment into an AI orchestration powerhouse. Build
 
 ---
 
-## The Problem We Solve
+## What problems does it solve?
+- **Hard-to-operationalize AI**: Multi-agent apps are complex to build, observe, and scale. Kasal turns that into a repeatable, visual workflow.
+- **Glue-code overload**: Stop stitching LLMs, vector search, tools, logs, and schedulers by hand. Kasal gives you a cohesive system out of the box.
+- **Enterprise friction**: Works with your Databricks environment (OAuth, Secrets, Vector Search, MLflow, Volumes) and respects org boundaries with group-aware multi-tenancy.
 
-Your organization has invested in Databricks for data and AI, but building intelligent workflows still requires extensive coding. Teams struggle to connect AI capabilities to their data in Unity Catalog. Manual processes don't leverage your lakehouse investment.
+## Who is it for?
+- **Data/AI Engineers**: Build reliable multi-agent workflows on top of Databricks.
+- **Analysts/Builders**: Design flows visually and reuse templates without deep infra knowledge.
+- **Platform Teams**: Standardize how AI workflows are built, governed, and observed.
 
-Kasal bridges this gap - making Databricks AI capabilities accessible to everyone.
+## What you get (at a glance)
+- **Visual Workflow Designer**: Drag-and-drop collaboration between agents and tools.
+- **Production-Grade Backend**: FastAPI + async SQLAlchemy, background schedulers, and robust logging.
+- **Databricks-Native Integrations**: OAuth, Secrets, Vector Search, Volumes, MLflow, and SQL endpoints.
+- **Deep Observability**: Real-time logs, execution traces, run history, and health checks.
+- **Extensible AI Engine**: CrewAI integration today, engine abstraction for future engines.
+- **Governance & Security**: Group-aware multi-tenant model, API keys, permissions, and auditability.
+
+## Components at a glance
+A quick tour of the building blocks—what each part does and why it matters.
+
+### Frontend (React SPA)
+- **What it does**: Visual designer for agents, tasks, and flows; live monitoring UI.
+- **Why it matters**: Non-technical users can build and operate AI workflows without touching code.
+
+### API (FastAPI)
+- **What it does**: Validates requests, exposes REST endpoints, and routes calls to services.
+- **Why it matters**: Clear, versioned contracts between UI/automation and backend logic.
+
+### Services (Business Logic)
+- **What it does**: Implements orchestration, validation, scheduling, and domain logic.
+- **Why it matters**: Keeps HTTP thin and domain logic testable and reusable.
+
+### Repositories (Data Access)
+- **What it does**: Encapsulates SQL and external I/O (Databricks APIs, Vector Search, MLflow).
+- **Why it matters**: Swappable persistence and integrations without leaking into services.
+
+### Engines (CrewAI Orchestration)
+- **What it does**: Prepares crews, runs executions, handles callbacks/guardrails, manages memory.
+- **Why it matters**: Pluggable execution engine today (CrewAI) and extensible for future engines.
+
+### Data & Storage
+- **What it does**: Async SQLAlchemy sessions, models/schemas, vector indexes, volumes.
+- **Why it matters**: Reliable persistence with optional vector search and document storage.
+
+### Scheduler & Background Jobs
+- **What it does**: Recurring runs, long tasks, and background queues (e.g., embedding batching).
+- **Why it matters**: Production-ready operations beyond single request/response.
+
+### Observability
+- **What it does**: Structured logs, execution logs, traces, history, health checks.
+- **Why it matters**: Debug fast, audit runs, and understand system behavior end-to-end.
+
+### Security & Governance
+- **What it does**: Group-aware multi-tenancy, JWT/Databricks headers, centralized permissions.
+- **Why it matters**: Safely share across teams while isolating data and enforcing roles.
+
+### Databricks Integrations
+- **What it does**: OAuth, Secrets, SQL Warehouses, Unity Catalog, Volumes, Vector Search, MLflow.
+- **Why it matters**: Build where your data and models already live with first-class support.
 
 ---
 
 ## What Makes Kasal Different
 
-### Visual Agent Design
-Drag and drop AI agents onto a canvas. Connect them like building blocks. No code required.
+# Core capabilities
 
-Each agent has a role:
-- Research Agent: Gathers information from databases and documents
-- Analysis Agent: Processes data and finds patterns
-- Writer Agent: Creates reports and summaries
-- Decision Agent: Makes choices based on rules you define
+- **Build**
+  - Visual designer for agents, tasks, flows.
+  - AI-assisted generation: agents, crews, tasks, and templates.
+  - Reusable tool registry (native + custom tools, MCP support).
+  - Documentation embeddings to improve agent planning and generation.
 
-### Real Data Connection - Powered by Databricks
-Connect directly to your Databricks ecosystem and beyond:
-- **Databricks Native**: Query Unity Catalog, Delta Lake, SQL Warehouses
-- **Databricks Volumes**: Store and access knowledge documents
-- **Databricks Vector Search**: Semantic search across your data
-- **Files**: Read PDFs, Excel, CSV, JSON, XML files
-- **Documents**: Process Word docs, presentations, text files
-- **APIs**: Connect to Salesforce, HubSpot, custom endpoints
-- **Knowledge**: Upload documents to Databricks for AI-powered search
+- **Orchestrate**
+  - CrewAI-based execution with guardrails and callbacks.
+  - Memory backends and entity extraction with model-aware fallbacks.
+  - Scheduler for recurring jobs and long-running workflows.
+  - Parallelization and background processing where it matters.
 
-### Intelligent Collaboration
-Agents work together like a team:
-- One agent's output becomes another's input
-- Parallel processing for independent tasks
-- Sequential flows for dependent operations
-- Conditional routing based on results
+- **Integrate (Databricks-first)**
+  - Vector Search setup/verification and indexing endpoints.
+  - MLflow model integration.
+  - Databricks SQL, Volumes, Secrets, and knowledge ingestion.
+  - Dispatcher and connectors for external systems and APIs.
 
----
+- **Operate**
+  - Centralized structured logging (file-backed), optional SQL query logging.
+  - Execution logs, traces, and run history via dedicated APIs.
+  - Database management endpoints (backup/restore where enabled).
+  - Health checks and environment validation on startup.
+
+- **Govern**
+  - Group-based multi-tenant isolation with role awareness.
+  - JWT and Databricks Apps headers for user context.
+  - Permissions centralized to keep auth decisions consistent.
+
 
 ## Real Use Cases in Production
 
@@ -180,21 +239,6 @@ Point to your lakehouse assets:
 
 ---
 
-## Who Benefits from Kasal
-
-### Data Teams on Databricks
-Query Unity Catalog without writing SQL. Build Delta Lake pipelines visually. Generate dashboards automatically from your lakehouse data.
-
-### Analytics Teams
-Transform raw data in Unity Catalog into insights. Automate report generation from Delta tables. Schedule complex analytical workflows.
-
-### ML Engineers
-Orchestrate model training on Databricks compute. Chain ML models into production pipelines. Monitor and retrain automatically.
-
-### Business Users
-Access governed data through natural language. Build workflows that leverage your organization's data. Get answers from your lakehouse instantly.
-
----
 
 ## Integration Capabilities - Databricks First
 

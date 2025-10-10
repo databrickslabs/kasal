@@ -1,3 +1,5 @@
+
+
 # Kasal Documentation Hub
 
 **Enterprise AI Agent Orchestration Platform**
@@ -5,25 +7,23 @@
 ---
 
 ## Quick Start
+Find the right documentation for your role and get productive fast.
 
 Choose your documentation based on your role:
 
-## Business Documentation
-
-### [Business User Guide](./BUSINESS_USER_GUIDE.md)
-**For Leaders, Managers, and Business Users**
-
-Get started with Kasal without any technical knowledge. Learn how to create AI workflows, calculate ROI, and manage your AI workforce.
-
-**Key Topics:**
-- ROI Calculator and Cost Analysis
-- Success Stories and Case Studies
-- 15-Minute Quick Setup Guide
-- Managing AI Workflows Without Code
-
----
 
 ## Technical Documentation
+Developer-focused guides, code structure, and API reference.
+### [Code structure Guide](./CODE_STRUCTURE_GUIDE.md)
+**For Software Engineers and Developers**
+
+Build and integrate with Kasal's powerful AI orchestration platform. From quick starts to advanced implementations.
+
+**Key Topics:**
+- High level code structure
+- Different folders and underlying components
+
+---
 
 ### [Developer Guide](./DEVELOPER_GUIDE.md)
 **For Software Engineers and Developers**
@@ -50,6 +50,7 @@ Complete REST API documentation with examples, WebSocket events, and SDK librari
 ---
 
 ## Architecture Documentation
+System design, patterns, and enterprise integration guidance.
 
 ### [Solution Architecture Guide](./ARCHITECTURE_GUIDE.md)
 **For Solution Architects and Technical Leaders**
@@ -65,6 +66,7 @@ Understand Kasal's architecture, design patterns, and enterprise integration str
 ---
 
 ## Getting Started in 30 Seconds
+One command sequence to run both backend and frontend locally.
 
 ```bash
 # Clone the repository
@@ -85,6 +87,7 @@ Access the application at `http://localhost:3000`
 ---
 
 ## Key Features
+What Kasal provides out of the box to build, operate, and govern AI workflows.
 
 | Feature | Description |
 |---------|-------------|
@@ -98,11 +101,12 @@ Access the application at `http://localhost:3000`
 ---
 
 ## Documentation Structure
+How this folder is organized and where to find topics.
 
 ```
 docs/
 ├── README.md                    # This file - Documentation hub
-├── BUSINESS_USER_GUIDE.md       # Business user documentation
+├── CODE_STRUCTURE_GUIDE.md      # Code structure documentation
 ├── DEVELOPER_GUIDE.md           # Developer documentation
 ├── ARCHITECTURE_GUIDE.md        # Architecture documentation
 ├── API_REFERENCE.md             # API reference
@@ -115,6 +119,7 @@ docs/
 ---
 
 ## Technology Stack
+Core frameworks and platforms used across the project.
 
 - **Backend**: FastAPI, SQLAlchemy 2.0, Python 3.9+
 - **Frontend**: React 18, TypeScript, Material-UI
@@ -125,6 +130,7 @@ docs/
 ---
 
 ## Support and Resources
+Where to get help and how to contribute.
 
 ### Getting Help
 
@@ -143,9 +149,10 @@ This project is licensed under the Apache License 2.0 - see the [LICENSE](https:
 ---
 
 ## Version Information
+Project and documentation version details.
 
 - **Current Version**: 2.0.0
-- **Documentation Updated**: January 2025
+- **Documentation Updated**: October 2025
 - **Minimum Python Version**: 3.9
 - **Minimum Node Version**: 16.0
 

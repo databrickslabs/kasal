@@ -5,6 +5,7 @@
 ---
 
 ## Getting Started
+Base URLs, authentication, and rate limits you need before calling endpoints.
 
 ### Base URL
 ```
@@ -35,6 +36,7 @@ curl -X GET https://api.example.com/v1/crews \
 ---
 
 ## Authentication Endpoints
+Login, refresh, and logout flows to manage tokens.
 
 ### POST /auth/login
 **Login with credentials**
@@ -77,6 +79,7 @@ Response: 204 No Content
 ---
 
 ## Crew Management
+Create and manage multi-agent crews and their configurations.
 
 ### GET /crews
 **List all crews**
@@ -160,6 +163,7 @@ Response: 204 No Content
 ---
 
 ## Agent Management
+Create and list individual agents with roles, models, and tools.
 
 ### GET /agents
 **List all agents**
@@ -201,6 +205,7 @@ Response: 201 Created
 ---
 
 ## Execution Management
+Start executions, get status, retrieve traces, and stop runs.
 
 ### POST /executions
 **Start crew execution**
@@ -264,6 +269,7 @@ Response: 200 OK
 ---
 
 ## Task Management
+Create and list tasks assigned to agents.
 
 ### GET /tasks
 **List tasks**
@@ -302,6 +308,7 @@ Response: 201 Created
 ---
 
 ## Tool Management
+Discover built-in tools and register custom tools.
 
 ### GET /tools
 **List available tools**
@@ -344,6 +351,7 @@ Response: 201 Created
 ---
 
 ## Memory Management
+Fetch and clear short/long-term memory for a crew.
 
 ### GET /memory/{crew_id}
 **Get crew memory**
@@ -378,40 +386,10 @@ Response: 204 No Content
 
 ---
 
-## Analytics
 
-### GET /analytics/usage
-**Get usage statistics**
-```json
-Response: 200 OK
-{
-  "period": "2024-01",
-  "executions": 1543,
-  "tokens_used": 2450000,
-  "success_rate": 0.98,
-  "avg_duration": 245
-}
-```
 
-### GET /analytics/performance
-**Get performance metrics**
-```json
-Response: 200 OK
-{
-  "crews": [
-    {
-      "crew_id": "crew_abc123",
-      "executions": 500,
-      "success_rate": 0.99,
-      "avg_duration": 180
-    }
-  ]
-}
-```
-
----
-
-## WebSocket Events
+## 🔵 WebSocket Events
+Real-time updates for task lifecycle, errors, and progress.
 
 ### Connection
 ```javascript
@@ -454,7 +432,8 @@ ws.onopen = () => {
 
 ---
 
-## Error Codes
+## 🔷 Error Codes
+Standardized error responses and meanings.
 
 | Code | Message | Description |
 |------|---------|-------------|
@@ -482,7 +461,8 @@ ws.onopen = () => {
 
 ---
 
-## Testing
+## 🔹 Testing
+Sandbox, Postman collection, and OpenAPI spec.
 
 ### Sandbox Environment
 ```bash
@@ -493,55 +473,6 @@ curl -X POST https://sandbox-api.kasal.ai/v1/crews \
   -d @crew.json
 ```
 
-### Postman Collection
-[Download Collection](https://api.kasal.ai/postman/kasal-api-v1.json)
-
-### OpenAPI Spec
-[View OpenAPI 3.0 Spec](https://api.kasal.ai/openapi.json)
-
----
-
-## SDKs & Libraries
-
-### Python
-```python
-pip install kasal-sdk
-
-from kasal import KasalClient
-
-client = KasalClient(api_key="your_key")
-crew = client.crews.create(name="My Crew")
-result = client.execute(crew.id, inputs={})
-```
-
-### JavaScript/TypeScript
-```javascript
-npm install @kasal/sdk
-
-import { Kasal } from '@kasal/sdk';
-
-const kasal = new Kasal({ apiKey: 'your_key' });
-const crew = await kasal.crews.create({ name: 'My Crew' });
-const result = await kasal.execute(crew.id, {});
-```
-
-### Go
-```go
-import "github.com/kasal/kasal-go"
-
-client := kasal.NewClient("your_key")
-crew, _ := client.Crews.Create("My Crew")
-result, _ := client.Execute(crew.ID, inputs)
-```
-
----
-
-## API Support
-
-- **Status Page**: [status.kasal.ai](https://status.kasal.ai)
-- **API Console**: [console.kasal.ai](https://console.kasal.ai)
-- **Developer Forum**: [forum.kasal.ai](https://forum.kasal.ai)
-- **Email**: api-support@kasal.ai
 
 ---
 

@@ -51,14 +51,13 @@ Create your first agent workflow in under 2 minutes:
 | Topic | Description |
 |-------|-------------|
 | **[Why Kasal](src/docs/WHY_KASAL.md)** | What problems it solves and who it's for |
+| **[Solution Architecture](src/docs/ARCHITECTURE_GUIDE.md)** | Layers, lifecycles, and platform integration |
 | **[Code Structure](src/docs/CODE_STRUCTURE_GUIDE.md)** | Where things live and how to navigate the repo |
 | **[Developer Guide](src/docs/DEVELOPER_GUIDE.md)** | Local setup, config, and extension patterns |
-| **[Solution Architecture](src/docs/ARCHITECTURE_GUIDE.md)** | Layers, lifecycles, and platform integration |
 | **[API Reference](src/docs/API_REFERENCE.md)** | REST endpoints, payloads, and errors |
 
 ### More Documentation
 - **[Docs Hub](src/docs/README.md)** - Documentation index
-- **[Business User Guide](src/docs/BUSINESS_USER_GUIDE.md)** - Non-technical intro and ROI
 - **[End‑User Tutorial Catalog](src/docs/END_USER_TUTORIAL_CATALOG.md)** - Screenshot-ready walkthroughs
 - **[Testing Guide](src/backend/tests/README.md)** - Testing strategy and coverage
 

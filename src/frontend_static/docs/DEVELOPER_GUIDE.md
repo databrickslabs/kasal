@@ -1,348 +1,145 @@
-# Kasal Developer Documentation
+## Developer Guide
+Build, extend, and debug Kasal efficiently. This guide focuses on day-to-day workflows.
 
-> **Build AI Workflows in 30 Seconds** - Production-ready from the start
+### Components you'll touch
+- **Frontend (React SPA)**: UI, designer, monitoring
+- **API (FastAPI)**: REST endpoints and validation
+- **Services**: Orchestration and business logic
+- **Repositories**: DB and external I/O (Databricks, Vector, MLflow)
+- **Engines (CrewAI)**: Agent/flow preparation and execution
+- **Data & Storage**: SQLAlchemy models/sessions, embeddings, volumes
 
----
+### Requirements
+Tools and versions you need before running the stack.
+- Python 3.9+
+- Node.js 18+
+- Postgres (recommended) or SQLite for local dev
+- Databricks access if exercising Databricks features
+## Developer Architecture Overview  
+This section gives developers a high-level view of the front end and back end. It explains core components and shows how to understand and trace them.
 
-## Quick Start
+## Backend Architecture  
+The backend uses FastAPI with a clean layered structure. It separates HTTP routing, business services, repositories, and SQLAlchemy models.
 
-### Install & Run
-```bash
-# Clone and setup
-git clone https://github.com/youorg/kasal
-cd kasal && pip install -r src/requirements.txt
+### Core Components  
+- API Routers: src/backend/src/api/* map HTTP endpoints to service calls.  
+- Services: src/backend/src/services/* implement business logic and transactions.  
+- Repositories: src/backend/src/repositories/* handle database CRUD.  
+- Models/Schemas: src/backend/src/models/* and src/backend/src/schemas/* define persistence and I/O contracts.  
+- Core/Engines: src/backend/src/core/* and src/backend/src/engines/* integrate LLMs and execution flows.  
+- DB/Session: src/backend/src/db/* configures sessions and Alembic migrations.  
+- Config/Security: src/backend/src/config/* and src/backend/src/dependencies/* provide settings and auth.
 
-# Start services
-cd src/backend && ./run.sh  # Backend: http://localhost:8000
-cd src/frontend && npm start # Frontend: http://localhost:3000
+### Typical Request Flow  
+A request passes through router, service, repository, and database. LLM calls route through the LLM manager when needed.
+
+```mermaid
+sequenceDiagram
+    participant C as Client
+    participant R as FastAPI Router
+    participant S as Service
+    participant U as UnitOfWork
+    participant Repo as Repository
+    participant DB as Database
+    participant L as LLM Manager
+
+    C->>R: HTTP Request
+    R->>S: Validate and delegate
+    S->>U: Begin transaction
+    S->>Repo: Query/Command
+    Repo->>DB: SQLAlchemy operation
+    DB-->>Repo: Rows/Status
+    alt Needs LLM
+        S->>L: Generate/Score
+        L-->>S: LLM Result
+    end
+    S->>U: Commit
+    S-->>R: DTO/Schema
+    R-->>C: HTTP Response
 ```
 
-### Your First AI Agent (30 seconds)
+### How to Understand Backend Components  
+- Start at the router file for the endpoint path.  
+- Open the service it calls and read business logic.  
+- Inspect repository methods and referenced models.  
+- Check schema types for request and response contracts.  
+- Review unit tests under `src/backend/tests` for examples.
+
+### Example: Minimal Endpoint Wiring  
+This shows a typical router, service, and repository connection.
+
 ```python
-from kasal import Agent, Task, Crew
+# router.py
+@router.get("/items/{item_id}", response_model=ItemOut)
+async def get_item(item_id: UUID, service: ItemService = Depends(...)):
+    return await service.get_item(item_id)
 
-# Create agent
-researcher = Agent(
-    role="Research Analyst",
-    goal="Find market insights",
-    model="gpt-4"
-)
+# services/item_service.py
+class ItemService:
+    async def get_item(self, item_id: UUID) -> ItemOut:
+        with self.uow as uow:
+            item = uow.items.get(item_id)
+            return ItemOut.model_validate(item)
 
-# Define task
-task = Task(
-    description="Analyze competitor pricing",
-    agent=researcher
-)
-
-# Run workflow
-crew = Crew(agents=[researcher], tasks=[task])
-result = crew.kickoff()
+# repositories/item_repository.py
+class ItemRepository(BaseRepository[Item]):
+    ...
 ```
 
-**That's it!** Your AI agent is running.
+## Frontend Architecture  
+The frontend is a React + TypeScript application. It organizes UI components, API clients, state stores, hooks, and utilities.
 
----
+### Core Components  
+- API Clients: src/frontend/src/api/* wrap HTTP calls with typed methods.  
+- UI Components: src/frontend/src/components/* render views and dialogs.  
+- Hooks: src/frontend/src/hooks/* encapsulate logic and side effects.  
+- Stores: src/frontend/src/store/* manage app and workflow state.  
+- Types/Config: src/frontend/src/types/* and src/frontend/src/config/* provide typing and environment.  
+- Utils: src/frontend/src/utils/* offer reusable helpers.
 
-## Architecture
+### UI Data Flow  
+Components call hooks, which use stores and API clients. Responses update state and re-render the UI.
 
-### Clean Architecture Pattern
-```
-Frontend → API → Service → Repository → Database
-   ↓        ↓       ↓          ↓           ↓
-React   FastAPI  Business  Data Layer  PostgreSQL
-```
-
-### Tech Stack
-| Layer | Technology | Purpose |
-|-------|------------|---------|
-| **Frontend** | React 18 + TypeScript | Interactive UI |
-| **API** | FastAPI + Pydantic | Type-safe endpoints |
-| **AI Engine** | CrewAI + LangChain | Agent orchestration |
-| **Database** | PostgreSQL/SQLite | Data persistence |
-| **Auth** | JWT + Databricks OAuth | Security |
-
----
-
-## Core Concepts
-
-### Agents
-```python
-agent = Agent(
-    role="Data Scientist",
-    goal="Analyze patterns",
-    backstory="Expert in ML",
-    tools=[SearchTool(), AnalysisTool()],
-    model="databricks-llama-70b"
-)
+```mermaid
+flowchart LR
+    A[UI Component] --> B[Hook]
+    B --> C[State Store]
+    B --> D[API Client]
+    D -->|HTTP| E[Backend API]
+    E -->|JSON| D
+    D --> C
+    C --> A
 ```
 
-### Tasks
-```python
-task = Task(
-    description="Generate weekly report",
-    expected_output="Markdown report with insights",
-    agent=analyst_agent,
-    async_execution=True
-)
-```
+### How to Understand Frontend Components  
+- Locate the component rendering the feature.  
+- Check its hook usage and props.  
+- Open the API client method it calls.  
+- Review the store slice it reads or writes.  
+- Inspect related types in src/frontend/src/types.
 
-### Crews
-```python
-crew = Crew(
-    agents=[researcher, writer, reviewer],
-    tasks=[research_task, write_task, review_task],
-    process="hierarchical",  # or "sequential"
-    memory=True  # Enable persistent memory
-)
-```
+### Example: Calling an API From a Component  
+A component loads items using an API service and updates local state.
 
-### Tools
-```python
-# Built-in tools
-from kasal.tools import (
-    WebSearchTool,
-    FileReadTool,
-    DatabaseQueryTool,
-    CodeExecutionTool
-)
-
-# Custom tool
-class CustomAPITool(BaseTool):
-    name = "api_caller"
-    description = "Call external APIs"
-
-    def _run(self, query: str) -> str:
-        # Your implementation
-        return api_response
-```
-
----
-
-## API Reference
-
-### Authentication
-```bash
-# Get token
-POST /api/v1/auth/login
-{
-  "username": "user@example.com",
-  "password": "secure_password"
+```ts
+// api/ItemService.ts
+export async function getItem(id: string) {
+  const res = await fetch(`/v1/items/${id}`, { headers: { Authorization: `Bearer ${token}` } });
+  if (!res.ok) throw new Error("Failed");
+  return (await res.json()) as Item;
 }
 
-# Use token
-GET /api/v1/crews
-Authorization: Bearer <token>
-```
-
-### Core Endpoints
-| Method | Endpoint | Description |
-|--------|----------|-------------|
-| GET | `/api/v1/crews` | List all crews |
-| POST | `/api/v1/crews` | Create new crew |
-| POST | `/api/v1/executions` | Start execution |
-| GET | `/api/v1/executions/{id}` | Get status |
-| GET | `/api/v1/traces/{job_id}` | Get execution trace |
-
-### WebSocket Events
-```javascript
-// Connect to real-time updates
-const ws = new WebSocket('ws://localhost:8000/ws');
-
-ws.onmessage = (event) => {
-  const data = JSON.parse(event.data);
-  // Handle: task_start, task_complete, error, etc.
+// components/Items/ItemView.tsx
+const ItemView: React.FC<{ id: string }> = ({ id }) => {
+  const [item, setItem] = useState<Item | null>(null);
+  useEffect(() => { getItem(id).then(setItem); }, [id]);
+  return item ? <div>{item.name}</div> : <span>Loading...</span>;
 };
 ```
 
----
+## End-to-End flow
+This ties front end and back end with shared contracts. It helps new developers trace a feature quickly.
 
-## Testing
-
-### Unit Tests
-```python
-# tests/test_agent.py
-async def test_agent_execution():
-    agent = Agent(role="Tester", goal="Validate")
-    result = await agent.execute("Test task")
-    assert result.success == True
-```
-
-### Run Tests
-```bash
-# All tests with coverage
-python run_tests.py --coverage
-
-# Specific test file
-python -m pytest tests/unit/test_file.py -v
-
-# With HTML report
-python run_tests.py --coverage --html-coverage
-```
-
----
-
-## Deployment
-
-### Docker
-```dockerfile
-FROM python:3.9-slim
-WORKDIR /app
-COPY src/requirements.txt .
-RUN pip install -r requirements.txt
-COPY . .
-CMD ["uvicorn", "src.backend.main:app"]
-```
-
-### Environment Variables
-```bash
-# .env file
-DATABASE_URL=postgresql://user:pass@localhost/kasal
-DATABRICKS_TOKEN=your_token
-OPENAI_API_KEY=your_key
-JWT_SECRET=your_secret
-```
-
-### Production Checklist
-- Enable CORS for your domain
-- Set secure JWT secret
-- Configure rate limiting
-- Enable SSL/TLS
-- Set up monitoring (Datadog/New Relic)
-- Configure backup strategy
-
----
-
-## Advanced Topics
-
-<details>
-<summary><strong>Custom Memory Backends</strong></summary>
-
-```python
-class DatabricksMemory(BaseMemory):
-    def __init__(self, index_name: str):
-        self.client = DatabricksVectorSearch()
-        self.index = index_name
-
-    async def store(self, data: dict):
-        await self.client.upsert(self.index, data)
-
-    async def retrieve(self, query: str, k: int = 5):
-        return await self.client.search(self.index, query, k)
-```
-</details>
-
-<details>
-<summary><strong>Async Operations</strong></summary>
-
-```python
-# CRITICAL: All I/O must be async
-async def process_crew_execution(crew_id: str):
-    async with get_db_session() as session:
-        repo = CrewRepository(session)
-        crew = await repo.get(crew_id)
-
-        # Parallel execution
-        tasks = [process_task(t) for t in crew.tasks]
-        results = await asyncio.gather(*tasks)
-
-        return results
-```
-</details>
-
-<details>
-<summary><strong>Error Handling</strong></summary>
-
-```python
-from kasal.exceptions import KasalError
-
-try:
-    result = await crew.kickoff()
-except AgentExecutionError as e:
-    logger.error(f"Agent failed: {e.agent_name}")
-    # Retry logic
-except TaskTimeoutError as e:
-    logger.error(f"Task timeout: {e.task_id}")
-    # Fallback strategy
-```
-</details>
-
-<details>
-<summary><strong>Performance Optimization</strong></summary>
-
-```python
-# Connection pooling
-engine = create_async_engine(
-    DATABASE_URL,
-    pool_size=20,
-    max_overflow=40,
-    pool_pre_ping=True
-)
-
-# Batch operations
-async def bulk_create_tasks(tasks: List[TaskSchema]):
-    async with UnitOfWork() as uow:
-        await uow.tasks.bulk_create(tasks)
-        await uow.commit()
-
-# Caching
-from functools import lru_cache
-
-@lru_cache(maxsize=100)
-def get_model_config(model_name: str):
-    return ModelConfig.get(model_name)
-```
-</details>
-
----
-
-## Security
-
-### Authentication Flow
-```python
-# JWT token generation
-def create_access_token(user_id: str) -> str:
-    payload = {
-        "sub": user_id,
-        "exp": datetime.utcnow() + timedelta(hours=24)
-    }
-    return jwt.encode(payload, JWT_SECRET, algorithm="HS256")
-
-# Protected endpoint
-@router.get("/protected")
-async def protected_route(
-    current_user: User = Depends(get_current_user)
-):
-    return {"user": current_user.email}
-```
-
-### Best Practices
-- **Never commit secrets** - Use environment variables
-- **Input validation** - Pydantic schemas everywhere
-- **SQL injection prevention** - SQLAlchemy ORM only
-- **Rate limiting** - Implement per-user limits
-- **Audit logging** - Track all mutations
-
----
-
-## Resources
-
-### Quick Links
-- [API Playground](/api/docs)
-- [Video Tutorials](https://kasal.ai/videos)
-- [Discord Community](https://discord.gg/kasal)
-- [Report Issues](https://github.com/kasal/issues)
-
-### Code Examples
-- [Basic Agent Setup](https://github.com/kasal/examples/basic)
-- [Multi-Agent Collaboration](https://github.com/kasal/examples/multi-agent)
-- [Custom Tools](https://github.com/kasal/examples/tools)
-- [Production Deployment](https://github.com/kasal/examples/deploy)
-
-### Support
-- **Chat**: Available in-app 24/7
-- **Email**: dev@kasal.ai
-- **Slack**: #kasal-developers
-
----
-
-*Build smarter, ship faster with Kasal*
+- Frontend Component → Hook → Store/API Client → Backend Router → Service → Repository → DB.  
+- Shared types and response shapes live in frontend types and backend schemas.  
+- Tests in src/backend/tests and frontend __tests__ show usage patterns.
