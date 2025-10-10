@@ -21,6 +21,7 @@ from src.schemas.genie import (
     GenieAuthConfig
 )
 from src.utils.databricks_auth import extract_user_token_from_request
+from src.utils.user_context import UserContext
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api/genie", tags=["genie"])
@@ -35,25 +36,30 @@ async def get_genie_spaces(
 ) -> GenieSpacesResponse:
     """
     Fetch available Genie spaces from Databricks with pagination.
-    
+
     Args:
         request: FastAPI request object
         page_token: Token for fetching next page
         page_size: Number of items per page (default 50, max 200)
-    
+        group_context: Group context from dependency injection
+
     Returns:
         GenieSpacesResponse: List of available Genie spaces with pagination info
     """
     try:
+        # Set group context for this request so get_auth_context() can access it
+        if group_context:
+            UserContext.set_group_context(group_context)
+
         # Extract user token for OBO authentication if available
         user_token = extract_user_token_from_request(request)
-        
+
         # Create auth config with user token for OBO
         auth_config = GenieAuthConfig(
             use_obo=True,
             user_token=user_token
         )
-        
+
         # Create service with auth config
         service = GenieService(auth_config)
         
@@ -84,24 +90,29 @@ async def search_genie_spaces(
 ) -> GenieSpacesResponse:
     """
     Search and filter Genie spaces from Databricks with pagination.
-    
+
     Args:
         request: FastAPI request object
         spaces_request: Request with search, filter, and pagination parameters
-    
+        group_context: Group context from dependency injection
+
     Returns:
         GenieSpacesResponse: List of filtered Genie spaces with pagination info
     """
     try:
+        # Set group context for this request so get_auth_context() can access it
+        if group_context:
+            UserContext.set_group_context(group_context)
+
         # Extract user token for OBO authentication if available
         user_token = extract_user_token_from_request(request)
-        
+
         # Create auth config with user token for OBO
         auth_config = GenieAuthConfig(
             use_obo=True,
             user_token=user_token
         )
-        
+
         # Create service with auth config
         service = GenieService(auth_config)
         

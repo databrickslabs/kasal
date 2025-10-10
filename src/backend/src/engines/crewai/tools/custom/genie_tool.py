@@ -61,9 +61,10 @@ class GenieTool(BaseTool):
     _current_conversation_id: str = PrivateAttr(default=None)
     _tool_id: int = PrivateAttr(default=35)  # Default tool ID
     _user_token: str = PrivateAttr(default=None)  # For OBO authentication
+    _group_id: str = PrivateAttr(default=None)  # For PAT authentication fallback
 
-    def __init__(self, tool_config: Optional[dict] = None, tool_id: Optional[int] = None, token_required: bool = True, user_token: str = None):
-        super().__init__()
+    def __init__(self, tool_config: Optional[dict] = None, tool_id: Optional[int] = None, token_required: bool = True, user_token: str = None, group_id: str = None, result_as_answer: bool = False):
+        super().__init__(result_as_answer=result_as_answer)
         if tool_config is None:
             tool_config = {}
 
@@ -88,6 +89,14 @@ class GenieTool(BaseTool):
         if user_token:
             self._user_token = user_token
             logger.info("User token provided for centralized authentication")
+
+        # CRITICAL: Store group_id for PAT authentication fallback
+        # This is essential because UserContext doesn't propagate to CrewAI threads
+        if group_id:
+            self._group_id = group_id
+            logger.info(f"Group ID provided for PAT authentication fallback: {group_id}")
+        else:
+            logger.warning("No group_id provided - PAT authentication may fail if user_token unavailable")
 
         # Extract space_id from tool_config (ONLY config, never environment)
         if tool_config:
@@ -157,14 +166,36 @@ class GenieTool(BaseTool):
         return f"{workspace_url}{path}"
 
     async def _get_auth_headers(self) -> dict:
-        """Get authentication headers using centralized databricks_auth module."""
+        """Get authentication headers using unified authentication."""
         try:
-            from src.utils.databricks_auth import get_databricks_auth_headers
-            headers, error = await get_databricks_auth_headers(user_token=self._user_token)
-            if error:
-                logger.error(f"Failed to get auth headers from databricks_auth: {error}")
+            from src.utils.databricks_auth import get_auth_context
+            from src.utils.user_context import UserContext, GroupContext
+
+            # CRITICAL: Set UserContext with group_id before calling get_auth_context()
+            # This is necessary because Python's contextvars don't propagate to CrewAI threads
+            # Without this, get_auth_context() cannot query ApiKeysService for PAT tokens
+            if self._group_id:
+                try:
+                    # Create GroupContext with the group_id we have
+                    group_context = GroupContext(
+                        group_ids=[self._group_id],
+                        group_email=f"{self._group_id}@tool_thread",
+                        access_token=self._user_token
+                    )
+                    UserContext.set_group_context(group_context)
+                    logger.info(f"[GenieTool] Set UserContext with group_id={self._group_id} for PAT authentication")
+                except Exception as ctx_error:
+                    logger.warning(f"[GenieTool] Could not set UserContext: {ctx_error}")
+
+            # Get unified auth context (handles OBO → PAT with group_id → SPN)
+            auth = await get_auth_context(user_token=self._user_token)
+
+            if not auth:
+                logger.error("No authentication method available")
                 return None
-            return headers
+
+            # Return headers from auth context
+            return auth.get_headers()
         except Exception as e:
             logger.error(f"Error getting auth headers: {e}")
             return None
