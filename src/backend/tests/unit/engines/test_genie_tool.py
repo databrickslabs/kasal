@@ -181,34 +181,38 @@ class TestGenieTool:
         """Test getting auth headers successfully."""
         tool = GenieTool(tool_config={"spaceId": "test-space"})
 
-        with patch('src.utils.databricks_auth.get_databricks_auth_headers') as mock_get_headers:
+        with patch('src.utils.databricks_auth.get_auth_context') as mock_get_auth_ctx:
             mock_headers = {"Authorization": "Bearer test-token"}
-            mock_get_headers.return_value = (mock_headers, None)
+            mock_auth_ctx = Mock()
+            mock_auth_ctx.get_headers.return_value = mock_headers
+            mock_get_auth_ctx.return_value = mock_auth_ctx
 
             headers = await tool._get_auth_headers()
             assert headers == mock_headers
-            mock_get_headers.assert_called_once_with(user_token=None)
+            mock_get_auth_ctx.assert_called_once_with(user_token=None)
 
     @pytest.mark.asyncio
     async def test_get_auth_headers_with_user_token(self):
         """Test getting auth headers with user token."""
         tool = GenieTool(tool_config={"spaceId": "test-space"}, user_token="user-token")
 
-        with patch('src.utils.databricks_auth.get_databricks_auth_headers') as mock_get_headers:
+        with patch('src.utils.databricks_auth.get_auth_context') as mock_get_auth_ctx:
             mock_headers = {"Authorization": "Bearer obo-token"}
-            mock_get_headers.return_value = (mock_headers, None)
+            mock_auth_ctx = Mock()
+            mock_auth_ctx.get_headers.return_value = mock_headers
+            mock_get_auth_ctx.return_value = mock_auth_ctx
 
             headers = await tool._get_auth_headers()
             assert headers == mock_headers
-            mock_get_headers.assert_called_once_with(user_token="user-token")
+            mock_get_auth_ctx.assert_called_once_with(user_token="user-token")
 
     @pytest.mark.asyncio
     async def test_get_auth_headers_failure(self):
         """Test getting auth headers failure."""
         tool = GenieTool(tool_config={"spaceId": "test-space"})
 
-        with patch('src.utils.databricks_auth.get_databricks_auth_headers') as mock_get_headers:
-            mock_get_headers.return_value = (None, "Auth error")
+        with patch('src.utils.databricks_auth.get_auth_context') as mock_get_auth_ctx:
+            mock_get_auth_ctx.return_value = None  # No auth available
 
             headers = await tool._get_auth_headers()
             assert headers is None
