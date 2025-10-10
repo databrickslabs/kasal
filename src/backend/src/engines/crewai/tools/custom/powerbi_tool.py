@@ -23,6 +23,14 @@ class PowerBIToolSchema(BaseModel):
         ...,
         description="Natural language question to convert into a DAX query"
     )
+    dataset_name: Optional[str] = Field(
+        None,
+        description="Power BI dataset/semantic model name to query (e.g., 'test_pbi', 'SalesDataset')"
+    )
+    metadata: Optional[Dict[str, Any]] = Field(
+        None,
+        description="Dataset metadata describing tables, columns, and relationships. Format: {'tables': [{'name': 'TableName', 'columns': [{'name': 'ColumnName', 'data_type': 'string|int|decimal|datetime'}]}]}"
+    )
 
 
 class PowerBITool(BaseTool):
@@ -46,7 +54,9 @@ class PowerBITool(BaseTool):
     name: str = "Power BI DAX Generator"
     description: str = (
         "Generate DAX queries from natural language questions for Power BI datasets. "
-        "Provide a 'question' parameter with your question about the data. "
+        "Provide 'question' (required), 'dataset_name' (optional), and 'metadata' (optional) parameters. "
+        "The 'metadata' parameter should contain dataset schema information with tables and columns. "
+        "Format: {'tables': [{'name': 'TableName', 'columns': [{'name': 'ColumnName', 'data_type': 'string|int|decimal|datetime'}]}]}. "
         "The tool will return a DAX query that can be executed in Databricks."
     )
     args_schema: Type[BaseModel] = PowerBIToolSchema
@@ -115,21 +125,42 @@ class PowerBITool(BaseTool):
 
         Args:
             question: Natural language question
+            dataset_name: Optional Power BI dataset name (runtime parameter)
+            metadata: Optional dataset metadata (runtime parameter)
 
         Returns:
             Generated DAX query with execution instructions
         """
         question = kwargs.get("question")
+        runtime_dataset_name = kwargs.get("dataset_name")
+        runtime_metadata = kwargs.get("metadata")
 
         if not question:
             return "Error: No question provided"
+
+        # Merge runtime parameters with configuration defaults
+        # Runtime parameters take precedence over configuration
+        effective_dataset_name = runtime_dataset_name or self.dataset_name
+        effective_metadata = runtime_metadata or self.metadata
+
+        logger.info(f"PowerBITool - Runtime parameters received:")
+        logger.info(f"  Runtime dataset_name: {runtime_dataset_name}")
+        logger.info(f"  Runtime metadata: {'Present' if runtime_metadata else 'None'}")
+        logger.info(f"  Effective dataset_name: {effective_dataset_name}")
+        logger.info(f"  Effective metadata: {'Present' if effective_metadata else 'None'}")
 
         try:
             # Run async method in event loop
             loop = asyncio.new_event_loop()
             asyncio.set_event_loop(loop)
             try:
-                result = loop.run_until_complete(self._generate_dax(question))
+                result = loop.run_until_complete(
+                    self._generate_dax(
+                        question=question,
+                        dataset_name=effective_dataset_name,
+                        metadata=effective_metadata
+                    )
+                )
                 return result
             finally:
                 loop.close()
@@ -138,22 +169,29 @@ class PowerBITool(BaseTool):
             logger.error(f"Error in Power BI tool: {str(e)}", exc_info=True)
             return f"Error generating DAX query: {str(e)}"
 
-    async def _generate_dax(self, question: str) -> str:
+    async def _generate_dax(
+        self,
+        question: str,
+        dataset_name: Optional[str] = None,
+        metadata: Optional[Dict[str, Any]] = None
+    ) -> str:
         """
         Generate DAX query asynchronously.
 
         Args:
             question: Natural language question
+            dataset_name: Power BI dataset name
+            metadata: Dataset metadata
 
         Returns:
             Formatted response with DAX query and instructions
         """
         try:
             # Validate metadata is available
-            if not self.metadata:
+            if not metadata:
                 return (
-                    "Error: Dataset metadata not configured. "
-                    "Please provide metadata in tool configuration."
+                    "Error: Dataset metadata not provided. "
+                    "Please provide metadata as a runtime parameter when calling the tool."
                 )
 
             # Import DAX generator service
@@ -166,7 +204,7 @@ class PowerBITool(BaseTool):
 
                 result = await service.generate_dax_from_question(
                     question=question,
-                    metadata=self.metadata,
+                    metadata=metadata,
                     model_name=self.model_name,
                     temperature=self.temperature
                 )
@@ -175,6 +213,9 @@ class PowerBITool(BaseTool):
             dax_query = result["dax_query"]
             explanation = result["explanation"]
             confidence = result["confidence"]
+
+            # Use dataset_name from parameter or fall back to config
+            effective_dataset_name = dataset_name or self.dataset_name or "your_dataset"
 
             response = f"""DAX Query Generated (Confidence: {confidence:.0%})
 
@@ -202,7 +243,7 @@ import pyadomd
 connection_string = (
     "Provider=MSOLAP;"
     "Data Source={self.xmla_endpoint};"
-    "Initial Catalog={self.dataset_name};"
+    "Initial Catalog={effective_dataset_name};"
     "User ID=app:{{client_id}}@{{tenant_id}};"
     "Password={{client_secret}};"
 )

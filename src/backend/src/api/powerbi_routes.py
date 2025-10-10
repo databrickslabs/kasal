@@ -5,13 +5,13 @@ API endpoints for Power BI DAX query generation.
 """
 
 import logging
-from typing import Any
+from typing import Any, Dict
 
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.core.dependencies import get_db, get_group_context
-from src.core.group_context import GroupContext
+from src.utils.user_context import GroupContext
 from src.schemas.powerbi import (
     DAXGenerationRequest,
     DAXGenerationResponse,

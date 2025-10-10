@@ -1300,7 +1300,50 @@ class ToolFactory:
                 # Create the tool with any specified configuration
                 tool = PythonPPTXTool(**tool_config)
                 return tool
-            
+
+            elif tool_name == "PowerBITool":
+                # Create a copy of the config
+                powerbi_tool_config = {**tool_config}
+
+                # Extract PowerBI-specific configuration
+                xmla_endpoint = tool_config.get('xmla_endpoint')
+                dataset_name = tool_config.get('dataset_name')
+                metadata = tool_config.get('metadata')
+                model_name = tool_config.get('model_name', 'databricks-meta-llama-3-1-405b-instruct')
+                temperature = tool_config.get('temperature', 0.1)
+
+                # Parse metadata if it's a JSON string (from database storage)
+                if metadata and isinstance(metadata, str):
+                    try:
+                        metadata = json.loads(metadata)
+                        logger.info("Parsed metadata from JSON string")
+                    except json.JSONDecodeError as e:
+                        logger.error(f"Failed to parse metadata JSON: {e}")
+                        metadata = None
+
+                logger.info(f"Creating PowerBITool with configuration:")
+                logger.info(f"  XMLA Endpoint: {xmla_endpoint}")
+                logger.info(f"  Dataset Name: {dataset_name}")
+                logger.info(f"  Metadata tables: {len(metadata.get('tables', [])) if metadata else 0}")
+                logger.info(f"  Model: {model_name}")
+                logger.info(f"  Temperature: {temperature}")
+
+                # Create the PowerBITool instance with explicit parameters
+                try:
+                    return tool_class(
+                        xmla_endpoint=xmla_endpoint,
+                        dataset_name=dataset_name,
+                        metadata=metadata,
+                        model_name=model_name,
+                        temperature=temperature,
+                        tool_config=powerbi_tool_config
+                    )
+                except Exception as e:
+                    logger.error(f"Error creating PowerBITool: {e}")
+                    import traceback
+                    logger.error(traceback.format_exc())
+                    return None
+
             # For all other tools, try to create with config parameters
             else:
                 # Check if the config has any data
