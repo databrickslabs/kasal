@@ -1,168 +1,145 @@
 ## Developer Guide
+Build, extend, and debug Kasal efficiently. This guide focuses on day-to-day workflows.
+
+### Components you'll touch
+- **Frontend (React SPA)**: UI, designer, monitoring
+- **API (FastAPI)**: REST endpoints and validation
+- **Services**: Orchestration and business logic
+- **Repositories**: DB and external I/O (Databricks, Vector, MLflow)
+- **Engines (CrewAI)**: Agent/flow preparation and execution
+- **Data & Storage**: SQLAlchemy models/sessions, embeddings, volumes
 
 ### Requirements
+Tools and versions you need before running the stack.
 - Python 3.9+
 - Node.js 18+
 - Postgres (recommended) or SQLite for local dev
 - Databricks access if exercising Databricks features
+## Developer Architecture Overview  
+This section gives developers a high-level view of the front end and back end. It explains core components and shows how to understand and trace them.
 
-### Quick start
-```bash
-# Backend
-cd src/backend
-python -m venv .venv && source .venv/bin/activate
-pip install -r ../requirements.txt
-./run.sh  # http://localhost:8000 (OpenAPI at /api-docs if enabled)
+## Backend Architecture  
+The backend uses FastAPI with a clean layered structure. It separates HTTP routing, business services, repositories, and SQLAlchemy models.
 
-# Frontend
-cd ../frontend
-npm install
-npm start  # http://localhost:3000
+### Core Components  
+- API Routers: src/backend/src/api/* map HTTP endpoints to service calls.  
+- Services: src/backend/src/services/* implement business logic and transactions.  
+- Repositories: src/backend/src/repositories/* handle database CRUD.  
+- Models/Schemas: src/backend/src/models/* and src/backend/src/schemas/* define persistence and I/O contracts.  
+- Core/Engines: src/backend/src/core/* and src/backend/src/engines/* integrate LLMs and execution flows.  
+- DB/Session: src/backend/src/db/* configures sessions and Alembic migrations.  
+- Config/Security: src/backend/src/config/* and src/backend/src/dependencies/* provide settings and auth.
+
+### Typical Request Flow  
+A request passes through router, service, repository, and database. LLM calls route through the LLM manager when needed.
+
+```mermaid
+sequenceDiagram
+    participant C as Client
+    participant R as FastAPI Router
+    participant S as Service
+    participant U as UnitOfWork
+    participant Repo as Repository
+    participant DB as Database
+    participant L as LLM Manager
+
+    C->>R: HTTP Request
+    R->>S: Validate and delegate
+    S->>U: Begin transaction
+    S->>Repo: Query/Command
+    Repo->>DB: SQLAlchemy operation
+    DB-->>Repo: Rows/Status
+    alt Needs LLM
+        S->>L: Generate/Score
+        L-->>S: LLM Result
+    end
+    S->>U: Commit
+    S-->>R: DTO/Schema
+    R-->>C: HTTP Response
 ```
 
-Health check:
-```bash
-curl http://localhost:8000/health
-# {"status":"healthy"}
+### How to Understand Backend Components  
+- Start at the router file for the endpoint path.  
+- Open the service it calls and read business logic.  
+- Inspect repository methods and referenced models.  
+- Check schema types for request and response contracts.  
+- Review unit tests under `src/backend/tests` for examples.
+
+### Example: Minimal Endpoint Wiring  
+This shows a typical router, service, and repository connection.
+
+```python
+# router.py
+@router.get("/items/{item_id}", response_model=ItemOut)
+async def get_item(item_id: UUID, service: ItemService = Depends(...)):
+    return await service.get_item(item_id)
+
+# services/item_service.py
+class ItemService:
+    async def get_item(self, item_id: UUID) -> ItemOut:
+        with self.uow as uow:
+            item = uow.items.get(item_id)
+            return ItemOut.model_validate(item)
+
+# repositories/item_repository.py
+class ItemRepository(BaseRepository[Item]):
+    ...
 ```
 
-### Configuration
-Backend settings: `src/backend/src/config/settings.py`
-- Core: `DEBUG_MODE`, `LOG_LEVEL`, `DOCS_ENABLED`, `AUTO_SEED_DATABASE`
-- Database:
-  - `DATABASE_TYPE=postgres|sqlite` (default: `postgres`)
-  - Postgres: `POSTGRES_SERVER`, `POSTGRES_PORT`, `POSTGRES_DB`, `POSTGRES_USER`, `POSTGRES_PASSWORD`
-  - SQLite: `SQLITE_DB_PATH=./app.db`
-  - SQL logging: `SQL_DEBUG=true|false`
-- Notes:
-  - `USE_NULLPOOL` is set early in `main.py` to avoid asyncpg pool issues
-  - Logs written under `src/backend/src/logs/`
+## Frontend Architecture  
+The frontend is a React + TypeScript application. It organizes UI components, API clients, state stores, hooks, and utilities.
 
-Frontend API base URL (`REACT_APP_API_URL`) at build-time:
-```bash
-# Option A: dev default already points to http://localhost:8000/api/v1
-# Option B: override explicitly for a build (Unix/macOS)
-REACT_APP_API_URL="http://localhost:8000/api/v1" npm run build
+### Core Components  
+- API Clients: src/frontend/src/api/* wrap HTTP calls with typed methods.  
+- UI Components: src/frontend/src/components/* render views and dialogs.  
+- Hooks: src/frontend/src/hooks/* encapsulate logic and side effects.  
+- Stores: src/frontend/src/store/* manage app and workflow state.  
+- Types/Config: src/frontend/src/types/* and src/frontend/src/config/* provide typing and environment.  
+- Utils: src/frontend/src/utils/* offer reusable helpers.
 
-# When using the top-level build script:
-# The env var will propagate into the "npm run build" it runs
-cd src
-REACT_APP_API_URL="http://localhost:8000/api/v1" python build.py
+### UI Data Flow  
+Components call hooks, which use stores and API clients. Responses update state and re-render the UI.
+
+```mermaid
+flowchart LR
+    A[UI Component] --> B[Hook]
+    B --> C[State Store]
+    B --> D[API Client]
+    D -->|HTTP| E[Backend API]
+    E -->|JSON| D
+    D --> C
+    C --> A
 ```
 
-### Conventions
-- Routers (`api/*`): Validate with `schemas/*`, delegate to `services/*`
-- Services: Business logic only; use repositories for I/O
-- Repositories: All SQL/external I/O; don’t leak ORM to services
-- Models: SQLAlchemy in `models/*`; Schemas: Pydantic in `schemas/*`
+### How to Understand Frontend Components  
+- Locate the component rendering the feature.  
+- Check its hook usage and props.  
+- Open the API client method it calls.  
+- Review the store slice it reads or writes.  
+- Inspect related types in src/frontend/src/types.
 
-### Add a new API resource (“widgets” example)
-1) Model: `models/widget.py`; import in `db/all_models.py`
-2) Schemas: `schemas/widget.py` (Create/Update/Read DTOs)
-3) Repository: `repositories/widget_repository.py`
-4) Service: `services/widget_service.py`
-5) Router: `api/widgets_router.py` (validate → call service)
-6) Register router in `api/__init__.py`
-7) Frontend: add `src/frontend/src/api/widgets.ts` + components/views/state
-8) Tests: `src/backend/tests/`
+### Example: Calling an API From a Component  
+A component loads items using an API service and updates local state.
 
-### Add a new CrewAI tool
-- Implement under `engines/crewai/tools/` (follow existing patterns)
-- Expose configuration via service/router if user-configurable
-- Ensure discovery/registration in the execution path (e.g., prep or service)
+```ts
+// api/ItemService.ts
+export async function getItem(id: string) {
+  const res = await fetch(`/v1/items/${id}`, { headers: { Authorization: `Bearer ${token}` } });
+  if (!res.ok) throw new Error("Failed");
+  return (await res.json()) as Item;
+}
 
-### Executions and tracing
-- Start executions via `executions_router.py` endpoints
-- Services invoke engine flow (`engines/crewai/*`)
-- Logs/traces:
-  - Execution logs via `execution_logs_*`
-  - Traces via `execution_trace_*`
-```bash
-# Kick off an execution
-curl -X POST http://localhost:8000/api/v1/executions -H "Content-Type: application/json" -d '{...}'
-
-# Get execution status
-curl http://localhost:8000/api/v1/executions/<id>
-
-# Fetch logs/trace
-curl http://localhost:8000/api/v1/execution-logs/<id>
-curl http://localhost:8000/api/v1/execution-trace/<job_id>
-```
-
-### Background processing
-- Scheduler: starts on DB-ready startup (`scheduler_service.py`)
-- Embedding queue (SQLite): `embedding_queue_service.py` batches writes
-- Cleanup on startup/shutdown: `execution_cleanup_service.py`
-
-### Database & migrations
-- SQLite for quick local dev (`DATABASE_TYPE=sqlite`), Postgres for multi-user
-- Alembic:
-```bash
-# after model changes
-alembic revision --autogenerate -m "add widgets"
-alembic upgrade head
-```
-
-### Auth, identity, tenancy
-- Databricks headers parsed by `utils/user_context.py`
-- Group-aware tenants; selected group passed in `group_id` header
-- JWT/basic auth in `auth_router.py`, users in `users_router.py`
-- Authorization checks in `core/permissions.py`
-
-### Logging & debugging
-- App logs: `src/backend/src/logs/` (managed by `core/logger.py`)
-- Verbose SQL: `export SQL_DEBUG=true`
-- SQLite “database is locked”: mitigated via retry/backoff; reduce writers or use Postgres
-
-### Frontend notes
-- Axios client and base URL:
-```1:13:/Users/anshu.roy/Documents/kasal/src/frontend/src/config/api/ApiConfig.ts
-export const config = {
-  apiUrl:
-    process.env.REACT_APP_API_URL ||
-    (process.env.NODE_ENV === 'development'
-      ? 'http://localhost:8000/api/v1'
-      : '/api/v1'),
+// components/Items/ItemView.tsx
+const ItemView: React.FC<{ id: string }> = ({ id }) => {
+  const [item, setItem] = useState<Item | null>(null);
+  useEffect(() => { getItem(id).then(setItem); }, [id]);
+  return item ? <div>{item.name}</div> : <span>Loading...</span>;
 };
-export const apiClient = axios.create({ baseURL: config.apiUrl, headers: { 'Content-Type': 'application/json' } });
 ```
 
-### Testing
-```bash
-# Backend
-python run_tests.py
+## End-to-End flow
+This ties front end and back end with shared contracts. It helps new developers trace a feature quickly.
 
-# Frontend
-cd src/frontend
-npm test
-```
-
-### Production checklist
-- Use Postgres (or managed DB), not SQLite
-- Harden secrets/tokens; externalize (e.g., Databricks Secrets/Vault)
-- Enforce TLS and CORS
-- Monitor logs/traces; set alerts
-- Review `DOCS_ENABLED`, `LOG_LEVEL`, `DEBUG_MODE`
-
-## Resources
-
-### Quick Links
-- [API Playground](/api/docs)
-- [Video Tutorials](https://kasal.ai/videos)
-- [Discord Community](https://discord.gg/kasal)
-- [Report Issues](https://github.com/kasal/issues)
-
-### Code Examples
-- [Basic Agent Setup](https://github.com/kasal/examples/basic)
-- [Multi-Agent Collaboration](https://github.com/kasal/examples/multi-agent)
-- [Custom Tools](https://github.com/kasal/examples/tools)
-- [Production Deployment](https://github.com/kasal/examples/deploy)
-
-### Support
-- **Chat**: Available in-app 24/7
-- **Email**: dev@kasal.ai
-- **Slack**: #kasal-developers
-
----
-
-*Build smarter, ship faster with Kasal*
+- Frontend Component → Hook → Store/API Client → Backend Router → Service → Repository → DB.  
+- Shared types and response shapes live in frontend types and backend schemas.  
+- Tests in src/backend/tests and frontend __tests__ show usage patterns.
