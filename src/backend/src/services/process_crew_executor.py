@@ -704,7 +704,12 @@ def run_crew_in_process(
                     ks = agent_cfg.get('knowledge_sources', [])
                     async_logger.info(f"[DEBUG] Agent {agent_id} has {len(ks)} knowledge_sources: {ks}")
 
-                crew_preparation = CrewPreparation(crew_config, tool_service, tool_factory, None)
+                # CRITICAL: Pass user_token from crew_config for OBO authentication
+                # This is needed for Databricks memory upserts to authenticate properly
+                user_token_for_crew = crew_config.get('user_token')
+                async_logger.info(f"[DEBUG] Creating CrewPreparation with user_token: {bool(user_token_for_crew)}")
+
+                crew_preparation = CrewPreparation(crew_config, tool_service, tool_factory, user_token_for_crew)
                 if not await crew_preparation.prepare():
                     raise RuntimeError(f"Failed to prepare crew for {execution_id}")
 
