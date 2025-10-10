@@ -944,6 +944,16 @@ class ToolFactory:
                 # Try to get user token from multiple sources for OAuth/OBO authentication
                 user_token = tool_config.get('user_token') or self.user_token
 
+                # CRITICAL: Extract group_id from config for PAT authentication fallback
+                # This is essential for tools running in CrewAI threads where UserContext is unavailable
+                group_id = None
+                if isinstance(self.config, dict):
+                    group_id = self.config.get('group_id')
+                    if group_id:
+                        logger.info(f"Extracted group_id from factory config for GenieTool: {group_id}")
+                    else:
+                        logger.warning("No group_id in factory config - PAT authentication may fail")
+
                 # If no user token in config or factory, try to get from context
                 if not user_token:
                     try:
@@ -1096,13 +1106,15 @@ class ToolFactory:
 
                 # Create the GenieTool instance
                 try:
-                    logger.info(f"Creating GenieTool with config, OBO: {bool(user_token)}, token preview: {user_token[:10] + '...' if user_token else 'None'}")
+                    logger.info(f"Creating GenieTool with config, OBO: {bool(user_token)}, token preview: {user_token[:10] + '...' if user_token else 'None'}, group_id: {group_id}")
                     logger.info(f"GenieTool config being passed: {genie_tool_config}")
                     return tool_class(
                         tool_config=genie_tool_config,
                         tool_id=tool_id,
                         token_required=False,
-                        user_token=user_token
+                        user_token=user_token,
+                        group_id=group_id,  # CRITICAL: Pass group_id for PAT authentication
+                        result_as_answer=result_as_answer
                     )
                 except Exception as e:
                     logger.error(f"Error creating GenieTool: {e}")

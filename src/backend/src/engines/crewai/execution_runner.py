@@ -635,6 +635,21 @@ async def run_crew_in_process(
         logger.info(f"[run_crew_in_process] Starting process-based execution for {execution_id}")
         logger.info(f"[run_crew_in_process] Calling process_crew_executor.run_crew_isolated with debug_tracing={debug_tracing_enabled}")
 
+        # CRITICAL: Add user_token to config for OBO authentication in subprocess
+        # This ensures tools can authenticate using the user's token
+        if user_token:
+            config['user_token'] = user_token
+            logger.info(f"[run_crew_in_process] Added user_token to crew_config for OBO authentication")
+        else:
+            logger.info(f"[run_crew_in_process] No user_token - subprocess will use PAT or SPN fallback")
+
+        # CRITICAL: Ensure group_id is in config for PAT authentication fallback
+        # Without this, get_auth_context() cannot query ApiKeysService for PAT tokens
+        if group_context and hasattr(group_context, 'primary_group_id') and group_context.primary_group_id:
+            if 'group_id' not in config or not config['group_id']:
+                config['group_id'] = group_context.primary_group_id
+                logger.info(f"[run_crew_in_process] Added group_id to crew_config: {group_context.primary_group_id}")
+
         # Run the crew in an isolated process
         result = await process_crew_executor.run_crew_isolated(
             execution_id=execution_id,

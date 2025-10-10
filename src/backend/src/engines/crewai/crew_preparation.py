@@ -780,6 +780,11 @@ class CrewPreparation:
                             'verbose': crew_kwargs.get('verbose', True),
                             'memory': crew_kwargs.get('memory', False)
                         }
+                        # For hierarchical process, manager_llm or manager_agent is required
+                        if 'manager_llm' in crew_kwargs:
+                            minimal_kwargs['manager_llm'] = crew_kwargs['manager_llm']
+                        elif 'manager_agent' in crew_kwargs:
+                            minimal_kwargs['manager_agent'] = crew_kwargs['manager_agent']
                         self.crew = Crew(**minimal_kwargs)
                 else:
                     raise
