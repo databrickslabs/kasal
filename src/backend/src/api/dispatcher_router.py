@@ -35,6 +35,15 @@ async def dispatch_request(
         Dictionary containing the intent detection result and generation response
     """
     try:
+        # CRITICAL: Set UserContext so LLMManager can access group_id
+        # This is needed for multi-tenant isolation in API key operations
+        from src.utils.user_context import UserContext
+        if group_context:
+            UserContext.set_group_context(group_context)
+            # Also set user token if available for OBO authentication
+            if group_context.access_token:
+                UserContext.set_user_token(group_context.access_token)
+
         # Create service instance with injected session
         dispatcher_service = DispatcherService.create(session)
 
@@ -64,6 +73,7 @@ async def detect_intent_only(
 
     Args:
         request: The dispatcher request containing the user's message
+        group_context: Group context from headers
         session: Database session from FastAPI DI
 
     Returns:
@@ -73,12 +83,19 @@ async def detect_intent_only(
         HTTPException: If there's an error in processing
     """
     try:
+        # CRITICAL: Set UserContext so LLMManager can access group_id
+        from src.utils.user_context import UserContext
+        if group_context:
+            UserContext.set_group_context(group_context)
+            if group_context.access_token:
+                UserContext.set_user_token(group_context.access_token)
+
         # Create service instance with injected session
         dispatcher_service = DispatcherService.create(session)
-        
+
         # Only detect intent without dispatching
         intent_result = await dispatcher_service._detect_intent(request.message, request.model or "databricks-llama-4-maverick")
-        
+
         # Create response
         response = DispatcherResponse(
             intent=intent_result["intent"],
@@ -86,11 +103,11 @@ async def detect_intent_only(
             extracted_info=intent_result["extracted_info"],
             suggested_prompt=intent_result["suggested_prompt"]
         )
-        
+
         return response
-        
+
     except Exception as e:
         raise HTTPException(
             status_code=500,
             detail=f"Error in intent detection: {str(e)}"
-        ) 
+        )

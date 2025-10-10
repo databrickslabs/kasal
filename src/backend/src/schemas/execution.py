@@ -145,6 +145,11 @@ class ExecutionResponse(BaseModel):
     agents_yaml: Optional[str] = Field(None, description="Agents configuration as JSON string")
     tasks_yaml: Optional[str] = Field(None, description="Tasks configuration as JSON string")
 
+    # MLflow integration fields
+    mlflow_trace_id: Optional[str] = Field(None, description="MLflow trace ID for evaluation linking")
+    mlflow_experiment_name: Optional[str] = Field(None, description="MLflow experiment name for reference")
+    mlflow_evaluation_run_id: Optional[str] = Field(None, description="MLflow evaluation run ID")
+
     model_config = ConfigDict(from_attributes=True)
 
 

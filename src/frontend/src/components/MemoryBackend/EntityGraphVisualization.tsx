@@ -192,8 +192,8 @@ const EntityGraphVisualization: React.FC<EntityGraphVisualizationProps> = ({
       setFilteredGraphData(graphData);
     } catch (err: unknown) {
       console.error('[EntityGraph] Error fetching entity data:', err);
-      const errorMessage = err instanceof Error ? err.message : 
-        (err as any)?.response?.data?.detail || 'Failed to fetch entity data';
+      const errorMessage = err instanceof Error ? err.message :
+        (err as { response?: { data?: { detail?: string } } })?.response?.data?.detail || 'Failed to fetch entity data';
       setError(errorMessage);
     } finally {
       setLoading(false);

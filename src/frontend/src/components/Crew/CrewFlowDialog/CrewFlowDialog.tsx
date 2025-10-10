@@ -129,11 +129,8 @@ const CrewFlowSelectionDialog: React.FC<CrewFlowSelectionDialogProps> = ({
   };
   
   // Refs for file inputs
-  const crewFileInputRef = useRef<HTMLInputElement>(null);
   const flowFileInputRef = useRef<HTMLInputElement>(null);
   const bulkFileInputRef = useRef<HTMLInputElement>(null);
-  const agentFileInputRef = useRef<HTMLInputElement>(null);
-  const taskFileInputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
     if (open) {
@@ -735,12 +732,7 @@ const CrewFlowSelectionDialog: React.FC<CrewFlowSelectionDialogProps> = ({
     }
   };
 
-  // Import functions
-  const handleImportCrewClick = () => {
-    if (crewFileInputRef.current) {
-      crewFileInputRef.current.click();
-    }
-  };
+
 
   const handleImportFlowClick = () => {
     if (flowFileInputRef.current) {
@@ -754,45 +746,7 @@ const CrewFlowSelectionDialog: React.FC<CrewFlowSelectionDialogProps> = ({
     }
   };
 
-  const handleImportCrew = async (event: ChangeEvent<HTMLInputElement>) => {
-    if (!event.target.files || event.target.files.length === 0) return;
-    
-    try {
-      setLoading(true);
-      setError(null);
-      setImportSuccess(null);
-      
-      const file = event.target.files[0];
-      const fileContents = await file.text();
-      const crewData = JSON.parse(fileContents);
-      
-      // Validate crew data
-      if (!crewData.name) {
-        throw new Error('Invalid crew data: missing name');
-      }
-      
-      // Save crew
-      await CrewService.saveCrew({
-        name: crewData.name,
-        nodes: crewData.nodes || [],
-        edges: crewData.edges || [],
-        agent_ids: crewData.agent_ids || [],
-        task_ids: crewData.task_ids || []
-      });
-      
-      await loadCrews();
-      setImportSuccess('Crew imported successfully');
-      
-      // Reset file input
-      event.target.value = '';
-    } catch (err) {
-      const error = err as Error;
-      console.error('Error importing crew:', error);
-      setError(`Failed to import crew: ${error.message}`);
-    } finally {
-      setLoading(false);
-    }
-  };
+
 
   const handleImportFlow = async (event: ChangeEvent<HTMLInputElement>) => {
     if (!event.target.files || event.target.files.length === 0) return;
@@ -834,140 +788,46 @@ const CrewFlowSelectionDialog: React.FC<CrewFlowSelectionDialogProps> = ({
     }
   };
 
-  const handleImportAgentsClick = () => {
-    if (agentFileInputRef.current) {
-      agentFileInputRef.current.click();
-    }
-  };
 
-  const handleImportTasksClick = () => {
-    if (taskFileInputRef.current) {
-      taskFileInputRef.current.click();
-    }
-  };
 
-  const handleImportAgents = async (event: ChangeEvent<HTMLInputElement>) => {
-    if (!event.target.files || event.target.files.length === 0) return;
-    
-    try {
-      setLoading(true);
-      setError(null);
-      setImportSuccess(null);
-      
-      const file = event.target.files[0];
-      const fileContents = await file.text();
-      const importData = JSON.parse(fileContents);
-      
-      // Support both single agent and multiple agents format
-      const agentsToImport = importData.agents || (importData.name ? [importData] : []);
-      
-      if (!Array.isArray(agentsToImport) || agentsToImport.length === 0) {
-        throw new Error('Invalid agent data: no agents found in file');
-      }
-      
-      let importedCount = 0;
-      for (const agent of agentsToImport) {
-        if (agent.name && agent.role) {
-          await AgentService.createAgent({
-            name: agent.name,
-            role: agent.role,
-            backstory: agent.backstory || '',
-            goal: agent.goal || '',
-            verbose: agent.verbose || false,
-            allow_delegation: agent.allow_delegation || false,
-            tools: agent.tools || [],
-            max_iter: agent.max_iter || 15,
-            max_rpm: agent.max_rpm || null,
-            llm: agent.llm || '',
-            cache: agent.cache !== undefined ? agent.cache : true,
-            allow_code_execution: agent.allow_code_execution || false,
-            code_execution_mode: agent.code_execution_mode || 'safe'
-          });
-          importedCount++;
-        }
-      }
-      
-      await loadAgents();
-      setImportSuccess(`Successfully imported ${importedCount} agent(s)`);
-      
-      // Reset file input
-      event.target.value = '';
-    } catch (err) {
-      const error = err as Error;
-      console.error('Error importing agents:', error);
-      setError(`Failed to import agents: ${error.message}`);
-    } finally {
-      setLoading(false);
-    }
-  };
 
-  const handleImportTasks = async (event: ChangeEvent<HTMLInputElement>) => {
-    if (!event.target.files || event.target.files.length === 0) return;
-    
-    try {
-      setLoading(true);
-      setError(null);
-      setImportSuccess(null);
-      
-      const file = event.target.files[0];
-      const fileContents = await file.text();
-      const importData = JSON.parse(fileContents);
-      
-      // Support both single task and multiple tasks format
-      const tasksToImport = importData.tasks || (importData.description ? [importData] : []);
-      
-      if (!Array.isArray(tasksToImport) || tasksToImport.length === 0) {
-        throw new Error('Invalid task data: no tasks found in file');
-      }
-      
-      let importedCount = 0;
-      for (const task of tasksToImport) {
-        if (task.description) {
-          await TaskService.createTask({
-            name: task.name || task.description.slice(0, 50),
-            description: task.description,
-            expected_output: task.expected_output || '',
-            tools: task.tools || [],
-            agent_id: task.agent_id || null,
-            async_execution: task.async_execution || false,
-            context: task.context || null,
-            config: task.config || {}
-          });
-          importedCount++;
-        }
-      }
-      
-      await loadTasks();
-      setImportSuccess(`Successfully imported ${importedCount} task(s)`);
-      
-      // Reset file input
-      event.target.value = '';
-    } catch (err) {
-      const error = err as Error;
-      console.error('Error importing tasks:', error);
-      setError(`Failed to import tasks: ${error.message}`);
-    } finally {
-      setLoading(false);
-    }
-  };
+
+
+
+
 
   const handleBulkImport = async (event: ChangeEvent<HTMLInputElement>) => {
     if (!event.target.files || event.target.files.length === 0) return;
-    
+
     try {
       setLoading(true);
       setError(null);
       setImportSuccess(null);
-      
+
       const file = event.target.files[0];
       const fileContents = await file.text();
-      const bulkData = JSON.parse(fileContents);
-      
+      let bulkData = JSON.parse(fileContents);
+
+      // Auto-detect single crew object and wrap it
+      // A single crew has: name, nodes, edges, and optionally agent_ids/task_ids
+      const isSingleCrew = bulkData.name &&
+                          bulkData.nodes &&
+                          Array.isArray(bulkData.nodes) &&
+                          bulkData.edges &&
+                          Array.isArray(bulkData.edges) &&
+                          !bulkData.crews &&
+                          !bulkData.flows;
+
+      if (isSingleCrew) {
+        console.log('Detected single crew object, wrapping in crews array');
+        bulkData = { crews: [bulkData] };
+      }
+
       // Validate bulk data
       if (!bulkData.crews && !bulkData.flows && !bulkData.agents && !bulkData.tasks) {
         throw new Error('Invalid import data: no valid data found');
       }
-      
+
       let importedCrews = 0;
       let importedFlows = 0;
       let importedAgents = 0;
@@ -1016,20 +876,39 @@ const CrewFlowSelectionDialog: React.FC<CrewFlowSelectionDialogProps> = ({
         }
       }
       
-      // Import crews
+      // Import crews (plans)
       if (Array.isArray(bulkData.crews)) {
-        for (const crew of bulkData.crews) {
-          if (crew.name) {
-            await CrewService.saveCrew({
-              name: crew.name,
-              nodes: crew.nodes || [],
-              edges: crew.edges || [],
-              agent_ids: crew.agent_ids || [],
-              task_ids: crew.task_ids || []
-            });
-            importedCrews++;
-          }
+        for (const c of bulkData.crews) {
+          const normalized = c?.crew ?? c;
+          const name = normalized.name
+            || normalized.title
+            || normalized.plan_name
+            || normalized.workflow_name
+            || `Imported Plan ${new Date().toISOString().slice(0,19).replace('T',' ')}`;
+          await CrewService.saveCrew({
+            name,
+            nodes: normalized.nodes || [],
+            edges: normalized.edges || [],
+            agent_ids: normalized.agent_ids || [],
+            task_ids: normalized.task_ids || []
+          });
+          importedCrews++;
         }
+      } else if (bulkData.crew) {
+        const normalized = bulkData.crew;
+        const name = normalized.name
+          || normalized.title
+          || normalized.plan_name
+          || normalized.workflow_name
+          || `Imported Plan ${new Date().toISOString().slice(0,19).replace('T',' ')}`;
+        await CrewService.saveCrew({
+          name,
+          nodes: normalized.nodes || [],
+          edges: normalized.edges || [],
+          agent_ids: normalized.agent_ids || [],
+          task_ids: normalized.task_ids || []
+        });
+        importedCrews++;
       }
       
       // Import flows
@@ -1082,37 +961,7 @@ const CrewFlowSelectionDialog: React.FC<CrewFlowSelectionDialogProps> = ({
   };
 
   // Export all
-  const handleExportAllCrews = async () => {
-    try {
-      setLoading(true);
-      setError(null);
-      
-      // Get all crews
-      const allCrews = await CrewService.getCrews();
-      
-      // Package in a format for export
-      const exportData = {
-        crews: allCrews,
-        exportDate: new Date().toISOString()
-      };
-      
-      // Export to file
-      const blob = new Blob([JSON.stringify(exportData, null, 2)], { type: 'application/json' });
-      const url = URL.createObjectURL(blob);
-      const link = document.createElement('a');
-      link.href = url;
-      link.download = `all_crews_export_${new Date().toISOString().slice(0, 10)}.json`;
-      document.body.appendChild(link);
-      link.click();
-      document.body.removeChild(link);
-      URL.revokeObjectURL(url);
-    } catch (error) {
-      console.error('Error exporting all crews:', error);
-      setError('Failed to export all crews');
-    } finally {
-      setLoading(false);
-    }
-  };
+
 
   const handleExportAllFlows = async () => {
     try {
@@ -1146,71 +995,9 @@ const CrewFlowSelectionDialog: React.FC<CrewFlowSelectionDialogProps> = ({
     }
   };
 
-  const handleExportAllAgents = async () => {
-    try {
-      setLoading(true);
-      setError(null);
-      
-      // Get all agents
-      const allAgents = await AgentService.listAgents();
-      
-      // Package in a format for export
-      const exportData = {
-        agents: allAgents,
-        exportedAt: new Date().toISOString(),
-        version: '1.0'
-      };
-      
-      // Create and download file
-      const blob = new Blob([JSON.stringify(exportData, null, 2)], { type: 'application/json' });
-      const url = URL.createObjectURL(blob);
-      const link = document.createElement('a');
-      link.href = url;
-      link.download = `agents_export_${new Date().toISOString().split('T')[0]}.json`;
-      document.body.appendChild(link);
-      link.click();
-      document.body.removeChild(link);
-      URL.revokeObjectURL(url);
-    } catch (error) {
-      console.error('Error exporting agents:', error);
-      setError('Failed to export agents');
-    } finally {
-      setLoading(false);
-    }
-  };
 
-  const handleExportAllTasks = async () => {
-    try {
-      setLoading(true);
-      setError(null);
-      
-      // Get all tasks
-      const allTasks = await TaskService.listTasks();
-      
-      // Package in a format for export
-      const exportData = {
-        tasks: allTasks,
-        exportedAt: new Date().toISOString(),
-        version: '1.0'
-      };
-      
-      // Create and download file
-      const blob = new Blob([JSON.stringify(exportData, null, 2)], { type: 'application/json' });
-      const url = URL.createObjectURL(blob);
-      const link = document.createElement('a');
-      link.href = url;
-      link.download = `tasks_export_${new Date().toISOString().split('T')[0]}.json`;
-      document.body.appendChild(link);
-      link.click();
-      document.body.removeChild(link);
-      URL.revokeObjectURL(url);
-    } catch (error) {
-      console.error('Error exporting tasks:', error);
-      setError('Failed to export tasks');
-    } finally {
-      setLoading(false);
-    }
-  };
+
+
 
   const handleExportEverything = async () => {
     try {
@@ -1407,43 +1194,23 @@ const CrewFlowSelectionDialog: React.FC<CrewFlowSelectionDialogProps> = ({
           <Box sx={{ width: '100%' }}>
             {showOnlyTab === undefined ? (
               // Show all tabs when opened from catalog
-              <Box sx={{ borderBottom: 1, borderColor: 'divider' }}>
+              <Box sx={{ borderBottom: 1, borderColor: 'divider', display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 2 }}>
                 <Tabs value={tabValue} onChange={handleTabChange} aria-label="catalog tabs">
-                  <Tab 
-                    icon={<PersonIcon />} 
-                    iconPosition="start" 
-                    label="Plans (New Tab)" 
-                    id="plan-tab-0" 
-                    aria-controls="tabpanel-0"
-                    sx={{ textTransform: 'none' }}
-                  />
-                  <Tab 
-                    icon={<GroupIcon />} 
-                    iconPosition="start" 
-                    label="Agents" 
-                    id="agent-tab-1" 
-                    aria-controls="tabpanel-1"
-                    sx={{ textTransform: 'none' }}
-                  />
-                  <Tab 
-                    icon={<AssignmentIcon />} 
-                    iconPosition="start" 
-                    label="Tasks" 
-                    id="task-tab-2" 
-                    aria-controls="tabpanel-2"
-                    sx={{ textTransform: 'none' }}
-                  />
+                  <Tab icon={<PersonIcon />} iconPosition="start" label="Plans" id="plan-tab-0" aria-controls="tabpanel-0" sx={{ textTransform: 'none' }} />
+                  <Tab icon={<GroupIcon />} iconPosition="start" label="Agents" id="agent-tab-1" aria-controls="tabpanel-1" sx={{ textTransform: 'none' }} />
+                  <Tab icon={<AssignmentIcon />} iconPosition="start" label="Tasks" id="task-tab-2" aria-controls="tabpanel-2" sx={{ textTransform: 'none' }} />
                   {crewAIFlowEnabled && (
-                    <Tab 
-                      icon={<AccountTreeIcon />} 
-                      iconPosition="start" 
-                      label="Flows" 
-                      id="flow-tab-3" 
-                      aria-controls="tabpanel-3" 
-                      sx={{ textTransform: 'none' }}
-                    />
+                    <Tab icon={<AccountTreeIcon />} iconPosition="start" label="Flows" id="flow-tab-3" aria-controls="tabpanel-3" sx={{ textTransform: 'none' }} />
                   )}
                 </Tabs>
+                <Box sx={{ display: 'flex', gap: 1 }}>
+                  <Button startIcon={<FileUploadIcon />} variant="outlined" size="small" onClick={handleBulkImportClick}>
+                    Import
+                  </Button>
+                  <Button startIcon={<DownloadIcon />} variant="outlined" size="small" onClick={handleExportEverything} disabled={crews.length === 0 && flows.length === 0 && agents.length === 0 && tasks.length === 0}>
+                    Export
+                  </Button>
+                </Box>
               </Box>
             ) : null}
 
@@ -1489,64 +1256,27 @@ const CrewFlowSelectionDialog: React.FC<CrewFlowSelectionDialogProps> = ({
               </Box>
               {showOnlyTab === undefined && (
                 <Box sx={{ ml: 2, display: 'flex', gap: 1 }}>
-                  {tabValue === 0 ? (
-                  <>
-                    <Button
-                      startIcon={<UploadIcon />}
-                      variant="outlined"
-                      size="small"
-                      onClick={handleImportCrewClick}
-                    >
-                      Import
-                    </Button>
-                    <Button
-                      startIcon={<DownloadIcon />}
-                      variant="outlined"
-                      size="small"
-                      onClick={handleExportAllCrews}
-                      disabled={crews.length === 0}
-                    >
-                      Export Plans
-                    </Button>
-                    <Button
-                      startIcon={<FileUploadIcon />}
-                      variant="outlined"
-                      size="small"
-                      onClick={handleBulkImportClick}
-                    >
-                      Import Everything
-                    </Button>
-                    <Button
-                      startIcon={<DownloadIcon />}
-                      variant="outlined"
-                      size="small"
-                      onClick={handleExportEverything}
-                      disabled={crews.length === 0 && flows.length === 0}
-                    >
-                      Export Everything
-                    </Button>
-                  </>
-                ) : tabValue === 3 ? (
-                  <>
-                    <Button
-                      startIcon={<UploadIcon />}
-                      variant="outlined"
-                      size="small"
-                      onClick={handleImportFlowClick}
-                    >
-                      Import
-                    </Button>
-                    <Button
-                      startIcon={<DownloadIcon />}
-                      variant="outlined"
-                      size="small"
-                      onClick={handleExportAllFlows}
-                      disabled={flows.length === 0}
-                    >
-                      Export Flows
-                    </Button>
-                  </>
-                ) : null}
+                  {tabValue === 3 ? (
+                    <>
+                      <Button
+                        startIcon={<UploadIcon />}
+                        variant="outlined"
+                        size="small"
+                        onClick={handleImportFlowClick}
+                      >
+                        Import
+                      </Button>
+                      <Button
+                        startIcon={<DownloadIcon />}
+                        variant="outlined"
+                        size="small"
+                        onClick={handleExportAllFlows}
+                        disabled={flows.length === 0}
+                      >
+                        Export Flows
+                      </Button>
+                    </>
+                  ) : null}
                 </Box>
               )}
             </Box>
@@ -1730,21 +1460,7 @@ const CrewFlowSelectionDialog: React.FC<CrewFlowSelectionDialogProps> = ({
                 >
                   Delete All
                 </Button>
-                <Button
-                  variant="outlined"
-                  onClick={handleImportAgentsClick}
-                  startIcon={<FileUploadIcon />}
-                >
-                  Import
-                </Button>
-                <Button
-                  variant="outlined"
-                  onClick={handleExportAllAgents}
-                  disabled={agents.length === 0 || loading}
-                  startIcon={<DownloadIcon />}
-                >
-                  Export Agents
-                </Button>
+
               </Box>
               <Divider sx={{ my: 2 }} />
               {loading ? (
@@ -1824,21 +1540,7 @@ const CrewFlowSelectionDialog: React.FC<CrewFlowSelectionDialogProps> = ({
                 >
                   Delete All
                 </Button>
-                <Button
-                  variant="outlined"
-                  onClick={handleImportTasksClick}
-                  startIcon={<FileUploadIcon />}
-                >
-                  Import
-                </Button>
-                <Button
-                  variant="outlined"
-                  onClick={handleExportAllTasks}
-                  disabled={tasks.length === 0 || loading}
-                  startIcon={<DownloadIcon />}
-                >
-                  Export Tasks
-                </Button>
+
               </Box>
               <Divider sx={{ my: 2 }} />
               {loading ? (
@@ -2057,13 +1759,6 @@ const CrewFlowSelectionDialog: React.FC<CrewFlowSelectionDialogProps> = ({
       {/* Hidden file inputs */}
       <input 
         type="file" 
-        ref={crewFileInputRef} 
-        style={{ display: 'none' }} 
-        accept=".json"
-        onChange={handleImportCrew}
-      />
-      <input 
-        type="file" 
         ref={flowFileInputRef} 
         style={{ display: 'none' }} 
         accept=".json"
@@ -2076,20 +1771,8 @@ const CrewFlowSelectionDialog: React.FC<CrewFlowSelectionDialogProps> = ({
         accept=".json"
         onChange={handleBulkImport}
       />
-      <input 
-        type="file" 
-        ref={agentFileInputRef} 
-        style={{ display: 'none' }} 
-        accept=".json"
-        onChange={handleImportAgents}
-      />
-      <input 
-        type="file" 
-        ref={taskFileInputRef} 
-        style={{ display: 'none' }} 
-        accept=".json"
-        onChange={handleImportTasks}
-      />
+
+
     </>
   );
 };

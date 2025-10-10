@@ -5,6 +5,7 @@ import { toast } from 'react-hot-toast';
 import { useTranslation } from 'react-i18next';
 import { runService } from '../../api/ExecutionHistoryService';
 import { logger } from '../../utils/logger';
+import { useGroupStore } from '../../store/groups';
 
 // Create a specialized logger for this module
 const historyLogger = logger.createChild('ExecutionHistory');
@@ -27,6 +28,9 @@ export const useRunHistory = () => {
     fetchRunHistory,
     setError
   } = useRunStatusStore();
+
+  // Get the current group ID from the store (reactive)
+  const currentGroupId = useGroupStore(state => state.currentGroupId);
 
   // Helper function to calculate duration for sorting
   const calculateSortDuration = (run: Run): number => {
@@ -159,23 +163,20 @@ export const useRunHistory = () => {
     // Ensure runHistory is an array
     const safeRunHistory = Array.isArray(runHistory) ? runHistory : [];
 
-    // Get the selected group ID from localStorage for additional client-side filtering
-    const selectedGroupId = localStorage.getItem('selectedGroupId');
-
     // Log for debugging
-    historyLogger.debug(`Filtering runs - Total: ${safeRunHistory.length}, Selected Group: ${selectedGroupId}`);
+    historyLogger.debug(`Filtering runs - Total: ${safeRunHistory.length}, Selected Group: ${currentGroupId}`);
 
     // Filter by group first (security filter)
     let groupFilteredRuns = safeRunHistory;
-    if (selectedGroupId) {
+    if (currentGroupId) {
       const beforeFilter = safeRunHistory.length;
       groupFilteredRuns = safeRunHistory.filter((run) => {
         // If the run has a group_id, it must match the selected workspace
         // If no group_id, check if it's an old run that should be filtered out
         if (run?.group_id) {
-          const matches = run.group_id === selectedGroupId;
+          const matches = run.group_id === currentGroupId;
           if (!matches) {
-            historyLogger.debug(`Filtering out run ${run.run_name} - group ${run.group_id} doesn't match ${selectedGroupId}`);
+            historyLogger.debug(`Filtering out run ${run.run_name} - group ${run.group_id} doesn't match ${currentGroupId}`);
           }
           return matches;
         }
@@ -187,7 +188,7 @@ export const useRunHistory = () => {
       historyLogger.debug(`Group filter applied: ${beforeFilter} → ${groupFilteredRuns.length} runs`);
     } else {
       // No selected group - this shouldn't happen in normal operation
-      historyLogger.warn('No selectedGroupId found - returning empty array for security');
+      historyLogger.warn('No currentGroupId found - returning empty array for security');
       groupFilteredRuns = [];
     }
 
@@ -200,7 +201,7 @@ export const useRunHistory = () => {
           return runName.includes(query);
         })
       : groupFilteredRuns;
-  }, [runHistory, searchQuery]);
+  }, [runHistory, searchQuery, currentGroupId]);
 
   const sortedRuns = useMemo(() => {
     // Make sure filteredRuns is an array
@@ -269,8 +270,12 @@ export const useRunHistory = () => {
 
   // Clear orphan runs and fetch fresh data when group changes
   useEffect(() => {
-    const selectedGroupId = localStorage.getItem('selectedGroupId');
-    historyLogger.info(`Group context initialized/changed: ${selectedGroupId}`);
+    if (!currentGroupId) {
+      historyLogger.info('No group selected yet, skipping fetch');
+      return;
+    }
+
+    historyLogger.info(`Group context initialized/changed: ${currentGroupId}`);
 
     // Clear any cached runs without group_id from the store
     const currentState = useRunStatusStore.getState();
@@ -280,7 +285,7 @@ export const useRunHistory = () => {
         historyLogger.debug(`Removing orphan run from cache: ${run.run_name}`);
         return false;
       }
-      if (run.group_id !== selectedGroupId) {
+      if (run.group_id !== currentGroupId) {
         historyLogger.debug(`Removing run from different group: ${run.run_name} (${run.group_id})`);
         return false;
       }
@@ -295,14 +300,14 @@ export const useRunHistory = () => {
         runHistory: cleanedHistory,
         activeRuns: Object.fromEntries(
           Object.entries(currentState.activeRuns)
-            .filter(([_, run]) => run.group_id === selectedGroupId)
+            .filter(([_, run]) => run.group_id === currentGroupId)
         )
       });
     }
 
     // Fetch fresh data
     fetchRuns();
-  }, [fetchRuns]);
+  }, [currentGroupId, fetchRuns]);
 
   return {
     runs: sortedRuns,

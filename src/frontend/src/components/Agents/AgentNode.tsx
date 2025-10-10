@@ -6,8 +6,6 @@ import DeleteIcon from '@mui/icons-material/Delete';
 import EditIcon from '@mui/icons-material/Edit';
 import CodeIcon from '@mui/icons-material/Code';
 import MemoryIcon from '@mui/icons-material/Memory';
-import FileIcon from '@mui/icons-material/FileUpload';
-import AttachFileIcon from '@mui/icons-material/AttachFile';
 import { Agent } from '../../api/AgentService';
 import AgentForm from './AgentForm';
 import { ToolService } from '../../api/ToolService';
@@ -15,6 +13,8 @@ import { Tool, KnowledgeSource } from '../../types/agent';
 import { Theme } from '@mui/material/styles';
 import { useTabDirtyState } from '../../hooks/workflow/useTabDirtyState';
 import { useAgentStore } from '../../store/agent';
+import { useUILayoutStore } from '../../store/uiLayout';
+import { useCrewExecutionStore } from '../../store/crewExecution';
 
 interface AgentNodeData {
   agentId: string;
@@ -64,6 +64,10 @@ const AgentNode: React.FC<{ data: AgentNodeData; id: string }> = ({ data, id }) 
   const { getAgent, updateAgent } = useAgentStore();
   const [agentData, setAgentData] = useState<Agent | null>(null);
 
+  // Get current layout orientation and process type
+  const layoutOrientation = useUILayoutStore(state => state.layoutOrientation);
+  const processType = useCrewExecutionStore(state => state.processType);
+
   // Load agent data using store
   useEffect(() => {
     if (data.agentId) {
@@ -104,7 +108,7 @@ const AgentNode: React.FC<{ data: AgentNodeData; id: string }> = ({ data, id }) 
     ));
   }, [id, setNodes, setEdges]);
 
-  const handleEditClick = async () => {
+  const handleEditClick = useCallback(async () => {
     try {
       // Don't manually close tooltips - let them close naturally
       document.activeElement && (document.activeElement as HTMLElement).blur();
@@ -154,7 +158,7 @@ const AgentNode: React.FC<{ data: AgentNodeData; id: string }> = ({ data, id }) 
     } catch (error) {
       console.error('Failed to fetch agent data:', error);
     }
-  };
+  }, [data.agentId, data.id, data.agent_id]);
 
   useEffect(() => {
     // Cleanup when dialog opens/closes if needed
@@ -176,10 +180,17 @@ const AgentNode: React.FC<{ data: AgentNodeData; id: string }> = ({ data, id }) 
     if (sortedTaskNodes.length > 0) {
       const targetNode = sortedTaskNodes[0];
 
+      // Get current layout orientation from store
+      const { layoutOrientation } = useUILayoutStore.getState();
+      const sourceHandle = layoutOrientation === 'vertical' ? 'bottom' : 'right';
+      const targetHandle = layoutOrientation === 'vertical' ? 'top' : 'left';
+
       const newEdge = {
         id: `${id}-${targetNode.id}`,
         source: id,
         target: targetNode.id,
+        sourceHandle,
+        targetHandle,
         type: 'default',
       };
 
@@ -255,6 +266,13 @@ const AgentNode: React.FC<{ data: AgentNodeData; id: string }> = ({ data, id }) 
     // Completely stop event propagation
     event.preventDefault();
     event.stopPropagation();
+
+    // If any MUI Dialog is open, ignore canvas node clicks to prevent click-through
+    const hasOpenDialog = document.querySelectorAll('.MuiDialog-root').length > 0;
+    if (hasOpenDialog) {
+      console.log('AgentNode click ignored because a dialog is open');
+      return;
+    }
 
     // Check if the click was on an interactive element
     const target = event.target as HTMLElement;
@@ -378,14 +396,9 @@ const AgentNode: React.FC<{ data: AgentNodeData; id: string }> = ({ data, id }) 
     return baseStyles;
   };
 
-  const hasFiles = data.knowledge_sources?.some(source =>
-    source.type === 'databricks_volume' ||
-    (source.type !== 'text' && source.type !== 'url' && source.fileInfo?.exists)
-  );
-
-  // Check if agent has DatabricksKnowledgeSearchTool
-  const hasKnowledgeSearchTool = data.tools?.includes('DatabricksKnowledgeSearchTool') ||
-                                  data.tools?.includes('36'); // Also check for tool ID
+  // Note: Knowledge source indicators removed from AgentNode
+  // Knowledge sources are now managed at task level
+  // Files are stored on agents but displayed on task nodes
 
   return (
     <Box
@@ -400,60 +413,65 @@ const AgentNode: React.FC<{ data: AgentNodeData; id: string }> = ({ data, id }) 
       data-nodetype="agent"
       data-selected={isSelected ? 'true' : 'false'}
     >
-      {/* Show attachment icon when agent has DatabricksKnowledgeSearchTool */}
-      {hasKnowledgeSearchTool && (
-        <Box
-          sx={{
-            position: 'absolute',
-            top: 4,
-            left: 4,
-            color: 'primary.main',
-            display: 'flex'
-          }}
-        >
-          <Tooltip
-            title="Has Knowledge Search capability for attached documents"
-            disableInteractive
-            placement="top"
-          >
-            <AttachFileIcon fontSize="small" />
-          </Tooltip>
-        </Box>
-      )}
 
-      {/* Legacy knowledge sources indicator (kept for backward compatibility) */}
-      {hasFiles && !hasKnowledgeSearchTool && (
-        <Box
-          sx={{
-            position: 'absolute',
-            top: 4,
-            left: 4,
-            color: 'success.main',
-            display: 'flex'
-          }}
-        >
-          <Tooltip
-            title={`Has ${data.knowledge_sources?.length || 0} knowledge source(s)`}
-            disableInteractive
-            placement="top"
-          >
-            <FileIcon fontSize="small" />
-          </Tooltip>
-        </Box>
-      )}
+      {/* Target handles - only visible in hierarchical mode */}
+      {/* Top handle - for manager connections in vertical layout */}
+      <Handle
+        type="target"
+        position={Position.Top}
+        id="top"
+        style={{
+          background: '#ff9800',
+          width: '7px',
+          height: '7px',
+          opacity: (layoutOrientation === 'vertical' && processType === 'hierarchical') ? 1 : 0,
+          pointerEvents: (layoutOrientation === 'vertical' && processType === 'hierarchical') ? 'all' : 'none'
+        }}
+      />
 
+      {/* Left handle - for manager connections in horizontal layout */}
+      <Handle
+        type="target"
+        position={Position.Left}
+        id="left"
+        style={{
+          background: '#ff9800',
+          width: '7px',
+          height: '7px',
+          opacity: (layoutOrientation === 'horizontal' && processType === 'hierarchical') ? 1 : 0,
+          pointerEvents: (layoutOrientation === 'horizontal' && processType === 'hierarchical') ? 'all' : 'none'
+        }}
+      />
+
+      {/* Source handles - for task connections */}
+      {/* Bottom handle - visible only in vertical layout */}
       <Handle
         type="source"
         position={Position.Bottom}
         id="bottom"
-        style={{ background: '#2196f3', width: '7px', height: '7px' }}
+        style={{
+          background: '#2196f3',
+          width: '7px',
+          height: '7px',
+          opacity: layoutOrientation === 'vertical' ? 1 : 0,
+          pointerEvents: layoutOrientation === 'vertical' ? 'all' : 'none'
+        }}
         onDoubleClick={handleDoubleClick}
       />
+
+      {/* Right handle - visible only in horizontal layout */}
       <Handle
         type="source"
         position={Position.Right}
         id="right"
-        style={{ background: '#2196f3', width: '7px', height: '7px' }}
+        style={{
+          background: '#2196f3',
+          width: '7px',
+          height: '7px',
+          opacity: layoutOrientation === 'horizontal' ? 1 : 0,
+          pointerEvents: layoutOrientation === 'horizontal' ? 'all' : 'none'
+        }}
+        onDoubleClick={handleDoubleClick}
       />
 
 
@@ -592,13 +610,13 @@ const AgentNode: React.FC<{ data: AgentNodeData; id: string }> = ({ data, id }) 
       </Box>
 
 
-      {Boolean((data as any)?.loading) && (
+      {Boolean((data as Record<string, unknown>)?.loading) && (
         <Box
           sx={{
             position: 'absolute',
             inset: 0,
             borderRadius: '12px',
-            background: (theme: any) => theme.palette.mode === 'light'
+            background: (theme: { palette: { mode: string } }) => theme.palette.mode === 'light'
               ? 'linear-gradient(180deg, rgba(255,255,255,0.6), rgba(255,255,255,0.4))'
               : 'linear-gradient(180deg, rgba(0,0,0,0.3), rgba(0,0,0,0.2))',
             backdropFilter: 'blur(1px)',

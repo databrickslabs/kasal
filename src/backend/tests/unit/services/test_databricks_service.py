@@ -644,8 +644,7 @@ class TestDatabricksService:
         mock_databricks_config.apps_enabled = False
         databricks_service.repository.get_active_config.return_value = mock_databricks_config
 
-        with patch('src.utils.databricks_auth.is_databricks_apps_environment', return_value=True), \
-             patch('src.utils.databricks_auth.get_databricks_auth_headers', new_callable=AsyncMock) as mock_auth, \
+        with patch('src.utils.databricks_auth.get_databricks_auth_headers', new_callable=AsyncMock) as mock_auth, \
              patch('requests.get') as mock_get:
 
             mock_auth.return_value = ({"Authorization": "Bearer oauth-token"}, None)
@@ -665,8 +664,7 @@ class TestDatabricksService:
         mock_databricks_config.apps_enabled = False
         databricks_service.repository.get_active_config.return_value = mock_databricks_config
 
-        with patch('src.utils.databricks_auth.is_databricks_apps_environment', return_value=True), \
-             patch('src.utils.databricks_auth.get_databricks_auth_headers', new_callable=AsyncMock) as mock_auth:
+        with patch('src.utils.databricks_auth.get_databricks_auth_headers', new_callable=AsyncMock) as mock_auth:
 
             mock_auth.return_value = (None, "OAuth failed")
 

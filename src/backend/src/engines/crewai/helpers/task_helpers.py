@@ -309,7 +309,7 @@ async def create_task(
                         tool_override = task_tool_configs.get(tool_name, {})
                         
                         # Debug logging for tool configs
-                        if tool_name in ["GenieTool", "SerperDevTool"]:
+                        if tool_name in ["GenieTool", "SerperDevTool", "DatabricksKnowledgeSearchTool"]:
                             logger.info(f"Task {task_key} - {tool_name} task_tool_configs: {task_tool_configs}")
                             logger.info(f"Task {task_key} - {tool_name} tool_override: {tool_override}")
                         

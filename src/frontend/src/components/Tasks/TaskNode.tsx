@@ -8,12 +8,14 @@ import EditIcon from '@mui/icons-material/Edit';
 import CloseIcon from '@mui/icons-material/Close';
 import CheckCircleIcon from '@mui/icons-material/CheckCircle';
 import ErrorIcon from '@mui/icons-material/Error';
+import AttachFileIcon from '@mui/icons-material/AttachFile';
 import { Task } from '../../api/TaskService';
 import { ToolService, Tool } from '../../api/ToolService';
 import TaskForm from './TaskForm';
 import { Theme } from '@mui/material/styles';
 import { useTabDirtyState } from '../../hooks/workflow/useTabDirtyState';
 import { useTaskExecutionStore } from '../../store/taskExecutionStore';
+import { useUILayoutStore } from '../../store/uiLayout';
 
 export interface TaskNodeData {
   label?: string;
@@ -90,6 +92,9 @@ const TaskNode: React.FC<TaskNodeProps> = ({ data, id }) => {
 
   // Tab dirty state management
   const { markCurrentTabDirty } = useTabDirtyState();
+
+  // Get current layout orientation
+  const layoutOrientation = useUILayoutStore(state => state.layoutOrientation);
 
   // Task execution state - try multiple ID formats for compatibility
   const taskStatus = useTaskExecutionStore(state => {
@@ -264,6 +269,8 @@ const TaskNode: React.FC<TaskNodeProps> = ({ data, id }) => {
           id: `${id}-${taskNodeBelow.id}`,
           source: id,
           target: taskNodeBelow.id,
+          sourceHandle: 'right',
+          targetHandle: 'left',
           type: 'default',
           animated: true, // This will make it look different from agent-task connections
         };
@@ -303,7 +310,7 @@ const TaskNode: React.FC<TaskNodeProps> = ({ data, id }) => {
         toggleSelection();
       }
     }
-  }, [toggleSelection, handleEditClick]);
+  }, [id, toggleSelection, handleEditClick]);
 
   // Handle context menu (right-click) to prevent browser default menu
   const handleContextMenu = useCallback((event: React.MouseEvent) => {
@@ -446,20 +453,38 @@ const TaskNode: React.FC<TaskNodeProps> = ({ data, id }) => {
     return taskData;
   };
 
+  // Check if task has DatabricksKnowledgeSearchTool
+  const hasKnowledgeSearchTool = data.tools?.includes('DatabricksKnowledgeSearchTool') ||
+                                  data.tools?.includes('36'); // Also check for tool ID
+
   return (
     <>
+      {/* Top handle - visible only in vertical layout */}
       <Handle
         type="target"
         position={Position.Top}
         id="top"
-        style={{ background: '#2196f3', width: '7px', height: '7px' }}
+        style={{
+          background: '#2196f3',
+          width: '7px',
+          height: '7px',
+          opacity: layoutOrientation === 'vertical' ? 1 : 0,
+          pointerEvents: layoutOrientation === 'vertical' ? 'all' : 'none'
+        }}
       />
 
+      {/* Left handle - visible only in horizontal layout */}
       <Handle
         type="target"
         position={Position.Left}
         id="left"
-        style={{ background: '#2196f3', width: '7px', height: '7px' }}
+        style={{
+          background: '#2196f3',
+          width: '7px',
+          height: '7px',
+          opacity: layoutOrientation === 'horizontal' ? 1 : 0,
+          pointerEvents: layoutOrientation === 'horizontal' ? 'all' : 'none'
+        }}
       />
       <Box
         sx={getTaskStyles()}
@@ -471,6 +496,28 @@ const TaskNode: React.FC<TaskNodeProps> = ({ data, id }) => {
         data-nodetype="task"
         data-selected={isSelected ? 'true' : 'false'}
       >
+        {/* Knowledge source indicator - shows when task has knowledge search tool */}
+        {hasKnowledgeSearchTool && (
+          <Box
+            sx={{
+              position: 'absolute',
+              top: 4,
+              left: 4,
+              color: 'primary.main',
+              display: 'flex',
+              zIndex: 5
+            }}
+          >
+            <Tooltip
+              title="Task has knowledge search capability"
+              disableInteractive
+              placement="top"
+            >
+              <AttachFileIcon fontSize="small" />
+            </Tooltip>
+          </Box>
+        )}
+
         {taskStatus && (
           <Box
             sx={{
@@ -563,13 +610,13 @@ const TaskNode: React.FC<TaskNodeProps> = ({ data, id }) => {
           )}
         </Typography>
 
-        {Boolean((data as any)?.loading) && (
+        {Boolean((data as Record<string, unknown>)?.loading) && (
           <Box
             sx={{
               position: 'absolute',
               inset: 0,
               borderRadius: '8px',
-              background: (theme: any) => theme.palette.mode === 'light'
+              background: (theme: { palette: { mode: string } }) => theme.palette.mode === 'light'
                 ? 'linear-gradient(90deg, rgba(255,255,255,0.35) 25%, rgba(255,255,255,0.6) 37%, rgba(255,255,255,0.35) 63%)'
                 : 'linear-gradient(90deg, rgba(255,255,255,0.08) 25%, rgba(255,255,255,0.16) 37%, rgba(255,255,255,0.08) 63%)',
               backgroundSize: '400% 100%',

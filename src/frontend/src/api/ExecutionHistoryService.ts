@@ -371,6 +371,10 @@ export class RunService {
       inputs,
       result: executionItem.result as Record<string, OutputDataType> | undefined,
       error: executionItem.error as string | undefined,
+      // MLflow integration fields
+      mlflow_trace_id: executionItem.mlflow_trace_id as string | undefined,
+      mlflow_experiment_name: executionItem.mlflow_experiment_name as string | undefined,
+      mlflow_evaluation_run_id: executionItem.mlflow_evaluation_run_id as string | undefined,
     };
   }
 

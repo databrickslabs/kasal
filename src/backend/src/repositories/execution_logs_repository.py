@@ -60,9 +60,6 @@ class ExecutionLogsRepository:
             # Just flush, don't commit - let the session manager handle commits
             await self.session.flush()
 
-            # Refresh to get the ID
-            await self.session.refresh(log)
-
             return log
         except Exception as e:
             logger.error(f"[ExecutionLogsRepository.create_log] Error creating log: {e}", exc_info=True)
@@ -121,14 +118,27 @@ class ExecutionLogsRepository:
         """
         if timestamp is None:
             return None
-            
-        # If timestamp has timezone information
-        if hasattr(timestamp, 'tzinfo') and timestamp.tzinfo is not None:
-            # Convert to UTC and make it timezone-naive
-            return timestamp.astimezone(timezone.utc).replace(tzinfo=None)
-        
-        # Already timezone-naive
-        return timestamp
+
+        try:
+            # If it's already a datetime object (aware or naive)
+            if isinstance(timestamp, datetime):
+                dt = timestamp
+            # If it's a string, try to parse ISO 8601; if it fails, ignore
+            elif isinstance(timestamp, str):
+                try:
+                    dt = datetime.fromisoformat(timestamp)
+                except Exception:
+                    return None
+            else:
+                return None
+
+            # Normalize to timezone-naive UTC
+            if getattr(dt, 'tzinfo', None) is not None:
+                return dt.astimezone(timezone.utc).replace(tzinfo=None)
+            return dt
+        except Exception:
+            # On any unexpected input, fall back to None so model default applies
+            return None
     
     
     

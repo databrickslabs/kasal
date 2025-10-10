@@ -6,7 +6,7 @@ import logging
 from typing import Any, Callable, List, TypeVar, Coroutine
 
 from src.core.logger import LoggerManager
-from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine, async_sessionmaker
+from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 # Get logger from the centralized logging system
 logger = LoggerManager.get_instance().system
@@ -16,54 +16,63 @@ T = TypeVar('T')
 
 async def execute_db_operation_with_fresh_engine(operation: Callable[[AsyncSession], Coroutine[Any, Any, T]]) -> T:
     """
-    Execute a database operation with a fresh engine and session to avoid event loop issues.
-    
+    Execute a database operation using the global engine to avoid corruption.
+
+    IMPORTANT: Reuses the global engine instead of creating fresh engines.
+    This prevents:
+    - WAL checkpoint interruption during engine disposal
+    - Connection lifecycle conflicts with StaticPool
+    - Silent data loss from incomplete checkpoints
+    - "file is not a database" corruption errors
+
+    Based on 2025 SQLite best practices research which showed that:
+    - Creating and disposing StaticPool engines repeatedly violates its design
+    - Engine disposal can interrupt WAL checkpoint operations
+    - Multiple competing engines cause checkpoint conflicts
+    - Proper pattern: Reuse long-lived global engine
+
+    For SQLite: Uses the global StaticPool engine (single connection)
+    For PostgreSQL: Uses dedicated NullPool engine for background tasks
+
     Args:
         operation: A callable that takes an AsyncSession and returns a coroutine
-        
+
     Returns:
         The result of the operation
-        
+
     Example:
         ```
         async def get_user(session, user_id):
             # Database operation
             return await session.execute(...)
-            
+
         result = await execute_db_operation_with_fresh_engine(
             lambda session: get_user(session, 123)
         )
         ```
     """
-    # Import here to avoid circular imports
-    from src.config.settings import settings
-    
-    # Create a new engine for this operation
-    engine = create_async_engine(
-        str(settings.DATABASE_URI),
-        echo=False,
-        future=True,
-        pool_pre_ping=True,
-    )
-    
-    # Create a new session factory
+    # Import the global nullpool_engine from session.py
+    # For SQLite: nullpool_engine = engine (same StaticPool)
+    # For PostgreSQL: nullpool_engine = separate NullPool for background tasks
+    from src.db.session import nullpool_engine
+
+    # Create session factory using the EXISTING global engine
+    # No engine creation, no disposal - engine lifecycle managed by session.py
     session_factory = async_sessionmaker(
-        engine,
+        nullpool_engine,  # Reuse existing engine
         expire_on_commit=False,
         autoflush=False,
     )
-    
+
     try:
         # Create a session and execute the operation
         async with session_factory() as session:
             result = await operation(session)
             return result
     except Exception as e:
-        logger.error(f"Error executing DB operation with fresh engine: {str(e)}")
+        logger.error(f"Error executing DB operation: {str(e)}", exc_info=True)
         raise
-    finally:
-        # Always dispose the engine
-        await engine.dispose()
+    # No engine disposal - engine lifecycle managed by session.py
 
 def create_and_run_loop(coroutine: Any) -> Any:
     """Create a new event loop, run the coroutine, and clean up properly."""

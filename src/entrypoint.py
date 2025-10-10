@@ -8,26 +8,30 @@ It starts the FastAPI backend server and serves the frontend static files.
 
 import os
 import sys
-import logging
 import argparse
 from pathlib import Path
+
+# Add backend directory to path FIRST
+project_root = Path(__file__).parent
+backend_dir = project_root / "backend"
+if str(backend_dir) not in sys.path:
+    sys.path.insert(0, str(backend_dir))
+
+# Configure logging BEFORE any other imports
+from src.config.logging import configure_early_logging, CentralizedLoggingConfig
+configure_early_logging()
+
+# Now import everything else
+import logging
+import asyncio
+from sqlalchemy import text
 from fastapi import FastAPI, Request, HTTPException
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import HTMLResponse, FileResponse
 from fastapi.middleware.cors import CORSMiddleware
 from starlette.middleware.base import BaseHTTPMiddleware
-import asyncio
-from sqlalchemy import text
 
-# Configure logging
-logging.basicConfig(
-    level=logging.INFO,
-    format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
-    handlers=[
-        logging.StreamHandler()
-    ]
-)
-
+# Get logger after configuration
 logger = logging.getLogger("kasal")
 
 def create_parser():
@@ -53,6 +57,16 @@ def create_parser():
         "--reload",
         action="store_true",
         help="Enable auto-reload for development"
+    )
+    parser.add_argument(
+        "-d", "--debug",
+        action="store_true",
+        help="Enable debug mode for all loggers (including SQLAlchemy)"
+    )
+    parser.add_argument(
+        "--environment",
+        choices=["dev", "prod"],
+        help="Environment mode (dev or prod)"
     )
     return parser
 
@@ -217,6 +231,17 @@ def run_app():
     parser = create_parser()
     args = parser.parse_args()
 
+    # Enable debug mode if requested
+    if args.debug:
+        os.environ["KASAL_DEBUG_ALL"] = "true"
+        os.environ["SQL_DEBUG"] = "true"
+        os.environ["KASAL_LOG_DATABASE"] = "DEBUG"
+
+    # Set DATABRICKS_APP_NAME for dev environment
+    if args.environment == "dev":
+        os.environ["DATABRICKS_APP_NAME"] = "kasal-local-test"
+        logger.info("Development environment detected - setting DATABRICKS_APP_NAME=kasal-local-test")
+
     logger.info("Starting Kasal application")
 
     # Get project root directory
@@ -257,10 +282,7 @@ def run_app():
 
         logger.info(f"Using SQLite database at: {db_path}")
 
-    # Add the backend directory to Python path to handle src imports
-    backend_dir = project_root / "backend"
-    if str(backend_dir) not in sys.path:
-        sys.path.insert(0, str(backend_dir))
+    # Backend dir was already added at the top of the file, no need to add again
 
     try:
         # Import the main module directly
@@ -336,6 +358,12 @@ def run_app():
                 async def serve_robots():
                     return FileResponse(robots_txt)
 
+            # Serve Kasal icon 16px image
+            kasal_icon_16 = os.path.join(frontend_static_dir, "kasal-icon-16.png")
+            if os.path.exists(kasal_icon_16):
+                @app.get("/kasal-icon-16.png")
+                async def serve_kasal_icon_16():
+                    return FileResponse(kasal_icon_16)
 
             # Serve markdown files from docs directory
             docs_dir = os.path.join(frontend_static_dir, "docs")

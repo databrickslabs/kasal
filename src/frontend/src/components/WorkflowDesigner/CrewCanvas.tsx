@@ -33,6 +33,7 @@ import { useCrewFlowHandlers } from '../../hooks/workflow/useCrewFlowHandlers';
 import { useToolHandlers } from '../../hooks/workflow/useToolHandlers';
 import { useCanvasHandlers } from '../../hooks/workflow/useCanvasHandlers';
 import { useDialogHandlers } from '../../hooks/workflow/useDialogHandlers';
+import ManagerNodeController from './ManagerNodeController';
 import RightSidebar from './RightSidebar';
 
 // Node and edge types are imported from flow-config
@@ -57,6 +58,8 @@ const edgeTypes = importedEdgeTypes;
 interface CrewCanvasProps {
   nodes: Node[];
   edges: Edge[];
+  setNodes: (nodes: Node[] | ((nodes: Node[]) => Node[])) => void;
+  setEdges: (edges: Edge[] | ((edges: Edge[]) => Edge[])) => void;
   onNodesChange: (changes: NodeChange[]) => void;
   onEdgesChange: (changes: EdgeChange[]) => void;
   onConnect: (connection: Connection) => void;
@@ -94,6 +97,8 @@ interface CrewCanvasProps {
 const CrewCanvas: React.FC<CrewCanvasProps> = ({
   nodes,
   edges,
+  setNodes,
+  setEdges,
   onNodesChange,
   onEdgesChange,
   onConnect,
@@ -101,14 +106,14 @@ const CrewCanvas: React.FC<CrewCanvasProps> = ({
   onPaneContextMenu,
   onInit,
   handleUIAwareFitView,
-  planningEnabled,
-  setPlanningEnabled,
-  reasoningEnabled,
-  setReasoningEnabled,
-  schemaDetectionEnabled,
-  setSchemaDetectionEnabled,
-  selectedModel,
-  setSelectedModel,
+  planningEnabled: _planningEnabled,
+  setPlanningEnabled: _setPlanningEnabled,
+  reasoningEnabled: _reasoningEnabled,
+  setReasoningEnabled: _setReasoningEnabled,
+  schemaDetectionEnabled: _schemaDetectionEnabled,
+  setSchemaDetectionEnabled: _setSchemaDetectionEnabled,
+  selectedModel: _selectedModelProp,
+  setSelectedModel: _setSelectedModelProp,
   onOpenLogsDialog,
   onToggleChat,
   isChatOpen,
@@ -117,8 +122,8 @@ const CrewCanvas: React.FC<CrewCanvasProps> = ({
   setIsFlowDialogOpen,
   showRunHistory,
   executionHistoryHeight = 200,
-  onOpenTutorial,
-  onOpenConfiguration
+  onOpenTutorial: _onOpenTutorial,
+  onOpenConfiguration: _onOpenConfiguration
 }) => {
 
   const [isRendering, setIsRendering] = useState(true);
@@ -158,7 +163,7 @@ const CrewCanvas: React.FC<CrewCanvasProps> = ({
   }, []);
   
   const errorStore = useErrorStore();
-  const runStatusStore = useRunStatusStore();
+  const _runStatusStore = useRunStatusStore();
   
   const fetchAgents = useCallback(async () => {
     try {
@@ -353,18 +358,38 @@ const CrewCanvas: React.FC<CrewCanvasProps> = ({
   }, [errorStore]);
 
   const nodesWithDimensions = React.useMemo(() => {
+    console.log('[CrewCanvas] Filtering nodes:', {
+      totalNodes: nodes.length,
+      nodeTypes: nodes.map(n => ({ id: n.id, type: n.type }))
+    });
+
     // Filter out any flow-related nodes first
     const crewNodes = nodes.filter(node => {
       // Exclude flow-related nodes
       if (!node || typeof node !== 'object') return false;
-      
+
       const nodeType = node.type?.toLowerCase() || '';
-      return nodeType === 'agentnode' || nodeType === 'tasknode';
+      const isIncluded = nodeType === 'agentnode' || nodeType === 'tasknode' || nodeType === 'managernode';
+
+      if (node.type === 'managerNode') {
+        console.log('[CrewCanvas] Manager node filter check:', {
+          type: node.type,
+          lowercase: nodeType,
+          isIncluded
+        });
+      }
+
+      return isIncluded;
+    });
+
+    console.log('[CrewCanvas] Filtered nodes:', {
+      count: crewNodes.length,
+      hasManager: crewNodes.some(n => n.type === 'managerNode')
     });
 
     return crewNodes.map(node => {
-      const defaultWidth = node.type === 'agentNode' ? 170 : 270;
-      const defaultHeight = node.type === 'agentNode' ? 170 : 135;
+      const defaultWidth = node.type === 'agentNode' ? 170 : node.type === 'managerNode' ? 200 : 270;
+      const defaultHeight = node.type === 'agentNode' ? 170 : node.type === 'managerNode' ? 150 : 135;
       
       if (!node.style || (!node.style.width && !node.style.height)) {
         return {
@@ -411,45 +436,91 @@ const CrewCanvas: React.FC<CrewCanvasProps> = ({
   const crewEdges = React.useMemo(() => {
     try {
       const crewNodeIds = new Set(nodes.map(node => node.id));
-      
+
+      console.log('[CrewCanvas] Building crewEdges:', {
+        totalNodes: nodes.length,
+        totalEdges: edges.length,
+        nodeIds: Array.from(crewNodeIds),
+        hasManagerNode: crewNodeIds.has('manager-node')
+      });
+
       // First, deduplicate edges by creating a Map with edge key
       const edgeMap = new Map<string, Edge>();
-      
+
       edges.forEach(edge => {
-        if (edge && 
+        const isManagerEdge = edge.source === 'manager-node' || edge.target === 'manager-node';
+
+        if (edge &&
             typeof edge === 'object' &&
-            edge.source && 
-            edge.target && 
-            crewNodeIds.has(edge.source) && 
+            edge.source &&
+            edge.target &&
+            crewNodeIds.has(edge.source) &&
             crewNodeIds.has(edge.target)) {
-          
+
           // Create a unique key for the edge
           const edgeKey = `${edge.source}-${edge.target}-${edge.sourceHandle || 'default'}-${edge.targetHandle || 'default'}`;
-          
+
           // Only keep the first occurrence of each edge
           if (!edgeMap.has(edgeKey)) {
-            edgeMap.set(edgeKey, edge);
+            // Ensure all edges have animated property set correctly
+            // Task-to-task edges should always be animated
+            const isTaskToTask = edge.source.startsWith('task-') && edge.target.startsWith('task-');
+            const isAgentToTask = edge.source.startsWith('agent-') && edge.target.startsWith('task-');
+
+            // Set animated to true for all agent-task and task-task edges
+            const enhancedEdge = {
+              ...edge,
+              animated: isTaskToTask || isAgentToTask ? true : (edge.animated || false)
+            };
+
+            edgeMap.set(edgeKey, enhancedEdge);
+
+            if (isManagerEdge) {
+              console.log('[CrewCanvas] Added manager edge:', edgeKey);
+            }
           }
+        } else if (isManagerEdge) {
+          console.log('[CrewCanvas] Manager edge filtered out:', {
+            id: edge.id,
+            source: edge.source,
+            target: edge.target,
+            hasSource: crewNodeIds.has(edge.source),
+            hasTarget: crewNodeIds.has(edge.target)
+          });
         }
       });
       
       // Convert map back to array
       const uniqueEdges = Array.from(edgeMap.values());
-      
-      // Apply animation to edges when jobs are running
-      const edgesWithAnimation = uniqueEdges.map(edge => ({
+
+      // Ensure edge type is set and preserve animated property and ID
+      const edgesWithType = uniqueEdges.map(edge => ({
         ...edge,
+        id: edge.id, // Explicitly preserve ID
         type: edge.type || 'default', // Ensure edge type is set
-        animated: runStatusStore.hasRunningJobs // Make edges animated when jobs are running
+        // Preserve the animated property from the edge (don't override it)
       }));
-      
-      
-      return edgesWithAnimation;
+
+      console.log('[CrewCanvas] Final edges:', edgesWithType.length, 'Manager edges:', edgesWithType.filter(e => e.source === 'manager-node').length);
+      console.log('[CrewCanvas] Edge IDs:', edgesWithType.map(e => e.id));
+
+      return edgesWithType;
     } catch (error) {
 
       return [];
     }
-  }, [edges, nodes, runStatusStore.hasRunningJobs]); // Add hasRunningJobs to dependencies
+  }, [edges, nodes]); // Removed runStatusStore.hasRunningJobs dependency
+
+  // Debug: Log what's being passed to ReactFlow
+  useEffect(() => {
+    console.log('[CrewCanvas] Rendering with:', {
+      nodes: nodesWithDimensions.length,
+      edges: crewEdges.length,
+      nodeTypes: nodesWithDimensions.map(n => n.type),
+      edgeIds: crewEdges.map(e => e.id),
+      managerEdges: crewEdges.filter(e => e.source === 'manager-node').length
+    });
+  }, [nodesWithDimensions, crewEdges]);
 
   const _handleDeleteSelected = useCallback((selectedNodes: Node[], selectedEdges: Edge[]) => {
     // First, remove the selected nodes
@@ -660,8 +731,8 @@ const CrewCanvas: React.FC<CrewCanvasProps> = ({
           selectNodesOnDrag={true}
           selectionOnDrag={true}
           panOnDrag={[1, 2]}
-          translateExtent={[[-2000, -2000], [3000, 3000]]}
-          nodeExtent={[[-2000, -2000], [3000, 3000]]}
+          translateExtent={[[-10000, -10000], [10000, 10000]]}
+          nodeExtent={[[-10000, -10000], [10000, 10000]]}
           snapToGrid={false}
           snapGrid={[15, 15]}
           multiSelectionKeyCode="Shift"
@@ -677,7 +748,13 @@ const CrewCanvas: React.FC<CrewCanvasProps> = ({
             variant={BackgroundVariant.Dots}
           />
 
-
+          {/* Manager node controller - handles automatic creation/removal based on process type */}
+          <ManagerNodeController
+            nodes={nodes}
+            edges={edges}
+            setNodes={setNodes}
+            setEdges={setEdges}
+          />
 
           <RightSidebar
             onOpenLogsDialog={onOpenLogsDialog}
@@ -787,6 +864,7 @@ const CrewCanvas: React.FC<CrewCanvasProps> = ({
                 source: sourceNodeId,
                 target: targetNodeId,
                 type: 'default',
+                animated: true,
                 sourceHandle: 'right',
                 targetHandle: 'left'
               });
@@ -801,7 +879,7 @@ const CrewCanvas: React.FC<CrewCanvasProps> = ({
             handleExecuteCrewButtonClick();
           }
         }}
-        selectedModel={selectedModel}
+        selectedModel={_selectedModel}
         tools={tools.map(tool => ({
           ...tool,
           icon: tool.icon || ''

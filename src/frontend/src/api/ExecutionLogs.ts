@@ -57,8 +57,8 @@ class ExecutionLogService {
         timestamp: log.timestamp,
         type: 'historical'
       }));
-    } catch (error: any) {
-      if (error.response?.status === 404) {
+    } catch (error: unknown) {
+      if (error instanceof Error && 'response' in error && (error as any).response?.status === 404) {
         console.warn(`No logs found for job ${jobId}`);
         return [];
       }
@@ -98,7 +98,7 @@ class ExecutionLogService {
           const data = JSON.parse(event.data);
           
           // Check if the content is a JSON string containing task status update
-          let parsedContent: any = null;
+          let parsedContent: Record<string, unknown> | null = null;
           try {
             if (typeof data.content === 'string' && data.content.includes('"type":"task_status_update"')) {
               parsedContent = JSON.parse(data.content);
@@ -112,19 +112,21 @@ class ExecutionLogService {
             // Import the store dynamically to avoid circular dependencies
             import('../store/taskExecutionStore').then(({ useTaskExecutionStore }) => {
               const { setTaskState } = useTaskExecutionStore.getState();
-              
-              const taskId = parsedContent.task_id || `task_${parsedContent.task_name}`;
-              const status = parsedContent.event_type === 'TASK_STARTED' ? 'running' :
-                            parsedContent.event_type === 'TASK_COMPLETED' ? 'completed' : 
-                            'failed';
-              
-              setTaskState(taskId, {
-                status,
-                task_name: parsedContent.task_name,
-                [`${status === 'running' ? 'started' : status}_at`]: parsedContent.timestamp
-              });
-              
-              console.log(`Task status update: ${taskId} is now ${status}`);
+
+              if (parsedContent) {
+                const taskId = (parsedContent as any).task_id || `task_${(parsedContent as any).task_name}`;
+                const status = (parsedContent as any).event_type === 'TASK_STARTED' ? 'running' :
+                              (parsedContent as any).event_type === 'TASK_COMPLETED' ? 'completed' :
+                              'failed';
+
+                setTaskState(taskId, {
+                  status,
+                  task_name: (parsedContent as any).task_name,
+                  [`${status === 'running' ? 'started' : status}_at`]: (parsedContent as any).timestamp
+                });
+
+                console.log(`Task status update: ${taskId} is now ${status}`);
+              }
             });
             
             // Also emit event for other listeners
@@ -240,7 +242,7 @@ class ExecutionLogService {
     };
   }
 
-  onTaskStatus(jobId: string, callback: (status: any) => void): () => void {
+  onTaskStatus(jobId: string, callback: (status: Record<string, unknown>) => void): () => void {
     const eventName = `task-status-${jobId}`;
     this.eventEmitter.on(eventName, callback);
     return () => {

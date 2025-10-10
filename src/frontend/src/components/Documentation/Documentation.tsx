@@ -42,6 +42,7 @@ const docSections: DocSection[] = [
   {
     label: 'Development',
     items: [
+      { label: 'Code Structure Guide', file: 'CODE_STRUCTURE_GUIDE' },
       { label: 'Developer Guide', file: 'DEVELOPER_GUIDE' },
       { label: 'Code structure', file: 'CODE_STRUCTURE_GUIDE' },
       { label: 'API Reference', file: 'API_REFERENCE' },

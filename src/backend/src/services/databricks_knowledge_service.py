@@ -12,15 +12,14 @@ import json
 import uuid
 from datetime import datetime
 try:
-    from databricks.sdk import WorkspaceClient
     from databricks.sdk.service.files import FileInfo
 except ImportError:
     # Databricks SDK not installed, will use REST API
-    WorkspaceClient = None
     FileInfo = None
 
 from sqlalchemy.ext.asyncio import AsyncSession
 from src.repositories.databricks_config_repository import DatabricksConfigRepository
+from src.utils.databricks_auth import get_workspace_client
 
 logger = logging.getLogger(__name__)
 
@@ -89,13 +88,25 @@ class DatabricksKnowledgeService:
             # Get Databricks configuration
             config = await self.repository.get_active_config(group_id=group_id)
             if not config:
-                # Use default configuration if none exists
-                logger.warning("No Databricks config found in database, using environment defaults")
+                # Use default configuration if none exists - get from unified auth
+                logger.warning("No Databricks config found in database, using unified auth defaults")
+                workspace_url = 'https://example.databricks.com'
+                token = ''
+                try:
+                    from src.utils.databricks_auth import get_auth_context
+                    auth = await get_auth_context()
+                    if auth:
+                        workspace_url = auth.workspace_url
+                        token = auth.token
+                        logger.debug(f"Using unified {auth.auth_method} auth for default config")
+                except Exception as e:
+                    logger.warning(f"Failed to get unified auth for default config: {e}")
+
                 config = type('obj', (object,), {
                     'knowledge_volume_enabled': True,
                     'knowledge_volume_path': 'main.default.knowledge',
-                    'workspace_url': os.getenv('DATABRICKS_HOST', 'https://example.databricks.com'),
-                    'encrypted_personal_access_token': os.getenv('DATABRICKS_TOKEN', '')
+                    'workspace_url': workspace_url,
+                    'encrypted_personal_access_token': token
                 })()
                 logger.info(f"Default config - workspace_url: {config.workspace_url}")
                 logger.info(f"Default config - volume_path: {config.knowledge_volume_path}")
@@ -144,30 +155,27 @@ class DatabricksKnowledgeService:
             file_size = len(content)
             logger.info(f"File size: {file_size} bytes ({file_size/1024:.2f} KB)")
 
-            # Get workspace URL first (needed for authentication)
-            workspace_url = getattr(config, 'workspace_url', os.getenv('DATABRICKS_HOST'))
+            # Get Databricks token using unified authentication system
+            from src.utils.databricks_auth import get_auth_context
+
+            # Get workspace URL from config or unified auth
+            workspace_url = getattr(config, 'workspace_url', None)
+            if not workspace_url:
+                auth = await get_auth_context()
+                if auth:
+                    workspace_url = auth.workspace_url
+                    logger.debug(f"Using workspace URL from unified {auth.auth_method} auth")
             logger.info(f"Workspace URL: {workspace_url}")
 
-            # Get Databricks token using proper authentication hierarchy
-            # Use DatabricksAuthHelper to get token following proper hierarchy
-            from src.repositories.databricks_auth_helper import DatabricksAuthHelper
-
             try:
-                # This will try:
-                # 1. OBO with user token (if provided)
-                # 2. PAT from database (DATABRICKS_TOKEN or DATABRICKS_API_KEY)
-                # 3. PAT from environment variables
-                token = await DatabricksAuthHelper.get_auth_token(
-                    workspace_url=workspace_url,
-                    user_token=user_token  # Pass the user_token from the method parameter
-                )
-                logger.info("Successfully obtained Databricks authentication token")
-            except Exception as auth_error:
-                logger.warning(f"Primary auth failed: {auth_error}")
+                # Unified auth handles: OBO, OAuth, PAT from database, PAT from environment
+                auth = await get_auth_context(user_token=user_token)
+                if not auth:
+                    raise Exception("Failed to get authentication context")
 
-                # Fallback: Try OAuth with client credentials if available
-                client_id = os.getenv('DATABRICKS_CLIENT_ID')
-                client_secret = os.getenv('DATABRICKS_CLIENT_SECRET')
+                token = auth.token
+                workspace_url = auth.workspace_url
+                logger.info(f"Successfully obtained Databricks authentication: {auth.auth_method}")
 
                 if client_id and client_secret:
                     logger.info("Attempting OAuth authentication with client credentials")
@@ -192,6 +200,10 @@ class DatabricksKnowledgeService:
                 else:
                     logger.debug("No OAuth credentials available")
                     token = None
+            except Exception as auth_error:
+                logger.error(f"Authentication failed: {auth_error}")
+                token = None
+                workspace_url = None
 
             if token:
                 logger.info("Databricks token found (length: %d)", len(token))
@@ -208,13 +220,10 @@ class DatabricksKnowledgeService:
                 logger.info("Attempting REAL upload to Databricks")
 
                 try:
-                    # Try using Databricks SDK if available
-                    if WorkspaceClient:
-                        logger.info("Databricks SDK is available, attempting SDK upload")
-                        workspace_client = WorkspaceClient(
-                            host=workspace_url,
-                            token=token
-                        )
+                    # Try using Databricks SDK via centralized auth
+                    workspace_client = await get_workspace_client(user_token=token)
+                    if workspace_client:
+                        logger.info("Using WorkspaceClient from databricks_auth middleware")
 
                         # Upload using SDK - same as DatabricksVolumeCallback
                         try:
@@ -435,31 +444,189 @@ class DatabricksKnowledgeService:
             logger.error(f"[FILE READ] Full traceback: {traceback.format_exc()}")
             return None
 
-    def _chunk_text(self, text: str, chunk_size: int = 1000, overlap: int = 200) -> List[str]:
+    async def _chunk_with_context(
+        self,
+        content: str,
+        file_path: str,
+        chunk_size: int = 1000,
+        overlap: int = 200
+    ) -> List[Dict[str, Any]]:
         """
-        Split text into overlapping chunks for better context preservation.
-        Same logic as DatabricksVectorKnowledgeSource.
+        Create chunks with document-level context prepended.
+        Implements Anthropic's Contextual Retrieval approach.
+
+        Args:
+            content: Full document content
+            file_path: Path to the file
+            chunk_size: Maximum chunk size in characters
+            overlap: Overlap between chunks
+
+        Returns:
+            List of chunk dictionaries with context
         """
+        filename = file_path.split('/')[-1]
+
+        # Generate document summary for context
+        document_summary = await self._generate_document_summary(content, filename)
+        logger.info(f"[CHUNKING] Generated summary for {filename}: {document_summary[:100]}...")
+
+        # Split content into paragraphs for semantic boundaries
+        paragraphs = [p.strip() for p in content.split('\n\n') if p.strip()]
+
         chunks = []
-        start = 0
-        text_length = len(text)
+        current_chunk = ""
+        chunk_index = 0
 
-        while start < text_length:
-            end = min(start + chunk_size, text_length)
-            chunk = text[start:end]
+        for paragraph in paragraphs:
+            # Check if adding this paragraph exceeds chunk size
+            if current_chunk and len(current_chunk) + len(paragraph) > chunk_size:
+                # Create contextual chunk
+                contextual_content = self._create_contextual_chunk(
+                    raw_content=current_chunk.strip(),
+                    filename=filename,
+                    document_summary=document_summary,
+                    chunk_index=chunk_index,
+                    total_chunks_estimate=len(paragraphs) // 2
+                )
 
-            # Add chunk if it has meaningful content
-            if chunk.strip():
-                chunks.append(chunk)
+                chunks.append({
+                    'content': contextual_content,  # For embedding (with context)
+                    'raw_content': current_chunk.strip(),  # For display
+                    'chunk_index': chunk_index,
+                    'section': f"Section {chunk_index + 1}",
+                    'document_summary': document_summary
+                })
 
-            # Move to next chunk with overlap
-            start += chunk_size - overlap
+                # Start new chunk with overlap
+                overlap_text = current_chunk[-overlap:] if len(current_chunk) > overlap else current_chunk
+                current_chunk = overlap_text + "\n\n" + paragraph
+                chunk_index += 1
+            else:
+                current_chunk = f"{current_chunk}\n\n{paragraph}" if current_chunk else paragraph
 
-            # Avoid infinite loop on small texts
-            if start <= 0 and len(chunks) > 0:
-                break
+        # Add final chunk
+        if current_chunk.strip():
+            contextual_content = self._create_contextual_chunk(
+                raw_content=current_chunk.strip(),
+                filename=filename,
+                document_summary=document_summary,
+                chunk_index=chunk_index,
+                total_chunks_estimate=chunk_index + 1
+            )
 
-        return chunks if chunks else [text]  # Return original if no chunks created
+            chunks.append({
+                'content': contextual_content,
+                'raw_content': current_chunk.strip(),
+                'chunk_index': chunk_index,
+                'section': f"Section {chunk_index + 1}",
+                'document_summary': document_summary
+            })
+
+        # Ensure at least one chunk
+        if not chunks and content.strip():
+            contextual_content = self._create_contextual_chunk(
+                raw_content=content.strip(),
+                filename=filename,
+                document_summary=document_summary,
+                chunk_index=0,
+                total_chunks_estimate=1
+            )
+            chunks.append({
+                'content': contextual_content,
+                'raw_content': content.strip(),
+                'chunk_index': 0,
+                'section': "Section 1",
+                'document_summary': document_summary
+            })
+
+        logger.info(f"[CHUNKING] Created {len(chunks)} context-enriched chunks for {filename}")
+        return chunks
+
+    def _create_contextual_chunk(
+        self,
+        raw_content: str,
+        filename: str,
+        document_summary: str,
+        chunk_index: int,
+        total_chunks_estimate: int
+    ) -> str:
+        """
+        Create a chunk with prepended document context.
+
+        This context helps the embedding model understand where this chunk
+        fits in the larger document, improving retrieval accuracy by 49-67%.
+        """
+        return f"""Document: {filename}
+Summary: {document_summary}
+Section: {chunk_index + 1} of ~{total_chunks_estimate}
+
+Content:
+{raw_content}"""
+
+    async def _generate_document_summary(self, content: str, filename: str) -> str:
+        """
+        Generate a brief summary of the document for contextual retrieval.
+        Uses a fast model with prompt caching for efficiency.
+
+        Args:
+            content: Full document content
+            filename: Name of the file
+
+        Returns:
+            2-3 sentence summary of the document
+        """
+        try:
+            from src.core.llm_manager import LLMManager
+
+            # Use first 3000 chars for summary generation
+            content_preview = content[:3000]
+
+            prompt = f"""Provide a concise 2-3 sentence summary that describes the main topic and purpose of this document.
+
+Document: {filename}
+Content preview:
+{content_preview}
+
+Summary (2-3 sentences):"""
+
+            # Use fast, efficient model
+            llm = LLMManager.get_llm(model_name="databricks-meta-llama-3-3-70b-instruct")
+            response = await llm.ainvoke(prompt)
+
+            summary = response.content.strip()
+            logger.info(f"[SUMMARY] Generated summary for {filename}")
+            return summary
+
+        except Exception as e:
+            logger.warning(f"[SUMMARY] Failed to generate summary for {filename}: {e}")
+            # Fallback to simple description
+            return f"Content from {filename}"
+
+    def _detect_content_type(self, filename: str) -> str:
+        """
+        Detect content type from file extension.
+
+        Args:
+            filename: Name of the file
+
+        Returns:
+            Content type string
+        """
+        ext = filename.lower().split('.')[-1] if '.' in filename else ''
+
+        type_map = {
+            'pdf': 'application/pdf',
+            'txt': 'text/plain',
+            'md': 'text/markdown',
+            'json': 'application/json',
+            'csv': 'text/csv',
+            'xml': 'application/xml',
+            'html': 'text/html',
+            'doc': 'application/msword',
+            'docx': 'application/vnd.openxmlformats-officedocument.wordprocessingml.document'
+        }
+
+        return type_map.get(ext, 'application/octet-stream')
 
     async def read_knowledge_file(
         self,
@@ -490,39 +657,55 @@ class DatabricksKnowledgeService:
             # Get Databricks configuration
             config = await self.repository.get_active_config(group_id=group_id)
             if not config:
+                # Get from unified auth
+                workspace_url = 'https://example.databricks.com'
+                token = ''
+                try:
+                    from src.utils.databricks_auth import get_auth_context
+                    auth = await get_auth_context()
+                    if auth:
+                        workspace_url = auth.workspace_url
+                        token = auth.token
+                except Exception as e:
+                    logger.warning(f"Failed to get unified auth: {e}")
+
                 config = type('obj', (object,), {
-                    'workspace_url': os.getenv('DATABRICKS_HOST', 'https://example.databricks.com'),
-                    'encrypted_personal_access_token': os.getenv('DATABRICKS_TOKEN', '')
+                    'workspace_url': workspace_url,
+                    'encrypted_personal_access_token': token
                 })()
-            
-            workspace_url = getattr(config, 'workspace_url', os.getenv('DATABRICKS_HOST'))
+
+            # Get workspace URL from config or unified auth
+            workspace_url = getattr(config, 'workspace_url', None)
+            if not workspace_url:
+                from src.utils.databricks_auth import get_auth_context
+                auth = await get_auth_context()
+                if auth:
+                    workspace_url = auth.workspace_url
             logger.info(f"Workspace URL: {workspace_url}")
-            
-            # Get authentication token
-            from src.repositories.databricks_auth_helper import DatabricksAuthHelper
-            
+
+            # Get authentication token using unified auth
+            from src.utils.databricks_auth import get_auth_context
+
             try:
-                token = await DatabricksAuthHelper.get_auth_token(
-                    workspace_url=workspace_url,
-                    user_token=user_token
-                )
-                logger.info("Successfully obtained Databricks authentication token")
+                auth = await get_auth_context(user_token=user_token)
+                if not auth:
+                    raise Exception("Failed to get authentication context")
+                token = auth.token
+                workspace_url = auth.workspace_url
+                logger.info(f"Successfully obtained Databricks authentication: {auth.auth_method}")
             except Exception as auth_error:
                 logger.warning(f"Auth failed: {auth_error}")
-                token = os.getenv('DATABRICKS_TOKEN')
+                token = None
             
             if token and workspace_url and workspace_url != 'https://example.databricks.com':
                 logger.info("Attempting REAL file read from Databricks")
                 
-                # Try using Databricks SDK if available
-                if WorkspaceClient:
+                # Try using Databricks SDK via centralized auth
+                workspace_client = await get_workspace_client(user_token=token)
+                if workspace_client:
                     try:
-                        logger.info("Using Databricks SDK to read file")
-                        workspace_client = WorkspaceClient(
-                            host=workspace_url,
-                            token=token
-                        )
-                        
+                        logger.info("Using WorkspaceClient from databricks_auth middleware to read file")
+
                         # Read file using SDK
                         download_response = workspace_client.files.download(file_path)
                         content = download_response.contents.read()
@@ -686,11 +869,23 @@ class DatabricksKnowledgeService:
             # Get Databricks configuration
             config = await self.repository.get_active_config(group_id=group_id)
             if not config:
+                # Get from unified auth
+                workspace_url = 'https://example.databricks.com'
+                token = ''
+                try:
+                    from src.utils.databricks_auth import get_auth_context
+                    auth = await get_auth_context()
+                    if auth:
+                        workspace_url = auth.workspace_url
+                        token = auth.token
+                except Exception as e:
+                    logger.warning(f"Failed to get unified auth: {e}")
+
                 config = type('obj', (object,), {
                     'knowledge_volume_enabled': True,
                     'knowledge_volume_path': 'main.default.knowledge',
-                    'workspace_url': os.getenv('DATABRICKS_HOST', 'https://example.databricks.com'),
-                    'encrypted_personal_access_token': os.getenv('DATABRICKS_TOKEN', '')
+                    'workspace_url': workspace_url,
+                    'encrypted_personal_access_token': token
                 })()
                 logger.info("Using default configuration")
             else:
@@ -736,19 +931,25 @@ class DatabricksKnowledgeService:
                         logger.error(f"Invalid volume path format: {configured_volume}")
                         return []
             
-            workspace_url = getattr(config, 'workspace_url', os.getenv('DATABRICKS_HOST'))
+            # Get authentication token using unified auth
+            from src.utils.databricks_auth import get_auth_context
+
+            # Get workspace URL from config or unified auth
+            workspace_url = getattr(config, 'workspace_url', None)
+            if not workspace_url:
+                auth = await get_auth_context()
+                if auth:
+                    workspace_url = auth.workspace_url
             logger.info(f"Workspace URL: {workspace_url}")
             logger.info(f"FINAL DIRECTORY PATH TO BROWSE: {directory_path}")
-            
-            # Get authentication token
-            from src.repositories.databricks_auth_helper import DatabricksAuthHelper
-            
+
             try:
-                token = await DatabricksAuthHelper.get_auth_token(
-                    workspace_url=workspace_url,
-                    user_token=user_token
-                )
-                logger.info(f"Successfully obtained Databricks authentication token (length: {len(token)})")
+                auth = await get_auth_context(user_token=user_token)
+                if not auth:
+                    raise Exception("Failed to get authentication context")
+                token = auth.token
+                workspace_url = auth.workspace_url
+                logger.info(f"Successfully obtained Databricks authentication: {auth.auth_method} (token length: {len(token)})")
             except Exception as auth_error:
                 logger.error(f"Authentication failed: {auth_error}")
                 return []
@@ -763,17 +964,14 @@ class DatabricksKnowledgeService:
             
             logger.info("Starting REAL Databricks API calls")
             
-            # Try using Databricks SDK if available
-            if WorkspaceClient:
+            # Try using Databricks SDK via centralized auth
+            workspace_client = await get_workspace_client(user_token=token)
+            if workspace_client:
                 try:
-                    logger.info("Attempting Databricks SDK method")
-                    workspace_client = WorkspaceClient(
-                        host=workspace_url,
-                        token=token
-                    )
-                    
+                    logger.info("Using WorkspaceClient from databricks_auth middleware for directory listing")
+
                     logger.info(f"SDK: Calling list_directory_contents('{directory_path}')")
-                    
+
                     # List directory contents using SDK
                     files_list = []
                     file_infos = workspace_client.files.list_directory_contents(directory_path)
@@ -1091,13 +1289,13 @@ class DatabricksKnowledgeService:
 
             logger.info(f"[EMBEDDING] Read {len(content)} characters from file")
 
-            # 2. Chunk the content
-            chunks = await self._chunk_text(content, file_path)
+            # 2. Chunk the content with context enrichment
+            chunks = await self._chunk_with_context(content, file_path)
             if not chunks:
                 logger.warning(f"[EMBEDDING] No chunks generated for file: {file_path}")
                 return {"status": "skipped", "reason": "No chunks generated"}
 
-            logger.info(f"[EMBEDDING] Generated {len(chunks)} chunks")
+            logger.info(f"[EMBEDDING] Generated {len(chunks)} context-enriched chunks")
 
             # 3. Get Vector Search storage (same pattern as DocumentationEmbeddingService)
             vector_storage = await self._get_vector_storage(user_token)
@@ -1109,20 +1307,31 @@ class DatabricksKnowledgeService:
 
             # 4. Process each chunk
             embedded_chunks = 0
-            for i, chunk in enumerate(chunks):
+            filename = file_path.split('/')[-1]
+
+            for i, chunk_data in enumerate(chunks):
                 try:
-                    # Prepare metadata for this chunk
+                    # Extract chunk information
+                    chunk_content = chunk_data['content']  # Contextual content (for embedding)
+                    raw_content = chunk_data.get('raw_content', chunk_content)  # Raw content (for display)
+                    section = chunk_data.get('section', f'Section {i+1}')
+                    document_summary = chunk_data.get('document_summary', '')
+
+                    # Prepare enhanced metadata for this chunk
                     metadata = {
                         'source': file_path,
+                        'filename': filename,
                         'execution_id': execution_id,
                         'group_id': group_id,
                         'chunk_index': i,
                         'total_chunks': len(chunks),
+                        'section': section,  # NEW: Section information
+                        'parent_document_id': f"{group_id}:{execution_id}:{filename}",  # NEW: Parent document ID
+                        'document_summary': document_summary,  # NEW: Document summary for context
                         'file_path': file_path,
-                        'filename': file_path.split('/')[-1],
                         'created_at': datetime.utcnow().isoformat(),
-                        'type': 'knowledge_source',  # IMPORTANT: Sets document_type to "knowledge_source" for crew execution compatibility
-                        'content_type': 'knowledge_file'
+                        'type': 'knowledge_source',  # IMPORTANT: Sets document_type to "knowledge_source"
+                        'content_type': self._detect_content_type(filename)  # NEW: Detected content type
                     }
 
                     # Generate embedding for the chunk (vector storage will handle this)
@@ -1136,9 +1345,10 @@ class DatabricksKnowledgeService:
                     logger.info(f"[EMBEDDING]   - agent_ids: {agent_ids}")
                     logger.info(f"[EMBEDDING]   - agent_ids_json: {agent_ids_json}")
                     logger.info(f"[EMBEDDING]   - group_id: {group_id}")
+                    logger.info(f"[EMBEDDING]   - section: {section}")
 
                     data = {
-                        'content': chunk,
+                        'content': chunk_content,  # Contextual content with document summary
                         'agent_ids': agent_ids_json,  # JSON array of agent IDs for access control
                         'group_id': group_id,  # Top-level field for document schema
                         'metadata': metadata,
@@ -1338,10 +1548,12 @@ class DatabricksKnowledgeService:
         group_id: str,
         execution_id: Optional[str] = None,
         file_paths: Optional[List[str]] = None,
+        agent_id: Optional[str] = None,
         limit: int = 5,
         user_token: Optional[str] = None
     ) -> List[Dict[str, Any]]:
         """
+        VERSION: 2025-10-03-AGENT-FILTER
         Search for knowledge in the Databricks Vector Index.
 
         This is an engine-agnostic method that can be used by any AI engine.
@@ -1351,6 +1563,7 @@ class DatabricksKnowledgeService:
             group_id: Group ID for tenant isolation
             execution_id: Optional execution ID for scoping
             file_paths: Optional list of file paths to filter search
+            agent_id: Optional agent ID for access control filtering
             limit: Maximum number of results to return
             user_token: Optional user token for OBO authentication
 
@@ -1358,6 +1571,22 @@ class DatabricksKnowledgeService:
             List of search results with content and metadata
         """
         logger.info("="*60)
+        logger.info("🔥🔥🔥 [ENTRY POINT] search_knowledge() METHOD CALLED 🔥🔥🔥")
+        logger.info("="*60)
+
+        try:
+            import inspect
+            # Check which version of the method is executing
+            source = inspect.getsource(self.search_knowledge)
+            if 'VERSION:' in source:
+                version = source.split('VERSION:')[1].split('\n')[0].strip()
+                logger.info(f"🔥🔥🔥 METHOD VERSION CHECK: {version}")
+            else:
+                logger.info("🔥🔥🔥 METHOD VERSION CHECK: OLD VERSION (no version tag)")
+        except Exception as version_error:
+            logger.error(f"🔥🔥🔥 VERSION CHECK FAILED: {version_error}", exc_info=True)
+
+        logger.info("🔥🔥🔥 [NEW CODE] REFACTORED SEARCH_KNOWLEDGE METHOD RUNNING 🔥🔥🔥")
         logger.info("[SEARCH DEBUG] KNOWLEDGE SEARCH STARTED")
         logger.info(f"[SEARCH DEBUG] Query: '{query}'")
         logger.info(f"[SEARCH DEBUG] Group ID: '{group_id}'")
@@ -1368,31 +1597,27 @@ class DatabricksKnowledgeService:
         logger.info("="*60)
 
         try:
-            # Get Databricks configuration
-            logger.info("[SEARCH DEBUG] Getting Databricks configuration...")
-            config = await self.repository.get_active_config(group_id=group_id)
-            if not config:
-                logger.warning("[SEARCH DEBUG] No Databricks config found, returning empty results")
+            # CRITICAL: Use _get_vector_storage() to ensure upload and search use the same configuration
+            # This matches the pattern used by DatabricksVectorStorage for long_term, short_term, entity memory
+            logger.info("[SEARCH DEBUG] Getting vector storage configuration (same as upload)...")
+
+            vector_storage = await self._get_vector_storage(user_token)
+            if not vector_storage:
+                logger.warning("[SEARCH DEBUG] Vector storage not configured, returning empty results")
                 return []
 
-            logger.info(f"[SEARCH DEBUG] Config found:")
-            logger.info(f"  - workspace_url: {getattr(config, 'workspace_url', 'NOT SET')}")
-            logger.info(f"  - document_index: {getattr(config, 'document_index', 'NOT SET')}")
-            logger.info(f"  - knowledge_volume_enabled: {getattr(config, 'knowledge_volume_enabled', 'NOT SET')}")
-            logger.info(f"  - knowledge_volume_path: {getattr(config, 'knowledge_volume_path', 'NOT SET')}")
+            document_index = vector_storage.index_name
+            endpoint_name = vector_storage.endpoint_name
+            workspace_url = vector_storage.workspace_url
 
-            # Use the document index for knowledge search
-            document_index = getattr(config, 'document_index', None)
-            if not document_index:
-                logger.error("[SEARCH DEBUG] No document index configured in Databricks config!")
-                logger.error("[SEARCH DEBUG] Please configure a document index in Databricks settings")
-                return []
-
-            logger.info(f"[SEARCH DEBUG] Using document index: '{document_index}'")
+            logger.info(f"[SEARCH DEBUG] Vector storage configuration:")
+            logger.info(f"  - document_index: {document_index}")
+            logger.info(f"  - endpoint_name: {endpoint_name}")
+            logger.info(f"  - workspace_url: {workspace_url}")
 
             # Import here to avoid circular dependencies
-            from src.repositories.databricks_vector_index_repository import DatabricksVectorIndexRepository
-            from src.schemas.databricks_schemas import DatabricksIndexSchemas
+            from src.schemas.databricks_index_schemas import DatabricksIndexSchemas
+            from src.core.llm_manager import LLMManager
 
             # Get the schema for document memory type
             logger.info("[SEARCH DEBUG] Getting schema for document memory type...")
@@ -1401,17 +1626,24 @@ class DatabricksKnowledgeService:
             logger.info(f"[SEARCH DEBUG] Schema fields: {list(schema_fields.keys())}")
             logger.info(f"[SEARCH DEBUG] Search columns: {search_columns}")
 
-            # Create the repository
-            logger.info("[SEARCH DEBUG] Creating DatabricksVectorIndexRepository...")
-            index_repo = DatabricksVectorIndexRepository(
-                index_name=document_index,
-                memory_type="document",
-                user_token=user_token
-            )
-            logger.info("[SEARCH DEBUG] Repository created successfully")
+            # Generate query embedding
+            logger.info(f"[SEARCH DEBUG] Generating embedding for query: '{query}'")
+            try:
+                query_embedding = await LLMManager.get_embedding(query, model="databricks-gte-large-en")
+                if not query_embedding:
+                    logger.error("[SEARCH DEBUG] Failed to generate query embedding!")
+                    return []
+                logger.info(f"[SEARCH DEBUG] Generated embedding with dimension: {len(query_embedding)}")
+            except Exception as embed_error:
+                logger.error(f"[SEARCH DEBUG] Error generating embedding: {embed_error}", exc_info=True)
+                return []
+
+            # Use the repository from vector_storage (same pattern as DatabricksVectorStorage.search())
+            logger.info("[SEARCH DEBUG] Using repository from vector_storage...")
+            index_repo = vector_storage.repository
+            logger.info("[SEARCH DEBUG] Repository retrieved successfully")
 
             # Quick readiness gate to avoid blocking when endpoint/index is provisioning
-            endpoint_name = getattr(config, 'document_endpoint_name', None) or getattr(config, 'endpoint_name', None)
             try:
                 index_info = await asyncio.wait_for(
                     index_repo.get_index(index_name=document_index, endpoint_name=endpoint_name, user_token=user_token),
@@ -1440,15 +1672,17 @@ class DatabricksKnowledgeService:
             }
             logger.info(f"[SEARCH DEBUG] Base filter - group_id: '{group_id}'")
 
-            # NOTE: Execution ID filtering is optional for knowledge search
-            # We typically want to search across ALL documents for a group, not just current execution
-            if execution_id:
-                logger.info(f"[SEARCH DEBUG] execution_id provided: '{execution_id}'")
-                logger.info("[SEARCH DEBUG] Note: This will filter to ONLY documents from this specific execution")
-                logger.info("[SEARCH DEBUG] To search all knowledge documents, don't pass execution_id")
-                filters["execution_id"] = execution_id
-            else:
-                logger.info("[SEARCH DEBUG] ✅ No execution_id filter - searching across ALL documents for this group")
+            # IMPORTANT: Search across ALL documents for the group by default
+            # This allows knowledge to persist and be reused across executions
+            logger.info("[SEARCH DEBUG] ✅ Searching across ALL knowledge documents for group (not execution-scoped)")
+            logger.info("[SEARCH DEBUG] This enables knowledge reuse across multiple workflow runs")
+
+            # NOTE: execution_id filtering is intentionally NOT applied by default
+            # If you need execution-scoped search, modify the filter manually
+            # Uncomment below if execution-specific filtering is needed:
+            # if execution_id:
+            #     filters["execution_id"] = execution_id
+            #     logger.info(f"[SEARCH DEBUG] Applied execution_id filter: '{execution_id}'")
 
             if file_paths:
                 logger.info(f"[SEARCH DEBUG] Adding file_paths filter: {file_paths}")
@@ -1456,11 +1690,23 @@ class DatabricksKnowledgeService:
             else:
                 logger.info("[SEARCH DEBUG] No file_paths filter - will search all documents")
 
+            # CRITICAL: Filter by agent_ids for access control
+            # The agent_ids column in the vector index is a JSON array like ["agent-uuid-1", "agent-uuid-2"]
+            # We need to check if the agent_id is in that array
+            if agent_id:
+                logger.info(f"[SEARCH DEBUG] Adding agent_ids filter for agent: {agent_id}")
+                # Use array_contains to check if agent_id is in the agent_ids JSON array
+                filters["agent_ids"] = {"$contains": agent_id}
+            else:
+                logger.info("[SEARCH DEBUG] No agent_id filter - will search all documents (no access control)")
+
             logger.info(f"[SEARCH DEBUG] Final search filters: {filters}")
 
             # Perform the search with a tight timeout to prevent blocking
             logger.info("[SEARCH DEBUG] Calling similarity_search with:")
-            logger.info(f"  - query_text: '{query}'")
+            logger.info(f"  - index_name: '{document_index}'")
+            logger.info(f"  - endpoint_name: '{endpoint_name}'")
+            logger.info(f"  - query_vector dimension: {len(query_embedding)}")
             logger.info(f"  - columns: {search_columns}")
             logger.info(f"  - filters: {filters}")
             logger.info(f"  - num_results: {limit}")
@@ -1468,14 +1714,18 @@ class DatabricksKnowledgeService:
             try:
                 search_results = await asyncio.wait_for(
                     index_repo.similarity_search(
-                        query_text=query,
+                        index_name=document_index,
+                        endpoint_name=endpoint_name,
+                        query_vector=query_embedding,
                         columns=search_columns,
                         filters=filters,
-                        num_results=limit
+                        num_results=limit,
+                        user_token=user_token
                     ),
-                    timeout=5
+                    timeout=10
                 )
-                logger.info(f"[SEARCH DEBUG] ✅ Search completed, got {len(search_results) if search_results else 0} results")
+                logger.info(f"[SEARCH DEBUG] ✅ Search completed successfully")
+                logger.info(f"[SEARCH DEBUG] Raw results: {search_results}")
             except asyncio.TimeoutError:
                 logger.warning("[SEARCH DEBUG] similarity_search timed out; returning empty results")
                 return []
@@ -1483,14 +1733,17 @@ class DatabricksKnowledgeService:
                 logger.error(f"[SEARCH DEBUG] ❌ Search failed with error: {search_error}", exc_info=True)
                 return []
 
-            if not search_results:
+            # Extract data_array from REST API response
+            # Repository returns: {'success': True, 'results': {'result': {'data_array': [...]}}}
+            data_array = search_results.get('results', {}).get('result', {}).get('data_array', [])
+            logger.info(f"[SEARCH DEBUG] Extracted {len(data_array)} results from data_array")
+
+            if not data_array:
                 logger.warning("[SEARCH DEBUG] ⚠️ No results found!")
                 logger.warning("[SEARCH DEBUG] Possible reasons:")
-                logger.warning("  1. ❌ Execution ID mismatch (most likely!)")
-                logger.warning("  2. Group ID doesn't match documents")
-                logger.warning("  3. Documents not properly indexed")
-                logger.warning("  4. Vector index is empty or not accessible")
-                logger.warning("[SEARCH DEBUG] 💡 TIP: Remove execution_id filter from the tool call!")
+                logger.warning("  1. Group ID doesn't match documents")
+                logger.warning("  2. Documents not properly indexed")
+                logger.warning("  3. Vector index is empty or not accessible")
                 return []
 
             # Get column positions for parsing results
@@ -1499,19 +1752,19 @@ class DatabricksKnowledgeService:
 
             # Format results for return
             formatted_results = []
-            logger.info(f"[SEARCH DEBUG] Formatting {len(search_results)} results...")
+            logger.info(f"[SEARCH DEBUG] Formatting {len(data_array)} results...")
 
-            for idx, result in enumerate(search_results):
+            for idx, result in enumerate(data_array):
                 try:
                     logger.info(f"[SEARCH DEBUG] Processing result {idx + 1}:")
                     logger.info(f"  - Raw result type: {type(result)}")
                     logger.info(f"  - Raw result length: {len(result) if hasattr(result, '__len__') else 'N/A'}")
 
                     # Parse result based on schema positions
-                    content = result[positions['content']] if 'content' in positions else ""
-                    source = result[positions['source']] if 'source' in positions else ""
-                    title = result[positions['title']] if 'title' in positions else ""
-                    chunk_index = result[positions['chunk_index']] if 'chunk_index' in positions else 0
+                    content = result[positions['content']] if 'content' in positions and len(result) > positions['content'] else ""
+                    source = result[positions['source']] if 'source' in positions and len(result) > positions['source'] else ""
+                    title = result[positions['title']] if 'title' in positions and len(result) > positions['title'] else ""
+                    chunk_index = result[positions['chunk_index']] if 'chunk_index' in positions and len(result) > positions['chunk_index'] else 0
 
                     logger.info(f"  - Content preview: {content[:100]}..." if content else "  - No content")
                     logger.info(f"  - Source: {source}")

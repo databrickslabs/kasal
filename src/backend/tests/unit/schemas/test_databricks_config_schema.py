@@ -29,7 +29,6 @@ class TestDatabricksConfigBase:
         assert config.db_schema == ""
         assert config.secret_scope == ""
         assert config.enabled is True
-        assert config.apps_enabled is False
 
     def test_valid_databricks_config_base_full(self):
         """Test DatabricksConfigBase with all fields specified."""
@@ -39,8 +38,7 @@ class TestDatabricksConfigBase:
             "catalog": "main",
             "schema": "default",  # Using alias
             "secret_scope": "kasal-secrets",
-            "enabled": True,
-            "apps_enabled": False
+            "enabled": True
         }
         config = DatabricksConfigBase(**config_data)
         assert config.workspace_url == "https://test.cloud.databricks.com"
@@ -49,7 +47,6 @@ class TestDatabricksConfigBase:
         assert config.db_schema == "default"
         assert config.secret_scope == "kasal-secrets"
         assert config.enabled is True
-        assert config.apps_enabled is False
 
     def test_databricks_config_base_schema_alias(self):
         """Test DatabricksConfigBase with schema field alias."""
@@ -66,20 +63,16 @@ class TestDatabricksConfigBase:
     def test_databricks_config_base_boolean_conversions(self):
         """Test DatabricksConfigBase boolean field conversions."""
         config_data = {
-            "enabled": "true",
-            "apps_enabled": 1
+            "enabled": "true"
         }
         config = DatabricksConfigBase(**config_data)
         assert config.enabled is True
-        assert config.apps_enabled is True
 
         config_data = {
-            "enabled": "false",
-            "apps_enabled": 0
+            "enabled": "false"
         }
         config = DatabricksConfigBase(**config_data)
         assert config.enabled is False
-        assert config.apps_enabled is False
 
     def test_databricks_config_base_url_formats(self):
         """Test DatabricksConfigBase with various URL formats."""
@@ -107,17 +100,6 @@ class TestDatabricksConfigCreate:
         assert config.enabled is False
         # Should not raise validation errors when disabled
 
-    def test_databricks_config_create_apps_enabled(self):
-        """Test DatabricksConfigCreate when apps are enabled."""
-        config_data = {
-            "enabled": True,
-            "apps_enabled": True
-        }
-        config = DatabricksConfigCreate(**config_data)
-        assert config.enabled is True
-        assert config.apps_enabled is True
-        # Should not raise validation errors when apps are enabled
-
     def test_databricks_config_create_valid_full(self):
         """Test DatabricksConfigCreate with all required fields when enabled."""
         config_data = {
@@ -126,8 +108,7 @@ class TestDatabricksConfigCreate:
             "catalog": "main",
             "schema": "default",
             "secret_scope": "kasal-secrets",
-            "enabled": True,
-            "apps_enabled": False
+            "enabled": True
         }
         config = DatabricksConfigCreate(**config_data)
         assert config.workspace_url == "https://test.cloud.databricks.com"
@@ -136,14 +117,12 @@ class TestDatabricksConfigCreate:
         assert config.db_schema == "default"
         assert config.secret_scope == "kasal-secrets"
         assert config.enabled is True
-        assert config.apps_enabled is False
 
     def test_databricks_config_create_validation_enabled_missing_fields(self):
         """Test DatabricksConfigCreate validation when enabled but missing required fields."""
         # Missing all required fields
         config_data = {
-            "enabled": True,
-            "apps_enabled": False
+            "enabled": True
         }
         with pytest.raises(ValueError) as exc_info:
             DatabricksConfigCreate(**config_data)
@@ -161,8 +140,7 @@ class TestDatabricksConfigCreate:
             "warehouse_id": "abc123",
             "catalog": "main",
             # Missing db_schema and secret_scope
-            "enabled": True,
-            "apps_enabled": False
+            "enabled": True
         }
         with pytest.raises(ValueError) as exc_info:
             DatabricksConfigCreate(**config_data)
@@ -179,8 +157,7 @@ class TestDatabricksConfigCreate:
             "catalog": "main",
             "schema": "",
             "secret_scope": "secrets",
-            "enabled": True,
-            "apps_enabled": False
+            "enabled": True
         }
         with pytest.raises(ValueError) as exc_info:
             DatabricksConfigCreate(**config_data)
@@ -196,15 +173,9 @@ class TestDatabricksConfigCreate:
         required = config.required_fields
         assert required == []
 
-        # When apps enabled
-        config = DatabricksConfigCreate(enabled=True, apps_enabled=True)
-        required = config.required_fields
-        assert required == []
-
-        # When enabled and apps disabled - provide valid data to avoid validation error
+        # When enabled - provide valid data to avoid validation error
         config = DatabricksConfigCreate(
             enabled=True,
-            apps_enabled=False,
             warehouse_id="test-wh",
             catalog="test",
             schema="test",
@@ -226,7 +197,6 @@ class TestDatabricksConfigUpdate:
         assert update.db_schema is None
         assert update.secret_scope is None
         assert update.enabled is None
-        assert update.apps_enabled is None
 
     def test_databricks_config_update_partial(self):
         """Test DatabricksConfigUpdate with partial fields."""
@@ -248,8 +218,7 @@ class TestDatabricksConfigUpdate:
             "catalog": "new_catalog",
             "schema": "new_schema",
             "secret_scope": "new-secrets",
-            "enabled": False,
-            "apps_enabled": True
+            "enabled": False
         }
         update = DatabricksConfigUpdate(**update_data)
         assert update.workspace_url == "https://new.cloud.databricks.com"
@@ -258,7 +227,6 @@ class TestDatabricksConfigUpdate:
         assert update.db_schema == "new_schema"
         assert update.secret_scope == "new-secrets"
         assert update.enabled is False
-        assert update.apps_enabled is True
 
     def test_databricks_config_update_schema_alias(self):
         """Test DatabricksConfigUpdate with schema field alias."""
@@ -281,7 +249,6 @@ class TestDatabricksConfigInDB:
             "schema": "default",
             "secret_scope": "secrets",
             "enabled": True,
-            "apps_enabled": False,
             "is_active": True,
             "created_at": now,
             "updated_at": now
@@ -294,7 +261,6 @@ class TestDatabricksConfigInDB:
         assert config.db_schema == "default"
         assert config.secret_scope == "secrets"
         assert config.enabled is True
-        assert config.apps_enabled is False
         assert config.is_active is True
         assert config.created_at == now
         assert config.updated_at == now
@@ -345,8 +311,7 @@ class TestDatabricksConfigResponse:
             "catalog": "response_catalog",
             "schema": "response_schema",
             "secret_scope": "response-secrets",
-            "enabled": True,
-            "apps_enabled": True
+            "enabled": True
         }
         response = DatabricksConfigResponse(**config_data)
 
@@ -357,7 +322,6 @@ class TestDatabricksConfigResponse:
         assert hasattr(response, 'db_schema')
         assert hasattr(response, 'secret_scope')
         assert hasattr(response, 'enabled')
-        assert hasattr(response, 'apps_enabled')
 
         # Should behave like base class
         assert response.workspace_url == "https://response.cloud.databricks.com"
@@ -366,7 +330,6 @@ class TestDatabricksConfigResponse:
         assert response.db_schema == "response_schema"
         assert response.secret_scope == "response-secrets"
         assert response.enabled is True
-        assert response.apps_enabled is True
 
     def test_databricks_config_response_minimal(self):
         """Test DatabricksConfigResponse with minimal data."""
@@ -377,7 +340,6 @@ class TestDatabricksConfigResponse:
         assert response.db_schema == ""
         assert response.secret_scope == ""
         assert response.enabled is True
-        assert response.apps_enabled is False
 
 
 class TestDatabricksTokenStatus:
@@ -443,8 +405,7 @@ class TestSchemaIntegration:
         """Test complete Databricks configuration lifecycle."""
         # Create configuration (disabled initially)
         create_data = {
-            "enabled": False,
-            "apps_enabled": False
+            "enabled": False
         }
         create_schema = DatabricksConfigCreate(**create_data)
 
@@ -455,8 +416,7 @@ class TestSchemaIntegration:
             "catalog": "production",
             "schema": "main",
             "secret_scope": "prod-secrets",
-            "enabled": True,
-            "apps_enabled": False
+            "enabled": True
         }
         update_schema = DatabricksConfigUpdate(**update_data)
 
@@ -470,7 +430,6 @@ class TestSchemaIntegration:
             "schema": update_data["schema"],
             "secret_scope": update_data["secret_scope"],
             "enabled": update_data["enabled"],
-            "apps_enabled": update_data["apps_enabled"],
             "is_active": True,
             "created_at": now,
             "updated_at": now
@@ -484,8 +443,7 @@ class TestSchemaIntegration:
             "catalog": db_config.catalog,
             "schema": db_config.db_schema,
             "secret_scope": db_config.secret_scope,
-            "enabled": db_config.enabled,
-            "apps_enabled": db_config.apps_enabled
+            "enabled": db_config.enabled
         }
         response_config = DatabricksConfigResponse(**response_data)
 
@@ -506,8 +464,7 @@ class TestSchemaIntegration:
             catalog="test",
             schema="default",
             secret_scope="test-secrets",
-            enabled=True,
-            apps_enabled=False
+            enabled=True
         )
         assert valid_enabled.enabled is True
 
@@ -515,19 +472,11 @@ class TestSchemaIntegration:
         valid_disabled = DatabricksConfigCreate(enabled=False)
         assert valid_disabled.enabled is False
 
-        # Valid apps-enabled configuration (no warehouse validation required)
-        valid_apps = DatabricksConfigCreate(
-            enabled=True,
-            apps_enabled=True
-        )
-        assert valid_apps.apps_enabled is True
-
         # Invalid enabled configuration (missing required fields)
         with pytest.raises(ValueError):
             DatabricksConfigCreate(
                 workspace_url="https://test.com",
-                enabled=True,
-                apps_enabled=False
+                enabled=True
                 # Missing warehouse_id, catalog, schema, secret_scope
             )
 

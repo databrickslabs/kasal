@@ -287,8 +287,10 @@ class CrewAIExecutionService:
             crew_logger.info(f"Execution {execution_id} using process type: {process_type}")
 
             # Build crew configuration with process type
+            # IMPORTANT: Use static "Default Crew" when run_name is None to ensure consistent crew_id
+            # The crew_id hash includes agent_roles, task_names, model, group_id - so uniqueness is preserved
             crew_config_dict = {
-                "name": run_name or f"Scheduled Crew {execution_id[:8]}",
+                "name": run_name or "Default Crew",
                 "model": config.model,
                 "process": process_type,  # Add process type to crew config
                 "planning": config.planning,

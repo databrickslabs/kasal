@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback, useMemo } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import {
   Box,
   IconButton,
@@ -18,16 +18,20 @@ import {
   HomeOutlined as HomeIcon,
   GroupsOutlined as GroupsIcon
 } from '@mui/icons-material';
-import { GroupService, GroupWithRole } from '../../api/GroupService';
+import { GroupWithRole } from '../../api/GroupService';
 import toast from 'react-hot-toast';
 import { useRunStatusStore } from '../../store/runStatus';
 import { useUserStore } from '../../store/user';
+import { useGroupStore } from '../../store/groups';
 
 const GroupSelector: React.FC = () => {
   const [anchorEl, setAnchorEl] = useState<null | HTMLElement>(null);
-  const [groups, setGroups] = useState<GroupWithRole[]>([]);
-  const [loading, setLoading] = useState(false);
-  const [currentGroup, setCurrentGroup] = useState<GroupWithRole | null>(null);
+  // Use Zustand store instead of local state
+  const groups = useGroupStore(s => s.groups);
+  const loading = useGroupStore(s => s.isLoading);
+  const currentGroup = useGroupStore(s => s.getCurrentGroup());
+  const fetchMyGroups = useGroupStore(s => s.fetchMyGroups);
+  const setCurrentGroupId = useGroupStore(s => s.setCurrentGroup);
   const [isSwitching, setIsSwitching] = useState(false);
   const clearRunHistory = useRunStatusStore(state => state.clearRunHistory);
 
@@ -40,88 +44,21 @@ const GroupSelector: React.FC = () => {
 
   const open = Boolean(anchorEl);
 
-  const fetchUserGroups = useCallback(async () => {
-    // Don't fetch if we don't have a user yet
-    if (!currentUser?.email) {
-      return;
-    }
 
-    setLoading(true);
-    try {
-      const groupService = GroupService.getInstance();
-      let userGroups: GroupWithRole[] = [];
-
-      try {
-        userGroups = await groupService.getMyGroups();
-      } catch (error) {
-        console.warn('Could not fetch user groups, using empty list:', error);
-        userGroups = [];
-      }
-
-      // Get user email from Zustand store (which fetches from backend with X-Forwarded-Email)
-      const currentUserEmail = currentUser.email;
-
-      const emailDomain = currentUserEmail.split('@')[1] || '';
-      const emailUser = currentUserEmail.split('@')[0] || '';
-
-      // Create the primary personal group ID format (e.g., user_admin_admin_com)
-      const primaryGroupId = `user_${emailUser}_${emailDomain.replace(/\./g, '_')}`;
-
-      // Groups already come with roles from backend
-      let allGroups: GroupWithRole[] = userGroups;
-
-      // Always add the personal workspace as the first option
-      const personalGroup: GroupWithRole = {
-        id: primaryGroupId,
-        name: 'My Workspace', // Better UX name
-        status: 'active',
-        auto_created: true,
-        created_at: new Date().toISOString(),
-        updated_at: new Date().toISOString(),
-        user_count: 1,
-        user_role: undefined  // Personal workspace doesn't have group roles
-      };
-
-      // Add personal group at the beginning
-      allGroups = [personalGroup, ...allGroups.filter(g => g.id !== primaryGroupId)];
-
-      setGroups(allGroups);
-
-      // Set current group from localStorage or use personal group
-      const savedGroupId = localStorage.getItem('selectedGroupId');
-      if (allGroups.length > 0) {
-        const selectedGroup = savedGroupId
-          ? allGroups.find(g => g.id === savedGroupId) || personalGroup
-          : personalGroup;
-
-        // Only update if it's different from current group
-        if (!currentGroup || currentGroup.id !== selectedGroup.id) {
-          setCurrentGroup(selectedGroup);
-          localStorage.setItem('selectedGroupId', selectedGroup.id);
-        }
-      }
-    } catch (error) {
-      console.error('Failed to fetch user groups:', error);
-      toast.error('Failed to load groups');
-    } finally {
-      setLoading(false);
-    }
-  }, [currentUser]); // Only depend on currentUser, not currentGroup
 
   // Fetch user once when component mounts
   useEffect(() => {
     if (!currentUser) {
       fetchCurrentUser();
     }
-  }, []); // Only run once on mount
+  }, [currentUser, fetchCurrentUser]); // Include dependencies
 
   // Fetch groups when user changes
   useEffect(() => {
     if (currentUser?.email) {
-      console.log('User email changed, fetching groups for:', currentUser.email);
-      fetchUserGroups();
+      fetchMyGroups();
     }
-  }, [currentUser?.email, fetchUserGroups]);
+  }, [currentUser?.email, fetchMyGroups]);
 
   const handleClick = (event: React.MouseEvent<HTMLButtonElement>) => {
     setAnchorEl(event.currentTarget);
@@ -147,19 +84,8 @@ const GroupSelector: React.FC = () => {
       // Clear the run history store before switching groups
       clearRunHistory();
 
-      // Set the group context in localStorage
-      localStorage.setItem('selectedGroupId', group.id);
-
-      // Also store the user email if this is a personal workspace
-      if (group.id.startsWith('user_')) {
-        localStorage.setItem('userEmail', group.name);
-      }
-
-      // Log what we're setting
-      console.log('Set selectedGroupId:', group.id);
-
-      // Update the current group immediately to show the change
-      setCurrentGroup(group);
+      // Update selected group in the global store (persists to localStorage + fires event)
+      setCurrentGroupId(group.id);
       handleClose();
 
       // Show success message with the actual group ID being used
@@ -216,7 +142,7 @@ const GroupSelector: React.FC = () => {
         }}
       />
     );
-  }, [currentGroup?.id, currentGroup?.name, currentUser?.email]);
+  }, [currentGroup?.id, currentGroup?.name, currentUser?.email, currentGroup]);
 
   if (loading || isSwitching || isLoadingUser) {
     return (

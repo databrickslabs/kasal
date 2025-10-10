@@ -38,6 +38,7 @@ import {
 } from '@mui/material';
 import { GroupService, Group, GroupUser, CreateGroupRequest, AssignUserRequest } from '../../api/GroupService';
 import { UserService, User } from '../../api/UserService';
+import { useGroupStore } from '../../store/groups';
 import {
   Add as AddIcon,
   Group as GroupIcon,
@@ -89,6 +90,9 @@ const GroupManagement: React.FC = () => {
   const [editingUserRole, setEditingUserRole] = useState<'admin' | 'editor' | 'operator'>('operator');
   const [availableUsers, setAvailableUsers] = useState<User[]>([]);
   const [loadingUsers, setLoadingUsers] = useState(false);
+
+  // Group store for refreshing GroupSelector
+  const refreshGroupStore = useGroupStore(s => s.refresh);
 
   // Form states
   const [newGroup, setNewGroup] = useState<CreateGroupRequest>({
@@ -235,6 +239,9 @@ const GroupManagement: React.FC = () => {
       }
 
       loadGroupUsers(selectedGroup.id);
+
+      // Refresh GroupSelector to show updated workspace list
+      await refreshGroupStore();
     } catch (error) {
       console.error('Error in bulk user assignment:', error);
       showNotification('Failed to add members', 'error');

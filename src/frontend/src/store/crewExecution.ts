@@ -31,6 +31,7 @@ interface CrewExecutionState {
   schemaDetectionEnabled: boolean;
   processType: 'sequential' | 'hierarchical';
   managerLLM: string;
+  managerNodeId: string | null;  // ID of the manager node (if exists)
   isCrewPlanningOpen: boolean;
   isScheduleDialogOpen: boolean;
   inputMode: 'dialog' | 'chat';
@@ -61,6 +62,7 @@ interface CrewExecutionState {
   setSchemaDetectionEnabled: (enabled: boolean) => void;
   setProcessType: (type: 'sequential' | 'hierarchical') => void;
   setManagerLLM: (model: string) => void;
+  setManagerNodeId: (id: string | null) => void;
   setCrewPlanningOpen: (open: boolean) => void;
   setScheduleDialogOpen: (open: boolean) => void;
   setSelectedTools: (tools: Tool[]) => void;
@@ -104,6 +106,7 @@ export const useCrewExecutionStore = create<CrewExecutionState>((set, get) => ({
   schemaDetectionEnabled: true,
   processType: (localStorage.getItem('crewai-process-type') as 'sequential' | 'hierarchical') || 'sequential',
   managerLLM: localStorage.getItem('crewai-manager-llm') || '',
+  managerNodeId: null,
   isCrewPlanningOpen: false,
   isScheduleDialogOpen: false,
   inputMode: (localStorage.getItem('crewai-input-mode') as 'dialog' | 'chat') || 'dialog',
@@ -140,6 +143,7 @@ export const useCrewExecutionStore = create<CrewExecutionState>((set, get) => ({
     localStorage.setItem('crewai-manager-llm', model);
     set({ managerLLM: model });
   },
+  setManagerNodeId: (id) => set({ managerNodeId: id }),
   setCrewPlanningOpen: (open) => set({ isCrewPlanningOpen: open }),
   setScheduleDialogOpen: (open) => set({ isScheduleDialogOpen: open }),
   setSelectedTools: (tools) => set({ selectedTools: tools }),
@@ -191,6 +195,40 @@ export const useCrewExecutionStore = create<CrewExecutionState>((set, get) => ({
       if (!hasAgentNodes || !hasTaskNodes) {
         throw new Error('Crew execution requires at least one agent and one task node');
       }
+
+      // Force refresh agents from database to get latest tools and knowledge_sources
+      console.log('[CrewExecution] Refreshing agent data from database before execution');
+      const { useAgentStore } = await import('./agent');
+      const agentStore = useAgentStore.getState();
+
+      const refreshedNodes = await Promise.all(
+        nodes.map(async (node) => {
+          if (node.type === 'agentNode' && node.data?.id) {
+            try {
+              // Force refresh from database
+              const freshAgent = await agentStore.getAgent(node.data.id, true);
+              if (freshAgent) {
+                console.log(`[CrewExecution] Refreshed agent ${freshAgent.name} - tools:`, freshAgent.tools);
+                return {
+                  ...node,
+                  data: {
+                    ...node.data,
+                    ...freshAgent,
+                    // Preserve canvas-specific data
+                    position: node.data.position,
+                  }
+                };
+              }
+            } catch (error) {
+              console.error(`[CrewExecution] Failed to refresh agent ${node.data.id}:`, error);
+            }
+          }
+          return node;
+        })
+      );
+
+      // Use refreshed nodes for execution
+      nodes = refreshedNodes;
 
       // Log the task nodes
       console.log('[CrewExecution] Task nodes before execution:', 
@@ -432,18 +470,51 @@ export const useCrewExecutionStore = create<CrewExecutionState>((set, get) => ({
       // Determine execution type based on node types
       const hasAgentNodes = nodes.some(node => node.type === 'agentNode');
       const hasTaskNodes = nodes.some(node => node.type === 'taskNode');
-      const hasFlowNodes = nodes.some(node => 
-        node.type === 'flowNode' || 
+      const hasFlowNodes = nodes.some(node =>
+        node.type === 'flowNode' ||
         node.type === 'crewNode' ||
         (node.type && node.type.toLowerCase().includes('flow'))
       );
 
       let executionType: 'crew' | 'flow' = 'crew';
-      
+
       if (hasFlowNodes) {
         executionType = 'flow';
       } else if (!hasAgentNodes || !hasTaskNodes) {
         throw new Error('Tab execution requires at least one agent and one task node for crew execution, or flow nodes for flow execution');
+      }
+
+      // Force refresh agents from database to get latest tools and knowledge_sources
+      if (hasAgentNodes) {
+        console.log('[TabExecution] Refreshing agent data from database before execution');
+        const { useAgentStore } = await import('./agent');
+        const agentStore = useAgentStore.getState();
+
+        const refreshedNodes = await Promise.all(
+          nodes.map(async (node) => {
+            if (node.type === 'agentNode' && node.data?.id) {
+              try {
+                const freshAgent = await agentStore.getAgent(node.data.id, true);
+                if (freshAgent) {
+                  console.log(`[TabExecution] Refreshed agent ${freshAgent.name} - tools:`, freshAgent.tools);
+                  return {
+                    ...node,
+                    data: {
+                      ...node.data,
+                      ...freshAgent,
+                      position: node.data.position,
+                    }
+                  };
+                }
+              } catch (error) {
+                console.error(`[TabExecution] Failed to refresh agent ${node.data.id}:`, error);
+              }
+            }
+            return node;
+          })
+        );
+
+        nodes = refreshedNodes;
       }
 
       // Prepare additionalInputs with planning_llm, reasoning_llm, process type, and manager_llm
@@ -704,4 +775,9 @@ export const useCrewExecutionStore = create<CrewExecutionState>((set, get) => ({
       set({ isExecuting: false });
     }
   }
-})); 
+}));
+
+// Expose store on window for debugging
+if (typeof window !== 'undefined') {
+  (window as any).useCrewExecutionStore = useCrewExecutionStore;
+}

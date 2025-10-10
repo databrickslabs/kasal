@@ -29,10 +29,6 @@ interface ChatMessageItemProps {
 }
 
 export const ChatMessageItem: React.FC<ChatMessageItemProps> = ({ message, onOpenLogs }) => {
-  // Debug logging for result messages
-  if (message.type === 'result') {
-    console.log('[ChatMessageItem] Rendering RESULT message:', message);
-  }
   const getIntentIcon = (intent?: string) => {
     switch (intent) {
       case 'generate_agent':

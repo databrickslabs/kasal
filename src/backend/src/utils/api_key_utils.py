@@ -90,6 +90,19 @@ async def async_get_databricks_personal_access_token(db: AsyncSession) -> str:
     return await ApiKeysService.get_api_key_value(db, "DATABRICKS_TOKEN") or ""
 
 def get_databricks_personal_access_token(db: Session) -> str:
-    """Get the Databricks personal access token from the database."""
+    """
+    DEPRECATED: Use get_auth_context() from databricks_auth.py instead.
+    Get the Databricks personal access token from the database.
+    """
+    try:
+        from src.utils.databricks_auth import get_auth_context
+        import asyncio
+        auth = asyncio.run(get_auth_context())
+        if auth and auth.token:
+            return auth.token
+    except Exception as e:
+        logger.warning(f"Failed to get token from unified auth: {e}")
+
+    # Fallback to API keys service
     api_key = ApiKeysService.setup_provider_api_key_sync(db, "DATABRICKS_TOKEN")
-    return os.environ.get("DATABRICKS_TOKEN", "") 
+    return api_key or "" 

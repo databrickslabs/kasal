@@ -16,7 +16,7 @@ from src.schemas.databricks_vector_endpoint import (
     EndpointState,
     EndpointType
 )
-from src.repositories.databricks_auth_helper import DatabricksAuthHelper
+from src.utils.databricks_auth import get_auth_context
 
 logger = LoggerManager.get_instance().databricks_vector_search
 
@@ -51,10 +51,11 @@ class DatabricksVectorEndpointRepository:
         Raises:
             Exception: If no authentication token can be obtained
         """
-        return await DatabricksAuthHelper.get_auth_token(
-            workspace_url=self.workspace_url,
-            user_token=user_token
-        )
+        # Use unified authentication system
+        auth = await get_auth_context(user_token=user_token)
+        if not auth:
+            raise Exception("Failed to get authentication context")
+        return auth.token
     
     async def create_endpoint(
         self,

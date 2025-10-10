@@ -30,6 +30,7 @@ import CloseIcon from '@mui/icons-material/Close';
 import MemoryIcon from '@mui/icons-material/Memory';
 import StorageIcon from '@mui/icons-material/Storage';
 import WorkspacesIcon from '@mui/icons-material/Workspaces';
+// import AutoFixHighIcon from '@mui/icons-material/AutoFixHigh';
 import { useTranslation } from 'react-i18next';
 import { LanguageService } from '../../api/LanguageService';
 import { ThemeConfig as _ThemeConfig } from '../../api/ThemeService';
@@ -49,6 +50,7 @@ import DatabaseManagement from './DatabaseManagement';
 import GroupManagement from './GroupManagement';
 import WorkspaceOverview from './WorkspaceOverview';
 import UserPermissionManagement from './UserPermissionManagement';
+// import DSPyConfiguration from './DSPyConfiguration'; // Temporarily disabled
 import { LANGUAGES } from '../../config/i18n/config';
 
 interface ConfigurationProps {
@@ -257,6 +259,13 @@ function Configuration({ onClose }: ConfigurationProps): JSX.Element {
         index: currentIndex++,
         group: 'workspace'
       });
+      // DSPy Optimization (Workspace) - temporarily disabled
+      // baseNavItems.push({
+      //   label: t('configuration.dspy.tab', { defaultValue: 'DSPy Optimization' }),
+      //   icon: <AutoFixHighIcon fontSize="small" />,
+      //   index: currentIndex++,
+      //   group: 'workspace'
+      // });
     }
 
     // Sections visible to editors and admins (but not operators) — workspace-relevant
@@ -678,6 +687,15 @@ function Configuration({ onClose }: ConfigurationProps): JSX.Element {
                 </ContentPanel>
               );
             }
+
+            // DSPy Optimization - Workspace Settings (temporarily disabled)
+            // if (item.label === t('configuration.dspy.tab', { defaultValue: 'DSPy Optimization' })) {
+            //   return (
+            //     <ContentPanel key={item.index} value={activeSection} index={item.index}>
+            //       <DSPyConfiguration />
+            //     </ContentPanel>
+            //   );
+            // }
 
             // User Permission Management (System Admin only)
             if (item.label === t('configuration.userPermissions.tab', { defaultValue: 'User Permissions' })) {

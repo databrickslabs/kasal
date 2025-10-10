@@ -350,7 +350,7 @@ class AgentTraceEventListener(BaseEventListener):
         "llm_guardrail",
     }
 
-    def __init__(self, job_id: str, group_context=None, debug_tracing: bool = True, register_global_events=False):
+    def __init__(self, job_id: str, group_context=None, debug_tracing: bool = False, register_global_events=False):
         """Initialize the agent trace event listener.
         
         Args:
@@ -692,9 +692,9 @@ class AgentTraceEventListener(BaseEventListener):
                     logger.info(f"{log_prefix} Crew Completed - Total Tokens: {extra_data.get('total_tokens', 'N/A')}, Execution Time: {extra_data.get('execution_time_seconds', 'N/A')} seconds")
                     # Also enqueue as a separate log for visibility
                     enqueue_log(
-                        self.job_id,
-                        f"📊 Crew Statistics: Total Tokens: {extra_data.get('total_tokens', 'N/A')}, Execution Time: {extra_data.get('execution_time_seconds', 'N/A')} seconds",
-                        "info"
+                        execution_id=self.job_id,
+                        content=f"📊 Crew Statistics: Total Tokens: {extra_data.get('total_tokens', 'N/A')}, Execution Time: {extra_data.get('execution_time_seconds', 'N/A')} seconds",
+                        group_context=self.group_context
                     )
                 
                 # Create trace for crew completion
@@ -746,12 +746,25 @@ class AgentTraceEventListener(BaseEventListener):
                     saved_content = str(event.content) if hasattr(event, 'content') else None
                     saved_data = str(event.data) if hasattr(event, 'data') else None
                     result = str(event.result) if hasattr(event, 'result') else None
-                    
-                    logger.info(f"{log_prefix} Event: MemorySaveCompleted | Agent: {agent_name} | Type: {memory_type}")
-                    
+
+                    # DETAILED DEBUG LOGGING
+                    logger.info("=" * 80)
+                    logger.info(f"MEMORY SAVE COMPLETED - DETAILED DEBUG INFO")
+                    logger.info("=" * 80)
+                    logger.info(f"Agent: {agent_name}")
+                    logger.info(f"Memory Type: {memory_type}")
+                    logger.info(f"Event attributes: {[attr for attr in dir(event) if not attr.startswith('_')]}")
+                    if saved_content:
+                        logger.info(f"Saved Content (first 200 chars): {saved_content[:200]}")
+                    if saved_data:
+                        logger.info(f"Saved Data (first 200 chars): {saved_data[:200]}")
+                    if result:
+                        logger.info(f"Result (first 200 chars): {result[:200]}")
+                    logger.info("=" * 80)
+
                     # Use actual content/result if available
                     output_content = saved_content or saved_data or result or f"Saved {memory_type}"
-                    
+
                     self._enqueue_trace(
                         event_source=agent_name,
                         event_context=f"saved_{memory_type}",
@@ -787,23 +800,84 @@ class AgentTraceEventListener(BaseEventListener):
                 """Handle memory query completion events."""
                 try:
                     agent_name = extract_agent_name_from_event(event) or "Unknown Agent"
-                    results = str(event.results) if hasattr(event, 'results') else "results retrieved"
                     memory_type = event.memory_type if hasattr(event, 'memory_type') else "memory"
 
-                    logger.info(f"{log_prefix} Event: MemoryQueryCompleted | Agent: {agent_name} | Type: {memory_type}")
+                    # Get the actual results object BEFORE converting to string
+                    actual_results = event.results if hasattr(event, 'results') else None
+                    results_str = str(actual_results) if actual_results is not None else "results retrieved"
+
+                    # DETAILED DEBUG LOGGING
+                    logger.info("=" * 80)
+                    logger.info(f"MEMORY QUERY COMPLETED - DETAILED DEBUG INFO")
+                    logger.info("=" * 80)
+                    logger.info(f"Agent: {agent_name}")
+                    logger.info(f"Memory Type: {memory_type}")
+                    logger.info(f"Event attributes: {[attr for attr in dir(event) if not attr.startswith('_')]}")
+                    logger.info(f"ACTUAL Results type (before str()): {type(actual_results)}")
+                    logger.info(f"ACTUAL Results value: {actual_results}")
+                    logger.info(f"Results string type: {type(results_str)}")
+                    logger.info(f"Results string length: {len(results_str) if hasattr(results_str, '__len__') else 'N/A'}")
+                    if results_str and results_str != "results retrieved":
+                        logger.info(f"Results string (first 300 chars): {results_str[:300]}")
+                    else:
+                        logger.info(f"⚠️ WARNING: No results retrieved from {memory_type} memory!")
+                    logger.info("=" * 80)
 
                     self._enqueue_trace(
                         event_source=agent_name,
                         event_context=f"memory_query[{memory_type}]",
                         event_type="memory_retrieval",
-                        output_content=results,  # Just the actual results
+                        output_content=results_str,  # Use string version for trace
                         extra_data={"operation": "query_completed", "memory_type": memory_type, "backend": "default"}
                     )
                 except Exception as e:
                     logger.error(f"{log_prefix} Error in on_memory_query_completed: {e}", exc_info=True)
-            
 
-            
+            @crewai_event_bus.on(MemoryRetrievalCompletedEvent)
+            def on_memory_retrieval_completed(source, event):
+                """Handle memory retrieval completion events (different from query events)."""
+                try:
+                    agent_name = extract_agent_name_from_event(event) or "Unknown Agent"
+                    memory_type = event.memory_type if hasattr(event, 'memory_type') else "memory"
+
+                    # Try to get memory_content first (the actual retrieved content)
+                    memory_content = str(event.memory_content) if hasattr(event, 'memory_content') else None
+                    results = str(event.results) if hasattr(event, 'results') else None
+                    data = str(event.data) if hasattr(event, 'data') else None
+
+                    # DETAILED DEBUG LOGGING
+                    logger.info("=" * 80)
+                    logger.info(f"MEMORY RETRIEVAL COMPLETED - DETAILED DEBUG INFO")
+                    logger.info("=" * 80)
+                    logger.info(f"Agent: {agent_name}")
+                    logger.info(f"Memory Type: {memory_type}")
+                    logger.info(f"Event attributes: {[attr for attr in dir(event) if not attr.startswith('_')]}")
+                    if memory_content:
+                        logger.info(f"Memory Content type: {type(memory_content)}")
+                        logger.info(f"Memory Content (first 300 chars): {memory_content[:300]}")
+                    if results:
+                        logger.info(f"Results type: {type(results)}")
+                        logger.info(f"Results (first 300 chars): {results[:300]}")
+                    else:
+                        logger.info(f"⚠️ WARNING: No results in MemoryRetrievalCompletedEvent!")
+                    if data:
+                        logger.info(f"Data type: {type(data)}")
+                        logger.info(f"Data (first 300 chars): {data[:300]}")
+                    logger.info("=" * 80)
+
+                    # Use memory_content if available, fallback to results/data
+                    output_content = memory_content or results or data or "Memory retrieved"
+                    self._enqueue_trace(
+                        event_source=agent_name,
+                        event_context=f"retrieved_{memory_type}",
+                        event_type="memory_retrieval_completed",
+                        output_content=output_content,
+                        extra_data={"operation": "retrieval_completed", "memory_type": memory_type, "backend": "default"}
+                    )
+                except Exception as e:
+                    logger.error(f"{log_prefix} Error in on_memory_retrieval_completed: {e}", exc_info=True)
+
+
         # Register Knowledge Event Handlers if available
         if KNOWLEDGE_EVENTS_AVAILABLE:
             logger.info(f"{log_prefix} Registering knowledge event handlers for CrewAI")

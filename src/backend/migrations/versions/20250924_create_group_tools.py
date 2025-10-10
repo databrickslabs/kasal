@@ -23,7 +23,7 @@ def upgrade() -> None:
         sa.Column("id", sa.Integer(), primary_key=True),
         sa.Column("tool_id", sa.Integer(), sa.ForeignKey("tools.id", ondelete="CASCADE"), nullable=False, index=True),
         sa.Column("group_id", sa.String(length=100), nullable=False, index=True),
-        sa.Column("enabled", sa.Boolean(), nullable=False, server_default=sa.text("0")),
+        sa.Column("enabled", sa.Boolean(), nullable=False, server_default=sa.text("false")),
         sa.Column("config", sa.JSON(), nullable=True),
         sa.Column("credentials_status", sa.String(length=50), nullable=False, server_default="unknown"),
         sa.Column("created_at", sa.DateTime(), nullable=False, server_default=sa.text("CURRENT_TIMESTAMP")),

@@ -12,7 +12,7 @@ from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine, async_sess
 from databricks.sdk import WorkspaceClient
 
 from src.core.logger import LoggerManager
-from src.utils.databricks_auth import is_databricks_apps_environment, get_current_databricks_user
+from src.utils.databricks_auth import get_current_databricks_user, get_workspace_client
 
 logger_manager = LoggerManager.get_instance()
 logger = logging.getLogger(__name__)
@@ -37,18 +37,39 @@ class LakebaseSessionFactory:
         self._engine = None
         self._session_factory = None
 
-    @property
-    def workspace_client(self) -> WorkspaceClient:
-        """Get or create Databricks workspace client."""
-        if not self._workspace_client:
-            if self.user_token:
-                self._workspace_client = WorkspaceClient(
-                    host=os.getenv("DATABRICKS_HOST"),
-                    token=self.user_token
-                )
-            else:
-                self._workspace_client = WorkspaceClient()
-        return self._workspace_client
+    async def _get_workspace_client(self) -> WorkspaceClient:
+        """
+        Get or create Databricks workspace client with proper authentication hierarchy.
+
+        Authentication priority:
+        1. OBO (On-Behalf-Of) with user token
+        2. PAT from API keys service
+        3. PAT from environment variables (DATABRICKS_TOKEN)
+
+        Uses the centralized get_workspace_client() function which properly handles
+        authentication without mixing OAuth and PAT methods.
+
+        Returns:
+            WorkspaceClient configured with appropriate authentication
+        """
+        if self._workspace_client:
+            return self._workspace_client
+
+        try:
+            # Use centralized workspace client creation from databricks_auth
+            # This handles the authentication hierarchy correctly and avoids
+            # mixing OAuth (SPN) with token authentication
+            self._workspace_client = await get_workspace_client(user_token=self.user_token)
+
+            if not self._workspace_client:
+                raise ValueError("Failed to create workspace client - no authentication available")
+
+            logger.info("Successfully created workspace client using centralized auth")
+            return self._workspace_client
+
+        except Exception as e:
+            logger.error(f"Failed to create workspace client: {e}")
+            raise
 
 
     async def get_connection_string(self) -> str:
@@ -60,7 +81,7 @@ class LakebaseSessionFactory:
         """
         try:
             # Get instance details
-            w = self.workspace_client
+            w = await self._get_workspace_client()
             instance = w.database.get_database_instance(name=self.instance_name)
 
             # Check if instance is ready - handle both string and enum states
@@ -79,11 +100,10 @@ class LakebaseSessionFactory:
 
             # Build connection string
             # For asyncpg, don't use sslmode in URL - use connect_args instead
-            # Authentication depends on environment:
-            # - Databricks Apps with user email: Use provided email
+            # Determine username:
+            # - If user email provided (e.g., from request context), use it
             # - Otherwise: Get the actual authenticated user's identity
-            if is_databricks_apps_environment() and self.user_email:
-                # In Databricks Apps with provided email, use it
+            if self.user_email:
                 username = quote(self.user_email)
                 logger.info(f"Using provided email for Lakebase: {self.user_email}")
             else:
@@ -92,13 +112,7 @@ class LakebaseSessionFactory:
                 current_user_identity, error = await get_current_databricks_user(self.user_token)
                 if error or not current_user_identity:
                     logger.error(f"Failed to get current user identity: {error}")
-                    # Try environment variable as last resort
-                    env_email = os.getenv('DATABRICKS_USER_EMAIL')
-                    if env_email:
-                        username = quote(env_email)
-                        logger.warning(f"Using email from environment as fallback: {env_email}")
-                    else:
-                        raise Exception(f"Cannot determine Databricks user identity: {error}")
+                    raise Exception(f"Cannot determine Databricks user identity: {error}")
                 else:
                     username = quote(current_user_identity)
                     logger.info(f"Using authenticated user identity for Lakebase: {current_user_identity}")
@@ -137,7 +151,8 @@ class LakebaseSessionFactory:
                 connect_args={
                     "ssl": "require",  # Enable SSL for asyncpg
                     "server_settings": {
-                        "jit": "off"  # Disable JIT for compatibility
+                        "jit": "off",  # Disable JIT for compatibility
+                        "search_path": "kasal"  # Set schema search path to kasal only
                     }
                 }
             )
@@ -156,9 +171,10 @@ class LakebaseSessionFactory:
             logger.error(f"Error creating Lakebase engine: {e}")
             raise
 
-    async def get_session(self) -> AsyncGenerator[AsyncSession, None]:
+    @asynccontextmanager
+    async def get_session(self):
         """
-        Get a database session with Lakebase.
+        Get a database session with Lakebase as an async context manager.
         Transaction management should be handled by the caller.
 
         Yields:
@@ -198,6 +214,7 @@ class LakebaseSessionFactory:
 _lakebase_factory: Optional[LakebaseSessionFactory] = None
 
 
+@asynccontextmanager
 async def get_lakebase_session(
     instance_name: str = None,
     user_token: Optional[str] = None,
@@ -239,8 +256,8 @@ async def get_lakebase_session(
         # Force engine recreation with new email
         await _lakebase_factory.create_engine()
 
-    # Get session and manage its lifecycle
-    async for session in _lakebase_factory.get_session():
+    # Get session and manage its lifecycle using async context manager
+    async with _lakebase_factory.get_session() as session:
         try:
             yield session
             await session.commit()

@@ -138,15 +138,15 @@ async def run_crew(execution_id: str, crew: Crew, running_jobs: Dict, group_cont
     from src.services.engine_config_service import EngineConfigService
     from src.db.session import get_db
 
-    # Fetch debug tracing flag from engine configuration (default True on errors)
-    debug_tracing_enabled = True
+    # Fetch debug tracing flag from engine configuration (default False on errors)
+    debug_tracing_enabled = False
     try:
-        async for session in get_db():
+        from src.db.session import async_session_factory
+        async with async_session_factory() as session:
             service = EngineConfigService(session)
             debug_tracing_enabled = await service.get_crewai_debug_tracing()
-            break
     except Exception as e:
-        logger.warning(f"Failed to read CrewAI debug tracing flag; defaulting to True. Error: {e}")
+        logger.warning(f"Failed to read CrewAI debug tracing flag; defaulting to False. Error: {e}")
 
     logger.debug(f"[TRACE_DEBUG] Creating AgentTraceEventListener for execution {execution_id} (debug_tracing={debug_tracing_enabled})")
     trace_listener = AgentTraceEventListener(job_id=execution_id, group_context=group_context, debug_tracing=debug_tracing_enabled)
@@ -217,7 +217,11 @@ async def run_crew(execution_id: str, crew: Crew, running_jobs: Dict, group_cont
                         for agent in crew.agents:
                             if not hasattr(agent, 'llm') or agent.llm is None:
                                 # Use LLMManager to configure CrewAI LLM
-                                crewai_llm = await LLMManager.configure_crewai_llm(model)
+                                # SECURITY: Pass group_id for multi-tenant isolation
+                                group_id = config.get('group_id') if config else None
+                                if not group_id:
+                                    raise ValueError("group_id is REQUIRED for LLM configuration")
+                                crewai_llm = await LLMManager.configure_crewai_llm(model, group_id)
                                 agent.llm = crewai_llm
                                 logger.info(f"Updated agent {agent.role} with global LLM {model}")
                     else:
@@ -234,29 +238,26 @@ async def run_crew(execution_id: str, crew: Crew, running_jobs: Dict, group_cont
             try:
                 # Import ApiKeysService to ensure API keys are in environment
                 from src.services.api_keys_service import ApiKeysService
-                
+
+                # SECURITY: Get group_id for multi-tenant isolation
+                group_id = group_context.primary_group_id if group_context else None
+
                 # Explicitly set up API keys for common providers
-                # Handle OpenAI API key properly in Databricks Apps environment
+                # Handle OpenAI API key properly
                 try:
-                    from src.utils.databricks_auth import is_databricks_apps_environment
-                    if not is_databricks_apps_environment():
-                        await ApiKeysService.setup_openai_api_key()
+                    openai_key = await ApiKeysService.get_provider_api_key("openai", group_id=group_id)
+                    if openai_key:
+                        # OpenAI key is configured, set it up
+                        os.environ["OPENAI_API_KEY"] = openai_key
+                        logger.info("OpenAI API key configured and set up")
                     else:
-                        # In Databricks Apps, check if OpenAI key is configured
-                        openai_key = await ApiKeysService.get_provider_api_key("openai")
-                        if openai_key:
-                            # OpenAI key is configured, set it up normally
-                            os.environ["OPENAI_API_KEY"] = openai_key
-                            logger.info("OpenAI API key configured and set up in Databricks Apps environment")
-                        else:
-                            # No OpenAI key configured, set dummy key to satisfy CrewAI validation
-                            os.environ["OPENAI_API_KEY"] = "sk-dummy-databricks-apps-validation-key"
-                            logger.info("No OpenAI API key configured, set dummy key for validation in Databricks Apps environment")
-                except ImportError:
-                    await ApiKeysService.setup_openai_api_key()
-                
-                await ApiKeysService.setup_anthropic_api_key()
-                await ApiKeysService.setup_gemini_api_key()  # Ensure Gemini API key is properly set
+                        # No OpenAI key configured, set dummy key to satisfy CrewAI validation
+                        os.environ["OPENAI_API_KEY"] = "sk-dummy-validation-key"
+                        logger.info("No OpenAI API key configured, set dummy key for validation")
+                except Exception as e:
+                    logger.warning(f"Error setting up OpenAI API key: {e}")
+                    # Set dummy key to satisfy CrewAI validation
+                    os.environ["OPENAI_API_KEY"] = "sk-dummy-validation-key"
                 
                 # Log API key status (don't log the actual keys)
                 logger.info("Verified API keys are set in environment variables")
@@ -613,17 +614,35 @@ async def run_crew_in_process(
             else:
                 logger.info("No user inputs found after filtering system inputs")
         
+        # Fetch debug tracing flag before spawning subprocess
+        debug_tracing_enabled = False  # Default value
+        try:
+            # Try to fetch debug tracing configuration
+            from src.services.engine_config_service import EngineConfigService
+            from src.db.session import async_session_factory
+
+            async with async_session_factory() as session:
+                try:
+                    service = EngineConfigService(session)
+                    debug_tracing_enabled = await service.get_crewai_debug_tracing()
+                    logger.info(f"Fetched debug tracing flag for subprocess: {debug_tracing_enabled}")
+                except Exception as e:
+                    logger.warning(f"Failed to fetch debug tracing flag, using default: {e}")
+        except Exception as e:
+            logger.warning(f"Could not access database for debug tracing flag: {e}")
+
         # Use ProcessCrewExecutor for isolated execution
         logger.info(f"[run_crew_in_process] Starting process-based execution for {execution_id}")
-        logger.info(f"[run_crew_in_process] Calling process_crew_executor.run_crew_isolated")
-        
+        logger.info(f"[run_crew_in_process] Calling process_crew_executor.run_crew_isolated with debug_tracing={debug_tracing_enabled}")
+
         # Run the crew in an isolated process
         result = await process_crew_executor.run_crew_isolated(
             execution_id=execution_id,
             crew_config=config,
             group_context=group_context,  # MANDATORY for tenant isolation
             inputs=user_inputs,
-            timeout=3600  # 1 hour timeout
+            timeout=3600,  # 1 hour timeout
+            debug_tracing_enabled=debug_tracing_enabled  # Pass the debug tracing flag
         )
         
         logger.info(f"[run_crew_in_process] Process executor returned result for {execution_id}")

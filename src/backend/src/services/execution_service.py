@@ -382,14 +382,9 @@ class ExecutionService:
             elif execution_type.lower() == "crew":
                 exec_logger.debug(f"[run_crew_execution] This is a CREW execution - delegating to CrewAIExecutionService")
                 
-                # Set up Databricks configuration if needed for crew executions
-                if config.model and 'databricks' in config.model.lower():
-                    exec_logger.info(f"Setting up Databricks token for crew execution with model {config.model}")
-                    from src.services.databricks_service import DatabricksService
-                    setup_result = await DatabricksService.setup_token()
-                    if not setup_result:
-                        exec_logger.warning("Failed to set up Databricks token, crew execution may fail if it requires Databricks")
-                
+                # NOTE: Databricks authentication is now handled via get_auth_context() in databricks_auth.py
+                # No need to set up environment variables here - each component uses unified auth
+
                 exec_logger.debug(f"[run_crew_execution] Calling crew_execution_service.run_crew_execution for job_id: {execution_id}")
                 # This call should handle PREPARING/RUNNING updates internally
                 result = await crew_execution_service.run_crew_execution(
@@ -449,28 +444,28 @@ class ExecutionService:
             # Get executions from database using ExecutionRepository
             from src.repositories.execution_repository import ExecutionRepository
 
-            logger.info(f"[list_executions] Starting database query - group_ids: {group_ids}, user_email: {user_email}")
+            logger.debug(f"[list_executions] Starting database query - group_ids: {group_ids}, user_email: {user_email}")
 
             if self.session:
-                logger.info(f"[list_executions] Using injected database session: {self.session}")
+                logger.debug(f"[list_executions] Using injected database session: {self.session}")
                 repo = ExecutionRepository(self.session)
-                logger.info(f"[list_executions] Created repository: {repo}")
+                logger.debug(f"[list_executions] Created repository: {repo}")
 
                 # Get executions with group and user filtering using the correct repository method
-                logger.info(f"[list_executions] Calling repo.get_execution_history with group_ids={group_ids}")
+                logger.debug(f"[list_executions] Calling repo.get_execution_history with group_ids={group_ids}")
                 db_executions_list, total_count = await repo.get_execution_history(
                     limit=limit,
                     offset=offset,
                     group_ids=group_ids,
                     user_email=user_email
                 )
-                logger.info(f"[list_executions] Repository returned {len(db_executions_list)} items, total_count={total_count}")
+                logger.debug(f"[list_executions] Repository returned {len(db_executions_list)} items, total_count={total_count}")
                 
-                logger.info(f"[list_executions] Database returned {len(db_executions_list)} executions for group_ids: {group_ids}")
+                logger.debug(f"[list_executions] Database returned {len(db_executions_list)} executions for group_ids: {group_ids}")
 
                 # Debug what we got
                 if db_executions_list:
-                    logger.info(f"[list_executions] First execution: job_id={db_executions_list[0].job_id}, group_id={db_executions_list[0].group_id}, run_name={db_executions_list[0].run_name}")
+                    logger.debug(f"[list_executions] First execution: job_id={db_executions_list[0].job_id}, group_id={db_executions_list[0].group_id}, run_name={db_executions_list[0].run_name}")
                 else:
                     logger.warning(f"[list_executions] No executions found for group_ids: {group_ids}")
                 
@@ -517,7 +512,7 @@ class ExecutionService:
                     execution_data["execution_id"] = execution_id
                 results.append(execution_data)
             
-            logger.info(f"Returning {len(results)} total executions ({len(db_executions)} from DB, {len(memory_executions)} from memory)")
+            logger.debug(f"Returning {len(results)} total executions ({len(db_executions)} from DB, {len(memory_executions)} from memory)")
             return results
                 
         except Exception as e:
@@ -562,15 +557,9 @@ class ExecutionService:
         success = False
         
         try:
-            # Set up Databricks configuration if needed
-            # This is important for executions that might need to use Databricks services
-            if config.model and 'databricks' in config.model.lower():
-                exec_logger.info(f"Setting up Databricks token for execution with model {config.model}")
-                from src.services.databricks_service import DatabricksService
-                setup_result = DatabricksService.setup_token_sync()
-                if not setup_result:
-                    exec_logger.warning("Failed to set up Databricks token, execution may fail if it requires Databricks")
-            
+            # NOTE: Databricks authentication is now handled via get_auth_context() in databricks_auth.py
+            # No need to set up environment variables here - each component uses unified auth
+
             # Main execution logic would go here
             # For non-crew executions, such as flows
             if execution_type == "flow":
@@ -679,7 +668,11 @@ class ExecutionService:
                 "created_at": execution.created_at,
                 "result": execution.result,
                 "run_name": execution.run_name,
-                "error": execution.error
+                "error": execution.error,
+                # MLflow integration fields
+                "mlflow_trace_id": execution.mlflow_trace_id,
+                "mlflow_experiment_name": execution.mlflow_experiment_name,
+                "mlflow_evaluation_run_id": execution.mlflow_evaluation_run_id
             }
         except Exception as e:
             exec_logger.error(f"Error getting execution status for {execution_id}: {str(e)}")
@@ -741,6 +734,18 @@ class ExecutionService:
                 else:
                     crew_logger.warning(f"[ExecutionService.create_execution] Agent {agent_id} has NO knowledge_sources field")
             
+            # Ensure GroupContext is available in UserContext for authentication
+            # This is critical for both OBO (user_token) and PAT (group_id) authentication
+            if group_context:
+                from src.utils.user_context import UserContext
+                UserContext.set_group_context(group_context)
+                crew_logger.info(f"[ExecutionService.create_execution] Set GroupContext for execution name generation: primary_group_id={group_context.primary_group_id}, has_access_token={bool(group_context.access_token)}")
+
+                # Also set user_token if available for OBO authentication
+                if hasattr(group_context, 'access_token') and group_context.access_token:
+                    UserContext.set_user_token(group_context.access_token)
+                    crew_logger.info("[ExecutionService.create_execution] Set user_token for OBO authentication")
+
             request = ExecutionNameGenerationRequest(
                 agents_yaml=agents_yaml,
                 tasks_yaml=tasks_yaml,

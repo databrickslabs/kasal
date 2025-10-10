@@ -149,6 +149,7 @@ class DatabricksIndexSchemas:
         "chunk_index": "int",  # Index of chunk within document
         "chunk_size": "int",  # Size of the chunk in characters
         "parent_document_id": "string",  # ID of parent document if chunked
+        "document_summary": "string",  # Brief summary for contextual retrieval (NEW)
 
         # Access control
         "agent_ids": "string",  # JSON array of agent IDs that can access this document
@@ -171,6 +172,8 @@ class DatabricksIndexSchemas:
     DOCUMENT_SEARCH_COLUMNS = [
         "id", "title", "content", "source", "document_type",
         "section", "chunk_index", "chunk_size", "parent_document_id",
+        # NOTE: document_summary removed from search columns for backward compatibility
+        # It will be stored in metadata but not queried directly
         "agent_ids", "created_at", "updated_at", "doc_metadata", "group_id",
         "embedding_model", "version"
     ]

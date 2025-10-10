@@ -25,18 +25,16 @@ export function useUIFitView(params: {
     layoutManager.updateUIState(currentUIState);
     const canvasArea = layoutManager.getAvailableCanvasArea('crew');
 
-    console.log('[FitView] Canvas area:', canvasArea);
-    console.log('[FitView] Chat panel width:', currentUIState.chatPanelWidth);
-    console.log('[FitView] Chat panel side:', currentUIState.chatPanelSide);
-
     // Calculate bounds of all nodes
     let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
     nodes.forEach((node) => {
       if (node.position) {
+        const nodeWidth = node.width || 200;
+        const nodeHeight = node.height || 150;
         minX = Math.min(minX, node.position.x);
         minY = Math.min(minY, node.position.y);
-        maxX = Math.max(maxX, node.position.x + (node.width || 200));
-        maxY = Math.max(maxY, node.position.y + (node.height || 150));
+        maxX = Math.max(maxX, node.position.x + nodeWidth);
+        maxY = Math.max(maxY, node.position.y + nodeHeight);
       }
     });
 
@@ -50,17 +48,11 @@ export function useUIFitView(params: {
     const zoomY = (canvasArea.height - 2 * padding) / nodesHeight;
     const zoom = Math.min(zoomX, zoomY, 1.5); // Cap at 1.5x to prevent over-zooming
 
-    console.log('[FitView] Calculated zoom:', zoom, 'zoomX:', zoomX, 'zoomY:', zoomY);
-    console.log('[FitView] Nodes bounds:', { minX, minY, maxX, maxY, nodesWidth, nodesHeight });
-
     // Calculate center of canvas area in screen coordinates with visual balance adjustments
-    // When chat panel is on the right, shift center point to the right to account for visual weight
-    // When chat panel is on the left, shift center point to the left to keep nodes visible
-    // When execution history is visible at bottom, shift center point up
     const chatPanelOffset = currentUIState.chatPanelVisible && !currentUIState.chatPanelCollapsed
       ? (currentUIState.chatPanelSide === 'right'
-          ? currentUIState.chatPanelWidth * 0.15   // Shift right when chat is on right
-          : -currentUIState.chatPanelWidth * 0.55) // Shift significantly to left when chat is on left
+          ? currentUIState.chatPanelWidth * 0.15
+          : -currentUIState.chatPanelWidth * 0.55)
       : 0;
 
     const executionHistoryOffset = currentUIState.executionHistoryVisible
@@ -75,12 +67,8 @@ export function useUIFitView(params: {
     const nodesCenterY = minY + nodesHeight / 2;
 
     // Calculate viewport position to center nodes in canvas area
-    // viewport.x = where we want the center in screen coords - where the node center will be with zoom
     const viewportX = canvasCenterX - nodesCenterX * zoom;
     const viewportY = canvasCenterY - nodesCenterY * zoom;
-
-    console.log('[FitView] Offsets - chat:', chatPanelOffset, 'execution:', executionHistoryOffset);
-    console.log('[FitView] Setting viewport:', { x: viewportX, y: viewportY, zoom });
 
     crewFlowInstanceRef.current.setViewport(
       { x: viewportX, y: viewportY, zoom },

@@ -465,7 +465,6 @@ class TestComplete100PercentCoverage:
         mock_config = {"provider": ModelProvider.DATABRICKS, "name": "databricks-model"}
 
         mock_databricks_auth = MagicMock()
-        mock_databricks_auth.is_databricks_apps_environment = MagicMock(return_value=True)
         mock_databricks_auth.setup_environment_variables = MagicMock()
 
         with patch.dict('sys.modules', {'src.utils.databricks_auth': mock_databricks_auth}):
@@ -474,7 +473,6 @@ class TestComplete100PercentCoverage:
                     mock_service.return_value.get_model_config = AsyncMock(return_value=mock_config)
 
                     result = await LLMManager.configure_litellm("test-model")
-                    mock_databricks_auth.is_databricks_apps_environment.assert_called_once()
                     mock_databricks_auth.setup_environment_variables.assert_called_once()
 
     @pytest.mark.asyncio
@@ -483,7 +481,6 @@ class TestComplete100PercentCoverage:
         mock_config = {"provider": ModelProvider.DATABRICKS, "name": "databricks-model"}
 
         mock_databricks_auth = MagicMock()
-        mock_databricks_auth.is_databricks_apps_environment = MagicMock(return_value=False)
 
         with patch.dict('sys.modules', {'src.utils.databricks_auth': mock_databricks_auth}):
             with patch('src.core.llm_manager.UnitOfWork'):
@@ -502,7 +499,6 @@ class TestComplete100PercentCoverage:
         mock_config = {"provider": ModelProvider.DATABRICKS, "name": "databricks-model"}
 
         mock_databricks_auth = MagicMock()
-        mock_databricks_auth.is_databricks_apps_environment = MagicMock(return_value=False)
 
         with patch.dict('sys.modules', {'src.utils.databricks_auth': mock_databricks_auth}):
             with patch('src.core.llm_manager.UnitOfWork'):
@@ -695,7 +691,6 @@ class TestComplete100PercentCoverage:
         mock_config = {"provider": ModelProvider.DATABRICKS, "name": "databricks-model"}
 
         mock_databricks_auth = MagicMock()
-        mock_databricks_auth.is_databricks_apps_environment = MagicMock(return_value=True)
         mock_databricks_auth.setup_environment_variables = MagicMock()
 
         with patch.dict('sys.modules', {'src.utils.databricks_auth': mock_databricks_auth}):
@@ -707,7 +702,6 @@ class TestComplete100PercentCoverage:
                         mock_llm_class.return_value = MagicMock()
 
                         result = await LLMManager.configure_crewai_llm("test-model")
-                        mock_databricks_auth.is_databricks_apps_environment.assert_called_once()
                         mock_databricks_auth.setup_environment_variables.assert_called_once()
 
     @pytest.mark.asyncio
@@ -756,7 +750,6 @@ class TestComplete100PercentCoverage:
         mock_config = {"provider": ModelProvider.DATABRICKS, "name": "databricks-model"}
 
         mock_databricks_auth = MagicMock()
-        mock_databricks_auth.is_databricks_apps_environment = MagicMock(return_value=False)
 
         with patch.dict('sys.modules', {'src.utils.databricks_auth': mock_databricks_auth}):
             with patch('src.core.llm_manager.UnitOfWork') as mock_uow:
@@ -783,7 +776,6 @@ class TestComplete100PercentCoverage:
         mock_config = {"provider": ModelProvider.DATABRICKS, "name": "databricks-model"}
 
         mock_databricks_auth = MagicMock()
-        mock_databricks_auth.is_databricks_apps_environment = MagicMock(return_value=False)
 
         with patch.dict('sys.modules', {'src.utils.databricks_auth': mock_databricks_auth}):
             with patch('src.core.llm_manager.UnitOfWork') as mock_uow:
@@ -885,7 +877,6 @@ class TestComplete100PercentCoverage:
         embedder_config = {"provider": "databricks", "config": {"model": "test-embedding"}}
 
         mock_databricks_auth = MagicMock()
-        mock_databricks_auth.is_databricks_apps_environment = MagicMock(return_value=True)
         mock_databricks_auth.get_databricks_auth_headers = AsyncMock(return_value=({"Authorization": "Bearer oauth-token"}, None))
 
         with patch.dict('sys.modules', {'src.utils.databricks_auth': mock_databricks_auth}):
@@ -898,7 +889,6 @@ class TestComplete100PercentCoverage:
                 with patch.dict(os.environ, {"DATABRICKS_HOST": "https://workspace.databricks.com"}):
                     result = await LLMManager.get_embedding("test text", embedder_config=embedder_config)
                     assert result == [0.1, 0.2]
-                    # The function is imported but not called as is_databricks_apps_environment
                     mock_databricks_auth.get_databricks_auth_headers.assert_called()
 
     @pytest.mark.asyncio
@@ -1338,7 +1328,6 @@ class TestComplete100PercentCoverage:
         mock_config = {"provider": ModelProvider.DATABRICKS, "name": "databricks-model"}
 
         mock_databricks_auth = MagicMock()
-        mock_databricks_auth.is_databricks_apps_environment = MagicMock(return_value=False)
 
         with patch.dict('sys.modules', {'src.utils.databricks_auth': mock_databricks_auth}):
             with patch('src.core.llm_manager.UnitOfWork') as mock_uow:
@@ -1461,7 +1450,6 @@ class TestComplete100PercentCoverage:
         embedder_config = {"provider": "databricks", "config": {"model": "test-embedding"}}
 
         mock_databricks_auth = MagicMock()
-        mock_databricks_auth.is_databricks_apps_environment = MagicMock(return_value=True)
         mock_databricks_auth.get_databricks_auth_headers = AsyncMock(return_value=(None, "Auth error"))
 
         with patch.dict('sys.modules', {'src.utils.databricks_auth': mock_databricks_auth}):
@@ -1977,7 +1965,6 @@ class TestComplete100PercentCoverage:
         mock_config = {"provider": ModelProvider.DATABRICKS, "name": "databricks-model"}
 
         mock_databricks_auth = MagicMock()
-        mock_databricks_auth.is_databricks_apps_environment = MagicMock(return_value=False)
 
         with patch.dict('sys.modules', {'src.utils.databricks_auth': mock_databricks_auth}):
             with patch('src.core.llm_manager.UnitOfWork') as mock_uow:

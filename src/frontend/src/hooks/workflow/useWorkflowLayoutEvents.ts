@@ -1,8 +1,7 @@
 import React from 'react';
-import type { ReactFlowInstance, Node, Edge, Connection } from 'reactflow';
+import type { ReactFlowInstance, Node, Edge } from 'reactflow';
 import { CanvasLayoutManager } from '../../utils/CanvasLayoutManager';
 import { useUILayoutStore } from '../../store/uiLayout';
-import { generateEdgeId } from '../../utils/edgeUtils';
 
 export function useWorkflowLayoutEvents(params: {
   nodes: Node[];
@@ -108,27 +107,29 @@ export function useWorkflowLayoutEvents(params: {
 
       layoutManager.updateUIState(currentUIState);
 
-      const reorganizedNodes = layoutManager.reorganizeNodes(nodes, 'crew');
+      const reorganizedNodes = layoutManager.reorganizeNodes(nodes, 'crew', _edges);
       setNodes(reorganizedNodes);
 
-      // Retarget agent->task edge handles to match orientation
+      // Retarget edge handles to match orientation
       if (reason === 'layout-orientation-toggle') {
-        // Always retarget Agent -> Task edges to horizontal connectors: agent right -> task left
-        const sourceHandle = 'right' as const;
-        const targetHandle = 'left' as const;
+        const currentLayout = useUILayoutStore.getState().layoutOrientation;
 
         setEdges(prevEdges => prevEdges.map(e => {
           const sourceNode = reorganizedNodes.find(n => n.id === e.source);
           const targetNode = reorganizedNodes.find(n => n.id === e.target);
+
+          // Agent-to-task edges: change based on layout orientation
           if (sourceNode?.type === 'agentNode' && targetNode?.type === 'taskNode') {
-            const newId = generateEdgeId({
-              source: e.source,
-              target: e.target,
-              sourceHandle,
-              targetHandle
-            } as Connection);
-            return { ...e, sourceHandle, targetHandle, id: newId };
+            const agentSourceHandle = currentLayout === 'vertical' ? 'bottom' : 'right';
+            const taskTargetHandle = currentLayout === 'vertical' ? 'top' : 'left';
+            return { ...e, sourceHandle: agentSourceHandle, targetHandle: taskTargetHandle };
           }
+
+          // Task-to-task edges: ALWAYS horizontal (right → left) regardless of layout
+          if (sourceNode?.type === 'taskNode' && targetNode?.type === 'taskNode') {
+            return { ...e, sourceHandle: 'right', targetHandle: 'left' };
+          }
+
           return e;
         }));
       }

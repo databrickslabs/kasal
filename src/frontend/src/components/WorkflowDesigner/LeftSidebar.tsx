@@ -851,7 +851,10 @@ const LeftSidebar: React.FC<LeftSidebarProps> = ({
                         <FitViewIcon fontSize="small" />
                       </IconButton>
                     </Tooltip>
-                    <Tooltip title="Toggle Layout (Vertical/Horizontal)" placement="right">
+                    <Tooltip
+                      title={`Current: ${layoutOrientation === 'horizontal' ? 'Horizontal' : 'Vertical'} Layout (Click to toggle)`}
+                      placement="right"
+                    >
                       <IconButton
                         onClick={toggleLayoutOrientation}
                         sx={{

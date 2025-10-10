@@ -15,12 +15,22 @@ from sqlalchemy import create_engine, text
 
 # Try to import DatabaseInstance, but make it optional
 try:
-    from databricks.sdk.service.database import DatabaseInstance
+    from databricks.sdk.service.database import (
+        DatabaseInstance,
+        DatabaseInstanceRole,
+        DatabaseInstanceRoleAttributes,
+        DatabaseInstanceRoleMembershipRole,
+        DatabaseInstanceRoleIdentityType
+    )
     LAKEBASE_AVAILABLE = True
 except ImportError:
     # Don't use logger here as it's not initialized yet
     print("Warning: DatabaseInstance not available in databricks-sdk. Lakebase features will be disabled.")
     DatabaseInstance = None
+    DatabaseInstanceRole = None
+    DatabaseInstanceRoleAttributes = None
+    DatabaseInstanceRoleMembershipRole = None
+    DatabaseInstanceRoleIdentityType = None
     LAKEBASE_AVAILABLE = False
 from sqlalchemy.ext.asyncio import create_async_engine, AsyncSession
 import asyncpg
@@ -29,8 +39,13 @@ from src.core.logger import LoggerManager
 from src.config.settings import settings
 from src.core.base_service import BaseService
 from src.models.database_config import LakebaseConfig
+from src.db.base import Base
 from src.repositories.database_config_repository import DatabaseConfigRepository
-from src.utils.databricks_auth import is_databricks_apps_environment, get_current_databricks_user
+from src.utils.databricks_auth import get_current_databricks_user, get_workspace_client, _databricks_auth
+from src.services.lakebase_permission_service import LakebasePermissionService
+from src.services.lakebase_connection_service import LakebaseConnectionService
+from src.services.lakebase_schema_service import LakebaseSchemaService
+from src.services.lakebase_migration_service import LakebaseMigrationService
 
 logger_manager = LoggerManager.get_instance()
 logger = logging.getLogger(__name__)
@@ -39,86 +54,42 @@ logger = logging.getLogger(__name__)
 class LakebaseService(BaseService):
     """Service for managing Databricks Lakebase instances."""
 
-    def __init__(self, session: AsyncSession, user_token: Optional[str] = None, user_email: Optional[str] = None):
+    def __init__(self, session: Optional[AsyncSession] = None, user_token: Optional[str] = None, user_email: Optional[str] = None):
         """
         Initialize Lakebase service.
 
         Args:
-            session: Database session
+            session: Database session (optional for migration operations that create their own engines)
             user_token: Optional user token for Databricks authentication
             user_email: Optional user email for Lakebase authentication
         """
-        super().__init__(session)
+        if session:
+            super().__init__(session)
+            self.session = session
+            self.config_repository = DatabaseConfigRepository(LakebaseConfig, session)
+        else:
+            # For operations that don't need database session (like migration with own engines)
+            self.session = None
+            self.config_repository = None
         self.user_token = user_token
         self.user_email = user_email
-        self.session = session
-        self.config_repository = DatabaseConfigRepository(LakebaseConfig, session)
-        self._workspace_client = None
 
-    async def _get_auth_token(self) -> Optional[str]:
-        """
-        Get authentication token with fallback strategy.
-
-        Priority:
-        1. User token (OBO)
-        2. PAT from database (API key service)
-        3. Environment variables
-
-        Returns:
-            Authentication token or None
-        """
-        # 1. Try user token (OBO)
-        if self.user_token:
-            logger.info("Using OBO user token for authentication")
-            return self.user_token
-
-        # 2. Try to get PAT from database
-        try:
-            from src.services.api_keys_service import ApiKeysService
-
-            # Try to get Databricks PAT from API keys using class method
-            databricks_token = await ApiKeysService.get_provider_api_key("databricks")
-            if databricks_token:
-                logger.info("Using PAT from API key service")
-                return databricks_token
-        except Exception as e:
-            logger.warning(f"Could not retrieve PAT from API key service: {e}")
-
-        # 3. Try environment variables
-        env_token = os.getenv("DATABRICKS_TOKEN") or os.getenv("DATABRICKS_API_KEY")
-        if env_token:
-            logger.info("Using PAT from environment variables")
-            return env_token
-
-        logger.warning("No authentication token available - will try default SDK auth")
-        return None
+        # Initialize specialized services
+        self.connection_service = LakebaseConnectionService(user_token, user_email)
+        self.schema_service = LakebaseSchemaService()
+        self.permission_service = LakebasePermissionService()
+        self.migration_service = None  # Will be created when needed with engines
 
     async def get_workspace_client(self) -> WorkspaceClient:
-        """Get or create Databricks workspace client with proper authentication."""
-        if not self._workspace_client:
-            auth_token = await self._get_auth_token()
-            host = os.getenv("DATABRICKS_HOST")
+        """
+        Get or create Databricks workspace client for Lakebase.
 
-            if auth_token and host:
-                # Use explicit token authentication
-                self._workspace_client = WorkspaceClient(
-                    host=host,
-                    token=auth_token
-                )
-                logger.info(f"Created WorkspaceClient with token auth for {host}")
-            else:
-                # Fall back to default SDK authentication (may use CLI auth)
-                try:
-                    self._workspace_client = WorkspaceClient()
-                    logger.info("Created WorkspaceClient with default SDK auth")
-                except Exception as e:
-                    logger.error(f"Failed to create WorkspaceClient: {e}")
-                    # Try one more time with just host
-                    if host:
-                        self._workspace_client = WorkspaceClient(host=host)
-                    else:
-                        raise
-        return self._workspace_client
+        Delegates to LakebaseConnectionService for authentication handling.
+
+        Returns:
+            WorkspaceClient configured with appropriate credentials
+        """
+        return await self.connection_service.get_workspace_client()
 
     async def get_config(self) -> Dict[str, Any]:
         """
@@ -226,7 +197,7 @@ class LakebaseService(BaseService):
                 logger.info(f"Instance {instance_name} already exists")
                 return existing
 
-            # Create new instance
+            # Create new instance using service principal
             w = await self.get_workspace_client()
             instance = w.database.create_database_instance(
                 DatabaseInstance(
@@ -310,6 +281,12 @@ class LakebaseService(BaseService):
                 logger.info("Lakebase features not available, returning NOT_FOUND state")
                 return {"state": "NOT_FOUND", "name": instance_name, "message": "Lakebase not available"}
 
+            # Check if Lakebase is configured before trying to authenticate
+            config = await self.get_config()
+            if not config or not config.get("enabled", False):
+                logger.info(f"Lakebase not configured or disabled, returning NOT_FOUND state for instance {instance_name}")
+                return {"state": "NOT_FOUND", "name": instance_name, "message": "Lakebase not configured"}
+
             w = await self.get_workspace_client()
             instance = w.database.get_database_instance(name=instance_name)
 
@@ -381,13 +358,14 @@ class LakebaseService(BaseService):
             raise
 
 
-    async def migrate_existing_data(self, instance_name: str, endpoint: str) -> Dict[str, Any]:
+    async def migrate_existing_data(self, instance_name: str, endpoint: str, recreate_schema: bool = False) -> Dict[str, Any]:
         """
         Migrate data from existing database (SQLite/PostgreSQL) to Lakebase.
 
         Args:
             instance_name: Lakebase instance name
             endpoint: Lakebase endpoint
+            recreate_schema: If True, drop and recreate kasal schema before migration
 
         Returns:
             Migration result
@@ -407,309 +385,151 @@ class LakebaseService(BaseService):
             logger.info(f"Endpoint: {endpoint}")
             logger.info("=" * 80)
 
-            # Generate temporary token for connection
-            w = await self.get_workspace_client()
-            cred = w.database.generate_database_credential(
-                request_id=str(uuid.uuid4()),
-                instance_names=[instance_name]
-            )
+            # Generate credentials using connection service
+            cred = await self.connection_service.generate_credentials(instance_name)
 
-            # Build Lakebase connection string
-            # For asyncpg, use ssl=require instead of sslmode=require
-            # Authentication depends on environment:
-            # - Databricks Apps with user email: Use provided email
-            # - Otherwise: Get the actual authenticated user's identity
-            if is_databricks_apps_environment() and self.user_email:
-                # In Databricks Apps, use provided email
-                username = quote(self.user_email)
-                logger.info(f"Using provided email for Lakebase: {self.user_email}")
+            # Note: DatabaseCredential has no 'user' attribute - we'll determine user by testing connections
+            logger.info(f"🔐 Generated database credential (will test connections to determine user)")
+
+            # Determine source database type from URI
+            source_uri = str(settings.DATABASE_URI)
+            # Check if it's SQLite by looking at the URI
+            if 'sqlite' in source_uri.lower():
+                source_db_type = "sqlite"
+            elif 'postgresql' in source_uri.lower() or 'postgres' in source_uri.lower():
+                source_db_type = "postgresql"
             else:
-                # Get the actual authenticated user's identity using centralized method
-                # Pass the user token if we have it (for OBO), otherwise it will use PAT
-                current_user_identity, error = await get_current_databricks_user(self.user_token)
-                if error or not current_user_identity:
-                    logger.error(f"Failed to get current user identity: {error}")
-                    raise Exception(f"Cannot determine Databricks user identity: {error}")
-
-                username = quote(current_user_identity)
-                logger.info(f"Using authenticated user identity for Lakebase: {current_user_identity}")
-
-            lakebase_url = (
-                f"postgresql+asyncpg://{username}:{cred.token}@"
-                f"{endpoint}:5432/databricks_postgres"
-            )
-
-            # Determine source database type
-            source_db_type = settings.DATABASE_TYPE
-            source_uri = settings.DATABASE_URI
+                # Fallback to DATABASE_TYPE setting
+                source_db_type = settings.DATABASE_TYPE
 
             logger.info(f"📦 Source Database: {source_db_type}")
+            logger.info(f"📦 Source URI: {source_uri}")
             logger.info(f"🎯 Target Database: Lakebase ({endpoint})")
             logger.info("-" * 60)
-
-            # Create Lakebase engine with SSL configuration for asyncpg
-            # asyncpg requires SSL settings in connect_args
-            lakebase_engine = create_async_engine(
-                lakebase_url,
-                echo=False,
-                connect_args={
-                    "ssl": "require",  # Enable SSL for asyncpg
-                    "server_settings": {
-                        "jit": "off"  # Disable JIT for compatibility
-                    }
-                }
-            )
 
             # Get table list from source database
             async with self.session.begin():
                 if source_db_type == "sqlite":
                     result = await self.session.execute(
-                        text("SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%';")
+                        text("SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%' AND name NOT LIKE 'alembic_%';")
                     )
-                else:  # PostgreSQL
+                    tables = [row[0] for row in result]
+                elif source_db_type == "postgresql":
+                    # For PostgreSQL source, check both kasal and public schemas
                     result = await self.session.execute(
-                        text("SELECT tablename FROM pg_tables WHERE schemaname = 'public';")
+                        text("""
+                            SELECT tablename FROM pg_tables
+                            WHERE schemaname IN ('kasal', 'public')
+                            AND tablename NOT LIKE 'alembic_%'
+                        """)
                     )
+                    tables = [row[0] for row in result]
+                else:
+                    logger.error(f"Unknown source database type: {source_db_type}")
+                    raise ValueError(f"Unsupported source database type: {source_db_type}")
 
-                tables = [row[0] for row in result]
-                logger.info(f"📊 Found {len(tables)} tables to migrate")
+                logger.info(f"📊 Found {len(tables)} tables to migrate from {source_db_type}")
                 logger.info(f"📋 Tables: {', '.join(tables[:10])}{'...' if len(tables) > 10 else ''}")
 
-            # Create tables in Lakebase
-            from src.db.base import Base
+            # Test connections and get working engine + user
+            connected_engine, connected_user = await self.connection_service.test_connections_async(endpoint, cred)
+            if not connected_engine:
+                raise Exception("Failed to connect to Lakebase with any credentials")
+
+            lakebase_engine = connected_engine
+            user_email = connected_user
+            logger.info(f"Using connected engine for all operations (connected as: {user_email})")
+
+            # Create schema using schema service
+            await self.schema_service.create_schema_async(lakebase_engine, user_email, recreate_schema)
+
+            # Create tables using schema service
             async with lakebase_engine.begin() as conn:
-                # Create tables one by one, skipping those with vector columns
-                # since Lakebase doesn't support pgvector extension yet
-                tables_to_skip = ['documentation_embeddings']  # Tables with vector columns
+                await self.schema_service.set_search_path_async(conn)
 
-                # Get all table objects from metadata
-                for table in Base.metadata.sorted_tables:
-                    if table.name in tables_to_skip:
-                        logger.info(f"Skipping table {table.name} (contains vector column)")
-                        # Create a modified version without vector column
-                        if table.name == 'documentation_embeddings':
-                            # Create table without the embedding column
-                            create_sql = """
-                            CREATE TABLE IF NOT EXISTS documentation_embeddings (
-                                id SERIAL PRIMARY KEY,
-                                source VARCHAR NOT NULL,
-                                title VARCHAR NOT NULL,
-                                content TEXT NOT NULL,
-                                doc_metadata JSON,
-                                created_at TIMESTAMP WITH TIME ZONE DEFAULT now(),
-                                updated_at TIMESTAMP WITH TIME ZONE DEFAULT now()
-                            )
-                            """
-                            await conn.execute(text(create_sql))
-                            logger.info("Created documentation_embeddings table without vector column")
-                    else:
-                        # Create table normally
-                        await conn.run_sync(table.create, checkfirst=True)
-                        logger.info(f"Created table {table.name}")
+            await self.schema_service.create_tables_async(lakebase_engine)
+            logger.info("-" * 60)
+            logger.info("📤 Starting data migration...")
 
-                logger.info("✅ Created table structure in Lakebase")
-                logger.info("-" * 60)
-                logger.info("📤 Starting data migration...")
+            # Import json for serialization (datetime already imported at top)
+            import json
+
+            # Initialize migration service with engines
+            self.migration_service = LakebaseMigrationService(
+                source_engine=self.session.get_bind(),
+                lakebase_engine=lakebase_engine,
+                source_session=self.session
+            )
+
+            # Get sorted table list
+            tables_async = await self.migration_service.get_table_list_async(self.session, source_db_type == "sqlite")
+            sorted_tables = self.migration_service.get_sorted_tables(tables_async)
 
             # Migrate data table by table
             migrated_tables = []
+            failed_tables_list = []
             total_rows = 0
             start_time = datetime.utcnow()
 
-            # Import json and datetime for serialization
-            import json
-            from datetime import datetime
+            for idx, table_name in enumerate(sorted_tables, 1):
+                logger.info(f"[{idx}/{len(sorted_tables)}] Migrating table: {table_name}")
 
-            # Define tables and their JSON columns
-            json_columns_by_table = {
-                'executionhistory': ['inputs', 'result', 'partial_results'],
-                'llmlog': ['extra_data'],
-                'tools': ['config'],
-                'agents': ['tools', 'tool_configs', 'embedder_config', 'knowledge_sources'],
-                'crews': ['agent_ids', 'task_ids', 'nodes', 'edges'],
-                'schema': ['schema_definition', 'field_descriptions', 'keywords', 'tools', 'example_data'],
-                'tasks': ['tools', 'tool_configs', 'context', 'config', 'output', 'callback_config'],
-                'memory_backend': ['databricks_config', 'custom_config'],
-                'flow': ['nodes', 'edges', 'flow_config'],
-                'flow_execution': ['config', 'result'],
-                'schedule': ['agents_yaml', 'tasks_yaml', 'inputs'],
-                'mcp_server': ['additional_config'],
-                'documentation_embedding': ['doc_metadata'],
-                'billing': ['billing_metadata', 'model_breakdown', 'notification_emails', 'alert_metadata'],
-                'chat_history': ['generation_result'],
-                'database_config': ['value'],
-                'execution_trace': ['output', 'trace_metadata'],
-                'error_trace': ['error_metadata'],
-            }
+                # Create Lakebase session for this table
+                async with AsyncSession(lakebase_engine) as lakebase_session:
+                    row_count, error = await self.migration_service.migrate_table_data_async(
+                        table_name, self.session, lakebase_session
+                    )
 
-            for idx, table_name in enumerate(tables, 1):
-                try:
-                    logger.info(f"[{idx}/{len(tables)}] Migrating table: {table_name}")
-
-                    # Special handling for documentation_embeddings table
-                    if table_name == 'documentation_embeddings':
-                        # Skip the embedding column
-                        async with self.session.begin():
-                            # Select all columns except embedding
-                            result = await self.session.execute(text(
-                                "SELECT id, source, title, content, doc_metadata, created_at, updated_at "
-                                "FROM documentation_embeddings"
-                            ))
-                            rows = result.fetchall()
-                            columns = ['id', 'source', 'title', 'content', 'doc_metadata', 'created_at', 'updated_at']
-                    else:
-                        # Read data from source normally
-                        async with self.session.begin():
-                            # Get all data from the table
-                            result = await self.session.execute(text(f"SELECT * FROM {table_name}"))
-                            rows = result.fetchall()
-                            columns = list(result.keys())
-
-                    if rows:
-                        # First, clear existing data in Lakebase to avoid duplicates
-                        async with AsyncSession(lakebase_engine) as lakebase_session:
-                            async with lakebase_session.begin():
-                                # TRUNCATE is faster but needs CASCADE for foreign keys
-                                # Using DELETE for safety
-                                delete_sql = f"DELETE FROM {table_name}"
-                                await lakebase_session.execute(text(delete_sql))
-                                logger.debug(f"  ↳ Cleared existing data from {table_name} in Lakebase")
-
-                        # Insert into Lakebase
-                        async with AsyncSession(lakebase_engine) as lakebase_session:
-                            async with lakebase_session.begin():
-                                # Build insert statement - escape column names for PostgreSQL
-                                col_names = ", ".join([f'"{col}"' for col in columns])
-                                placeholders = ", ".join([f":{col}" for col in columns])
-                                insert_sql = f"INSERT INTO {table_name} ({col_names}) VALUES ({placeholders})"
-
-                                # Get JSON columns for this table
-                                json_cols = json_columns_by_table.get(table_name, [])
-
-                                # Define boolean columns for each table (from SQLAlchemy models)
-                                boolean_columns_by_table = {
-                                    'agents': ['verbose', 'allow_delegation', 'cache', 'memory', 'allow_code_execution',
-                                              'use_system_prompt', 'respect_context_window'],
-                                    'executionhistory': ['planning', 'is_stopping'],
-                                    'tools': ['enabled'],
-                                    'llmlog': [],  # No boolean columns
-                                    'modelconfig': ['extended_thinking', 'enabled'],
-                                    'prompttemplate': ['is_active'],
-                                    'groups': ['auto_created'],
-                                    'tasks': ['async_execution', 'markdown', 'human_input'],
-                                    'group_users': ['auto_created'],
-                                }
-
-                                # Define datetime columns for proper conversion
-                                datetime_columns_by_table = {
-                                    'llmlog': ['created_at'],
-                                    'crews': ['created_at', 'updated_at'],
-                                    'apikey': ['created_at', 'updated_at'],
-                                    'schema': ['created_at', 'updated_at'],
-                                    'execution_logs': ['timestamp'],
-                                    'documentation_embeddings': ['created_at', 'updated_at'],
-                                    'groups': ['created_at', 'updated_at'],
-                                    'users': ['created_at', 'updated_at', 'last_login'],
-                                    'roles': ['created_at', 'updated_at'],
-                                    'chat_history': ['timestamp'],
-                                    'database_configs': ['created_at', 'updated_at'],
-                                    'tasks': ['created_at', 'updated_at'],
-                                    'execution_trace': ['created_at'],
-                                    'group_users': ['joined_at', 'created_at', 'updated_at'],
-                                }
-
-                                # Get column lists for this table
-                                bool_cols = boolean_columns_by_table.get(table_name, [])
-                                dt_cols = datetime_columns_by_table.get(table_name, [])
-
-                                # Batch insert with proper type conversion
-                                for row in rows:
-                                    row_dict = {}
-                                    for idx, col in enumerate(columns):
-                                        value = row[idx]
-
-                                        # Handle datetime columns
-                                        if col in dt_cols and value is not None:
-                                            if isinstance(value, str):
-                                                try:
-                                                    # Try parsing the datetime string
-                                                    row_dict[col] = datetime.fromisoformat(value.replace('Z', '+00:00'))
-                                                except (ValueError, AttributeError):
-                                                    # If it fails, try a simpler format
-                                                    try:
-                                                        row_dict[col] = datetime.strptime(value.split('.')[0], '%Y-%m-%d %H:%M:%S')
-                                                    except:
-                                                        row_dict[col] = value  # Keep as-is if parsing fails
-                                            else:
-                                                row_dict[col] = value
-                                        # Handle boolean columns (SQLite stores as 0/1 integers)
-                                        elif col in bool_cols and value is not None:
-                                            if isinstance(value, int):
-                                                row_dict[col] = bool(value)  # Convert 0/1 to False/True
-                                            else:
-                                                row_dict[col] = value
-                                        # Check if this column is a JSON column
-                                        elif col in json_cols:
-                                            # Handle JSON columns - serialize dict/list to JSON string
-                                            if isinstance(value, (dict, list)):
-                                                row_dict[col] = json.dumps(value)
-                                            elif isinstance(value, str):
-                                                # Check if it's already valid JSON
-                                                try:
-                                                    json.loads(value)  # If this succeeds, it's valid JSON
-                                                    row_dict[col] = value
-                                                except (json.JSONDecodeError, TypeError):
-                                                    # Plain string, need to wrap it as JSON string
-                                                    # "hello world" becomes '"hello world"' which is valid JSON
-                                                    row_dict[col] = json.dumps(value)
-                                            elif value is None:
-                                                row_dict[col] = None
-                                            else:
-                                                # For other types (int, float, bool, etc.)
-                                                # Wrap them to make valid JSON
-                                                row_dict[col] = json.dumps(value)
-                                        else:
-                                            # Non-JSON columns
-                                            if isinstance(value, (dict, list)):
-                                                # If it's dict/list but not a JSON column, still serialize it
-                                                row_dict[col] = json.dumps(value)
-                                            else:
-                                                # Keep other types as-is
-                                                row_dict[col] = value
-
-                                    await lakebase_session.execute(text(insert_sql), row_dict)
-
-                                total_rows += len(rows)
-
-                        logger.info(f"  ✓ Migrated {len(rows)} rows from {table_name}")
-                        migrated_tables.append({
+                    if error:
+                        failed_tables_list.append({
                             "table": table_name,
-                            "rows": len(rows)
+                            "error": error,
+                            "error_type": error.split(':')[0] if ':' in error else "Unknown"
                         })
                     else:
-                        logger.debug(f"  ↳ Table {table_name} is empty, skipping")
-
-                except Exception as table_error:
-                    logger.error(f"Error migrating table {table_name}: {table_error}")
-                    # Continue with other tables
+                        migrated_tables.append({
+                            "table": table_name,
+                            "rows": row_count
+                        })
+                        total_rows += row_count
 
             # Close Lakebase engine
             await lakebase_engine.dispose()
-
-            # Update configuration to mark migration complete
-            config = await self.get_config()
-            config["migration_completed"] = True
-            config["migration_date"] = datetime.utcnow().isoformat()
-            config["migrated_tables"] = len(migrated_tables)
-            config["migrated_rows"] = total_rows
-            await self.save_config(config)
 
             # Calculate migration duration
             end_time = datetime.utcnow()
             duration = (end_time - start_time).total_seconds()
 
+            # Determine if migration was successful
+            failed_tables = len(tables) - len(migrated_tables)
+            migration_success = failed_tables == 0
+
+            # Update configuration to mark migration status
+            config = await self.get_config()
+            config["migration_completed"] = migration_success
+            config["migration_date"] = datetime.utcnow().isoformat()
+            config["migrated_tables"] = len(migrated_tables)
+            config["migrated_rows"] = total_rows
+            config["failed_tables"] = failed_tables
+
+            # If migration was successful, automatically enable Lakebase
+            if migration_success:
+                config["enabled"] = True
+                logger.info("✅ Migration successful - Lakebase automatically enabled")
+
+            await self.save_config(config)
+
             logger.info("=" * 80)
-            logger.info("🎉 LAKEBASE MIGRATION COMPLETED SUCCESSFULLY!")
+            if migration_success:
+                logger.info("🎉 LAKEBASE MIGRATION COMPLETED SUCCESSFULLY!")
+                logger.info("🔄 Lakebase has been automatically enabled - all future database operations will use Lakebase")
+            else:
+                logger.warning(f"⚠️  LAKEBASE MIGRATION COMPLETED WITH ERRORS! {failed_tables} table(s) failed.")
+                logger.warning(f"")
+                logger.warning(f"Failed tables:")
+                for failed in failed_tables_list:
+                    logger.warning(f"  • {failed['table']}: {failed['error_type']} - {failed['error']}")
+                logger.warning(f"⚠️  Lakebase was NOT enabled due to migration errors")
             logger.info(f"📊 Summary:")
             logger.info(f"  • Tables migrated: {len(migrated_tables)}/{len(tables)}")
             logger.info(f"  • Total rows: {total_rows:,}")
@@ -717,19 +537,260 @@ class LakebaseService(BaseService):
             logger.info(f"  • Instance: {instance_name}")
             logger.info(f"  • Status: READY")
             logger.info("=" * 80)
-            logger.info("🔄 The system will now automatically use Lakebase for all database operations")
 
             return {
-                "success": True,
+                "success": migration_success,
                 "migrated_tables": migrated_tables,
                 "total_tables": len(migrated_tables),
                 "total_rows": total_rows,
+                "failed_tables": failed_tables,
+                "failed_tables_details": failed_tables_list,
                 "timestamp": datetime.utcnow().isoformat()
             }
 
         except Exception as e:
             logger.error(f"Error migrating data to Lakebase: {e}")
             raise
+
+    async def migrate_existing_data_stream(self, instance_name: str, endpoint: str, recreate_schema: bool = False, migrate_data: bool = True):
+        """
+        Migrate data from existing database to Lakebase with streaming progress updates.
+
+        This is a generator function that yields progress events as the migration proceeds.
+
+        Args:
+            instance_name: Name of the Lakebase instance
+            endpoint: Lakebase endpoint URL
+            recreate_schema: Whether to drop and recreate the schema
+            migrate_data: Whether to migrate data (False = schema only)
+
+        Args:
+            instance_name: Lakebase instance name
+            endpoint: Lakebase endpoint
+            recreate_schema: If True, drop and recreate kasal schema before migration
+
+        Yields:
+            Dict with event type and progress information
+        """
+        try:
+            # Check if Lakebase is available
+            if not LAKEBASE_AVAILABLE:
+                yield {"type": "error", "message": "Lakebase features not available in current environment"}
+                return
+
+            yield {"type": "info", "message": "=" * 80}
+            yield {"type": "info", "message": "🚀 LAKEBASE MIGRATION STARTED"}
+            yield {"type": "info", "message": f"Instance: {instance_name}"}
+            yield {"type": "info", "message": f"Endpoint: {endpoint}"}
+            yield {"type": "info", "message": "=" * 80}
+
+            # Generate credentials using connection service
+            yield {"type": "progress", "message": "Generating database credentials...", "step": "auth"}
+            cred = await self.connection_service.generate_credentials(instance_name)
+            yield {"type": "success", "message": f"✅ Generated database credential"}
+
+            yield {"type": "info", "message": f"[STREAM] Testing connection methods to determine user..."}
+
+            # Test connections using connection service (sync version for streaming)
+            test_engine, connected_user = self.connection_service.test_connections_sync(endpoint, cred)
+
+            if not test_engine or not connected_user:
+                yield {"type": "error", "message": "All connection attempts failed - could not connect to Lakebase"}
+                return
+
+            # Use the engine and user that worked
+            lakebase_engine_initial = test_engine
+            user_email = connected_user
+            yield {"type": "info", "message": f"🔐 Using PostgreSQL role: {user_email}"}
+
+            # Build the URL for any additional engines (but we'll primarily use the one that worked)
+            lakebase_url = (
+                f"postgresql+pg8000://{quote(user_email)}:{cred.token}@"
+                f"{endpoint}:5432/databricks_postgres"
+            )
+
+            # Determine source database type
+            source_uri = str(settings.DATABASE_URI)
+            is_sqlite = 'sqlite' in source_uri.lower()
+
+            # Connect to source database
+            yield {"type": "progress", "message": "📥 Connecting to source database...", "step": "connect_source"}
+            if is_sqlite:
+                # For SQLite, use sync engine
+                # Ensure we're using the sync sqlite driver
+                source_uri_sync = source_uri.replace("sqlite+aiosqlite://", "sqlite://")
+                source_engine = create_engine(source_uri_sync, echo=False)
+                yield {"type": "success", "message": "✅ Connected to SQLite source database"}
+            else:
+                # For PostgreSQL source, use sync pg8000 driver to avoid greenlet issues
+                from sqlalchemy.pool import NullPool
+                source_uri_sync = source_uri.replace("postgresql+asyncpg://", "postgresql+pg8000://")
+                source_engine = create_engine(source_uri_sync, echo=False, poolclass=NullPool)
+                yield {"type": "success", "message": "✅ Connected to PostgreSQL source database"}
+
+            # Use the connected engine for Lakebase
+            yield {"type": "progress", "message": "📤 Connecting to Lakebase...", "step": "connect_lakebase"}
+            lakebase_engine = lakebase_engine_initial
+            yield {"type": "success", "message": "✅ Connected to Lakebase"}
+
+            # Initialize migration service
+            self.migration_service = LakebaseMigrationService(
+                source_engine=source_engine,
+                lakebase_engine=lakebase_engine,
+                source_session=None
+            )
+
+            # Get table list
+            yield {"type": "progress", "message": "📋 Getting table list from source...", "step": "get_tables"}
+            tables = self.migration_service.get_table_list_sync(source_engine, is_sqlite)
+            sorted_tables = self.migration_service.get_sorted_tables(tables)
+            yield {"type": "success", "message": f"✅ Found {len(tables)} tables to migrate"}
+
+            # Create schema and tables
+            yield {"type": "progress", "message": "🏗️ Creating schema and tables...", "step": "create_schema", "total_tables": len(tables)}
+
+            # Handle schema recreation if requested
+            if recreate_schema:
+                with lakebase_engine.begin() as conn:
+                    try:
+                        yield {"type": "progress", "message": "🗑️ Dropping existing kasal schema..."}
+                        conn.execute(text("DROP SCHEMA IF EXISTS kasal CASCADE"))
+                        yield {"type": "success", "message": "✅ Dropped kasal schema"}
+                    except Exception as drop_error:
+                        yield {"type": "warning", "message": f"Could not drop schema (may be owned by different role), continuing..."}
+
+            # Create schema using schema service
+            with lakebase_engine.begin() as conn:
+                self.schema_service.create_schema_sync(lakebase_engine, user_email, False)
+                yield {"type": "success", "message": "✅ Created kasal schema"}
+
+                # Grant permissions using permission service
+                self.permission_service.grant_all_permissions_sync(conn, user_email)
+                yield {"type": "success", "message": f"✅ Granted schema permissions to {user_email}"}
+
+                conn.execute(text("SET search_path TO kasal"))
+                yield {"type": "success", "message": "✅ Set kasal schema as default search path"}
+
+            # Create tables with streaming
+            for message in self.schema_service.create_tables_sync_stream(lakebase_engine):
+                yield message
+
+            # Check if we should migrate data
+            if not migrate_data:
+                # Schema-only mode - skip data migration
+                yield {"type": "success", "message": "✅ Schema created successfully (data migration skipped)"}
+                start_time = datetime.utcnow()
+                yield {
+                    "type": "result",
+                    "success": True,
+                    "message": "Schema creation completed",
+                    "total_tables": len(tables),
+                    "total_rows": 0,
+                    "duration": (datetime.utcnow() - start_time).total_seconds(),
+                    "migrated_tables": [],
+                    "failed_tables": []
+                }
+                source_engine.dispose()
+                lakebase_engine.dispose()
+                return
+
+            # Start data migration
+            yield {"type": "progress", "message": "📤 Starting data migration...", "step": "migrate_data"}
+
+            migrated_tables = []
+            failed_tables_list = []
+            total_rows = 0
+            start_time = datetime.utcnow()
+
+            # Migrate each table
+            for idx, table_name in enumerate(sorted_tables, 1):
+                yield {
+                    "type": "table_start",
+                    "message": f"Migrating table {table_name}...",
+                    "table": table_name,
+                    "progress": idx,
+                    "total": len(tables)
+                }
+
+                row_count, error = self.migration_service.migrate_table_data_sync(
+                    table_name, source_engine, lakebase_engine, is_sqlite
+                )
+
+                if error:
+                    failed_tables_list.append({
+                        "table": table_name,
+                        "error": error,
+                        "error_type": error.split(':')[0] if ':' in error else "Unknown"
+                    })
+                    yield {
+                        "type": "table_error",
+                        "message": f"❌ Error migrating table {table_name}: {error}",
+                        "table": table_name,
+                        "error": error,
+                        "error_type": error.split(':')[0] if ':' in error else "Unknown"
+                    }
+                else:
+                    migrated_tables.append({"table": table_name, "rows": row_count})
+                    total_rows += row_count
+                    yield {
+                        "type": "table_complete",
+                        "message": f"✓ Migrated {row_count} rows from {table_name}",
+                        "table": table_name,
+                        "rows": row_count,
+                        "progress": idx,
+                        "total": len(tables)
+                    }
+
+            # Dispose engines
+            source_engine.dispose()
+            lakebase_engine.dispose()
+
+            # Calculate summary
+            duration = (datetime.utcnow() - start_time).total_seconds()
+            failed_tables = len(tables) - len(migrated_tables)
+            migration_success = failed_tables == 0
+
+            # Note: Config update is handled by the router after migration completes
+            # We just return the result here
+
+            # Send summary
+            yield {"type": "info", "message": "=" * 80}
+            if migration_success:
+                yield {"type": "complete", "message": "🎉 LAKEBASE MIGRATION COMPLETED SUCCESSFULLY!"}
+                yield {"type": "success", "message": "🔄 Lakebase has been automatically enabled - all future database operations will use Lakebase"}
+            else:
+                yield {"type": "warning", "message": f"⚠️ LAKEBASE MIGRATION COMPLETED WITH ERRORS! {failed_tables} table(s) failed."}
+                if failed_tables_list:
+                    yield {"type": "info", "message": "Failed tables:"}
+                    for failed in failed_tables_list:
+                        yield {"type": "error", "message": f"  • {failed['table']}: {failed['error_type']} - {failed['error']}"}
+                yield {"type": "warning", "message": "⚠️ Lakebase was NOT enabled due to migration errors"}
+
+            yield {"type": "info", "message": "📊 Summary:"}
+            yield {"type": "info", "message": f"  • Tables migrated: {len(migrated_tables)}/{len(tables)}"}
+            yield {"type": "info", "message": f"  • Total rows: {total_rows:,}"}
+            yield {"type": "info", "message": f"  • Duration: {duration:.2f} seconds"}
+            yield {"type": "info", "message": f"  • Instance: {instance_name}"}
+            yield {"type": "info", "message": f"  • Status: READY"}
+            yield {"type": "info", "message": "=" * 80}
+
+            # Final result
+            yield {
+                "type": "result",
+                "success": migration_success,
+                "migrated_tables": migrated_tables,
+                "total_tables": len(migrated_tables),
+                "total_rows": total_rows,
+                "failed_tables": failed_tables,
+                "failed_tables_details": failed_tables_list,
+                "duration": duration,
+                "timestamp": datetime.utcnow().isoformat()
+            }
+
+        except Exception as e:
+            yield {"type": "error", "message": f"Error migrating data to Lakebase: {e}"}
+            import traceback
+            yield {"type": "error", "message": f"Traceback: {traceback.format_exc()}"}
 
     @asynccontextmanager
     async def get_lakebase_session(self, instance_name: str):
@@ -762,11 +823,10 @@ class LakebaseService(BaseService):
             # Build connection string
             endpoint = instance["read_write_dns"]
             # For asyncpg, don't use sslmode in URL
-            # Authentication depends on environment:
-            # - Databricks Apps with user email: Use provided email
+            # Determine username:
+            # - If user email provided (e.g., from request context), use it
             # - Otherwise: Get the actual authenticated user's identity
-            if is_databricks_apps_environment() and self.user_email:
-                # In Databricks Apps, use provided email
+            if self.user_email:
                 username = quote(self.user_email)
                 logger.info(f"Using provided email for Lakebase: {self.user_email}")
             else:
@@ -806,7 +866,7 @@ class LakebaseService(BaseService):
             logger.error(f"Error creating Lakebase session: {e}")
             raise
 
-    async def check_lakebase_tables(self, instance_name: str) -> Dict[str, Any]:
+    async def check_lakebase_tables(self) -> Dict[str, Any]:
         """
         Check what tables exist in Lakebase database.
 
@@ -850,7 +910,7 @@ class LakebaseService(BaseService):
             )
 
             # Get user identity
-            if is_databricks_apps_environment() and self.user_email:
+            if self.user_email:
                 username = quote(self.user_email)
             else:
                 current_user_identity, error = await get_current_databricks_user(self.user_token)
@@ -969,13 +1029,13 @@ class LakebaseService(BaseService):
 
     async def test_connection(self, instance_name: str) -> Dict[str, Any]:
         """
-        Test connection to Lakebase instance.
+        Test connection to Lakebase instance and check migration status.
 
         Args:
             instance_name: Name of the instance
 
         Returns:
-            Connection test result
+            Connection test result with migration status
         """
         try:
             async with self.get_lakebase_session(instance_name) as session:
@@ -983,17 +1043,35 @@ class LakebaseService(BaseService):
                 result = await session.execute(text("SELECT version()"))
                 version = result.scalar()
 
-                # Get table count
-                table_result = await session.execute(
-                    text("SELECT COUNT(*) FROM information_schema.tables WHERE table_schema = 'public'")
+                # Check if kasal schema exists
+                schema_result = await session.execute(
+                    text("SELECT schema_name FROM information_schema.schemata WHERE schema_name = 'kasal'")
                 )
+                has_kasal_schema = schema_result.scalar() is not None
+
+                # Get table count from kasal schema if it exists, otherwise from public
+                if has_kasal_schema:
+                    table_result = await session.execute(
+                        text("SELECT COUNT(*) FROM information_schema.tables WHERE table_schema = 'kasal'")
+                    )
+                else:
+                    table_result = await session.execute(
+                        text("SELECT COUNT(*) FROM information_schema.tables WHERE table_schema = 'public'")
+                    )
                 table_count = table_result.scalar()
+
+                # Determine migration status based on schema and table presence
+                migration_needed = not has_kasal_schema or table_count == 0
+                migration_status = 'pending' if migration_needed else 'completed'
 
                 return {
                     "success": True,
                     "version": version,
                     "table_count": table_count,
-                    "instance_name": instance_name
+                    "instance_name": instance_name,
+                    "has_kasal_schema": has_kasal_schema,
+                    "migration_needed": migration_needed,
+                    "migration_status": migration_status
                 }
 
         except Exception as e:
@@ -1002,3 +1080,78 @@ class LakebaseService(BaseService):
                 "success": False,
                 "error": str(e)
             }
+
+    async def get_workspace_info(self) -> Dict[str, Any]:
+        """
+        Get Databricks workspace URL and organization ID for Lakebase links.
+
+        Returns:
+            Dictionary with workspace_url and organization_id
+
+        Raises:
+            HTTPException: If Lakebase is not enabled
+        """
+        from fastapi import HTTPException
+
+        # Check if Lakebase is enabled
+        config = await self.get_config()
+        if not config.get("enabled", False):
+            raise HTTPException(
+                status_code=400,
+                detail="Lakebase is not enabled. Please configure and enable Lakebase first."
+            )
+
+        # Get workspace client
+        w = await self.get_workspace_client()
+
+        # Get workspace ID (organization ID)
+        workspace_id = w.get_workspace_id()
+
+        # Get workspace URL from config
+        workspace_url = w.config.host
+
+        # Clean up the URL
+        if workspace_url and workspace_url.endswith('/'):
+            workspace_url = workspace_url[:-1]
+
+        return {
+            "success": True,
+            "workspace_url": workspace_url,
+            "organization_id": str(workspace_id)
+        }
+
+    async def enable_lakebase(self, instance_name: str, endpoint: str) -> Dict[str, Any]:
+        """
+        Enable Lakebase without performing data migration.
+        This sets the 'enabled' flag in configuration, allowing connection to Lakebase
+        where schema will be created on first use.
+
+        Args:
+            instance_name: Name of the Lakebase instance
+            endpoint: Lakebase connection endpoint
+
+        Returns:
+            Success status and configuration
+        """
+        # Get current config
+        config = await self.get_config()
+
+        # Update config with instance details
+        config["instance_name"] = instance_name
+        config["endpoint"] = endpoint
+        config["enabled"] = True
+        config["migration_completed"] = True  # Mark as ready even without migration
+
+        # Save updated config
+        await self.save_config(config)
+
+        # Dispose existing database connections to force reconnection to Lakebase
+        from src.db.session import dispose_engines
+        await dispose_engines()
+        logger.info("Disposed existing database connections to switch to Lakebase")
+
+        return {
+            "success": True,
+            "message": "Lakebase enabled successfully. All connections switched to Lakebase.",
+            "config": config
+        }

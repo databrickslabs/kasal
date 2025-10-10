@@ -448,4 +448,9 @@ export const useTabManagerStore = create<TabManagerState>()(
       }
     }
   )
-); 
+);
+
+// Expose store on window for debugging
+if (typeof window !== 'undefined') {
+  (window as any).useTabManagerStore = useTabManagerStore;
+}

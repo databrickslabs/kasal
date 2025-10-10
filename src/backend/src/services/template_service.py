@@ -521,11 +521,9 @@ class TemplateService:
                 return default_template
             return ""
 
-    @staticmethod
-    async def get_template_content(name: str, default_template: str = None) -> str:
+    async def get_template_content(self, name: str, default_template: str = None) -> str:
         """
-        Static method for backward compatibility.
-        Other services call this directly without instantiating the service.
+        Get the content of a template by name.
 
         Args:
             name: Name of the template
@@ -534,6 +532,7 @@ class TemplateService:
         Returns:
             Template content
         """
+        return await self._get_template_content_instance(name, default_template)
 
     async def _get_effective_template_content_instance(self, name: str, group_context: GroupContext) -> str:
         """

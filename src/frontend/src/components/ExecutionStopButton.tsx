@@ -25,7 +25,7 @@ interface ExecutionStopButtonProps {
   status: string;
   variant?: 'button' | 'icon';
   size?: 'small' | 'medium' | 'large';
-  onStopComplete?: (result: any) => void;
+  onStopComplete?: (result: unknown) => void;
   onStatusChange?: (newStatus: string) => void;
 }
 
@@ -93,10 +93,10 @@ const ExecutionStopButton: React.FC<ExecutionStopButtonProps> = ({
           }));
         }
       }
-    } catch (error: any) {
+    } catch (error: unknown) {
       console.error('Error stopping execution:', error);
       toast.error(
-        error.response?.data?.detail || 'Failed to stop execution'
+        (error as any)?.response?.data?.detail || 'Failed to stop execution'
       );
     } finally {
       setIsStopping(false);
