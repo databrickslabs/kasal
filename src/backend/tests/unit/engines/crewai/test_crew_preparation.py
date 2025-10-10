@@ -480,31 +480,40 @@ class TestCrewPreparation:
         crew_preparation.config["crew"]["reasoning"] = True
         crew_preparation.config["crew"]["planning_llm"] = "gpt-3.5-turbo"
         crew_preparation.config["crew"]["reasoning_llm"] = "gpt-4"
+        crew_preparation.config["group_id"] = "test_group_123"  # Required for planning/reasoning LLMs
         
         mock_crew = MagicMock()
         mock_planning_llm = MagicMock()
         mock_reasoning_llm = MagicMock()
-        
+        mock_manager_llm = MagicMock()
+
         with patch('src.engines.crewai.crew_preparation.Crew', return_value=mock_crew) as mock_crew_class, \
              patch('src.core.llm_manager.LLMManager.get_llm') as mock_get_llm, \
+             patch('src.core.llm_manager.LLMManager.configure_crewai_llm') as mock_configure_llm, \
              patch('src.services.api_keys_service.ApiKeysService.get_provider_api_key', return_value=None):
-            
-            # Configure LLMManager.get_llm to return different mocks for different models
-            # Note: gpt-4 is used for both reasoning and manager LLM in this test
+
+            # Configure LLMManager.get_llm for planning and reasoning (no group_id parameter)
             mock_get_llm.side_effect = lambda model: {
                 "gpt-3.5-turbo": mock_planning_llm,
                 "gpt-4": mock_reasoning_llm
             }[model]
-            
+
+            # Configure LLMManager.configure_crewai_llm for manager LLM (has group_id parameter)
+            mock_configure_llm.return_value = mock_manager_llm
+
             result = await crew_preparation._create_crew()
-            
+
             assert result is True
-            
-            # Verify LLMManager.get_llm was called for planning, reasoning, and manager LLMs
-            # Note: gpt-4 is called twice (manager + reasoning), gpt-3.5-turbo once (planning)
-            assert mock_get_llm.call_count == 3
+
+            # Verify LLMManager.get_llm was called for planning and reasoning LLMs
+            assert mock_get_llm.call_count == 2
             mock_get_llm.assert_any_call("gpt-3.5-turbo")
             mock_get_llm.assert_any_call("gpt-4")
+
+            # Verify LLMManager.configure_crewai_llm was called for manager LLM with gpt-4
+            # Note: When planning=True, the configured model is used as manager_llm
+            assert mock_configure_llm.call_count == 1
+            mock_configure_llm.assert_any_call("gpt-4", "test_group_123")
             
             # Verify crew was created with planning and reasoning LLM objects
             call_kwargs = mock_crew_class.call_args[1]
@@ -854,35 +863,123 @@ class TestCrewPreparation:
         crew_preparation.config["crew"]["reasoning"] = True
         crew_preparation.config["crew"]["planning_llm"] = "invalid-planning-model"
         crew_preparation.config["crew"]["reasoning_llm"] = "invalid-reasoning-model"
-        
+
         mock_crew = MagicMock()
-        
+
         with patch('src.engines.crewai.crew_preparation.Crew', return_value=mock_crew) as mock_crew_class, \
              patch('src.core.llm_manager.LLMManager.get_llm', side_effect=Exception("Model not found")) as mock_get_llm, \
              patch('src.engines.crewai.crew_preparation.logger') as mock_logger, \
              patch('src.services.api_keys_service.ApiKeysService.get_provider_api_key', return_value=None):
-            
+
             result = await crew_preparation._create_crew()
-            
+
             assert result is True
-            
+
             # Verify LLMManager.get_llm was called for planning, reasoning, and manager LLMs
             # Note: Manager LLM is also created, so we expect 3 calls total
             assert mock_get_llm.call_count >= 2  # At least 2 calls for planning and reasoning LLMs
             mock_get_llm.assert_any_call("invalid-planning-model")
             mock_get_llm.assert_any_call("invalid-reasoning-model")
-            
+
             # Verify both errors were logged
             # Planning/Reasoning LLM error handling moved to CrewConfigBuilder service
             # Just verify crew creation succeeded
             # Error handling moved to service layer
-            
+
             # Verify crew was created without planning_llm or reasoning_llm in kwargs
             call_kwargs = mock_crew_class.call_args[1]
             assert call_kwargs['planning'] is True
             assert call_kwargs['reasoning'] is True
             assert 'planning_llm' not in call_kwargs
             assert 'reasoning_llm' not in call_kwargs
+
+    @pytest.mark.asyncio
+    async def test_create_crew_hierarchical_minimal_kwargs_preserves_manager_llm(self, crew_preparation):
+        """Test that minimal_kwargs fallback preserves manager_llm for hierarchical process."""
+        crew_preparation.agents = {"agent1": MagicMock()}
+        crew_preparation.tasks = [MagicMock()]
+        crew_preparation.config["crew"]["process"] = "hierarchical"
+        crew_preparation.config["group_id"] = "test_group_123"
+
+        mock_manager_llm = MagicMock()
+        mock_crew = MagicMock()
+
+        # Simulate TypeError on first Crew() call, success on minimal_kwargs
+        call_count = 0
+        def crew_side_effect(**kwargs):
+            nonlocal call_count
+            call_count += 1
+            if call_count == 1:
+                # First call fails with TypeError (unsupported kwarg)
+                raise TypeError("unexpected keyword argument 'unsupported_param'")
+            # Second call (minimal_kwargs) succeeds
+            return mock_crew
+
+        with patch('src.engines.crewai.crew_preparation.Crew', side_effect=crew_side_effect) as mock_crew_class, \
+             patch('src.engines.crewai.config.manager_config_builder.LLMManager.configure_crewai_llm',
+                   return_value=mock_manager_llm), \
+             patch('src.services.api_keys_service.ApiKeysService.get_provider_api_key', return_value=None):
+
+            result = await crew_preparation._create_crew()
+
+            assert result is True
+            assert crew_preparation.crew == mock_crew
+
+            # Verify Crew was called twice: first with full kwargs, then with minimal_kwargs
+            assert mock_crew_class.call_count == 2
+
+            # Verify the second call (minimal_kwargs) included manager_llm
+            second_call_kwargs = mock_crew_class.call_args_list[1][1]
+            assert 'manager_llm' in second_call_kwargs
+            assert second_call_kwargs['manager_llm'] == mock_manager_llm
+
+    @pytest.mark.asyncio
+    async def test_create_crew_hierarchical_minimal_kwargs_preserves_manager_agent(self, crew_preparation):
+        """Test that minimal_kwargs fallback preserves manager_agent for hierarchical process."""
+        crew_preparation.agents = {"agent1": MagicMock()}
+        crew_preparation.tasks = [MagicMock()]
+        crew_preparation.config["crew"]["process"] = "hierarchical"
+        crew_preparation.config["crew"]["manager_agent"] = {
+            "role": "Manager",
+            "goal": "Manage team",
+            "backstory": "Experienced"
+        }
+        crew_preparation.config["group_id"] = "test_group_123"
+
+        mock_manager_agent = MagicMock()
+        mock_crew = MagicMock()
+
+        # Simulate TypeError on first Crew() call, success on minimal_kwargs
+        call_count = 0
+        def crew_side_effect(**kwargs):
+            nonlocal call_count
+            call_count += 1
+            if call_count == 1:
+                # First call fails with TypeError (unsupported kwarg)
+                raise TypeError("unexpected keyword argument 'unsupported_param'")
+            # Second call (minimal_kwargs) succeeds
+            return mock_crew
+
+        # Mock create_agent to accept all parameters passed by manager_config_builder
+        async def mock_create_agent_func(**kwargs):
+            return mock_manager_agent
+
+        with patch('src.engines.crewai.crew_preparation.Crew', side_effect=crew_side_effect) as mock_crew_class, \
+             patch('src.engines.crewai.config.manager_config_builder.create_agent', side_effect=mock_create_agent_func), \
+             patch('src.services.api_keys_service.ApiKeysService.get_provider_api_key', return_value=None):
+
+            result = await crew_preparation._create_crew()
+
+            assert result is True
+            assert crew_preparation.crew == mock_crew
+
+            # Verify Crew was called twice: first with full kwargs, then with minimal_kwargs
+            assert mock_crew_class.call_count == 2
+
+            # Verify the second call (minimal_kwargs) included manager_agent
+            second_call_kwargs = mock_crew_class.call_args_list[1][1]
+            assert 'manager_agent' in second_call_kwargs
+            assert second_call_kwargs['manager_agent'] == mock_manager_agent
     
 class TestCrewPreparationHelperFunctions:
     """Test suite for helper functions in crew_preparation module."""
