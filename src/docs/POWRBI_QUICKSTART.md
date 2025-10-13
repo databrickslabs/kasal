@@ -361,7 +361,7 @@ python3 deploy.py --app-name kasal-david --user-name david.schwarzenbacher@datab
 
 7. Exectue the crew and set these parameters: 
 - dataset_name: test_pbi
-- metadata: {'tables': [{'name': 'TestData', 'columns': [{'name': 'product', 'data_type': 'string'}, {'name': 'nsr', 'data_type': 'decimal'}, {'name': 'country', 'data_type': 'string'}]}]}
+- metadata: {'tables': [{'name': 'TestData', 'columns': [{'name': 'product', 'data_type': 'string'}, {'name': 'nsr', 'data_type': 'decimal'}, {'name': 'country', 'data_type': 'string'}, , {'name': 'fiscper', 'data_type': 'decimal'}, {'name': 'cogs', 'data_type': 'decimal'}, {'name': 'net_income', 'data_type': 'string'}]}]}
 
 **Expected Response:**
 ```dax
