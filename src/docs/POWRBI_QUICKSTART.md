@@ -69,19 +69,19 @@ python3 deploy.py --app-name kasal-david --user-name david.schwarzenbacher@datab
 
 ```json
 {
-  "id": "eabcdc73-123c-4991-ab77-01417d3d474b",
-  "name": "test_pbi_crew_e2e",
+  "id": "e890bf60-dbfa-4ebc-a833-9640d3a44037",
+  "name": "e2e_pbi_crew",
   "agent_ids": [
-    "95e2e868-1b86-45b2-b07d-130791c35a91",
-    "a803dae4-22d3-4e74-a931-aa7ace598563"
+    "7daf0c19-692a-4be3-bc14-c84cc9f0239e",
+    "64efa87e-d8e7-49df-9097-733ea7135f43"
   ],
   "task_ids": [
-    "f2c964e3-461f-4556-b269-53894a73f910",
-    "207293d2-a820-47b4-87e4-fe51a52bb060"
+    "189ee792-8e83-40e1-9c84-abd52bbb7b18",
+    "e8b2232a-af7f-451b-a89a-072253df18b7"
   ],
   "nodes": [
     {
-      "id": "agent-95e2e868-1b86-45b2-b07d-130791c35a91",
+      "id": "agent-7daf0c19-692a-4be3-bc14-c84cc9f0239e",
       "type": "agentNode",
       "position": {
         "x": 100,
@@ -95,7 +95,7 @@ python3 deploy.py --app-name kasal-david --user-name david.schwarzenbacher@datab
         "tools": [
           "71"
         ],
-        "agentId": "95e2e868-1b86-45b2-b07d-130791c35a91",
+        "agentId": "7daf0c19-692a-4be3-bc14-c84cc9f0239e",
         "taskId": null,
         "llm": "databricks-llama-4-maverick",
         "function_calling_llm": null,
@@ -139,7 +139,7 @@ python3 deploy.py --app-name kasal-david --user-name david.schwarzenbacher@datab
       "style": null
     },
     {
-      "id": "task-f2c964e3-461f-4556-b269-53894a73f910",
+      "id": "task-189ee792-8e83-40e1-9c84-abd52bbb7b18",
       "type": "taskNode",
       "position": {
         "x": 374.4179408025376,
@@ -154,7 +154,7 @@ python3 deploy.py --app-name kasal-david --user-name david.schwarzenbacher@datab
           "71"
         ],
         "agentId": null,
-        "taskId": "f2c964e3-461f-4556-b269-53894a73f910",
+        "taskId": "189ee792-8e83-40e1-9c84-abd52bbb7b18",
         "llm": null,
         "function_calling_llm": null,
         "max_iter": null,
@@ -207,7 +207,7 @@ python3 deploy.py --app-name kasal-david --user-name david.schwarzenbacher@datab
       "style": null
     },
     {
-      "id": "agent-a803dae4-22d3-4e74-a931-aa7ace598563",
+      "id": "agent-64efa87e-d8e7-49df-9097-733ea7135f43",
       "type": "agentNode",
       "position": {
         "x": 98.44294056195827,
@@ -219,7 +219,7 @@ python3 deploy.py --app-name kasal-david --user-name david.schwarzenbacher@datab
         "goal": "Orchestrate and manage Databricks jobs efficiently\n\nYou will make sure that the action run will only trigger 1 time and not more. ",
         "backstory": "Experienced in managing and optimizing Databricks workflows, with expertise in job scheduling and execution.",
         "tools": [],
-        "agentId": "a803dae4-22d3-4e74-a931-aa7ace598563",
+        "agentId": "64efa87e-d8e7-49df-9097-733ea7135f43",
         "taskId": null,
         "llm": "databricks-llama-4-maverick",
         "function_calling_llm": null,
@@ -263,7 +263,7 @@ python3 deploy.py --app-name kasal-david --user-name david.schwarzenbacher@datab
       "style": null
     },
     {
-      "id": "task-207293d2-a820-47b4-87e4-fe51a52bb060",
+      "id": "task-e8b2232a-af7f-451b-a89a-072253df18b7",
       "type": "taskNode",
       "position": {
         "x": 343.2037683825747,
@@ -278,7 +278,7 @@ python3 deploy.py --app-name kasal-david --user-name david.schwarzenbacher@datab
           "70"
         ],
         "agentId": null,
-        "taskId": "207293d2-a820-47b4-87e4-fe51a52bb060",
+        "taskId": "e8b2232a-af7f-451b-a89a-072253df18b7",
         "llm": null,
         "function_calling_llm": null,
         "max_iter": null,
@@ -298,7 +298,7 @@ python3 deploy.py --app-name kasal-david --user-name david.schwarzenbacher@datab
         "use_system_prompt": null,
         "respect_context_window": null,
         "type": "task",
-        "description": "Execute job ID 260124535998145 with the dax_statement you get from the Business Intelligence analyst as a job_params that is passed to the job.\n\nNot I don't want you to list or get the job I want you to only run it but only once you are not allowed to run more than once.\n\nExample of a dax_statement that you might receive is e.g. EVALUATE\nSUMMARIZECOLUMNS(\n    'TestData'[product],\n    \"Total NSR\", SUM('TestData'[nsr])\n)\n\nYou need to replace this dax_statement with the one coming from the Business Intelligence Analyst.\n\n You will make sure that the action run will only trigger 1 time and not more.",
+        "description": "Execute job ID 260124535998145 with the dax_statement you get from the Business Intelligence analyst as a job_params that is passed to the job.\n\nIn addition to this, set workspace_id to \"bcb084ed-f8c9-422c-b148-29839c0f9227\" and semantic_model_id to \"a17de62e-8dc0-4a8a-acaa-2a9954de8c75\" and add them as additional job_params.\n\nNot I don't want you to list or get the job I want you to only run it but only once you are not allowed to run more than once.\n\nExample of a dax_statement that you might receive is e.g. EVALUATE\nSUMMARIZECOLUMNS(\n    'TestData'[product],\n    \"Total NSR\", SUM('TestData'[nsr])\n)\n\nYou need to replace this dax_statement with the one coming from the Business Intelligence Analyst.\n\n You will make sure that the action run will only trigger 1 time and not more.",
         "expected_output": "A job execution result containing the response data from running job ID 260124535998145 with the custom city and query parameters. The output will include any data returned by the job, execution status, and timestamps.",
         "icon": null,
         "advanced_config": null,
@@ -333,29 +333,29 @@ python3 deploy.py --app-name kasal-david --user-name david.schwarzenbacher@datab
   ],
   "edges": [
     {
-      "source": "agent-95e2e868-1b86-45b2-b07d-130791c35a91",
-      "target": "task-f2c964e3-461f-4556-b269-53894a73f910",
+      "source": "agent-7daf0c19-692a-4be3-bc14-c84cc9f0239e",
+      "target": "task-189ee792-8e83-40e1-9c84-abd52bbb7b18",
       "id": "edge-1",
       "sourceHandle": null,
       "targetHandle": null
     },
     {
-      "source": "agent-a803dae4-22d3-4e74-a931-aa7ace598563",
-      "target": "task-207293d2-a820-47b4-87e4-fe51a52bb060",
+      "source": "agent-64efa87e-d8e7-49df-9097-733ea7135f43",
+      "target": "task-e8b2232a-af7f-451b-a89a-072253df18b7",
       "id": "reactflow__edge-agent-a803dae4-22d3-4e74-a931-aa7ace598563-task-207293d2-a820-47b4-87e4-fe51a52bb060-default-default",
       "sourceHandle": null,
       "targetHandle": null
     },
     {
-      "source": "task-f2c964e3-461f-4556-b269-53894a73f910",
-      "target": "task-207293d2-a820-47b4-87e4-fe51a52bb060",
+      "source": "task-189ee792-8e83-40e1-9c84-abd52bbb7b18",
+      "target": "task-e8b2232a-af7f-451b-a89a-072253df18b7",
       "id": "reactflow__edge-task-f2c964e3-461f-4556-b269-53894a73f910-task-207293d2-a820-47b4-87e4-fe51a52bb060-default-default",
       "sourceHandle": null,
       "targetHandle": null
     }
   ],
-  "created_at": "2025-10-10T12:53:30.356429",
-  "updated_at": "2025-10-10T12:53:30.356432"
+  "created_at": "2025-10-13T05:03:46.986254",
+  "updated_at": "2025-10-13T05:03:46.986256"
 }
 ```
 
