@@ -5,15 +5,17 @@ Power BI Metadata Extractor
 This notebook extracts schema metadata from Power BI semantic models/datasets
 and formats it for use with PowerBITool in Kasal.
 
-Uses INFO.TABLES and INFO.COLUMNS DMV functions (compatible with REST API executeQueries endpoint).
+APPROACH:
+1. Discovers tables using INFO.VIEW.TABLES() DMV function
+2. Queries actual table data using TOPN to get sample rows
+3. Infers column names and data types from the response
 
-The output is a JSON structure containing tables, columns, data types, and relationships
+The output is a JSON structure containing tables, columns, and data types
 that can be directly used as the 'metadata' parameter in PowerBITool.
 
 Required Parameters (via job_params):
 - workspace_id: Power BI workspace ID
 - semantic_model_id: Power BI semantic model/dataset ID
-- table_names: List of table names to extract metadata for (e.g., ["Sales", "Products"])
 - auth_method: "device_code" or "service_principal" (default: "device_code")
 
 For Service Principal auth, also provide:
@@ -22,8 +24,7 @@ For Service Principal auth, also provide:
 - client_secret: Service principal secret
 
 Optional Parameters:
-- include_hidden: Include hidden tables/columns (default: false)
-- include_relationships: Include table relationships (default: true)
+- sample_size: Number of rows to sample per table for type inference (default: 100)
 - output_format: "json" or "python_dict" (default: "json")
 """
 
@@ -53,9 +54,10 @@ DEFAULT_TENANT_ID = "9f37a392-f0ae-4280-9796-f1864a10effc"
 DEFAULT_CLIENT_ID = "1950a258-227b-4e31-a9cf-717495945fc2"
 
 try:
+    # Get job parameters
     job_params = json.loads(dbutils.widgets.get("job_params"))
 
-    # Required parameters
+    # Extract required parameters
     WORKSPACE_ID = job_params.get("workspace_id")
     SEMANTIC_MODEL_ID = job_params.get("semantic_model_id")
 
@@ -66,12 +68,8 @@ try:
     CLIENT_SECRET = job_params.get("client_secret")
 
     # Optional parameters
-    INCLUDE_HIDDEN = job_params.get("include_hidden", False)
-    INCLUDE_RELATIONSHIPS = job_params.get("include_relationships", True)
-    OUTPUT_FORMAT = job_params.get("output_format", "json")  # "json" or "python_dict"
-
-    # Table names (REQUIRED for REST API - DMVs don't work)
-    TABLE_NAMES = job_params.get("table_names", [])
+    SAMPLE_SIZE = job_params.get("sample_size", 100)
+    OUTPUT_FORMAT = job_params.get("output_format", "json")
 
     print("=" * 80)
     print("Power BI Metadata Extractor")
@@ -80,19 +78,9 @@ try:
     print(f"Workspace ID: {WORKSPACE_ID}")
     print(f"Semantic Model ID: {SEMANTIC_MODEL_ID}")
     print(f"Authentication Method: {AUTH_METHOD}")
-    print(f"Table Names Provided: {len(TABLE_NAMES) if TABLE_NAMES else 0}")
-    print(f"Include Relationships: {INCLUDE_RELATIONSHIPS}")
+    print(f"Sample Size: {SAMPLE_SIZE} rows per table")
     print(f"Output Format: {OUTPUT_FORMAT}")
     print("=" * 80)
-
-    if not TABLE_NAMES:
-        print("\n⚠️  WARNING: No table_names provided!")
-        print("   The REST API executeQueries endpoint does not support automatic")
-        print("   schema discovery via DMV functions (INFO.*, TMSCHEMA_*, etc.)")
-        print("\n   Please provide table_names in job_params:")
-        print('   "table_names": ["Table1", "Table2", "Table3"]')
-        print("\n   Exiting...")
-        raise ValueError("table_names parameter is required for metadata extraction")
 
 except Exception as e:
     print(f"❌ Error getting parameters: {str(e)}")
@@ -101,8 +89,7 @@ except Exception as e:
     print("- semantic_model_id: Power BI dataset/semantic model ID")
     print("\nOptional parameters:")
     print("- auth_method: 'device_code' or 'service_principal' (default: 'device_code')")
-    print("- include_hidden: true/false (default: false)")
-    print("- include_relationships: true/false (default: true)")
+    print("- sample_size: Number of rows to sample (default: 100)")
     print("- output_format: 'json' or 'python_dict' (default: 'json')")
     raise
 
@@ -163,7 +150,7 @@ try:
             client_id=CLIENT_ID,
             client_secret=CLIENT_SECRET
         )
-    else:
+    else:  # device_code (default)
         access_token = generate_token_device_code(
             tenant_id=TENANT_ID,
             client_id=CLIENT_ID
@@ -226,88 +213,61 @@ def execute_dax_for_metadata(token: str, dataset_id: str, dax_query: str) -> pd.
     return pd.DataFrame()
 
 
-def map_dax_type_to_metadata_type(dax_type: str) -> str:
+def extract_table_metadata_from_data(token: str, dataset_id: str, table_names: List[str], sample_size: int = 100) -> List[Dict[str, Any]]:
     """
-    Map DAX/Power BI data types to simplified metadata types.
+    Extract column metadata by querying actual data from each table.
+
+    Uses Power BI REST API executeQueries endpoint with TOPN to get sample data,
+    then infers column names and data types from the response.
 
     Args:
-        dax_type: Power BI data type (e.g., "Int64", "String", "Decimal", "DateTime")
+        token: Access token for Power BI API
+        dataset_id: Power BI dataset/semantic model ID
+        table_names: List of table names to extract metadata for
+        sample_size: Number of rows to sample (default: 100)
 
     Returns:
-        str: Simplified type ("string", "int", "decimal", "datetime", "boolean")
+        List of table metadata dictionaries with columns and data types
     """
-    type_mapping = {
-        # String types
-        "String": "string",
-        "Text": "string",
-
-        # Integer types
-        "Int64": "int",
-        "Integer": "int",
-        "Whole Number": "int",
-
-        # Decimal/Float types
-        "Decimal": "decimal",
-        "Double": "decimal",
-        "Currency": "decimal",
-        "Fixed Decimal Number": "decimal",
-        "Decimal Number": "decimal",
-
-        # DateTime types
-        "DateTime": "datetime",
-        "Date": "datetime",
-        "Time": "datetime",
-
-        # Boolean types
-        "Boolean": "boolean",
-        "True/False": "boolean"
-    }
-
-    # Return mapped type or default to string
-    return type_mapping.get(dax_type, "string")
-
-
-def extract_table_metadata_manual(token: str, dataset_id: str, table_names: List[str]) -> List[Dict[str, Any]]:
-    """
-    Extract column metadata by querying each table directly.
-
-    This is a fallback when DMV functions don't work with the REST API.
-    Requires user to provide table names upfront.
-    """
-    print(f"\n🔄 Extracting metadata for {len(table_names)} tables manually...")
+    print(f"\n🔄 Extracting metadata for {len(table_names)} tables...")
+    print(f"   Using sample size: {sample_size} rows per table\n")
 
     tables_metadata = []
 
     for table_name in table_names:
-        print(f"   Processing table: {table_name}")
+        print(f"   📊 Processing table: {table_name}")
 
-        # Query first row to get column names and types
-        query = f"EVALUATE TOPN(1, '{table_name}')"
+        # Query sample data to get column names and types
+        # Using TOPN to get first N rows from the table
+        query = f"EVALUATE TOPN({sample_size}, '{table_name}')"
         df = execute_dax_for_metadata(token, dataset_id, query)
 
         if df.empty:
-            print(f"   ⚠️  Could not query table: {table_name}")
+            print(f"   ⚠️  Could not query table: {table_name} (may be empty or not exist)")
             continue
 
         # Extract column information from DataFrame
         columns = []
         for col_name in df.columns:
-            # Remove the square brackets from column names
-            clean_name = col_name.strip('[]')
+            # Remove the table name prefix and square brackets from column names
+            # Power BI returns columns as [TableName[ColumnName]] or [ColumnName]
+            clean_name = col_name.strip(table_name).strip('[').strip(']')
 
-            # Infer data type from pandas dtype
-            dtype = df[col_name].dtype
-            if dtype == 'object':
+            # Infer data type from pandas dtype based on actual data
+            dtype = str(df[col_name].dtype)
+
+            if 'object' in dtype or 'string' in dtype:
                 data_type = 'string'
-            elif dtype == 'int64':
+            elif 'int' in dtype:
                 data_type = 'int'
-            elif dtype == 'float64':
+            elif 'float' in dtype or 'decimal' in dtype:
                 data_type = 'decimal'
-            elif dtype == 'datetime64[ns]':
+            elif 'datetime' in dtype:
                 data_type = 'datetime'
-            elif dtype == 'bool':
+            elif 'bool' in dtype:
                 data_type = 'boolean'
             else:
+                # Default to string for unknown types
                 data_type = 'string'
 
             columns.append({
@@ -320,131 +280,11 @@ def extract_table_metadata_manual(token: str, dataset_id: str, table_names: List
             "columns": columns
         })
 
-        print(f"   ✅ Found {len(columns)} columns in {table_name}")
+        print(f"   ✅ Found {len(columns)} columns in '{table_name}'")
+
+    print(f"\n✅ Successfully processed {len(tables_metadata)}/{len(table_names)} tables")
 
     return tables_metadata
-
-
-def extract_table_metadata(token: str, dataset_id: str, include_hidden: bool = False) -> List[Dict[str, Any]]:
-    """
-    Extract table and column metadata from Power BI semantic model.
-
-    Note: DMV functions (INFO.*, TMSCHEMA_*, SYSTEMRESTRICTSCHEMA) don't work
-    with the REST API executeQueries endpoint.
-
-    This function returns empty and the user should provide table names manually,
-    or use the Admin Scanner API for full schema discovery.
-    """
-    print("\n🔄 Attempting to extract table metadata...")
-    print("⚠️  Note: Automatic schema discovery via DMVs is not supported with REST API")
-    print("⚠️  You need to either:")
-    print("   1. Provide table names manually (see extract_table_metadata_manual)")
-    print("   2. Use Power BI Admin Scanner API (requires admin permissions)")
-    print("   3. Use XMLA endpoint with TMSCHEMA views (requires different connection)")
-
-    return []
-
-    # Process tables
-    tables_dict = {}
-
-    # INFO.TABLES columns: [TableName], [IsHidden], [Description] (if available)
-    for _, table_row in tables_df.iterrows():
-        table_name = table_row.get("[TableName]")
-        if not table_name:
-            continue
-
-        table_hidden = table_row.get("[IsHidden]", False)
-
-        # Skip hidden tables if requested
-        if table_hidden and not include_hidden:
-            continue
-
-        tables_dict[table_name] = {
-            "name": table_name,
-            "columns": []
-        }
-
-    # Process columns
-    # INFO.COLUMNS columns: [TableName], [ColumnName], [DataType], [IsHidden]
-    for _, col_row in columns_df.iterrows():
-        table_name = col_row.get("[TableName]")
-        column_name = col_row.get("[ColumnName]")
-
-        if not table_name or not column_name:
-            continue
-
-        # Skip if table not in our dict (was hidden)
-        if table_name not in tables_dict:
-            continue
-
-        column_hidden = col_row.get("[IsHidden]", False)
-
-        # Skip hidden columns if requested
-        if column_hidden and not include_hidden:
-            continue
-
-        # Get data type - INFO.COLUMNS uses [DataType]
-        column_type = col_row.get("[DataType]", "String")
-
-        # Add column
-        column_info = {
-            "name": column_name,
-            "data_type": map_dax_type_to_metadata_type(column_type)
-        }
-
-        tables_dict[table_name]["columns"].append(column_info)
-
-    # Convert to list
-    tables_list = list(tables_dict.values())
-
-    # Remove tables with no columns (all were hidden)
-    tables_list = [t for t in tables_list if len(t["columns"]) > 0]
-
-    print(f"✅ Processed {len(tables_list)} tables")
-
-    return tables_list
-
-
-def extract_relationship_metadata(token: str, dataset_id: str) -> List[Dict[str, Any]]:
-    """
-    Extract relationship metadata from Power BI semantic model.
-
-    Note: INFO.RELATIONSHIPS may not be available in all Power BI deployments.
-    If this fails, relationships will be omitted from the output.
-    """
-    print("\n🔄 Extracting relationship metadata...")
-
-    try:
-        # Try to get relationships using INFO.RELATIONSHIPS
-        # Note: This may not work in all environments
-        dax_query = "EVALUATE INFO.RELATIONSHIPS"
-        df = execute_dax_for_metadata(token, dataset_id, dax_query)
-    except Exception as e:
-        print(f"⚠️  INFO.RELATIONSHIPS not available: {str(e)}")
-        return []
-
-    if df.empty:
-        print("⚠️  No relationships found")
-        return []
-
-    print(f"✅ Retrieved {len(df)} relationships")
-
-    relationships = []
-    # INFO.RELATIONSHIPS columns may vary, but typically include:
-    # [FromTableName], [FromColumnName], [ToTableName], [ToColumnName]
-    for _, row in df.iterrows():
-        rel = {
-            "fromTable": row.get("[FromTableName]", row.get("[FromTable]", "")),
-            "fromColumn": row.get("[FromColumnName]", row.get("[FromColumn]", "")),
-            "toTable": row.get("[ToTableName]", row.get("[ToTable]", "")),
-            "toColumn": row.get("[ToColumnName]", row.get("[ToColumn]", "")),
-        }
-
-        # Only add if we have valid data
-        if rel["fromTable"] and rel["toTable"]:
-            relationships.append(rel)
-
-    return relationships
 
 # COMMAND ----------
 
@@ -467,27 +307,46 @@ except Exception as e:
 
 # COMMAND ----------
 
+# DBTITLE 1,Discover Tables
+try:
+    print("\n🔄 Discovering tables in dataset...")
+    tables_df = execute_dax_for_metadata(access_token, SEMANTIC_MODEL_ID, "EVALUATE INFO.VIEW.TABLES()")
+
+    if tables_df.empty:
+        print("⚠️  Could not discover tables automatically")
+        print("   The notebook will exit. Please provide table_names manually if needed.")
+        raise ValueError("No tables found in dataset")
+
+    # Extract unique table names from the [Name] column
+    table_names = list(set(tables_df['[Name]']))
+
+    print("\n" + "=" * 80)
+    print("Tables Discovered")
+    print("=" * 80)
+    print(f"Found {len(table_names)} tables:")
+    for table_name in table_names:
+        print(f"  - {table_name}")
+    print("=" * 80)
+
+except Exception as e:
+    print(f"❌ Error discovering tables: {str(e)}")
+    raise
+
+# COMMAND ----------
+
 # DBTITLE 1,Extract Metadata
 try:
-    # Extract tables and columns using manual approach (table names required)
-    tables_metadata = extract_table_metadata_manual(
+    # Extract tables and columns by querying actual data
+    # This approach works reliably with the REST API executeQueries endpoint
+    tables_metadata = extract_table_metadata_from_data(
         token=access_token,
         dataset_id=SEMANTIC_MODEL_ID,
-        table_names=TABLE_NAMES
+        table_names=table_names,
+        sample_size=SAMPLE_SIZE
     )
 
     # Build metadata structure
     metadata = {"tables": tables_metadata}
-
-    # Extract relationships if requested
-    if INCLUDE_RELATIONSHIPS:
-        relationships = extract_relationship_metadata(
-            token=access_token,
-            dataset_id=SEMANTIC_MODEL_ID
-        )
-
-        if relationships:
-            metadata["relationships"] = relationships
 
     print("\n" + "=" * 80)
     print("Metadata Extraction Summary")
@@ -496,10 +355,6 @@ try:
 
     total_columns = sum(len(table["columns"]) for table in tables_metadata)
     print(f"✅ Total columns: {total_columns}")
-
-    if INCLUDE_RELATIONSHIPS and "relationships" in metadata:
-        print(f"✅ Relationships extracted: {len(metadata['relationships'])}")
-
     print("=" * 80)
 
 except Exception as e:
@@ -516,15 +371,10 @@ print("=" * 80)
 # Display each table with sample columns
 for table in tables_metadata[:5]:  # Show first 5 tables
     print(f"\n📊 Table: {table['name']}")
-    if table.get('description'):
-        print(f"   Description: {table['description']}")
     print(f"   Columns ({len(table['columns'])}):")
 
     for col in table['columns'][:10]:  # Show first 10 columns per table
-        col_str = f"      - {col['name']} ({col['data_type']})"
-        if col.get('description'):
-            col_str += f" - {col['description']}"
-        print(col_str)
+        print(f"      - {col['name']} ({col['data_type']})")
 
     if len(table['columns']) > 10:
         print(f"      ... and {len(table['columns']) - 10} more columns")
@@ -544,7 +394,7 @@ if OUTPUT_FORMAT == "python_dict":
     print("Copy this into your Python code:\n")
     print(output_str)
 
-elif OUTPUT_FORMAT == "json":
+else:  # json (default)
     # JSON format (pretty-printed)
     output_str = json.dumps(metadata, indent=2)
     print("\n" + "=" * 80)
@@ -552,15 +402,6 @@ elif OUTPUT_FORMAT == "json":
     print("=" * 80)
     print("Copy this into your PowerBITool configuration:\n")
     print(output_str)
-
-# COMMAND ----------
-
-# DBTITLE 1,Save to File (Optional)
-# Uncomment to save metadata to a file
-# output_filename = f"powerbi_metadata_{SEMANTIC_MODEL_ID}_{datetime.now().strftime('%Y%m%d_%H%M%S')}.json"
-# with open(f"/dbfs/tmp/{output_filename}", "w") as f:
-#     json.dump(metadata, f, indent=2)
-# print(f"✅ Metadata saved to: /dbfs/tmp/{output_filename}")
 
 # COMMAND ----------
 
@@ -573,7 +414,7 @@ print("Dataset Name:", dataset_info.get('name', 'your_dataset'))
 print("\nMetadata (compact format for crew input):")
 print("-" * 80)
 
-# Compact format without descriptions for easier copying
+# Compact format without extra whitespace
 compact_metadata = {
     "tables": [
         {
@@ -608,8 +449,6 @@ print(f"   Execution Time: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
 print(f"   Semantic Model ID: {SEMANTIC_MODEL_ID}")
 print(f"   Tables Extracted: {len(tables_metadata)}")
 print(f"   Total Columns: {total_columns}")
-if INCLUDE_RELATIONSHIPS and "relationships" in metadata:
-    print(f"   Relationships: {len(metadata['relationships'])}")
 print("=" * 80)
 
 # COMMAND ----------
