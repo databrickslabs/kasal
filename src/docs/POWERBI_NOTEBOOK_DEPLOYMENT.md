@@ -12,7 +12,9 @@ When you deploy Kasal, the notebook is automatically deployed:
 python src/deploy.py --app-name kasal --user-name your.email@company.com
 ```
 
-**Deployed to**: `/Users/your.email@company.com/kasal_notebooks/powerbi_dax_executor`
+**Deployed Notebooks**:
+- `/Users/your.email@company.com/kasal_notebooks/powerbi_dax_executor`
+- `/Users/your.email@company.com/kasal_notebooks/powerbi_metadata_extractor`
 
 ### Manual Notebook Deployment (Optional)
 
@@ -65,7 +67,79 @@ Execute the job with these parameters (as a single `job_params` JSON string):
 }
 ```
 
+## Power BI Metadata Extractor
+
+The metadata extractor notebook helps you semi-automatically create metadata for PowerBITool.
+
+### Deploying Metadata Extractor
+
+The metadata extractor is automatically deployed alongside the DAX executor:
+
+```bash
+python src/deploy.py --app-name kasal --user-name your.email@company.com
+```
+
+**Deployed to**: `/Users/your.email@company.com/kasal_notebooks/powerbi_metadata_extractor`
+
+### Using the Metadata Extractor
+
+The metadata extractor uses Power BI's `INFO.TABLES` and `INFO.COLUMNS` DMV functions to extract schema information. These functions are compatible with the Power BI REST API `executeQueries` endpoint.
+
+Run the notebook with these parameters:
+
+```json
+{
+  "job_params": {
+    "workspace_id": "12345678-1234-1234-1234-123456789012",
+    "semantic_model_id": "87654321-4321-4321-4321-210987654321",
+    "auth_method": "service_principal",
+    "client_id": "your-client-id",
+    "tenant_id": "your-tenant-id",
+    "client_secret": "your-secret",
+    "include_hidden": false,
+    "include_relationships": true,
+    "output_format": "json"
+  }
+}
+```
+
+**Output**: The notebook will extract and format metadata in the exact structure needed for PowerBITool:
+
+```json
+{
+  "tables": [
+    {
+      "name": "TestData",
+      "columns": [
+        {"name": "product", "data_type": "string"},
+        {"name": "nsr", "data_type": "decimal"},
+        {"name": "country", "data_type": "string"}
+      ]
+    }
+  ]
+}
+```
+
+### Metadata Extractor Parameters
+
+| Parameter | Description | Default | Required |
+|-----------|-------------|---------|----------|
+| `workspace_id` | Power BI workspace ID | - | ✅ Yes |
+| `semantic_model_id` | Dataset ID | - | ✅ Yes |
+| `auth_method` | "device_code" or "service_principal" | "device_code" | ❌ No |
+| `include_hidden` | Include hidden tables/columns | false | ❌ No |
+| `include_relationships` | Include table relationships | true | ❌ No |
+| `output_format` | "json" or "python_dict" | "json" | ❌ No |
+
 ## Complete Workflow: Agent → DAX → Execution
+
+### Step 0: Extract Metadata (First Time Setup)
+
+Use the metadata extractor notebook to get your dataset structure:
+
+1. Create a Databricks job for the metadata extractor notebook
+2. Run it with your workspace_id and semantic_model_id
+3. Copy the compact metadata output
 
 ### Step 1: Generate DAX Query
 
@@ -257,13 +331,13 @@ python -m src.utils.notebook_deployment your.email@company.com
 databricks workspace ls /Users/your.email@company.com/kasal_notebooks/
 ```
 
-### Issue: pyadomd import error
+### Issue: azure-identity import error
 
 **Cause**: Package not installed or Python not restarted
 
-**Solution**: The notebook includes:
+**Solution**: Both notebooks include:
 ```python
-%pip install pyadomd
+%pip install azure-identity requests pandas
 dbutils.library.restartPython()
 ```
 
@@ -271,12 +345,13 @@ If still failing, check cluster has internet access for package installation.
 
 ### Issue: Connection failed to Power BI
 
-**Cause**: Service Principal permissions or XMLA endpoint
+**Cause**: Service Principal permissions or authentication
 
 **Solution**:
 1. Verify Service Principal has Read access to workspace
-2. Check XMLA endpoint format: `powerbi://api.powerbi.com/v1.0/myorg/workspace_name`
-3. Test credentials manually in Power BI Desktop first
+2. Check that "Service principals can access Power BI APIs" is enabled in tenant settings
+3. Verify client_id, tenant_id, and client_secret are correct
+4. Test credentials by running the metadata extractor first
 
 ### Issue: DAX syntax error
 
@@ -293,29 +368,33 @@ Complete workflow integration:
 
 ```mermaid
 graph LR
-    A[User Question] --> B[PowerBITool]
+    A[Extract Metadata] --> B[PowerBITool]
     B --> C[Generate DAX]
     C --> D[DatabricksJobsTool]
     D --> E[powerbi_dax_executor notebook]
-    E --> F[Power BI via XMLA]
+    E --> F[Power BI REST API]
     F --> G[Results]
 ```
 
 **Step-by-step**:
-1. User asks question: "What is total NSR per product?"
-2. PowerBITool generates DAX using metadata
-3. DatabricksJobsTool creates/runs job with generated DAX
-4. Deployed notebook executes DAX against Power BI
-5. Results returned as DataFrame and JSON
+1. **First time setup**: Run metadata extractor to get dataset structure
+2. User asks question: "What is total NSR per product?"
+3. PowerBITool generates DAX using metadata
+4. DatabricksJobsTool creates/runs job with generated DAX
+5. Deployed notebook executes DAX against Power BI via REST API
+6. Results returned as DataFrame and JSON
 
 ## Summary
 
-✅ **Automatic Deployment**: Notebook deployed with application
+✅ **Automatic Deployment**: Both notebooks deployed with application
 ✅ **Pre-Configured**: Ready to use with parameters
+✅ **Metadata Extraction**: Semi-automatic metadata generation for PowerBITool
 ✅ **Error Handling**: Comprehensive error handling built-in
 ✅ **Multiple Outputs**: Results in various formats
 ✅ **Easy Integration**: Works seamlessly with PowerBITool and DatabricksJobsTool
 
-**Deployed Location**: `/Users/{your_email}/kasal_notebooks/powerbi_dax_executor`
+**Deployed Locations**:
+- `/Users/{your_email}/kasal_notebooks/powerbi_dax_executor`
+- `/Users/{your_email}/kasal_notebooks/powerbi_metadata_extractor`
 
 For more details, see [NOTEBOOK_TEMPLATES.md](./NOTEBOOK_TEMPLATES.md)
