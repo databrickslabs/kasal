@@ -127,6 +127,15 @@ except ImportError:
         PowerBITool = None
         logging.warning("Could not import PowerBITool")
 
+try:
+    from .custom.job_metadata_fetcher_tool import JobMetadataFetcherTool
+except ImportError:
+    try:
+        from .custom.job_metadata_fetcher_tool import JobMetadataFetcherTool
+    except ImportError:
+        JobMetadataFetcherTool = None
+        logging.warning("Could not import JobMetadataFetcherTool")
+
 
 # Setup logger
 logger = logging.getLogger(__name__)
@@ -219,7 +228,9 @@ class ToolFactory:
             "SnowflakeSearchTool": SnowflakeSearchTool,
             "WeaviateVectorSearchTool": WeaviateVectorSearchTool,
             "PythonPPTXTool": PythonPPTXTool,
-            "PowerBITool": PowerBITool
+            "PowerBITool": PowerBITool,
+            "PowerBIDAXGenerator": PowerBITool,
+            "JobMetadataFetcher": JobMetadataFetcherTool
         }
         
         # Initialize _initialized flag
