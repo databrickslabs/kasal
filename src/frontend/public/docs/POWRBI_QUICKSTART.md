@@ -58,168 +58,48 @@ Deploy the app:
 python3 deploy.py --app-name kasal-david --user-name david.schwarzenbacher@databricks.com
 ```
 
+# Step 3: Configuration of the deployed items
+- From the uploaded notebook (src/backend/src/engines/crewai/tools/templates/notebooks/powerbi_full_pipeline.py) create a job
+- This job will have ONE task (taskname is SUPER important): pbi_e2e_pipeline & link the notebook from above to the task
+- Feel free to edit, if needed, default variables. However, we suggest to refrain from this
+- This job will give you a job-ID --> copy this and put it into the configuration of the Kasal-app you have running for the PowerBI Tool, which you have to enable
+- As Databricks-host please enter your host-IP address WITHOUT the https
+- Don't forget to set the Databricks-API key in the the configuration plane
+
 ## Step 3: Frontend UI testing
 
-1. Navigate to Tools section in the Kasal UI
-2. Find "PowerBITool" (ID: 71)
-3. Click Edit/Configure
-4. Update the configuration JSON with your settings
-5. Save changes
-6. Create a crew like this (check all the parameters like job-id and co)
+As a reference this is one example of a crew setup that you can upload in the frontend: 
+ATTENTION: In the front-end you need to make sure that the parameters set in the task match YOUR environment (aka your semantic_model_id, workspace_id, etc.). In general as authentication methodology we suggest service_principal, but you need to have this configured within your environment, thus default is device-control-flow, but please note this is nice for experiments, but NOT production ready then as it will need interactice authentication. 
+
+Please note that if the job-fails it most likely has to do with the access - simply add the SVP from the app you spun up as a manager of your job-notebook, which should fix the issue.
 
 ```json
 {
-  "id": "e890bf60-dbfa-4ebc-a833-9640d3a44037",
-  "name": "e2e_pbi_crew",
+  "id": "3980587e-5a1e-44b3-a264-1dc11feb72f2",
+  "name": "test",
   "agent_ids": [
-    "7daf0c19-692a-4be3-bc14-c84cc9f0239e",
-    "64efa87e-d8e7-49df-9097-733ea7135f43"
+    "4379d037-4a1b-4101-bb19-18f8de1be668"
   ],
   "task_ids": [
-    "189ee792-8e83-40e1-9c84-abd52bbb7b18",
-    "e8b2232a-af7f-451b-a89a-072253df18b7"
+    "97b2f77c-f5a1-49ac-9e98-31f1b0c13c8f"
   ],
   "nodes": [
     {
-      "id": "agent-7daf0c19-692a-4be3-bc14-c84cc9f0239e",
+      "id": "agent-4379d037-4a1b-4101-bb19-18f8de1be668",
       "type": "agentNode",
       "position": {
-        "x": 100,
-        "y": 200
+        "x": 63.96047192664271,
+        "y": -341.6588050410664
       },
       "data": {
-        "label": "BI Analyst",
-        "role": "Business Intelligence Analyst",
-        "goal": "Generate accurate DAX queries for Power BI datasets",
-        "backstory": "Expert in Power BI and DAX with 10+ years of experience. You understand how to provide dataset metadata at runtime when using the Power BI DAX Generator tool. When asked to query a Power BI dataset, you provide the dataset_name and a complete metadata structure with tables and columns.",
+        "label": "PowerBI Job Orchestrator",
+        "role": "PowerBI Job Manager",
+        "goal": "Orchestrate and manage PowerBI jobs efficiently\n\nYou will make sure that the action run will only trigger 1 time and not more. ",
+        "backstory": "Experienced in managing and optimizing Databricks workflows for PowerBI, with expertise in job scheduling and execution.",
         "tools": [
           "71"
         ],
-        "agentId": "7daf0c19-692a-4be3-bc14-c84cc9f0239e",
-        "taskId": null,
-        "llm": "databricks-llama-4-maverick",
-        "function_calling_llm": null,
-        "max_iter": 25,
-        "max_rpm": 1,
-        "max_execution_time": 300,
-        "verbose": false,
-        "allow_delegation": false,
-        "cache": true,
-        "memory": true,
-        "embedder_config": {
-          "provider": "databricks",
-          "config": {
-            "model": "databricks-gte-large-en"
-          }
-        },
-        "system_template": null,
-        "prompt_template": null,
-        "response_template": null,
-        "allow_code_execution": false,
-        "code_execution_mode": "safe",
-        "max_retry_limit": 3,
-        "use_system_prompt": true,
-        "respect_context_window": true,
-        "type": "agent",
-        "description": null,
-        "expected_output": null,
-        "icon": null,
-        "advanced_config": null,
-        "config": null,
-        "context": [],
-        "async_execution": false,
-        "knowledge_sources": [],
-        "markdown": false
-      },
-      "width": null,
-      "height": null,
-      "selected": null,
-      "positionAbsolute": null,
-      "dragging": null,
-      "style": null
-    },
-    {
-      "id": "task-189ee792-8e83-40e1-9c84-abd52bbb7b18",
-      "type": "taskNode",
-      "position": {
-        "x": 374.4179408025376,
-        "y": 198.6230842121526
-      },
-      "data": {
-        "label": "NSR per Product Analysis",
-        "role": null,
-        "goal": null,
-        "backstory": null,
-        "tools": [
-          "71"
-        ],
-        "agentId": null,
-        "taskId": "189ee792-8e83-40e1-9c84-abd52bbb7b18",
-        "llm": null,
-        "function_calling_llm": null,
-        "max_iter": null,
-        "max_rpm": null,
-        "max_execution_time": null,
-        "verbose": null,
-        "allow_delegation": null,
-        "cache": null,
-        "memory": true,
-        "embedder_config": null,
-        "system_template": null,
-        "prompt_template": null,
-        "response_template": null,
-        "allow_code_execution": null,
-        "code_execution_mode": null,
-        "max_retry_limit": null,
-        "use_system_prompt": null,
-        "respect_context_window": null,
-        "type": "task",
-        "description": "Generate a DAX query to calculate Net Sales Revenue (NSR) and Cost Of Goods Sold (COGS) per product from the test_pbi dataset. When using the Power BI DAX Generator tool, execute and ask for these parameters:\n\n1. dataset_name: {dataset_name}\n2. metadata: {metadata}\n\nThe tool will generate a DAX EVALUATE statement that groups by product and sums the NSR and COGS values as two separate columns.",
-        "expected_output": "A complete, executable DAX EVALUATE statement that calculates total NSR grouped by product. The query should be ready to run against the Power BI dataset via XMLA endpoint.",
-        "icon": null,
-        "advanced_config": null,
-        "config": {
-          "cache_response": false,
-          "cache_ttl": 3600,
-          "retry_on_fail": true,
-          "max_retries": 3,
-          "timeout": null,
-          "priority": 1,
-          "error_handling": "default",
-          "output_file": null,
-          "output_json": null,
-          "output_pydantic": null,
-          "validation_function": null,
-          "callback_function": null,
-          "human_input": false,
-          "markdown": false
-        },
-        "context": [],
-        "async_execution": false,
-        "knowledge_sources": null,
-        "markdown": false
-      },
-      "width": null,
-      "height": null,
-      "selected": null,
-      "positionAbsolute": null,
-      "dragging": null,
-      "style": null
-    },
-    {
-      "id": "agent-64efa87e-d8e7-49df-9097-733ea7135f43",
-      "type": "agentNode",
-      "position": {
-        "x": 98.44294056195827,
-        "y": 447.4736022841256
-      },
-      "data": {
-        "label": "Databricks Job Orchestrator",
-        "role": "Databricks Job Manager",
-        "goal": "Orchestrate and manage Databricks jobs efficiently\n\nYou will make sure that the action run will only trigger 1 time and not more. ",
-        "backstory": "Experienced in managing and optimizing Databricks workflows, with expertise in job scheduling and execution.",
-        "tools": [],
-        "agentId": "64efa87e-d8e7-49df-9097-733ea7135f43",
+        "agentId": "4379d037-4a1b-4101-bb19-18f8de1be668",
         "taskId": null,
         "llm": "databricks-llama-4-maverick",
         "function_calling_llm": null,
@@ -263,22 +143,22 @@ python3 deploy.py --app-name kasal-david --user-name david.schwarzenbacher@datab
       "style": null
     },
     {
-      "id": "task-e8b2232a-af7f-451b-a89a-072253df18b7",
+      "id": "task-97b2f77c-f5a1-49ac-9e98-31f1b0c13c8f",
       "type": "taskNode",
       "position": {
-        "x": 343.2037683825747,
-        "y": 446.5243311337546
+        "x": 303.15458030615144,
+        "y": -338.9256934052662
       },
       "data": {
-        "label": "Run Job with Custom City and Query Parameters",
+        "label": "Run Job with Custom Parameters",
         "role": null,
         "goal": null,
         "backstory": null,
         "tools": [
-          "70"
+          "71"
         ],
         "agentId": null,
-        "taskId": "e8b2232a-af7f-451b-a89a-072253df18b7",
+        "taskId": "97b2f77c-f5a1-49ac-9e98-31f1b0c13c8f",
         "llm": null,
         "function_calling_llm": null,
         "max_iter": null,
@@ -298,15 +178,15 @@ python3 deploy.py --app-name kasal-david --user-name david.schwarzenbacher@datab
         "use_system_prompt": null,
         "respect_context_window": null,
         "type": "task",
-        "description": "Execute job ID 260124535998145 with the dax_statement you get from the Business Intelligence analyst as a job_params that is passed to the job.\n\nIn addition to this, set workspace_id to \"bcb084ed-f8c9-422c-b148-29839c0f9227\" and semantic_model_id to \"a17de62e-8dc0-4a8a-acaa-2a9954de8c75\" and add them as additional job_params.\n\nNot I don't want you to list or get the job I want you to only run it but only once you are not allowed to run more than once.\n\nExample of a dax_statement that you might receive is e.g. EVALUATE\nSUMMARIZECOLUMNS(\n    'TestData'[product],\n    \"Total NSR\", SUM('TestData'[nsr])\n)\n\nYou need to replace this dax_statement with the one coming from the Business Intelligence Analyst.\n\n You will make sure that the action run will only trigger 1 time and not more.",
-        "expected_output": "A job execution result containing the response data from running job ID 260124535998145 with the custom city and query parameters. The output will include any data returned by the job, execution status, and timestamps.",
+        "description": "Execute job ID 365257288725339 ONE TIME ONLY. Do not retry if you receive a successful run_id. Execute the job with those parameters:\n- question: {question}\n- workspace_id: 'bcb084ed-f8c9-422c-b148-29839c0f9227'\n- semantic_model_id: 'a17de62e-8dc0-4a8a-acaa-2a9954de8c75'\n- auth_method: 'device_code'\n- tenant_id: '9f37a392-f0ae-4280-9796-f1864a10effc'\n- client_id: '1950a258-227b-4e31-a9cf-717495945fc2'\"\n- client_secret: 'TBD'\n- sample_size: 100\n- metadata: \"json\"\n- databricks_host: \"https://e2-demo-field-eng.cloud.databricks.com/\"\n- databricks_token: <YOUR_DATABRICKS_API_TOKEN>\n\nI don't want you to list or get the job; I want you to run it once; you are not allowed to run more than once. Use PowerBITool to execute this query.\n\nIMPORTANT: You will make sure that the action run will only trigger 1 time and not more.",
+        "expected_output": "A job execution result containing the response data from running job ID 365257288725339 with the custom parameters. The output will include any result_data and various other parameters.",
         "icon": null,
         "advanced_config": null,
         "config": {
           "cache_response": false,
           "cache_ttl": 3600,
-          "retry_on_fail": true,
-          "max_retries": 3,
+          "retry_on_fail": false,
+          "max_retries": 0,
           "timeout": null,
           "priority": 1,
           "error_handling": "default",
@@ -333,43 +213,49 @@ python3 deploy.py --app-name kasal-david --user-name david.schwarzenbacher@datab
   ],
   "edges": [
     {
-      "source": "agent-7daf0c19-692a-4be3-bc14-c84cc9f0239e",
-      "target": "task-189ee792-8e83-40e1-9c84-abd52bbb7b18",
-      "id": "edge-1",
-      "sourceHandle": null,
-      "targetHandle": null
-    },
-    {
-      "source": "agent-64efa87e-d8e7-49df-9097-733ea7135f43",
-      "target": "task-e8b2232a-af7f-451b-a89a-072253df18b7",
-      "id": "reactflow__edge-agent-a803dae4-22d3-4e74-a931-aa7ace598563-task-207293d2-a820-47b4-87e4-fe51a52bb060-default-default",
-      "sourceHandle": null,
-      "targetHandle": null
-    },
-    {
-      "source": "task-189ee792-8e83-40e1-9c84-abd52bbb7b18",
-      "target": "task-e8b2232a-af7f-451b-a89a-072253df18b7",
-      "id": "reactflow__edge-task-f2c964e3-461f-4556-b269-53894a73f910-task-207293d2-a820-47b4-87e4-fe51a52bb060-default-default",
+      "source": "agent-4379d037-4a1b-4101-bb19-18f8de1be668",
+      "target": "task-97b2f77c-f5a1-49ac-9e98-31f1b0c13c8f",
+      "id": "reactflow__edge-agent-83ec5a5f-7b9a-46ea-b12d-63bfaad2d9d0-task-ebd1eaaf-e42b-4e36-bb5b-b486be841bf2-default-default",
       "sourceHandle": null,
       "targetHandle": null
     }
   ],
-  "created_at": "2025-10-13T05:03:46.986254",
-  "updated_at": "2025-10-13T05:03:46.986256"
+  "created_at": "2025-10-16T18:39:31.203804",
+  "updated_at": "2025-10-16T18:39:31.203806"
 }
 ```
 
-7. Exectue the crew and set these parameters: 
-- dataset_name: test_pbi
-- metadata: {'tables': [{'name': 'TestData', 'columns': [{'name': 'product', 'data_type': 'string'}, {'name': 'nsr', 'data_type': 'decimal'}, {'name': 'country', 'data_type': 'string'}, , {'name': 'fiscper', 'data_type': 'decimal'}, {'name': 'cogs', 'data_type': 'decimal'}, {'name': 'net_income', 'data_type': 'string'}]}]}
+Exectue the crew and set these parameters: 
+- question: Generate a DAX query to calculate Net Sales Revenue (NSR) and Cost Of Goods Sold (COGS) per product
+- You can even think of ingesting the semantic_model_id dynamically as only the question and this one will change
 
 **Expected Response:**
-```dax
-EVALUATE
-SUMMARIZECOLUMNS(
-    'TestData'[product],
-    "Total NSR", SUM('TestData'[nsr])
-)
+```json
+{
+  "success": true,
+  "run_id": 1086410411823064,
+  "question": "Generate a DAX query to calculate Net Sales Revenue (NSR) and Cost Of Goods Sold (COGS) per product",
+  "elapsed_seconds": 81.7,
+  "dax_query": null,
+  "result_data": [
+    {
+      "TestData[product]": "product_a",
+      "[Net Sales Revenue]": 20892722.53,
+      "[Cost Of Goods Sold]": 10275850.23
+    },
+    {
+      "TestData[product]": "product_b",
+      "[Net Sales Revenue]": 20705392.63,
+      "[Cost Of Goods Sold]": 10425699.56
+    },
+    {
+      "TestData[product]": "product_c",
+      "[Net Sales Revenue]": 18076406.91,
+      "[Cost Of Goods Sold]": 8797758.1
+    }
+  ],
+  "message": "Successfully executed Power BI query in 81.7s"
+}
 ```
 
 ## Summary
