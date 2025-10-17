@@ -78,7 +78,7 @@ tools_data = [
     (68, "PythonPPTXTool", "A powerful tool for creating Microsoft PowerPoint presentations using the python-pptx library. It converts raw text content into professionally formatted slides with proper styling, titles, and content organization. The tool supports creating presentations from scratch or using templates, customizing styling, and saving to specified locations. Ideal for automating presentation creation, report generation, and converting textual information into visual slide formats.", "presentation"),
     (69, "MCPTool", "An advanced adapter for Model Context Protocol (MCP) servers that enables access to thousands of specialized tools from the MCP ecosystem. This tool establishes and manages connections with MCP servers through SSE (Server-Sent Events), providing seamless integration with community-built tool collections. Perfect for extending agent capabilities with domain-specific tools without requiring custom development or direct integration work.", "integration"),
     (70, "DatabricksJobsTool", "A comprehensive Databricks Jobs management tool using direct REST API calls for optimal performance. IMPORTANT WORKFLOW: Always use 'get_notebook' action FIRST to analyze job notebooks and understand required parameters before running any job with custom parameters. This ensures proper parameter construction and prevents job failures. Available actions: (1) 'list' - List all jobs in workspace with optional name/ID filtering, (2) 'list_my_jobs' - List only jobs created by current user, (3) 'get' - Get detailed job configuration and recent run history, (4) 'get_notebook' - Analyze notebook content to understand parameters, widgets, and logic (REQUIRED before running jobs with parameters), (5) 'run' - Trigger job execution with custom parameters (use dict for notebook/SQL tasks, list for Python tasks), (6) 'monitor' - Track real-time execution status and task progress, (7) 'create' - Create new jobs with custom configurations. The tool provides intelligent parameter analysis, suggesting proper parameter structures based on notebook patterns (search jobs, ETL jobs, etc.). Supports OAuth/OBO authentication, PAT tokens, and Databricks CLI profiles. All operations use direct REST API calls avoiding SDK overhead for faster execution. Essential for automating data pipelines, orchestrating workflows, and integrating Databricks jobs into AI agent systems.", "database"),
-    (71, "PowerBITool", "A powerful natural language to DAX query generator for Power BI semantic models. This tool translates business questions into executable DAX queries that can be run against Power BI datasets via XMLA endpoints. It analyzes Power BI dataset metadata (tables, columns, relationships) to generate accurate, context-aware DAX queries with confidence scoring. The tool provides complete execution instructions for running generated queries in Databricks notebooks using pyadomd. Perfect for business intelligence workflows, automated reporting, data analysis tasks, and enabling AI agents to interact with Power BI data through natural language. Essential for bridging the gap between conversational AI and Power BI analytics, allowing users to ask questions like 'What is the total NSR per product?' and receive executable DAX queries. Ideal for business analysts, data scientists, and anyone working with Power BI semantic models who needs to generate complex DAX queries quickly and accurately.", "business_intelligence"),
+    (71, "PowerBITool", "An end-to-end Power BI query execution tool that handles everything automatically: metadata extraction, DAX generation, and query execution. Users simply provide a natural language question (e.g., 'What is the total NSR per product?') along with Power BI credentials, and the tool: (1) Submits a Databricks job running the powerbi_full_pipeline notebook, (2) Monitors job completion with automatic polling, (3) Extracts and returns DAX execution results directly. Required parameters: question, semantic_model_id, workspace_id, tenant_id, client_id, client_secret, and auth_method ('service_principal' or 'device_code'). Optional: timeout_seconds (default: 600). Behind the scenes, the powerbi_full_pipeline notebook performs metadata extraction from Power BI, generates DAX queries via LLM, and executes them against Power BI. This is a single-call solution - no need for separate metadata extraction, DAX generation, or manual result retrieval. Perfect for business intelligence workflows, automated reporting, and enabling AI agents to answer Power BI questions with minimal setup. Essential for bridging conversational AI and Power BI analytics with maximum convenience.", "business_intelligence"),
     (72, "JobMetadataFetcher", "A generic utility tool for retrieving output from any completed Databricks notebook job that uses dbutils.notebook.exit(json.dumps(data)). This tool fetches the notebook exit output from job runs executed via DatabricksJobsTool, allowing agents to extract structured results from any type of job (metadata extraction, data processing, analytics, etc.). The tool accepts a run_id and optional extract_key parameter - if extract_key is provided (e.g., 'metadata', 'compact_metadata'), it returns only that specific field from the output; otherwise, it returns the complete job output. Used in multi-agent workflows where agents need to chain job executions and pass results between steps. Perfect for building flexible data pipelines where job results need to be processed, analyzed, or passed to subsequent operations. Supports Power BI metadata extraction workflows and any other job-based data pipeline. Enables building complex orchestration workflows with clean separation between job execution and result processing.", "database"),
 ]
 
@@ -395,18 +395,17 @@ def get_tool_configs():
         },   # DatabricksJobsTool
         "71": {
             "result_as_answer": False,
-            # Connection-level configuration (shared across all tasks)
-            "xmla_endpoint": "powerbi://api.powerbi.com/v1.0/myorg/your_workspace",  # Power BI XMLA endpoint
-            "model_name": "databricks-meta-llama-3-1-405b-instruct",  # LLM model for DAX generation
-            "temperature": 0.1  # Temperature for DAX generation (lower = more deterministic)
-            # NOTE: dataset_name and metadata are dataset-specific and should be configured at task/agent level
-            # Example task-level config:
-            # "tool_configs": {
-            #   "PowerBITool": {
-            #     "dataset_name": "SalesDataset",
-            #     "metadata": {"tables": [...]}
-            #   }
-            # }
+            "DATABRICKS_HOST": "",  # Databricks workspace URL (e.g., "e2-demo-field-eng.cloud.databricks.com")
+            "powerbi_job_id": None  # Job ID for the powerbi_full_pipeline notebook (must be configured)
+            # The tool automatically handles:
+            # - Job submission with question and Power BI credentials
+            # - Waiting for completion with polling
+            # - Extracting DAX execution results
+            # Required parameters for each call:
+            # - question: Natural language question
+            # - semantic_model_id: Power BI semantic model/dataset ID
+            # - workspace_id: Power BI workspace ID
+            # - tenant_id, client_id, client_secret: Azure AD credentials
         },   # PowerBITool
         "72": {
             "result_as_answer": False

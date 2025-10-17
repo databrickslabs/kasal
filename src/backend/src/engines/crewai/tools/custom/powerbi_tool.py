@@ -1,319 +1,572 @@
 """
-Power BI DAX Generator Tool
+Power BI Integration Tool
 
-CrewAI custom tool for generating DAX queries from natural language questions.
-This tool allows agents to work with Power BI semantic models by generating
-DAX queries that can be executed in Databricks notebooks.
+CrewAI custom tool for end-to-end Power BI integration:
+1. Submits Power BI full pipeline notebook job (metadata extraction, DAX generation, execution)
+2. Monitors job completion with automatic polling
+3. Extracts and returns DAX execution results
+
+This tool provides a single-call solution for Power BI queries - users just provide
+the question and authentication, and the tool handles everything else automatically.
 """
 
 import asyncio
 import logging
+import json
+import time
+import os
+import hashlib
 from typing import Any, Dict, Optional, Type
+from datetime import datetime, timedelta
 
 from crewai.tools import BaseTool
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, PrivateAttr
+import aiohttp
 
 logger = logging.getLogger(__name__)
 
+# Global cache to prevent duplicate job submissions
+# Maps request_hash -> (run_id, timestamp, result)
+_JOB_SUBMISSION_CACHE = {}
+
 
 class PowerBIToolSchema(BaseModel):
-    """Input schema for Power BI DAX Generator Tool."""
+    """Input schema for Power BI Integration Tool."""
 
     question: str = Field(
         ...,
-        description="Natural language question to convert into a DAX query"
+        description="Natural language question to answer using Power BI (e.g., 'What is the total NSR per product?')"
     )
-    dataset_name: Optional[str] = Field(
-        None,
-        description="Power BI dataset/semantic model name to query (e.g., 'test_pbi', 'SalesDataset')"
+    semantic_model_id: str = Field(
+        ...,
+        description="Power BI semantic model/dataset ID (GUID format)"
     )
-    metadata: Optional[Dict[str, Any]] = Field(
+    workspace_id: str = Field(
+        ...,
+        description="Power BI workspace ID (GUID format)"
+    )
+    tenant_id: str = Field(
+        ...,
+        description="Azure AD tenant ID for authentication"
+    )
+    client_id: str = Field(
+        ...,
+        description="Azure AD service principal client ID"
+    )
+    client_secret: str = Field(
+        ...,
+        description="Azure AD service principal client secret"
+    )
+    auth_method: Optional[str] = Field(
+        "service_principal",
+        description="Authentication method: 'service_principal' or 'device_code' (default: 'service_principal')"
+    )
+    databricks_host: Optional[str] = Field(
         None,
-        description="Dataset metadata describing tables, columns, and relationships. Format: {'tables': [{'name': 'TableName', 'columns': [{'name': 'ColumnName', 'data_type': 'string|int|decimal|datetime'}]}]}"
+        description="Optional Databricks host URL for the notebook to use (e.g., 'https://e2-demo-field-eng.cloud.databricks.com/'). If not provided, uses the tool's configured host."
+    )
+    databricks_token: Optional[str] = Field(
+        None,
+        description="Optional Databricks API token for the notebook to use. If not provided, uses the tool's configured token."
+    )
+    timeout_seconds: Optional[int] = Field(
+        600,
+        description="Maximum time in seconds to wait for job completion (default: 600 / 10 minutes)"
     )
 
 
 class PowerBITool(BaseTool):
     """
-    Power BI DAX Generator Tool for CrewAI agents.
+    Power BI Integration Tool for CrewAI agents.
 
-    This tool generates DAX queries from natural language questions based on
-    Power BI dataset metadata. The generated queries can then be executed
-    in Databricks notebooks against the Power BI XMLA endpoint.
+    This tool provides end-to-end Power BI query execution:
+    1. Submits a Databricks job running the powerbi_full_pipeline notebook
+    2. Waits for job completion (with automatic polling)
+    3. Extracts DAX execution results from the job output
 
-    Example usage in agent configuration:
-        ```python
-        tool_config = {
-            "xmla_endpoint": "powerbi://api.powerbi.com/v1.0/myorg/workspace",
-            "dataset_name": "SalesDataset",
-            "metadata": {...}  # Dataset metadata
-        }
-        ```
+    The tool handles all complexity internally - users just provide:
+    - question: Natural language question
+    - semantic_model_id, workspace_id: Power BI identifiers
+    - tenant_id, client_id, client_secret: Azure AD credentials
+
+    The powerbi_full_pipeline notebook performs:
+    - Metadata extraction from Power BI
+    - DAX query generation via LLM
+    - DAX query execution against Power BI
+
+    All results are automatically extracted and returned.
     """
 
-    name: str = "Power BI DAX Generator"
+    name: str = "Power BI Query Executor"
     description: str = (
-        "Generate DAX queries from natural language questions for Power BI datasets. "
-        "Provide 'question' (required), 'dataset_name' (optional), and 'metadata' (optional) parameters. "
-        "The 'metadata' parameter should contain dataset schema information with tables and columns. "
-        "Format: {'tables': [{'name': 'TableName', 'columns': [{'name': 'ColumnName', 'data_type': 'string|int|decimal|datetime'}]}]}. "
-        "The tool will return a DAX query that can be executed in Databricks."
+        "Execute Power BI queries from natural language questions. "
+        "This tool handles everything automatically: metadata extraction, DAX generation, and query execution. "
+        "Required: question, semantic_model_id, workspace_id, tenant_id, client_id, client_secret. "
+        "Optional: auth_method ('service_principal' or 'device_code'), databricks_host, databricks_token, timeout_seconds. "
+        "If databricks_host/databricks_token are provided, they override the tool's configuration for the notebook. "
+        "IMPORTANT: This tool automatically prevents duplicate submissions - identical requests within 30 minutes return cached results. "
+        "Only call this tool ONCE per query. Do not retry or call again. "
+        "Returns: DAX query execution results directly."
     )
     args_schema: Type[BaseModel] = PowerBIToolSchema
 
-    # Tool configuration
-    xmla_endpoint: Optional[str] = None
-    dataset_name: Optional[str] = None
-    metadata: Optional[Dict[str, Any]] = None
-    model_name: str = "databricks-meta-llama-3-1-405b-instruct"
-    temperature: float = 0.1
+    # Private attributes for authentication (like DatabricksJobsTool)
+    _host: str = PrivateAttr(default=None)
+    _token: str = PrivateAttr(default=None)
+    _job_id: Optional[int] = PrivateAttr(default=None)  # Power BI pipeline job ID
 
     def __init__(
         self,
-        xmla_endpoint: Optional[str] = None,
-        dataset_name: Optional[str] = None,
-        metadata: Optional[Dict[str, Any]] = None,
-        model_name: str = "databricks-meta-llama-3-1-405b-instruct",
-        temperature: float = 0.1,
-        tool_config: Optional[Dict[str, Any]] = None,
+        databricks_host: Optional[str] = None,
+        powerbi_job_id: Optional[int] = None,
+        tool_config: Optional[dict] = None,
         **kwargs: Any
     ) -> None:
         """
-        Initialize the Power BI Tool.
+        Initialize the Power BI Integration Tool.
 
         Args:
-            xmla_endpoint: Power BI XMLA endpoint URL
-            dataset_name: Name of the Power BI dataset
-            metadata: Dataset metadata (tables, columns, relationships)
-            model_name: LLM model to use for DAX generation
-            temperature: Temperature for LLM generation
-            tool_config: Additional tool configuration
-            **kwargs: Additional keyword arguments for BaseTool
+            databricks_host: Databricks workspace host URL
+            powerbi_job_id: Job ID for the powerbi_full_pipeline notebook
+            tool_config: Tool configuration with auth details
+            **kwargs: Additional keyword arguments
         """
         super().__init__(**kwargs)
 
-        # Get configuration from tool_config if provided
+        if tool_config is None:
+            tool_config = {}
+
+        # Get configuration from tool_config (same pattern as DatabricksJobsTool)
         if tool_config:
-            self.xmla_endpoint = tool_config.get('xmla_endpoint', xmla_endpoint)
-            self.dataset_name = tool_config.get('dataset_name', dataset_name)
-            self.metadata = tool_config.get('metadata', metadata)
-            self.model_name = tool_config.get('model_name', model_name)
-            self.temperature = tool_config.get('temperature', temperature)
-        else:
-            self.xmla_endpoint = xmla_endpoint
-            self.dataset_name = dataset_name
-            self.metadata = metadata
-            self.model_name = model_name
-            self.temperature = temperature
+            # Check for token
+            if 'DATABRICKS_API_KEY' in tool_config:
+                self._token = tool_config['DATABRICKS_API_KEY']
+            elif 'token' in tool_config:
+                self._token = tool_config['token']
 
-        # Validate configuration
-        if not self.metadata:
-            logger.warning(
-                "Power BI tool initialized without metadata. "
-                "DAX generation will not work until metadata is provided."
-            )
+            # Get Power BI job ID
+            if 'powerbi_job_id' in tool_config:
+                self._job_id = tool_config['powerbi_job_id']
+            elif powerbi_job_id:
+                self._job_id = powerbi_job_id
 
-        logger.info("Power BI DAX Generator Tool Configuration:")
-        logger.info(f"XMLA Endpoint: {self.xmla_endpoint}")
-        logger.info(f"Dataset: {self.dataset_name}")
-        logger.info(f"Model: {self.model_name}")
-        logger.info(f"Metadata tables: {len(self.metadata.get('tables', [])) if self.metadata else 0}")
+            # Handle host configuration
+            if databricks_host:
+                host = databricks_host
+            elif 'DATABRICKS_HOST' in tool_config:
+                host = tool_config['DATABRICKS_HOST']
+            elif 'databricks_host' in tool_config:
+                host = tool_config['databricks_host']
+            else:
+                host = None
 
-    def _run(self, **kwargs: Any) -> str:
+            # Process host if found
+            if host:
+                if isinstance(host, list) and host:
+                    host = host[0]
+                if isinstance(host, str):
+                    # Strip protocol and trailing slash
+                    if host.startswith('https://'):
+                        host = host[8:]
+                    if host.startswith('http://'):
+                        host = host[7:]
+                    if host.endswith('/'):
+                        host = host[:-1]
+                self._host = host
+
+        # Try to get authentication if not set
+        if not self._token:
+            try:
+                # Try API Keys Service
+                from src.core.unit_of_work import UnitOfWork
+                from src.services.api_keys_service import ApiKeysService
+
+                loop = None
+                try:
+                    loop = asyncio.get_event_loop()
+                except RuntimeError:
+                    loop = asyncio.new_event_loop()
+                    asyncio.set_event_loop(loop)
+
+                async def get_databricks_token():
+                    async with UnitOfWork():
+                        token = await ApiKeysService.get_provider_api_key("databricks") or \
+                               await ApiKeysService.get_provider_api_key("DATABRICKS_API_KEY") or \
+                               await ApiKeysService.get_provider_api_key("DATABRICKS_TOKEN")
+                        return token
+
+                if not loop.is_running():
+                    self._token = loop.run_until_complete(get_databricks_token())
+
+            except Exception as e:
+                logger.debug(f"Could not get token from API Keys Service: {e}")
+
+            # Fallback to environment variables
+            if not self._token:
+                self._token = os.getenv("DATABRICKS_API_KEY") or os.getenv("DATABRICKS_TOKEN")
+
+        # Set fallback host from environment
+        if not self._host:
+            self._host = os.getenv("DATABRICKS_HOST", "your-workspace.cloud.databricks.com")
+
+        logger.info("PowerBI Integration Tool initialized")
+        logger.info(f"Host: {self._host}")
+        logger.info(f"Power BI Job ID: {self._job_id}")
+        if self._token:
+            masked_token = f"{self._token[:4]}...{self._token[-4:]}" if len(self._token) > 8 else "***"
+            logger.info(f"Token (masked): {masked_token}")
+
+    async def _make_api_call(self, method: str, endpoint: str, data: Optional[Dict] = None) -> Dict[str, Any]:
+        """Make API call to Databricks REST API."""
+        url = f"https://{self._host}{endpoint}"
+        headers = {
+            "Authorization": f"Bearer {self._token}",
+            "Content-Type": "application/json"
+        }
+
+        async with aiohttp.ClientSession() as session:
+            async with session.request(
+                method=method,
+                url=url,
+                json=data if data else None,
+                headers=headers,
+                timeout=aiohttp.ClientTimeout(total=30)
+            ) as response:
+                if response.status == 200:
+                    return await response.json()
+                else:
+                    raise Exception(f"API call failed: {response.status} - {await response.text()}")
+
+    def _run(
+        self,
+        question: str,
+        semantic_model_id: str,
+        workspace_id: str,
+        tenant_id: str,
+        client_id: str,
+        client_secret: str,
+        auth_method: str = "service_principal",
+        databricks_host: Optional[str] = None,
+        databricks_token: Optional[str] = None,
+        timeout_seconds: int = 600
+    ) -> str:
         """
-        Execute the tool synchronously.
+        Execute Power BI query end-to-end.
 
         Args:
             question: Natural language question
-            dataset_name: Optional Power BI dataset name (runtime parameter)
-            metadata: Optional dataset metadata (runtime parameter)
+            semantic_model_id: Power BI semantic model ID
+            workspace_id: Power BI workspace ID
+            tenant_id: Azure AD tenant ID
+            client_id: Azure AD client ID
+            client_secret: Azure AD client secret
+            auth_method: Authentication method ('service_principal' or 'device_code')
+            databricks_host: Optional custom host for notebook (overrides tool config)
+            databricks_token: Optional custom token for notebook (overrides tool config)
+            timeout_seconds: Maximum time to wait for completion
 
         Returns:
-            Generated DAX query with execution instructions
+            JSON string containing DAX execution results
         """
-        question = kwargs.get("question")
-        runtime_dataset_name = kwargs.get("dataset_name")
-        runtime_metadata = kwargs.get("metadata")
-
-        if not question:
-            return "Error: No question provided"
-
-        # Merge runtime parameters with configuration defaults
-        # Runtime parameters take precedence over configuration
-        effective_dataset_name = runtime_dataset_name or self.dataset_name
-        effective_metadata = runtime_metadata or self.metadata
-
-        logger.info(f"PowerBITool - Runtime parameters received:")
-        logger.info(f"  Runtime dataset_name: {runtime_dataset_name}")
-        logger.info(f"  Runtime metadata: {'Present' if runtime_metadata else 'None'}")
-        logger.info(f"  Effective dataset_name: {effective_dataset_name}")
-        logger.info(f"  Effective metadata: {'Present' if effective_metadata else 'None'}")
-
         try:
-            # Run async method in event loop
+            logger.info(f"PowerBI Tool - Executing query: {question[:100]}")
+            logger.info(f"  Semantic Model: {semantic_model_id}")
+            logger.info(f"  Workspace: {workspace_id}")
+
+            # Deduplication: Generate request hash
+            request_signature = f"{question}|{semantic_model_id}|{workspace_id}|{tenant_id}"
+            request_hash = hashlib.md5(request_signature.encode()).hexdigest()
+
+            # Check cache for recent identical requests (within last 30 minutes)
+            cache_ttl = timedelta(minutes=30)
+            current_time = datetime.now()
+
+            # Clean expired cache entries
+            expired_keys = [
+                key for key, (_, timestamp, _) in _JOB_SUBMISSION_CACHE.items()
+                if current_time - timestamp > cache_ttl
+            ]
+            for key in expired_keys:
+                del _JOB_SUBMISSION_CACHE[key]
+
+            # Check if this exact request was made recently
+            if request_hash in _JOB_SUBMISSION_CACHE:
+                run_id, cached_time, cached_result = _JOB_SUBMISSION_CACHE[request_hash]
+                age_seconds = (current_time - cached_time).total_seconds()
+                logger.warning(
+                    f"⚠️ DUPLICATE REQUEST DETECTED - Returning cached result from {age_seconds:.1f}s ago"
+                )
+                logger.warning(f"   Original run_id: {run_id}")
+                logger.warning(f"   Request hash: {request_hash[:8]}...")
+                return cached_result
+
+            # Check authentication
+            if not self._token:
+                return json.dumps({
+                    "error": "No authentication available",
+                    "details": "Please configure DATABRICKS_API_KEY or token"
+                })
+
+            # Check job ID
+            if not self._job_id:
+                return json.dumps({
+                    "error": "Power BI job ID not configured",
+                    "details": "Please provide powerbi_job_id in tool_config"
+                })
+
+            # Create event loop for async operations
             loop = asyncio.new_event_loop()
             asyncio.set_event_loop(loop)
+
             try:
+                # Execute the full pipeline
                 result = loop.run_until_complete(
-                    self._generate_dax(
+                    self._execute_powerbi_pipeline(
                         question=question,
-                        dataset_name=effective_dataset_name,
-                        metadata=effective_metadata
+                        semantic_model_id=semantic_model_id,
+                        workspace_id=workspace_id,
+                        tenant_id=tenant_id,
+                        client_id=client_id,
+                        client_secret=client_secret,
+                        auth_method=auth_method,
+                        databricks_host=databricks_host,
+                        databricks_token=databricks_token,
+                        timeout_seconds=timeout_seconds
                     )
                 )
+
+                # Cache the successful result to prevent duplicate submissions
+                result_data = json.loads(result)
+                if result_data.get("success"):
+                    run_id = result_data.get("run_id")
+                    _JOB_SUBMISSION_CACHE[request_hash] = (run_id, current_time, result)
+                    logger.info(f"✅ Cached result for request hash: {request_hash[:8]}...")
+
                 return result
+
             finally:
                 loop.close()
 
         except Exception as e:
             logger.error(f"Error in Power BI tool: {str(e)}", exc_info=True)
-            return f"Error generating DAX query: {str(e)}"
+            return json.dumps({
+                "error": f"Failed to execute Power BI query: {str(e)}"
+            })
 
-    async def _generate_dax(
+    async def _execute_powerbi_pipeline(
         self,
         question: str,
-        dataset_name: Optional[str] = None,
-        metadata: Optional[Dict[str, Any]] = None
+        semantic_model_id: str,
+        workspace_id: str,
+        tenant_id: str,
+        client_id: str,
+        client_secret: str,
+        auth_method: str,
+        databricks_host: Optional[str],
+        databricks_token: Optional[str],
+        timeout_seconds: int
     ) -> str:
         """
-        Generate DAX query asynchronously.
-
-        Args:
-            question: Natural language question
-            dataset_name: Power BI dataset name
-            metadata: Dataset metadata
+        Execute the full Power BI pipeline: submit job, wait, extract results.
 
         Returns:
-            Formatted response with DAX query and instructions
+            JSON string with execution results
         """
-        try:
-            # Validate metadata is available
-            if not metadata:
-                return (
-                    "Error: Dataset metadata not provided. "
-                    "Please provide metadata as a runtime parameter when calling the tool."
-                )
+        start_time = time.time()
 
-            # Import DAX generator service
-            from src.core.unit_of_work import UnitOfWork
-            from src.services.dax_generator_service import DAXGeneratorService
+        # Use provided host/token or fall back to tool config
+        # If databricks_host is provided, use it as-is (user should include https://)
+        # If not provided, use self._host with https:// prefix
+        notebook_host = databricks_host if databricks_host else f"https://{self._host}"
+        notebook_token = databricks_token if databricks_token else self._token
 
-            # Generate DAX query
-            async with UnitOfWork() as uow:
-                service = await DAXGeneratorService.from_unit_of_work(uow)
+        # Step 1: Submit the job
+        logger.info("Step 1: Submitting Power BI pipeline job...")
+        logger.info(f"  Auth Method: {auth_method}")
+        logger.info(f"  Databricks Host for notebook: {notebook_host}")
+        logger.info(f"  Using custom token: {databricks_token is not None}")
 
-                result = await service.generate_dax_from_question(
-                    question=question,
-                    metadata=metadata,
-                    model_name=self.model_name,
-                    temperature=self.temperature
-                )
+        job_params = {
+            "question": question,
+            "semantic_model_id": semantic_model_id,
+            "workspace_id": workspace_id,
+            "tenant_id": tenant_id,
+            "client_id": client_id,
+            "client_secret": client_secret,
+            "auth_method": auth_method,
+            "databricks_host": notebook_host,
+            "databricks_token": notebook_token
+        }
 
-            # Format response
-            dax_query = result["dax_query"]
-            explanation = result["explanation"]
-            confidence = result["confidence"]
+        # Submit job via Databricks Jobs API
+        payload = {
+            "job_id": self._job_id,
+            "job_parameters": {
+                "job_params": json.dumps(job_params)
+            }
+        }
 
-            # Use dataset_name from parameter or fall back to config
-            effective_dataset_name = dataset_name or self.dataset_name or "your_dataset"
+        submit_response = await self._make_api_call("POST", "/api/2.1/jobs/run-now", payload)
+        run_id = submit_response.get("run_id")
 
-            response = f"""DAX Query Generated (Confidence: {confidence:.0%})
+        if not run_id:
+            return json.dumps({
+                "error": "No run_id returned from job submission",
+                "details": submit_response
+            })
 
-Question: {question}
+        logger.info(f"✅ Job submitted successfully: run_id={run_id}")
 
-DAX Query:
-```dax
-{dax_query}
-```
+        # Step 2: Wait for completion
+        logger.info(f"Step 2: Waiting for job completion (timeout: {timeout_seconds}s)...")
+        completed = await self._wait_for_completion_async(int(run_id), timeout_seconds)
 
-Explanation: {explanation}
+        if not completed:
+            elapsed = time.time() - start_time
+            return json.dumps({
+                "error": "Job did not complete within timeout",
+                "run_id": run_id,
+                "timeout_seconds": timeout_seconds,
+                "elapsed_seconds": round(elapsed, 1),
+                "details": "The job is still running or failed. Check Databricks UI for details."
+            })
 
----
-Execution Instructions:
+        # Step 3: Extract results
+        logger.info("Step 3: Extracting results from job output...")
 
-To execute this DAX query in Databricks:
+        # Get run info to handle multi-task jobs
+        run_info = await self._make_api_call("GET", f"/api/2.1/jobs/runs/get?run_id={run_id}")
 
-1. Use the Databricks Jobs Tool to create a notebook job
-2. In the notebook, use the following Python code:
+        # Handle multi-task job structure
+        tasks = run_info.get("tasks", [])
+        actual_run_id = run_id
 
-```python
-import pyadomd
+        # Hardcoded task_key for Power BI pipeline
+        POWERBI_TASK_KEY = "pbi_e2e_pipeline"
 
-# Connection string
-connection_string = (
-    "Provider=MSOLAP;"
-    "Data Source={self.xmla_endpoint};"
-    "Initial Catalog={effective_dataset_name};"
-    "User ID=app:{{client_id}}@{{tenant_id}};"
-    "Password={{client_secret}};"
-)
+        if tasks and len(tasks) > 0:
+            # Find the pbi_e2e_pipeline task
+            task_run = None
+            for task in tasks:
+                if task.get("task_key") == POWERBI_TASK_KEY:
+                    task_run = task
+                    break
 
-# Execute DAX query
-with Pyadomd(connection_string) as conn:
-    cursor = conn.cursor()
-    cursor.execute(\"\"\"
-{dax_query}
-    \"\"\")
+            if task_run:
+                actual_run_id = str(task_run.get("run_id"))
+                logger.info(f"Using task run_id: {actual_run_id} for task '{POWERBI_TASK_KEY}'")
+            else:
+                # Fallback to first task
+                actual_run_id = str(tasks[0].get("run_id"))
+                logger.warning(f"Task '{POWERBI_TASK_KEY}' not found, using first task")
 
-    # Get results
-    columns = [desc[0] for desc in cursor.description]
-    rows = cursor.fetchall()
+        # Fetch output
+        output_response = await self._make_api_call(
+            "GET",
+            f"/api/2.1/jobs/runs/get-output?run_id={actual_run_id}"
+        )
 
-    # Convert to list of dictionaries
-    results = []
-    for row in rows:
-        results.append(dict(zip(columns, row)))
+        notebook_output = output_response.get("notebook_output")
+        if not notebook_output or not notebook_output.get("result"):
+            return json.dumps({
+                "error": "No output found from job run",
+                "run_id": run_id,
+                "details": "The notebook may not have called dbutils.notebook.exit() or the job failed."
+            })
 
-    # Display results
-    display(results)
-```
+        # Parse result
+        result_data = json.loads(notebook_output.get("result"))
 
-3. Provide the service principal credentials as job parameters:
-   - client_id: Azure AD application/client ID
-   - tenant_id: Azure AD tenant ID
-   - client_secret: Service principal secret
+        # Extract DAX execution results (hardcoded extract_key)
+        EXTRACT_KEY = "pipeline_steps.step_3_execution.result_data"
+        extracted_data = self._extract_nested_key(result_data, EXTRACT_KEY)
 
----
-"""
-            return response
+        elapsed = time.time() - start_time
 
-        except Exception as e:
-            logger.error(f"Error generating DAX: {str(e)}", exc_info=True)
-            return f"Error generating DAX query: {str(e)}"
+        if extracted_data is None:
+            available_keys = self._get_available_keys(result_data)
+            return json.dumps({
+                "error": f"Key '{EXTRACT_KEY}' not found in job output",
+                "run_id": run_id,
+                "elapsed_seconds": round(elapsed, 1),
+                "available_keys": available_keys
+            })
 
-    def update_metadata(self, metadata: Dict[str, Any]) -> None:
-        """
-        Update the dataset metadata.
+        logger.info(f"✅ Power BI pipeline completed successfully in {elapsed:.1f}s")
 
-        Args:
-            metadata: New metadata dictionary
-        """
-        self.metadata = metadata
-        logger.info(f"Updated Power BI metadata: {len(metadata.get('tables', []))} tables")
+        # Return comprehensive result
+        return json.dumps({
+            "success": True,
+            "run_id": run_id,
+            "question": question,
+            "elapsed_seconds": round(elapsed, 1),
+            "dax_query": result_data.get("pipeline_steps", {}).get("step_2_dax_generation", {}).get("dax_query"),
+            "result_data": extracted_data,
+            "message": f"Successfully executed Power BI query in {elapsed:.1f}s"
+        }, indent=2)
 
-    def update_config(
-        self,
-        xmla_endpoint: Optional[str] = None,
-        dataset_name: Optional[str] = None,
-        model_name: Optional[str] = None,
-        temperature: Optional[float] = None
-    ) -> None:
-        """
-        Update tool configuration.
+    async def _wait_for_completion_async(self, run_id: int, timeout_seconds: int) -> bool:
+        """Wait for job run to complete using async API calls."""
+        start_time = time.time()
+        check_interval = 5
 
-        Args:
-            xmla_endpoint: New XMLA endpoint
-            dataset_name: New dataset name
-            model_name: New model name
-            temperature: New temperature
-        """
-        if xmla_endpoint:
-            self.xmla_endpoint = xmla_endpoint
-        if dataset_name:
-            self.dataset_name = dataset_name
-        if model_name:
-            self.model_name = model_name
-        if temperature is not None:
-            self.temperature = temperature
+        while True:
+            elapsed = time.time() - start_time
 
-        logger.info("Updated Power BI tool configuration")
+            if elapsed > timeout_seconds:
+                logger.warning(f"Timeout waiting for run_id {run_id}")
+                return False
+
+            try:
+                run_info = await self._make_api_call("GET", f"/api/2.1/jobs/runs/get?run_id={run_id}")
+                state = run_info.get("state", {})
+                life_cycle_state = state.get("life_cycle_state")
+                result_state = state.get("result_state")
+
+                terminal_states = ["TERMINATED", "SKIPPED", "INTERNAL_ERROR"]
+
+                if life_cycle_state in terminal_states:
+                    if result_state == "SUCCESS":
+                        logger.info(f"✅ Job run {run_id} completed successfully after {elapsed:.1f}s")
+                        return True
+                    else:
+                        logger.error(f"❌ Job run {run_id} failed with state: {result_state}")
+                        return False
+
+                logger.info(f"⏳ Job run {run_id} is {life_cycle_state} (waited {elapsed:.1f}s)")
+                await asyncio.sleep(check_interval)
+
+            except Exception as e:
+                logger.error(f"Error checking run status: {str(e)}")
+                return False
+
+    def _extract_nested_key(self, data: Dict[str, Any], key_path: str) -> Any:
+        """Extract nested key using dot notation."""
+        keys = key_path.split('.')
+        current = data
+
+        for key in keys:
+            if isinstance(current, dict) and key in current:
+                current = current[key]
+            else:
+                return None
+
+        return current
+
+    def _get_available_keys(self, data: Any, prefix: str = "", max_depth: int = 3, current_depth: int = 0) -> list:
+        """Get available keys in nested structure."""
+        if current_depth >= max_depth:
+            return []
+
+        keys = []
+
+        if isinstance(data, dict):
+            for key, value in data.items():
+                full_key = f"{prefix}.{key}" if prefix else key
+                keys.append(full_key)
+
+                if isinstance(value, dict):
+                    nested_keys = self._get_available_keys(value, full_key, max_depth, current_depth + 1)
+                    keys.extend(nested_keys)
+
+        return keys
