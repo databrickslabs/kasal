@@ -322,9 +322,24 @@ class DatabaseManagementService:
             
             if not restore_result["success"]:
                 return restore_result
-            
+
+            # CRITICAL: Dispose pool after SQLite import to invalidate stale connections
+            # DO NOT close session here - it causes corruption when SQLite tries to write cleanup
+            # operations using the old file descriptor after the database file was replaced
+            # Let FastAPI's context manager close the session naturally after response is sent
+            if db_type == 'sqlite':
+                try:
+                    # Dispose the engine pool to mark it for disposal
+                    # This ensures subsequent requests get fresh connections to the new database file
+                    from src.db.session import engine
+                    await engine.dispose()
+                    logger.info("Database connection pool disposed - next requests will connect to new database file")
+                except Exception as dispose_error:
+                    logger.warning(f"Failed to dispose connection pool: {dispose_error}")
+                    # Continue anyway - import was successful
+
             logger.info(f"Database imported successfully from {catalog}.{schema}.{volume_name}/{backup_filename}")
-            
+
             result = {
                 "success": True,
                 "imported_from": f"/Volumes/{catalog}/{schema}/{volume_name}/{backup_filename}",
