@@ -1,7 +1,7 @@
 # 🔵 Kasal Solution Architecture
 
 > **Enterprise AI Orchestration Platform** - Scalable, secure, cloud-native
-![Kasal Overvew](/Kasal-overview.png)
+![Kasal Overvew](././/images/Kasal-overview.png)
 *Visual workflow designer for creating AI agent collaborations*
 ---
 
