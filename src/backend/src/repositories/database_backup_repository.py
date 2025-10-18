@@ -56,14 +56,14 @@ class DatabaseBackupRepository:
     ) -> Dict[str, Any]:
         """
         Create a backup of SQLite database and upload to Databricks volume.
-        
+
         Args:
             source_path: Path to the source database file
             catalog: Unity Catalog name
             schema: Schema name
             volume_name: Volume name
             backup_filename: Name for the backup file
-            
+
         Returns:
             Backup creation result
         """
@@ -74,7 +74,18 @@ class DatabaseBackupRepository:
                     "success": False,
                     "error": f"Database file not found at {source_path}"
                 }
-            
+
+            # Checkpoint WAL to merge all changes into main database file
+            # This ensures we get all recent data, not just checkpointed data
+            try:
+                conn = sqlite3.connect(source_path)
+                conn.execute("PRAGMA wal_checkpoint(TRUNCATE)")
+                conn.close()
+                logger.info(f"WAL checkpoint completed for {source_path}")
+            except Exception as wal_error:
+                logger.warning(f"WAL checkpoint failed (may not be in WAL mode): {wal_error}")
+                # Continue anyway - database might not be using WAL mode
+
             with open(source_path, 'rb') as f:
                 db_content = f.read()
             
@@ -190,9 +201,9 @@ class DatabaseBackupRepository:
                 sql_content.append(f"ALTER TABLE {table} DISABLE TRIGGER ALL;")
                 sql_content.append(f"DELETE FROM {table};")
                 sql_content.append("")
-                
+
                 # Get table data
-                result = await session.execute(
+                result = await db_session.execute(
                     text(f"SELECT * FROM {table}")
                 )
                 rows = result.fetchall()
@@ -497,10 +508,10 @@ class DatabaseBackupRepository:
             if create_safety_backup and os.path.exists(target_path):
                 timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
                 safety_backup = f"{target_path}.backup_{timestamp}"
-                
+
                 with open(target_path, 'rb') as f:
                     current_db = f.read()
-                
+
                 # Upload safety backup to volume
                 safety_filename = f"safety_backup_{timestamp}.db"
                 await self.volume_repo.upload_file_to_volume(
@@ -511,10 +522,149 @@ class DatabaseBackupRepository:
                     file_content=current_db
                 )
                 logger.info(f"Created safety backup in volume: {safety_filename}")
-            
-            # Restore the database
-            with open(target_path, 'wb') as f:
-                f.write(backup_content)
+
+            # NEW APPROACH: Table-by-table copy instead of file replacement
+            # This avoids breaking existing database connections (disk I/O errors)
+
+            # STEP 1: Get current admin user info
+            current_admin_info = None
+            if os.path.exists(target_path):
+                try:
+                    current_conn = sqlite3.connect(target_path)
+                    current_cursor = current_conn.cursor()
+
+                    # Get current system admin user
+                    current_cursor.execute("""
+                        SELECT id, email, username, is_system_admin
+                        FROM users
+                        WHERE is_system_admin = 1
+                        LIMIT 1
+                    """)
+                    result = current_cursor.fetchone()
+
+                    if result:
+                        current_admin_info = {
+                            'id': result[0],
+                            'email': result[1],
+                            'username': result[2],
+                            'is_system_admin': result[3]
+                        }
+                        logger.info(f"[IMPORT] Found current admin: {current_admin_info['email']} with UUID: {current_admin_info['id']}")
+
+                    current_conn.close()
+                except Exception as e:
+                    logger.warning(f"[IMPORT] Could not read current admin info: {e}")
+
+            # STEP 2: Connect to both databases
+            try:
+                # Connect to backup database (source)
+                backup_conn = sqlite3.connect(tmp_path)
+                backup_cursor = backup_conn.cursor()
+
+                # Connect to target database (destination)
+                target_conn = sqlite3.connect(target_path)
+                target_cursor = target_conn.cursor()
+
+                # STEP 3: Get list of tables from backup
+                backup_cursor.execute("SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%'")
+                tables = [row[0] for row in backup_cursor.fetchall()]
+                logger.info(f"[IMPORT] Found {len(tables)} tables to import: {tables}")
+
+                # Tables to skip (system tables)
+                skip_tables = {'alembic_version'}  # Don't import migration version
+
+                # STEP 4: Copy each table
+                imported_tables = []
+                for table_name in tables:
+                    if table_name in skip_tables:
+                        logger.info(f"[IMPORT] Skipping system table: {table_name}")
+                        continue
+
+                    logger.info(f"[IMPORT] Importing table: {table_name}")
+
+                    try:
+                        # Get column names from backup table
+                        backup_cursor.execute(f"PRAGMA table_info({table_name})")
+                        columns_info = backup_cursor.fetchall()
+                        column_names = [col[1] for col in columns_info]
+
+                        # Clear existing data in target table
+                        target_cursor.execute(f"DELETE FROM {table_name}")
+                        logger.info(f"[IMPORT]   Cleared {table_name} table")
+
+                        # Get all data from backup table
+                        backup_cursor.execute(f"SELECT * FROM {table_name}")
+                        rows = backup_cursor.fetchall()
+
+                        if rows:
+                            # Special handling for users table to preserve admin UUID
+                            if table_name == 'users' and current_admin_info:
+                                logger.info(f"[IMPORT]   Processing users table with admin UUID preservation")
+
+                                # Insert rows, but update admin user's UUID
+                                placeholders = ','.join(['?' for _ in column_names])
+                                insert_sql = f"INSERT INTO {table_name} ({','.join(column_names)}) VALUES ({placeholders})"
+
+                                admin_email = current_admin_info['email']
+                                admin_uuid = current_admin_info['id']
+
+                                for row in rows:
+                                    row_list = list(row)
+
+                                    # Find email column index
+                                    email_idx = column_names.index('email')
+
+                                    # If this is the admin user, replace their UUID
+                                    if row_list[email_idx] == admin_email:
+                                        id_idx = column_names.index('id')
+                                        old_uuid = row_list[id_idx]
+                                        row_list[id_idx] = admin_uuid
+
+                                        # Ensure is_system_admin is set to 1
+                                        if 'is_system_admin' in column_names:
+                                            admin_idx = column_names.index('is_system_admin')
+                                            row_list[admin_idx] = 1
+
+                                        logger.info(f"[IMPORT]   Preserving admin UUID: {old_uuid} -> {admin_uuid} for {admin_email}")
+
+                                    target_cursor.execute(insert_sql, row_list)
+                            else:
+                                # Regular table - insert all rows
+                                placeholders = ','.join(['?' for _ in column_names])
+                                insert_sql = f"INSERT INTO {table_name} ({','.join(column_names)}) VALUES ({placeholders})"
+                                target_cursor.executemany(insert_sql, rows)
+
+                            logger.info(f"[IMPORT]   Imported {len(rows)} rows into {table_name}")
+                            imported_tables.append(table_name)
+                        else:
+                            logger.info(f"[IMPORT]   Table {table_name} is empty")
+                            imported_tables.append(table_name)
+
+                    except Exception as table_error:
+                        logger.error(f"[IMPORT] Error importing table {table_name}: {table_error}")
+                        import traceback
+                        logger.error(f"[IMPORT] Traceback: {traceback.format_exc()}")
+                        # Continue with other tables
+
+                # STEP 5: Commit all changes
+                target_conn.commit()
+                logger.info(f"[IMPORT] Successfully committed changes for {len(imported_tables)} tables")
+
+                # STEP 6: Close connections
+                backup_conn.close()
+                target_conn.close()
+
+                logger.info(f"[IMPORT] ✓ Import completed successfully")
+
+            except Exception as import_error:
+                logger.error(f"[IMPORT] Error during table-by-table import: {import_error}")
+                import traceback
+                logger.error(f"[IMPORT] Traceback: {traceback.format_exc()}")
+                os.unlink(tmp_path)
+                return {
+                    "success": False,
+                    "error": f"Failed to import database: {import_error}"
+                }
             
             # Clean up temp file
             os.unlink(tmp_path)
