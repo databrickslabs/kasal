@@ -340,10 +340,74 @@ starlette==0.40.0
                 logger.info(f"Starting app: {app_name}")
                 client.apps.start(app_name)
                 logger.info(f"App started. Check the app URL: {client.config.host}#apps/{app_name}")
+
+                # Create Power BI reference jobs after successful deployment
+                try:
+                    logger.info("=" * 60)
+                    logger.info("📊 Creating Power BI reference jobs...")
+                    logger.info("=" * 60)
+
+                    from backend.src.utils.powerbi_job_setup import PowerBIJobSetup
+
+                    # Get notebook paths from deployed location
+                    notebooks_dir = Path(workspace_dir) / "backend" / "src" / "engines" / "crewai" / "tools" / "templates" / "notebooks"
+
+                    # Initialize job setup with deployed workspace client
+                    job_setup = PowerBIJobSetup(workspace_client=client)
+
+                    # Override notebooks_dir to point to deployed location
+                    job_setup.notebooks_dir = notebooks_dir
+
+                    # Create jobs
+                    result = job_setup.setup_all_jobs(user_email=user_name, use_serverless=False)
+
+                    logger.info("=" * 60)
+                    logger.info("✅ Power BI Jobs Created Successfully!")
+                    logger.info("=" * 60)
+                    logger.info(f"📌 Metadata Extractor Job ID: {result['metadata_extractor_job_id']}")
+                    logger.info(f"📌 DAX Executor Job ID: {result['dax_executor_job_id']}")
+                    logger.info("")
+                    logger.info("💡 Save these job IDs - you'll need them for crew configuration!")
+                    logger.info("=" * 60)
+
+                except Exception as job_error:
+                    logger.warning(f"⚠️  Power BI job creation failed (non-critical): {job_error}")
+                    logger.warning("You can create jobs manually later with: python -m src.utils.powerbi_job_setup")
+
                 return True
             except Exception as start_error:
                 if "compute is in ACTIVE state" in str(start_error):
                     logger.info("App is already running - deployment successful!")
+
+                    # Try to create Power BI jobs even if app was already running
+                    try:
+                        logger.info("=" * 60)
+                        logger.info("📊 Creating Power BI reference jobs...")
+                        logger.info("=" * 60)
+
+                        from backend.src.utils.powerbi_job_setup import PowerBIJobSetup
+
+                        # Get notebook paths from deployed location
+                        notebooks_dir = Path(workspace_dir) / "backend" / "src" / "engines" / "crewai" / "tools" / "templates" / "notebooks"
+
+                        job_setup = PowerBIJobSetup(workspace_client=client)
+                        job_setup.notebooks_dir = notebooks_dir
+
+                        result = job_setup.setup_all_jobs(user_email=user_name, use_serverless=False)
+
+                        logger.info("=" * 60)
+                        logger.info("✅ Power BI Jobs Created Successfully!")
+                        logger.info("=" * 60)
+                        logger.info(f"📌 Metadata Extractor Job ID: {result['metadata_extractor_job_id']}")
+                        logger.info(f"📌 DAX Executor Job ID: {result['dax_executor_job_id']}")
+                        logger.info("")
+                        logger.info("💡 Save these job IDs - you'll need them for crew configuration!")
+                        logger.info("=" * 60)
+
+                    except Exception as job_error:
+                        logger.warning(f"⚠️  Power BI job creation failed (non-critical): {job_error}")
+                        logger.warning("You can create jobs manually later with: python -m src.utils.powerbi_job_setup")
+
                     return True
                 logger.error(f"Error starting app: {start_error}")
                 try:

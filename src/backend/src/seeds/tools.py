@@ -78,6 +78,7 @@ tools_data = [
     (68, "PythonPPTXTool", "A powerful tool for creating Microsoft PowerPoint presentations using the python-pptx library. It converts raw text content into professionally formatted slides with proper styling, titles, and content organization. The tool supports creating presentations from scratch or using templates, customizing styling, and saving to specified locations. Ideal for automating presentation creation, report generation, and converting textual information into visual slide formats.", "presentation"),
     (69, "MCPTool", "An advanced adapter for Model Context Protocol (MCP) servers that enables access to thousands of specialized tools from the MCP ecosystem. This tool establishes and manages connections with MCP servers through SSE (Server-Sent Events), providing seamless integration with community-built tool collections. Perfect for extending agent capabilities with domain-specific tools without requiring custom development or direct integration work.", "integration"),
     (70, "DatabricksJobsTool", "A comprehensive Databricks Jobs management tool using direct REST API calls for optimal performance. IMPORTANT WORKFLOW: Always use 'get_notebook' action FIRST to analyze job notebooks and understand required parameters before running any job with custom parameters. This ensures proper parameter construction and prevents job failures. Available actions: (1) 'list' - List all jobs in workspace with optional name/ID filtering, (2) 'list_my_jobs' - List only jobs created by current user, (3) 'get' - Get detailed job configuration and recent run history, (4) 'get_notebook' - Analyze notebook content to understand parameters, widgets, and logic (REQUIRED before running jobs with parameters), (5) 'run' - Trigger job execution with custom parameters (use dict for notebook/SQL tasks, list for Python tasks), (6) 'monitor' - Track real-time execution status and task progress, (7) 'create' - Create new jobs with custom configurations. The tool provides intelligent parameter analysis, suggesting proper parameter structures based on notebook patterns (search jobs, ETL jobs, etc.). Supports OAuth/OBO authentication, PAT tokens, and Databricks CLI profiles. All operations use direct REST API calls avoiding SDK overhead for faster execution. Essential for automating data pipelines, orchestrating workflows, and integrating Databricks jobs into AI agent systems.", "database"),
+    (71, "PowerBITool", "An end-to-end Power BI query execution tool that handles everything automatically: metadata extraction, DAX generation, and query execution. Users simply provide a natural language question (e.g., 'What is the total NSR per product?') along with Power BI credentials, and the tool: (1) Submits a Databricks job running the powerbi_full_pipeline notebook, (2) Monitors job completion with automatic polling, (3) Extracts and returns DAX execution results directly. Required parameters: question, semantic_model_id, workspace_id, tenant_id, client_id, client_secret, and auth_method ('service_principal' or 'device_code'). Optional: timeout_seconds (default: 600). Behind the scenes, the powerbi_full_pipeline notebook performs metadata extraction from Power BI, generates DAX queries via LLM, and executes them against Power BI. This is a single-call solution - no need for separate metadata extraction, DAX generation, or manual result retrieval. Perfect for business intelligence workflows, automated reporting, and enabling AI agents to answer Power BI questions with minimal setup. Essential for bridging conversational AI and Power BI analytics with maximum convenience.", "business_intelligence"),
 ]
 
 def get_tool_configs():
@@ -390,7 +391,21 @@ def get_tool_configs():
         "70": {
             "result_as_answer": False,
             "DATABRICKS_HOST": "",  # Databricks workspace URL (e.g., "e2-demo-field-eng.cloud.databricks.com")
-        }   # DatabricksJobsTool
+        },   # DatabricksJobsTool
+        "71": {
+            "result_as_answer": False,
+            "DATABRICKS_HOST": "",  # Databricks workspace URL (e.g., "e2-demo-field-eng.cloud.databricks.com")
+            "powerbi_job_id": None  # Job ID for the powerbi_full_pipeline notebook (must be configured)
+            # The tool automatically handles:
+            # - Job submission with question and Power BI credentials
+            # - Waiting for completion with polling
+            # - Extracting DAX execution results
+            # Required parameters for each call:
+            # - question: Natural language question
+            # - semantic_model_id: Power BI semantic model/dataset ID
+            # - workspace_id: Power BI workspace ID
+            # - tenant_id, client_id, client_secret: Azure AD credentials
+        }   # PowerBITool
     }
 
 async def seed_async():
@@ -411,21 +426,21 @@ async def seed_async():
         try:
             async with async_session_factory() as session:
                 if tool_id not in existing_ids:
-                    # Add new tool - GenieTool (ID 35), PerplexityTool (ID 31), and DatabricksCustomTool (ID 67) are enabled by default
+                    # Add new tool - GenieTool (ID 35), PerplexityTool (ID 31), DatabricksCustomTool (ID 67), DatabricksJobsTool (ID 70), and PowerBITool (ID 71) are enabled by default
                     tool = Tool(
                         id=tool_id,
                         title=title,
                         description=description,
                         icon=icon,
                         config=get_tool_configs().get(str(tool_id), {}),
-                        enabled=(tool_id in [31, 35, 67, 70]),  # Enable PerplexityTool, GenieTool, DatabricksCustomTool, and DatabricksJobsTool
+                        enabled=(tool_id in [31, 35, 67, 70, 71]),  # Enable PerplexityTool, GenieTool, DatabricksCustomTool, DatabricksJobsTool, and PowerBITool
                         created_at=datetime.now().replace(tzinfo=None),
                         updated_at=datetime.now().replace(tzinfo=None)
                     )
                     session.add(tool)
                     tools_added += 1
                 else:
-                    # Update existing tool - GenieTool (ID 35), PerplexityTool (ID 31), and DatabricksCustomTool (ID 67) are enabled by default
+                    # Update existing tool - GenieTool (ID 35), PerplexityTool (ID 31), DatabricksCustomTool (ID 67), DatabricksJobsTool (ID 70), and PowerBITool (ID 71) are enabled by default
                     result = await session.execute(
                         select(Tool).filter(Tool.id == tool_id)
                     )
@@ -435,7 +450,7 @@ async def seed_async():
                         existing_tool.description = description
                         existing_tool.icon = icon
                         existing_tool.config = get_tool_configs().get(str(tool_id), {})
-                        existing_tool.enabled = (tool_id in [31, 35, 67, 70])  # Enable PerplexityTool, GenieTool, DatabricksCustomTool, and DatabricksJobsTool
+                        existing_tool.enabled = (tool_id in [31, 35, 67, 70, 71])  # Enable PerplexityTool, GenieTool, DatabricksCustomTool, DatabricksJobsTool, and PowerBITool
                         existing_tool.updated_at = datetime.now().replace(tzinfo=None)
                         tools_updated += 1
                 
@@ -469,21 +484,21 @@ def seed_sync():
         try:
             with SessionLocal() as session:
                 if tool_id not in existing_ids:
-                    # Add new tool - GenieTool (ID 35), PerplexityTool (ID 31), and DatabricksCustomTool (ID 67) are enabled by default
+                    # Add new tool - GenieTool (ID 35), PerplexityTool (ID 31), DatabricksCustomTool (ID 67), DatabricksJobsTool (ID 70), and PowerBITool (ID 71) are enabled by default
                     tool = Tool(
                         id=tool_id,
                         title=title,
                         description=description,
                         icon=icon,
                         config=get_tool_configs().get(str(tool_id), {}),
-                        enabled=(tool_id in [31, 35, 67, 70]),  # Enable PerplexityTool, GenieTool, DatabricksCustomTool, and DatabricksJobsTool
+                        enabled=(tool_id in [31, 35, 67, 70, 71]),  # Enable PerplexityTool, GenieTool, DatabricksCustomTool, DatabricksJobsTool, and PowerBITool
                         created_at=datetime.now().replace(tzinfo=None),
                         updated_at=datetime.now().replace(tzinfo=None)
                     )
                     session.add(tool)
                     tools_added += 1
                 else:
-                    # Update existing tool - GenieTool (ID 35), PerplexityTool (ID 31), and DatabricksCustomTool (ID 67) are enabled by default
+                    # Update existing tool - GenieTool (ID 35), PerplexityTool (ID 31), DatabricksCustomTool (ID 67), DatabricksJobsTool (ID 70), and PowerBITool (ID 71) are enabled by default
                     result = session.execute(
                         select(Tool).filter(Tool.id == tool_id)
                     )
@@ -493,7 +508,7 @@ def seed_sync():
                         existing_tool.description = description
                         existing_tool.icon = icon
                         existing_tool.config = get_tool_configs().get(str(tool_id), {})
-                        existing_tool.enabled = (tool_id in [31, 35, 67, 70])  # Enable PerplexityTool, GenieTool, DatabricksCustomTool, and DatabricksJobsTool
+                        existing_tool.enabled = (tool_id in [31, 35, 67, 70, 71])  # Enable PerplexityTool, GenieTool, DatabricksCustomTool, DatabricksJobsTool, and PowerBITool
                         existing_tool.updated_at = datetime.now().replace(tzinfo=None)
                         tools_updated += 1
                 

@@ -44,6 +44,7 @@ from src.api.memory_backend_router import router as memory_backend_router
 from src.api.documentation_embeddings_router import router as documentation_embeddings_router
 from src.api.database_management_router import router as database_management_router
 from src.api.genie_router import router as genie_router
+from src.api.powerbi_routes import router as powerbi_router
 
 # Create the main API router
 api_router = APIRouter()
@@ -93,6 +94,7 @@ api_router.include_router(memory_backend_router)
 api_router.include_router(documentation_embeddings_router)
 api_router.include_router(database_management_router)
 api_router.include_router(genie_router)
+api_router.include_router(powerbi_router)
 
 __all__ = [
     "api_router",
@@ -138,5 +140,6 @@ __all__ = [
     "memory_backend_router",
     "documentation_embeddings_router",
     "database_management_router",
-    "genie_router"
+    "genie_router",
+    "powerbi_router"
 ]

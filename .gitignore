@@ -93,12 +93,18 @@ __pycache__/
 *.py[cod]
 *$py.class
 *.so
+
+# Frontend static build output
+src/frontend_static/
+frontend_static/
+*db
 .Python
 build/
 dist/
 downloads/
 eggs/
 .eggs/
+src/test_ref*
 lib/
 lib64/
 parts/
