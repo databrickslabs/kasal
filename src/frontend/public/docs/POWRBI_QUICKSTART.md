@@ -19,7 +19,7 @@ This provides maximum flexibility:
 - Power BI dataset metadata (tables, columns, relationships)
 
 ## Requirements
-- Python 3.9+
+- Python 3.9+ 
 - Node.js 18+
 - Postgres (recommended) or SQLite for local dev
 - Databricks access if exercising Databricks features
