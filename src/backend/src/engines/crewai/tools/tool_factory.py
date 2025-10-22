@@ -32,6 +32,15 @@ except ImportError:
         logging.warning("Could not import GenieTool")
 
 try:
+    from .custom.agentbricks_tool import AgentBricksTool
+except ImportError:
+    try:
+        from .custom.agentbricks_tool import AgentBricksTool
+    except ImportError:
+        AgentBricksTool = None
+        logging.warning("Could not import AgentBricksTool")
+
+try:
     from .custom.databricks_custom_tool import DatabricksCustomTool
 except ImportError:
     try:
@@ -99,6 +108,7 @@ class ToolFactory:
             "SerperDevTool": SerperDevTool,
             "ScrapeWebsiteTool": ScrapeWebsiteTool,
             "GenieTool": GenieTool,
+            "AgentBricksTool": AgentBricksTool,
             "DatabricksCustomTool": DatabricksCustomTool,
             "DatabricksJobsTool": DatabricksJobsTool,
             "DatabricksKnowledgeSearchTool": DatabricksKnowledgeSearchTool,
@@ -1118,6 +1128,88 @@ class ToolFactory:
                     )
                 except Exception as e:
                     logger.error(f"Error creating GenieTool: {e}")
+                    return None
+
+            elif tool_name == "AgentBricksTool":
+                # Get tool ID if any
+                tool_id = tool_config.get('tool_id', None)
+
+                # Log the raw tool_config to debug endpointName issue
+                logger.info(f"AgentBricksTool raw tool_config: {tool_config}")
+                logger.info(f"AgentBricksTool tool_config_override: {tool_config_override}")
+
+                # Create a copy of the config
+                agentbricks_tool_config = {**tool_config}
+
+                # Try to get user token from multiple sources for OAuth/OBO authentication
+                user_token = tool_config.get('user_token') or self.user_token
+
+                # CRITICAL: Extract group_id from config for PAT authentication fallback
+                # This is essential for tools running in CrewAI threads where UserContext is unavailable
+                group_id = None
+                if isinstance(self.config, dict):
+                    group_id = self.config.get('group_id')
+                    if group_id:
+                        logger.info(f"Extracted group_id from factory config for AgentBricksTool: {group_id}")
+                    else:
+                        logger.warning("No group_id in factory config - PAT authentication may fail")
+
+                # If no user token in config or factory, try to get from context
+                if not user_token:
+                    try:
+                        from src.utils.user_context import UserContext
+                        user_token = UserContext.get_user_token()
+                        if user_token:
+                            logger.info(f"Extracted user token from context for AgentBricksTool OBO authentication: {user_token[:10]}...")
+                        else:
+                            logger.warning("No user token found in context for AgentBricksTool")
+                            # Also check if group context has a token
+                            group_context = UserContext.get_group_context()
+                            if group_context and group_context.access_token:
+                                user_token = group_context.access_token
+                                logger.info(f"Found user token in group context: {user_token[:10]}...")
+                            else:
+                                logger.warning("No user token in group context either")
+                    except Exception as e:
+                        logger.error(f"Could not extract user token from context: {e}")
+                        import traceback
+                        logger.error(traceback.format_exc())
+
+                # Check for endpointName in tool_config_override first (task/agent specific), then in base tool_config
+                if tool_config_override and 'endpointName' in tool_config_override:
+                    agentbricks_tool_config['endpointName'] = tool_config_override['endpointName']
+                    logger.info(f"Using endpointName from tool_config_override: {tool_config_override['endpointName']}")
+                elif tool_config_override and 'endpoint_name' in tool_config_override:
+                    # Also check for endpoint_name with underscore
+                    agentbricks_tool_config['endpointName'] = tool_config_override['endpoint_name']
+                    logger.info(f"Using endpoint_name (underscore) from tool_config_override: {tool_config_override['endpoint_name']}")
+                elif 'endpointName' in tool_config:
+                    agentbricks_tool_config['endpointName'] = tool_config['endpointName']
+                    logger.info(f"Using endpointName from base tool_config: {tool_config['endpointName']}")
+                elif 'endpoint_name' in tool_config:
+                    # Also check for endpoint_name with underscore in base config
+                    agentbricks_tool_config['endpointName'] = tool_config['endpoint_name']
+                    logger.info(f"Using endpoint_name (underscore) from base tool_config: {tool_config['endpoint_name']}")
+                else:
+                    logger.warning("No endpointName or endpoint_name found in tool_config_override or base tool_config")
+                    logger.warning(f"tool_config keys: {list(tool_config.keys())}")
+                    logger.warning(f"tool_config_override keys: {list(tool_config_override.keys()) if tool_config_override else 'None'}")
+                # No default endpointName - must be configured in agent/task
+
+                # Create the AgentBricksTool instance
+                try:
+                    logger.info(f"Creating AgentBricksTool with config, OBO: {bool(user_token)}, token preview: {user_token[:10] + '...' if user_token else 'None'}, group_id: {group_id}")
+                    logger.info(f"AgentBricksTool config being passed: {agentbricks_tool_config}")
+                    return tool_class(
+                        tool_config=agentbricks_tool_config,
+                        tool_id=tool_id,
+                        token_required=False,
+                        user_token=user_token,
+                        group_id=group_id,  # CRITICAL: Pass group_id for PAT authentication
+                        result_as_answer=result_as_answer
+                    )
+                except Exception as e:
+                    logger.error(f"Error creating AgentBricksTool: {e}")
                     return None
 
             elif tool_name == "DatabricksKnowledgeSearchTool":
