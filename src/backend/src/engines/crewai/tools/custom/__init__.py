@@ -6,6 +6,7 @@ This package provides custom tool implementations for the CrewAI engine.
 
 from src.engines.crewai.tools.custom.perplexity_tool import PerplexitySearchTool
 from src.engines.crewai.tools.custom.genie_tool import GenieTool
+from src.engines.crewai.tools.custom.agentbricks_tool import AgentBricksTool
 from src.engines.crewai.tools.custom.databricks_custom_tool import DatabricksCustomTool
 from src.engines.crewai.tools.custom.python_pptx_tool import PythonPPTXTool
 
@@ -13,6 +14,7 @@ from src.engines.crewai.tools.custom.python_pptx_tool import PythonPPTXTool
 __all__ = [
     'PerplexitySearchTool',
     'GenieTool',
+    'AgentBricksTool',
     'DatabricksCustomTool',
     'PythonPPTXTool'
 ]

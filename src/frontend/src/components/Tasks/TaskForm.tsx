@@ -38,6 +38,7 @@ import { TaskService } from '../../api/TaskService';
 import { DatabricksService } from '../../api/DatabricksService';
 import useStableResize from '../../hooks/global/useStableResize';
 import { GenieSpaceSelector } from '../Common/GenieSpaceSelector';
+import { AgentBricksEndpointSelector } from '../Common/AgentBricksEndpointSelector';
 import { PerplexityConfigSelector } from '../Common/PerplexityConfigSelector';
 import { SerperConfigSelector } from '../Common/SerperConfigSelector';
 import { MCPServerSelector } from '../Common/MCPServerSelector';
@@ -117,6 +118,7 @@ const TaskForm: React.FC<TaskFormProps> = ({ initialData, onCancel, onTaskSaved,
   const [error, setError] = useState<string | null>(null);
   const [availableTasks, setAvailableTasks] = useState<Task[]>([]);
   const [selectedGenieSpace, setSelectedGenieSpace] = useState<{ id: string; name: string } | null>(null);
+  const [selectedAgentBricksEndpoint, setSelectedAgentBricksEndpoint] = useState<{ id: string; name: string } | null>(null);
   const [perplexityConfig, setPerplexityConfig] = useState<PerplexityConfig>({});
   const [serperConfig, setSerperConfig] = useState<SerperConfig>({});
   const [selectedMcpServers, setSelectedMcpServers] = useState<string[]>([]);
@@ -144,6 +146,18 @@ const TaskForm: React.FC<TaskFormProps> = ({ initialData, onCancel, onTaskSaved,
           setSelectedGenieSpace({
             id: spaceId as string,
             name: spaceName as string
+          });
+        }
+      }
+
+      // Check for AgentBricksTool config - try both endpointName and endpoint_name for compatibility
+      const agentBricksConfig = initialData.tool_configs.AgentBricksTool as Record<string, unknown>;
+      if (agentBricksConfig) {
+        const endpointName = agentBricksConfig.endpointName || agentBricksConfig.endpoint_name;
+        if (endpointName && typeof endpointName === 'string') {
+          setSelectedAgentBricksEndpoint({
+            id: endpointName as string,
+            name: endpointName as string
           });
         }
       }
@@ -277,6 +291,20 @@ const TaskForm: React.FC<TaskFormProps> = ({ initialData, onCancel, onTaskSaved,
           return;
         }
 
+        // If AgentBricksTool is selected, ensure an endpoint is specified
+        const isAgentBricksSelected = formData.tools.some(toolId => {
+          const tool = tools.find(t =>
+            String(t.id) === String(toolId) ||
+            t.id === Number(toolId) ||
+            t.title === toolId
+          );
+          return tool?.title === 'AgentBricksTool';
+        });
+        if (isAgentBricksSelected && !selectedAgentBricksEndpoint) {
+          setError('Please select an AgentBricks Endpoint when AgentBricksTool is selected');
+          return;
+        }
+
         // Build tool_configs for tools that need configuration
         let updatedToolConfigs = { ...toolConfigs };
 
@@ -299,6 +327,26 @@ const TaskForm: React.FC<TaskFormProps> = ({ initialData, onCancel, onTaskSaved,
         } else if (!selectedGenieSpace) {
           // Remove GenieTool config if no space selected
           delete updatedToolConfigs.GenieTool;
+        }
+
+        // Handle AgentBricksTool config
+        if (selectedAgentBricksEndpoint && formData.tools.some(toolId => {
+          const tool = tools.find(t =>
+            String(t.id) === String(toolId) ||
+            t.id === Number(toolId) ||
+            t.title === toolId
+          );
+          return tool?.title === 'AgentBricksTool';
+        })) {
+          updatedToolConfigs = {
+            ...updatedToolConfigs,
+            AgentBricksTool: {
+              endpointName: selectedAgentBricksEndpoint.name
+            }
+          };
+        } else if (!selectedAgentBricksEndpoint) {
+          // Remove AgentBricksTool config if no endpoint selected
+          delete updatedToolConfigs.AgentBricksTool;
         }
 
         // Handle PerplexityTool config
@@ -505,6 +553,16 @@ const TaskForm: React.FC<TaskFormProps> = ({ initialData, onCancel, onTaskSaved,
     return tool?.title === 'GenieTool';
   });
   const isGenieSpaceMissing = isGenieToolSelected && !selectedGenieSpace;
+
+  const isAgentBricksToolSelected = formData.tools.some(toolId => {
+    const tool = tools.find(t =>
+      String(t.id) === String(toolId) ||
+      t.id === Number(toolId) ||
+      t.title === toolId
+    );
+    return tool?.title === 'AgentBricksTool';
+  });
+  const isAgentBricksEndpointMissing = isAgentBricksToolSelected && !selectedAgentBricksEndpoint;
 
   return (
     <>
@@ -796,6 +854,65 @@ const TaskForm: React.FC<TaskFormProps> = ({ initialData, onCancel, onTaskSaved,
               </Box>
             )}
 
+            {/* AgentBricks Endpoint Display - Show only when AgentBricksTool is selected */}
+            {formData.tools.some(toolId => {
+              const tool = tools.find(t =>
+                String(t.id) === String(toolId) ||
+                t.id === Number(toolId) ||
+                t.title === toolId
+              );
+              return tool?.title === 'AgentBricksTool';
+            }) && (
+              <Box sx={{ mt: 2 }}>
+                <Typography variant="subtitle2" sx={{ mb: 1 }}>AgentBricks Endpoint</Typography>
+                {selectedAgentBricksEndpoint ? (
+                  <Chip
+                    label={selectedAgentBricksEndpoint.name}
+                    size="medium"
+                    color="primary"
+                    variant="outlined"
+                    onDelete={() => {
+                      setSelectedAgentBricksEndpoint(null);
+                      // Remove AgentBricksTool config when endpoint is removed
+                      setToolConfigs(prev => {
+                        const newConfigs = { ...prev };
+                        delete newConfigs.AgentBricksTool;
+                        return newConfigs;
+                      });
+                    }}
+                    deleteIcon={<DeleteIcon fontSize="small" />}
+                  />
+                ) : (
+                  <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+                    <AgentBricksEndpointSelector
+                      value=""
+                      onChange={(value, endpointName) => {
+                        if (value) {
+                          setSelectedAgentBricksEndpoint({
+                            id: value as string,
+                            name: endpointName || (value as string)
+                          });
+                          // Update tool configs when endpoint is selected
+                          setToolConfigs(prev => ({
+                            ...prev,
+                            AgentBricksTool: {
+                              endpointName: value as string
+                            }
+                          }));
+                        }
+                      }}
+                      label=""
+                      placeholder="Select an AgentBricks endpoint..."
+                      required
+                      error={isAgentBricksEndpointMissing}
+                      helperText={isAgentBricksEndpointMissing ? 'AgentBricks Endpoint is required when AgentBricksTool is selected' : ''}
+                      fullWidth
+                    />
+                  </Box>
+                )}
+              </Box>
+            )}
+
             {/* Perplexity Configuration - Show only when PerplexityTool is selected */}
             {formData.tools.some(toolId => {
               const tool = tools.find(t =>
@@ -989,7 +1106,7 @@ const TaskForm: React.FC<TaskFormProps> = ({ initialData, onCancel, onTaskSaved,
           }}
         >
           <Button onClick={onCancel}>Cancel</Button>
-          <Button onClick={() => void handleSave()} variant="contained" color="primary" disabled={isGenieSpaceMissing}>
+          <Button onClick={() => void handleSave()} variant="contained" color="primary" disabled={isGenieSpaceMissing || isAgentBricksEndpointMissing}>
             Save
           </Button>
         </Box>
