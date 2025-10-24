@@ -2,6 +2,7 @@
 Repository for interacting with Databricks Unity Catalog Volumes using WorkspaceClient.
 """
 import os
+import io
 import asyncio
 from datetime import datetime
 from typing import Dict, List, Optional, Any, TYPE_CHECKING
@@ -239,9 +240,11 @@ class DatabricksVolumeRepository:
             def _upload_file():
                 try:
                     # Use the Files API through the SDK
+                    # Wrap bytes in BytesIO to create a file-like object
+                    content_stream = io.BytesIO(file_content) if isinstance(file_content, bytes) else file_content
                     self._workspace_client.files.upload(
                         file_path=volume_path,
-                        contents=file_content,
+                        content=content_stream,
                         overwrite=True
                     )
                     
