@@ -309,7 +309,7 @@ class DatabricksVolumeCallback(CrewAICallback):
         # File path must be in format: /Volumes/catalog/schema/volume/path
         client.files.upload(
             file_path=full_path,
-            contents=binary_content,
+            content=binary_content,
             overwrite=True
         )
 

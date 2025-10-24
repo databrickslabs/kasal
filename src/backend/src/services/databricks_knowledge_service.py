@@ -5,6 +5,7 @@ from typing import Dict, Any, List, Optional
 from fastapi import UploadFile
 import logging
 import os
+import io
 import asyncio
 import aiohttp
 import base64
@@ -232,9 +233,11 @@ class DatabricksKnowledgeService:
                             logger.info(f"  - content size: {len(content)} bytes")
                             logger.info(f"  - overwrite: True")
 
+                            # Wrap bytes in BytesIO to create a file-like object
+                            content_stream = io.BytesIO(content) if isinstance(content, bytes) else content
                             workspace_client.files.upload(
                                 file_path=file_path,
-                                contents=content,
+                                content=content_stream,
                                 overwrite=True
                             )
 
