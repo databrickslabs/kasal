@@ -151,6 +151,12 @@ async def import_database(
         )
 
     try:
+        # CRITICAL: Set UserContext so PAT lookup can find group_id
+        # The auth chain needs UserContext.get_group_context() to return the group_id
+        from src.utils.user_context import UserContext
+        UserContext.set_group_context(group_context)
+        logger.info(f"[IMPORT] Set UserContext with group_id: {group_context.primary_group_id if group_context else None}")
+
         # Use the injected service
         result = await service.import_from_volume(
             catalog=request.catalog,

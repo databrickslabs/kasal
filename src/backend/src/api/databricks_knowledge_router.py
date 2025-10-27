@@ -36,12 +36,14 @@ def get_databricks_knowledge_service(
     # Get group_id from context - use first group ID or default
     group_id = group_context.group_ids[0] if group_context and group_context.group_ids else "default"
     created_by_email = group_context.group_email if group_context else None
+    user_token = group_context.access_token if group_context else None
 
     # Create service and pass session to it
     return DatabricksKnowledgeService(
         session=session,
         group_id=group_id,
-        created_by_email=created_by_email
+        created_by_email=created_by_email,
+        user_token=user_token
     )
 
 
