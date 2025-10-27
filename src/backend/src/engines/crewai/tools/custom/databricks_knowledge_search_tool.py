@@ -232,7 +232,8 @@ class DatabricksKnowledgeSearchTool(BaseTool):
                 # Create service with session
                 service = DatabricksKnowledgeService(
                     session=session,
-                    group_id=self._group_id
+                    group_id=self._group_id,
+                    user_token=None  # Search tool doesn't have user context
                 )
 
                 logger.info("[TOOL ASYNC DEBUG] Service created successfully")

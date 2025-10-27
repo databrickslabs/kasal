@@ -20,6 +20,7 @@ except ImportError:
 
 from sqlalchemy.ext.asyncio import AsyncSession
 from src.repositories.databricks_config_repository import DatabricksConfigRepository
+from src.repositories.databricks_volume_repository import DatabricksVolumeRepository
 from src.utils.databricks_auth import get_workspace_client
 
 logger = logging.getLogger(__name__)
@@ -28,7 +29,7 @@ logger = logging.getLogger(__name__)
 class DatabricksKnowledgeService:
     """Service for managing knowledge files in Databricks Volumes."""
 
-    def __init__(self, session: AsyncSession, group_id: str, created_by_email: Optional[str] = None):
+    def __init__(self, session: AsyncSession, group_id: str, created_by_email: Optional[str] = None, user_token: Optional[str] = None):
         """
         Initialize the Databricks Knowledge Service.
 
@@ -36,9 +37,11 @@ class DatabricksKnowledgeService:
             session: Database session
             group_id: Group ID for tenant isolation
             created_by_email: Email of the user
+            user_token: Optional user token for OBO authentication
         """
         self.session = session
         self.repository = DatabricksConfigRepository(session)
+        self.volume_repository = DatabricksVolumeRepository(user_token=user_token)
         self.group_id = group_id
         self.created_by_email = created_by_email
     
@@ -156,186 +159,49 @@ class DatabricksKnowledgeService:
             file_size = len(content)
             logger.info(f"File size: {file_size} bytes ({file_size/1024:.2f} KB)")
 
-            # Get Databricks token using unified authentication system
-            from src.utils.databricks_auth import get_auth_context
-
-            # Get workspace URL from config or unified auth
-            workspace_url = getattr(config, 'workspace_url', None)
-            if not workspace_url:
-                auth = await get_auth_context()
-                if auth:
-                    workspace_url = auth.workspace_url
-                    logger.debug(f"Using workspace URL from unified {auth.auth_method} auth")
-            logger.info(f"Workspace URL: {workspace_url}")
-
-            try:
-                # Unified auth handles: OBO, OAuth, PAT from database, PAT from environment
-                auth = await get_auth_context(user_token=user_token)
-                if not auth:
-                    raise Exception("Failed to get authentication context")
-
-                token = auth.token
-                workspace_url = auth.workspace_url
-                logger.info(f"Successfully obtained Databricks authentication: {auth.auth_method}")
-
-                if client_id and client_secret:
-                    logger.info("Attempting OAuth authentication with client credentials")
-                    try:
-                        from databricks.sdk.core import Config
-                        oauth_config = Config(
-                            host=workspace_url,
-                            client_id=client_id,
-                            client_secret=client_secret
-                        )
-                        # Get OAuth token
-                        auth_result = oauth_config.authenticate()
-                        if hasattr(auth_result, 'access_token'):
-                            token = auth_result.access_token
-                            logger.info("Successfully obtained OAuth token")
-                        else:
-                            logger.error("No access token in OAuth response")
-                            token = None
-                    except Exception as oauth_error:
-                        logger.error(f"OAuth authentication failed: {oauth_error}")
-                        token = None
-                else:
-                    logger.debug("No OAuth credentials available")
-                    token = None
-            except Exception as auth_error:
-                logger.error(f"Authentication failed: {auth_error}")
-                token = None
-                workspace_url = None
-
-            if token:
-                logger.info("Databricks token found (length: %d)", len(token))
-            else:
-                logger.warning("No Databricks token found - will simulate upload")
+            # Use DatabricksVolumeRepository for upload (includes OBO → PAT fallback)
+            logger.info("Attempting upload via DatabricksVolumeRepository")
 
             # Track upload success and method used
             upload_successful = False
             upload_method = "none"
             selected_agents = volume_config.get('selected_agents', [])
+            workspace_url = None
 
-            # If we have a token and workspace URL, try actual upload
-            if token and workspace_url and workspace_url != 'https://example.databricks.com':
-                logger.info("Attempting REAL upload to Databricks")
+            try:
+                # Upload using the repository layer (handles auth fallback automatically)
+                upload_result = await self.volume_repository.upload_file_to_volume(
+                    catalog=catalog,
+                    schema=schema,
+                    volume_name=volume,
+                    file_name=f"{group_id}/{execution_id}/{date_dir}/{file.filename}" if date_dir else f"{group_id}/{execution_id}/{file.filename}",
+                    file_content=content
+                )
 
-                try:
-                    # Try using Databricks SDK via centralized auth
-                    workspace_client = await get_workspace_client(user_token=token)
-                    if workspace_client:
-                        logger.info("Using WorkspaceClient from databricks_auth middleware")
+                if upload_result["success"]:
+                    logger.info("="*60)
+                    logger.info("SUCCESS! File uploaded via DatabricksVolumeRepository")
+                    logger.info(f"File location: {file_path}")
+                    logger.info("="*60)
 
-                        # Upload using SDK - same as DatabricksVolumeCallback
-                        try:
-                            logger.info(f"Calling workspace_client.files.upload()")
-                            logger.info(f"  - file_path: {file_path}")
-                            logger.info(f"  - content size: {len(content)} bytes")
-                            logger.info(f"  - overwrite: True")
+                    upload_successful = True
+                    upload_method = "repository"
 
-                            # Wrap bytes in BytesIO to create a file-like object
-                            content_stream = io.BytesIO(content) if isinstance(content, bytes) else content
-                            workspace_client.files.upload(
-                                file_path=file_path,
-                                content=content_stream,
-                                overwrite=True
-                            )
+                    # Get workspace URL for display
+                    from src.utils.databricks_auth import get_auth_context
+                    try:
+                        auth = await get_auth_context()
+                        if auth:
+                            workspace_url = auth.workspace_url
+                    except Exception:
+                        pass
+                else:
+                    logger.error(f"Repository upload failed: {upload_result.get('error')}")
+                    raise Exception(upload_result.get('error', 'Upload failed'))
 
-                            logger.info("="*60)
-                            logger.info("SUCCESS! File uploaded via SDK to Databricks")
-                            logger.info(f"File location: {file_path}")
-                            logger.info("You should see this file in your Databricks workspace at:")
-                            logger.info(f"  {workspace_url}/browse/files{file_path}")
-                            logger.info("="*60)
-
-                            upload_successful = True
-                            upload_method = "sdk"
-
-                        except Exception as sdk_error:
-                            logger.error(f"SDK upload failed: {sdk_error}")
-                            logger.info("Falling back to DBFS API method")
-                    else:
-                        logger.warning("Databricks SDK not available, using DBFS API")
-
-                    # Fallback: Use DBFS API if SDK failed or not available
-                    if not upload_successful:
-                        logger.info("Attempting upload via DBFS API")
-                        async with aiohttp.ClientSession() as session:
-                            # Convert content to base64
-                            content_b64 = base64.b64encode(content).decode('utf-8')
-                            logger.info(f"Encoded content to base64 (length: {len(content_b64)})")
-
-                            headers = {
-                                "Authorization": f"Bearer {token}",
-                                "Content-Type": "application/json"
-                            }
-
-                            # Step 1: Create file handle
-                            create_url = f"{workspace_url}/api/2.0/fs/files/create"
-                            create_data = {
-                                "path": file_path,
-                                "overwrite": True
-                            }
-
-                            logger.info(f"Step 1: Creating file handle at {create_url}")
-                            logger.info(f"  Request data: {create_data}")
-
-                            async with session.put(create_url, json=create_data, headers=headers) as response:
-                                if response.status != 200:
-                                    error_text = await response.text()
-                                    logger.error(f"Failed to create file handle: Status {response.status}")
-                                    logger.error(f"Error response: {error_text}")
-                                    raise Exception(f"Failed to create file: {error_text}")
-
-                                result = await response.json()
-                                handle = result.get("handle")
-                                logger.info(f"File handle created successfully: {handle}")
-
-                            # Step 2: Add content block
-                            add_block_url = f"{workspace_url}/api/2.0/fs/files/add-block"
-                            upload_data = {
-                                "handle": handle,
-                                "data": content_b64
-                            }
-
-                            logger.info(f"Step 2: Uploading content to {add_block_url}")
-                            logger.info(f"  Handle: {handle}")
-
-                            async with session.post(add_block_url, json=upload_data, headers=headers) as response:
-                                if response.status != 200:
-                                    error_text = await response.text()
-                                    logger.error(f"Failed to upload content: Status {response.status}")
-                                    logger.error(f"Error response: {error_text}")
-                                    raise Exception(f"Failed to upload content: {error_text}")
-
-                            logger.info("Content uploaded successfully")
-
-                            # Step 3: Close file
-                            close_url = f"{workspace_url}/api/2.0/fs/files/close"
-                            close_data = {"handle": handle}
-
-                            logger.info(f"Step 3: Closing file at {close_url}")
-
-                            async with session.post(close_url, json=close_data, headers=headers) as response:
-                                if response.status != 200:
-                                    error_text = await response.text()
-                                    logger.error(f"Failed to close file: Status {response.status}")
-                                    logger.error(f"Error response: {error_text}")
-                                    raise Exception(f"Failed to close file: {error_text}")
-
-                            logger.info("="*60)
-                            logger.info("SUCCESS! File uploaded via DBFS API to Databricks")
-                            logger.info(f"File location: {file_path}")
-                            logger.info("You should see this file in your Databricks workspace at:")
-                            logger.info(f"  {workspace_url}/browse/files{file_path}")
-                            logger.info("="*60)
-
-                            upload_successful = True
-                            upload_method = "dbfs_api"
-
-                except Exception as e:
-                    logger.error(f"Failed to upload to Databricks: {e}", exc_info=True)
-                    logger.warning("Falling back to simulation mode")
+            except Exception as e:
+                logger.error(f"Failed to upload to Databricks: {e}", exc_info=True)
+                logger.warning("Upload failed - will use simulation mode")
 
             # Set simulation mode if upload not successful
             if not upload_successful:

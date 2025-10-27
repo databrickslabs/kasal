@@ -846,7 +846,13 @@ class CrewPreparation:
             if databricks_config and databricks_config.knowledge_volume_enabled:
                 logger.info(f"Checking for knowledge sources for execution {execution_id}")
 
-                knowledge_service = DatabricksKnowledgeService()
+                # Note: This instantiation needs session, group_id, and user_token
+                # This appears to be incomplete code that needs refactoring
+                knowledge_service = DatabricksKnowledgeService(
+                    session=None,  # TODO: Pass proper session
+                    group_id=group_id,
+                    user_token=None  # TODO: Pass user token if available
+                )
 
                 volume_config = {
                     'volume_path': databricks_config.knowledge_volume_path or 'main.default.knowledge',

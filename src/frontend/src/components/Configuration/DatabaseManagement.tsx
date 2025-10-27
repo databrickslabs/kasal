@@ -1367,8 +1367,8 @@ const DatabaseManagement: React.FC = () => {
                   </ListItem>
                 ))}
               </List>
-              <Alert severity="warning" sx={{ mt: 2 }}>
-                Warning: This will replace the current database with the selected backup.
+              <Alert severity="info" sx={{ mt: 2 }}>
+                The selected backup will be added to the current database (data will be merged, not replaced).
               </Alert>
             </Box>
           ) : (
