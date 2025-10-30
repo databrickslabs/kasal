@@ -47,6 +47,7 @@ const DatabricksConfiguration: React.FC<DatabricksConfigurationProps> = ({ onSav
 
     // MLflow configuration
     mlflow_enabled: false,
+    mlflow_experiment_name: 'kasal-crew-execution-traces',
     evaluation_enabled: false,
     evaluation_judge_model: '',
 
@@ -183,7 +184,12 @@ const DatabricksConfiguration: React.FC<DatabricksConfigurationProps> = ({ onSav
     setLoading(true);
     try {
       const databricksService = DatabricksService.getInstance();
-      const savedConfig = await databricksService.setDatabricksConfig(config);
+      // Ensure workspace_url from backend environment is included in the config
+      const configToSave = {
+        ...config,
+        workspace_url: workspaceUrlFromBackend || config.workspace_url
+      };
+      const savedConfig = await databricksService.setDatabricksConfig(configToSave);
       setConfig(savedConfig);
 
       // Sync DatabricksKnowledgeSearchTool enabled state with knowledge_volume_enabled
@@ -394,6 +400,19 @@ const DatabricksConfiguration: React.FC<DatabricksConfigurationProps> = ({ onSav
           />
         </Box>
 
+        {/* MLflow Experiment Name */}
+        {config.mlflow_enabled && (
+          <TextField
+            label={t('configuration.databricks.mlflow.experimentName', { defaultValue: 'MLflow Experiment Name' })}
+            value={config.mlflow_experiment_name || 'kasal-crew-execution-traces'}
+            onChange={handleInputChange('mlflow_experiment_name')}
+            fullWidth
+            disabled={loading || !config.enabled || !config.mlflow_enabled}
+            size="small"
+            placeholder="kasal-crew-execution-traces"
+            helperText={t('configuration.databricks.mlflow.experimentNameHelp', { defaultValue: 'Name of the MLflow experiment for crew execution traces' })}
+          />
+        )}
 
         {/* MLflow Evaluation Section */}
         {config.mlflow_enabled && (

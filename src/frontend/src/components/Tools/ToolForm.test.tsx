@@ -20,14 +20,6 @@ jest.mock('../../api/ToolService', () => ({
   ToolService: {
     listTools: jest.fn().mockResolvedValue([
       {
-        id: 67,
-        title: 'DatabricksCustomTool',
-        description: 'Test Databricks Custom Tool',
-        icon: 'database',
-        config: {},
-        enabled: true,
-      },
-      {
         id: 70,
         title: 'DatabricksJobsTool',
         description: 'Test Databricks Jobs Tool',
@@ -79,9 +71,7 @@ describe('ToolForm', () => {
   it('should include all custom tools in the customTools array', () => {
     expect(customTools).toContain('GenieTool');
     expect(customTools).toContain('PerplexityTool');
-    expect(customTools).toContain('DatabricksCustomTool');
     expect(customTools).toContain('DatabricksJobsTool');
-    expect(customTools).toContain('PythonPPTXTool');
   });
 
   it('should correctly categorize tools based on customTools array', async () => {

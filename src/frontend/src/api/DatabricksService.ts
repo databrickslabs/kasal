@@ -11,6 +11,7 @@ export interface DatabricksConfig {
 
   // MLflow configuration
   mlflow_enabled?: boolean;
+  mlflow_experiment_name?: string; // MLflow experiment name
   // MLflow Evaluation configuration
   evaluation_enabled?: boolean;
   evaluation_judge_model?: string; // Databricks judge endpoint route, e.g., "databricks:/<endpoint>"
