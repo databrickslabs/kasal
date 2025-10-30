@@ -746,11 +746,7 @@ class DatabricksVectorIndexRepository:
             }
             
             # Log search parameters for debugging
-            logger.debug(f"[similarity_search] Index: {index_name}")
-            logger.debug(f"[similarity_search] Query vector dimension: {len(query_vector)}")
-            logger.debug(f"[similarity_search] Requested columns: {columns[:5]}..." if len(columns) > 5 else f"[similarity_search] Requested columns: {columns}")
-            logger.debug(f"[similarity_search] Num results requested: {num_results}")
-            logger.debug(f"[similarity_search] Filters: {filters}")
+            logger.debug(f"[similarity_search] Index: {index_name}, filters: {filters}, num_results: {num_results}")
             
             # Prepare the payload
             payload = {
@@ -759,7 +755,7 @@ class DatabricksVectorIndexRepository:
                 "num_results": num_results
             }
             if filters:
-                payload["filters"] = filters
+                payload["filters_json"] = json.dumps(filters)
             
             # Make the REST API call
             async with aiohttp.ClientSession() as session:
