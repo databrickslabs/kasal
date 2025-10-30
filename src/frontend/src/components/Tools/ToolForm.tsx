@@ -59,9 +59,7 @@ const toolIcons: ToolIcon[] = [
 export const customTools = [
   'GenieTool',
   'PerplexityTool',
-  'DatabricksCustomTool',
-  'DatabricksJobsTool',
-  'PythonPPTXTool'
+  'DatabricksJobsTool'
 ];
 
 const convertServiceToolToTool = (serviceTool: ServiceTool): Tool => {

@@ -154,37 +154,6 @@ export const TOOL_SECURITY_INFO: Record<string, {
     ],
     deploymentContext: 'Single-tenant containerized deployment'
   },
-  'DatabricksCustomTool': {
-    riskLevel: 'CRITICAL',
-    description: 'Executes unlimited SQL operations on Databricks',
-    risks: [
-      'SQL injection vulnerabilities',
-      'Unauthorized data access across tenants',
-      'Data modification or deletion',
-      'Performance impact from expensive queries',
-      'Access to system metadata tables'
-    ],
-    mitigations: [
-      'Use parameterized queries only',
-      'Implement tenant-based data filtering',
-      'Add query approval workflows',
-      'Set query timeouts and resource limits'
-    ],
-    singleTenantRiskLevel: 'MEDIUM',
-    singleTenantRisks: [
-      'SQL injection if queries not properly sanitized',
-      'Access to all data user has permissions for',
-      'Potential for expensive queries impacting performance',
-      'Data modification within user\'s scope'
-    ],
-    singleTenantMitigations: [
-      'Databricks On-Behalf-Of (OBO) scopes access to user permissions',
-      'User can only access data they\'re already authorized for',
-      'Query execution limits enforced by Databricks',
-      'SQL operations logged and auditable'
-    ],
-    deploymentContext: 'Single-tenant with Databricks OBO security model'
-  },
   'DatabricksJobsTool': {
     riskLevel: 'HIGH',
     description: 'Manages Databricks Jobs with create, run, and monitor capabilities',
