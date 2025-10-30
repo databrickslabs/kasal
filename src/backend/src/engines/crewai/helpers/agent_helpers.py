@@ -294,7 +294,10 @@ async def create_agent(
                             agent_tools.append(tool_instance)
                             logger.info(f"Added tool instance {tool_name} to agent {agent_key}")
                     else:
-                        logger.warning(f"Could not create tool instance for {tool_name}")
+                        logger.error(f"Could not create tool instance for {tool_name}")
+                        logger.error(f"Tool factory returned None - check tool factory logs for details")
+                        logger.error(f"Tool config: {tool_config}")
+                        logger.error(f"Tool override: {tool_override}")
             else:
                 # Without tool_factory, just append the tool names (this won't work for CrewAI)
                 agent_tools.extend([name for name in tool_names if name])

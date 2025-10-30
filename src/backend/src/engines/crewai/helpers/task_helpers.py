@@ -349,7 +349,9 @@ async def create_task(
                                 }
                                 logger.info(f"Added tool instance {tool_name} to task {task_key} with details: {tool_info}")
                         else:
-                            logger.warning(f"Could not create tool instance for {tool_name}")
+                            logger.error(f"Could not create tool instance for {tool_name}")
+                            logger.error(f"Tool factory returned None - check tool factory logs for details")
+                            logger.error(f"Tool config: {tool_config}")
                     except Exception as e:
                         logger.error(f"Error creating tool {tool_name}: {str(e)}")
             else:
