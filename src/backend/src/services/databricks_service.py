@@ -61,6 +61,7 @@ class DatabricksService:
                 "is_active": True,
                 "is_enabled": config_in.enabled,
                 "mlflow_enabled": getattr(config_in, "mlflow_enabled", False),
+                "mlflow_experiment_name": getattr(config_in, "mlflow_experiment_name", "kasal-crew-execution-traces"),
                 "evaluation_enabled": getattr(config_in, "evaluation_enabled", False),
                 "evaluation_judge_model": getattr(config_in, "evaluation_judge_model", None),
                 "group_id": self.group_id,
@@ -91,6 +92,7 @@ class DatabricksService:
                     schema=new_config.schema,
                     enabled=new_config.is_enabled,
                     mlflow_enabled=new_config.mlflow_enabled if hasattr(new_config, 'mlflow_enabled') else False,
+                    mlflow_experiment_name=new_config.mlflow_experiment_name if hasattr(new_config, 'mlflow_experiment_name') else "kasal-crew-execution-traces",
                     evaluation_enabled=new_config.evaluation_enabled if hasattr(new_config, 'evaluation_enabled') else False,
                     evaluation_judge_model=new_config.evaluation_judge_model if hasattr(new_config, 'evaluation_judge_model') else None,
                     # Volume configuration fields
@@ -132,6 +134,7 @@ class DatabricksService:
                 enabled=config.is_enabled,
                 # MLflow configuration
                 mlflow_enabled=config.mlflow_enabled if hasattr(config, 'mlflow_enabled') else False,
+                mlflow_experiment_name=config.mlflow_experiment_name if hasattr(config, 'mlflow_experiment_name') else "kasal-crew-execution-traces",
                 evaluation_enabled=config.evaluation_enabled if hasattr(config, 'evaluation_enabled') else False,
                 evaluation_judge_model=config.evaluation_judge_model if hasattr(config, 'evaluation_judge_model') else None,
                 # Volume configuration fields
@@ -318,25 +321,34 @@ class DatabricksService:
             }
 
         # Check required fields for Databricks integration
-        required_fields = ["workspace_url", "warehouse_id", "catalog", "schema"]
+        # workspace_url can fall back to DATABRICKS_HOST environment variable
+        required_fields = ["warehouse_id", "catalog", "schema"]
         missing_fields = []
-        
+
         for field in required_fields:
             value = getattr(config, field, None)
             if not value:
                 missing_fields.append(field)
-        
+
         if missing_fields:
             return {
                 "status": "error",
                 "message": f"Missing required fields: {', '.join(missing_fields)}",
                 "connected": False
             }
-        
+
         # All required fields are present, now test actual connection
         try:
-            # Prepare the workspace URL
-            workspace_url = config.workspace_url
+            # Prepare the workspace URL - fall back to environment variable if not in config
+            import os
+            workspace_url = config.workspace_url or os.getenv("DATABRICKS_HOST", "")
+
+            if not workspace_url:
+                return {
+                    "status": "error",
+                    "message": "workspace_url not configured and DATABRICKS_HOST environment variable not set",
+                    "connected": False
+                }
             if not workspace_url.startswith('https://'):
                 workspace_url = f"https://{workspace_url}"
             if workspace_url.endswith('/'):
@@ -384,7 +396,7 @@ class DatabricksService:
                     "message": "Successfully connected to Databricks",
                     "connected": True,
                     "config": {
-                        "workspace_url": config.workspace_url,
+                        "workspace_url": workspace_url,
                         "warehouse_id": config.warehouse_id,
                         "catalog": config.catalog,
                         "schema": config.schema
@@ -412,7 +424,7 @@ class DatabricksService:
         except requests.exceptions.ConnectionError:
             return {
                 "status": "error",
-                "message": f"Failed to connect to {config.workspace_url} - check workspace URL",
+                "message": f"Failed to connect to {workspace_url} - check workspace URL",
                 "connected": False
             }
         except requests.exceptions.Timeout:
