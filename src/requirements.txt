@@ -47,3 +47,5 @@ dspy-ai>=2.5.0  # DSPy framework for prompt optimization
 optuna>=3.5.0  # For hyperparameter optimization with DSPy
 numpy>=1.24.0  # Required by DSPy for numerical operations
 redis>=5.0.0  # Optional: For distributed caching of optimized modules
+
+# Security - Prompt injection detection
