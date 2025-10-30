@@ -31,14 +31,6 @@ except ImportError:
         GenieTool = None
         logging.warning("Could not import GenieTool")
 
-try:
-    from .custom.databricks_custom_tool import DatabricksCustomTool
-except ImportError:
-    try:
-        from .custom.databricks_custom_tool import DatabricksCustomTool
-    except ImportError:
-        DatabricksCustomTool = None
-        logging.warning("Could not import DatabricksCustomTool")
 
 try:
     from .custom.databricks_jobs_tool import DatabricksJobsTool
@@ -99,7 +91,6 @@ class ToolFactory:
             "SerperDevTool": SerperDevTool,
             "ScrapeWebsiteTool": ScrapeWebsiteTool,
             "GenieTool": GenieTool,
-            "DatabricksCustomTool": DatabricksCustomTool,
             "DatabricksJobsTool": DatabricksJobsTool,
             "DatabricksKnowledgeSearchTool": DatabricksKnowledgeSearchTool,
         }
@@ -110,6 +101,73 @@ class ToolFactory:
 
         # Initialize _initialized flag
         self._initialized = False
+
+    async def _validate_databricks_auth(self) -> tuple[bool, str]:
+        """
+        Validate that Databricks authentication is properly configured.
+        
+        Returns:
+            Tuple of (is_valid, error_message)
+        """
+        try:
+            from src.utils.databricks_auth import get_auth_context
+            
+            # Check for user token (OBO authentication)
+            if self.user_token:
+                logger.info("[AUTH VALIDATION] User token available for OBO authentication")
+                return (True, "OBO authentication available")
+            
+            # Check for unified auth
+            try:
+                auth = await get_auth_context()
+                if auth and (auth.token or auth.workspace_url):
+                    logger.info("[AUTH VALIDATION] Unified auth context available")
+                    return (True, "Unified authentication available")
+            except Exception as e:
+                logger.debug(f"[AUTH VALIDATION] Unified auth not available: {e}")
+            
+            # Check for Databricks config in database
+            try:
+                from src.services.databricks_service import DatabricksService
+                from src.db.session import async_session_factory
+                
+                group_id = self.config.get('group_id', 'default') if isinstance(self.config, dict) else 'default'
+                
+                async with async_session_factory() as session:
+                    service = DatabricksService(session)
+                    config = await service.get_databricks_config(group_id=group_id)
+                    
+                    if config and config.workspace_url:
+                        # Check if we have any auth method configured
+                        has_auth = bool(
+                            config.api_key or 
+                            config.client_id or 
+                            config.oauth_enabled
+                        )
+                        if has_auth:
+                            logger.info(f"[AUTH VALIDATION] Databricks config found for group {group_id}")
+                            return (True, "Database configuration available")
+                        else:
+                            logger.warning(f"[AUTH VALIDATION] Databricks config exists but no auth method configured")
+                            return (False, "No authentication method configured in database")
+                    else:
+                        logger.warning(f"[AUTH VALIDATION] No Databricks config found for group {group_id}")
+                        return (False, f"No Databricks configuration for group {group_id}")
+                        
+            except Exception as e:
+                logger.debug(f"[AUTH VALIDATION] Database config check failed: {e}")
+            
+            # No authentication method available
+            error_msg = (
+                "No Databricks authentication method available. "
+                "Configure one of: user token (OBO), API key, or OAuth credentials"
+            )
+            logger.error(f"[AUTH VALIDATION] {error_msg}")
+            return (False, error_msg)
+            
+        except Exception as e:
+            logger.error(f"[AUTH VALIDATION] Error during validation: {e}", exc_info=True)
+            return (False, f"Authentication validation error: {str(e)}")
 
     @classmethod
     async def create(cls, config, api_keys_service=None, user_token=None):
@@ -696,113 +754,6 @@ class ToolFactory:
 
                 return tool_class(**tool_config_with_key)
 
-            elif tool_name == "DatabricksCustomTool":
-                # Create a copy of the config (same as GenieTool)
-                databricks_tool_config = {**tool_config}
-
-                # Get configuration from tool_config
-                default_catalog = tool_config.get('catalog')
-                default_schema = tool_config.get('schema')
-                default_warehouse_id = tool_config.get('warehouse_id')
-
-                # Try to get user token from multiple sources for OAuth/OBO authentication
-                user_token = tool_config.get('user_token') or self.user_token
-
-                # If no user token in config or factory, try to get from context
-                if not user_token:
-                    try:
-                        from src.utils.user_context import UserContext
-                        user_token = UserContext.get_user_token()
-                        if user_token:
-                            logger.info(f"Extracted user token from context for DatabricksCustomTool OBO authentication: {user_token[:10]}...")
-                        else:
-                            logger.warning("No user token found in context for DatabricksCustomTool")
-                    except Exception as e:
-                        logger.error(f"Could not extract user token from context: {e}")
-
-                # Get DATABRICKS_HOST from tool_config or environment
-                databricks_host = tool_config.get('DATABRICKS_HOST')
-
-                # If DATABRICKS_HOST is not in tool_config, try to get it from unified auth
-                if not databricks_host:
-                    # Use unified authentication
-                    try:
-                        from src.utils.databricks_auth import get_auth_context
-                        # Check if we're in an async context
-                        try:
-                            asyncio.get_running_loop()
-                            # We're in an event loop, use thread pool
-                            import concurrent.futures
-                            with concurrent.futures.ThreadPoolExecutor() as pool:
-                                auth = pool.submit(self._run_in_new_loop, get_auth_context).result()
-                        except RuntimeError:
-                            # No running event loop, safe to use asyncio.run
-                            auth = asyncio.run(get_auth_context())
-                        databricks_host = auth.workspace_url if auth else None
-                    except Exception as e:
-                        logger.debug(f"Unified auth not available: {e}")
-                        databricks_host = None
-
-                    # If not in environment, try to get from DatabricksService
-                    if not databricks_host:
-                        try:
-                            # Try to get from DatabricksService configuration
-                            from src.services.databricks_service import DatabricksService
-                            from src.db.session import async_session_factory
-
-                            async def get_databricks_config():
-                                async with async_session_factory() as session:
-                                    service = DatabricksService(session)
-                                    config = await service.get_databricks_config()
-                                    if config and config.workspace_url:
-                                        workspace_url = config.workspace_url.rstrip('/')
-                                        if not workspace_url.startswith('https://'):
-                                            workspace_url = f"https://{workspace_url}"
-                                        return workspace_url
-                                return None
-
-                            # Execute the async function
-                            try:
-                                # Check if we're in an async context
-                                asyncio.get_running_loop()
-                                # Use ThreadPoolExecutor to call async method from sync context
-                                import concurrent.futures
-                                with concurrent.futures.ThreadPoolExecutor() as pool:
-                                    databricks_host = pool.submit(
-                                        self._run_in_new_loop,
-                                        get_databricks_config
-                                    ).result()
-                            except RuntimeError:
-                                # Not in async context
-                                loop = asyncio.new_event_loop()
-                                try:
-                                    asyncio.set_event_loop(loop)
-                                    databricks_host = loop.run_until_complete(get_databricks_config())
-                                finally:
-                                    loop.close()
-
-                            if databricks_host:
-                                logger.info(f"Retrieved DATABRICKS_HOST from DatabricksService: {databricks_host}")
-                                # Add to the tool config copy
-                                databricks_tool_config['DATABRICKS_HOST'] = databricks_host
-                            else:
-                                logger.warning("Could not retrieve DATABRICKS_HOST from DatabricksService")
-
-                        except Exception as e:
-                            logger.error(f"Error getting DATABRICKS_HOST from service: {e}")
-
-                # Create the tool with the same pattern as GenieTool
-                logger.info(f"Creating DatabricksCustomTool with tool_config: {databricks_tool_config}")
-                return tool_class(
-                    default_catalog=default_catalog,
-                    default_schema=default_schema,
-                    default_warehouse_id=default_warehouse_id,
-                    databricks_host=databricks_host,
-                    tool_config=databricks_tool_config,
-                    user_token=user_token,
-                    result_as_answer=result_as_answer
-                )
-
             elif tool_name == "DatabricksJobsTool":
                 # Create a copy of the config (same pattern as other Databricks tools)
                 databricks_jobs_config = {**tool_config}
@@ -903,32 +854,8 @@ class ToolFactory:
                 )
 
 
-            elif tool_name == "DatabricksKnowledgeSearchTool":
-                # Ensure the knowledge search tool is instantiated with proper execution and tenant context
-                # Determine group_id and execution_id from the factory config when available
-                group_id = None
-                execution_id = None
-                try:
-                    if isinstance(self.config, dict):
-                        group_id = self.config.get("group_id")
-                        execution_id = self.config.get("execution_id") or self.config.get("crew_id")
-                except Exception:
-                    group_id = None
-                    execution_id = None
-
-                user_token = self.user_token
-
-                # Log creation with context for troubleshooting
-                logger.info(
-                    f"Creating DatabricksKnowledgeSearchTool with group_id: {group_id}, execution_id: {execution_id}, has_user_token: {bool(user_token)}"
-                )
-
-                # Instantiate the tool with contextual parameters so searches are scoped correctly
-                return tool_class(
-                    group_id=group_id or "default",
-                    execution_id=execution_id,
-                    user_token=user_token,
-                )
+            # NOTE: DatabricksKnowledgeSearchTool is handled later in the method (see line ~1190)
+            # This block was a duplicate and has been removed to avoid confusion
 
             elif tool_name == "GenieTool":
                 # Get tool ID if any
@@ -1124,6 +1051,37 @@ class ToolFactory:
                 # Create the tool with group_id and user_token
                 # NOTE: We do NOT pass execution_id as it prevents searching across all knowledge documents
                 # The tool should search ALL documents for the group, not just current execution
+
+                # Validate Databricks authentication before creating tool
+                try:
+                    # Check if we're in an async context
+                    try:
+                        asyncio.get_running_loop()
+                        # We're in an event loop, use thread pool
+                        import concurrent.futures
+                        with concurrent.futures.ThreadPoolExecutor() as pool:
+                            auth_valid, auth_message = pool.submit(
+                                self._run_in_new_loop,
+                                self._validate_databricks_auth
+                            ).result()
+                    except RuntimeError:
+                        # No running event loop, safe to use asyncio.run
+                        loop = asyncio.new_event_loop()
+                        try:
+                            asyncio.set_event_loop(loop)
+                            auth_valid, auth_message = loop.run_until_complete(self._validate_databricks_auth())
+                        finally:
+                            loop.close()
+
+                    if not auth_valid:
+                        logger.warning(f"[TOOL_FACTORY] Databricks authentication validation failed: {auth_message}")
+                        logger.warning(f"[TOOL_FACTORY] Proceeding with tool creation - authentication may be available through environment variables or fallback methods")
+                    else:
+                        logger.info(f"[TOOL_FACTORY] Databricks authentication validated: {auth_message}")
+
+                except Exception as e:
+                    logger.error(f"[TOOL_FACTORY] Error validating Databricks auth: {e}", exc_info=True)
+                    logger.warning(f"[TOOL_FACTORY] Proceeding with tool creation despite validation error")
 
                 # CRITICAL DEBUG: Print to stdout
                 print(f"[TOOL_FACTORY] ========================================")
