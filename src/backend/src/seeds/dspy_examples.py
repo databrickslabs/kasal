@@ -280,12 +280,6 @@ def _agent_generation_examples() -> List[Dict[str, Any]]:
             "source_type": ExampleSourceType.SYNTHETIC.value,
         },
         {
-            "input_data": {"prompt": "Agent that drafts PPT slides from briefs", "tools_available": ["PythonPPTXTool"]},
-            "output_data": {"agent_name": "SlideSmith", "role": "Create slides", "backstory": "Presenter", "goal": "PPT decks", "tools": ["PythonPPTXTool"], "reasoning": "PPT generation"},
-            "quality_score": 0.88,
-            "source_type": ExampleSourceType.SYNTHETIC.value,
-        },
-        {
             "input_data": {"prompt": "Agent that queries Snowflake for finance KPIs", "tools_available": ["SnowflakeSearchTool"]},
             "output_data": {"agent_name": "Finance KPI Bot", "role": "BI answers", "backstory": "Analyst", "goal": "KPI queries", "tools": ["SnowflakeSearchTool"], "reasoning": "Warehouse access"},
             "quality_score": 0.88,
@@ -332,12 +326,6 @@ def _task_generation_examples() -> List[Dict[str, Any]]:
         {
             "input_data": {"prompt": "Create a task to scrape product prices", "agent_context": "Site Scraper"},
             "output_data": {"task_name": "Scrape Prices", "description": "Extract prices from pages", "expected_output": "CSV rows", "tools": ["ScrapeWebsiteTool"], "reasoning": "Scraping"},
-            "quality_score": 0.86,
-            "source_type": ExampleSourceType.SYNTHETIC.value,
-        },
-        {
-            "input_data": {"prompt": "Create task for slides draft from outline", "agent_context": "SlideSmith"},
-            "output_data": {"task_name": "Draft Slides", "description": "Turn outline into slides", "expected_output": "PPTX file", "tools": ["PythonPPTXTool"], "reasoning": "PPT generation"},
             "quality_score": 0.86,
             "source_type": ExampleSourceType.SYNTHETIC.value,
         },
@@ -402,12 +390,6 @@ def _crew_generation_examples() -> List[Dict[str, Any]]:
             "input_data": {"prompt": "Crew to compile weekly KPIs and email report", "tools_available": ["DatabricksQueryTool"]},
             "output_data": {"crew_name": "KPI Reporter", "agents": [{"name": "Lakehouse Analyst"}], "tasks": [{"name": "Compute KPIs"}, {"name": "Email Report"}], "workflow": {"edges": [[0,1]]}, "reasoning": "Compute then send"},
             "quality_score": 0.88,
-            "source_type": ExampleSourceType.SYNTHETIC.value,
-        },
-        {
-            "input_data": {"prompt": "Crew to create PPT from research brief", "tools_available": ["PythonPPTXTool", "PerplexityTool"]},
-            "output_data": {"crew_name": "Deck Builder", "agents": [{"name": "Sourced Researcher"}, {"name": "SlideSmith"}], "tasks": [{"name": "Research"}, {"name": "Draft Slides"}], "workflow": {"edges": [[0,1]]}, "reasoning": "Research then slides"},
-            "quality_score": 0.87,
             "source_type": ExampleSourceType.SYNTHETIC.value,
         },
         {
