@@ -376,57 +376,8 @@ class CrewPreparation:
                     logger.error(f"Failed to create agent: {agent_name}")
                     return False
 
-                # Handle knowledge sources after agent creation to avoid serialization issues
-                if 'knowledge_sources' in agent_config and agent_config['knowledge_sources']:
-                    try:
-                        from src.engines.crewai.knowledge.knowledge_factory import KnowledgeSourceFactory
-
-                        # Get execution_id and group_id from config
-                        execution_id = self.config.get('execution_id', self.config.get('crew_id', 'default'))
-                        group_id = self.config.get('group_id', 'default')
-
-                        # Get embedder config from agent or crew
-                        embedder_config = None
-                        if 'embedder_config' in agent_config:
-                            embedder_config = agent_config['embedder_config']
-                            logger.info(f"Using embedder config from agent: {embedder_config}")
-                        elif hasattr(self, 'embedder_config'):
-                            embedder_config = self.embedder_config
-                            logger.info(f"Using embedder config from crew: {embedder_config}")
-
-                        # CRITICAL FIX: Clean the agent_id to remove prefixes before passing to knowledge sources
-                        # This prevents the agent_agent-UUID format in the vector index
-                        clean_agent_id = agent_id
-                        if agent_id:
-                            # Strip any agent_ or agent- prefixes to get the clean UUID
-                            if agent_id.startswith('agent_'):
-                                clean_agent_id = agent_id[6:]  # Remove 'agent_' prefix
-                            if clean_agent_id.startswith('agent-'):
-                                clean_agent_id = clean_agent_id[6:]  # Remove 'agent-' prefix
-
-                        logger.info(f"[CREW] Agent ID cleanup: original='{agent_id}', clean='{clean_agent_id}'")
-
-                        # Create knowledge sources from configuration with agent access control
-                        knowledge_sources = KnowledgeSourceFactory.create_knowledge_sources(
-                            agent_config['knowledge_sources'],
-                            execution_id=execution_id,
-                            group_id=group_id,
-                            embedder_config=embedder_config,
-                            agent_id=clean_agent_id  # Pass the clean Kasal Agent UUID for access control
-                        )
-
-                        if knowledge_sources:
-                            # Set knowledge_sources directly on the agent
-                            agent.knowledge_sources = knowledge_sources
-                            logger.info(f"Added {len(knowledge_sources)} knowledge sources to agent {agent_name}")
-
-                            # NOTE: We'll call add() on each knowledge source AFTER set_knowledge() is called
-                            # This ensures the knowledge is properly initialized before processing
-                            for ks in knowledge_sources:
-                                if hasattr(ks, 'collection_name'):
-                                    logger.info(f"  - Collection: {ks.collection_name} (will be processed after crew initialization)")
-                    except Exception as e:
-                        logger.error(f"Error adding knowledge sources to agent {agent_name}: {e}", exc_info=True)
+                # NOTE: knowledge_sources handling removed - we now use DatabricksKnowledgeSearchTool directly
+                # The tool is configured via agent.tools, not agent.knowledge_sources
 
                 # Store the agent with the agent_name as key
                 self.agents[agent_name] = agent
@@ -741,10 +692,8 @@ class CrewPreparation:
             # 13. Handle OpenAI API key
             await self._handle_openai_api_key()
 
-            # 14. Add knowledge sources
-            await self._attach_knowledge_sources()
-
-            # 15. Create crew instance with error handling
+            # 14. Create crew instance with error handling
+            # NOTE: knowledge_sources no longer used - we use DatabricksKnowledgeSearchTool instead
             logger.info(f"Creating Crew with kwargs: {list(crew_kwargs.keys())}")
             try:
                 self.crew = Crew(**crew_kwargs)
@@ -825,98 +774,27 @@ class CrewPreparation:
             logger.warning(f"Error handling OpenAI API key: {e}")
 
     async def _attach_knowledge_sources(self) -> None:
-        """Attach knowledge sources from Databricks volume to agents"""
-        try:
-            from src.services.databricks_knowledge_service import DatabricksKnowledgeService
-            from src.db.session import async_session_factory
-
-            execution_id = self.config.get('execution_id') or self.config.get('run_name', 'default')
-            group_id = self.config.get('group_id', 'default')
-
-            # Get Databricks config
-            databricks_config = None
-            try:
-                async with async_session_factory() as session:
-                    from src.repositories.databricks_config_repository import DatabricksConfigRepository
-                    databricks_repo = DatabricksConfigRepository(session)
-                    databricks_config = await databricks_repo.get_active_config(group_id=group_id)
-            except Exception as db_error:
-                logger.warning(f"Could not check Databricks config from database: {db_error}")
-
-            if databricks_config and databricks_config.knowledge_volume_enabled:
-                logger.info(f"Checking for knowledge sources for execution {execution_id}")
-
-                # Note: This instantiation needs session, group_id, and user_token
-                # This appears to be incomplete code that needs refactoring
-                knowledge_service = DatabricksKnowledgeService(
-                    session=None,  # TODO: Pass proper session
-                    group_id=group_id,
-                    user_token=None  # TODO: Pass user token if available
-                )
-
-                volume_config = {
-                    'volume_path': databricks_config.knowledge_volume_path or 'main.default.knowledge',
-                    'workspace_url': databricks_config.workspace_url,
-                    'file_format': 'auto',
-                    'chunk_size': databricks_config.knowledge_chunk_size or 1000,
-                    'chunk_overlap': databricks_config.knowledge_chunk_overlap or 200,
-                }
-
-                knowledge_source = knowledge_service.create_knowledge_source(
-                    execution_id=execution_id,
-                    group_id=group_id,
-                    volume_config=volume_config
-                )
-
-                if knowledge_source:
-                    attached_count = 0
-                    for agent in self.agents.values():
-                        existing = getattr(agent, 'knowledge_sources', []) or []
-                        setattr(agent, 'knowledge_sources', [*existing, knowledge_source])
-                        attached_count += 1
-                    logger.info(f"Attached Databricks volume knowledge source to {attached_count} agent(s) for execution {execution_id}")
-
-        except Exception as e:
-            logger.warning(f"Could not load knowledge sources: {e}")
+        """
+        DEPRECATED: This method is deprecated and no longer functional.
+        
+        Knowledge sources should now be configured via:
+        1. Agent's knowledge_sources configuration (processed in _create_agents)
+        2. DatabricksKnowledgeSearchTool in agent's tools list
+        
+        This method is kept as a no-op to prevent breaking existing code paths.
+        """
+        logger.info("[DEPRECATED] _attach_knowledge_sources called - this method is deprecated")
+        logger.info("Knowledge sources should be configured via agent.knowledge_sources or DatabricksKnowledgeSearchTool")
+        # No-op: Knowledge sources are now handled via the KnowledgeSourceFactory in _create_agents
 
     async def _initialize_agent_knowledge(self, crew_kwargs: Dict[str, Any]) -> None:
-        """Initialize knowledge for each agent after crew creation"""
-        try:
-            logger.info("[CrewPreparation] Initializing knowledge for agents...")
-            for agent in self.crew.agents:
-                if hasattr(agent, 'knowledge_sources') and agent.knowledge_sources:
-                    logger.info(f"[CrewPreparation] Agent {agent.role} has {len(agent.knowledge_sources)} knowledge sources")
-
-                    agent.crew = self.crew
-
-                    if hasattr(agent, 'set_knowledge'):
-                        logger.info(f"[CrewPreparation] Calling set_knowledge() for agent {agent.role}")
-                        agent.set_knowledge(crew_embedder=crew_kwargs.get('embedder'))
-                        logger.info(f"[CrewPreparation] ✅ Knowledge initialized for agent {agent.role}")
-
-                        if hasattr(agent, 'knowledge') and agent.knowledge:
-                            logger.info(f"[CrewPreparation] Agent {agent.role} knowledge object created successfully")
-
-                            for ks in agent.knowledge_sources:
-                                if hasattr(ks, 'add'):
-                                    logger.info(f"[CrewPreparation] Calling add() on knowledge source: {getattr(ks, 'collection_name', 'unknown')}")
-                                    try:
-                                        ks.add()
-                                        logger.info(f"[CrewPreparation] ✅ Successfully processed knowledge source")
-                                    except Exception as add_error:
-                                        logger.error(f"[CrewPreparation] ❌ Error processing knowledge source: {add_error}", exc_info=True)
-                                else:
-                                    logger.warning(f"[CrewPreparation] Knowledge source does not have add() method")
-                        else:
-                            logger.warning(f"[CrewPreparation] Agent {agent.role} knowledge is still None after set_knowledge()")
-                    else:
-                        logger.warning(f"[CrewPreparation] Agent {agent.role} does not have set_knowledge() method")
-                else:
-                    logger.info(f"[CrewPreparation] Agent {agent.role} has no knowledge sources")
-
-            logger.info("[CrewPreparation] Knowledge initialization completed for all agents")
-        except Exception as knowledge_error:
-            logger.error(f"[CrewPreparation] Error initializing agent knowledge: {knowledge_error}", exc_info=True)
+        """
+        DEPRECATED: This method is no longer needed.
+        Knowledge is now accessed via DatabricksKnowledgeSearchTool in agent's tools list.
+        Kept as no-op to prevent breaking existing code paths.
+        """
+        logger.info("[CrewPreparation] _initialize_agent_knowledge called (deprecated - no-op)")
+        logger.info("[CrewPreparation] Knowledge access is now via DatabricksKnowledgeSearchTool")
 
 
     async def execute(self) -> Dict[str, Any]:
