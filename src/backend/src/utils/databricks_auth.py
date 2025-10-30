@@ -1006,7 +1006,9 @@ async def get_auth_context(
 
             if group_id:
                 logger.info(f"[AUTH PAT] Attempting to load PAT from database with group_id={group_id}")
+                logger.info("[AUTH PAT] ABOUT TO CREATE async_session_factory() - if hang occurs, it's here")
                 async with async_session_factory() as session:
+                    logger.info("[AUTH PAT] async_session_factory() created successfully")
                     api_service = ApiKeysService(session, group_id=group_id)
 
                     for key_name in ["DATABRICKS_TOKEN", "DATABRICKS_API_KEY"]:

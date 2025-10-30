@@ -13,6 +13,7 @@ class DatabricksConfigBase(BaseModel):
 
     # MLflow configuration
     mlflow_enabled: bool = False
+    mlflow_experiment_name: Optional[str] = "kasal-crew-execution-traces"
     # MLflow Evaluation configuration
     evaluation_enabled: bool = False
     evaluation_judge_model: Optional[str] = None  # Databricks judge endpoint route, e.g., "databricks:/<endpoint>"
@@ -77,6 +78,7 @@ class DatabricksConfigUpdate(DatabricksConfigBase):
 
     # MLflow configuration
     mlflow_enabled: Optional[bool] = None
+    mlflow_experiment_name: Optional[str] = None
     # MLflow Evaluation configuration
     evaluation_enabled: Optional[bool] = None
     evaluation_judge_model: Optional[str] = None

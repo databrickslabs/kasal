@@ -20,6 +20,7 @@ class DatabricksConfig(Base):
 
     # MLflow configuration
     mlflow_enabled = Column(Boolean, default=False)  # Enable/disable MLflow tracking for this workspace
+    mlflow_experiment_name = Column(String, nullable=True, default="kasal-crew-execution-traces")  # MLflow experiment name
     evaluation_enabled = Column(Boolean, default=False)  # Enable/disable MLflow evaluation for this workspace
     evaluation_judge_model = Column(String, nullable=True)  # Databricks judge endpoint route, e.g., "databricks:/<endpoint>"
 
