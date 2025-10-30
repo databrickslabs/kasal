@@ -171,8 +171,10 @@ class TestDatabricksVectorIndexRepository:
                 mock_session.post.assert_called()
                 call_kwargs = mock_session.post.call_args[1]
                 assert "json" in call_kwargs
-                assert "filters" in call_kwargs["json"]
-                assert call_kwargs["json"]["filters"] == filters
+                assert "filters_json" in call_kwargs["json"]
+                # The filters are JSON-encoded in filters_json
+                import json
+                assert json.loads(call_kwargs["json"]["filters_json"]) == filters
 
     @pytest.mark.asyncio
     async def test_similarity_search_failure(self, repository, mock_auth_token):
