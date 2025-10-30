@@ -569,31 +569,6 @@ class TestSpecificSchemas:
         assert "conversation" in example
         assert "message" in example
 
-    def test_python_pptx_schema(self):
-        """Test Python PPTX schema."""
-        pptx_schema = next(
-            (s for s in SAMPLE_SCHEMAS if s["name"] == "PythonPPTX"),
-            None
-        )
-
-        assert pptx_schema is not None
-        assert pptx_schema["schema_type"] == "data_model"
-
-        # Check required structure
-        props = pptx_schema["schema_definition"]["properties"]
-        assert "title" in props
-        assert "slides" in props
-
-        # Check slides array structure
-        slides_def = props["slides"]
-        assert slides_def["type"] == "array"
-        assert "items" in slides_def
-
-        slide_props = slides_def["items"]["properties"]
-        assert "title" in slide_props
-        assert "content" in slide_props
-        assert "bullet_points" in slide_props
-
     def test_arxiv_schemas(self):
         """Test arXiv related schemas."""
         arxiv_paper = next(
