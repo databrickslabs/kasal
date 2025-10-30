@@ -44,7 +44,9 @@ class DatabricksKnowledgeSearchTool(BaseTool):
     description: str = (
         "Search through uploaded knowledge documents to find relevant information. "
         "Use this tool when you need to find information from documents that have been "
-        "uploaded to the knowledge base. Input should be a specific search query."
+        "uploaded to the knowledge base. Input should be a specific search query. "
+        "IMPORTANT: Documents are chunked - request at least 10-20 results (use limit parameter) "
+        "to get comprehensive information from the document."
     )
     args_schema: Type[BaseModel] = DatabricksKnowledgeSearchInput
 
@@ -101,6 +103,61 @@ class DatabricksKnowledgeSearchTool(BaseTool):
         logger.info(f"  Configured file paths (from tool_configs): {file_paths}")
         logger.info(f"  Agent ID (for access control): {agent_id}")
 
+    def _resolve_file_paths(self, agent_file_paths: List[str]) -> List[str]:
+        """
+        Resolve agent-provided file paths to full volume paths.
+
+        The agent might provide:
+        - Simple filenames: "tt.txt"
+        - Relative paths: "folder/tt.txt"
+        - Full volume paths: "/Volumes/catalog/schema/volume/..."
+
+        We need to match these against configured paths and return full paths.
+
+        Args:
+            agent_file_paths: List of file paths from agent
+
+        Returns:
+            List of resolved full volume paths
+        """
+        if not agent_file_paths:
+            return None
+
+        if not self._configured_file_paths:
+            # No configured paths to match against - return agent paths as-is
+            logger.warning("[TOOL] No configured file paths to resolve against")
+            return agent_file_paths
+
+        resolved_paths = []
+
+        for agent_path in agent_file_paths:
+            # Check if it's already a full volume path
+            if agent_path.startswith("/Volumes/"):
+                resolved_paths.append(agent_path)
+                logger.info(f"[TOOL] Path already full volume path: {agent_path}")
+                continue
+
+            # Try to match against configured paths
+            # Match by filename only (last component of path)
+            agent_filename = agent_path.split("/")[-1] if "/" in agent_path else agent_path
+
+            matched = False
+            for configured_path in self._configured_file_paths:
+                configured_filename = configured_path.split("/")[-1]
+                if configured_filename == agent_filename:
+                    resolved_paths.append(configured_path)
+                    logger.info(f"[TOOL] Resolved '{agent_path}' to '{configured_path}'")
+                    matched = True
+                    break
+
+            if not matched:
+                logger.warning(f"[TOOL] Could not resolve '{agent_path}' to any configured path")
+                # Still add it - let the search service handle it
+                resolved_paths.append(agent_path)
+
+        logger.info(f"[TOOL] Resolved {len(agent_file_paths)} paths to {len(resolved_paths)} full paths")
+        return resolved_paths if resolved_paths else None
+
     def _run(self, query: str, limit: int = 10, file_paths: Optional[List[str]] = None) -> str:
         """
         Run the knowledge search synchronously (required by CrewAI).
@@ -108,14 +165,20 @@ class DatabricksKnowledgeSearchTool(BaseTool):
         Args:
             query: The search query
             limit: Maximum number of results
-            file_paths: Optional file paths filter (from agent call - IGNORED if tool has configured paths)
+            file_paths: Optional file paths filter (from agent call - will be resolved to full paths)
 
         Returns:
             Formatted search results as a string
         """
-        # CRITICAL: Use configured file paths from tool_configs, NOT what the agent passes
-        # The agent might pass just filenames, but we need full paths to match the vector index
-        effective_file_paths = self._configured_file_paths if self._configured_file_paths else file_paths
+        # PRIORITY: If agent provides file_paths, resolve and use those (agent knows what it wants)
+        # FALLBACK: If no file_paths provided, use configured paths from tool_configs
+        # This allows dynamic file selection while maintaining backwards compatibility
+        if file_paths:
+            effective_file_paths = self._resolve_file_paths(file_paths)
+            logger.info(f"[TOOL DEBUG] Using agent-provided file paths (resolved): {effective_file_paths}")
+        else:
+            effective_file_paths = self._configured_file_paths
+            logger.info(f"[TOOL DEBUG] Using configured file paths (tool_configs): {effective_file_paths}")
 
         logger.info("="*80)
         logger.info("[TOOL DEBUG] DatabricksKnowledgeSearchTool._run() called")
@@ -211,17 +274,34 @@ class DatabricksKnowledgeSearchTool(BaseTool):
 
             # CRITICAL FIX: Force remove from sys.modules and reload to get latest code
             # Subprocess inherits cached modules from parent process
-            module_name = 'src.services.databricks_knowledge_service'
-            if module_name in sys.modules:
-                logger.info(f"[TOOL ASYNC DEBUG] Removing {module_name} from sys.modules...")
-                del sys.modules[module_name]
-                logger.info("[TOOL ASYNC DEBUG] Module removed, will import fresh from disk")
+            modules_to_reload = [
+                'src.services.databricks_knowledge_service',
+                'src.services.knowledge_search_service',  # Also reload search service
+                'src.repositories.databricks_vector_index_repository'  # Also reload repository
+            ]
+            for module_name in modules_to_reload:
+                if module_name in sys.modules:
+                    logger.info(f"[TOOL ASYNC DEBUG] Removing {module_name} from sys.modules...")
+                    del sys.modules[module_name]
+            logger.info("[TOOL ASYNC DEBUG] Modules removed, will import fresh from disk")
 
             from src.services.databricks_knowledge_service import DatabricksKnowledgeService
             from src.repositories.databricks_config_repository import DatabricksConfigRepository
             from src.db.session import async_session_factory
+            from src.utils.user_context import UserContext, GroupContext
 
             logger.info("[TOOL ASYNC DEBUG] Imports successful")
+
+            # CRITICAL: Set group context so PAT lookup works
+            # The embedding generation needs group_id to find the PAT token
+            if self._group_id:
+                logger.info(f"[TOOL ASYNC DEBUG] Setting group context for PAT lookup: {self._group_id}")
+                # GroupContext is a dataclass - use group_ids parameter, NOT primary_group_id
+                # primary_group_id is a computed property that returns group_ids[0]
+                group_context = GroupContext(group_ids=[self._group_id])
+                UserContext.set_group_context(group_context)
+                logger.info("[TOOL ASYNC DEBUG] Group context set successfully")
+
             logger.info("[TOOL ASYNC DEBUG] Creating async session...")
 
             # Create a new session for each search (don't cache service with session)
@@ -233,7 +313,7 @@ class DatabricksKnowledgeSearchTool(BaseTool):
                 service = DatabricksKnowledgeService(
                     session=session,
                     group_id=self._group_id,
-                    user_token=None  # Search tool doesn't have user context
+                    user_token=self._user_token  # Pass user token for embedding generation authentication
                 )
 
                 logger.info("[TOOL ASYNC DEBUG] Service created successfully")
