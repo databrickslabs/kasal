@@ -25,14 +25,16 @@ logger = LoggerManager.get_instance().system
 class DatabricksVolumeRepository:
     """Repository for Databricks Unity Catalog Volume operations using WorkspaceClient."""
 
-    def __init__(self, user_token: Optional[str] = None):
+    def __init__(self, user_token: Optional[str] = None, group_id: Optional[str] = None):
         """Initialize the repository with Databricks authentication.
 
         Args:
             user_token: Optional user access token for OBO authentication
+            group_id: Optional group ID for PAT token lookup (multi-tenant isolation)
         """
         self._workspace_client: Optional["WorkspaceClient"] = None
         self._user_token = user_token
+        self._group_id = group_id
         self._executor = ThreadPoolExecutor(max_workers=1)
 
         # Log what authentication method will be used
@@ -40,6 +42,45 @@ class DatabricksVolumeRepository:
             logger.info(f"DatabricksVolumeRepository: Initialized with user token (length: {len(user_token)})")
         else:
             logger.warning("DatabricksVolumeRepository: No user token provided, will use fallback authentication")
+
+        if group_id:
+            logger.info(f"DatabricksVolumeRepository: Group ID set to: {group_id}")
+
+    async def _get_client_with_group_context(
+        self,
+        user_token: Optional[str] = None,
+        operation_name: str = "operation"
+    ) -> tuple[Optional["WorkspaceClient"], Optional[str]]:
+        """
+        Get workspace client with group context set for PAT lookup.
+
+        Args:
+            user_token: Optional user token for OBO
+            operation_name: Operation name for logging
+
+        Returns:
+            Tuple of (client, retry_token)
+        """
+        # If we have a group_id, temporarily set UserContext for PAT lookup
+        if self._group_id:
+            from src.utils.user_context import UserContext, GroupContext
+
+            # Create minimal GroupContext for PAT lookup
+            group_context = GroupContext(
+                group_ids=[self._group_id],
+                group_email=None,
+                access_token=user_token
+            )
+
+            # Set context before auth
+            UserContext.set_group_context(group_context)
+            logger.debug(f"[{operation_name}] Set UserContext with group_id={self._group_id}")
+
+        # Now call the standard auth function
+        return await get_workspace_client_with_fallback(
+            user_token=user_token,
+            operation_name=operation_name
+        )
 
     async def _ensure_client(self) -> bool:
         """Ensure we have a WorkspaceClient instance using centralized authentication."""
@@ -128,7 +169,9 @@ class DatabricksVolumeRepository:
                     error_msg = str(e)
 
                     # Check if this is a scope error and we can retry
-                    if retry_token is not None and is_scope_error(e):
+                    # Local check for "invalid scope" (Databricks Apps OBO token error)
+                    is_invalid_scope = "invalid scope" in error_msg.lower()
+                    if retry_token is not None and (is_scope_error(e) or is_invalid_scope):
                         # Return special marker to trigger retry
                         return {"_scope_error": True, "error": error_msg}
 
@@ -156,8 +199,8 @@ class DatabricksVolumeRepository:
 
         try:
             # First attempt: Try with OBO if available
-            client, retry_token = await get_workspace_client_with_fallback(
-                self._user_token,
+            client, retry_token = await self._get_client_with_group_context(
+                user_token=self._user_token,
                 operation_name="volume_create"
             )
 
@@ -175,7 +218,7 @@ class DatabricksVolumeRepository:
                 logger.info("[VOLUME] Retrying with PAT/SPN authentication (skipping OBO)")
 
                 # Retry with PAT by passing user_token=None
-                client_pat, _ = await get_workspace_client_with_fallback(
+                client_pat, _ = await self._get_client_with_group_context(
                     user_token=None,
                     operation_name="volume_create_retry"
                 )
@@ -364,7 +407,8 @@ class DatabricksVolumeRepository:
         schema: str,
         volume_name: str,
         file_name: str,
-        file_content: bytes
+        file_content: bytes,
+        user_token: Optional[str] = None
     ) -> Dict[str, Any]:
         """
         Upload a file to a Unity Catalog volume using WorkspaceClient.
@@ -377,6 +421,7 @@ class DatabricksVolumeRepository:
             volume_name: Volume name
             file_name: Name of the file to upload
             file_content: Content of the file as bytes
+            user_token: Optional user token for OBO authentication (overrides instance token)
 
         Returns:
             Upload result
@@ -414,7 +459,9 @@ class DatabricksVolumeRepository:
                     error_msg = str(e)
 
                     # Check if this is a scope error and we can retry
-                    if retry_token is not None and is_scope_error(e):
+                    # Local check for "invalid scope" (Databricks Apps OBO token error)
+                    is_invalid_scope = "invalid scope" in error_msg.lower()
+                    if retry_token is not None and (is_scope_error(e) or is_invalid_scope):
                         # Return special marker to trigger retry
                         return {"_scope_error": True, "error": error_msg}
 
@@ -433,14 +480,24 @@ class DatabricksVolumeRepository:
             return await loop.run_in_executor(self._executor, _upload_file)
 
         try:
-            # Ensure volume exists first
+            # Use provided user_token if available, otherwise fall back to instance token
+            effective_token = user_token if user_token is not None else self._user_token
+
+            # Try to ensure volume exists first, but continue even if this fails
+            # (volume might already exist but we lack permission to check/create)
             volume_result = await self.create_volume_if_not_exists(catalog, schema, volume_name)
             if not volume_result["success"]:
-                return volume_result
+                error_msg = volume_result.get("error", "")
+                # If it's a permission/scope error, log warning and continue (volume might exist)
+                if "scope" in error_msg.lower() or "permission" in error_msg.lower() or "forbidden" in error_msg.lower():
+                    logger.warning(f"[UPLOAD] Cannot verify volume exists due to permissions, attempting upload anyway: {error_msg}")
+                else:
+                    # Other errors (catalog/schema doesn't exist, etc.) should fail
+                    return volume_result
 
             # First attempt: Try with OBO if available
-            client, retry_token = await get_workspace_client_with_fallback(
-                self._user_token,
+            client, retry_token = await self._get_client_with_group_context(
+                user_token=effective_token,
                 operation_name="volume_upload"
             )
 
@@ -458,7 +515,7 @@ class DatabricksVolumeRepository:
                 logger.info("[UPLOAD] Retrying with PAT/SPN authentication (skipping OBO)")
 
                 # Retry with PAT by passing user_token=None
-                client_pat, _ = await get_workspace_client_with_fallback(
+                client_pat, _ = await self._get_client_with_group_context(
                     user_token=None,
                     operation_name="volume_upload_retry"
                 )
@@ -578,7 +635,9 @@ class DatabricksVolumeRepository:
                     error_msg = str(e)
 
                     # Check if this is a scope error and we can retry
-                    if retry_token is not None and is_scope_error(e):
+                    # Local check for "invalid scope" (Databricks Apps OBO token error)
+                    is_invalid_scope = "invalid scope" in error_msg.lower()
+                    if retry_token is not None and (is_scope_error(e) or is_invalid_scope):
                         # Return special marker to trigger retry
                         return {"_scope_error": True, "error": error_msg}
 
@@ -604,8 +663,8 @@ class DatabricksVolumeRepository:
 
         try:
             # First attempt: Try with OBO if available
-            client, retry_token = await get_workspace_client_with_fallback(
-                self._user_token,
+            client, retry_token = await self._get_client_with_group_context(
+                user_token=self._user_token,
                 operation_name="volume_download"
             )
 
@@ -623,7 +682,7 @@ class DatabricksVolumeRepository:
                 logger.info("[DOWNLOAD] Retrying with PAT/SPN authentication (skipping OBO)")
 
                 # Retry with PAT by passing user_token=None
-                client_pat, _ = await get_workspace_client_with_fallback(
+                client_pat, _ = await self._get_client_with_group_context(
                     user_token=None,
                     operation_name="volume_download_retry"
                 )
@@ -708,7 +767,9 @@ class DatabricksVolumeRepository:
                     error_msg = str(e)
 
                     # Check if this is a scope error and we can retry
-                    if retry_token is not None and is_scope_error(e):
+                    # Local check for "invalid scope" (Databricks Apps OBO token error)
+                    is_invalid_scope = "invalid scope" in error_msg.lower()
+                    if retry_token is not None and (is_scope_error(e) or is_invalid_scope):
                         # Return special marker to trigger retry
                         return {"_scope_error": True, "error": error_msg}
 
@@ -731,8 +792,8 @@ class DatabricksVolumeRepository:
 
         try:
             # First attempt: Try with OBO if available
-            client, retry_token = await get_workspace_client_with_fallback(
-                self._user_token,
+            client, retry_token = await self._get_client_with_group_context(
+                user_token=self._user_token,
                 operation_name="volume_list"
             )
 
@@ -750,7 +811,7 @@ class DatabricksVolumeRepository:
                 logger.info("[LIST] Retrying with PAT/SPN authentication (skipping OBO)")
 
                 # Retry with PAT by passing user_token=None
-                client_pat, _ = await get_workspace_client_with_fallback(
+                client_pat, _ = await self._get_client_with_group_context(
                     user_token=None,
                     operation_name="volume_list_retry"
                 )
@@ -814,7 +875,9 @@ class DatabricksVolumeRepository:
                     error_msg = str(e)
 
                     # Check if this is a scope error and we can retry
-                    if retry_token is not None and is_scope_error(e):
+                    # Local check for "invalid scope" (Databricks Apps OBO token error)
+                    is_invalid_scope = "invalid scope" in error_msg.lower()
+                    if retry_token is not None and (is_scope_error(e) or is_invalid_scope):
                         # Return special marker to trigger retry
                         return {"_scope_error": True, "error": error_msg}
 
@@ -839,8 +902,8 @@ class DatabricksVolumeRepository:
 
         try:
             # First attempt: Try with OBO if available
-            client, retry_token = await get_workspace_client_with_fallback(
-                self._user_token,
+            client, retry_token = await self._get_client_with_group_context(
+                user_token=self._user_token,
                 operation_name="volume_mkdir"
             )
 
@@ -858,7 +921,7 @@ class DatabricksVolumeRepository:
                 logger.info("[MKDIR] Retrying with PAT/SPN authentication (skipping OBO)")
 
                 # Retry with PAT by passing user_token=None
-                client_pat, _ = await get_workspace_client_with_fallback(
+                client_pat, _ = await self._get_client_with_group_context(
                     user_token=None,
                     operation_name="volume_mkdir_retry"
                 )
@@ -921,7 +984,9 @@ class DatabricksVolumeRepository:
                     error_msg = str(e)
 
                     # Check if this is a scope error and we can retry
-                    if retry_token is not None and is_scope_error(e):
+                    # Local check for "invalid scope" (Databricks Apps OBO token error)
+                    is_invalid_scope = "invalid scope" in error_msg.lower()
+                    if retry_token is not None and (is_scope_error(e) or is_invalid_scope):
                         # Return special marker to trigger retry
                         return {"_scope_error": True, "error": error_msg}
 
@@ -943,8 +1008,8 @@ class DatabricksVolumeRepository:
 
         try:
             # First attempt: Try with OBO if available
-            client, retry_token = await get_workspace_client_with_fallback(
-                self._user_token,
+            client, retry_token = await self._get_client_with_group_context(
+                user_token=self._user_token,
                 operation_name="volume_delete"
             )
 
@@ -962,7 +1027,7 @@ class DatabricksVolumeRepository:
                 logger.info("[DELETE] Retrying with PAT/SPN authentication (skipping OBO)")
 
                 # Retry with PAT by passing user_token=None
-                client_pat, _ = await get_workspace_client_with_fallback(
+                client_pat, _ = await self._get_client_with_group_context(
                     user_token=None,
                     operation_name="volume_delete_retry"
                 )
