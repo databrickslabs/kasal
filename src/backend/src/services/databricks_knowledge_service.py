@@ -40,7 +40,7 @@ class DatabricksKnowledgeService:
         """
         self.session = session
         self.repository = DatabricksConfigRepository(session)
-        self.volume_repository = DatabricksVolumeRepository(user_token=user_token)
+        self.volume_repository = DatabricksVolumeRepository(user_token=user_token, group_id=group_id)
         self.group_id = group_id
         self.created_by_email = created_by_email
         self.user_token = user_token
@@ -179,7 +179,8 @@ class DatabricksKnowledgeService:
                     schema=schema,
                     volume_name=volume,
                     file_name=f"{group_id}/{execution_id}/{date_dir}/{file.filename}" if date_dir else f"{group_id}/{execution_id}/{file.filename}",
-                    file_content=content
+                    file_content=content,
+                    user_token=user_token  # Pass user_token for OBO authentication
                 )
 
                 if upload_result["success"]:
@@ -209,22 +210,20 @@ class DatabricksKnowledgeService:
 
             # Set simulation mode if upload not successful
             if not upload_successful:
-                logger.warning("Missing credentials or using example URL - will simulate upload")
-                logger.warning(f"  Token available: {bool(token)}")
-                logger.warning(f"  Workspace URL: {workspace_url}")
-                logger.warning(f"  Is example URL: {workspace_url == 'https://example.databricks.com'}")
+                logger.warning("Upload failed - authentication error")
+                logger.warning("Check that you have proper Databricks authentication configured")
 
                 logger.info("="*60)
-                logger.info("SIMULATED UPLOAD (not actually uploaded to Databricks)")
-                logger.info(f"Would upload to: {file_path}")
+                logger.info("UPLOAD FAILED - File not uploaded to Databricks")
+                logger.info(f"Target path: {file_path}")
                 logger.info(f"File: {file.filename}, Size: {file_size} bytes")
-                logger.info("To enable REAL uploads:")
-                logger.info("  1. Set DATABRICKS_TOKEN environment variable")
-                logger.info("  2. Set DATABRICKS_HOST environment variable")
-                logger.info("  3. Or configure in Databricks settings page")
+                logger.info("To resolve:")
+                logger.info("  1. Verify OBO token is passed from request headers")
+                logger.info("  2. Check PAT token is configured in API Keys Service")
+                logger.info("  3. Or verify Service Principal credentials")
                 logger.info("="*60)
 
-                upload_method = "simulated"
+                upload_method = "failed"
 
             logger.info(f"Selected agents for knowledge access: {selected_agents}")
 
