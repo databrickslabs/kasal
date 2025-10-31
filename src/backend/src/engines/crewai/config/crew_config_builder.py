@@ -161,22 +161,49 @@ class CrewConfigBuilder:
         crew_config = self.config.get('crew', {})
 
         # Planning LLM
+        group_id = self.config.get('group_id')
         if 'planning_llm' in crew_config:
             try:
-                planning_llm = await LLMManager.get_llm(crew_config['planning_llm'])
+                if group_id:
+                    planning_llm = await LLMManager.configure_crewai_llm(crew_config['planning_llm'], group_id)
+                else:
+                    planning_llm = await LLMManager.get_llm(crew_config['planning_llm'])
                 crew_kwargs['planning_llm'] = planning_llm
                 logger.info(f"Set crew planning LLM to: {crew_config['planning_llm']}")
             except Exception as llm_error:
                 logger.warning(f"Could not create planning LLM for model {crew_config['planning_llm']}: {llm_error}")
+        elif crew_config.get('planning', False):
+            # If planning is enabled but no planning_llm specified, use the default model
+            default_model = self.config.get('model')
+            if default_model and group_id:
+                try:
+                    planning_llm = await LLMManager.configure_crewai_llm(default_model, group_id)
+                    crew_kwargs['planning_llm'] = planning_llm
+                    logger.info(f"Set crew planning LLM to default model: {default_model}")
+                except Exception as llm_error:
+                    logger.warning(f"Could not create default planning LLM for model {default_model}: {llm_error}")
 
         # Reasoning LLM
         if 'reasoning_llm' in crew_config:
             try:
-                reasoning_llm = await LLMManager.get_llm(crew_config['reasoning_llm'])
+                if group_id:
+                    reasoning_llm = await LLMManager.configure_crewai_llm(crew_config['reasoning_llm'], group_id)
+                else:
+                    reasoning_llm = await LLMManager.get_llm(crew_config['reasoning_llm'])
                 crew_kwargs['reasoning_llm'] = reasoning_llm
                 logger.info(f"Set crew reasoning LLM to: {crew_config['reasoning_llm']}")
             except Exception as llm_error:
                 logger.warning(f"Could not create reasoning LLM for model {crew_config['reasoning_llm']}: {llm_error}")
+        elif crew_config.get('reasoning', False):
+            # If reasoning is enabled but no reasoning_llm specified, use the default model
+            default_model = self.config.get('model')
+            if default_model and group_id:
+                try:
+                    reasoning_llm = await LLMManager.configure_crewai_llm(default_model, group_id)
+                    crew_kwargs['reasoning_llm'] = reasoning_llm
+                    logger.info(f"Set crew reasoning LLM to default model: {default_model}")
+                except Exception as llm_error:
+                    logger.warning(f"Could not create default reasoning LLM for model {default_model}: {llm_error}")
 
         return crew_kwargs
 
