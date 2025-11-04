@@ -405,6 +405,7 @@ const ModelConfiguration: React.FC<{ mode?: 'system' | 'workspace' | 'auto' }> =
     setSaving,
     setSearchTerm,
     setError,
+    incrementRefreshKey,
   } = useModelConfig();
   const { enqueueSnackbar } = useSnackbar();
   const [modelToDelete, setModelToDelete] = React.useState<string | null>(null);
@@ -486,6 +487,9 @@ const ModelConfiguration: React.FC<{ mode?: 'system' | 'workspace' | 'auto' }> =
       setModels(updatedModels);
       setCurrentEditModel(null);
       setEditDialogOpen(false);
+
+      // Notify other components that models have changed
+      incrementRefreshKey();
     } catch (err) {
       console.error('Error saving model:', err);
       setError(err instanceof Error ? err.message : 'Failed to save model');
@@ -524,6 +528,9 @@ const ModelConfiguration: React.FC<{ mode?: 'system' | 'workspace' | 'auto' }> =
         { variant: 'success' }
       );
 
+      // Notify other components that models have changed
+      incrementRefreshKey();
+
       // Schedule a background refresh after a delay to ensure consistency
       setTimeout(() => {
         console.log('[ModelConfiguration] Running background refresh after deletion');
@@ -531,6 +538,7 @@ const ModelConfiguration: React.FC<{ mode?: 'system' | 'workspace' | 'auto' }> =
           .then(refreshedModels => {
             console.log('[ModelConfiguration] Background refresh complete, updating models');
             setModels(refreshedModels);
+            incrementRefreshKey();
           })
           .catch(err => {
             console.warn('[ModelConfiguration] Background refresh failed:', err);
@@ -582,6 +590,9 @@ const ModelConfiguration: React.FC<{ mode?: 'system' | 'workspace' | 'auto' }> =
           : t('configuration.models.modelDisabled', { defaultValue: 'Model disabled successfully' }),
         { variant: 'success' }
       );
+
+      // Notify other components that models have changed
+      incrementRefreshKey();
     } catch (err) {
       console.error(`Error toggling model ${key}:`, err);
       setError(err instanceof Error ? err.message : 'Failed to update model status');
@@ -607,6 +618,9 @@ const ModelConfiguration: React.FC<{ mode?: 'system' | 'workspace' | 'auto' }> =
         t('configuration.models.allModelsEnabled', { defaultValue: 'All models have been enabled' }),
         { variant: 'success' }
       );
+
+      // Notify other components that models have changed
+      incrementRefreshKey();
     } catch (err) {
       console.error('Error enabling all models:', err);
       setError(err instanceof Error ? err.message : 'Failed to enable all models');
@@ -634,6 +648,9 @@ const ModelConfiguration: React.FC<{ mode?: 'system' | 'workspace' | 'auto' }> =
         t('configuration.models.allModelsDisabled', { defaultValue: 'All models have been disabled' }),
         { variant: 'success' }
       );
+
+      // Notify other components that models have changed
+      incrementRefreshKey();
     } catch (err) {
       console.error('Error disabling all models:', err);
       setError(err instanceof Error ? err.message : 'Failed to disable all models');
