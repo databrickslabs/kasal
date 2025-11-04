@@ -631,28 +631,28 @@ runs_df = mlflow.search_runs(
 )
 
 if not runs_df.empty:
-    print(f"\\n✅ Found {{{{len(runs_df)}}}} recent runs:")
+    print(f"\\n✅ Found {{len(runs_df)}} recent runs:")
     for idx, row in runs_df.head().iterrows():
-        print(f"   {{{{idx+1}}}}. Run ID: {{{{row['run_id'][:8]}}}}... | Started: {{{{row['start_time']}}}}")
+        print(f"   {{idx+1}}. Run ID: {{row['run_id'][:8]}}... | Started: {{row['start_time']}}")
 
     # Use the most recent run
     latest_run_id = runs_df.iloc[0]["run_id"]
     latest_run = mlflow.get_run(latest_run_id)
 
-    print(f"\\n📊 Using latest run: {{{{latest_run_id}}}}")
-    print(f"   - Experiment: {{{{latest_run.info.experiment_id}}}}")
-    print(f"   - Status: {{{{latest_run.info.status}}}}")
+    print(f"\\n📊 Using latest run: {{latest_run_id}}")
+    print(f"   - Experiment: {{latest_run.info.experiment_id}}")
+    print(f"   - Status: {{latest_run.info.status}}")
 
     # Create evaluation dataset
     # You can customize the ground truth and expected outputs based on your use case
-    eval_data = pd.DataFrame({{{{
+    eval_data = pd.DataFrame({{
         "inputs": [
             "Artificial Intelligence trends in 2025"
         ],
         "ground_truth": [
             "A comprehensive analysis covering AI trends, including generative AI, large language models, multimodal AI, AI safety, and practical applications across industries."
         ]
-    }}}})
+    }})
 
     # Define a function to get predictions from the crew
     def crew_model(inputs):
@@ -686,7 +686,7 @@ if not runs_df.empty:
 
         print("\\n✅ Evaluation complete!")
         print(f"\\n📊 Evaluation Results:")
-        print(f"   - Metrics: {{{{eval_results.metrics}}}}")
+        print(f"   - Metrics: {{eval_results.metrics}}")
 
         # Display evaluation results table
         print("\\n📈 Detailed Results:")
@@ -694,14 +694,14 @@ if not runs_df.empty:
 
         # Log custom metrics to the original run
         with mlflow.start_run(run_id=latest_run_id):
-            mlflow.log_metrics({{{{
+            mlflow.log_metrics({{
                 "custom_evaluation_score": 0.95,  # Replace with your actual scoring logic
                 "task_completion_rate": 1.0
-            }}}})
+            }})
             print("\\n✅ Custom metrics logged to MLflow run")
 
     except Exception as e:
-        print(f"\\n❌ Evaluation failed: {{{{str(e)}}}}")
+        print(f"\\n❌ Evaluation failed: {{str(e)}}")
         print("\\nNote: Make sure you have the required evaluation dependencies:")
         print("   %pip install mlflow[genai] openai")
 
