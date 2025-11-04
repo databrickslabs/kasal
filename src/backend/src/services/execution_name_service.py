@@ -113,17 +113,35 @@ Tasks:
             model_params = await LLMManager.configure_litellm(request.model)
 
             # Generate completion
+            # Note: Some models (like Gemini) may use reasoning_tokens internally before generating output.
+            # We set max_tokens=100 to safely accommodate both reasoning and completion tokens,
+            # ensuring we can generate a full 2-4 word name without hitting token limits.
+            # For models without reasoning tokens, we'll truncate to ensure concise names.
             import litellm
             response = await litellm.acompletion(
                 **model_params,
                 messages=messages,
                 temperature=0.7,
-                max_tokens=20
+                max_tokens=100  # Increased to prevent truncation of 2-4 word names
             )
-            
+
             # Extract and clean the name
             name = response["choices"][0]["message"]["content"].strip()
             name = name.replace('"', '').replace("'", "")
+
+            # Check if the model used reasoning tokens (e.g., Gemini models)
+            usage = response.get('usage', {})
+            reasoning_tokens = usage.get('reasoning_tokens', 0)
+
+            if reasoning_tokens == 0:
+                # Model didn't use reasoning tokens, so we should ensure the name is concise
+                # Truncate to first 4 words if longer (2-4 word requirement)
+                words = name.split()
+                if len(words) > 4:
+                    name = " ".join(words[:4])
+                    logger.info(f"Truncated name to 4 words (no reasoning tokens used): '{name}'")
+            else:
+                logger.info(f"Model used {reasoning_tokens} reasoning tokens, keeping full response: '{name}'")
             
             # Log the interaction
             try:
