@@ -481,7 +481,7 @@ class TestCrewPreparation:
         crew_preparation.config["crew"]["planning_llm"] = "gpt-3.5-turbo"
         crew_preparation.config["crew"]["reasoning_llm"] = "gpt-4"
         crew_preparation.config["group_id"] = "test_group_123"  # Required for planning/reasoning LLMs
-        
+
         mock_crew = MagicMock()
         mock_planning_llm = MagicMock()
         mock_reasoning_llm = MagicMock()
@@ -492,29 +492,30 @@ class TestCrewPreparation:
              patch('src.core.llm_manager.LLMManager.configure_crewai_llm') as mock_configure_llm, \
              patch('src.services.api_keys_service.ApiKeysService.get_provider_api_key', return_value=None):
 
-            # Configure LLMManager.get_llm for planning and reasoning (no group_id parameter)
-            mock_get_llm.side_effect = lambda model: {
-                "gpt-3.5-turbo": mock_planning_llm,
-                "gpt-4": mock_reasoning_llm
-            }[model]
+            # Configure LLMManager.configure_crewai_llm to return different LLMs based on model
+            # When group_id is present, configure_crewai_llm is called instead of get_llm
+            def configure_llm_side_effect(model, group_id):
+                if model == "gpt-3.5-turbo":
+                    return mock_planning_llm
+                elif model == "gpt-4":
+                    return mock_reasoning_llm
+                return mock_manager_llm
 
-            # Configure LLMManager.configure_crewai_llm for manager LLM (has group_id parameter)
-            mock_configure_llm.return_value = mock_manager_llm
+            mock_configure_llm.side_effect = configure_llm_side_effect
 
             result = await crew_preparation._create_crew()
 
             assert result is True
 
-            # Verify LLMManager.get_llm was called for planning and reasoning LLMs
-            assert mock_get_llm.call_count == 2
-            mock_get_llm.assert_any_call("gpt-3.5-turbo")
-            mock_get_llm.assert_any_call("gpt-4")
+            # Verify LLMManager.configure_crewai_llm was called for planning, reasoning, and manager LLMs
+            # Since group_id is present, configure_crewai_llm is used instead of get_llm
+            assert mock_configure_llm.call_count == 3  # planning + reasoning + manager
+            mock_configure_llm.assert_any_call("gpt-3.5-turbo", "test_group_123")  # planning
+            mock_configure_llm.assert_any_call("gpt-4", "test_group_123")  # reasoning and manager
 
-            # Verify LLMManager.configure_crewai_llm was called for manager LLM with gpt-4
-            # Note: When planning=True, the configured model is used as manager_llm
-            assert mock_configure_llm.call_count == 1
-            mock_configure_llm.assert_any_call("gpt-4", "test_group_123")
-            
+            # Verify get_llm was NOT called (since group_id is present)
+            assert mock_get_llm.call_count == 0
+
             # Verify crew was created with planning and reasoning LLM objects
             call_kwargs = mock_crew_class.call_args[1]
             assert call_kwargs['planning'] is True
