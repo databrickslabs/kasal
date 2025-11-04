@@ -16,9 +16,12 @@ import {
   Schedule as ScheduleIcon,
   Assessment as LogsIcon,
   History as HistoryIcon,
+  FileDownload as FileDownloadIcon,
 } from '@mui/icons-material';
 import { useFlowConfigStore } from '../../store/flowConfig';
 import { usePermissionStore } from '../../store/permissions';
+import { useTabManagerStore } from '../../store/tabManager';
+import ExportCrewDialog from '../CrewExport/ExportCrewDialog';
 
 interface SidebarItem {
   id: string;
@@ -61,11 +64,21 @@ const RightSidebar: React.FC<RightSidebarProps> = ({
 }) => {
   const [animateAIAssistant, setAnimateAIAssistant] = useState(true);
   const [chatOpenedByClick, setChatOpenedByClick] = useState(false);
+  const [isExportDialogOpen, setIsExportDialogOpen] = useState(false);
+
   const { crewAIFlowEnabled } = useFlowConfigStore();
 
   // Get user permissions
   const { userRole } = usePermissionStore();
   const isOperator = userRole === 'operator';
+  const isAdmin = userRole === 'admin';
+  const isEditor = userRole === 'editor';
+
+  // Get active tab's crew info from tabManager
+  const { getActiveTab } = useTabManagerStore();
+  const activeTab = getActiveTab();
+  const savedCrewId = activeTab?.savedCrewId;
+  const savedCrewName = activeTab?.savedCrewName || 'Unnamed Crew';
 
 
   useEffect(() => {
@@ -119,8 +132,23 @@ const RightSidebar: React.FC<RightSidebarProps> = ({
         tooltip: 'Save Crew',
         onClick: onSaveCrewClick,
         disabled: false
+      },
+      {
+        id: 'separator-export',
+        isSeparator: true
+      },
+      {
+        id: 'export-notebook',
+        icon: <FileDownloadIcon />,
+        tooltip: savedCrewId ? 'Export To Notebook' : 'Save crew first to export',
+        onClick: () => setIsExportDialogOpen(true),
+        disabled: !savedCrewId
       }
     ] : []),
+    {
+      id: 'separator-catalog',
+      isSeparator: true
+    },
     {
       id: 'open-catalog',
       icon: <MenuBookIcon />,
@@ -257,6 +285,16 @@ const RightSidebar: React.FC<RightSidebarProps> = ({
           ))}
         </Paper>
       </Box>
+
+      {/* Export Dialog */}
+      {savedCrewId && (
+        <ExportCrewDialog
+          open={isExportDialogOpen}
+          onClose={() => setIsExportDialogOpen(false)}
+          crewId={savedCrewId}
+          crewName={savedCrewName}
+        />
+      )}
     </>
   );
 };
