@@ -32,6 +32,7 @@ import { useWorkflowStore } from '../../store/workflow';
 import { useCrewExecutionStore } from '../../store/crewExecution';
 import { useChatMessagesStore } from '../../store/chatMessagesStore';
 import { useKnowledgeConfigStore } from '../../store/knowledgeConfigStore';
+import { useModelConfigStore } from '../../store/modelConfig';
 import { Node as FlowNode } from 'reactflow';
 import { ChatHistoryService } from '../../api/ChatHistoryService';
 import { ModelService } from '../../api/ModelService';
@@ -101,6 +102,9 @@ const WorkflowChat: React.FC<WorkflowChatProps> = ({
     isKnowledgeSourceEnabled,
     checkConfiguration,
   } = useKnowledgeConfigStore();
+
+  // Use Zustand store for model configuration
+  const { refreshKey } = useModelConfigStore();
 
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
@@ -299,7 +303,7 @@ const WorkflowChat: React.FC<WorkflowChatProps> = ({
     }
   }, [isVisible]);
 
-  // Fetch models when component mounts
+  // Fetch models when component mounts or when refreshKey changes
   useEffect(() => {
     const fetchModels = async () => {
       setIsLoadingModels(true);
@@ -323,7 +327,7 @@ const WorkflowChat: React.FC<WorkflowChatProps> = ({
       }
     };
     fetchModels();
-  }, []);
+  }, [refreshKey]);
 
   // Initialize knowledge configuration on mount
   useEffect(() => {
@@ -1578,18 +1582,26 @@ const WorkflowChat: React.FC<WorkflowChatProps> = ({
                       >
                         {(() => {
                           const modelName = models[selectedModel]?.name || selectedModel;
-                          if (modelName.includes('databricks-gpt-oss-120b')) return 'GPT OSS 120B';
-                          if (modelName.includes('databricks-gpt-oss-20b')) return 'GPT OSS 20B';
-                          if (modelName.includes('databricks-llama-4-maverick')) return 'Llama 4';
-                          if (modelName.includes('databricks-meta-llama-3-1-405b-instruct')) return 'Llama 3';
-                          if (modelName.includes('databricks-meta-llama-3-3-70b-instruct')) return 'Llama 3';
-                          if (modelName.includes('databricks-llama-70b')) return 'Llama 3 70B';
-                          if (modelName.includes('databricks-llama-405b')) return 'Llama 3 405B';
-                          if (modelName.includes('gpt-4')) return 'GPT-4';
-                          if (modelName.includes('gpt-3.5')) return 'GPT-3.5';
-                          if (modelName.includes('claude')) return 'Claude';
-                          if (modelName.length > 15) return modelName.substring(0, 15) + '...';
-                          return modelName;
+                          // Remove databricks- prefix for cleaner display
+                          const displayName = modelName.replace(/^databricks-/, '');
+
+                          // Special cases for better readability
+                          if (displayName.includes('gpt-oss-120b')) return 'GPT OSS 120B';
+                          if (displayName.includes('gpt-oss-20b')) return 'GPT OSS 20B';
+                          if (displayName.includes('llama-4-maverick')) return 'Llama 4';
+                          if (displayName.includes('meta-llama-3-1-405b')) return 'Llama 3.1 405B';
+                          if (displayName.includes('meta-llama-3-3-70b')) return 'Llama 3.3 70B';
+                          if (displayName.includes('gpt-5-mini')) return 'GPT-5 Mini';
+                          if (displayName.includes('gpt-5-nano')) return 'GPT-5 Nano';
+                          if (displayName.includes('gpt-5')) return 'GPT-5';
+                          if (displayName.includes('gemini-2-5-pro')) return 'Gemini 2.5 Pro';
+                          if (displayName.includes('gemini-2-5-flash')) return 'Gemini 2.5 Flash';
+                          if (displayName.includes('claude-sonnet-4-5')) return 'Claude 4.5';
+                          if (displayName.includes('claude-sonnet-4')) return 'Claude 4';
+                          if (displayName.includes('qwen3-next-80b')) return 'Qwen3 80B';
+                          if (displayName.includes('gemma-3-12b')) return 'Gemma 3 12B';
+                          if (displayName.length > 15) return displayName.substring(0, 15) + '...';
+                          return displayName;
                         })()}
                       </Typography>
                       <KeyboardArrowDownIcon sx={{ fontSize: 14 }} />
@@ -1645,7 +1657,28 @@ const WorkflowChat: React.FC<WorkflowChatProps> = ({
                         >
                           <Box sx={{ width: '100%' }}>
                             <Typography variant="body2" sx={{ fontSize: '0.813rem' }}>
-                              {model.name}
+                              {(() => {
+                                // Remove databricks- prefix for cleaner display
+                                const displayName = model.name.replace(/^databricks-/, '');
+
+                                // Special cases for better readability
+                                if (displayName.includes('gpt-oss-120b')) return 'GPT OSS 120B';
+                                if (displayName.includes('gpt-oss-20b')) return 'GPT OSS 20B';
+                                if (displayName.includes('llama-4-maverick')) return 'Llama 4';
+                                if (displayName.includes('meta-llama-3-1-405b')) return 'Llama 3.1 405B';
+                                if (displayName.includes('meta-llama-3-3-70b')) return 'Llama 3.3 70B';
+                                if (displayName.includes('gpt-5-mini')) return 'GPT-5 Mini';
+                                if (displayName.includes('gpt-5-nano')) return 'GPT-5 Nano';
+                                if (displayName.includes('gpt-5')) return 'GPT-5';
+                                if (displayName.includes('gemini-2-5-pro')) return 'Gemini 2.5 Pro';
+                                if (displayName.includes('gemini-2-5-flash')) return 'Gemini 2.5 Flash';
+                                if (displayName.includes('claude-sonnet-4-5')) return 'Claude Sonnet 4.5';
+                                if (displayName.includes('claude-3-7-sonnet')) return 'Claude 3.7 Sonnet';
+                                if (displayName.includes('claude-sonnet-4')) return 'Claude Sonnet 4';
+                                if (displayName.includes('qwen3-next-80b')) return 'Qwen3 Next 80B';
+                                if (displayName.includes('gemma-3-12b')) return 'Gemma 3 12B';
+                                return displayName;
+                              })()}
                             </Typography>
                             {model.provider && (
                               <Typography
