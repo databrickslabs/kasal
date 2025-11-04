@@ -2,6 +2,7 @@ litellm==1.74.9
 asyncpg
 pg8000  # Pure Python PostgreSQL driver for synchronous operations in subprocesses
 aiosqlite
+aiofiles>=23.0.0  # For async file I/O operations
 pydantic-settings
 cryptography
 python-multipart
