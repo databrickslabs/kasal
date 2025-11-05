@@ -7,6 +7,7 @@ import hashlib
 from typing import TYPE_CHECKING, Any, ClassVar, Dict, List, Optional, Type, Union
 from datetime import datetime
 import time
+from concurrent.futures import ThreadPoolExecutor
 
 import aiohttp
 from crewai.tools import BaseTool
@@ -14,9 +15,43 @@ from pydantic import BaseModel, Field, PrivateAttr, model_validator
 
 logger = logging.getLogger(__name__)
 
+# Thread pool executor for running async operations from sync context
+_EXECUTOR = ThreadPoolExecutor(max_workers=5)
+
 # Global execution tracking dictionaries (outside of class to avoid Pydantic field interpretation)
 _GLOBAL_RUN_EXECUTIONS: Dict[str, str] = {}
 _GLOBAL_CREATE_EXECUTIONS: Dict[str, str] = {}
+
+
+def _run_async_in_sync_context(coro):
+    """
+    Safely run an async coroutine from a synchronous context.
+
+    This handles the case where we're already in an event loop (e.g., FastAPI)
+    and need to execute async code from a sync function (e.g., CrewAI tool's _run method).
+
+    Args:
+        coro: The coroutine to execute
+
+    Returns:
+        The result of the coroutine execution
+    """
+    try:
+        # Try to get the current running loop
+        loop = asyncio.get_running_loop()
+        # We're already in an async context, run in executor to avoid nested loop issues
+        logger.debug("Detected running event loop, using ThreadPoolExecutor")
+        future = _EXECUTOR.submit(asyncio.run, coro)
+        return future.result()
+    except RuntimeError:
+        # No event loop running, we can safely create one
+        logger.debug("No running event loop detected, creating new loop")
+        loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(loop)
+        try:
+            return loop.run_until_complete(coro)
+        finally:
+            loop.close()
 
 
 class DatabricksJobsToolSchema(BaseModel):
@@ -631,80 +666,74 @@ class DatabricksJobsTool(BaseTool):
                 name_filter=name_filter,
                 job_params=job_params
             )
-            
-            # Execute the requested action
-            loop = asyncio.new_event_loop()
-            asyncio.set_event_loop(loop)
-            
-            try:
-                if action == "list":
-                    result = loop.run_until_complete(self._list_jobs(limit, name_filter))
-                    self._action_usage_counts[action] += 1
-                elif action == "list_my_jobs":
-                    result = loop.run_until_complete(self._list_my_jobs(limit, name_filter))
-                    self._action_usage_counts[action] += 1
-                elif action == "get":
-                    result = loop.run_until_complete(self._get_job(job_id))
-                    self._action_usage_counts[action] += 1
-                elif action == "get_notebook":
-                    result = loop.run_until_complete(self._get_notebook_content(job_id))
-                    self._action_usage_counts[action] += 1
-                elif action == "run":
-                    result = loop.run_until_complete(self._run_job(job_id, job_params))
-                    
-                    # SINGLE EXECUTION TRACKING: Track successful run execution
-                    if result and "Successfully triggered job" in result:
-                        # Extract run_id from the result
-                        import re
-                        run_id_match = re.search(r'Run ID: (\d+)', result)
-                        if run_id_match:
-                            new_run_id = run_id_match.group(1)
-                            param_hash = DatabricksJobsTool._deterministic_hash(job_params) if job_params else 'no_params'
-                            execution_key = f"run_{job_id}_{param_hash}"
-                            _GLOBAL_RUN_EXECUTIONS[execution_key] = new_run_id
-                            self.current_usage_count += 1
-                            self._action_usage_counts[action] += 1
-                            logger.info(f"[SINGLE_EXECUTION] Tracked successful run: job_id={job_id}, run_id={new_run_id}, action_usage={self._action_usage_counts[action]}, total_tracked_runs={len(_GLOBAL_RUN_EXECUTIONS)}")
-                            
-                            # Add execution tracking info to result
-                            result += f"\n\n🔒 EXECUTION TRACKING: This tool will prevent duplicate runs of this job with these parameters."
-                            action_limit = self._action_limits.get(action)
-                            if action_limit is not None:
-                                result += f"\n📊 Action Usage: {action} {self._action_usage_counts[action]}/{action_limit}"
-                            else:
-                                result += f"\n📊 Action Usage: {action} {self._action_usage_counts[action]}/unlimited"
-                        
-                elif action == "monitor":
-                    result = loop.run_until_complete(self._monitor_run(run_id))
-                    self._action_usage_counts[action] += 1
-                elif action == "create":
-                    result = loop.run_until_complete(self._create_job(job_config))
-                    
-                    # SINGLE EXECUTION TRACKING: Track successful job creation
-                    if result and "Successfully created job" in result:
-                        # Extract job_id from the result
-                        import re
-                        job_id_match = re.search(r'Job ID: (\d+)', result)
-                        if job_id_match:
-                            new_job_id = job_id_match.group(1)
-                            config_hash = DatabricksJobsTool._deterministic_hash(job_config) if job_config else 'no_config'
-                            execution_key = f"create_{config_hash}"
-                            _GLOBAL_CREATE_EXECUTIONS[execution_key] = new_job_id
-                            self.current_usage_count += 1
-                            self._action_usage_counts[action] += 1
-                            logger.info(f"[SINGLE_EXECUTION] Tracked successful creation: job_name={job_config.get('name', 'Unknown')}, job_id={new_job_id}, action_usage={self._action_usage_counts[action]}, total_tracked_creates={len(_GLOBAL_CREATE_EXECUTIONS)}")
-                            
-                            # Add execution tracking info to result
-                            result += f"\n\n🔒 EXECUTION TRACKING: This tool will prevent duplicate creation of jobs with this configuration."
-                            action_limit = self._action_limits.get(action)
-                            if action_limit is not None:
-                                result += f"\n📊 Action Usage: {action} {self._action_usage_counts[action]}/{action_limit}"
-                            else:
-                                result += f"\n📊 Action Usage: {action} {self._action_usage_counts[action]}/unlimited"
-                else:
-                    result = f"Error: Unknown action '{action}'"
-            finally:
-                loop.close()
+
+            # Execute the requested action using helper function
+            if action == "list":
+                result = _run_async_in_sync_context(self._list_jobs(limit, name_filter))
+                self._action_usage_counts[action] += 1
+            elif action == "list_my_jobs":
+                result = _run_async_in_sync_context(self._list_my_jobs(limit, name_filter))
+                self._action_usage_counts[action] += 1
+            elif action == "get":
+                result = _run_async_in_sync_context(self._get_job(job_id))
+                self._action_usage_counts[action] += 1
+            elif action == "get_notebook":
+                result = _run_async_in_sync_context(self._get_notebook_content(job_id))
+                self._action_usage_counts[action] += 1
+            elif action == "run":
+                result = _run_async_in_sync_context(self._run_job(job_id, job_params))
+
+                # SINGLE EXECUTION TRACKING: Track successful run execution
+                if result and "Successfully triggered job" in result:
+                    # Extract run_id from the result
+                    import re
+                    run_id_match = re.search(r'Run ID: (\d+)', result)
+                    if run_id_match:
+                        new_run_id = run_id_match.group(1)
+                        param_hash = DatabricksJobsTool._deterministic_hash(job_params) if job_params else 'no_params'
+                        execution_key = f"run_{job_id}_{param_hash}"
+                        _GLOBAL_RUN_EXECUTIONS[execution_key] = new_run_id
+                        self.current_usage_count += 1
+                        self._action_usage_counts[action] += 1
+                        logger.info(f"[SINGLE_EXECUTION] Tracked successful run: job_id={job_id}, run_id={new_run_id}, action_usage={self._action_usage_counts[action]}, total_tracked_runs={len(_GLOBAL_RUN_EXECUTIONS)}")
+
+                        # Add execution tracking info to result
+                        result += f"\n\n🔒 EXECUTION TRACKING: This tool will prevent duplicate runs of this job with these parameters."
+                        action_limit = self._action_limits.get(action)
+                        if action_limit is not None:
+                            result += f"\n📊 Action Usage: {action} {self._action_usage_counts[action]}/{action_limit}"
+                        else:
+                            result += f"\n📊 Action Usage: {action} {self._action_usage_counts[action]}/unlimited"
+
+            elif action == "monitor":
+                result = _run_async_in_sync_context(self._monitor_run(run_id))
+                self._action_usage_counts[action] += 1
+            elif action == "create":
+                result = _run_async_in_sync_context(self._create_job(job_config))
+
+                # SINGLE EXECUTION TRACKING: Track successful job creation
+                if result and "Successfully created job" in result:
+                    # Extract job_id from the result
+                    import re
+                    job_id_match = re.search(r'Job ID: (\d+)', result)
+                    if job_id_match:
+                        new_job_id = job_id_match.group(1)
+                        config_hash = DatabricksJobsTool._deterministic_hash(job_config) if job_config else 'no_config'
+                        execution_key = f"create_{config_hash}"
+                        _GLOBAL_CREATE_EXECUTIONS[execution_key] = new_job_id
+                        self.current_usage_count += 1
+                        self._action_usage_counts[action] += 1
+                        logger.info(f"[SINGLE_EXECUTION] Tracked successful creation: job_name={job_config.get('name', 'Unknown')}, job_id={new_job_id}, action_usage={self._action_usage_counts[action]}, total_tracked_creates={len(_GLOBAL_CREATE_EXECUTIONS)}")
+
+                        # Add execution tracking info to result
+                        result += f"\n\n🔒 EXECUTION TRACKING: This tool will prevent duplicate creation of jobs with this configuration."
+                        action_limit = self._action_limits.get(action)
+                        if action_limit is not None:
+                            result += f"\n📊 Action Usage: {action} {self._action_usage_counts[action]}/{action_limit}"
+                        else:
+                            result += f"\n📊 Action Usage: {action} {self._action_usage_counts[action]}/unlimited"
+            else:
+                result = f"Error: Unknown action '{action}'"
             
             total_time = time.time() - start_time
             logger.info(f"Action '{action}' completed in {total_time:.3f}s")
