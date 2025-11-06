@@ -38,6 +38,9 @@ const ExportCrewDialog: React.FC<ExportCrewDialogProps> = ({
   const [options, setOptions] = useState<ExportOptions>({
     include_custom_tools: true,
     include_comments: true,
+    include_tracing: true,
+    include_evaluation: true,
+    include_deployment: true,
     model_override: ''
   });
   const [isExporting, setIsExporting] = useState(false);
@@ -72,8 +75,8 @@ const ExportCrewDialog: React.FC<ExportCrewDialogProps> = ({
         options
       });
 
-      // Then, download the file
-      const blob = await CrewExportService.downloadExport(crewId, exportFormat);
+      // Then, download the file with the same options
+      const blob = await CrewExportService.downloadExport(crewId, exportFormat, options);
 
       // Determine filename
       const filename = `${exportResponse.metadata.sanitized_name}.ipynb`;
@@ -156,6 +159,40 @@ const ExportCrewDialog: React.FC<ExportCrewDialogProps> = ({
                   />
                 }
                 label="Add explanatory comments"
+              />
+            </Box>
+          </FormControl>
+
+          {/* Databricks Notebook Features */}
+          <FormControl component="fieldset">
+            <FormLabel component="legend">Notebook Features</FormLabel>
+            <Box sx={{ display: 'flex', flexDirection: 'column', gap: 1, mt: 1 }}>
+              <FormControlLabel
+                control={
+                  <Checkbox
+                    checked={options.include_tracing ?? true}
+                    onChange={handleOptionChange('include_tracing')}
+                  />
+                }
+                label="Include MLflow tracing/autolog"
+              />
+              <FormControlLabel
+                control={
+                  <Checkbox
+                    checked={options.include_evaluation ?? true}
+                    onChange={handleOptionChange('include_evaluation')}
+                  />
+                }
+                label="Include evaluation metrics"
+              />
+              <FormControlLabel
+                control={
+                  <Checkbox
+                    checked={options.include_deployment ?? true}
+                    onChange={handleOptionChange('include_deployment')}
+                  />
+                }
+                label="Include deployment code"
               />
             </Box>
           </FormControl>

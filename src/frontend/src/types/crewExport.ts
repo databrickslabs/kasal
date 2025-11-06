@@ -24,6 +24,10 @@ export interface ExportOptions {
   include_comments?: boolean;
   include_tests?: boolean;
   model_override?: string;
+  // Databricks notebook options
+  include_tracing?: boolean;
+  include_evaluation?: boolean;
+  include_deployment?: boolean;
 }
 
 export interface CrewExportRequest {
