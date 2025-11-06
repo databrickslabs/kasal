@@ -37,13 +37,24 @@ export class CrewExportService {
    */
   static async downloadExport(
     crewId: string,
-    format: ExportFormat
+    format: ExportFormat,
+    options?: {
+      include_custom_tools?: boolean;
+      include_comments?: boolean;
+      include_tracing?: boolean;
+      include_evaluation?: boolean;
+      include_deployment?: boolean;
+      model_override?: string;
+    }
   ): Promise<Blob> {
     try {
       const response = await API.get(
         `/crews/${crewId}/export/download`,
         {
-          params: { format },
+          params: {
+            format,
+            ...(options || {})
+          },
           responseType: 'blob'
         }
       );

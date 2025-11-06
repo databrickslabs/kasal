@@ -147,7 +147,8 @@ class CodeGenerator:
         crew_name: str,
         sample_inputs: Optional[Dict[str, Any]] = None,
         include_comments: bool = True,
-        for_notebook: bool = False
+        for_notebook: bool = False,
+        include_tracing: bool = True
     ) -> str:
         """
         Generate main.py content
@@ -157,6 +158,7 @@ class CodeGenerator:
             sample_inputs: Sample input parameters
             include_comments: Whether to include explanatory comments
             for_notebook: Whether this is for a notebook
+            include_tracing: Whether to include MLflow tracing (for_notebook only)
 
         Returns:
             Python code for main execution
@@ -199,21 +201,42 @@ class CodeGenerator:
             code_parts.append('    print()\n')
             code_parts.append('    \n')
             code_parts.append('    try:\n')
-            code_parts.append('        # Execute crew within MLflow run for tracking\n')
             code_parts.append('        print("🔄 Executing crew tasks...")\n')
             code_parts.append('        \n')
-            code_parts.append('        # Start MLflow run to ensure it can be found by evaluation\n')
-            code_parts.append('        with mlflow.start_run() as run:\n')
-            code_parts.append('            # Log input parameters\n')
-            code_parts.append('            mlflow.log_params(inputs)\n')
-            code_parts.append('            \n')
-            code_parts.append('            # Execute crew (autolog will capture traces)\n')
-            code_parts.append('            result = crew.kickoff(inputs=inputs)\n')
-            code_parts.append('            \n')
-            code_parts.append('            # Log result as artifact\n')
-            code_parts.append('            mlflow.log_text(str(result), "crew_output.txt")\n')
-            code_parts.append('            \n')
-            code_parts.append('            print(f"\\n📊 MLflow Run ID: {run.info.run_id}")\n')
+
+            if include_tracing:
+                # MLflow tracking enabled
+                code_parts.append('        # Execute crew within MLflow run for tracking\n')
+                code_parts.append('        # Check if there is already an active run\n')
+                code_parts.append('        active_run = mlflow.active_run()\n')
+                code_parts.append('        \n')
+                code_parts.append('        if active_run:\n')
+                code_parts.append('            # Use existing run (e.g., when called from evaluation)\n')
+                code_parts.append('            print(f"Using existing MLflow run: {active_run.info.run_id}")\n')
+                code_parts.append('            mlflow.log_params(inputs)\n')
+                code_parts.append('            result = crew.kickoff(inputs=inputs)\n')
+                code_parts.append('            mlflow.log_text(str(result), "crew_output.txt")\n')
+                code_parts.append('            run_id = active_run.info.run_id\n')
+                code_parts.append('        else:\n')
+                code_parts.append('            # Start new MLflow run\n')
+                code_parts.append('            with mlflow.start_run() as run:\n')
+                code_parts.append('                # Log input parameters\n')
+                code_parts.append('                mlflow.log_params(inputs)\n')
+                code_parts.append('                \n')
+                code_parts.append('                # Execute crew (autolog will capture traces)\n')
+                code_parts.append('                result = crew.kickoff(inputs=inputs)\n')
+                code_parts.append('                \n')
+                code_parts.append('                # Log result as artifact\n')
+                code_parts.append('                mlflow.log_text(str(result), "crew_output.txt")\n')
+                code_parts.append('                \n')
+                code_parts.append('                run_id = run.info.run_id\n')
+                code_parts.append('        \n')
+                code_parts.append('        print(f"\\n📊 MLflow Run ID: {run_id}")\n')
+            else:
+                # No MLflow tracking - just execute crew
+                code_parts.append('        # Execute crew directly (no MLflow tracking)\n')
+                code_parts.append('        result = crew.kickoff(inputs=inputs)\n')
+
             code_parts.append('        \n')
             code_parts.append('        # Print results\n')
             code_parts.append('        print()\n')
@@ -383,6 +406,33 @@ class CodeGenerator:
 
         return code
 
+    def _get_tool_instantiation(self, tool_name: str) -> Optional[str]:
+        """
+        Get the instantiation code for a tool by its name.
+
+        Args:
+            tool_name: Name of the tool (e.g., "PerplexityTool", "SerperDevTool")
+
+        Returns:
+            Instantiation code string (e.g., "PerplexitySearchTool()") or None if unknown
+        """
+        # Map tool names to their instantiation code
+        tool_mapping = {
+            "PerplexityTool": "PerplexitySearchTool()",
+            "SerperDevTool": "SerperDevTool()",
+            "ScrapeWebsiteTool": "ScrapeWebsiteTool()",
+            "DallETool": "DallETool()",
+            "GenieTool": "GenieTool()",
+        }
+
+        instantiation = tool_mapping.get(tool_name)
+        if instantiation:
+            logger.info(f"Mapped tool '{tool_name}' to instantiation: {instantiation}")
+            return instantiation
+        else:
+            logger.warning(f"Unknown tool name '{tool_name}' - no instantiation mapping found")
+            return None
+
     def _generate_notebook_crew_code(
         self,
         crew_name: str,
@@ -495,6 +545,18 @@ class CodeGenerator:
             code_parts.append(f'            context_tasks.append(task_map[ctx_task_name])\n')
             code_parts.append(f'    {task_name}_config["context"] = context_tasks\n')
             code_parts.append(f'\n')
+
+            # Instantiate tools if present
+            task_tools = task.get('tools', [])
+            if task_tools:
+                code_parts.append(f'# Instantiate tools for {task_name}\n')
+                code_parts.append(f'{task_name}_tools = []\n')
+                for tool_name in task_tools:
+                    tool_instance = self._get_tool_instantiation(tool_name)
+                    if tool_instance:
+                        code_parts.append(f'{task_name}_tools.append({tool_instance})\n')
+                code_parts.append(f'{task_name}_config["tools"] = {task_name}_tools\n')
+                code_parts.append(f'\n')
 
             code_parts.append(f'{task_name} = Task(**{task_name}_config)\n')
             code_parts.append(f'task_map[\'{task_name}\'] = {task_name}\n')

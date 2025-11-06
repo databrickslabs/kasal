@@ -27,6 +27,11 @@ class ExportOptions(BaseModel):
     model_override: Optional[str] = Field(None, description="Override LLM model for all agents")
     include_memory_config: bool = Field(True, description="Include memory backend configuration")
 
+    # Databricks notebook options
+    include_tracing: bool = Field(True, description="Include MLflow tracing/autolog (databricks_notebook only)")
+    include_evaluation: bool = Field(True, description="Include MLflow evaluation cell (databricks_notebook only)")
+    include_deployment: bool = Field(True, description="Include model deployment cell (databricks_notebook only)")
+
 
 class CrewExportRequest(BaseModel):
     """Request to export a crew"""

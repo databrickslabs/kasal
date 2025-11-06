@@ -95,6 +95,9 @@ async def export_crew(
     Returns:
         Export result with files/notebook and metadata
     """
+    # Log the export request options for debugging
+    logger.info(f"Export request for crew {crew_id}: format={request.export_format}, options={request.options}")
+
     # Check permissions - only editors and admins can export
     if not check_role_in_context(group_context, ["admin", "editor"]):
         raise HTTPException(
@@ -141,7 +144,13 @@ async def download_export(
     crew_id: str,
     service: ExportServiceDep,
     group_context: GroupContextDep,
-    format: ExportFormat = Query(..., description="Export format")
+    format: ExportFormat = Query(..., description="Export format"),
+    include_custom_tools: bool = Query(True, description="Include custom tool implementations"),
+    include_comments: bool = Query(True, description="Add explanatory comments"),
+    include_tracing: bool = Query(True, description="Include MLflow tracing"),
+    include_evaluation: bool = Query(True, description="Include evaluation metrics"),
+    include_deployment: bool = Query(True, description="Include deployment code"),
+    model_override: str = Query(None, description="Override LLM model")
 ):
     """
     Download exported crew as file.
@@ -181,11 +190,24 @@ async def download_export(
         )
 
     try:
+        # Create options from query parameters
+        from src.schemas.crew_export import ExportOptions
+        export_options = ExportOptions(
+            include_custom_tools=include_custom_tools,
+            include_comments=include_comments,
+            include_tracing=include_tracing,
+            include_evaluation=include_evaluation,
+            include_deployment=include_deployment,
+            model_override=model_override if model_override else None
+        )
+
+        logger.info(f"Download request with options: {export_options}")
+
         # Generate export
         result = await service.export_crew(
             crew_id=crew_id,
             export_format=format,
-            options=None,
+            options=export_options,
             group_context=group_context
         )
 
