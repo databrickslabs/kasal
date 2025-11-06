@@ -164,23 +164,37 @@ class GroupContext:
                 else:
                     highest_role = user_groups_with_roles[0][1] if user_groups_with_roles else None
 
-                # If a specific group_id was provided, use its role
-                if group_id and group_id in roles_by_group:
-                    user_role = roles_by_group[group_id]
-                    # Put the selected group first in the list
-                    user_group_ids = [group_id] + [gid for gid in user_group_ids if gid != group_id]
-                elif group_id and group_id.startswith("user_"):
-                    # Personal workspace selected (e.g., user_admin_admin_com)
-                    # For personal workspaces, inherit the highest role for authorization
-                    # but keep data isolated to personal workspace
-                    user_role = highest_role  # Use highest role for authorization
+                # If a specific group_id was provided, validate it
+                if group_id:
+                    # Check if it's a regular group the user belongs to
+                    if group_id in roles_by_group:
+                        user_role = roles_by_group[group_id]
+                        # Put the selected group first in the list
+                        user_group_ids = [group_id] + [gid for gid in user_group_ids if gid != group_id]
+                    # Check if it's a personal workspace
+                    elif group_id.startswith("user_"):
+                        # Validate that the personal workspace matches the user's email
+                        expected_personal_workspace = cls.generate_individual_group_id(email)
+                        if group_id != expected_personal_workspace:
+                            # SECURITY: Reject unauthorized personal workspace access
+                            logger.warning(f"SECURITY: User {email} attempted to access unauthorized personal workspace {group_id}")
+                            raise ValueError(f"Access denied: User does not have access to group {group_id}")
 
-                    # Add the personal workspace as primary for data filtering
-                    # This ensures data isolation to personal workspace
-                    user_group_ids = [group_id] + user_group_ids
-                    logger.info(f"Personal workspace {group_id} selected for {email}, using highest role: {user_role}")
+                        # Personal workspace selected (e.g., user_admin_admin_com)
+                        # For personal workspaces, inherit the highest role for authorization
+                        # but keep data isolated to personal workspace
+                        user_role = highest_role  # Use highest role for authorization
+
+                        # Add the personal workspace as primary for data filtering
+                        # This ensures data isolation to personal workspace
+                        user_group_ids = [group_id] + user_group_ids
+                        logger.info(f"Personal workspace {group_id} selected for {email}, using highest role: {user_role}")
+                    else:
+                        # SECURITY: Reject unauthorized group access
+                        logger.warning(f"SECURITY: User {email} attempted to access unauthorized group {group_id}")
+                        raise ValueError(f"Access denied: User does not have access to group {group_id}")
                 else:
-                    # Use the role from the first group
+                    # No specific group_id provided - use the role from the first group
                     user_role = user_groups_with_roles[0][1] if user_groups_with_roles else None
 
                 logger.info(f"User {email} belongs to groups: {user_group_ids} with role: {user_role}, highest role: {highest_role}")
@@ -195,8 +209,11 @@ class GroupContext:
                 highest_role=highest_role,
                 current_user=user  # Include the user object with permission fields
             )
+        except ValueError:
+            # SECURITY: Re-raise authorization errors - do not fallback
+            raise
         except Exception as e:
-            # Fallback to individual groups if group lookup fails
+            # Fallback to individual groups if group lookup fails (non-authorization errors)
             logger.warning(f"Failed to lookup user groups for {email}, falling back to individual groups: {e}")
             individual_group_id = cls.generate_individual_group_id(email)
             return cls(
