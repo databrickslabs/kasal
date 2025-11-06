@@ -541,6 +541,8 @@ def configure_subprocess_logging(execution_id: str):
         'src.services.trace_queue',  # Add trace queue logger
         'src.engines.crewai.execution_runner',  # Add execution runner logger
         'src.services.databricks_knowledge_service',  # Add knowledge service logger for search debugging
+        'src.engines.crewai.tools.custom.powerbi_analysis_tool',  # Add PowerBI tool logger
+        'src.engines.crewai.tools.custom.databricks_jobs_tool',  # Add Databricks jobs tool logger
         '__main__'  # For any direct logging in subprocess
     ]:
         module_logger = get_logger(logger_name)

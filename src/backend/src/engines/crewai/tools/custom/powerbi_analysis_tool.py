@@ -3,6 +3,8 @@ import asyncio
 import json
 import time
 import re
+import os
+from datetime import datetime
 from typing import Any, Optional, Type
 from concurrent.futures import ThreadPoolExecutor
 
@@ -10,6 +12,18 @@ from crewai.tools import BaseTool
 from pydantic import BaseModel, Field, PrivateAttr, model_validator
 
 logger = logging.getLogger(__name__)
+
+# Emergency debug logging to file (bypasses all logging config)
+def _debug_log(msg: str):
+    """Write debug message directly to file, bypassing logger."""
+    try:
+        debug_file = '/tmp/powerbi_tool_debug.log'
+        with open(debug_file, 'a') as f:
+            timestamp = datetime.now().isoformat()
+            f.write(f"[{timestamp}] {msg}\n")
+            f.flush()
+    except Exception:
+        pass  # Silently fail if we can't write debug log
 
 # Thread pool executor for running async operations from sync context
 _EXECUTOR = ThreadPoolExecutor(max_workers=5)
@@ -131,6 +145,16 @@ class PowerBIAnalysisTool(BaseTool):
         super().__init__(**kwargs)
         self._group_id = group_id
         self._databricks_job_id = databricks_job_id
+
+        # Clear debug log file at initialization
+        try:
+            debug_file = '/tmp/powerbi_tool_debug.log'
+            if os.path.exists(debug_file):
+                os.remove(debug_file)
+        except Exception:
+            pass
+
+        _debug_log(f"PowerBIAnalysisTool initialized for group: {group_id or 'default'}, job_id: {databricks_job_id}")
         logger.info(f"PowerBIAnalysisTool initialized for group: {group_id or 'default'}")
 
     def _run(self, **kwargs: Any) -> str:
@@ -149,8 +173,13 @@ class PowerBIAnalysisTool(BaseTool):
         Returns:
             str: Formatted analysis results
         """
+        _debug_log(f"PowerBI tool _run called with job_id={kwargs.get('job_id')}, dashboard_id={kwargs.get('dashboard_id')}")
+        logger.info(f"[POWERBI-TOOL] _run called with job_id={kwargs.get('job_id')}")
         # Use helper function to safely run async code from sync context
-        return _run_async_in_sync_context(self._execute_analysis(**kwargs))
+        result = _run_async_in_sync_context(self._execute_analysis(**kwargs))
+        _debug_log(f"PowerBI tool _run returning result of type {type(result)}, length={len(str(result))}")
+        logger.info(f"[POWERBI-TOOL] _run returning result length={len(str(result))}")
+        return result
 
     async def _execute_analysis(self, **kwargs) -> str:
         """
@@ -167,6 +196,9 @@ class PowerBIAnalysisTool(BaseTool):
         workspace_id = kwargs.get('workspace_id')
         job_id = kwargs.get('job_id')  # Get job_id from parameters
         additional_params = kwargs.get('additional_params')  # Get additional parameters
+
+        _debug_log(f"_execute_analysis started: job_id={job_id}, dashboard_id={dashboard_id}, questions={questions}")
+        logger.info(f"[POWERBI-TOOL] _execute_analysis started")
 
         try:
             # Import here to avoid circular dependency
@@ -256,7 +288,8 @@ class PowerBIAnalysisTool(BaseTool):
                 if run_id:
                     # Get the task_key from additional_params if provided, otherwise use default
                     task_key = additional_params.get('task_key', 'pbi_e2e_pipeline') if additional_params else 'pbi_e2e_pipeline'
-                    logger.info(f"Monitoring Databricks job run {run_id}, task: {task_key}")
+                    _debug_log(f"Monitoring Databricks job run {run_id}, task: {task_key}")
+                    logger.info(f"[POWERBI-TOOL] Monitoring Databricks job run {run_id}, task: {task_key}")
 
                     # Poll for completion
                     max_wait = 300  # 5 minutes
@@ -271,27 +304,36 @@ class PowerBIAnalysisTool(BaseTool):
 
                         if task_status == "SUCCESS":
                             # Task completed successfully - extract the notebook output
-                            print(f"[POWERBI-TOOL] 🎯 Task '{task_key}' completed successfully (run_id: {run_id}), extracting notebook output...")
-                            logger.warning(f"🎯 Task '{task_key}' completed successfully (run_id: {run_id}), extracting notebook output...")
+                            _debug_log(f"Task '{task_key}' SUCCESS - extracting output from run_id={run_id}")
+                            logger.info(f"[POWERBI-TOOL] 🎯 Task '{task_key}' completed successfully (run_id: {run_id}), extracting notebook output...")
 
                             try:
                                 # Get the notebook output by calling the Databricks API directly
-                                print(f"[POWERBI-TOOL] Calling _get_notebook_output with run_id={run_id}, task_key={task_key}")
+                                _debug_log(f"Calling _get_notebook_output with run_id={run_id}, task_key={task_key}")
+                                logger.info(f"[POWERBI-TOOL] Calling _get_notebook_output with run_id={run_id}, task_key={task_key}")
                                 result_data = await self._get_notebook_output(databricks_tool, run_id, task_key)
-                                print(f"[POWERBI-TOOL] _get_notebook_output returned: {type(result_data)} - {bool(result_data)}")
+                                _debug_log(f"_get_notebook_output returned: {type(result_data)} - has_data={bool(result_data)}")
+                                logger.info(f"[POWERBI-TOOL] _get_notebook_output returned: {type(result_data)} - {bool(result_data)}")
 
                                 if result_data:
-                                    logger.warning(f"✅ Successfully extracted {result_data.get('rows_returned', 0)} rows from task output")
-                                    return self._format_analysis_result(
+                                    rows_count = result_data.get('rows_returned', 0)
+                                    _debug_log(f"Successfully extracted {rows_count} rows from task output")
+                                    logger.info(f"[POWERBI-TOOL] ✅ Successfully extracted {rows_count} rows from task output")
+                                    formatted_result = self._format_analysis_result(
                                         dashboard_id,
                                         question_str,
                                         result_data
                                     )
+                                    _debug_log(f"Formatted result length: {len(formatted_result)} chars")
+                                    logger.info(f"[POWERBI-TOOL] Formatted result length: {len(formatted_result)} chars")
+                                    logger.info(f"[POWERBI-TOOL] Result preview: {formatted_result[:500]}")
+                                    _debug_log(f"Returning formatted result: {formatted_result[:200]}...")
+                                    return formatted_result
                                 else:
                                     # Fallback to basic success message if we can't extract data
                                     # Return detailed debug info to help diagnose the issue
-                                    print(f"[POWERBI-TOOL] ❌ result_data is None/empty")
-                                    logger.error(f"❌ Failed to extract result data from task '{task_key}' (run_id: {run_id})")
+                                    logger.error(f"[POWERBI-TOOL] ❌ result_data is None/empty")
+                                    logger.error(f"[POWERBI-TOOL] Failed to extract result data from task '{task_key}' (run_id: {run_id})")
 
                                     # Include debug information in the response
                                     debug_info = f"✅ Task '{task_key}' completed successfully but could not extract detailed results.\n\n"
@@ -314,10 +356,7 @@ class PowerBIAnalysisTool(BaseTool):
 
                                     return debug_info
                             except Exception as e:
-                                print(f"[POWERBI-TOOL] ❌ EXCEPTION during result extraction: {str(e)}")
-                                import traceback
-                                traceback.print_exc()
-                                logger.error(f"❌ Exception during result extraction: {str(e)}", exc_info=True)
+                                logger.error(f"[POWERBI-TOOL] ❌ EXCEPTION during result extraction: {str(e)}", exc_info=True)
                                 return f"✅ Task '{task_key}' completed successfully but extraction failed: {str(e)}\n\nRun ID: {run_id}"
                         elif task_status in ["FAILED", "CANCELED", "TIMEDOUT"]:
                             logger.error(f"Task '{task_key}' failed with status: {task_status}")
@@ -445,32 +484,32 @@ class PowerBIAnalysisTool(BaseTool):
         self._extraction_debug = []
 
         try:
+            _debug_log(f"_get_notebook_output: run_id={run_id}, task_key={task_key}")
             self._extraction_debug.append(f"Starting extraction for run_id={run_id}, task_key={task_key}")
             # For multi-task jobs, we need to get the run details first to find the task
-            print(f"[POWERBI-TOOL] 🔍 Getting run details for run {run_id}, looking for task '{task_key}'")
-            logger.warning(f"🔍 Getting run details for run {run_id}, looking for task '{task_key}'")
+            logger.info(f"[POWERBI-TOOL] 🔍 Getting run details for run {run_id}, looking for task '{task_key}'")
 
             # First, get the run details to see if it's a multi-task job
             run_details_endpoint = f"/api/2.1/jobs/runs/get?run_id={run_id}"
-            print(f"[POWERBI-TOOL] Making API call to: {run_details_endpoint}")
+            _debug_log(f"Making API call to: {run_details_endpoint}")
+            logger.info(f"[POWERBI-TOOL] Making API call to: {run_details_endpoint}")
             self._extraction_debug.append(f"API call: {run_details_endpoint}")
             run_details = await databricks_tool._make_api_call("GET", run_details_endpoint)
 
-            print(f"[POWERBI-TOOL] 📋 Got run details with keys: {list(run_details.keys())}")
-            logger.warning(f"📋 Got run details with keys: {list(run_details.keys())}")
+            _debug_log(f"Got run details with {len(run_details)} keys")
+            logger.info(f"[POWERBI-TOOL] 📋 Got run details with keys: {list(run_details.keys())}")
             self._extraction_debug.append(f"Run details keys: {list(run_details.keys())}")
 
             # Check if this is a multi-task job
             tasks = run_details.get('tasks', [])
-            print(f"[POWERBI-TOOL] 🔢 Found {len(tasks)} tasks in run")
-            logger.warning(f"🔢 Found {len(tasks)} tasks in run")
+            _debug_log(f"Found {len(tasks)} tasks in run")
+            logger.info(f"[POWERBI-TOOL] 🔢 Found {len(tasks)} tasks in run")
             self._extraction_debug.append(f"Found {len(tasks)} tasks")
 
             if tasks:
                 # Multi-task job - find the specific task
                 task_keys = [t.get('task_key') for t in tasks]
-                print(f"[POWERBI-TOOL] 🔎 Multi-task job detected. Available tasks: {task_keys}")
-                logger.warning(f"🔎 Multi-task job detected. Available tasks: {task_keys}")
+                logger.info(f"[POWERBI-TOOL] 🔎 Multi-task job detected. Available tasks: {task_keys}")
                 self._extraction_debug.append(f"Available tasks: {task_keys}")
 
                 target_task = None
@@ -482,27 +521,27 @@ class PowerBIAnalysisTool(BaseTool):
                 if target_task:
                     # Get the task's run_id
                     task_run_id = target_task.get('run_id')
-                    print(f"[POWERBI-TOOL] ✅ Found task '{task_key}' with run_id {task_run_id}")
-                    logger.warning(f"✅ Found task '{task_key}' with run_id {task_run_id}")
+                    _debug_log(f"Found task '{task_key}' with run_id={task_run_id}")
+                    logger.info(f"[POWERBI-TOOL] ✅ Found task '{task_key}' with run_id {task_run_id}")
                     self._extraction_debug.append(f"Found task '{task_key}' with run_id={task_run_id}")
 
                     # Get the output for this specific task run
                     task_output_endpoint = f"/api/2.1/jobs/runs/get-output?run_id={task_run_id}"
-                    print(f"[POWERBI-TOOL] 📥 Fetching task output from: {task_output_endpoint}")
-                    logger.warning(f"📥 Fetching task output from: {task_output_endpoint}")
+                    _debug_log(f"Fetching task output from: {task_output_endpoint}")
+                    logger.info(f"[POWERBI-TOOL] 📥 Fetching task output from: {task_output_endpoint}")
                     self._extraction_debug.append(f"Fetching output: {task_output_endpoint}")
                     task_response = await databricks_tool._make_api_call("GET", task_output_endpoint)
 
-                    print(f"[POWERBI-TOOL] 📦 Task response keys: {list(task_response.keys())}")
-                    logger.warning(f"📦 Task response keys: {list(task_response.keys())}")
+                    _debug_log(f"Task response has {len(task_response)} keys")
+                    logger.info(f"[POWERBI-TOOL] 📦 Task response keys: {list(task_response.keys())}")
                     self._extraction_debug.append(f"Response keys: {list(task_response.keys())}")
                     notebook_output = task_response.get('notebook_output', {})
-                    print(f"[POWERBI-TOOL] 📓 Notebook output keys: {list(notebook_output.keys())}")
-                    logger.warning(f"📓 Notebook output keys: {list(notebook_output.keys())}")
+                    _debug_log(f"Notebook output has {len(notebook_output)} keys")
+                    logger.info(f"[POWERBI-TOOL] 📓 Notebook output keys: {list(notebook_output.keys())}")
                     self._extraction_debug.append(f"Notebook output keys: {list(notebook_output.keys())}")
                     result_text = notebook_output.get('result', '')
-                    print(f"[POWERBI-TOOL] 📝 Result text length: {len(result_text)} chars")
-                    logger.warning(f"📝 Result text length: {len(result_text)} chars")
+                    _debug_log(f"Result text length: {len(result_text)} chars, preview: {result_text[:100]}")
+                    logger.info(f"[POWERBI-TOOL] 📝 Result text length: {len(result_text)} chars")
                     self._extraction_debug.append(f"Result text length: {len(result_text)} chars")
                 else:
                     logger.warning(f"Task '{task_key}' not found. Available tasks: {[t.get('task_key') for t in tasks]}")
@@ -520,54 +559,65 @@ class PowerBIAnalysisTool(BaseTool):
                 result_text = notebook_output.get('result', '')
 
             if not result_text:
-                print(f"[POWERBI-TOOL] ❌ No notebook output result found in response")
-                logger.error(f"❌ No notebook output result found in response")
+                logger.error(f"[POWERBI-TOOL] ❌ No notebook output result found in response")
                 self._extraction_debug.append("ERROR: No result_text found")
                 return None
 
-            print(f"[POWERBI-TOOL] 📄 Notebook output result (first 200 chars): {result_text[:200]}")
-            logger.warning(f"📄 Notebook output result (first 200 chars): {result_text[:200]}")
+            _debug_log(f"Result text preview: {result_text[:200]}")
+            logger.info(f"[POWERBI-TOOL] 📄 Notebook output result (first 200 chars): {result_text[:200]}")
             self._extraction_debug.append(f"Result preview: {result_text[:100]}...")
 
-            # Parse the "Notebook exited: {...}" format
-            # Look for JSON after "Notebook exited: "
+            # Try two parsing strategies:
+            # 1. Look for "Notebook exited: {...}" pattern (older format)
+            # 2. Parse result_text directly as JSON (current Databricks format from dbutils.notebook.exit)
+
+            json_str = None
             match = re.search(r'Notebook exited:\s*({.+})', result_text, re.DOTALL)
 
             if match:
-                print(f"[POWERBI-TOOL] 🎯 Found 'Notebook exited:' pattern in output")
-                logger.warning(f"🎯 Found 'Notebook exited:' pattern in output")
+                _debug_log("Found 'Notebook exited:' pattern in output")
+                logger.info(f"[POWERBI-TOOL] 🎯 Found 'Notebook exited:' pattern in output")
                 self._extraction_debug.append("Pattern matched: 'Notebook exited:'")
                 json_str = match.group(1)
-                print(f"[POWERBI-TOOL] Found JSON in notebook output (length: {len(json_str)} chars)")
-                logger.info(f"Found JSON in notebook output (length: {len(json_str)} chars)")
+            else:
+                # Try parsing result_text directly as JSON (Databricks dbutils.notebook.exit format)
+                _debug_log("No 'Notebook exited:' pattern, trying direct JSON parse")
+                logger.info(f"[POWERBI-TOOL] No 'Notebook exited:' pattern found, trying direct JSON parse")
+                self._extraction_debug.append("No 'Notebook exited:' pattern - attempting direct JSON parse")
+                json_str = result_text.strip()
+
+            if json_str:
+                _debug_log(f"Attempting to parse JSON (length: {len(json_str)} chars)")
+                logger.info(f"[POWERBI-TOOL] Found JSON in notebook output (length: {len(json_str)} chars)")
                 self._extraction_debug.append(f"JSON length: {len(json_str)} chars")
 
                 try:
                     parsed_output = json.loads(json_str)
-                    print(f"[POWERBI-TOOL] ✅ Successfully parsed notebook output JSON")
-                    print(f"[POWERBI-TOOL] 📊 Parsed output keys: {list(parsed_output.keys())}")
-                    logger.warning(f"✅ Successfully parsed notebook output JSON")
-                    logger.warning(f"📊 Parsed output keys: {list(parsed_output.keys())}")
+                    _debug_log(f"Successfully parsed JSON, keys: {list(parsed_output.keys())}")
+                    logger.info(f"[POWERBI-TOOL] ✅ Successfully parsed notebook output JSON")
+                    logger.info(f"[POWERBI-TOOL] 📊 Parsed output keys: {list(parsed_output.keys())}")
                     self._extraction_debug.append(f"JSON parsed successfully, keys: {list(parsed_output.keys())}")
 
                     # Extract the actual result data from pipeline_steps.step_3_execution.result_data
                     pipeline_steps = parsed_output.get('pipeline_steps', {})
-                    print(f"[POWERBI-TOOL] 🔧 Pipeline steps available: {list(pipeline_steps.keys())}")
-                    logger.warning(f"🔧 Pipeline steps available: {list(pipeline_steps.keys())}")
+                    _debug_log(f"Pipeline steps: {list(pipeline_steps.keys())}")
+                    logger.info(f"[POWERBI-TOOL] 🔧 Pipeline steps available: {list(pipeline_steps.keys())}")
                     self._extraction_debug.append(f"Pipeline steps: {list(pipeline_steps.keys())}")
 
                     step_3 = pipeline_steps.get('step_3_execution', {})
-                    print(f"[POWERBI-TOOL] 🎯 Step 3 (execution) keys: {list(step_3.keys())}")
-                    logger.warning(f"🎯 Step 3 (execution) keys: {list(step_3.keys())}")
+                    _debug_log(f"Step 3 keys: {list(step_3.keys())}")
+                    logger.info(f"[POWERBI-TOOL] 🎯 Step 3 (execution) keys: {list(step_3.keys())}")
                     self._extraction_debug.append(f"Step 3 keys: {list(step_3.keys())}")
 
                     result_data = step_3.get('result_data', [])
 
                     if result_data:
-                        print(f"[POWERBI-TOOL] 🎉 Successfully extracted {len(result_data)} result rows")
-                        logger.warning(f"🎉 Successfully extracted {len(result_data)} result rows")
+                        _debug_log(f"SUCCESS: Extracted {len(result_data)} result rows")
+                        logger.info(f"[POWERBI-TOOL] 🎉 Successfully extracted {len(result_data)} result rows")
                         self._extraction_debug.append(f"SUCCESS: Extracted {len(result_data)} rows")
-                        return {
+
+                        # Build return data
+                        return_data = {
                             'status': parsed_output.get('status'),
                             'execution_time': parsed_output.get('execution_time'),
                             'generated_dax': pipeline_steps.get('step_2_dax_generation', {}).get('generated_dax'),
@@ -575,34 +625,27 @@ class PowerBIAnalysisTool(BaseTool):
                             'columns': step_3.get('columns', []),
                             'result_data': result_data
                         }
+                        _debug_log(f"Returning data with {len(str(return_data))} chars")
+                        return return_data
                     else:
-                        print(f"[POWERBI-TOOL] ❌ No result_data found in step_3_execution")
-                        print(f"[POWERBI-TOOL] step_3_execution content: {json.dumps(step_3, indent=2)[:500]}")
-                        logger.error("❌ No result_data found in step_3_execution")
-                        logger.error(f"step_3_execution content: {json.dumps(step_3, indent=2)[:500]}")
+                        logger.error(f"[POWERBI-TOOL] ❌ No result_data found in step_3_execution")
+                        logger.error(f"[POWERBI-TOOL] step_3_execution content: {json.dumps(step_3, indent=2)[:500]}")
                         self._extraction_debug.append("ERROR: result_data is empty/missing in step_3_execution")
                         self._extraction_debug.append(f"step_3 content: {json.dumps(step_3, indent=2)[:200]}")
                         return None
                 except json.JSONDecodeError as e:
-                    print(f"[POWERBI-TOOL] ❌ Failed to parse JSON: {e}")
-                    print(f"[POWERBI-TOOL] JSON string (first 500 chars): {json_str[:500]}")
-                    logger.error(f"❌ Failed to parse JSON: {e}")
-                    logger.error(f"JSON string (first 500 chars): {json_str[:500]}")
+                    logger.error(f"[POWERBI-TOOL] ❌ Failed to parse JSON: {e}")
+                    logger.error(f"[POWERBI-TOOL] JSON string (first 500 chars): {json_str[:500]}")
                     self._extraction_debug.append(f"ERROR: JSON parse failed - {str(e)}")
                     return None
             else:
-                print(f"[POWERBI-TOOL] ❌ Could not find 'Notebook exited:' pattern in output")
-                print(f"[POWERBI-TOOL] Result text (first 500 chars): {result_text[:500]}")
-                logger.error(f"❌ Could not find 'Notebook exited:' pattern in output")
-                logger.error(f"Result text (first 500 chars): {result_text[:500]}")
-                self._extraction_debug.append("ERROR: 'Notebook exited:' pattern not found")
+                logger.error(f"[POWERBI-TOOL] ❌ No JSON string to parse")
+                logger.error(f"[POWERBI-TOOL] Result text (first 500 chars): {result_text[:500]}")
+                self._extraction_debug.append("ERROR: No JSON string extracted from result")
                 return None
 
         except Exception as e:
-            print(f"[POWERBI-TOOL] ❌ EXCEPTION in _get_notebook_output: {str(e)}")
-            import traceback
-            traceback.print_exc()
-            logger.error(f"❌ Error extracting notebook output: {e}", exc_info=True)
+            logger.error(f"[POWERBI-TOOL] ❌ EXCEPTION in _get_notebook_output: {str(e)}", exc_info=True)
             self._extraction_debug.append(f"EXCEPTION: {str(e)}")
             return None
 
