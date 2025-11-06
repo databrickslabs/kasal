@@ -74,13 +74,19 @@ async def get_group_context(
 
     # Get group context with the specific group_id if provided
     if user_email:
-        group_context = await GroupContext.from_email(
-            email=user_email,
-            access_token=access_token,
-            group_id=x_group_id  # Pass the selected group ID from header
-        )
-        logger.debug(f"Created group context: primary_group_id={group_context.primary_group_id}, group_ids={group_context.group_ids}, email={group_context.group_email}, role={group_context.user_role}")
-        return group_context
+        try:
+            group_context = await GroupContext.from_email(
+                email=user_email,
+                access_token=access_token,
+                group_id=x_group_id  # Pass the selected group ID from header
+            )
+            logger.debug(f"Created group context: primary_group_id={group_context.primary_group_id}, group_ids={group_context.group_ids}, email={group_context.group_email}, role={group_context.user_role}")
+            return group_context
+        except ValueError as e:
+            # SECURITY: Unauthorized group access attempt
+            logger.error(f"Unauthorized group access attempt: {e}")
+            from fastapi import HTTPException
+            raise HTTPException(status_code=403, detail=str(e))
 
     # Fallback: No group context available
     logger.debug("No email header found, returning empty group context")
