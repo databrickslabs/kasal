@@ -1,5 +1,5 @@
 # Kasal
-![Kasal Logo](./src/docs/images/logo.png)
+![Kasal Logo](./src/frontend/public/kasal-icon-32.png)
 **Build intelligent AI agent workflows with visual simplicity and enterprise power.**
 
 [![YouTube Video](https://img.youtube.com/vi/0d5e5rSe5JI/0.jpg)](https://www.youtube.com/watch?v=0d5e5rSe5JI)
@@ -35,7 +35,7 @@ Quick setup for testing and development - requires Python 3.9+ and Node.js.
 
 ## See It in Action
 
-![Kasal UI Screenshot](src/images/kasal-ui-screenshot.png)
+![Kasal UI Screenshot](./src/frontend/public/kasal-ui-screenshot.png)
 *Visual workflow designer for creating AI agent collaborations*
 
 Create your first agent workflow in under 2 minutes:
