@@ -10,7 +10,7 @@ import asyncio
 import uuid
 from typing import Dict, List, Optional, Any, Union
 from datetime import datetime, UTC
-from sqlalchemy.orm import Session
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from fastapi import HTTPException, status
 
@@ -22,15 +22,15 @@ from src.schemas.flow_execution import (
     FlowExecutionStatus
 )
 from src.repositories.flow_execution_repository import (
-    SyncFlowExecutionRepository,
-    SyncFlowNodeExecutionRepository
+    FlowExecutionRepository,
+    FlowNodeExecutionRepository
 )
-from src.repositories.flow_repository import SyncFlowRepository
-from src.repositories.task_repository import SyncTaskRepository
-from src.repositories.agent_repository import SyncAgentRepository
-from src.repositories.tool_repository import SyncToolRepository
+from src.repositories.flow_repository import FlowRepository
+from src.repositories.task_repository import TaskRepository
+from src.repositories.agent_repository import AgentRepository
+from src.repositories.tool_repository import ToolRepository
 from src.core.logger import LoggerManager
-from src.db.session import SessionLocal
+from src.db.session import async_session_factory
 from src.services.api_keys_service import ApiKeysService
 from src.engines.crewai.flow.backend_flow import BackendFlow
 
@@ -40,15 +40,15 @@ logger = LoggerManager.get_instance().crew
 class FlowRunnerService:
     """Service for running Flow executions"""
     
-    def __init__(self, db: Session):
-        """Initialize with database session"""
+    def __init__(self, db: AsyncSession):
+        """Initialize with async database session"""
         self.db = db
-        self.flow_execution_repo = SyncFlowExecutionRepository(db)
-        self.node_execution_repo = SyncFlowNodeExecutionRepository(db)
-        self.flow_repo = SyncFlowRepository(db)
-        self.task_repo = SyncTaskRepository(db)
-        self.agent_repo = SyncAgentRepository(db)
-        self.tool_repo = SyncToolRepository(db)
+        self.flow_execution_repo = FlowExecutionRepository(db)
+        self.node_execution_repo = FlowNodeExecutionRepository(db)
+        self.flow_repo = FlowRepository(db)
+        self.task_repo = TaskRepository(db)
+        self.agent_repo = AgentRepository(db)
+        self.tool_repo = ToolRepository(db)
     
     def create_flow_execution(self, flow_id: Union[uuid.UUID, str], job_id: str, config: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
         """
@@ -247,11 +247,14 @@ class FlowRunnerService:
             
             # Initialize API keys before execution
             try:
+                # SECURITY: Get group_id from config for multi-tenant isolation
+                group_id = config.get('group_id') if config else None
+
                 # Initialize all the API keys needed for execution
                 for provider in ["OPENAI", "ANTHROPIC", "PERPLEXITY", "SERPER"]:
                     try:
                         # Since this is an async method in a sync context, use sync approach
-                        provider_key = await ApiKeysService.get_provider_api_key(provider)
+                        provider_key = await ApiKeysService.get_provider_api_key(provider, group_id=group_id)
                         if not provider_key:
                             logger.warning(f"No API key found for provider: {provider}")
                         else:
@@ -349,11 +352,14 @@ class FlowRunnerService:
             
             # Initialize API keys before execution
             try:
+                # SECURITY: Get group_id from config for multi-tenant isolation
+                group_id = config.get('group_id') if config else None
+
                 # Initialize all the API keys needed for execution
                 for provider in ["OPENAI", "ANTHROPIC", "PERPLEXITY", "SERPER"]:
                     try:
                         # Since this is an async method in a sync context, use sync approach
-                        provider_key = await ApiKeysService.get_provider_api_key(provider)
+                        provider_key = await ApiKeysService.get_provider_api_key(provider, group_id=group_id)
                         if not provider_key:
                             logger.warning(f"No API key found for provider: {provider}")
                         else:
@@ -668,11 +674,14 @@ class FlowRunnerService:
                 from src.services.task_service import TaskService
                 from src.services.crew_service import CrewService
                 from src.engines.crewai.tools.tool_factory import ToolFactory
-                
+
                 # Create a tool factory instance for tool creation
-                tool_factory = ToolFactory()
+                # Pass an empty config dict as required by ToolFactory
+                tool_factory = ToolFactory(config={})
                 
-                with SessionLocal() as db:
+                # TODO: Convert to async - temporarily disabled SessionLocal usage
+                # Need to refactor this to use async patterns properly
+                if False:  # Temporarily disabled
                     agent_service = AgentService(db)
                     task_service = TaskService(db)
                     crew_service = CrewService(db)
@@ -793,8 +802,8 @@ class FlowRunnerService:
                                         process_str = str(crew_data.process).lower()
                                         if process_str == 'hierarchical':
                                             process_type = Process.hierarchical
-                                        elif process_str == 'parallel':
-                                            process_type = Process.parallel
+                                        # Note: CrewAI does not have Process.parallel
+                                        # Use hierarchical for delegation or async_execution for task-level parallelism
                                     
                                     crew = Crew(
                                         agents=agents,

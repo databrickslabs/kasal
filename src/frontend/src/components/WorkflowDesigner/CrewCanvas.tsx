@@ -25,7 +25,6 @@ import { useJobManagementStore } from '../../store/jobManagement';
 import { useCrewExecutionStore } from '../../store/crewExecution';
 import { useErrorStore } from '../../store/error';
 import { useRunStatusStore } from '../../store/runStatus';
-import { logEdgeDetails } from '../../utils/flowUtils';
 import { useCrewExecution } from '../../hooks/workflow/useCrewExecution';
 import { useConnectionGenerator } from '../../hooks/workflow/useConnectionGenerator';
 import { useAgentHandlers } from '../../hooks/workflow/useAgentHandlers';
@@ -34,7 +33,7 @@ import { useCrewFlowHandlers } from '../../hooks/workflow/useCrewFlowHandlers';
 import { useToolHandlers } from '../../hooks/workflow/useToolHandlers';
 import { useCanvasHandlers } from '../../hooks/workflow/useCanvasHandlers';
 import { useDialogHandlers } from '../../hooks/workflow/useDialogHandlers';
-import LeftSidebar from './LeftSidebar';
+import ManagerNodeController from './ManagerNodeController';
 import RightSidebar from './RightSidebar';
 
 // Node and edge types are imported from flow-config
@@ -59,12 +58,16 @@ const edgeTypes = importedEdgeTypes;
 interface CrewCanvasProps {
   nodes: Node[];
   edges: Edge[];
+  setNodes: (nodes: Node[] | ((nodes: Node[]) => Node[])) => void;
+  setEdges: (edges: Edge[] | ((edges: Edge[]) => Edge[])) => void;
   onNodesChange: (changes: NodeChange[]) => void;
   onEdgesChange: (changes: EdgeChange[]) => void;
   onConnect: (connection: Connection) => void;
   onSelectionChange?: (params: OnSelectionChangeParams) => void;
   onPaneContextMenu?: (event: React.MouseEvent) => void;
   onInit?: (instance: ReactFlowInstance) => void;
+  // FitView handler
+  handleUIAwareFitView: () => void;
   // Runtime features props
   planningEnabled: boolean;
   setPlanningEnabled: (enabled: boolean) => void;
@@ -85,26 +88,32 @@ interface CrewCanvasProps {
   // Execution history visibility
   showRunHistory?: boolean;
   executionHistoryHeight?: number;
+  // Tutorial and configuration
+  onOpenTutorial?: () => void;
+  onOpenConfiguration?: () => void;
 }
 
 
 const CrewCanvas: React.FC<CrewCanvasProps> = ({
   nodes,
   edges,
+  setNodes,
+  setEdges,
   onNodesChange,
   onEdgesChange,
   onConnect,
   onSelectionChange,
   onPaneContextMenu,
   onInit,
-  planningEnabled,
-  setPlanningEnabled,
-  reasoningEnabled,
-  setReasoningEnabled,
-  schemaDetectionEnabled,
-  setSchemaDetectionEnabled,
-  selectedModel,
-  setSelectedModel,
+  handleUIAwareFitView,
+  planningEnabled: _planningEnabled,
+  setPlanningEnabled: _setPlanningEnabled,
+  reasoningEnabled: _reasoningEnabled,
+  setReasoningEnabled: _setReasoningEnabled,
+  schemaDetectionEnabled: _schemaDetectionEnabled,
+  setSchemaDetectionEnabled: _setSchemaDetectionEnabled,
+  selectedModel: _selectedModelProp,
+  setSelectedModel: _setSelectedModelProp,
   onOpenLogsDialog,
   onToggleChat,
   isChatOpen,
@@ -112,8 +121,11 @@ const CrewCanvas: React.FC<CrewCanvasProps> = ({
   setIsTaskDialogOpen,
   setIsFlowDialogOpen,
   showRunHistory,
-  executionHistoryHeight = 200
+  executionHistoryHeight = 200,
+  onOpenTutorial: _onOpenTutorial,
+  onOpenConfiguration: _onOpenConfiguration
 }) => {
+
   const [isRendering, setIsRendering] = useState(true);
   const containerRef = useRef<HTMLDivElement>(null);
   const reactFlowInstanceRef = useRef<ReactFlowInstance | null>(null);
@@ -151,7 +163,7 @@ const CrewCanvas: React.FC<CrewCanvasProps> = ({
   }, []);
   
   const errorStore = useErrorStore();
-  const runStatusStore = useRunStatusStore();
+  const _runStatusStore = useRunStatusStore();
   
   const fetchAgents = useCallback(async () => {
     try {
@@ -185,7 +197,11 @@ const CrewCanvas: React.FC<CrewCanvasProps> = ({
     setSelectedTools: _setJobTrackerSelectedTools
   } = useJobManagementStore();
 
-  const { selectedModel: _selectedModel } = useCrewExecutionStore();
+  const {
+    selectedModel: _selectedModel,
+    processType: _processType,
+    setProcessType: _setProcessType
+  } = useCrewExecutionStore();
   const { handleExecuteCrew, isExecuting: _isExecuting } = useCrewExecution();
 
   const {
@@ -256,8 +272,8 @@ const CrewCanvas: React.FC<CrewCanvasProps> = ({
     setShowSuccess
   });
 
-  const { 
-    isGeneratingConnections, 
+  const {
+    isGeneratingConnections: _isGeneratingConnections,
     handleGenerateConnections 
   } = useConnectionGenerator({
     reactFlowInstanceRef,
@@ -342,18 +358,38 @@ const CrewCanvas: React.FC<CrewCanvasProps> = ({
   }, [errorStore]);
 
   const nodesWithDimensions = React.useMemo(() => {
+    console.log('[CrewCanvas] Filtering nodes:', {
+      totalNodes: nodes.length,
+      nodeTypes: nodes.map(n => ({ id: n.id, type: n.type }))
+    });
+
     // Filter out any flow-related nodes first
     const crewNodes = nodes.filter(node => {
       // Exclude flow-related nodes
       if (!node || typeof node !== 'object') return false;
-      
+
       const nodeType = node.type?.toLowerCase() || '';
-      return nodeType === 'agentnode' || nodeType === 'tasknode';
+      const isIncluded = nodeType === 'agentnode' || nodeType === 'tasknode' || nodeType === 'managernode';
+
+      if (node.type === 'managerNode') {
+        console.log('[CrewCanvas] Manager node filter check:', {
+          type: node.type,
+          lowercase: nodeType,
+          isIncluded
+        });
+      }
+
+      return isIncluded;
+    });
+
+    console.log('[CrewCanvas] Filtered nodes:', {
+      count: crewNodes.length,
+      hasManager: crewNodes.some(n => n.type === 'managerNode')
     });
 
     return crewNodes.map(node => {
-      const defaultWidth = node.type === 'agentNode' ? 170 : 270;
-      const defaultHeight = node.type === 'agentNode' ? 170 : 135;
+      const defaultWidth = node.type === 'agentNode' ? 170 : node.type === 'managerNode' ? 200 : 270;
+      const defaultHeight = node.type === 'agentNode' ? 170 : node.type === 'managerNode' ? 150 : 135;
       
       if (!node.style || (!node.style.width && !node.style.height)) {
         return {
@@ -382,35 +418,13 @@ const CrewCanvas: React.FC<CrewCanvasProps> = ({
     reactFlowInstanceRef.current = instance;
     
     try {
-      const attemptFitView = (attempt = 1, maxAttempts = 3) => {
-        try {
-          if (instance && attempt <= maxAttempts) {
-            const delay = 100 * attempt;
-            
-            setTimeout(() => {
-              try {
-                instance.fitView({
-                  padding: 0.2,
-                  includeHiddenNodes: false,
-                  duration: 800
-                });
-              } catch (error) {
-                // Log error and retry if needed
-                console.warn(`fitView attempt ${attempt} failed:`, error);
-                if (attempt < maxAttempts) {
-                  attemptFitView(attempt + 1, maxAttempts);
-                }
-              }
-            }, delay);
-          }
-        } catch (error) {
-          // Log any other errors
-          console.warn('Error in attemptFitView:', error);
-        }
-      };
-      
-      attemptFitView();
-      
+      // Defer to UI-aware fit view handled by useWorkflowLayoutEvents
+      // Fire a signal that the crew flow has initialized; listeners will center with chat-aware bounds
+      setTimeout(() => {
+        window.dispatchEvent(new Event('crewFlowInitialized'));
+        window.dispatchEvent(new Event('fitViewToNodesInternal'));
+      }, 150);
+
       if (onInit) {
         onInit(instance);
       }
@@ -422,49 +436,91 @@ const CrewCanvas: React.FC<CrewCanvasProps> = ({
   const crewEdges = React.useMemo(() => {
     try {
       const crewNodeIds = new Set(nodes.map(node => node.id));
-      
+
+      console.log('[CrewCanvas] Building crewEdges:', {
+        totalNodes: nodes.length,
+        totalEdges: edges.length,
+        nodeIds: Array.from(crewNodeIds),
+        hasManagerNode: crewNodeIds.has('manager-node')
+      });
+
       // First, deduplicate edges by creating a Map with edge key
       const edgeMap = new Map<string, Edge>();
-      
+
       edges.forEach(edge => {
-        if (edge && 
+        const isManagerEdge = edge.source === 'manager-node' || edge.target === 'manager-node';
+
+        if (edge &&
             typeof edge === 'object' &&
-            edge.source && 
-            edge.target && 
-            crewNodeIds.has(edge.source) && 
+            edge.source &&
+            edge.target &&
+            crewNodeIds.has(edge.source) &&
             crewNodeIds.has(edge.target)) {
-          
+
           // Create a unique key for the edge
           const edgeKey = `${edge.source}-${edge.target}-${edge.sourceHandle || 'default'}-${edge.targetHandle || 'default'}`;
-          
+
           // Only keep the first occurrence of each edge
           if (!edgeMap.has(edgeKey)) {
-            edgeMap.set(edgeKey, edge);
+            // Ensure all edges have animated property set correctly
+            // Task-to-task edges should always be animated
+            const isTaskToTask = edge.source.startsWith('task-') && edge.target.startsWith('task-');
+            const isAgentToTask = edge.source.startsWith('agent-') && edge.target.startsWith('task-');
+
+            // Set animated to true for all agent-task and task-task edges
+            const enhancedEdge = {
+              ...edge,
+              animated: isTaskToTask || isAgentToTask ? true : (edge.animated || false)
+            };
+
+            edgeMap.set(edgeKey, enhancedEdge);
+
+            if (isManagerEdge) {
+              console.log('[CrewCanvas] Added manager edge:', edgeKey);
+            }
           }
+        } else if (isManagerEdge) {
+          console.log('[CrewCanvas] Manager edge filtered out:', {
+            id: edge.id,
+            source: edge.source,
+            target: edge.target,
+            hasSource: crewNodeIds.has(edge.source),
+            hasTarget: crewNodeIds.has(edge.target)
+          });
         }
       });
       
       // Convert map back to array
       const uniqueEdges = Array.from(edgeMap.values());
-      
-      // Apply animation to edges when jobs are running
-      const edgesWithAnimation = uniqueEdges.map(edge => ({
+
+      // Ensure edge type is set and preserve animated property and ID
+      const edgesWithType = uniqueEdges.map(edge => ({
         ...edge,
+        id: edge.id, // Explicitly preserve ID
         type: edge.type || 'default', // Ensure edge type is set
-        animated: runStatusStore.hasRunningJobs // Make edges animated when jobs are running
+        // Preserve the animated property from the edge (don't override it)
       }));
-      
-      console.log(`CrewCanvas: Edges - Total: ${edges.length}, Unique: ${edgesWithAnimation.length}`);
-      
-      // Log edge details for debugging
-      logEdgeDetails(edgesWithAnimation, "CrewCanvas: Filtered crew edges:");
-      
-      return edgesWithAnimation;
+
+      console.log('[CrewCanvas] Final edges:', edgesWithType.length, 'Manager edges:', edgesWithType.filter(e => e.source === 'manager-node').length);
+      console.log('[CrewCanvas] Edge IDs:', edgesWithType.map(e => e.id));
+
+      return edgesWithType;
     } catch (error) {
-      console.error("CrewCanvas: Error filtering edges:", error);
+
       return [];
     }
-  }, [edges, nodes, runStatusStore.hasRunningJobs]); // Add hasRunningJobs to dependencies
+  }, [edges, nodes]); // Removed runStatusStore.hasRunningJobs dependency
+
+  // Debug: Log what's being passed to ReactFlow
+  useEffect(() => {
+    console.log('[CrewCanvas] Rendering with:', {
+      nodes: nodesWithDimensions.length,
+      edges: crewEdges.length,
+      nodeTypes: nodesWithDimensions.map(n => n.type),
+      edgeIds: crewEdges.map(e => e.id),
+      managerEdges: crewEdges.filter(e => e.source === 'manager-node').length
+    });
+  }, [nodesWithDimensions, crewEdges]);
 
   const _handleDeleteSelected = useCallback((selectedNodes: Node[], selectedEdges: Edge[]) => {
     // First, remove the selected nodes
@@ -483,14 +539,14 @@ const CrewCanvas: React.FC<CrewCanvasProps> = ({
     onEdgesChange(Array.from(allEdgesToDelete).map(edgeId => ({ type: 'remove', id: edgeId })));
   }, [onNodesChange, onEdgesChange, edges]);
 
-  const { shortcuts } = useShortcuts({
+  useShortcuts({
     flowInstance: reactFlowInstanceRef.current,
     onDeleteSelected: _handleDeleteSelected,
     onClearCanvas: handleClear,
     onZoomIn: () => reactFlowInstanceRef.current?.zoomIn(),
     onZoomOut: () => reactFlowInstanceRef.current?.zoomOut(),
-    onFitView: () => reactFlowInstanceRef.current?.fitView({ padding: 0.2 }),
-    onExecuteCrew: handleExecuteCrewButtonClick,
+    onFitView: handleUIAwareFitView,
+    // Don't override onExecuteCrew - let useShortcuts use its default handler with workflow store
     onExecuteFlow: () => {
       if (nodes.length > 0 || edges.length > 0) {
         const currentNodes = nodes.map(node => ({ ...node }));
@@ -513,13 +569,11 @@ const CrewCanvas: React.FC<CrewCanvasProps> = ({
     onOpenMaxRPMDialog: () => setIsMaxRPMSelectionDialogOpen(true),
     onOpenMCPConfigDialog: () => setIsMCPConfigDialogOpen(true),
     disabled: false,
-    useWorkflowStore: true
+    useWorkflowStore: true,
+    instanceId: 'crew-canvas',  // Unique identifier for this instance
+    priority: 10  // Higher priority than flow canvas
   });
 
-  useEffect(() => {
-    // Log shortcut changes for debugging purposes
-    console.log('CrewCanvas - Shortcuts updated:', shortcuts);
-  }, [shortcuts]);
 
   useEffect(() => {
     const checkDialogState = () => {
@@ -542,7 +596,7 @@ const CrewCanvas: React.FC<CrewCanvasProps> = ({
   const fetchTools = async () => {
     _setIsUpdatingAgents(true);
     try {
-      const toolsList = await ToolService.listTools();
+      const toolsList = await ToolService.listEnabledTools();
       const formattedTools: ToolType[] = toolsList.map(tool => ({
         id: tool.id.toString(),
         title: tool.title,
@@ -574,7 +628,7 @@ const CrewCanvas: React.FC<CrewCanvasProps> = ({
     
     const handleEdgeDelete = (event: CustomEvent) => {
       const { id } = event.detail;
-      console.log('Deleting edge:', id);
+
       onEdgesChange([{ type: 'remove', id }]);
     };
     
@@ -648,6 +702,7 @@ const CrewCanvas: React.FC<CrewCanvasProps> = ({
       ) : (
         <ReactFlow
           key="crew-canvas"
+          data-tour="canvas-area"
           nodes={nodesWithDimensions}
           edges={crewEdges}
           onNodesChange={handleNodesChange}
@@ -661,7 +716,8 @@ const CrewCanvas: React.FC<CrewCanvasProps> = ({
           nodeTypes={nodeTypes}
           edgeTypes={edgeTypes}
           connectionMode={ConnectionMode.Loose}
-          fitView
+          // Removed automatic fitView to prevent ResizeObserver loops
+          // fitView is handled manually in handleInit and via controls
           attributionPosition="bottom-left"
           minZoom={0.1}
           maxZoom={4}
@@ -675,8 +731,8 @@ const CrewCanvas: React.FC<CrewCanvasProps> = ({
           selectNodesOnDrag={true}
           selectionOnDrag={true}
           panOnDrag={[1, 2]}
-          translateExtent={[[-2000, -2000], [3000, 3000]]}
-          nodeExtent={[[-2000, -2000], [3000, 3000]]}
+          translateExtent={[[-10000, -10000], [10000, 10000]]}
+          nodeExtent={[[-10000, -10000], [10000, 10000]]}
           snapToGrid={false}
           snapGrid={[15, 15]}
           multiSelectionKeyCode="Shift"
@@ -692,31 +748,12 @@ const CrewCanvas: React.FC<CrewCanvasProps> = ({
             variant={BackgroundVariant.Dots}
           />
 
-          <LeftSidebar
-            onClearCanvas={handleClear}
-            onGenerateConnections={handleGenerateConnectionsWrapper}
-            onZoomIn={() => reactFlowInstanceRef.current?.zoomIn()}
-            onZoomOut={() => reactFlowInstanceRef.current?.zoomOut()}
-            onFitView={() => reactFlowInstanceRef.current?.fitView()}
-            onToggleInteractivity={() => {
-              if (reactFlowInstanceRef.current) {
-                const currentNodes = reactFlowInstanceRef.current.getNodes();
-                const updatedNodes = currentNodes.map(node => ({
-                  ...node,
-                  selectable: !node.selectable
-                }));
-                reactFlowInstanceRef.current.setNodes(updatedNodes);
-              }
-            }}
-            isGeneratingConnections={isGeneratingConnections}
-            planningEnabled={planningEnabled}
-            setPlanningEnabled={setPlanningEnabled}
-            reasoningEnabled={reasoningEnabled}
-            setReasoningEnabled={setReasoningEnabled}
-            schemaDetectionEnabled={schemaDetectionEnabled}
-            setSchemaDetectionEnabled={setSchemaDetectionEnabled}
-
-            showRunHistory={showRunHistory}
+          {/* Manager node controller - handles automatic creation/removal based on process type */}
+          <ManagerNodeController
+            nodes={nodes}
+            edges={edges}
+            setNodes={setNodes}
+            setEdges={setEdges}
           />
 
           <RightSidebar
@@ -762,8 +799,7 @@ const CrewCanvas: React.FC<CrewCanvasProps> = ({
         open={isCrewPlanningDialogOpen}
         onClose={() => setIsCrewPlanningDialogOpen(false)}
         onGenerateCrew={(crewPlan: Crew, shouldExecute: boolean) => {
-          console.log('CrewCanvas received crew plan:', crewPlan, 'Should execute:', shouldExecute);
-          console.log('CrewCanvas task async_execution values:', crewPlan.tasks.map(t => ({ name: t.name, async: t.async_execution })));
+
           
           const newNodes: Node[] = [];
           const newEdges: Edge[] = [];
@@ -771,7 +807,7 @@ const CrewCanvas: React.FC<CrewCanvasProps> = ({
           // Step 1: Process agents and create agent nodes
           crewPlan.agents.forEach((agent: CrewAgent, index: number) => {
             const nodeId = `agent-${agent.id}`;
-            console.log(`CrewCanvas: Creating agent node: ${nodeId} (${agent.name})`);
+
             newNodes.push({
               id: nodeId,
               type: 'agentNode',
@@ -792,7 +828,7 @@ const CrewCanvas: React.FC<CrewCanvasProps> = ({
           // Step 2: Process tasks and create task nodes
           crewPlan.tasks.forEach((task: CrewTask, index: number) => {
             const nodeId = `task-${task.id}`;
-            console.log(`CrewCanvas: Creating task node: ${nodeId} (${task.name}), async_execution:`, task.async_execution);
+
             newNodes.push({
               id: nodeId,
               type: 'taskNode',
@@ -827,7 +863,10 @@ const CrewCanvas: React.FC<CrewCanvasProps> = ({
                 id: `edge-${task.id}`,
                 source: sourceNodeId,
                 target: targetNodeId,
-                type: 'default'
+                type: 'default',
+                animated: true,
+                sourceHandle: 'right',
+                targetHandle: 'left'
               });
             }
           });
@@ -840,7 +879,7 @@ const CrewCanvas: React.FC<CrewCanvasProps> = ({
             handleExecuteCrewButtonClick();
           }
         }}
-        selectedModel={selectedModel}
+        selectedModel={_selectedModel}
         tools={tools.map(tool => ({
           ...tool,
           icon: tool.icon || ''

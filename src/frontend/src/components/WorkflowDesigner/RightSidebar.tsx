@@ -18,6 +18,7 @@ import {
   History as HistoryIcon,
 } from '@mui/icons-material';
 import { useFlowConfigStore } from '../../store/flowConfig';
+import { usePermissionStore } from '../../store/permissions';
 
 interface SidebarItem {
   id: string;
@@ -62,6 +63,10 @@ const RightSidebar: React.FC<RightSidebarProps> = ({
   const [chatOpenedByClick, setChatOpenedByClick] = useState(false);
   const { crewAIFlowEnabled } = useFlowConfigStore();
 
+  // Get user permissions
+  const { userRole } = usePermissionStore();
+  const isOperator = userRole === 'operator';
+
 
   useEffect(() => {
     // Trigger animation on mount, then stop after 1.5s
@@ -88,31 +93,34 @@ const RightSidebar: React.FC<RightSidebarProps> = ({
 
 
   const sidebarItems: SidebarItem[] = [
-    {
-      id: 'add-agent',
-      icon: <PersonAddIcon />,
-      tooltip: 'Add Agent',
-      onClick: () => setIsAgentDialogOpen(true),
-      disabled: false
-    },
-    {
-      id: 'add-task',
-      icon: <AddTaskIcon />,
-      tooltip: 'Add Task',
-      onClick: () => setIsTaskDialogOpen(true),
-      disabled: false
-    },
-    {
-      id: 'separator2',
-      isSeparator: true
-    },
-    {
-      id: 'save-crew',
-      icon: <SaveIcon />,
-      tooltip: 'Save Crew',
-      onClick: onSaveCrewClick,
-      disabled: false
-    },
+    // Only show Add Agent, Add Task, and Save Crew for non-operators
+    ...(!isOperator ? [
+      {
+        id: 'add-agent',
+        icon: <PersonAddIcon />,
+        tooltip: 'Add Agent',
+        onClick: () => setIsAgentDialogOpen(true),
+        disabled: false
+      },
+      {
+        id: 'add-task',
+        icon: <AddTaskIcon />,
+        tooltip: 'Add Task',
+        onClick: () => setIsTaskDialogOpen(true),
+        disabled: false
+      },
+      {
+        id: 'separator2',
+        isSeparator: true
+      },
+      {
+        id: 'save-crew',
+        icon: <SaveIcon />,
+        tooltip: 'Save Crew',
+        onClick: onSaveCrewClick,
+        disabled: false
+      }
+    ] : []),
     {
       id: 'open-catalog',
       icon: <MenuBookIcon />,
@@ -187,6 +195,7 @@ const RightSidebar: React.FC<RightSidebarProps> = ({
 
         {/* Activity Bar (like VS Code) */}
         <Paper
+          data-tour="right-sidebar"
           elevation={0}
           sx={{
             position: 'fixed',

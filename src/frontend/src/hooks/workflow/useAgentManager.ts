@@ -10,6 +10,7 @@ interface UseAgentManagerProps {
 export const useAgentManager = ({ nodes, setNodes }: UseAgentManagerProps) => {
   const [agents, setAgents] = useState<Agent[]>([]);
   const [isAgentDialogOpen, setIsAgentDialogOpen] = useState(false);
+  const [openInCreateMode, setOpenInCreateMode] = useState(false);
 
   const fetchAgents = useCallback(async () => {
     try {
@@ -31,13 +32,17 @@ export const useAgentManager = ({ nodes, setNodes }: UseAgentManagerProps) => {
       y: Math.random() * 400
     };
 
+    // Generate a unique ID if the agent doesn't have one
+    const agentId = agent.id || `temp-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
+    
     const newNode: ReactFlowNode = {
-      id: `agent-${agent.id}`,
+      id: `agent-${agentId}`,
       type: 'agentNode',
       position,
       data: {
         ...agent,
-        agentId: agent.id,
+        agentId: agent.id, // Use the actual agent.id (which could be undefined for new agents)
+        id: agent.id, // Also set id in data for consistency
         label: agent.name,
         type: 'agent',
       }
@@ -65,6 +70,11 @@ export const useAgentManager = ({ nodes, setNodes }: UseAgentManagerProps) => {
     console.log('Show agent form');
   }, []);
 
+  const openAgentDialog = useCallback((createMode = false) => {
+    setOpenInCreateMode(createMode);
+    setIsAgentDialogOpen(true);
+  }, []);
+
   return {
     agents,
     addAgentNode,
@@ -72,6 +82,8 @@ export const useAgentManager = ({ nodes, setNodes }: UseAgentManagerProps) => {
     setIsAgentDialogOpen,
     handleAgentSelect,
     handleShowAgentForm,
-    fetchAgents
+    fetchAgents,
+    openInCreateMode,
+    openAgentDialog
   };
 }; 

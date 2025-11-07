@@ -67,8 +67,6 @@ class TestDataProcessingGuardrail:
         assert hasattr(guardrail, 'validate')
         assert callable(guardrail.validate)
     
-    @patch('src.engines.crewai.guardrails.data_processing_guardrail.SyncUnitOfWork')
-    @patch('src.engines.crewai.guardrails.data_processing_guardrail.DataProcessingRepository')
     def test_validate_all_records_processed_success(self, mock_repo_class, mock_uow):
         """Test successful validation when all records are processed."""
         # Setup UOW
@@ -89,8 +87,6 @@ class TestDataProcessingGuardrail:
         assert result["valid"] is True
         assert "All data records have been processed successfully" in result["feedback"]
     
-    @patch('src.engines.crewai.guardrails.data_processing_guardrail.SyncUnitOfWork')
-    @patch('src.engines.crewai.guardrails.data_processing_guardrail.DataProcessingRepository')
     def test_validate_unprocessed_records_exist(self, mock_repo_class, mock_uow):
         """Test validation when unprocessed records exist."""
         # Setup UOW
@@ -111,8 +107,6 @@ class TestDataProcessingGuardrail:
         assert result["valid"] is False
         assert "There are still 3 unprocessed records" in result["feedback"]
     
-    @patch('src.engines.crewai.guardrails.data_processing_guardrail.SyncUnitOfWork')
-    @patch('src.engines.crewai.guardrails.data_processing_guardrail.DataProcessingRepository')
     def test_validate_no_records_exist(self, mock_repo_class, mock_uow):
         """Test validation when no records exist in database."""
         # Setup UOW
@@ -132,8 +126,6 @@ class TestDataProcessingGuardrail:
         assert result["valid"] is False
         assert "No records found in the database" in result["feedback"]
     
-    @patch('src.engines.crewai.guardrails.data_processing_guardrail.SyncUnitOfWork')
-    @patch('src.engines.crewai.guardrails.data_processing_guardrail.DataProcessingRepository')
     def test_validate_creates_test_data_when_no_records(self, mock_repo_class, mock_uow):
         """Test that validation creates test data when no records exist."""
         # Setup UOW
@@ -156,8 +148,6 @@ class TestDataProcessingGuardrail:
         mock_repo.create_record_sync.assert_any_call(che_number="CHE67890", processed=True)
         mock_uow_instance._session.commit.assert_called()
     
-    @patch('src.engines.crewai.guardrails.data_processing_guardrail.SyncUnitOfWork')
-    @patch('src.engines.crewai.guardrails.data_processing_guardrail.DataProcessingRepository')
     def test_validate_creates_table_on_error(self, mock_repo_class, mock_uow):
         """Test that validation creates table when it doesn't exist."""
         # Setup UOW
@@ -184,7 +174,6 @@ class TestDataProcessingGuardrail:
         mock_repo.create_record_sync.assert_any_call(che_number="CHE12345", processed=False)
         mock_repo.create_record_sync.assert_any_call(che_number="CHE67890", processed=True)
     
-    @patch('src.engines.crewai.guardrails.data_processing_guardrail.SyncUnitOfWork')
     def test_validate_uow_initialization(self, mock_uow):
         """Test that UOW is initialized if not already initialized."""
         # Setup UOW as not initialized
@@ -192,32 +181,29 @@ class TestDataProcessingGuardrail:
         mock_uow_instance._initialized = False
         mock_uow_instance._session = MagicMock()
         mock_uow.get_instance.return_value = mock_uow_instance
-        
+
         guardrail = DataProcessingGuardrail({})
-        
+
         try:
             guardrail.validate("test_output")
         except Exception:
             # Expected since repository isn't fully mocked
             pass
-        
+
         # Should initialize UOW
         mock_uow_instance.initialize.assert_called_once()
-    
-    @patch('src.engines.crewai.guardrails.data_processing_guardrail.SyncUnitOfWork')
+
     def test_validate_exception_handling(self, mock_uow):
         """Test validation exception handling."""
         # Setup UOW to throw exception
         mock_uow.get_instance.side_effect = Exception("Database connection failed")
-        
+
         guardrail = DataProcessingGuardrail({})
         result = guardrail.validate("test_output")
-        
+
         assert result["valid"] is False
         assert "Error checking data processing status" in result["feedback"]
-    
-    @patch('src.engines.crewai.guardrails.data_processing_guardrail.SyncUnitOfWork')
-    @patch('src.engines.crewai.guardrails.data_processing_guardrail.DataProcessingRepository')
+
     def test_validate_repository_creation(self, mock_repo_class, mock_uow):
         """Test that repository is created with correct session."""
         # Setup UOW
@@ -239,8 +225,6 @@ class TestDataProcessingGuardrail:
         # Verify repository was created with sync_session
         mock_repo_class.assert_called_once_with(sync_session=mock_session)
     
-    @patch('src.engines.crewai.guardrails.data_processing_guardrail.SyncUnitOfWork')
-    @patch('src.engines.crewai.guardrails.data_processing_guardrail.DataProcessingRepository')
     def test_validate_different_output_types(self, mock_repo_class, mock_uow):
         """Test validation with different output parameter types."""
         # Setup

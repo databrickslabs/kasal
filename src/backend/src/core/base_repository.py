@@ -66,31 +66,41 @@ class BaseRepository(Generic[ModelType]):
     async def create(self, obj_in: dict) -> ModelType:
         """
         Create a new record.
-        
+
         Args:
             obj_in: Dictionary of values to create model with
-            
+
         Returns:
             The created model instance
         """
         import logging
         logger = logging.getLogger(__name__)
-        
+
         try:
             logger.debug(f"Creating new {self.model.__name__} with data: {obj_in}")
             db_obj = self.model(**obj_in)
             self.session.add(db_obj)
-            
+
             # Flush changes to get generated ID and other DB-generated values
             await self.session.flush()
-            
-            # Explicitly commit changes to ensure they're persisted to the database
-            await self.session.commit()
-            
-            # Refresh the object to ensure we have all the DB-generated data
-            await self.session.refresh(db_obj)
-            
-            logger.debug(f"Created {self.model.__name__} with ID: {db_obj.id}")
+
+            # Capture the ID immediately after flush while we know it's available
+            # This prevents lazy loading issues later
+            obj_id = db_obj.id if hasattr(db_obj, 'id') else 'unknown'
+
+            # Don't commit here - let the session dependency handle it
+            # This ensures consistent transaction management across all operations
+
+            # Try to refresh the object to ensure we have all the DB-generated data
+            # If the session has been committed elsewhere, this might fail
+            try:
+                await self.session.refresh(db_obj)
+            except Exception as refresh_error:
+                # If refresh fails (e.g., object detached), it's okay
+                # The object still has the data from flush
+                logger.debug(f"Could not refresh {self.model.__name__} (session may be closed): {refresh_error}")
+
+            logger.debug(f"Created {self.model.__name__} with ID: {obj_id}")
             return db_obj
         except Exception as e:
             logger.error(f"Error creating {self.model.__name__}: {str(e)}")
@@ -103,29 +113,29 @@ class BaseRepository(Generic[ModelType]):
     async def add(self, obj: ModelType) -> ModelType:
         """
         Add an existing model object to the database.
-        
+
         Args:
             obj: Model instance to add to database
-            
+
         Returns:
             The added model instance with database-generated values
         """
         import logging
         logger = logging.getLogger(__name__)
-        
+
         try:
             logger.debug(f"Adding {self.model.__name__} object to database")
             self.session.add(obj)
-            
+
             # Flush changes to get generated ID and other DB-generated values
             await self.session.flush()
-            
-            # Explicitly commit changes to ensure they're persisted to the database
-            await self.session.commit()
-            
+
+            # Don't commit here - let the session dependency handle it
+            # This ensures consistent transaction management across all operations
+
             # Refresh the object to ensure we have all the DB-generated data
             await self.session.refresh(obj)
-            
+
             logger.debug(f"Added {self.model.__name__} with ID: {obj.id}")
             return obj
         except Exception as e:
@@ -164,14 +174,14 @@ class BaseRepository(Generic[ModelType]):
             # Use SQLAlchemy's update statement instead of ORM-style updates
             # This is more efficient for SQLite and less prone to locking
             stmt = update(self.model).where(self.model.id == id).values(**obj_in)
-            
+
             # Execute direct SQL update
             await self.session.execute(stmt)
-            
-            # Now explicitly flush and commit to ensure transaction is completed
+
+            # Only flush, don't commit - let the session dependency handle commits
+            # This ensures consistent transaction management across all operations
             await self.session.flush()
-            await self.session.commit()
-            
+
             # Refresh to get updated data
             updated_obj = await self.get(id)
             
@@ -202,13 +212,20 @@ class BaseRepository(Generic[ModelType]):
             db_obj = await self.get(id)
             if db_obj:
                 logger.debug(f"Found {self.model.__name__} with ID {id}, deleting")
-                self.session.delete(db_obj)
-                
-                # Always flush and commit to ensure transaction is completed
+                logger.info(f"[BASE REPO DELETE] Deleting {self.model.__name__} ID={id}")
+
+                # Use SQL DELETE statement instead of ORM delete
+                # This ensures the DELETE is actually executed
+                from sqlalchemy import delete as sql_delete
+                stmt = sql_delete(self.model).where(self.model.id == id)
+                result = await self.session.execute(stmt)
+                logger.info(f"[BASE REPO DELETE] Executed SQL DELETE for {self.model.__name__} ID={id}, rows affected: {result.rowcount}")
+
+                # Flush to ensure the delete is sent to the database
                 await self.session.flush()
-                await self.session.commit()
-                
-                logger.debug(f"Successfully deleted {self.model.__name__} with ID {id}")
+                logger.info(f"[BASE REPO DELETE] Flushed session after SQL DELETE")
+
+                logger.debug(f"Successfully deleted {self.model.__name__} with ID {id} (flushed)")
                 return True
             else:
                 logger.warning(f"{self.model.__name__} with ID {id} not found for deletion")

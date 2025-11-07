@@ -1,171 +1,161 @@
-# Modern Python Backend
 
-A modern, scalable backend architecture using FastAPI, SQLAlchemy, and best practices for 2025.
 
-## Architecture Overview
+# Kasal Documentation Hub
 
-This project follows a clean architecture pattern with clear separation of concerns:
+**Enterprise AI Agent Orchestration Platform**
 
-- **API Layer**: FastAPI routes and controllers
-- **Service Layer**: Business logic implementation
-- **Repository Layer**: Data access abstraction
-- **DB Layer**: Database models and connectivity
-- **Schema Layer**: Data validation and serialization (Pydantic models)
+---
 
-## Features
+## Quick Start
+Find the right documentation for your role and get productive fast.
 
-- ✅ FastAPI with async support
-- ✅ SQLAlchemy 2.0 with async support
-- ✅ Clean architecture with dependency injection
-- ✅ Repository pattern for data access
-- ✅ Unit of Work pattern for transactions
-- ✅ Environment-based configuration
-- ✅ Comprehensive test setup
-- ✅ Modern typing and code quality tools
-- ✅ Database seeding for predefined data
-- ✅ Multi-engine AI orchestration ready (CrewAI active, LangGraph integration prepared)
+Choose your documentation based on your role:
 
-## Project Structure
 
-```
-backend/
-├── src/                 # Application source code
-│   ├── api/             # API routes and controllers
-│   │   ├── __init__.py  # Router registration
-│   │   └── {domain}_router.py  # Domain-specific route handlers
-│   ├── core/            # Core application components
-│   ├── db/              # Database setup and session management
-│   ├── models/          # SQLAlchemy models
-│   ├── repositories/    # Repository pattern implementations
-│   │   ├── base_repository.py  # Base repository with common operations
-│   │   └── {domain}_repository.py  # Domain-specific repositories
-│   ├── schemas/         # Pydantic models for validation
-│   │   ├── __init__.py  # Re-exports important schemas
-│   │   ├── base.py      # Common base schemas
-│   │   └── {domain}/    # Domain-specific schemas
-│   ├── services/        # Business logic services
-│   │   └── {domain}_service.py  # Domain-specific services
-│   ├── seeds/           # Database seeders for populating initial data
-│   ├── config/          # Configuration management
-│   ├── utils/           # Utility functions
-│   ├── __init__.py
-│   └── main.py          # Application entry point
-├── tests/               # Test suite
-│   ├── integration/     # Integration tests
-│   └── unit/            # Unit tests
-├── docs/                # Project documentation
-│   ├── ARCHITECTURE.md  # Architectural design details
-│   ├── BEST_PRACTICES.md # Coding guidelines
-│   ├── MODELS.md        # Database model documentation
-│   ├── SCHEMAS.md       # Schema documentation
-│   ├── REPOSITORY_PATTERN.md # Repository pattern documentation
-│   └── README.md        # Documentation index
-├── pyproject.toml       # Project dependencies and settings
-└── README.md            # Project documentation
-```
+## Technical Documentation
+Developer-focused guides, code structure, and API reference.
+### [Code structure Guide](./CODE_STRUCTURE_GUIDE.md)
+**For Software Engineers and Developers**
 
-### Organization Principles
+Build and integrate with Kasal's powerful AI orchestration platform. From quick starts to advanced implementations.
 
-Our codebase follows these organizational principles:
+**Key Topics:**
+- High level code structure
+- Different folders and underlying components
 
-1. **Domain-based Structure**: Files are organized by domain (e.g., executions, agents)
-2. **Consolidated Services**: Each domain has a single service file handling all related operations
-3. **Dedicated Repositories**: Each domain has a repository handling data access operations
-4. **Consistent Naming**: Files follow consistent naming patterns (`{domain}_service.py`, `{domain}_repository.py`)
-5. **Single Responsibility**: Each component focuses on a specific domain area
-6. **Layered Architecture**: Clear separation between API, service, repository, and data layers
+---
 
-## Getting Started
+### [Developer Guide](./DEVELOPER_GUIDE.md)
+**For Software Engineers and Developers**
 
-### Prerequisites
+Build and integrate with Kasal's powerful AI orchestration platform. From quick starts to advanced implementations.
 
-- Python 3.9 or higher
-- Poetry for dependency management
+**Key Topics:**
+- 30-Second Quick Start with Code Examples
+- API Integration and SDK Usage
+- Testing Strategies and Best Practices
+- Production Deployment Guides
 
-### Installation
+### [API Reference](./API_REFERENCE.md)
+**For API Integrators and Backend Engineers**
 
-1. Clone this repository
-2. Install dependencies:
-   ```
-   cd backend
-   poetry install
-   ```
+Complete REST API documentation with examples, WebSocket events, and SDK libraries.
 
-### Running the Application
+**Key Topics:**
+- RESTful Endpoints Documentation
+- WebSocket Real-time Events
+- Authentication and Authorization
+- Rate Limits and Error Handling
+
+---
+
+## Architecture Documentation
+System design, patterns, and enterprise integration guidance.
+
+### [Solution Architecture Guide](./ARCHITECTURE_GUIDE.md)
+**For Solution Architects and Technical Leaders**
+
+Understand Kasal's architecture, design patterns, and enterprise integration strategies.
+
+**Key Topics:**
+- System Design and Components
+- Security Model and Compliance
+- Scaling Strategies and Performance
+- Integration Patterns and Best Practices
+
+---
+
+## Getting Started in 30 Seconds
+One command sequence to run both backend and frontend locally.
 
 ```bash
-# Development server
-poetry run uvicorn src.main:app --reload
+# Clone the repository
+git clone https://github.com/databrickslabs/kasal
 
-# Production server
-poetry run uvicorn src.main:app --host 0.0.0.0 --port 8000
+# Install dependencies
+cd kasal && pip install -r src/requirements.txt
+
+# Start the backend
+cd src/backend && ./run.sh
+
+# In another terminal, start the frontend
+cd src/frontend && npm install && npm start
 ```
 
-### Database Migrations
+Access the application at `http://localhost:3000`
 
-Basic commands for working with database migrations:
+---
 
-```bash
-# Initialize Alembic (first time only)
-poetry run alembic init migrations
+## Key Features
+What Kasal provides out of the box to build, operate, and govern AI workflows.
 
-# Create a migration
-poetry run alembic revision --autogenerate -m "description"
+| Feature | Description |
+|---------|-------------|
+| **AI Agent Orchestration** | Create and manage teams of AI agents working together |
+| **Visual Workflow Designer** | Drag-and-drop interface for creating complex workflows |
+| **Enterprise Security** | SOC2 compliant with role-based access control |
+| **Databricks Integration** | Native integration with Databricks platform |
+| **Scalable Architecture** | Microservices-ready, horizontally scalable design |
+| **Multi-Model Support** | Support for GPT-4, Claude, Databricks models, and more |
 
-# Run migrations
-poetry run alembic upgrade head
+---
+
+## Documentation Structure
+How this folder is organized and where to find topics.
+
+```
+docs/
+├── README.md                    # This file - Documentation hub
+├── CODE_STRUCTURE_GUIDE.md      # Code structure documentation
+├── DEVELOPER_GUIDE.md           # Developer documentation
+├── ARCHITECTURE_GUIDE.md        # Architecture documentation
+├── API_REFERENCE.md             # API reference
+└── archive/                     # Legacy documentation
+    ├── technical/               # Technical deep-dives
+    ├── security/                # Security documentation
+    └── guides/                  # Various guides
 ```
 
-For a comprehensive guide on database migrations, including best practices, troubleshooting, and real-world examples, see [Database Migrations Guide](DATABASE_MIGRATIONS.md).
+---
 
-### Database Seeding
+## Technology Stack
+Core frameworks and platforms used across the project.
 
-The application automatically seeds the database with predefined data during startup. This includes tool configurations, schemas, prompt templates, and model configurations.
+- **Backend**: FastAPI, SQLAlchemy 2.0, Python 3.9+
+- **Frontend**: React 18, TypeScript, Material-UI
+- **AI Engine**: CrewAI, LangChain
+- **Database**: PostgreSQL / SQLite
+- **Authentication**: JWT + Databricks OAuth
 
-By default, automatic seeding is enabled and occurs during the application's startup lifecycle in the FastAPI lifespan context manager.
+---
 
-For manual seeding or development needs:
+## Support and Resources
+Where to get help and how to contribute.
 
-```bash
-# Run all seeders
-poetry run python -m src.seeds.seed_runner --all
+### Getting Help
 
-# Run specific seeders
-poetry run python -m src.seeds.seed_runner --tools
-poetry run python -m src.seeds.seed_runner --schemas
-poetry run python -m src.seeds.seed_runner --prompt_templates
-poetry run python -m src.seeds.seed_runner --model_configs
+- **GitHub Issues**: [github.com/databrickslabs/kasal/issues](https://github.com/databrickslabs/kasal/issues)
+- **Email**: Contact your Databricks support team
+- **Documentation**: You're already here!
 
-# Run with debug mode
-poetry run python -m src.seeds.seed_runner --all --debug
-```
+### Contributing
 
-You can disable automatic seeding by setting:
-```
-AUTO_SEED_DATABASE=false
-```
+We welcome contributions! Please see our [Contributing Guide](https://github.com/databrickslabs/kasal/blob/main/CONTRIBUTING.md) for details.
 
-For more details, see [Database Seeding](docs/DATABASE_SEEDING.md).
+### License
 
-### Testing
+This project is licensed under the Apache License 2.0 - see the [LICENSE](https://github.com/databrickslabs/kasal/blob/main/LICENSE) file for details.
 
-```bash
-# Run all tests
-poetry run pytest
+---
 
-# Run with coverage
-poetry run pytest --cov=src
-```
+## Version Information
+Project and documentation version details.
 
-## Best Practices
+- **Current Version**: 2.0.0
+- **Documentation Updated**: October 2025
+- **Minimum Python Version**: 3.9
+- **Minimum Node Version**: 16.0
 
-This project implements the following best practices:
+---
 
-1. **Clean Architecture**: Separation of concerns with layers
-2. **Repository Pattern**: Abstract database access
-3. **Unit of Work Pattern**: Handle transactions
-4. **Dependency Injection**: Manage dependencies cleanly
-5. **Async First**: Utilize async/await for better performance
-6. **Type Hints**: Comprehensive typing for better code quality
-7. **Testing**: Unit and integration tests for reliable code
-8. **Data Seeding**: Idempotent database population with predefined data
+*Built by Databricks Labs*

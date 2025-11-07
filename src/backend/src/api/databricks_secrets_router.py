@@ -10,10 +10,9 @@ from fastapi import APIRouter, Depends, HTTPException, Path, status
 import logging
 import os
 
-from src.core.dependencies import SessionDep
+from src.core.dependencies import SessionDep, GroupContextDep
 from src.services.databricks_secrets_service import DatabricksSecretsService
 from src.schemas.databricks_secret import (
-    SecretBase,
     SecretCreate,
     SecretUpdate,
     SecretResponse,
@@ -29,32 +28,29 @@ router = APIRouter(
 # Set up logging
 logger = logging.getLogger(__name__)
 
-# Dependency to get SecretService
-async def get_secret_service():
+def get_databricks_secrets_service(session: SessionDep) -> DatabricksSecretsService:
     """
-    Get a properly initialized DatabricksSecretsService instance using UnitOfWork.
-    
+    Dependency provider for DatabricksSecretsService.
+
+    Creates service with session following the pattern:
+    Router → Service → Repository → DB
+
+    Args:
+        session: Database session from FastAPI DI
+
     Returns:
-        Initialized DatabricksSecretsService
+        DatabricksSecretsService instance with session
     """
-    from src.core.unit_of_work import UnitOfWork
-    async with UnitOfWork() as uow:
-        # Get the DatabricksService first
-        from src.services.databricks_service import DatabricksService
-        databricks_service = await DatabricksService.from_unit_of_work(uow)
-        
-        # Create DatabricksSecretsService
-        service = DatabricksSecretsService(uow.databricks_config_repository)
-        service.set_databricks_service(databricks_service)
-        # Note: set_api_key_repository method does not exist on DatabricksSecretsService
-        # service.set_api_key_repository(uow.api_key_repository)
-        
-        yield service
+    return DatabricksSecretsService(session)
+
+# Type alias for cleaner function signatures
+DatabricksSecretsServiceDep = Annotated[DatabricksSecretsService, Depends(get_databricks_secrets_service)]
 
 
 @router.get("", response_model=List[SecretResponse])
 async def get_databricks_secrets(
-    service: DatabricksSecretsService = Depends(get_secret_service),
+    group_context: GroupContextDep,
+    service: DatabricksSecretsServiceDep,
 ):
     """
     Get all secrets from Databricks secret store.
@@ -71,14 +67,17 @@ async def get_databricks_secrets(
         try:
             config = await service.databricks_service.get_databricks_config()
             if config and config.is_enabled and config.workspace_url and config.secret_scope:
-                # Use token from environment variable
-                token = os.getenv("DATABRICKS_TOKEN", "")
-                if token:
-                    # Get secrets list from Databricks
-                    databricks_results = await service.get_databricks_secrets(config.secret_scope)
-                    
-                    # Return the results directly
-                    return databricks_results
+                # Verify token is available via unified auth
+                try:
+                    from src.utils.databricks_auth import get_auth_context
+                    auth = await get_auth_context()
+                    if auth and auth.token:
+                        # Get secrets list from Databricks
+                        databricks_results = await service.get_databricks_secrets(config.secret_scope)
+                        # Return the results directly
+                        return databricks_results
+                except Exception as e:
+                    logger.warning(f"Failed to get unified auth for secrets: {e}")
         except Exception as e:
             logger.warning(f"Error getting Databricks secrets: {str(e)}")
             
@@ -91,7 +90,8 @@ async def get_databricks_secrets(
 @router.post("", response_model=SecretResponse, status_code=status.HTTP_201_CREATED)
 async def create_databricks_secret(
     secret_data: SecretCreate,
-    service: DatabricksSecretsService = Depends(get_secret_service),
+    group_context: GroupContextDep,
+    service: DatabricksSecretsServiceDep,
 ):
     """
     Create a new secret in Databricks.
@@ -146,7 +146,8 @@ async def create_databricks_secret(
 async def update_databricks_secret(
     secret_name: str,
     secret_data: SecretUpdate,
-    service: DatabricksSecretsService = Depends(get_secret_service),
+    group_context: GroupContextDep,
+    service: DatabricksSecretsServiceDep,
 ):
     """
     Update an existing secret in Databricks.
@@ -209,7 +210,8 @@ async def update_databricks_secret(
 @router.delete("/{secret_name}", status_code=status.HTTP_204_NO_CONTENT)
 async def delete_databricks_secret(
     secret_name: str,
-    service: DatabricksSecretsService = Depends(get_secret_service),
+    group_context: GroupContextDep,
+    service: DatabricksSecretsServiceDep,
 ):
     """
     Delete a secret from Databricks.
@@ -247,7 +249,8 @@ async def delete_databricks_secret(
 
 @router.post("/scopes", status_code=status.HTTP_200_OK)
 async def create_databricks_secret_scope(
-    service: DatabricksSecretsService = Depends(get_secret_service),
+    group_context: GroupContextDep,
+    service: DatabricksSecretsServiceDep,
 ):
     """
     Create a secret scope in Databricks if it doesn't exist.
@@ -266,16 +269,18 @@ async def create_databricks_secret_scope(
                 detail="Databricks not properly configured"
             )
             
-        token = os.getenv("DATABRICKS_TOKEN", "")
-        if not token:
+        # Get token from unified auth
+        from src.utils.databricks_auth import get_auth_context
+        auth = await get_auth_context()
+        if not auth or not auth.token:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
-                detail="DATABRICKS_TOKEN environment variable not set"
+                detail="No Databricks authentication available"
             )
-            
+
         success = await service.create_databricks_secret_scope(
             config.workspace_url,
-            token,
+            auth.token,
             config.secret_scope
         )
         
@@ -296,7 +301,8 @@ async def create_databricks_secret_scope(
 # Legacy routes for backward compatibility (matching old routing paths)
 @router.get("/secrets", response_model=List[Dict])
 async def get_secrets(
-    service: DatabricksSecretsService = Depends(get_secret_service),
+    group_context: GroupContextDep,
+    service: DatabricksSecretsServiceDep,
 ):
     """Legacy endpoint for getting all secrets from a specific Databricks scope."""
     try:
@@ -318,7 +324,8 @@ async def get_secrets(
 async def set_secret(
     key: str,
     secret_data: SecretUpdate,
-    service: DatabricksSecretsService = Depends(get_secret_service),
+    group_context: GroupContextDep,
+    service: DatabricksSecretsServiceDep,
 ):
     """Legacy endpoint for setting a secret value in Databricks."""
     try:
@@ -339,7 +346,8 @@ async def set_secret(
 @router.delete("/secrets/{key}", status_code=status.HTTP_204_NO_CONTENT)
 async def delete_secret_endpoint(
     key: str,
-    service: DatabricksSecretsService = Depends(get_secret_service),
+    group_context: GroupContextDep,
+    service: DatabricksSecretsServiceDep,
 ):
     """Legacy endpoint for deleting a secret from Databricks."""
     try:
@@ -357,19 +365,23 @@ async def delete_secret_endpoint(
 
 @router.post("/secret-scopes", status_code=status.HTTP_200_OK)
 async def create_secret_scope_endpoint(
-    service: DatabricksSecretsService = Depends(get_secret_service),
+    group_context: GroupContextDep,
+    service: DatabricksSecretsServiceDep,
 ):
     """Legacy endpoint for creating a secret scope if it doesn't exist."""
     try:
         workspace_url, scope = await service.validate_databricks_config()
-        token = os.getenv("DATABRICKS_TOKEN", "")
-        if not token:
+
+        # Get token from unified auth
+        from src.utils.databricks_auth import get_auth_context
+        auth = await get_auth_context()
+        if not auth or not auth.token:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
-                detail="DATABRICKS_TOKEN environment variable not set"
+                detail="No Databricks authentication available"
             )
-        
-        success = await service.create_databricks_secret_scope(workspace_url, token, scope)
+
+        success = await service.create_databricks_secret_scope(workspace_url, auth.token, scope)
         if success:
             return {"status": "success", "message": f"Scope '{scope}' created or already exists"}
         else:
@@ -385,7 +397,8 @@ async def create_secret_scope_endpoint(
 @router.post("/databricks/token", status_code=status.HTTP_200_OK, response_model=Dict[str, str])
 async def set_databricks_token(
     request: DatabricksTokenRequest,
-    service: DatabricksSecretsService = Depends(get_secret_service),
+    group_context: GroupContextDep,
+    service: DatabricksSecretsServiceDep,
 ):
     """Set Databricks token in the configuration."""
     try:
@@ -396,11 +409,10 @@ async def set_databricks_token(
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail="Databricks not properly configured"
             )
-        
-        # Set the token in the environment so it can be used
-        os.environ["DATABRICKS_TOKEN"] = request.token
-        
+
         # Store the token in Databricks scopes for later use
+        # NOTE: Do NOT set os.environ["DATABRICKS_TOKEN"] here as it causes race conditions
+        # Authentication should use get_auth_context() from databricks_auth.py instead
         success = await service.set_databricks_token(config.secret_scope, request.token)
         
         if success:
@@ -422,40 +434,44 @@ async def set_databricks_token(
 # of concerns between API keys and Databricks secrets
 @router.get("/api-keys", response_model=List[SecretResponse])
 async def get_legacy_api_keys(
-    service: DatabricksSecretsService = Depends(get_secret_service),
+    group_context: GroupContextDep,
+    service: DatabricksSecretsServiceDep,
     source: Optional[str] = None,
 ):
     """Legacy endpoint for getting all API keys."""
     logger.info("Legacy API keys GET endpoint called - redirecting to Databricks secrets")
-    return await get_databricks_secrets(service=service)
+    return await get_databricks_secrets(group_context=group_context, service=service)
 
 
 @router.post("/api-key", response_model=SecretResponse)
 async def create_legacy_api_key(
     secret_data: SecretCreate,
-    service: DatabricksSecretsService = Depends(get_secret_service),
+    group_context: GroupContextDep,
+    service: DatabricksSecretsServiceDep,
 ):
     """Legacy endpoint for creating a new API key."""
     logger.info(f"Legacy API key CREATE endpoint called for key '{secret_data.name}' - redirecting to Databricks secrets")
-    return await create_databricks_secret(secret_data, service)
+    return await create_databricks_secret(secret_data, group_context, service)
 
 
 @router.put("/api-keys/{secret_name}", response_model=SecretResponse)
 async def update_legacy_api_key(
     secret_name: str,
     secret_data: SecretUpdate,
-    service: DatabricksSecretsService = Depends(get_secret_service),
+    group_context: GroupContextDep,
+    service: DatabricksSecretsServiceDep,
 ):
     """Legacy endpoint for updating an API key."""
     logger.info(f"Legacy API key UPDATE endpoint called for key '{secret_name}' - redirecting to Databricks secrets")
-    return await update_databricks_secret(secret_name, secret_data, service)
+    return await update_databricks_secret(secret_name, secret_data, group_context, service)
 
 
 @router.delete("/api-key/{secret_name}", status_code=status.HTTP_204_NO_CONTENT)
 async def delete_legacy_api_key(
     secret_name: str,
-    service: DatabricksSecretsService = Depends(get_secret_service),
+    group_context: GroupContextDep,
+    service: DatabricksSecretsServiceDep,
 ):
     """Legacy endpoint for deleting an API key."""
     logger.info(f"Legacy API key DELETE endpoint called for key '{secret_name}' - redirecting to Databricks secrets")
-    await delete_databricks_secret(secret_name, service) 
+    await delete_databricks_secret(secret_name, group_context, service) 

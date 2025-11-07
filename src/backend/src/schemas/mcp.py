@@ -43,6 +43,7 @@ class MCPServerResponse(MCPServerBase):
     """Schema for MCP server responses"""
     id: int = Field(..., description="Unique identifier for the MCP server")
     api_key: str = Field("", description="Decrypted API key (only present in specific scenarios)")
+    group_id: Optional[str] = Field(default=None, description="Workspace/group identifier if this is a workspace override")
     created_at: datetime = Field(..., description="Timestamp when the server was created")
     updated_at: datetime = Field(..., description="Timestamp when the server was last updated")
 

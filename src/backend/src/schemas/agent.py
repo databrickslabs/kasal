@@ -14,6 +14,7 @@ class AgentBase(BaseModel):
     
     # Core configuration
     llm: str = Field(default="databricks-llama-4-maverick")
+    temperature: Optional[int] = Field(default=None, ge=0, le=100, description="Temperature override (0-100)")
     tools: List[Any] = Field(default_factory=list)
     tool_configs: Optional[Dict[str, Dict[str, Any]]] = Field(default_factory=dict)  # Tool-specific config overrides
     function_calling_llm: Optional[str] = None
@@ -74,6 +75,7 @@ class AgentUpdate(BaseModel):
     
     # Core configuration
     llm: Optional[str] = None
+    temperature: Optional[int] = Field(default=None, ge=0, le=100, description="Temperature override (0-100)")
     tools: Optional[List[Any]] = None
     tool_configs: Optional[Dict[str, Dict[str, Any]]] = None  # Tool-specific config overrides
     function_calling_llm: Optional[str] = None

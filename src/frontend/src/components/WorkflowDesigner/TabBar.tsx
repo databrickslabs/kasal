@@ -30,16 +30,21 @@ import {
   NoteAdd as NewCanvasIcon,
   FolderOpen as LoadCrewIcon,
   ArrowDropDown as ArrowDropDownIcon,
-  Clear as ClearAllIcon
+  Clear as ClearAllIcon,
+  Group as GroupIcon,
+  Assignment as AssignmentIcon
 } from '@mui/icons-material';
 import { useTabManagerStore } from '../../store/tabManager';
 import { useThemeManager } from '../../hooks/workflow/useThemeManager';
+import GroupSelector from '../Common/GroupSelector';
 
 interface TabBarProps {
   onRunTab?: (tabId: string) => void;
   isRunning?: boolean;
   runningTabId?: string | null;
   onLoadCrew?: () => void;
+  onLoadAgents?: () => void;
+  onLoadTasks?: () => void;
   disabled?: boolean;
 }
 
@@ -48,6 +53,8 @@ const TabBar: React.FC<TabBarProps> = ({
   isRunning = false, 
   runningTabId = null,
   onLoadCrew,
+  onLoadAgents,
+  onLoadTasks,
   disabled = false
 }) => {
   const { isDarkMode } = useThemeManager();
@@ -62,6 +69,7 @@ const TabBar: React.FC<TabBarProps> = ({
     clearAllTabs,
     clearTabExecutionStatus
   } = useTabManagerStore();
+
 
   const [contextMenu, setContextMenu] = useState<{
     mouseX: number;
@@ -120,11 +128,23 @@ const TabBar: React.FC<TabBarProps> = ({
     handleNewTabMenuClose();
   };
 
-  const handleLoadExistingCrew = () => {
+  const handleLoadExistingPlans = () => {
     if (onLoadCrew) {
       onLoadCrew();
     }
     handleNewTabMenuClose();
+  };
+
+  const handleLoadExistingAgents = () => {
+    if (onLoadAgents) {
+      onLoadAgents();
+    }
+  };
+
+  const handleLoadExistingTasks = () => {
+    if (onLoadTasks) {
+      onLoadTasks();
+    }
   };
 
   const handleCloseTab = (tabId: string, event: React.MouseEvent) => {
@@ -148,11 +168,9 @@ const TabBar: React.FC<TabBarProps> = ({
   };
 
   const handleConfirmClose = (action: 'save' | 'discard' | 'cancel') => {
-    console.log('TabBar: handleConfirmClose called with action:', action, 'tabId:', closeConfirmDialog.tabId);
     
     if (action === 'save') {
       const tab = tabs.find(t => t.id === closeConfirmDialog.tabId);
-      console.log('TabBar: Found tab for close:', tab ? { id: tab.id, name: tab.name, savedCrewId: tab.savedCrewId, isDirty: tab.isDirty } : 'NOT FOUND');
       
       if (tab && tab.savedCrewId) {
         // Check if this is a legacy tab with 'loaded' placeholder
@@ -341,10 +359,12 @@ const TabBar: React.FC<TabBarProps> = ({
           display: 'flex',
           alignItems: 'center',
           minHeight: '48px',
+          height: '48px',  // Fixed height to prevent shifts
           paddingLeft: 1,
           paddingRight: 1,
           position: 'relative',
-          zIndex: 1001 // Above the toolbar
+          zIndex: 1001, // Above the toolbar
+          overflow: 'hidden'  // Prevent overflow from causing layout shifts
         }}
       >
         <Box sx={{ display: 'flex', alignItems: 'center', flex: 1 }}>
@@ -489,29 +509,44 @@ const TabBar: React.FC<TabBarProps> = ({
           </Tabs>
 
           <Tooltip title={disabled ? "Tab operations disabled during processing" : "New Tab Options"}>
-            <IconButton
-              onClick={handleNewTabMenuOpen}
-              disabled={disabled}
-              size="small"
-              sx={{
-                marginLeft: 1,
-                padding: '6px',
-                color: isDarkMode ? 'rgba(255,255,255,0.7)' : 'rgba(0,0,0,0.6)',
-                '&:hover': {
-                  backgroundColor: isDarkMode ? 'rgba(255,255,255,0.1)' : 'rgba(0,0,0,0.1)',
-                  color: isDarkMode ? 'rgba(255,255,255,0.9)' : 'rgba(0,0,0,0.8)'
-                },
-                '&.Mui-disabled': {
-                  color: isDarkMode ? 'rgba(255,255,255,0.3)' : 'rgba(0,0,0,0.3)',
-                }
-              }}
-            >
-              <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5 }}>
-                <AddIcon sx={{ fontSize: 18 }} />
-                <ArrowDropDownIcon sx={{ fontSize: 14 }} />
-              </Box>
-            </IconButton>
+            <span>
+              <IconButton
+                onClick={handleNewTabMenuOpen}
+                disabled={disabled}
+                size="small"
+                sx={{
+                  marginLeft: 1,
+                  padding: '6px',
+                  color: isDarkMode ? 'rgba(255,255,255,0.7)' : 'rgba(0,0,0,0.6)',
+                  '&:hover': {
+                    backgroundColor: isDarkMode ? 'rgba(255,255,255,0.1)' : 'rgba(0,0,0,0.1)',
+                    color: isDarkMode ? 'rgba(255,255,255,0.9)' : 'rgba(0,0,0,0.8)'
+                  },
+                  '&.Mui-disabled': {
+                    color: isDarkMode ? 'rgba(255,255,255,0.3)' : 'rgba(0,0,0,0.3)',
+                  }
+                }}
+              >
+                <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5 }}>
+                  <AddIcon sx={{ fontSize: 18 }} />
+                  <ArrowDropDownIcon sx={{ fontSize: 14 }} />
+                </Box>
+              </IconButton>
+            </span>
           </Tooltip>
+        </Box>
+
+        {/* Workspace Selector - positioned on the right */}
+        <Box sx={{
+          display: 'flex',
+          alignItems: 'center',
+          pl: 0.25,
+          pr: 0.75,  // Add more padding on the right to align with sidebar separator
+          flexShrink: 0,  // Prevent the box from shrinking
+          width: 'auto',
+          transition: 'none'  // Disable any transitions that might cause flickering
+        }}>
+          <GroupSelector />
         </Box>
       </Box>
 
@@ -538,13 +573,31 @@ const TabBar: React.FC<TabBarProps> = ({
             secondary="Start with a blank canvas"
           />
         </MenuItem>
-        <MenuItem onClick={handleLoadExistingCrew}>
+        <MenuItem onClick={handleLoadExistingPlans}>
           <ListItemIcon>
             <LoadCrewIcon sx={{ fontSize: 18 }} />
           </ListItemIcon>
           <ListItemText 
-            primary="Load Existing Crew"
-            secondary="Open a saved canvas"
+            primary="Load Existing Plans"
+            secondary="Opens in a new tab"
+          />
+        </MenuItem>
+        <MenuItem onClick={() => { handleLoadExistingAgents(); handleNewTabMenuClose(); }}>
+          <ListItemIcon>
+            <GroupIcon sx={{ fontSize: 18 }} />
+          </ListItemIcon>
+          <ListItemText 
+            primary="Load Existing Agents"
+            secondary="Adds to current tab"
+          />
+        </MenuItem>
+        <MenuItem onClick={() => { handleLoadExistingTasks(); handleNewTabMenuClose(); }}>
+          <ListItemIcon>
+            <AssignmentIcon sx={{ fontSize: 18 }} />
+          </ListItemIcon>
+          <ListItemText 
+            primary="Load Existing Tasks"
+            secondary="Adds to current tab"
           />
         </MenuItem>
       </Menu>

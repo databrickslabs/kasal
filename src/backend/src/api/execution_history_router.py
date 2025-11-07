@@ -6,11 +6,16 @@ execution history records and related data.
 """
 
 
-from fastapi import APIRouter, Depends, HTTPException, Query, status, Response
+from fastapi import APIRouter, Depends, HTTPException, Query, status, Response, Header
+from typing import Optional, List, Dict, Any
+from sqlalchemy import select, distinct, func
 
 from src.core.logger import LoggerManager
-from src.core.dependencies import GroupContextDep
+from src.core.dependencies import GroupContextDep, SessionDep
 from src.services.execution_history_service import ExecutionHistoryService, get_execution_history_service
+from src.services.group_service import GroupService
+from src.services.user_service import UserService
+from src.models.execution_history import ExecutionHistory
 from src.schemas.execution_history import (
     ExecutionHistoryList,
     ExecutionHistoryItem,
@@ -27,6 +32,133 @@ router = APIRouter(
     tags=["Execution History"]
 )
 
+@router.get("/history/debug-groups")
+async def debug_execution_groups(
+    session: SessionDep,
+    x_forwarded_email: Optional[str] = Header(None, alias="X-Forwarded-Email"),
+    x_auth_request_email: Optional[str] = Header(None, alias="X-Auth-Request-Email"),
+) -> Dict[str, Any]:
+    """
+    Debug endpoint to see all unique group_ids in execution_history table
+    and compare with user's groups.
+    """
+    try:
+        # Get user email from headers
+        user_email = x_auth_request_email or x_forwarded_email
+
+        # Get all unique group_ids from execution_history table
+        stmt = select(distinct(ExecutionHistory.group_id), func.count(ExecutionHistory.id)).group_by(ExecutionHistory.group_id)
+        result = await session.execute(stmt)
+        all_group_ids = [(row[0], row[1]) for row in result.fetchall()]
+
+        # Get user's groups if email provided
+        user_groups = []
+        if user_email:
+            user_service = UserService(session)
+            user = await user_service.get_or_create_user_by_email(user_email)
+            if user:
+                group_service = GroupService(session)
+                groups = await group_service.get_user_groups(user.id)
+                user_groups = [{"id": g.id, "name": g.name} for g in groups]
+
+        return {
+            "user_email": user_email,
+            "user_groups": user_groups,
+            "all_execution_groups": [
+                {"group_id": gid, "execution_count": count}
+                for gid, count in all_group_ids
+            ],
+            "total_unique_groups": len(all_group_ids)
+        }
+    except Exception as e:
+        logger.error(f"Error in debug endpoint: {str(e)}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Debug failed: {str(e)}"
+        )
+
+@router.get("/history/all-groups", response_model=ExecutionHistoryList)
+async def get_all_groups_execution_history(
+    session: SessionDep,
+    limit: int = Query(50, ge=1, le=100),
+    offset: int = Query(0, ge=0),
+    x_forwarded_email: Optional[str] = Header(None, alias="X-Forwarded-Email"),
+    x_auth_request_email: Optional[str] = Header(None, alias="X-Auth-Request-Email"),
+    service: ExecutionHistoryService = Depends(get_execution_history_service)
+):
+    """
+    Get execution history from all groups the user belongs to.
+
+    This endpoint fetches executions from all groups where the user is a member,
+    eliminating the need to switch between groups to see executions.
+
+    Args:
+        session: Database session
+        limit: Maximum number of executions to return (1-100)
+        offset: Pagination offset
+        x_forwarded_email: User email from Databricks Apps
+        x_auth_request_email: User email from OAuth2-Proxy
+        service: ExecutionHistoryService instance
+
+    Returns:
+        ExecutionHistoryList with paginated execution history from all user's groups
+    """
+    try:
+        # Get user email from headers (prefer OAuth2-Proxy over direct)
+        user_email = x_auth_request_email or x_forwarded_email
+
+        if not user_email:
+            logger.warning("No user email found in headers, returning empty list")
+            return ExecutionHistoryList(executions=[], total=0, offset=offset, limit=limit)
+
+        # Get all groups the user belongs to
+        user_service = UserService(session)
+        user = await user_service.get_or_create_user_by_email(user_email)
+
+        if not user:
+            logger.warning(f"User not found for email {user_email}, returning empty list")
+            return ExecutionHistoryList(executions=[], total=0, offset=offset, limit=limit)
+
+        group_service = GroupService(session)
+        user_groups = await group_service.get_user_groups(user.id)
+
+        # Extract group IDs
+        group_ids = [group.id for group in user_groups]
+
+        logger.info(f"User {user_email} belongs to {len(user_groups)} groups")
+        for group in user_groups:
+            logger.info(f"  - Group: {group.id} ({group.name})")
+
+        # Also add the user's personal workspace
+        email_parts = user_email.split('@')
+        if len(email_parts) == 2:
+            email_user = email_parts[0]
+            email_domain = email_parts[1].replace('.', '_')
+            personal_group_id = f"user_{email_user}_{email_domain}"
+            if personal_group_id not in group_ids:
+                group_ids.append(personal_group_id)
+                logger.info(f"  - Added personal workspace: {personal_group_id}")
+
+        logger.info(f"Fetching executions for user {user_email} from {len(group_ids)} total groups: {group_ids}")
+
+        # Fetch executions from all groups
+        result = await service.get_execution_history(limit, offset, group_ids=group_ids)
+
+        logger.info(f"Found {result.total} total executions across all groups")
+        if result.executions:
+            logger.info(f"Returning {len(result.executions)} executions (offset={offset}, limit={limit})")
+            # Log first few execution group_ids to debug
+            for i, exec in enumerate(result.executions[:5]):
+                logger.info(f"  - Execution {i+1}: job_id={exec.job_id}, group_id={exec.group_id}, status={exec.status}")
+
+        return result
+    except Exception as e:
+        logger.error(f"Error getting all groups execution history: {str(e)}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to retrieve execution history: {str(e)}"
+        )
+
 @router.get("/history", response_model=ExecutionHistoryList)
 async def get_execution_history(
     group_context: GroupContextDep,
@@ -36,13 +168,13 @@ async def get_execution_history(
 ):
     """
     Get a paginated list of execution history with group filtering.
-    
+
     Args:
         limit: Maximum number of executions to return (1-100)
         offset: Pagination offset
         group_context: Group context for filtering
         service: ExecutionHistoryService instance
-    
+
     Returns:
         ExecutionHistoryList with paginated execution history
     """

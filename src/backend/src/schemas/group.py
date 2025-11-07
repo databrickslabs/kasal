@@ -5,14 +5,13 @@ These schemas define the request and response models for group-related endpoints
 """
 from datetime import datetime
 from typing import Optional, List
-from pydantic import BaseModel, Field, EmailStr, ConfigDict
+from pydantic import BaseModel, Field, EmailStr, ConfigDict, field_validator
 from src.models.enums import GroupStatus, GroupUserRole, GroupUserStatus
 
 
 class GroupBase(BaseModel):
     """Base group schema with common fields."""
     name: str = Field(..., description="Human-readable group name", min_length=1, max_length=255)
-    email_domain: str = Field(..., description="Email domain for the group", min_length=1, max_length=255)
     description: Optional[str] = Field(None, description="Optional group description", max_length=1000)
 
 
@@ -24,7 +23,6 @@ class GroupCreateRequest(GroupBase):
 class GroupUpdateRequest(BaseModel):
     """Schema for updating an existing group."""
     name: Optional[str] = Field(None, description="Human-readable group name", min_length=1, max_length=255)
-    email_domain: Optional[str] = Field(None, description="Email domain for the group", min_length=1, max_length=255)
     description: Optional[str] = Field(None, description="Optional group description", max_length=1000)
     status: Optional[GroupStatus] = Field(None, description="Group status")
 
@@ -47,16 +45,21 @@ class GroupResponse(GroupBase):
     model_config = ConfigDict(from_attributes=True)
 
 
+class GroupWithRoleResponse(GroupResponse):
+    """Schema for group responses that include the current user's role."""
+    user_role: Optional[GroupUserRole] = Field(None, description="Current user's role in this group")
+
+
 class GroupUserBase(BaseModel):
     """Base group user schema with common fields."""
-    role: GroupUserRole = Field(GroupUserRole.USER, description="User role in the group")
+    role: GroupUserRole = Field(GroupUserRole.OPERATOR, description="User role in the group")
     status: GroupUserStatus = Field(GroupUserStatus.ACTIVE, description="User status in the group")
 
 
 class GroupUserCreateRequest(BaseModel):
     """Schema for assigning a user to a group."""
     user_email: EmailStr = Field(..., description="Email of user to assign to group")
-    role: GroupUserRole = Field(GroupUserRole.USER, description="Role to assign to user")
+    role: GroupUserRole = Field(GroupUserRole.OPERATOR, description="Role to assign to user")
 
 
 class GroupUserUpdateRequest(BaseModel):
@@ -75,6 +78,20 @@ class GroupUserResponse(GroupUserBase):
     auto_created: bool = Field(..., description="Whether association was auto-created")
     created_at: datetime = Field(..., description="Association creation timestamp")
     updated_at: datetime = Field(..., description="Association last update timestamp")
+
+    @field_validator('role', mode='before')
+    @classmethod
+    def migrate_legacy_roles(cls, v):
+        """Automatically migrate legacy role values to new 3-tier system."""
+        if isinstance(v, str):
+            # Map old roles to new roles
+            role_mapping = {
+                'manager': 'editor',
+                'user': 'operator',
+                'viewer': 'operator',
+            }
+            return role_mapping.get(v, v)
+        return v
 
     model_config = ConfigDict(from_attributes=True)
 

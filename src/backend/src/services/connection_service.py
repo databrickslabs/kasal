@@ -24,10 +24,14 @@ logger = logging.getLogger(__name__)
 
 class ConnectionService:
     """Service for generating connections between agents and tasks."""
-    
-    def __init__(self):
-        """Initialize the service."""
-        pass
+
+    def __init__(self, session=None):
+        """Initialize the service.
+
+        Args:
+            session: Database session for accessing templates (optional for backward compatibility)
+        """
+        self.session = session
     
     async def _log_llm_interaction(self, endpoint: str, prompt: str, response: str, model: str, 
                                  status: str = 'success', error_message: str = None) -> None:
@@ -148,15 +152,16 @@ class ConnectionService:
             ValueError: If there's a problem with the generation
             Exception: For any other errors during generation
         """
-        # Default model if not specified - use Databricks model in Apps environment, OpenAI otherwise
+        # Default model if not specified - use Databricks model if service principal auth, OpenAI otherwise
         default_model = "gpt-4o-mini"
         try:
-            from src.utils.databricks_auth import is_databricks_apps_environment
-            if is_databricks_apps_environment():
+            from src.utils.databricks_auth import get_auth_context
+            auth = await get_auth_context()
+            if auth and auth.auth_method == "service_principal":
                 default_model = "databricks-llama-4-maverick"
-                logger.info("Using Databricks model in Apps environment")
-        except ImportError:
-            logger.debug("Enhanced Databricks auth not available, using OpenAI default")
+                logger.info("Using Databricks model (service principal auth detected)")
+        except Exception:
+            logger.debug("Could not determine auth method, using OpenAI default")
         
         model = request.model or os.getenv("CONNECTION_MODEL", default_model)
         
@@ -164,8 +169,16 @@ class ConnectionService:
         logger.info(f"Number of agents: {len(request.agents)}, Number of tasks: {len(request.tasks)}")
         
         try:
-            # Get the prompt template
-            system_message = await TemplateService.get_template_content("generate_connections")
+            # Get the prompt template using proper dependency injection
+            if self.session:
+                from src.repositories.template_repository import TemplateRepository
+                template_repository = TemplateRepository(self.session)
+                template_service = TemplateService(template_repository)
+                system_message = await template_service.get_template_content("generate_connections")
+            else:
+                # Fallback for backward compatibility when no session is provided
+                system_message = await TemplateService.get_template_content("generate_connections")
+
             if not system_message:
                 raise ValueError("Required prompt template 'generate_connections' not found")
             

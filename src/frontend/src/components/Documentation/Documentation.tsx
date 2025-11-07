@@ -19,12 +19,12 @@ import {
   ExpandLess, 
   ExpandMore, 
   Menu as MenuIcon,
-  GitHub as GitHubIcon,
   Home as HomeIcon
 } from '@mui/icons-material';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import { useNavigate } from 'react-router-dom';
+import mermaid from 'mermaid';
 
 interface DocSection {
   label: string;
@@ -32,56 +32,26 @@ interface DocSection {
 }
 
 const docSections: DocSection[] = [
-  {
-    label: 'Getting Started',
-    items: [
-      { label: 'Installation', file: 'GETTING_STARTED' },
-      { label: 'Best Practices', file: 'BEST_PRACTICES' },
-    ],
-  },
+ 
   {
     label: 'Architecture',
     items: [
-      { label: 'Overview', file: 'ARCHITECTURE' },
-      { label: 'Authorization', file: 'AUTHORIZATION' },
-      { label: 'Security Model', file: 'SECURITY_MODEL' },
-      { label: 'Database Migrations', file: 'DATABASE_MIGRATIONS' },
-      { label: 'Database Seeding', file: 'DATABASE_SEEDING' },
-      { label: 'Models', file: 'MODELS' },
-      { label: 'Schemas', file: 'SCHEMAS' },
-      { label: 'Schema Structure', file: 'SCHEMAS_STRUCTURE' },
+      { label: 'Solution Architecture', file: 'ARCHITECTURE_GUIDE' },
     ],
   },
   {
-    label: 'Backend Features',
+    label: 'Development',
     items: [
-      { label: 'CrewAI Engine', file: 'CREWAI_ENGINE' },
-      { label: 'LLM Manager', file: 'LLM_MANAGER' },
-      { label: 'Memory Backend', file: 'MEMORY_BACKEND_FEATURE' },
-      { label: 'Databricks Vector Search', file: 'DATABRICKS_VECTOR_SEARCH' },
-      { label: 'Embeddings', file: 'EMBEDDINGS' },
-      { label: 'Logging', file: 'LOGGING' },
-      { label: 'Tasks', file: 'TASKS' },
-      { label: 'Agents', file: 'AGENTS' },
+      { label: 'Developer Guide', file: 'DEVELOPER_GUIDE' },
+      { label: 'Code structure', file: 'CODE_STRUCTURE_GUIDE' },
+      { label: 'API Reference', file: 'API_REFERENCE' },
     ],
   },
-  {
-    label: 'API & Usage',
-    items: [
-      { label: 'REST API', file: 'API' },
-      { label: 'Shortcuts', file: 'SHORTCUTS' },
-    ],
-  },
-  {
-    label: 'Deployment',
-    items: [
-      { label: 'Deployment Guide', file: 'DEPLOYMENT_GUIDE' },
-    ],
-  },
+  
 ];
 
 const Documentation: React.FC = () => {
-  const [currentDoc, setCurrentDoc] = useState<string>('index');
+  const [currentDoc, setCurrentDoc] = useState<string>('README');
   const [docContent, setDocContent] = useState<string>('');
   const [loading, setLoading] = useState<boolean>(true);
   const [openSections, setOpenSections] = useState<{ [key: string]: boolean }>({});
@@ -96,6 +66,21 @@ const Documentation: React.FC = () => {
   useEffect(() => {
     loadDocument(currentDoc);
   }, [currentDoc]);
+
+  // Initialize Mermaid diagrams whenever the markdown content changes
+  useEffect(() => {
+    if (!loading && docContent) {
+      try {
+        mermaid.initialize({ startOnLoad: false, securityLevel: 'loose' });
+        // Run after the next paint to ensure markdown is in the DOM
+        window.requestAnimationFrame(() => {
+          mermaid.run();
+        });
+      } catch (e) {
+        // no-op: if mermaid fails, the raw code block will still be shown
+      }
+    }
+  }, [docContent, loading]);
 
   const loadDocument = async (filename: string) => {
     setLoading(true);
@@ -142,7 +127,7 @@ const Documentation: React.FC = () => {
       </Toolbar>
       <List>
         <ListItem disablePadding>
-          <ListItemButton onClick={() => handleDocSelect('index')}>
+          <ListItemButton onClick={() => handleDocSelect('README')}>
             <HomeIcon sx={{ mr: 1 }} />
             <ListItemText primary="Home" />
           </ListItemButton>
@@ -198,14 +183,6 @@ const Documentation: React.FC = () => {
           </Typography>
           <IconButton color="inherit" onClick={() => navigate('/workflow')}>
             <HomeIcon />
-          </IconButton>
-          <IconButton 
-            color="inherit"
-            component="a"
-            href="https://github.com/yourusername/kasal"
-            target="_blank"
-          >
-            <GitHubIcon />
           </IconButton>
         </Toolbar>
       </AppBar>
@@ -280,30 +257,129 @@ const Documentation: React.FC = () => {
                     {children}
                   </Typography>
                 ),
-                code: ({ children, ...props }: { children?: React.ReactNode; inline?: boolean }) => (
-                  props.inline ? (
+                img: (props) => (
+                  <img
+                    {...(props as any)}
+                    style={{
+                      maxWidth: '100%',
+                      height: 'auto',
+                      display: 'block',
+                      marginTop: 16,
+                      marginBottom: 16,
+                    }}
+                  />
+                ),
+                a: ({ href, children, ...props }: { href?: string; children?: React.ReactNode }) => {
+                  if (!href) return <a {...(props as any)}>{children}</a>;
+
+                  // Intra-page anchors (e.g., #section)
+                  if (href.startsWith('#')) {
+                    return (
+                      <Box
+                        component="a"
+                        href={href}
+                        sx={{
+                          color: theme.palette.primary.main,
+                          textDecoration: 'underline',
+                          '&:hover': { color: theme.palette.primary.dark },
+                        }}
+                        {...(props as any)}
+                      >
+                        {children}
+                      </Box>
+                    );
+                  }
+
+                  const isExternal = /^https?:\/\//i.test(href);
+                  const isMd = href.toLowerCase().endsWith('.md');
+
+                  // Normalize internal doc links to our loader (expects filename without .md)
+                  if (!isExternal && isMd) {
+                    // Strip common prefixes like /docs/ or src/docs/
+                    const normalized = href
+                      .replace(/^\/?src\/docs\//i, '')
+                      .replace(/^\/?docs\//i, '');
+                    const base = (normalized.split('/').pop() || normalized).replace(/\.md$/i, '');
+                    return (
+                      <Box
+                        component="a"
+                        href="#"
+                        onClick={(e: React.MouseEvent) => {
+                          e.preventDefault();
+                          handleDocSelect(base);
+                        }}
+                        sx={{
+                          color: theme.palette.primary.main,
+                          textDecoration: 'underline',
+                          cursor: 'pointer',
+                          '&:hover': { color: theme.palette.primary.dark },
+                        }}
+                      >
+                        {children}
+                      </Box>
+                    );
+                  }
+
+                  // External links open in new tab
+                  return (
                     <Box
-                      component="code"
+                      component="a"
+                      href={href}
+                      target="_blank"
+                      rel="noopener noreferrer"
                       sx={{
-                        backgroundColor: 'grey.100',
-                        border: '1px solid',
-                        borderColor: 'grey.300',
-                        borderRadius: 1,
-                        px: 0.5,
-                        py: 0.25,
-                        fontSize: '0.875rem',
-                        fontFamily: 'monospace',
+                        color: theme.palette.primary.main,
+                        textDecoration: 'underline',
+                        '&:hover': { color: theme.palette.primary.dark },
                       }}
+                      {...(props as any)}
                     >
                       {children}
                     </Box>
-                  ) : (
+                  );
+                },
+                code: ({ children, inline, className, ...props }: { children?: React.ReactNode; inline?: boolean; className?: string }) => {
+                  const languageMatch = /language-(\w+)/.exec(className || '');
+                  const language = languageMatch ? languageMatch[1] : undefined;
+
+                  // Render Mermaid diagrams as <div class="mermaid"> blocks
+                  if (!inline && language === 'mermaid') {
+                    const diagram = String(children || '').replace(/\n$/, '');
+                    return (
+                      <Box component="div" className="mermaid" sx={{ my: 2 }}>
+                        {diagram}
+                      </Box>
+                    );
+                  }
+
+                  // Default code rendering (inline vs block)
+                  if (inline) {
+                    return (
+                      <Box
+                        component="code"
+                        sx={{
+                          backgroundColor: theme.palette.background.subtle,
+                          border: '1px solid',
+                          borderColor: theme.palette.divider,
+                          borderRadius: 1,
+                          px: 0.5,
+                          py: 0.25,
+                          fontSize: '0.875rem',
+                          fontFamily: 'monospace',
+                        }}
+                      >
+                        {children}
+                      </Box>
+                    );
+                  }
+
+                  return (
                     <Box
                       component="pre"
                       sx={{
-                        backgroundColor: 'grey.100',
+                        backgroundColor: theme.palette.background.subtle,
                         border: '1px solid',
-                        borderColor: 'grey.300',
+                        borderColor: theme.palette.divider,
                         borderRadius: 1,
                         p: 2,
                         overflow: 'auto',
@@ -313,8 +389,8 @@ const Documentation: React.FC = () => {
                     >
                       <code>{children}</code>
                     </Box>
-                  )
-                ),
+                  );
+                },
               }}
             >
               {docContent}

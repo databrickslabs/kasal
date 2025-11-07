@@ -27,7 +27,6 @@ import {
 import EditIcon from '@mui/icons-material/Edit';
 import DeleteIcon from '@mui/icons-material/Delete';
 import MemoryIcon from '@mui/icons-material/Memory';
-import axios from 'axios';
 import { Agent, SavedAgentsProps } from '../../types/agent';
 import { AgentService } from '../../api/AgentService';
 import { ToolService } from '../../api/ToolService';
@@ -45,7 +44,7 @@ const SavedAgents: React.FC<SavedAgentsProps> = ({ refreshTrigger }) => {
     };
 
     const fetchTools = async () => {
-      const fetchedTools = await ToolService.listTools();
+      const fetchedTools = await ToolService.listEnabledTools();
       setTools(fetchedTools.map(tool => tool.title));
     };
 

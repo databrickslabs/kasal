@@ -11,13 +11,13 @@ import json
 import os
 import traceback
 from typing import Dict, Any, List, Optional
-from datetime import datetime
 
 import litellm
 
-from src.models.log import LLMLog
 from src.utils.prompt_utils import robust_json_parser
 from src.services.template_service import TemplateService
+
+from src.repositories.log_repository import LLMLogRepository
 from src.services.log_service import LLMLogService
 from src.core.llm_manager import LLMManager
 from src.utils.user_context import GroupContext
@@ -27,35 +27,23 @@ logger = logging.getLogger(__name__)
 
 class AgentGenerationService:
     """Service for agent generation operations."""
-    
-    def __init__(self, log_service: LLMLogService):
+
+    def __init__(self, session: Any):
         """
-        Initialize the service.
-        
+        Initialize the service with database session.
+
         Args:
-            log_service: Service for logging LLM interactions
+            session: Database session from dependency injection
         """
-        self.log_service = log_service
+        self.session = session
+        # Initialize log service with repository using the same session
+        self.log_service = LLMLogService(LLMLogRepository(session))
     
-    @classmethod
-    def create(cls) -> 'AgentGenerationService':
-        """
-        Factory method to create a properly configured instance of the service.
-        
-        This method abstracts the creation of dependencies while maintaining
-        proper separation of concerns.
-        
-        Returns:
-            An instance of AgentGenerationService with all required dependencies
-        """
-        log_service = LLMLogService.create()
-        return cls(log_service=log_service)
-    
-    async def _log_llm_interaction(self, endpoint: str, prompt: str, response: str, model: str, 
+    async def _log_llm_interaction(self, endpoint: str, prompt: str, response: str, model: str,
                                   group_context: Optional[GroupContext] = None) -> None:
         """
         Log LLM interaction using the log service.
-        
+
         Args:
             endpoint: API endpoint that was called
             prompt: Input prompt text
@@ -76,9 +64,80 @@ class AgentGenerationService:
         except Exception as e:
             logger.error(f"Failed to log LLM interaction: {str(e)}")
             logger.error(f"Traceback: {traceback.format_exc()}")
+
+    async def _get_relevant_documentation(self, user_prompt: str, tools: List[str] = None, limit: int = 5) -> str:
+        """
+        Retrieve relevant documentation embeddings based on the agent generation request.
+        Specifically looks for agent patterns and tool-specific best practices.
+
+        Args:
+            user_prompt: The user's prompt for agent generation
+            tools: Optional list of tools to find specific tool documentation
+            limit: Maximum number of documentation chunks to retrieve (default 5 for agents)
+
+        Returns:
+            String containing relevant documentation formatted for context
+        """
+        try:
+            # Build enhanced query including tool context if available
+            search_query = user_prompt
+
+            # Add tool names to search for tool-specific best practices
+            if tools and len(tools) > 0:
+                tool_names = ", ".join(tools) if isinstance(tools[0], str) else ", ".join([t.get('name', '') for t in tools])
+                search_query += f"\n\nTools: {tool_names}"
+
+            # Add keywords to find agent-specific best practices
+            search_query += "\n\nAgent role goal backstory tools capabilities best practices"
+
+            logger.info("Creating embedding for agent generation query to find relevant documentation")
+
+            # Configure embedder (default to Databricks for consistency)
+            embedder_config = {
+                'provider': 'databricks',
+                'config': {'model': 'databricks-gte-large-en'}
+            }
+
+            # Get the embedding for the search query
+            embedding_response = await LLMManager.get_embedding(search_query, embedder_config=embedder_config)
+            if not embedding_response:
+                logger.warning("Failed to create embedding for agent generation query")
+                return ""
+
+            query_embedding = embedding_response
+
+            # Retrieve similar documentation based on the embedding
+            logger.info(f"Searching for {limit} most relevant documentation chunks for agent generation")
+            doc_service = DocumentationEmbeddingService(self.session)
+            similar_docs = await doc_service.search_similar_embeddings(
+                query_embedding=query_embedding,
+                limit=limit
+            )
+
+            if not similar_docs or len(similar_docs) == 0:
+                logger.warning("No relevant documentation found for agent generation")
+                return ""
+
+            # Format the documentation for context, emphasizing agent patterns
+            docs_context = "\n\n## Agent Generation Best Practices and Examples\n\n"
+
+            for doc in similar_docs:
+                # Prioritize agent and tool best practices
+                if 'agent' in doc.title.lower() or 'tool' in doc.source.lower() or 'best_practices' in doc.source:
+                    docs_context = f"### {doc.title}\n\n{doc.content}\n\n" + docs_context
+                else:
+                    docs_context += f"### {doc.title}\n\n{doc.content}\n\n"
+
+            logger.info(f"Retrieved {len(similar_docs)} relevant documentation chunks for agent generation")
+            return docs_context
+
+        except Exception as e:
+            logger.error(f"Error retrieving documentation for agent generation: {str(e)}")
+            logger.error(traceback.format_exc())
+            return ""
     
-    async def generate_agent(self, prompt_text: str, model: str = None, tools: List[str] = None, 
-                            group_context: Optional[GroupContext] = None) -> Dict[str, Any]:
+    async def generate_agent(self, prompt_text: str, model: str = None, tools: List[str] = None,
+                            group_context: Optional[GroupContext] = None, fast_planning: bool = True) -> Dict[str, Any]:
         """
         Generate agent configuration from natural language description.
         
@@ -107,12 +166,17 @@ class AgentGenerationService:
         logger.info(f"Generating agent with model: {model} and tools: {tools}")
         
         try:
-            # Get and prepare prompt template
-            system_message = await self._prepare_prompt_template(tools)
-            
-            # Generate agent configuration
-            agent_config = await self._generate_agent_config(prompt_text, system_message, model)
-            
+            # Get and prepare prompt template (composed with group/user overrides)
+            system_message = await self._prepare_prompt_template(tools, group_context)
+
+            # Documentation context disabled: skip vector search/embedding for agent generation
+            documentation_context = None
+
+            # Generate agent configuration without external documentation context
+            agent_config = await self._generate_agent_config(
+                prompt_text, system_message, model, documentation_context, fast_planning=fast_planning
+            )
+
             # Log the interaction
             try:
                 await self._log_llm_interaction(
@@ -133,52 +197,55 @@ class AgentGenerationService:
             logger.error(f"Traceback: {traceback.format_exc()}")
             raise
     
-    async def _prepare_prompt_template(self, tools: List[str]) -> str:
+    async def _prepare_prompt_template(self, tools: List[str], group_context: Optional[GroupContext]) -> str:
         """
-        Prepare the prompt template with tools context.
-        
+        Prepare the prompt template (with group/user appended overrides).
+
         Args:
-            tools: List of tools to include in the prompt
-            
+            tools: List of tools (ignored for generation)
+            group_context: Current request's group context
+
         Returns:
-            str: Complete system message with tools context
-            
+            str: Complete system message
+
         Raises:
             ValueError: If prompt template is not found
         """
-        # Get prompt template from database using the TemplateService
-        system_message = await TemplateService.get_template_content("generate_agent")
-        
+        # Get composed prompt template from database using the TemplateService
+        system_message = await TemplateService.get_effective_template_content("generate_agent", group_context)
+
         if not system_message:
             raise ValueError("Required prompt template 'generate_agent' not found in database")
-        
-        # IMPORTANT: Do not include tools context in the prompt
-        # Tools should be added manually after generation if needed
-        # Remove any tools context that was previously added
-        
+
         return system_message
     
-    async def _generate_agent_config(self, prompt_text: str, system_message: str, model: str) -> Dict[str, Any]:
+    async def _generate_agent_config(self, prompt_text: str, system_message: str, model: str,
+                                     documentation_context: str = None, fast_planning: bool = False) -> Dict[str, Any]:
         """
         Generate and process agent configuration.
-        
+
         Args:
             prompt_text: Natural language description of the agent
             system_message: System message with template and tools context
             model: Model to use for generation
-            
+            documentation_context: Optional relevant documentation for enhanced generation
+
         Returns:
             Dict[str, Any]: Processed agent configuration
-            
+
         Raises:
             ValueError: If agent configuration is invalid
             Exception: For generation errors
         """
         # Prepare messages for LLM
         messages = [
-            {"role": "system", "content": system_message},
-            {"role": "user", "content": prompt_text}
+            {"role": "system", "content": system_message}
         ]
+
+        # (No documentation context injected)
+
+        # Add the user's prompt
+        messages.append({"role": "user", "content": prompt_text})
         
         # Configure litellm using the LLMManager
         model_params = await LLMManager.configure_litellm(model)
@@ -189,8 +256,8 @@ class AgentGenerationService:
             response = await litellm.acompletion(
                 **model_params,
                 messages=messages,
-                temperature=0.7,
-                max_tokens=4000
+                temperature=0.2 if fast_planning else 0.7,
+                max_tokens=1200 if fast_planning else 4000
             )
             
             # Extract and parse content

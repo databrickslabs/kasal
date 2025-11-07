@@ -1,22 +1,26 @@
 from datetime import datetime, timedelta
-from typing import Optional, Dict, Any, List, Tuple
+from typing import Optional, Dict, Any, List
 import json
 import jwt
 from jwt.exceptions import PyJWTError as JWTError
 from passlib.context import CryptContext
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy import select, func
 
 from src.config import settings
 from src.db.session import get_db
-from src.models.user import User, RefreshToken, UserProfile, ExternalIdentity, IdentityProvider
+from src.models.user import User, RefreshToken
 from src.repositories.user_repository import (
-    UserRepository, RefreshTokenRepository, UserProfileRepository,
-    ExternalIdentityRepository, IdentityProviderRepository
+    UserRepository, RefreshTokenRepository
 )
 from src.schemas.user import UserCreate, UserInDB, UserRole, TokenData
+from src.core.logger import LoggerManager
 
 # Password hashing
 pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
+
+# Initialize logger
+logger = LoggerManager.get_instance().system
 
 def verify_password(plain_password: str, hashed_password: str) -> bool:
     """Verify a password against its hash"""
@@ -62,10 +66,9 @@ class AuthService:
         self.session = session
         self.user_repo = UserRepository(User, session)
         self.refresh_token_repo = RefreshTokenRepository(RefreshToken, session)
-        self.user_profile_repo = UserProfileRepository(UserProfile, session)
-        self.external_identity_repo = ExternalIdentityRepository(ExternalIdentity, session)
-        self.identity_provider_repo = IdentityProviderRepository(IdentityProvider, session)
+        # External identity and identity provider repos removed - using simplified auth
     
+
     async def authenticate_user(self, username_or_email: str, password: str) -> Optional[User]:
         """Authenticate a user by username/email and password"""
         user = await self.user_repo.get_by_username_or_email(username_or_email)
@@ -73,10 +76,13 @@ class AuthService:
             return None
         if not verify_password(password, user.hashed_password):
             return None
-        
+
         # Update last login time
         await self.user_repo.update_last_login(user.id)
-        
+
+        # Check if this is the first user logging in when no groups exist
+        await self._handle_first_user_admin_setup(user)
+
         return user
     
     async def register_user(self, user_data: UserCreate) -> User:
@@ -98,14 +104,7 @@ class AuthService:
         user_dict["role"] = UserRole.REGULAR  # Default role for new users
         
         user = await self.user_repo.create(user_dict)
-        
-        # Create default empty profile
-        profile_data = {
-            "user_id": user.id,
-            "display_name": user.username,  # Use username as initial display name
-        }
-        await self.user_profile_repo.create(profile_data)
-        
+
         return user
     
     async def create_user_tokens(self, user: User) -> Dict[str, str]:
@@ -213,97 +212,36 @@ class AuthService:
         """Revoke all refresh tokens for a user"""
         await self.refresh_token_repo.revoke_all_for_user(user_id)
     
-    async def authenticate_with_external_provider(
-        self, provider: str, provider_user_id: str, email: str, profile_data: Dict[str, Any] = None
-    ) -> Tuple[User, bool]:
+
+    async def _handle_first_user_admin_setup(self, user: User) -> None:
         """
-        Authenticate a user with an external identity provider
-        Returns a tuple of (user, is_new_user)
+        Check if this is the first user when no groups exist.
+        If so, create the first admin group and assign the user as admin.
         """
-        # Check if external identity exists
-        external_id = await self.external_identity_repo.get_by_provider_and_id(provider, provider_user_id)
-        
-        if external_id:
-            # Update last login
-            await self.external_identity_repo.update_last_login(external_id.id)
-            
-            # Get the user
-            user = await self.user_repo.get(external_id.user_id)
-            if not user:
-                raise ValueError("User not found for external identity")
-            
-            # Update user's last login
-            await self.user_repo.update_last_login(user.id)
-            
-            return user, False
-            
-        else:
-            # Check if user with this email exists
-            user = await self.user_repo.get_by_email(email)
-            
-            if user:
-                # Link external identity to existing user
-                external_id_data = {
-                    "user_id": user.id,
-                    "provider": provider,
-                    "provider_user_id": provider_user_id,
-                    "email": email,
-                    "profile_data": json.dumps(profile_data) if profile_data else None,
-                }
-                await self.external_identity_repo.create(external_id_data)
-                
-                # Update user's last login
-                await self.user_repo.update_last_login(user.id)
-                
-                return user, False
-                
-            else:
-                # Create new user with external identity
-                # Generate random username base from email
-                username_base = email.split("@")[0]
-                username = username_base
-                i = 1
-                
-                # Check if username exists, if so, append number
-                while await self.user_repo.get_by_username(username):
-                    username = f"{username_base}{i}"
-                    i += 1
-                
-                # Create user with random password (not used)
-                import secrets
-                random_password = secrets.token_urlsafe(32)
-                hashed_password = get_password_hash(random_password)
-                
-                user_data = {
-                    "username": username,
-                    "email": email,
-                    "hashed_password": hashed_password,
-                    "role": UserRole.REGULAR,  # Default role for new users
-                }
-                
-                user = await self.user_repo.create(user_data)
-                
-                # Create profile
-                display_name = None
-                if profile_data:
-                    # Try to extract name from profile data
-                    display_name = profile_data.get("name") or profile_data.get("displayName")
-                
-                profile_data = {
-                    "user_id": user.id,
-                    "display_name": display_name or username,
-                    "avatar_url": profile_data.get("picture") if profile_data else None,
-                }
-                await self.user_profile_repo.create(profile_data)
-                
-                # Create external identity
-                external_id_data = {
-                    "user_id": user.id,
-                    "provider": provider,
-                    "provider_user_id": provider_user_id,
-                    "email": email,
-                    "profile_data": json.dumps(profile_data) if profile_data else None,
-                }
-                await self.external_identity_repo.create(external_id_data)
-                
-                return user, True 
+        try:
+            # Import services here to avoid circular imports
+            from src.services.group_service import GroupService
+            from src.services.user_service import UserService
+
+            # Initialize services
+            group_service = GroupService(self.session)
+            user_service = UserService(self.session)
+
+            # Check if any groups exist
+            total_groups = await group_service.get_total_group_count()
+
+            if total_groups == 0:
+                logger.info(f"No groups exist. Creating first admin group for user {user.email}")
+
+                # Create the first admin group and assign the user as admin
+                group, group_user = await group_service.create_first_admin_group_for_user(user)
+
+                # Also update the user's global role to ADMIN if it's not already
+                if user.role != UserRole.ADMIN:
+                    await user_service.assign_role(user.id, UserRole.ADMIN)
+                    logger.info(f"Updated user {user.email} global role to ADMIN")
+
+        except Exception as e:
+            # Log the error but don't fail authentication
+            logger.error(f"Error during first user admin setup: {e}")
+            # Don't raise the exception - allow authentication to continue 

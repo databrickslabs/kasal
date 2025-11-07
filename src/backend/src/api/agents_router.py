@@ -4,9 +4,9 @@ from fastapi import APIRouter, Depends, HTTPException, Path, status
 import logging
 from sqlalchemy.exc import IntegrityError
 
-from src.core.dependencies import SessionDep, GroupContextDep, get_service
+from src.core.dependencies import SessionDep, GroupContextDep
+from src.core.permissions import check_role_in_context
 from src.models.agent import Agent
-from src.repositories.agent_repository import AgentRepository
 from src.schemas.agent import Agent as AgentSchema
 from src.schemas.agent import AgentCreate, AgentUpdate, AgentLimitedUpdate
 from src.services.agent_service import AgentService
@@ -20,27 +20,51 @@ router = APIRouter(
 # Set up logging
 logger = logging.getLogger(__name__)
 
-# Dependency to get AgentService
-get_agent_service = get_service(AgentService, AgentRepository, Agent)
+async def get_agent_service(session: SessionDep) -> AgentService:
+    """
+    Dependency provider for AgentService.
+
+    Creates service with properly injected session following the pattern:
+    Router → Service → Repository → DB
+
+    Args:
+        session: Database session from FastAPI DI
+
+    Returns:
+        AgentService instance with injected session
+    """
+    return AgentService(session=session)
+
+# Type alias for cleaner function signatures
+AgentServiceDep = Annotated[AgentService, Depends(get_agent_service)]
+
 
 
 @router.post("", response_model=AgentSchema, status_code=status.HTTP_201_CREATED)
 async def create_agent(
     agent_in: AgentCreate,
-    service: Annotated[AgentService, Depends(get_agent_service)],
+    service: AgentServiceDep,
     group_context: GroupContextDep,
 ):
     """
     Create a new agent with group isolation.
-    
+    Only Editors and Admins can create agents.
+
     Args:
         agent_in: Agent data for creation
         service: Agent service injected by dependency
         group_context: Group context from headers
-        
+
     Returns:
         Created agent
     """
+    # Check permissions - only editors and admins can create agents
+    if not check_role_in_context(group_context, ["admin", "editor"]):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Only editors and admins can create agents"
+        )
+
     try:
         if group_context and group_context.is_valid():
             return await service.create_with_group(agent_in, group_context)
@@ -53,7 +77,7 @@ async def create_agent(
 
 @router.get("", response_model=List[AgentSchema])
 async def list_agents(
-    service: Annotated[AgentService, Depends(get_agent_service)],
+    service: AgentServiceDep,
     group_context: GroupContextDep,
 ):
     """
@@ -80,23 +104,25 @@ async def list_agents(
 @router.get("/{agent_id}", response_model=AgentSchema)
 async def get_agent(
     agent_id: Annotated[str, Path(title="The ID of the agent to get")],
-    service: Annotated[AgentService, Depends(get_agent_service)],
+    service: AgentServiceDep,
+    group_context: GroupContextDep,
 ):
     """
-    Get a specific agent by ID.
+    Get a specific agent by ID with group isolation.
     
     Args:
         agent_id: ID of the agent to get
         service: Agent service injected by dependency
+        group_context: Group context from headers
         
     Returns:
-        Agent if found
+        Agent if found and belongs to user's group
         
     Raises:
-        HTTPException: If agent not found
+        HTTPException: If agent not found or not authorized
     """
     try:
-        agent = await service.get(agent_id)
+        agent = await service.get_with_group_check(agent_id, group_context)
         if not agent:
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND,
@@ -114,24 +140,34 @@ async def get_agent(
 async def update_agent_full(
     agent_id: Annotated[str, Path(title="The ID of the agent to update")],
     agent_in: AgentUpdate,
-    service: Annotated[AgentService, Depends(get_agent_service)],
+    service: AgentServiceDep,
+    group_context: GroupContextDep,
 ):
     """
-    Update all fields of an existing agent.
-    
+    Update all fields of an existing agent with group isolation.
+    Only Editors and Admins can update agents.
+
     Args:
         agent_id: ID of the agent to update
         agent_in: Agent data for full update
         service: Agent service injected by dependency
-        
+        group_context: Group context from headers
+
     Returns:
         Updated agent
-        
+
     Raises:
-        HTTPException: If agent not found
+        HTTPException: If agent not found or not authorized
     """
+    # Check permissions - only editors and admins can update agents
+    if not check_role_in_context(group_context, ["admin", "editor"]):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Only editors and admins can update agents"
+        )
+
     try:
-        agent = await service.update_with_partial_data(agent_id, agent_in)
+        agent = await service.update_with_group_check(agent_id, agent_in, group_context)
         if not agent:
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND,
@@ -147,24 +183,34 @@ async def update_agent_full(
 async def update_agent(
     agent_id: Annotated[str, Path(title="The ID of the agent to update")],
     agent_in: AgentLimitedUpdate,
-    service: Annotated[AgentService, Depends(get_agent_service)],
+    service: AgentServiceDep,
+    group_context: GroupContextDep,
 ):
     """
-    Update limited fields of an existing agent.
-    
+    Update limited fields of an existing agent with group isolation.
+    Only Editors and Admins can update agents.
+
     Args:
         agent_id: ID of the agent to update
         agent_in: Agent data for limited update
         service: Agent service injected by dependency
-        
+        group_context: Group context from headers
+
     Returns:
         Updated agent
-        
+
     Raises:
-        HTTPException: If agent not found
+        HTTPException: If agent not found or not authorized
     """
+    # Check permissions - only editors and admins can update agents
+    if not check_role_in_context(group_context, ["admin", "editor"]):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Only editors and admins can update agents"
+        )
+
     try:
-        agent = await service.update_limited_fields(agent_id, agent_in)
+        agent = await service.update_limited_with_group_check(agent_id, agent_in, group_context)
         if not agent:
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND,
@@ -179,20 +225,30 @@ async def update_agent(
 @router.delete("/{agent_id}", status_code=status.HTTP_204_NO_CONTENT)
 async def delete_agent(
     agent_id: Annotated[str, Path(title="The ID of the agent to delete")],
-    service: Annotated[AgentService, Depends(get_agent_service)],
+    service: AgentServiceDep,
+    group_context: GroupContextDep,
 ):
     """
-    Delete an agent.
-    
+    Delete an agent with group isolation.
+    Only Editors and Admins can delete agents.
+
     Args:
         agent_id: ID of the agent to delete
         service: Agent service injected by dependency
+        group_context: Group context from headers
         
     Raises:
-        HTTPException: If agent not found
+        HTTPException: If agent not found or not authorized
     """
+    # Check permissions - only editors and admins can delete agents
+    if not check_role_in_context(group_context, ["admin", "editor"]):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Only editors and admins can delete agents"
+        )
+
     try:
-        deleted = await service.delete(agent_id)
+        deleted = await service.delete_with_group_check(agent_id, group_context)
         if not deleted:
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND,
@@ -205,16 +261,26 @@ async def delete_agent(
 
 @router.delete("", status_code=status.HTTP_204_NO_CONTENT)
 async def delete_all_agents(
-    service: Annotated[AgentService, Depends(get_agent_service)],
+    service: AgentServiceDep,
+    group_context: GroupContextDep,
 ):
     """
-    Delete all agents.
-    
+    Delete all agents for the current group.
+    Only Admins can delete all agents.
+
     Args:
         service: Agent service injected by dependency
+        group_context: Group context from headers
     """
+    # Check permissions - only admins can delete all agents
+    if not check_role_in_context(group_context, ["admin"]):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Only admins can delete all agents"
+        )
+
     try:
-        await service.delete_all()
+        await service.delete_all_for_group(group_context)
     except IntegrityError as ie:
         logger.warning(f"Attempted to delete agents referenced by tasks: {ie}")
         raise HTTPException(

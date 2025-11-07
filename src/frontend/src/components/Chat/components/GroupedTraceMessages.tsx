@@ -11,7 +11,7 @@ import {
   Tooltip,
   Fade,
 } from '@mui/material';
-import TerminalIcon from '@mui/icons-material/Terminal';
+import SmartToyIcon from '@mui/icons-material/SmartToy';
 import OpenInNewIcon from '@mui/icons-material/OpenInNew';
 import { ChatMessage } from '../types';
 import { stripAnsiEscapes } from '../utils/textProcessing';
@@ -53,7 +53,7 @@ export const GroupedTraceMessages: React.FC<GroupedTraceMessagesProps> = ({ mess
               height: 32,
             }}
           >
-            <TerminalIcon sx={{ fontSize: 20 }} />
+            <SmartToyIcon sx={{ fontSize: 20 }} />
           </Avatar>
         </ListItemAvatar>
         

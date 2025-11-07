@@ -206,6 +206,7 @@ class TestUnitOfWork:
                                                     # (detailed assertions are covered in other tests)
 
 
+@pytest.mark.skip(reason="SyncUnitOfWork is deprecated; async-only architecture now")
 class TestSyncUnitOfWork:
     """Test cases for synchronous SyncUnitOfWork class."""
     

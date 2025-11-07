@@ -8,23 +8,16 @@ GPT-OSS models return content as a list with reasoning blocks and text blocks,
 rather than a simple string, which requires special handling for CrewAI integration.
 """
 
-import logging
 import os
 from typing import Any, Dict, List, Optional, Union
 from crewai import LLM
 import json
-import sys
 
-# Configure logger with both file and console output for debugging
-logger = logging.getLogger(__name__)
-logger.setLevel(logging.DEBUG)
+# Use centralized logger
+from src.core.logger import get_logger
 
-# Add console handler for immediate feedback
-console_handler = logging.StreamHandler(sys.stdout)
-console_handler.setLevel(logging.INFO)
-formatter = logging.Formatter('[GPT-OSS] %(levelname)s: %(message)s')
-console_handler.setFormatter(formatter)
-logger.addHandler(console_handler)
+# Configure logger using centralized configuration
+logger = get_logger(__name__)
 
 
 class DatabricksGPTOSSHandler:

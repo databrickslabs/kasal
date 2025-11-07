@@ -18,6 +18,7 @@ export interface Run {
   run_name: string;
   agents_yaml: string;
   tasks_yaml: string;
+  group_id?: string;
   group_email?: string;
   inputs?: {
     agents_yaml: Record<string, any>;
@@ -31,6 +32,10 @@ export interface Run {
   };
   result?: RunResult;
   error?: string;
+  // MLflow integration fields
+  mlflow_trace_id?: string;
+  mlflow_experiment_name?: string;
+  mlflow_evaluation_run_id?: string;
 }
 
 export interface ExtendedRun extends Run {

@@ -132,13 +132,14 @@ class TaskConfig:
             # Fallback to direct database query if repository not available or agent not found
             if not agent_data:
                 try:
-                    from src.db.session import SessionLocal
-                    db = SessionLocal()
-                    try:
-                        from src.models.agent import Agent as AgentModel
-                        agent_data = db.query(AgentModel).filter(AgentModel.id == task_data.agent_id).first()
-                    finally:
-                        db.close()
+                    from src.db.session import async_session_factory
+                    from sqlalchemy import select
+                    from src.models.agent import Agent as AgentModel
+
+                    async with async_session_factory() as db:
+                        stmt = select(AgentModel).filter(AgentModel.id == task_data.agent_id)
+                        result = await db.execute(stmt)
+                        agent_data = result.scalar_one_or_none()
                 except Exception as db_error:
                     logger.error(f"Error querying database for agent: {db_error}", exc_info=True)
             
@@ -181,13 +182,14 @@ class TaskConfig:
                         # Fallback to direct database query
                         if not agent_data:
                             try:
-                                from src.db.session import SessionLocal
-                                db = SessionLocal()
-                                try:
-                                    from src.models.agent import Agent as AgentModel
-                                    agent_data = db.query(AgentModel).filter(AgentModel.id == inferred_agent_id).first()
-                                finally:
-                                    db.close()
+                                from src.db.session import async_session_factory
+                                from sqlalchemy import select
+                                from src.models.agent import Agent as AgentModel
+
+                                async with async_session_factory() as db:
+                                    stmt = select(AgentModel).filter(AgentModel.id == inferred_agent_id)
+                                    result = await db.execute(stmt)
+                                    agent_data = result.scalar_one_or_none()
                             except Exception as db_error:
                                 logger.error(f"Error querying database for inferred agent: {db_error}", exc_info=True)
                         

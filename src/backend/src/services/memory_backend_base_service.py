@@ -4,18 +4,17 @@ Base memory backend service for core CRUD operations.
 This module implements the base service layer for memory backend configurations.
 """
 from typing import List, Optional, Dict, Any
-from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.models.memory_backend import MemoryBackend
 from src.schemas.memory_backend import (
-    MemoryBackendConfig, 
+    MemoryBackendConfig,
     MemoryBackendCreate,
     MemoryBackendUpdate,
     DatabricksMemoryConfig,
     MemoryBackendType
 )
 from src.core.logger import LoggerManager
-from src.core.unit_of_work import UnitOfWork
+from src.repositories.memory_backend_repository import MemoryBackendRepository
 
 logger = LoggerManager.get_instance().system
 
@@ -23,14 +22,15 @@ logger = LoggerManager.get_instance().system
 class MemoryBackendBaseService:
     """Base service for managing memory backend configurations."""
     
-    def __init__(self, uow: UnitOfWork):
+    def __init__(self, session: Any):
         """
         Initialize the service.
-        
+
         Args:
-            uow: Unit of Work instance
+            session: Database session from dependency injection
         """
-        self.uow = uow
+        self.session = session
+        self.repository = MemoryBackendRepository(session)
     
     async def create_memory_backend(
         self, 
@@ -48,7 +48,7 @@ class MemoryBackendBaseService:
             Created memory backend
         """
         try:
-            repo = self.uow.memory_backend_repository
+            repo = self.repository
             
             # Check if name already exists
             existing = await repo.get_by_name(group_id, config.name)
@@ -86,11 +86,11 @@ class MemoryBackendBaseService:
             if len(all_backends) == 1:
                 await repo.set_default(group_id, backend.id)
             
-            await self.uow.commit()
+            await self.session.commit()
             return backend
             
         except Exception as e:
-            # UnitOfWork handles rollback automatically in __aexit__
+            await self.session.rollback()
             logger.error(f"Error creating memory backend: {e}")
             raise
     
@@ -104,7 +104,7 @@ class MemoryBackendBaseService:
         Returns:
             List of memory backends
         """
-        repo = self.uow.memory_backend_repository
+        repo = self.repository
         return await repo.get_by_group_id(group_id)
     
     async def get_memory_backend(self, group_id: str, backend_id: str) -> Optional[MemoryBackend]:
@@ -118,7 +118,7 @@ class MemoryBackendBaseService:
         Returns:
             Memory backend or None
         """
-        repo = self.uow.memory_backend_repository
+        repo = self.repository
         backend = await repo.get(backend_id)
         
         # Check ownership
@@ -137,7 +137,7 @@ class MemoryBackendBaseService:
         Returns:
             Default memory backend or None
         """
-        repo = self.uow.memory_backend_repository
+        repo = self.repository
         return await repo.get_default_by_group_id(group_id)
     
     async def update_memory_backend(
@@ -158,7 +158,7 @@ class MemoryBackendBaseService:
             Updated memory backend or None
         """
         try:
-            repo = self.uow.memory_backend_repository
+            repo = self.repository
             backend = await repo.get(backend_id)
             
             # Check ownership
@@ -186,11 +186,11 @@ class MemoryBackendBaseService:
                 if hasattr(backend, key) and key != "backend_type":  # backend_type already handled
                     setattr(backend, key, value)
             
-            await self.uow.commit()
+            await self.session.commit()
             return backend
             
         except Exception as e:
-            # UnitOfWork handles rollback automatically in __aexit__
+            await self.session.rollback()
             logger.error(f"Error updating memory backend: {e}")
             raise
     
@@ -206,7 +206,7 @@ class MemoryBackendBaseService:
             True if deleted
         """
         try:
-            repo = self.uow.memory_backend_repository
+            repo = self.repository
             backend = await repo.get(backend_id)
             
             # Check ownership
@@ -226,11 +226,11 @@ class MemoryBackendBaseService:
                         break
             
             await repo.delete(backend_id)
-            await self.uow.commit()
+            await self.session.commit()
             return True
             
         except Exception as e:
-            # UnitOfWork handles rollback automatically in __aexit__
+            await self.session.rollback()
             logger.error(f"Error deleting memory backend: {e}")
             raise
     
@@ -246,13 +246,13 @@ class MemoryBackendBaseService:
             True if successful
         """
         try:
-            repo = self.uow.memory_backend_repository
+            repo = self.repository
             success = await repo.set_default(group_id, backend_id)
             if success:
-                await self.uow.commit()
+                await self.session.commit()
             return success
         except Exception as e:
-            # UnitOfWork handles rollback automatically in __aexit__
+            await self.session.rollback()
             logger.error(f"Error setting default backend: {e}")
             raise
     
@@ -299,7 +299,7 @@ class MemoryBackendBaseService:
             Result with deleted count and new disabled config
         """
         try:
-            repo = self.uow.memory_backend_repository
+            repo = self.repository
             
             # Delete all existing configurations
             deleted_count = await repo.delete_all_by_group_id(group_id)
@@ -318,7 +318,7 @@ class MemoryBackendBaseService:
             }
             
             backend = await repo.create(disabled_config)
-            await self.uow.commit()
+            await self.session.commit()
             
             return {
                 "success": True,
@@ -347,7 +347,7 @@ class MemoryBackendBaseService:
             Number of deleted configurations
         """
         try:
-            repo = self.uow.memory_backend_repository
+            repo = self.repository
             
             # Get all backends for the group
             backends = await repo.get_by_group_id(group_id)
@@ -360,7 +360,7 @@ class MemoryBackendBaseService:
                     deleted_count += 1
                     logger.info(f"Deleted disabled configuration: {backend.id}")
             
-            await self.uow.commit()
+            await self.session.commit()
             return deleted_count
             
         except Exception as e:

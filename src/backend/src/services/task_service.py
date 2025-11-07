@@ -57,6 +57,24 @@ class TaskService(BaseService[Task, TaskCreate]):
             Task if found, else None
         """
         return await self.repository.get(id)
+    
+    async def get_with_group_check(self, id: str, group_context: GroupContext) -> Optional[Task]:
+        """
+        Get a task by ID with group verification.
+        
+        Args:
+            id: ID of the task to get
+            group_context: Group context for verification
+            
+        Returns:
+            Task if found and belongs to user's group, else None
+        """
+        task = await self.repository.get(id)
+        if task and group_context and group_context.group_ids:
+            # Check if task belongs to one of the user's groups
+            if task.group_id not in group_context.group_ids:
+                return None  # Return None to trigger 404, not 403 (avoid information leakage)
+        return task
         
     async def create(self, obj_in: TaskCreate) -> Task:
         """
@@ -142,6 +160,46 @@ class TaskService(BaseService[Task, TaskCreate]):
         
         return await self.repository.update(id, update_data)
     
+    async def update_with_group_check(self, id: str, obj_in: TaskUpdate, group_context: GroupContext) -> Optional[Task]:
+        """
+        Update a task with partial data and group verification.
+        
+        Args:
+            id: ID of the task to update
+            obj_in: Schema with fields to update
+            group_context: Group context for verification
+            
+        Returns:
+            Updated task if found and belongs to user's group, else None
+        """
+        # First verify the task belongs to the user's group
+        task = await self.get_with_group_check(id, group_context)
+        if not task:
+            return None
+        
+        # Debug logging for tool_configs
+        import logging
+        logger = logging.getLogger(__name__)
+        if hasattr(obj_in, 'tool_configs') and obj_in.tool_configs is not None:
+            logger.info(f"TaskService: Updating task {id} with tool_configs: {obj_in.tool_configs}")
+        
+        # Exclude unset fields (None) from update
+        update_data = obj_in.model_dump(exclude_none=True)
+        
+        # Log if tool_configs is in update_data
+        if 'tool_configs' in update_data:
+            logger.info(f"TaskService: update_data contains tool_configs: {update_data.get('tool_configs')}")
+        
+        if not update_data:
+            # No fields to update
+            return task
+        
+        # Convert empty agent_id to None for PostgreSQL compatibility
+        if "agent_id" in update_data and update_data["agent_id"] == "":
+            update_data["agent_id"] = None
+        
+        return await self.repository.update(id, update_data)
+    
     async def update_full(self, id: str, obj_in: Dict[str, Any]) -> Optional[Task]:
         """
         Update all fields of a task.
@@ -153,6 +211,29 @@ class TaskService(BaseService[Task, TaskCreate]):
         Returns:
             Updated task if found, else None
         """
+        # Convert empty agent_id to None for PostgreSQL compatibility
+        if "agent_id" in obj_in and obj_in["agent_id"] == "":
+            obj_in["agent_id"] = None
+            
+        return await self.repository.update(id, obj_in)
+    
+    async def update_full_with_group_check(self, id: str, obj_in: Dict[str, Any], group_context: GroupContext) -> Optional[Task]:
+        """
+        Update all fields of a task with group verification.
+        
+        Args:
+            id: ID of the task to update
+            obj_in: Dictionary with all fields to update
+            group_context: Group context for verification
+            
+        Returns:
+            Updated task if found and belongs to user's group, else None
+        """
+        # First verify the task belongs to the user's group
+        task = await self.get_with_group_check(id, group_context)
+        if not task:
+            return None
+        
         # Convert empty agent_id to None for PostgreSQL compatibility
         if "agent_id" in obj_in and obj_in["agent_id"] == "":
             obj_in["agent_id"] = None
@@ -171,6 +252,24 @@ class TaskService(BaseService[Task, TaskCreate]):
         """
         return await self.repository.delete(id)
     
+    async def delete_with_group_check(self, id: str, group_context: GroupContext) -> bool:
+        """
+        Delete a task by ID with group verification.
+        
+        Args:
+            id: ID of the task to delete
+            group_context: Group context for verification
+            
+        Returns:
+            True if task was deleted, False if not found or not authorized
+        """
+        # First verify the task belongs to the user's group
+        task = await self.get_with_group_check(id, group_context)
+        if not task:
+            return False
+        
+        return await self.repository.delete(id)
+    
     async def delete_all(self) -> None:
         """
         Delete all tasks.
@@ -179,6 +278,26 @@ class TaskService(BaseService[Task, TaskCreate]):
             None
         """
         await self.repository.delete_all()
+    
+    async def delete_all_for_group(self, group_context: GroupContext) -> None:
+        """
+        Delete all tasks for a specific group.
+        
+        Args:
+            group_context: Group context for filtering
+            
+        Returns:
+            None
+        """
+        if not group_context or not group_context.group_ids:
+            return
+        
+        # Get all tasks for the group
+        tasks = await self.find_by_group(group_context)
+        
+        # Delete each task
+        for task in tasks:
+            await self.repository.delete(task.id)
     
     async def create_with_group(self, obj_in: TaskCreate, group_context: GroupContext) -> Task:
         """

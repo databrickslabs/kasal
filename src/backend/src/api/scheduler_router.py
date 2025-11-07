@@ -5,10 +5,9 @@ from fastapi import APIRouter, Depends, HTTPException, BackgroundTasks, status, 
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.schemas.schedule import ScheduleCreate, ScheduleCreateFromExecution, ScheduleUpdate, ScheduleResponse, ScheduleListResponse, ToggleResponse
-from src.db.session import get_db
 from src.services.scheduler_service import SchedulerService
 from src.utils.user_context import GroupContext
-from src.core.dependencies import GroupContextDep
+from src.core.dependencies import GroupContextDep, SessionDep
 from src.schemas.scheduler import (
     SchedulerJobSchema,
     SchedulerJobCreate,
@@ -26,15 +25,29 @@ router = APIRouter(
 # Set up logger
 logger = logging.getLogger(__name__)
 
-# Create service dependency
-async def get_scheduler_service(db: AsyncSession = Depends(get_db)) -> SchedulerService:
-    return SchedulerService(db)
+async def get_scheduler_service(session: SessionDep) -> SchedulerService:
+    """
+    Dependency provider for SchedulerService.
+
+    Creates service with properly injected session following the pattern:
+    Router → Service → Repository → DB
+
+    Args:
+        session: Database session from FastAPI DI
+
+    Returns:
+        SchedulerService instance with injected dependencies
+    """
+    return SchedulerService(session)
+
+# Type alias for cleaner function signatures
+SchedulerServiceDep = Annotated[SchedulerService, Depends(get_scheduler_service)]
 
 
 @router.post("", response_model=ScheduleResponse, status_code=status.HTTP_201_CREATED)
 async def create_schedule(
     schedule: ScheduleCreate,
-    service: Annotated[SchedulerService, Depends(get_scheduler_service)],
+    service: SchedulerServiceDep,
     group_context: GroupContextDep
 ) -> ScheduleResponse:
     """
@@ -61,7 +74,7 @@ async def create_schedule(
 @router.post("/from-execution", response_model=ScheduleResponse, status_code=status.HTTP_201_CREATED)
 async def create_schedule_from_execution(
     schedule: ScheduleCreateFromExecution,
-    service: Annotated[SchedulerService, Depends(get_scheduler_service)],
+    service: SchedulerServiceDep,
     group_context: GroupContextDep
 ) -> ScheduleResponse:
     """
@@ -88,7 +101,7 @@ async def create_schedule_from_execution(
 
 @router.get("", response_model=List[ScheduleResponse])
 async def list_schedules(
-    service: Annotated[SchedulerService, Depends(get_scheduler_service)],
+    service: SchedulerServiceDep,
     group_context: GroupContextDep
 ) -> List[ScheduleResponse]:
     """
@@ -106,7 +119,8 @@ async def list_schedules(
 @router.get("/{schedule_id}", response_model=ScheduleResponse)
 async def get_schedule(
     schedule_id: Annotated[int, Path(title="The ID of the schedule to get")],
-    service: Annotated[SchedulerService, Depends(get_scheduler_service)]
+    service: SchedulerServiceDep,
+    group_context: GroupContextDep
 ) -> ScheduleResponse:
     """
     Get a specific schedule by ID.
@@ -119,7 +133,7 @@ async def get_schedule(
     """
     logger.info(f"Getting schedule with ID {schedule_id}")
     try:
-        response = await service.get_schedule_by_id(schedule_id)
+        response = await service.get_schedule_by_id_with_group_check(schedule_id, group_context)
         logger.info(f"Retrieved schedule with ID {schedule_id}")
         return response
     except HTTPException as e:
@@ -131,7 +145,8 @@ async def get_schedule(
 async def update_schedule(
     schedule_id: Annotated[int, Path(title="The ID of the schedule to update")],
     schedule_update: ScheduleUpdate,
-    service: Annotated[SchedulerService, Depends(get_scheduler_service)]
+    service: SchedulerServiceDep,
+    group_context: GroupContextDep
 ) -> ScheduleResponse:
     """
     Update an existing schedule.
@@ -145,7 +160,7 @@ async def update_schedule(
     """
     logger.info(f"Updating schedule with ID {schedule_id}")
     try:
-        response = await service.update_schedule(schedule_id, schedule_update)
+        response = await service.update_schedule_with_group_check(schedule_id, schedule_update, group_context)
         logger.info(f"Updated schedule with ID {schedule_id}")
         return response
     except HTTPException as e:
@@ -156,7 +171,8 @@ async def update_schedule(
 @router.delete("/{schedule_id}", status_code=status.HTTP_200_OK)
 async def delete_schedule(
     schedule_id: Annotated[int, Path(title="The ID of the schedule to delete")],
-    service: Annotated[SchedulerService, Depends(get_scheduler_service)]
+    service: SchedulerServiceDep,
+    group_context: GroupContextDep
 ) -> Dict[str, str]:
     """
     Delete a schedule.
@@ -169,7 +185,7 @@ async def delete_schedule(
     """
     logger.info(f"Deleting schedule with ID {schedule_id}")
     try:
-        response = await service.delete_schedule(schedule_id)
+        response = await service.delete_schedule_with_group_check(schedule_id, group_context)
         logger.info(f"Deleted schedule with ID {schedule_id}")
         return response
     except HTTPException as e:
@@ -180,7 +196,8 @@ async def delete_schedule(
 @router.post("/{schedule_id}/toggle", response_model=ToggleResponse)
 async def toggle_schedule(
     schedule_id: Annotated[int, Path(title="The ID of the schedule to toggle")],
-    service: Annotated[SchedulerService, Depends(get_scheduler_service)]
+    service: SchedulerServiceDep,
+    group_context: GroupContextDep
 ) -> ToggleResponse:
     """
     Toggle a schedule's active state.
@@ -196,7 +213,7 @@ async def toggle_schedule(
     """
     logger.info(f"Toggling schedule with ID {schedule_id}")
     try:
-        response = await service.toggle_schedule(schedule_id)
+        response = await service.toggle_schedule_with_group_check(schedule_id, group_context)
         active_status = "enabled" if response.is_active else "disabled"
         logger.info(f"Toggled schedule with ID {schedule_id}, now {active_status}")
         return response
@@ -207,7 +224,8 @@ async def toggle_schedule(
 
 @router.get("/jobs", response_model=List[SchedulerJobResponse])
 async def get_all_jobs(
-    service: Annotated[SchedulerService, Depends(get_scheduler_service)]
+    service: SchedulerServiceDep,
+    group_context: GroupContextDep
 ) -> List[SchedulerJobResponse]:
     """
     Get all scheduler jobs.
@@ -216,7 +234,7 @@ async def get_all_jobs(
         List of scheduler jobs
     """
     try:
-        return await service.get_all_jobs()
+        return await service.get_all_jobs_for_group(group_context)
     except Exception as e:
         logger.error(f"Error getting jobs: {str(e)}")
         raise HTTPException(
@@ -228,7 +246,8 @@ async def get_all_jobs(
 @router.post("/jobs", response_model=SchedulerJobResponse)
 async def create_job(
     job: SchedulerJobCreate,
-    service: Annotated[SchedulerService, Depends(get_scheduler_service)]
+    service: SchedulerServiceDep,
+    group_context: GroupContextDep
 ) -> SchedulerJobResponse:
     """
     Create a new scheduler job.
@@ -240,7 +259,7 @@ async def create_job(
         Created job
     """
     try:
-        return await service.create_job(job)
+        return await service.create_job_with_group(job, group_context)
     except Exception as e:
         logger.error(f"Error creating job: {str(e)}")
         raise HTTPException(
@@ -253,7 +272,8 @@ async def create_job(
 async def update_job(
     job_id: int,
     job: SchedulerJobUpdate,
-    service: Annotated[SchedulerService, Depends(get_scheduler_service)]
+    service: SchedulerServiceDep,
+    group_context: GroupContextDep
 ) -> SchedulerJobResponse:
     """
     Update a scheduler job.
@@ -266,7 +286,7 @@ async def update_job(
         Updated job
     """
     try:
-        return await service.update_job(job_id, job)
+        return await service.update_job_with_group_check(job_id, job, group_context)
     except Exception as e:
         logger.error(f"Error updating job: {str(e)}")
         raise HTTPException(

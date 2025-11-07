@@ -134,10 +134,9 @@ class FlowBuilder:
                 if task_repo:
                     task_data = task_repo.find_by_id(task_id)
                 else:
-                    # Get task repository from factory
-                    from src.repositories.task_repository import get_sync_task_repository
-                    task_repo = get_sync_task_repository()
-                    task_data = task_repo.find_by_id(task_id)
+                    # Log warning if repositories not provided
+                    logger.warning(f"No task repository provided for task_id {task_id}")
+                    task_data = None
                 
                 if task_data:
                     # Configure agent for this task
@@ -155,10 +154,9 @@ class FlowBuilder:
                         if agent_repo:
                             agent_data = agent_repo.find_by_id(agent_id)
                         else:
-                            # Get agent repository from factory
-                            from src.repositories.agent_repository import get_sync_agent_repository
-                            agent_repo = get_sync_agent_repository()
-                            agent_data = agent_repo.find_by_id(agent_id)
+                            # Log warning if repositories not provided
+                            logger.warning(f"No agent repository provided for agent_id {agent_id}")
+                            agent_data = None
                         
                         if agent_data:
                             agent = await AgentConfig.configure_agent_and_tools(agent_data, flow_data, repositories)
@@ -209,10 +207,9 @@ class FlowBuilder:
                 if agent_repo:
                     agent_data = agent_repo.find_by_id(crew_id)
                 else:
-                    # Get agent repository from factory
-                    from src.repositories.agent_repository import get_sync_agent_repository
-                    agent_repo = get_sync_agent_repository()
-                    agent_data = agent_repo.find_by_id(crew_id)
+                    # Log warning if repositories not provided
+                    logger.warning(f"No agent repository provided for crew_id {crew_id}")
+                    agent_data = None
                 
                 if agent_data:
                     agent = await AgentConfig.configure_agent_and_tools(agent_data, flow_data, repositories)
@@ -229,10 +226,9 @@ class FlowBuilder:
                     if task_repo:
                         task_data = task_repo.find_by_id(task_id)
                     else:
-                        # Get task repository from factory
-                        from src.repositories.task_repository import get_sync_task_repository
-                        task_repo = get_sync_task_repository()
-                        task_data = task_repo.find_by_id(task_id)
+                        # Log warning if repositories not provided
+                        logger.warning(f"No task repository provided for task_id {task_id}")
+                        task_data = None
                     
                     if task_data:
                         # Use agent_id from task config or fall back to crew_id

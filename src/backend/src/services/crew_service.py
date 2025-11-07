@@ -200,88 +200,93 @@ class CrewService:
 
     async def find_by_group(self, group_context: GroupContext) -> List[Crew]:
         """
-        Find all crews for the given group.
-        
+        Find all crews for the CURRENT workspace (primary group only).
+
         Args:
             group_context: Group context from headers
-            
+
         Returns:
-            List of crews for the group
+            List of crews for the selected workspace
         """
-        if not group_context.group_ids:
-            # If no group context, return empty list for security
+        primary_group_id = getattr(group_context, "primary_group_id", None)
+        if not primary_group_id:
+            # If no current workspace, return empty list for security
             return []
-        
-        return await self.repository.find_by_group(group_context.group_ids)
+
+        return await self.repository.find_by_group([primary_group_id])
 
     async def get_by_group(self, id: UUID, group_context: GroupContext) -> Optional[Crew]:
         """
-        Get a crew by ID, ensuring it belongs to the group.
-        
+        Get a crew by ID, ensuring it belongs to the CURRENT workspace (primary group).
+
         Args:
             id: ID of the crew to get
             group_context: Group context from headers
-            
+
         Returns:
-            Crew if found and belongs to group, else None
+            Crew if found and belongs to current workspace, else None
         """
-        if not group_context.group_ids:
+        primary_group_id = getattr(group_context, "primary_group_id", None)
+        if not primary_group_id:
             return None
-        
-        return await self.repository.get_by_group(id, group_context.group_ids)
+
+        return await self.repository.get_by_group(id, [primary_group_id])
 
     async def update_with_partial_data_by_group(self, id: UUID, obj_in: CrewUpdate, group_context: GroupContext) -> Optional[Crew]:
         """
-        Update a crew with partial data, ensuring it belongs to the group.
-        
+        Update a crew with partial data, ensuring it belongs to the CURRENT workspace (primary group).
+
         Args:
             id: ID of the crew to update
             obj_in: Schema with fields to update
             group_context: Group context from headers
-            
+
         Returns:
-            Updated crew if found and belongs to group, else None
+            Updated crew if found and belongs to current workspace, else None
         """
-        if not group_context.group_ids:
+        primary_group_id = getattr(group_context, "primary_group_id", None)
+        if not primary_group_id:
             return None
-        
-        # First verify the crew exists and belongs to the group
-        existing_crew = await self.repository.get_by_group(id, group_context.group_ids)
+
+        # First verify the crew exists and belongs to the current workspace
+        existing_crew = await self.repository.get_by_group(id, [primary_group_id])
         if not existing_crew:
             return None
-        
+
         # Exclude unset fields (None) from update
         update_data = obj_in.model_dump(exclude_none=True)
         if not update_data:
             # No fields to update
             return existing_crew
-        
+
         return await self.repository.update(id, update_data)
 
     async def delete_by_group(self, id: UUID, group_context: GroupContext) -> bool:
         """
-        Delete a crew by ID, ensuring it belongs to the group.
-        
+        Delete a crew by ID, ensuring it belongs to the CURRENT workspace (primary group).
+
         Args:
             id: ID of the crew to delete
             group_context: Group context from headers
-            
+
         Returns:
-            True if crew was deleted, False if not found or doesn't belong to group
+            True if crew was deleted, False if not found or doesn't belong to current workspace
         """
-        if not group_context.group_ids:
+        primary_group_id = getattr(group_context, "primary_group_id", None)
+        if not primary_group_id:
             return False
-        
-        return await self.repository.delete_by_group(id, group_context.group_ids)
+
+        return await self.repository.delete_by_group(id, [primary_group_id])
 
     async def delete_all_by_group(self, group_context: GroupContext) -> None:
         """
-        Delete all crews for the given group.
+        Delete all crews for the CURRENT workspace (primary group only).
         
         Args:
             group_context: Group context from headers
         """
-        if not group_context.group_ids:
+        primary_group_id = getattr(group_context, "primary_group_id", None)
+        if not primary_group_id:
             return
         
-        await self.repository.delete_all_by_group(group_context.group_ids) 
+        await self.repository.delete_all_by_group([primary_group_id])

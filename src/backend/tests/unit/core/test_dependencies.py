@@ -97,13 +97,16 @@ class TestGetGroupContext:
                 x_forwarded_access_token="old-token",
                 x_auth_request_email="test@example.com",
                 x_auth_request_user="testuser",
-                x_auth_request_access_token="auth-token"
+                x_auth_request_access_token="auth-token",
+                x_group_id=None,
+                x_group_domain=None
             )
             
             # Verify OAuth2-Proxy headers are preferred
             mock_from_email.assert_called_once_with(
                 email="test@example.com",
-                access_token="auth-token"
+                access_token="auth-token",
+                group_id=None
             )
             assert result == mock_group_context
     
@@ -124,13 +127,16 @@ class TestGetGroupContext:
                 x_forwarded_access_token="fallback-token",
                 x_auth_request_email=None,
                 x_auth_request_user=None,
-                x_auth_request_access_token=None
+                x_auth_request_access_token=None,
+                x_group_id=None,
+                x_group_domain=None
             )
             
             # Verify fallback headers are used
             mock_from_email.assert_called_once_with(
                 email="fallback@example.com",
-                access_token="fallback-token"
+                access_token="fallback-token",
+                group_id=None
             )
             assert result == mock_group_context
     
@@ -140,19 +146,25 @@ class TestGetGroupContext:
         with patch('src.core.dependencies.GroupContext') as mock_group_context_class:
             mock_empty_context = MagicMock(spec=GroupContext)
             mock_group_context_class.return_value = mock_empty_context
-            
-            result = await get_group_context(
-                request=mock_request,
-                x_forwarded_email=None,
-                x_forwarded_access_token=None,
-                x_auth_request_email=None,
-                x_auth_request_user=None,
-                x_auth_request_access_token=None
-            )
-            
-            # Verify empty context is returned
-            mock_group_context_class.assert_called_once_with()
-            assert result == mock_empty_context
+
+            # Mock settings import inside the function to avoid admin@admin.com fallback
+            with patch('src.config.settings.settings') as mock_settings:
+                mock_settings.DEBUG_MODE = False
+
+                result = await get_group_context(
+                    request=mock_request,
+                    x_forwarded_email=None,
+                    x_forwarded_access_token=None,
+                    x_auth_request_email=None,
+                    x_auth_request_user=None,
+                    x_auth_request_access_token=None,
+                    x_group_id=None,
+                    x_group_domain=None
+                )
+
+                # Verify empty context is returned
+                mock_group_context_class.assert_called_once_with()
+                assert result == mock_empty_context
     
     @pytest.mark.asyncio
     async def test_get_group_context_with_partial_headers(self, mock_request):
@@ -171,13 +183,16 @@ class TestGetGroupContext:
                 x_forwarded_access_token=None,
                 x_auth_request_email="partial@example.com",
                 x_auth_request_user=None,
-                x_auth_request_access_token=None
+                x_auth_request_access_token=None,
+                x_group_id=None,
+                x_group_domain=None
             )
             
             # Verify called with email only
             mock_from_email.assert_called_once_with(
                 email="partial@example.com",
-                access_token=None
+                access_token=None,
+                group_id=None
             )
             assert result == mock_group_context
 
@@ -290,23 +305,24 @@ class TestGetLogService:
     """Test cases for get_log_service factory."""
     
     def test_get_log_service_creates_singleton(self):
-        """Test that get_log_service creates a service instance."""
+        """Test that get_log_service creates a service instance with session."""
         with patch('src.core.dependencies.LLMLogRepository') as mock_repo_class:
             with patch('src.core.dependencies.LLMLogService') as mock_service_class:
                 mock_repo_instance = MagicMock()
                 mock_service_instance = MagicMock()
-                
+
                 mock_repo_class.return_value = mock_repo_instance
                 mock_service_class.return_value = mock_service_instance
-                
-                result = get_log_service()
-                
-                # Verify repository was created
-                mock_repo_class.assert_called_once_with()
-                
+
+                mock_session = MagicMock()
+                result = get_log_service(mock_session)
+
+                # Verify repository was created with session
+                mock_repo_class.assert_called_once_with(mock_session)
+
                 # Verify service was created with repository
                 mock_service_class.assert_called_once_with(mock_repo_instance)
-                
+
                 assert result == mock_service_instance
     
     def test_get_log_service_returns_same_type(self):
@@ -314,10 +330,11 @@ class TestGetLogService:
         # Mock the actual imports to avoid dependencies
         mock_repo = MagicMock(spec=LLMLogRepository)
         mock_service = MagicMock(spec=LLMLogService)
-        
+
         with patch('src.core.dependencies.LLMLogRepository', return_value=mock_repo):
             with patch('src.core.dependencies.LLMLogService', return_value=mock_service):
-                result = get_log_service()
-                
+                mock_session = MagicMock()
+                result = get_log_service(mock_session)
+
                 # Verify it returns the service instance
                 assert result == mock_service

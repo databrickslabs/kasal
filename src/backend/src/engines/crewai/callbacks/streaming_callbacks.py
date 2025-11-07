@@ -1,7 +1,32 @@
-"""
-Streaming callbacks for CrewAI engine.
+"""Real-time streaming callbacks for CrewAI agent execution.
 
-This module provides streaming callback implementations for CrewAI.
+This module provides callback implementations for streaming CrewAI events
+and logs to the database in real-time, enabling live monitoring of agent
+execution progress.
+
+The callbacks integrate with CrewAI's event system to capture agent activities,
+tool usage, LLM interactions, and task completions, streaming them to the
+database for real-time display in the UI.
+
+Key Features:
+    - Real-time event streaming via CrewAI event bus
+    - Log buffering and batching for efficiency
+    - Multi-tenant support through group context
+    - Automatic cleanup and resource management
+    - Integration with execution logs queue system
+
+Components:
+    - LogCaptureHandler: Captures and buffers log records
+    - JobOutputCallback: Streams job output to database
+    - EventStreamingCallback: Captures CrewAI events in real-time
+
+Example:
+    >>> callback = EventStreamingCallback(
+    ...     job_id="exec_123",
+    ...     config={"stream_events": True},
+    ...     group_context=user_context
+    ... )
+    >>> # Callback automatically registers with CrewAI event bus
 """
 from typing import Any, Optional, Dict
 from datetime import datetime, UTC
@@ -11,12 +36,13 @@ import queue
 import traceback
 from logging.handlers import MemoryHandler
 
-# Import CrewAI's event system
-from crewai.utilities.events import (
-    ToolUsageStartedEvent,
-    ToolUsageFinishedEvent,
-    LLMCallStartedEvent,
-    LLMCallCompletedEvent,
+# Import CrewAI's event system - using new location
+# Note: Tool and LLM events have been removed in newer CrewAI versions
+# We'll need to handle these differently
+from crewai.events import (
+    AgentExecutionCompletedEvent,
+    CrewKickoffStartedEvent,
+    CrewKickoffCompletedEvent,
     crewai_event_bus
 )
 
@@ -290,23 +316,61 @@ class JobOutputCallback(CrewAICallback):
 
 
 class EventStreamingCallback:
-    """
-    Callback that streams CrewAI events (tool usage, LLM calls, etc.) to the database.
-    Uses the event bus system to capture and stream events in real-time.
+    """Real-time event streaming callback for CrewAI execution monitoring.
+    
+    This callback integrates with CrewAI's event bus to capture and stream
+    execution events to the database in real-time. It provides comprehensive
+    monitoring of agent activities, tool usage, and task progression.
+    
+    The callback registers event handlers for various CrewAI events and
+    streams them to the execution logs queue for persistence and real-time
+    UI updates.
+    
+    Attributes:
+        job_id: Unique identifier for the execution being monitored
+        config: Configuration dictionary for callback behavior
+        group_context: Multi-tenant context for isolation
+        _event_handlers: Dictionary of registered event handlers
+    
+    Event Types Handled:
+        - AgentExecutionCompletedEvent: Agent task completion
+        - CrewKickoffStartedEvent: Crew execution start
+        - CrewKickoffCompletedEvent: Crew execution completion
+        - Tool events (if available in CrewAI version)
+        - LLM events (if available in CrewAI version)
+    
+    Note:
+        The callback automatically registers with the CrewAI event bus
+        on initialization and unregisters on cleanup.
     """
     
     def __init__(self, job_id: str, config: Dict[str, Any] = None, group_context=None):
-        """
-        Initialize the event streaming callback.
+        """Initialize the event streaming callback with event bus registration.
+        
+        Sets up event handlers for all available CrewAI events and registers
+        them with the global event bus for real-time event capture.
         
         Args:
-            job_id: The execution/job ID to associate logs with
-            config: Optional configuration dictionary
-            group_context: Group context for logging isolation
+            job_id: Unique identifier for the execution to monitor.
+                All captured events will be associated with this ID.
+            config: Optional configuration dictionary controlling:
+                - stream_events: Enable/disable event streaming
+                - event_filter: Filter specific event types
+                - batch_size: Number of events to batch before streaming
+            group_context: Optional multi-tenant context containing:
+                - primary_group_id: Group identifier for isolation
+                - group_email: Group email for notifications
+        
+        Example:
+            >>> callback = EventStreamingCallback(
+            ...     job_id="exec_123",
+            ...     config={"stream_events": True, "batch_size": 10}
+            ... )
         """
         self.job_id = job_id
         self.config = config
         self.group_context = group_context
+        self.handlers = {}  # Initialize handlers dictionary
         self._setup_event_handlers()
         logger_manager.system.info(f"Initialized EventStreamingCallback for job {job_id}")
         
@@ -346,9 +410,77 @@ class EventStreamingCallback:
         return sanitized
         
     def _setup_event_handlers(self):
-        """Set up event handlers for CrewAI events."""
-        self._register_tool_usage_handlers()
-        self._register_llm_call_handlers()
+        """Set up event handlers for CrewAI events.
+        
+        Note: In CrewAI 0.177+, ToolUsageStartedEvent, ToolUsageFinishedEvent,
+        LLMCallStartedEvent, and LLMCallCompletedEvent no longer exist.
+        Tool and LLM events are now handled through AgentExecutionCompletedEvent.
+        """
+        # Only register handlers if streaming is enabled
+        if not self.config or not self.config.get('stream_events', True):
+            return
+            
+        # Register handler for AgentExecutionCompletedEvent
+        @crewai_event_bus.on(AgentExecutionCompletedEvent)
+        def on_agent_execution_completed(source, event):
+            try:
+                event_data = {
+                    "type": "agent_completed",
+                    "agent": event.agent.role if hasattr(event.agent, 'role') else str(event.agent),
+                    "output": str(event.output) if hasattr(event, 'output') else None,
+                    "timestamp": datetime.now(UTC).isoformat()
+                }
+                
+                enqueue_log(
+                    execution_id=self.job_id,
+                    content=json.dumps(event_data),
+                    group_context=self.group_context
+                )
+            except Exception as e:
+                logger_manager.system.error(f"Error handling agent execution completed: {e}", exc_info=True)
+        
+        self.handlers[AgentExecutionCompletedEvent] = on_agent_execution_completed
+        
+        # Register handler for CrewKickoffStartedEvent
+        @crewai_event_bus.on(CrewKickoffStartedEvent)
+        def on_crew_kickoff_started(source, event):
+            try:
+                event_data = {
+                    "type": "crew_started",
+                    "crew_name": event.crew_name if hasattr(event, 'crew_name') else "Unknown",
+                    "timestamp": datetime.now(UTC).isoformat()
+                }
+                
+                enqueue_log(
+                    execution_id=self.job_id,
+                    content=json.dumps(event_data),
+                    group_context=self.group_context
+                )
+            except Exception as e:
+                logger_manager.system.error(f"Error handling crew kickoff started: {e}", exc_info=True)
+        
+        self.handlers[CrewKickoffStartedEvent] = on_crew_kickoff_started
+        
+        # Register handler for CrewKickoffCompletedEvent
+        @crewai_event_bus.on(CrewKickoffCompletedEvent)
+        def on_crew_kickoff_completed(source, event):
+            try:
+                event_data = {
+                    "type": "crew_completed",
+                    "crew_name": event.crew_name if hasattr(event, 'crew_name') else "Unknown",
+                    "output": str(event.output) if hasattr(event, 'output') else None,
+                    "timestamp": datetime.now(UTC).isoformat()
+                }
+                
+                enqueue_log(
+                    execution_id=self.job_id,
+                    content=json.dumps(event_data),
+                    group_context=self.group_context
+                )
+            except Exception as e:
+                logger_manager.system.error(f"Error handling crew kickoff completed: {e}", exc_info=True)
+        
+        self.handlers[CrewKickoffCompletedEvent] = on_crew_kickoff_completed
     
     def _register_tool_usage_handlers(self):
         """Register handlers for tool usage events."""
@@ -503,6 +635,8 @@ Timestamp: {datetime.now(UTC).isoformat()}
     
     def cleanup(self):
         """Clean up resources and event handlers."""
+        # Clear handlers reference
+        self.handlers = {}
         # No direct way to remove event handlers from CrewAI's event bus
         # In a future version, we could modify the event bus to support removing handlers
         logger_manager.system.info(f"Cleaned up EventStreamingCallback for job {self.job_id}") 

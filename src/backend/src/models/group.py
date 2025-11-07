@@ -24,9 +24,8 @@ class GroupStatus(str, Enum):
 
 class GroupUserRole(str, Enum):
     ADMIN = "admin"           # Full control within group
-    MANAGER = "manager"       # Can manage users and workflows
-    USER = "user"            # Can execute workflows
-    VIEWER = "viewer"        # Read-only access
+    EDITOR = "editor"         # Can build and modify workflows
+    OPERATOR = "operator"     # Can execute workflows and monitor
 
 class GroupUserStatus(str, Enum):
     ACTIVE = "active"
@@ -47,7 +46,6 @@ class Group(Base):
     # Primary identification
     id: Mapped[str] = mapped_column(String(100), primary_key=True)  # e.g., "acme_corp"
     name: Mapped[str] = mapped_column(String(255), nullable=False)  # e.g., "Acme Corporation"
-    email_domain: Mapped[str] = mapped_column(String(255), nullable=False)  # e.g., "acme-corp.com"
     
     # Status and metadata
     status: Mapped[str] = mapped_column(String(50), nullable=False, default="ACTIVE")
@@ -65,41 +63,22 @@ class Group(Base):
     group_users = relationship("GroupUser", back_populates="group", cascade="all, delete-orphan")
     
     @classmethod
-    def generate_group_id(cls, email_domain: str, group_name: str = None) -> str:
+    def generate_group_id(cls, group_name: str) -> str:
         """
-        Generate unique group ID from email domain and group name.
-        
+        Generate unique group ID from group name.
+
         Examples:
-        - acme-corp.com, "Engineering Team" -> acme_corp_engineering_team_<uuid>
-        - tech.startup.io, "Sales" -> tech_startup_io_sales_<uuid>
+        - "Engineering Team" -> engineering_team_<uuid>
+        - "Sales" -> sales_<uuid>
         """
-        domain_part = email_domain.replace(".", "_").replace("-", "_").lower()
-        
-        if group_name:
-            # Clean group name for ID use
-            name_part = group_name.replace(" ", "_").replace("-", "_").lower()
-            # Remove special characters
-            name_part = "".join(c for c in name_part if c.isalnum() or c == "_")
-            base_id = f"{domain_part}_{name_part}"
-        else:
-            base_id = domain_part
-        
+        # Clean group name for ID use
+        name_part = group_name.replace(" ", "_").replace("-", "_").lower()
+        # Remove special characters
+        name_part = "".join(c for c in name_part if c.isalnum() or c == "_")
+
         # Add short UUID to ensure uniqueness
         short_uuid = str(uuid4())[:8]
-        return f"{base_id}_{short_uuid}"
-    
-    @classmethod
-    def generate_group_name(cls, email_domain: str) -> str:
-        """
-        Generate friendly group name from email domain.
-        
-        Examples:
-        - acme-corp.com -> Acme Corp
-        - tech.startup.io -> Tech Startup IO
-        """
-        # Remove .com, .io, etc. and replace separators with spaces
-        name_part = email_domain.split('.')[0] if '.' in email_domain else email_domain
-        return name_part.replace('-', ' ').replace('_', ' ').title()
+        return f"{name_part}_{short_uuid}"
 
 
 class GroupUser(Base):
@@ -140,110 +119,35 @@ class GroupUser(Base):
         return f"<GroupUser(group_id='{self.group_id}', user_id='{self.user_id}', role='{self.role}')>"
 
 
-# Import privilege constants
-from src.models.privileges import Privileges
+# Simplified role-based access - permissions handled by decorators in src.core.permissions
+# Role hierarchy: admin > editor > operator
 
-# Simple permission mapping for roles
-GROUP_PERMISSIONS = {
-    GroupUserRole.ADMIN: [
-        # Group management (within group context)
-        Privileges.GROUP_MANAGE_USERS,
-        Privileges.GROUP_MANAGE_ROLES,
-        # User management
-        Privileges.USER_INVITE,
-        Privileges.USER_REMOVE,
-        Privileges.USER_UPDATE_ROLE,
-        # Full resource access
-        Privileges.AGENT_CREATE,
-        Privileges.AGENT_READ,
-        Privileges.AGENT_UPDATE,
-        Privileges.AGENT_DELETE,
-        Privileges.TASK_CREATE,
-        Privileges.TASK_READ,
-        Privileges.TASK_UPDATE,
-        Privileges.TASK_DELETE,
-        Privileges.CREW_CREATE,
-        Privileges.CREW_READ,
-        Privileges.CREW_UPDATE,
-        Privileges.CREW_DELETE,
-        Privileges.EXECUTION_READ,
-        Privileges.EXECUTION_MANAGE,
-        # Full configuration access for group admins
-        Privileges.SETTINGS_READ,
-        Privileges.SETTINGS_UPDATE,
-        Privileges.TOOL_CREATE,
-        Privileges.TOOL_READ,
-        Privileges.TOOL_UPDATE,
-        Privileges.TOOL_DELETE,
-        Privileges.TOOL_CONFIGURE,
-        Privileges.MODEL_CREATE,
-        Privileges.MODEL_READ,
-        Privileges.MODEL_UPDATE,
-        Privileges.MODEL_DELETE,
-        Privileges.MODEL_CONFIGURE,
-        Privileges.MCP_CREATE,
-        Privileges.MCP_READ,
-        Privileges.MCP_UPDATE,
-        Privileges.MCP_DELETE,
-        Privileges.MCP_CONFIGURE,
-        Privileges.API_KEY_CREATE,
-        Privileges.API_KEY_READ,
-        Privileges.API_KEY_UPDATE,
-        Privileges.API_KEY_DELETE,
-        Privileges.API_KEY_MANAGE
-    ],
-    GroupUserRole.MANAGER: [
-        # User management
-        Privileges.USER_INVITE,
-        Privileges.USER_UPDATE_ROLE,
-        # Resource management
-        Privileges.AGENT_CREATE,
-        Privileges.AGENT_READ,
-        Privileges.AGENT_UPDATE,
-        Privileges.AGENT_DELETE,
-        Privileges.TASK_CREATE,
-        Privileges.TASK_READ,
-        Privileges.TASK_UPDATE,
-        Privileges.TASK_DELETE,
-        Privileges.CREW_CREATE,
-        Privileges.CREW_READ,
-        Privileges.CREW_UPDATE,
-        Privileges.CREW_DELETE,
-        Privileges.EXECUTION_READ,
-        # Limited configuration access (read + configure existing)
-        Privileges.TOOL_READ,
-        Privileges.TOOL_CONFIGURE,
-        Privileges.MODEL_READ,
-        Privileges.MODEL_CONFIGURE,
-        Privileges.MCP_READ,
-        Privileges.SETTINGS_READ,
-        Privileges.API_KEY_READ
-    ],
-    GroupUserRole.USER: [
-        # Read and execute access
-        Privileges.AGENT_READ,
-        Privileges.TASK_READ,
-        Privileges.TASK_EXECUTE,
-        Privileges.CREW_READ,
-        Privileges.CREW_EXECUTE,
-        Privileges.EXECUTION_CREATE,
-        Privileges.EXECUTION_READ,
-        # Basic configuration read access
-        Privileges.TOOL_READ,
-        Privileges.MODEL_READ,
-        Privileges.SETTINGS_READ
-    ],
-    GroupUserRole.VIEWER: [
-        # Read-only access
-        Privileges.AGENT_READ,
-        Privileges.TASK_READ,
-        Privileges.CREW_READ,
-        Privileges.EXECUTION_READ,
-        # Basic read access to configuration
-        Privileges.TOOL_READ,
-        Privileges.MODEL_READ,
-        Privileges.SETTINGS_READ
-    ]
-}
+def get_role_hierarchy(role: GroupUserRole) -> int:
+    """
+    Get the hierarchy level for a role.
+    Higher numbers = more permissions.
+
+    Returns:
+        int: Hierarchy level (3=admin, 2=editor, 1=operator)
+    """
+    hierarchy = {
+        GroupUserRole.ADMIN: 3,     # Full access including user/group management
+        GroupUserRole.EDITOR: 2,    # Can create/edit workflows, execute
+        GroupUserRole.OPERATOR: 1   # Can execute and monitor only
+    }
+    return hierarchy.get(role, 0)
+
+def role_has_access(user_role: GroupUserRole, required_role: GroupUserRole) -> bool:
+    """
+    Check if user role has sufficient access level for the required role.
+
+    Args:
+        user_role: The user's current role
+        required_role: The minimum role required for the action
+
+    Returns:
+        bool: True if user has sufficient access
+    """
+    return get_role_hierarchy(user_role) >= get_role_hierarchy(required_role)
 
 # Legacy compatibility aliases removed - migration complete

@@ -88,7 +88,6 @@ export const useTabSync = ({ nodes, edges, setNodes, setEdges }: UseTabSyncProps
   // Save current state for a specific tab
   const saveStateForTab = useCallback((tabId: string, nodesToSave: Node[], edgesToSave: Edge[]) => {
     if (tabId && !isLoadingCrewRef.current) {
-      console.log('Saving state for tab:', tabId, 'with', nodesToSave.length, 'nodes and', edgesToSave.length, 'edges');
       updateTabNodes(tabId, nodesToSave);
       updateTabEdges(tabId, edgesToSave);
     }
@@ -99,7 +98,6 @@ export const useTabSync = ({ nodes, edges, setNodes, setEdges }: UseTabSyncProps
     if (activeTabId !== lastActiveTabIdRef.current) {
       // Don't interfere if we're currently loading a crew
       if (isLoadingCrewRef.current) {
-        console.log('Skipping tab sync during crew load');
         lastActiveTabIdRef.current = activeTabId;
         return;
       }
@@ -114,7 +112,6 @@ export const useTabSync = ({ nodes, edges, setNodes, setEdges }: UseTabSyncProps
       
       const activeTab = getActiveTab();
       if (activeTab) {
-        console.log('Switching to tab:', activeTab.name, 'with', activeTab.nodes.length, 'nodes and', activeTab.edges.length, 'edges');
         
         // Create deep copies to ensure proper restoration
         const restoredNodes = activeTab.nodes.map(node => ({
@@ -201,7 +198,6 @@ export const useTabSync = ({ nodes, edges, setNodes, setEdges }: UseTabSyncProps
     if (activeTabId && !isLoadingCrewRef.current && !isSwitchingTabsRef.current) {
       const activeTab = getActiveTab();
       if (activeTab && nodesHaveChanged(activeTab.nodes, nodes)) {
-        console.log('Auto-syncing', nodes.length, 'nodes to tab:', activeTab.name);
         updateTabNodes(activeTabId, nodes);
       }
     }
@@ -211,7 +207,6 @@ export const useTabSync = ({ nodes, edges, setNodes, setEdges }: UseTabSyncProps
     if (activeTabId && !isLoadingCrewRef.current && !isSwitchingTabsRef.current) {
       const activeTab = getActiveTab();
       if (activeTab && edgesHaveChanged(activeTab.edges, edges)) {
-        console.log('Auto-syncing', edges.length, 'edges to tab:', activeTab.name);
         updateTabEdges(activeTabId, edges);
       }
     }
@@ -236,10 +231,9 @@ export const useTabSync = ({ nodes, edges, setNodes, setEdges }: UseTabSyncProps
         const targetTabId = tabId || activeTabId; // Use specified tab ID or current active tab
         
         if (targetTabId && crewId && crewName && !isLoadingCrewRef.current) {
-          console.log('Updating crew info for tab:', targetTabId, 'with name:', crewName);
           updateTabCrewInfo(targetTabId, crewId, crewName);
         } else if (isLoadingCrewRef.current) {
-          console.log('Skipping crew info update during crew load');
+          // Skip update while loading crew
         }
       }
     };
@@ -254,12 +248,10 @@ export const useTabSync = ({ nodes, edges, setNodes, setEdges }: UseTabSyncProps
   // Listen for crew load events to prevent marking as dirty during load
   useEffect(() => {
     const handleCrewLoadStart = () => {
-      console.log('Crew load started - disabling sync');
       isLoadingCrewRef.current = true;
     };
 
     const handleCrewLoadComplete = () => {
-      console.log('Crew load completed - re-enabling sync');
       setTimeout(() => {
         isLoadingCrewRef.current = false;
       }, 200); // Small delay to ensure all updates are processed
@@ -278,7 +270,6 @@ export const useTabSync = ({ nodes, edges, setNodes, setEdges }: UseTabSyncProps
   useEffect(() => {
     const handleClearCanvas = (event: CustomEvent<{ tabId: string }>) => {
       if (event.detail.tabId === activeTabId) {
-        console.log('Clearing canvas for new tab:', event.detail.tabId);
         setNodes([]);
         setEdges([]);
       }

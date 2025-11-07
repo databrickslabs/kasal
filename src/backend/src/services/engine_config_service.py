@@ -18,27 +18,15 @@ logger = LoggerManager.get_instance().crew
 class EngineConfigService:
     """Service for engine configuration operations."""
     
-    def __init__(self, repository: EngineConfigRepository):
+    def __init__(self, session):
         """
-        Initialize the service with repository.
-        
+        Initialize the service with session.
+
         Args:
-            repository: EngineConfigRepository instance
+            session: Database session from FastAPI DI (from core.dependencies)
         """
-        self.repository = repository
+        self.repository = EngineConfigRepository(session)
     
-    @classmethod
-    async def from_unit_of_work(cls, uow):
-        """
-        Create a service instance from a UnitOfWork.
-        
-        Args:
-            uow: UnitOfWork instance
-            
-        Returns:
-            EngineConfigService: Service instance using the UnitOfWork's repository
-        """
-        return cls(repository=uow.engine_config_repository)
     
     async def find_all(self) -> List[EngineConfig]:
         """
@@ -220,10 +208,10 @@ class EngineConfigService:
     async def set_crewai_flow_enabled(self, enabled: bool) -> bool:
         """
         Set the CrewAI flow enabled status.
-        
+
         Args:
             enabled: Whether flow should be enabled
-            
+
         Returns:
             True if successful
         """
@@ -232,7 +220,36 @@ class EngineConfigService:
         except Exception as e:
             logger.error(f"Error setting CrewAI flow enabled status: {str(e)}")
             raise
-    
+
+    async def get_crewai_debug_tracing(self) -> bool:
+        """
+        Get the CrewAI debug tracing enabled status.
+
+        Returns:
+            True if debug tracing is enabled, False otherwise (defaults to False if not found)
+        """
+        try:
+            return await self.repository.get_crewai_debug_tracing()
+        except Exception as e:
+            logger.error(f"Error getting CrewAI debug tracing status: {str(e)}")
+            return False  # Default to disabled on error
+
+    async def set_crewai_debug_tracing(self, enabled: bool) -> bool:
+        """
+        Set the CrewAI debug tracing enabled status.
+
+        Args:
+            enabled: Whether debug tracing should be enabled
+
+        Returns:
+            True if successful
+        """
+        try:
+            return await self.repository.set_crewai_debug_tracing(enabled)
+        except Exception as e:
+            logger.error(f"Error setting CrewAI debug tracing status: {str(e)}")
+            raise
+
     async def delete_engine_config(self, engine_name: str) -> bool:
         """
         Delete an engine configuration.

@@ -1,4 +1,4 @@
-import { config } from '../config/api';
+import { apiClient } from '../config/api/ApiConfig';
 
 export interface EngineConfig {
   id: number;
@@ -25,153 +25,104 @@ export interface CrewAIFlowStatusResponse {
   flow_enabled: boolean;
 }
 
+export interface CrewAIDebugTracingStatusResponse {
+  debug_tracing: boolean;
+}
+
+
+
 export class EngineConfigService {
-  private static baseUrl = `${config.apiUrl}/engine-config`;
+  private static baseUrl = `/engine-config`;
 
   /**
    * Get all engine configurations
    */
   static async getEngineConfigs(): Promise<EngineConfigListResponse> {
-    const response = await fetch(`${this.baseUrl}`, {
-      method: 'GET',
-      headers: {
-        'Content-Type': 'application/json',
-      },
-    });
-
-    if (!response.ok) {
-      throw new Error(`Failed to fetch engine configurations: ${response.statusText}`);
-    }
-
-    return response.json();
+    const response = await apiClient.get<EngineConfigListResponse>(`${this.baseUrl}`);
+    return response.data;
   }
 
   /**
    * Get enabled engine configurations
    */
   static async getEnabledEngineConfigs(): Promise<EngineConfigListResponse> {
-    const response = await fetch(`${this.baseUrl}/enabled`, {
-      method: 'GET',
-      headers: {
-        'Content-Type': 'application/json',
-      },
-    });
-
-    if (!response.ok) {
-      throw new Error(`Failed to fetch enabled engine configurations: ${response.statusText}`);
-    }
-
-    return response.json();
+    const response = await apiClient.get<EngineConfigListResponse>(`${this.baseUrl}/enabled`);
+    return response.data;
   }
 
   /**
    * Get engine configuration by engine name
    */
   static async getEngineConfig(engineName: string): Promise<EngineConfig> {
-    const response = await fetch(`${this.baseUrl}/engine/${engineName}`, {
-      method: 'GET',
-      headers: {
-        'Content-Type': 'application/json',
-      },
-    });
-
-    if (!response.ok) {
-      throw new Error(`Failed to fetch engine configuration: ${response.statusText}`);
-    }
-
-    return response.json();
+    const response = await apiClient.get<EngineConfig>(`${this.baseUrl}/engine/${engineName}`);
+    return response.data;
   }
 
   /**
    * Get engine configuration by engine name and config key
    */
   static async getEngineConfigByKey(engineName: string, configKey: string): Promise<EngineConfig> {
-    const response = await fetch(`${this.baseUrl}/engine/${engineName}/config/${configKey}`, {
-      method: 'GET',
-      headers: {
-        'Content-Type': 'application/json',
-      },
-    });
-
-    if (!response.ok) {
-      throw new Error(`Failed to fetch engine configuration: ${response.statusText}`);
-    }
-
-    return response.json();
+    const response = await apiClient.get<EngineConfig>(`${this.baseUrl}/engine/${engineName}/config/${configKey}`);
+    return response.data;
   }
 
   /**
    * Get CrewAI flow enabled status
    */
   static async getCrewAIFlowEnabled(): Promise<CrewAIFlowStatusResponse> {
-    const response = await fetch(`${this.baseUrl}/crewai/flow-enabled`, {
-      method: 'GET',
-      headers: {
-        'Content-Type': 'application/json',
-      },
-    });
-
-    if (!response.ok) {
-      throw new Error(`Failed to fetch CrewAI flow status: ${response.statusText}`);
-    }
-
-    return response.json();
+    const response = await apiClient.get<CrewAIFlowStatusResponse>(`${this.baseUrl}/crewai/flow-enabled`);
+    return response.data;
   }
 
   /**
    * Set CrewAI flow enabled status
    */
   static async setCrewAIFlowEnabled(enabled: boolean): Promise<{ success: boolean; flow_enabled: boolean }> {
-    const response = await fetch(`${this.baseUrl}/crewai/flow-enabled`, {
-      method: 'PATCH',
-      headers: {
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify({ flow_enabled: enabled }),
-    });
+    const response = await apiClient.patch<{ success: boolean; flow_enabled: boolean }>(
+      `${this.baseUrl}/crewai/flow-enabled`,
+      { flow_enabled: enabled }
+    );
+    return response.data;
+  }
 
-    if (!response.ok) {
-      throw new Error(`Failed to update CrewAI flow status: ${response.statusText}`);
-    }
+  /**
+   * Get CrewAI debug tracing status
+   */
+  static async getCrewAIDebugTracing(): Promise<CrewAIDebugTracingStatusResponse> {
+    const response = await apiClient.get<CrewAIDebugTracingStatusResponse>(`${this.baseUrl}/crewai/debug-tracing`);
+    return response.data;
+  }
 
-    return response.json();
+  /**
+   * Set CrewAI debug tracing status
+   */
+  static async setCrewAIDebugTracing(enabled: boolean): Promise<{ success: boolean; debug_tracing: boolean }> {
+    const response = await apiClient.patch<{ success: boolean; debug_tracing: boolean }>(
+      `${this.baseUrl}/crewai/debug-tracing`,
+      { debug_tracing: enabled }
+    );
+    return response.data;
   }
 
   /**
    * Toggle engine configuration enabled status
    */
   static async toggleEngineEnabled(engineName: string, enabled: boolean): Promise<EngineConfig> {
-    const response = await fetch(`${this.baseUrl}/engine/${engineName}/toggle`, {
-      method: 'PATCH',
-      headers: {
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify({ enabled }),
-    });
-
-    if (!response.ok) {
-      throw new Error(`Failed to toggle engine configuration: ${response.statusText}`);
-    }
-
-    return response.json();
+    const response = await apiClient.patch<EngineConfig>(
+      `${this.baseUrl}/engine/${engineName}/toggle`,
+      { enabled }
+    );
+    return response.data;
   }
 
   /**
    * Update engine configuration value
    */
   static async updateConfigValue(engineName: string, configKey: string, configValue: string): Promise<EngineConfig> {
-    const response = await fetch(`${this.baseUrl}/engine/${engineName}/config/${configKey}/value`, {
-      method: 'PATCH',
-      headers: {
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify({ config_value: configValue }),
-    });
-
-    if (!response.ok) {
-      throw new Error(`Failed to update config value: ${response.statusText}`);
-    }
-
-    return response.json();
+    const response = await apiClient.patch<EngineConfig>(
+      `${this.baseUrl}/engine/${engineName}/config/${configKey}/value`,
+      { config_value: configValue }
+    );
+    return response.data;
   }
-} 
+}

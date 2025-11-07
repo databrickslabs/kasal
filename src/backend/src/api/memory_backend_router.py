@@ -10,10 +10,11 @@ from fastapi import APIRouter, Depends, HTTPException, status, Request, Query
 from sqlalchemy.ext.asyncio import AsyncSession
 from datetime import datetime
 
-from src.core.dependencies import GroupContextDep
+from src.core.dependencies import GroupContextDep, SessionDep
+from src.core.permissions import check_role_in_context, is_workspace_admin
 from src.core.logger import LoggerManager
 from src.schemas.memory_backend import (
-    MemoryBackendConfig, 
+    MemoryBackendConfig,
     DatabricksMemoryConfig,
     MemoryBackendCreate,
     MemoryBackendUpdate,
@@ -21,30 +22,23 @@ from src.schemas.memory_backend import (
     MemoryBackendType
 )
 from src.services.memory_backend_service import MemoryBackendService
-from src.repositories.memory_backend_repository import MemoryBackendRepository
 from src.models.memory_backend import MemoryBackend
-from src.core.unit_of_work import UnitOfWork
 from src.utils.databricks_auth import extract_user_token_from_request
 
 logger = LoggerManager.get_instance().api
 
 router = APIRouter(prefix="/memory-backend", tags=["memory-backend"])
 
-# Dependency to get UnitOfWork
-async def get_uow():
-    """Get UnitOfWork instance."""
-    async with UnitOfWork() as uow:
-        yield uow
-
-# Dependency to get MemoryBackendService
-def get_memory_backend_service(uow: UnitOfWork = Depends(get_uow)) -> MemoryBackendService:
-    """Get MemoryBackendService instance with UnitOfWork."""
-    return MemoryBackendService(uow)
+# Dependency to get MemoryBackendService with injected session
+def get_memory_backend_service(session: SessionDep) -> MemoryBackendService:
+    """Get MemoryBackendService instance with injected session."""
+    return MemoryBackendService(session)
 
 
 @router.get("/databricks/workspace-url")
 async def get_workspace_url(
     service: Annotated[MemoryBackendService, Depends(get_memory_backend_service)],
+    group_context: GroupContextDep,
 ) -> Dict[str, Any]:
     """
     Get the Databricks workspace URL from environment or configuration.
@@ -184,16 +178,24 @@ async def create_databricks_index(
 ) -> Dict[str, Any]:
     """
     Create a new Databricks Vector Search index.
-    
+    Only workspace admins can create Databricks indexes.
+
     Args:
         request: Request containing index creation parameters
         req: FastAPI request for extracting user token
         group_context: Current group context
         service: Memory backend service
-        
+
     Returns:
         Index creation result
     """
+    # Check permissions - only workspace admins can create indexes
+    if not is_workspace_admin(group_context):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Only workspace admins can create Databricks indexes"
+        )
+
     try:
         # Extract parameters
         try:
@@ -257,15 +259,23 @@ async def create_memory_config(
 ) -> MemoryBackendResponse:
     """
     Create a new memory backend configuration.
-    
+    Only workspace admins can create memory configurations for their workspace.
+
     Args:
         config: Memory backend configuration
         group_context: Current group context
         service: Memory backend service
-        
+
     Returns:
         Created memory backend configuration
     """
+    # Check permissions - only workspace admins can create memory configs
+    if not is_workspace_admin(group_context):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Only workspace admins can create memory configurations"
+        )
+
     try:
         # Service is injected via dependency
         backend = await service.create_memory_backend(group_context.primary_group_id, config)
@@ -301,19 +311,10 @@ async def get_memory_configs(
         List of memory backend configurations
     """
     try:
-        # Log request headers to debug authentication
-        logger.info(f"Request headers: {dict(request.headers)}")
-        logger.info(f"Group context - group_id: {group_context.primary_group_id}, email: {group_context.group_email}")
-        
-        # Service is injected via dependency
-        logger.info(f"Getting all memory backends for group: {group_context.primary_group_id}")
+        # Only log group context at debug level for frequently called endpoint
+        logger.debug(f"Getting memory backends for group: {group_context.primary_group_id}")
         backends = await service.get_memory_backends(group_context.primary_group_id)
-        logger.info(f"Found {len(backends)} backends for group")
-        
-        for backend in backends:
-            logger.info(f"Backend: {backend.name}, Type: {backend.backend_type}, Default: {backend.is_default}")
-            if backend.databricks_config:
-                logger.info(f"Databricks config: {backend.databricks_config}")
+        logger.debug(f"Found {len(backends)} backends for group")
         
         return [MemoryBackendResponse.model_validate(backend) for backend in backends]
         
@@ -381,15 +382,14 @@ async def get_default_memory_config(
     """
     try:
         # Service is injected via dependency
-        logger.info(f"Getting default memory backend for group: {group_context.primary_group_id}")
+        logger.debug(f"Getting default memory backend for group: {group_context.primary_group_id}")
         backend = await service.get_default_memory_backend(group_context.primary_group_id)
-        
+
         if backend:
-            logger.info(f"Found default backend: {backend.name}")
-            logger.info(f"Databricks config: {backend.databricks_config}")
+            logger.debug(f"Found default backend: {backend.name}")
             return MemoryBackendResponse.model_validate(backend)
         else:
-            logger.info(f"No default backend found for group: {group_context.primary_group_id}")
+            logger.debug(f"No default backend found for group: {group_context.primary_group_id}")
             return None
         
     except Exception as e:
@@ -409,16 +409,24 @@ async def update_memory_config(
 ) -> MemoryBackendResponse:
     """
     Update a memory backend configuration.
-    
+    Only workspace admins can update memory configurations for their workspace.
+
     Args:
         backend_id: Backend ID
         update_data: Update data
         group_context: Current group context
         service: Memory backend service
-        
+
     Returns:
         Updated memory backend configuration
     """
+    # Check permissions - only workspace admins can update memory configs
+    if not is_workspace_admin(group_context):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Only workspace admins can update memory configurations"
+        )
+
     try:
         # Service is injected via dependency
         backend = await service.update_memory_backend(group_context.primary_group_id, backend_id, update_data)
@@ -449,15 +457,23 @@ async def delete_memory_config(
 ) -> Dict[str, Any]:
     """
     Delete a memory backend configuration.
-    
+    Only workspace admins can delete memory configurations for their workspace.
+
     Args:
         backend_id: Backend ID
         group_context: Current group context
         service: Memory backend service
-        
+
     Returns:
         Success status
     """
+    # Check permissions - only workspace admins can delete memory configs
+    if not is_workspace_admin(group_context):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Only workspace admins can delete memory configurations"
+        )
+
     try:
         # Service is injected via dependency
         success = await service.delete_memory_backend(group_context.primary_group_id, backend_id)
@@ -562,46 +578,62 @@ async def one_click_databricks_setup(
     """
     One-click setup for Databricks Vector Search.
     Creates all endpoints and indexes automatically.
-    
+    Only workspace admins can set up memory backend for their workspace.
+
     Args:
         request: Request containing workspace_url, catalog, and schema
         req: FastAPI request for extracting user token
         group_context: Current group context
         service: Memory backend service
-        
+
     Returns:
         Setup result with created resources
     """
+    # Check permissions - only workspace admins can set up memory backend
+    if not is_workspace_admin(group_context):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Only workspace admins can set up memory backend"
+        )
+
     try:
-        # In Databricks Apps, prefer DATABRICKS_HOST over user-provided URL
+        # CRITICAL: Set UserContext for authentication system to access group_id
+        # The authentication system needs group_id to look up PAT tokens from database
+        from src.utils.user_context import UserContext
+        UserContext.set_group_context(group_context)
+        logger.info(f"[ONE-CLICK-SETUP] Set UserContext with group_id: {group_context.primary_group_id}")
+
+        # Get workspace URL from unified auth or user request
         workspace_url = request.get("workspace_url")
-        
-        # Check if we're in Databricks Apps environment
-        databricks_host = os.environ.get("DATABRICKS_HOST")
-        if databricks_host:
-            # Override with the correct workspace URL from environment
-            if not databricks_host.startswith("http"):
-                workspace_url = f"https://{databricks_host}"
-            else:
-                workspace_url = databricks_host
-            logger.info(f"Using DATABRICKS_HOST from environment: {workspace_url}")
-        elif not workspace_url:
+
+        # Try to get from unified auth first
+        if not workspace_url:
+            try:
+                from src.utils.databricks_auth import get_auth_context
+                auth = await get_auth_context()
+                if auth and auth.workspace_url:
+                    workspace_url = auth.workspace_url
+                    logger.info(f"Using workspace URL from unified {auth.auth_method} auth: {workspace_url}")
+            except Exception as e:
+                logger.warning(f"Failed to get unified auth: {e}")
+
+        if not workspace_url:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
-                detail="workspace_url is required (DATABRICKS_HOST not found in environment)"
+                detail="workspace_url is required and not available from unified auth"
             )
-        
+
         catalog = request.get("catalog", "ml")
         schema = request.get("schema", "agents")
         embedding_dimension = request.get("embedding_dimension", 768)  # Default to 768 if not provided
-        
+
         # Extract user token for OBO authentication
         user_token = extract_user_token_from_request(req)
-        
+
         # Run one-click setup with user_id from group context
         logger.info(f"Starting one-click setup for group: {group_context.primary_group_id}")
         logger.info(f"Workspace URL: {workspace_url}, Catalog: {catalog}, Schema: {schema}, Embedding dimension: {embedding_dimension}")
-        
+
         result = await service.one_click_databricks_setup(
             workspace_url=workspace_url,
             catalog=catalog,
@@ -610,11 +642,11 @@ async def one_click_databricks_setup(
             user_token=user_token,
             group_id=group_context.primary_group_id  # Pass group_id from group context
         )
-        
+
         logger.info(f"One-click setup result: {result}")
-        
+
         return result
-        
+
     except HTTPException:
         raise
     except Exception as e:
@@ -767,16 +799,24 @@ async def delete_databricks_index(
 ) -> Dict[str, Any]:
     """
     Delete a Databricks Vector Search index.
-    
+    Only workspace admins can delete Databricks indexes.
+
     Args:
         request: Request containing deletion parameters
         req: FastAPI request for extracting user token
         group_context: Current group context
         service: Memory backend service
-        
+
     Returns:
         Deletion result
     """
+    # Check permissions - only workspace admins can delete indexes
+    if not is_workspace_admin(group_context):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Only workspace admins can delete Databricks indexes"
+        )
+
     try:
         # Extract parameters
         workspace_url = request.get("workspace_url")
@@ -822,16 +862,24 @@ async def delete_databricks_endpoint(
 ) -> Dict[str, Any]:
     """
     Delete a Databricks Vector Search endpoint.
-    
+    Only workspace admins can delete Databricks endpoints.
+
     Args:
         request: Request containing deletion parameters
         req: FastAPI request for extracting user token
         group_context: Current group context
         service: Memory backend service
-        
+
     Returns:
         Deletion result
     """
+    # Check permissions - only workspace admins can delete endpoints
+    if not is_workspace_admin(group_context):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Only workspace admins can delete Databricks endpoints"
+        )
+
     try:
         # Extract parameters
         workspace_url = request.get("workspace_url")
@@ -915,16 +963,24 @@ async def switch_to_disabled_mode(
     service: Annotated[MemoryBackendService, Depends(get_memory_backend_service)],
 ) -> Dict[str, Any]:
     """
-    Switch to disabled mode by deleting all memory backend configurations 
+    Switch to disabled mode by deleting all memory backend configurations
     and creating a new disabled configuration.
-    
+    Only workspace admins can switch to disabled mode.
+
     Args:
         group_context: Current group context
         service: Memory backend service
-        
+
     Returns:
         Success status with deleted count and new disabled configuration
     """
+    # Check permissions - only workspace admins can switch to disabled mode
+    if not is_workspace_admin(group_context):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Only workspace admins can switch memory backend to disabled mode"
+        )
+
     try:
         # Delete all configurations and create disabled one
         result = await service.delete_all_and_create_disabled(group_context.primary_group_id)
@@ -1038,16 +1094,24 @@ async def empty_index(
 ) -> Dict[str, Any]:
     """
     Empty a Databricks Vector Search index by deleting and recreating it.
-    
+    Only workspace admins can empty Databricks indexes.
+
     Args:
         request: Request containing index parameters
         req: FastAPI request for extracting user token
         group_context: Current group context
         service: Memory backend service
-        
+
     Returns:
         Operation result
     """
+    # Check permissions - only workspace admins can empty indexes
+    if not is_workspace_admin(group_context):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Only workspace admins can empty Databricks indexes"
+        )
+
     try:
         # Extract parameters
         workspace_url = request.get("workspace_url")

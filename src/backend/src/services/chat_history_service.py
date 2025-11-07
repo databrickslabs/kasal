@@ -16,40 +16,19 @@ class ChatHistoryService(BaseService[ChatHistory, ChatHistoryCreate]):
     Follows Kasal's service patterns for multi-group deployments.
     """
     
-    def __init__(
-        self,
-        session: AsyncSession,
-        repository_class: Type[ChatHistoryRepository] = ChatHistoryRepository,
-        model_class: Type[ChatHistory] = ChatHistory
-    ):
+    def __init__(self, session):
         """
-        Initialize the service with session and optional repository and model classes.
-        
+        Initialize the service with session.
+
         Args:
-            session: Database session for operations
-            repository_class: Repository class to use for data access (optional)
-            model_class: Model class associated with this service (optional)
+            session: Database session from FastAPI DI (from core.dependencies)
         """
         super().__init__(session)
-        self.repository_class = repository_class
-        self.model_class = model_class
-        self.repository = repository_class(session)
+        self.repository = ChatHistoryRepository(session)
     
-    @classmethod
-    def create(cls, session: AsyncSession) -> 'ChatHistoryService':
-        """
-        Factory method to create a properly configured ChatHistoryService instance.
-        
-        Args:
-            session: Database session for operations
-            
-        Returns:
-            An instance of ChatHistoryService
-        """
-        return cls(session=session)
 
     async def save_message(
-        self, 
+        self,
         session_id: str,
         user_id: str,
         message_type: str,
@@ -58,10 +37,10 @@ class ChatHistoryService(BaseService[ChatHistory, ChatHistoryCreate]):
         confidence: Optional[float] = None,
         generation_result: Optional[dict] = None,
         group_context: Optional[GroupContext] = None
-    ) -> ChatHistory:
+    ) -> ChatHistoryResponse:
         """
         Save a chat message with group context.
-        
+
         Args:
             session_id: Chat session identifier
             user_id: User identifier
@@ -71,11 +50,16 @@ class ChatHistoryService(BaseService[ChatHistory, ChatHistoryCreate]):
             confidence: Confidence score (optional)
             generation_result: Generated data (optional)
             group_context: Group context for multi-tenant support
-            
+
         Returns:
-            Created ChatHistory instance
+            Created chat message response DTO (avoids async lazy-loading)
         """
+        # Generate ID and timestamp up-front so we can return a DTO without touching ORM lazy-loaders
+        message_id = str(uuid4())
+        ts = datetime.utcnow()
+
         message_data = {
+            'id': message_id,
             'session_id': session_id,
             'user_id': user_id,
             'message_type': message_type,
@@ -83,7 +67,7 @@ class ChatHistoryService(BaseService[ChatHistory, ChatHistoryCreate]):
             'intent': intent,
             'confidence': str(confidence) if confidence is not None else None,
             'generation_result': generation_result,
-            'timestamp': datetime.utcnow(),
+            'timestamp': ts,
         }
 
         # Add group context if available
@@ -93,15 +77,19 @@ class ChatHistoryService(BaseService[ChatHistory, ChatHistoryCreate]):
                 'group_email': group_context.group_email
             })
 
-        return await self.repository.create(message_data)
+        # Persist to DB using the same ID/timestamp to keep DB and response consistent
+        await self.repository.create(message_data)
+
+        # Return a pure Pydantic DTO built from the explicit data (no ORM access -> no MissingGreenlet)
+        return ChatHistoryResponse(**message_data)
 
     async def get_chat_session(
-        self, 
-        session_id: str, 
-        page: int = 0, 
+        self,
+        session_id: str,
+        page: int = 0,
         per_page: int = 50,
         group_context: Optional[GroupContext] = None
-    ) -> List[ChatHistory]:
+    ) -> List[ChatHistoryResponse]:
         """
         Get chat messages for a specific session with group filtering.
         
@@ -117,20 +105,22 @@ class ChatHistoryService(BaseService[ChatHistory, ChatHistoryCreate]):
         if not group_context or not group_context.group_ids:
             return []
 
-        return await self.repository.get_by_session_and_group(
+        messages = await self.repository.get_by_session_and_group(
             session_id=session_id,
             group_ids=group_context.group_ids,
             page=page,
             per_page=per_page
         )
+        # Convert SQLAlchemy models to Pydantic schemas
+        return [ChatHistoryResponse.model_validate(msg) for msg in messages]
 
     async def get_user_sessions(
-        self, 
-        user_id: str, 
-        page: int = 0, 
+        self,
+        user_id: str,
+        page: int = 0,
         per_page: int = 20,
         group_context: Optional[GroupContext] = None
-    ) -> List[ChatHistory]:
+    ) -> List[ChatHistoryResponse]:
         """
         Get recent chat sessions for a user with group filtering.
         
@@ -146,12 +136,14 @@ class ChatHistoryService(BaseService[ChatHistory, ChatHistoryCreate]):
         if not group_context or not group_context.group_ids:
             return []
 
-        return await self.repository.get_user_sessions(
+        sessions = await self.repository.get_user_sessions(
             user_id=user_id,
             group_ids=group_context.group_ids,
             page=page,
             per_page=per_page
         )
+        # Convert SQLAlchemy models to Pydantic schemas
+        return [ChatHistoryResponse.model_validate(session) for session in sessions]
 
     async def get_group_sessions(
         self, 

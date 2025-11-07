@@ -17,7 +17,6 @@ from src.schemas.databricks_vector_index import IndexCreate
 from src.repositories.databricks_vector_endpoint_repository import DatabricksVectorEndpointRepository
 from src.repositories.databricks_vector_index_repository import DatabricksVectorIndexRepository
 from src.core.logger import LoggerManager
-from src.core.unit_of_work import UnitOfWork
 from src.services.memory_backend_base_service import MemoryBackendBaseService
 
 logger = LoggerManager.get_instance().system
@@ -26,14 +25,14 @@ logger = LoggerManager.get_instance().system
 class DatabricksVectorSearchSetupService:
     """Service for automated Databricks Vector Search setup."""
     
-    def __init__(self, uow: UnitOfWork = None):
+    def __init__(self, session: Any = None):
         """
         Initialize the service.
-        
+
         Args:
-            uow: Unit of Work instance (optional)
+            session: Database session from dependency injection (optional)
         """
-        self.uow = uow
+        self.session = session
     
     async def one_click_databricks_setup(
         self,
@@ -230,10 +229,11 @@ class DatabricksVectorSearchSetupService:
             results["schema"] = schema
             
             # Save the configuration if group_id is provided
-            if group_id and self.uow:
+            if group_id and self.session:
                 try:
+                    from src.repositories.memory_backend_repository import MemoryBackendRepository
                     # First, check if there are existing configurations
-                    repo = self.uow.memory_backend_repository
+                    repo = MemoryBackendRepository(self.session)
                     existing_configs = await repo.get_by_group_id(group_id)
                     
                     # If there are existing configs, we need to handle them properly
@@ -251,7 +251,7 @@ class DatabricksVectorSearchSetupService:
                             logger.info("All existing configurations are disabled, deleting them")
                             for config_to_delete in existing_configs:
                                 await repo.delete(config_to_delete.id)
-                            await self.uow.commit()
+                            await self.session.commit()
                             logger.info(f"Deleted {len(existing_configs)} disabled configurations")
                         else:
                             # If there are non-disabled configs, we should not delete them automatically
@@ -274,7 +274,7 @@ class DatabricksVectorSearchSetupService:
                     backend_config = MemoryBackendCreate(**backend_config_data)
                     
                     # Save using the existing method
-                    base_service = MemoryBackendBaseService(self.uow)
+                    base_service = MemoryBackendBaseService(self.session)
                     saved_backend = await base_service.create_memory_backend(group_id, backend_config)
                     results["backend_id"] = saved_backend.id
                     results["message"] = "Setup completed and configuration saved"

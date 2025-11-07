@@ -36,8 +36,8 @@ class Settings(BaseSettings):
     SYNC_DATABASE_URI: Optional[str] = None
     
     # Database file path for SQLite
-    SQLITE_DB_PATH: str = os.getenv("SQLITE_DB_PATH", "./app.db")
-    DB_FILE_PATH: str = os.getenv("DB_FILE_PATH", "sqlite.db")
+    SQLITE_DB_PATH: Optional[str] = os.getenv("SQLITE_DB_PATH", "./app.db")
+    DB_FILE_PATH: Optional[str] = os.getenv("DB_FILE_PATH", "sqlite.db")
 
     @field_validator("DATABASE_URI", mode="before")
     def assemble_db_connection(cls, v: Optional[str], info) -> Any:
@@ -79,7 +79,8 @@ class Settings(BaseSettings):
     DOCS_ENABLED: bool = True
     
     # Logging
-    LOG_LEVEL: str = "INFO"
+    # Support both old LOG_LEVEL and new KASAL_LOG_LEVEL environment variables
+    LOG_LEVEL: str = os.getenv("KASAL_LOG_LEVEL", os.getenv("LOG_LEVEL", "INFO"))
 
     # Server settings
     SERVER_HOST: str = "0.0.0.0"

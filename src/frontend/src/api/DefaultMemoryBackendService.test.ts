@@ -11,7 +11,7 @@ describe('DefaultMemoryBackendService', () => {
     (DefaultMemoryBackendService as any).instance = undefined;
     service = DefaultMemoryBackendService.getInstance();
     // Mock console.error
-    jest.spyOn(console, 'error').mockImplementation(() => {});
+    jest.spyOn(console, 'error').mockImplementation(jest.fn());
   });
 
   afterEach(() => {

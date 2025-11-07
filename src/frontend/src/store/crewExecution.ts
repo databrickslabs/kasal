@@ -29,6 +29,9 @@ interface CrewExecutionState {
   reasoningEnabled: boolean;
   reasoningLLM: string;
   schemaDetectionEnabled: boolean;
+  processType: 'sequential' | 'hierarchical';
+  managerLLM: string;
+  managerNodeId: string | null;  // ID of the manager node (if exists)
   isCrewPlanningOpen: boolean;
   isScheduleDialogOpen: boolean;
   inputMode: 'dialog' | 'chat';
@@ -57,6 +60,9 @@ interface CrewExecutionState {
   setReasoningEnabled: (enabled: boolean) => void;
   setReasoningLLM: (model: string) => void;
   setSchemaDetectionEnabled: (enabled: boolean) => void;
+  setProcessType: (type: 'sequential' | 'hierarchical') => void;
+  setManagerLLM: (model: string) => void;
+  setManagerNodeId: (id: string | null) => void;
   setCrewPlanningOpen: (open: boolean) => void;
   setScheduleDialogOpen: (open: boolean) => void;
   setSelectedTools: (tools: Tool[]) => void;
@@ -98,6 +104,9 @@ export const useCrewExecutionStore = create<CrewExecutionState>((set, get) => ({
   reasoningEnabled: false,
   reasoningLLM: '',
   schemaDetectionEnabled: true,
+  processType: (localStorage.getItem('crewai-process-type') as 'sequential' | 'hierarchical') || 'sequential',
+  managerLLM: localStorage.getItem('crewai-manager-llm') || '',
+  managerNodeId: null,
   isCrewPlanningOpen: false,
   isScheduleDialogOpen: false,
   inputMode: (localStorage.getItem('crewai-input-mode') as 'dialog' | 'chat') || 'dialog',
@@ -124,6 +133,17 @@ export const useCrewExecutionStore = create<CrewExecutionState>((set, get) => ({
   setReasoningEnabled: (enabled) => set({ reasoningEnabled: enabled }),
   setReasoningLLM: (model) => set({ reasoningLLM: model }),
   setSchemaDetectionEnabled: (enabled) => set({ schemaDetectionEnabled: enabled }),
+  setProcessType: (type) => {
+    console.log('[CrewExecutionStore] Setting process type to:', type);
+    localStorage.setItem('crewai-process-type', type);
+    set({ processType: type });
+    console.log('[CrewExecutionStore] Process type set, new state:', get().processType);
+  },
+  setManagerLLM: (model) => {
+    localStorage.setItem('crewai-manager-llm', model);
+    set({ managerLLM: model });
+  },
+  setManagerNodeId: (id) => set({ managerNodeId: id }),
   setCrewPlanningOpen: (open) => set({ isCrewPlanningOpen: open }),
   setScheduleDialogOpen: (open) => set({ isScheduleDialogOpen: open }),
   setSelectedTools: (tools) => set({ selectedTools: tools }),
@@ -165,7 +185,7 @@ export const useCrewExecutionStore = create<CrewExecutionState>((set, get) => ({
 
   // Execution methods
   executeCrew: async (nodes, edges) => {
-    const { selectedModel, planningEnabled, planningLLM, reasoningEnabled, reasoningLLM, schemaDetectionEnabled, inputVariables } = get();
+    const { selectedModel, planningEnabled, planningLLM, reasoningEnabled, reasoningLLM, schemaDetectionEnabled, inputVariables, processType, managerLLM } = get();
     set({ isExecuting: true });
 
     try {
@@ -175,6 +195,40 @@ export const useCrewExecutionStore = create<CrewExecutionState>((set, get) => ({
       if (!hasAgentNodes || !hasTaskNodes) {
         throw new Error('Crew execution requires at least one agent and one task node');
       }
+
+      // Force refresh agents from database to get latest tools and knowledge_sources
+      console.log('[CrewExecution] Refreshing agent data from database before execution');
+      const { useAgentStore } = await import('./agent');
+      const agentStore = useAgentStore.getState();
+
+      const refreshedNodes = await Promise.all(
+        nodes.map(async (node) => {
+          if (node.type === 'agentNode' && node.data?.id) {
+            try {
+              // Force refresh from database
+              const freshAgent = await agentStore.getAgent(node.data.id, true);
+              if (freshAgent) {
+                console.log(`[CrewExecution] Refreshed agent ${freshAgent.name} - tools:`, freshAgent.tools);
+                return {
+                  ...node,
+                  data: {
+                    ...node.data,
+                    ...freshAgent,
+                    // Preserve canvas-specific data
+                    position: node.data.position,
+                  }
+                };
+              }
+            } catch (error) {
+              console.error(`[CrewExecution] Failed to refresh agent ${node.data.id}:`, error);
+            }
+          }
+          return node;
+        })
+      );
+
+      // Use refreshed nodes for execution
+      nodes = refreshedNodes;
 
       // Log the task nodes
       console.log('[CrewExecution] Task nodes before execution:', 
@@ -189,13 +243,19 @@ export const useCrewExecutionStore = create<CrewExecutionState>((set, get) => ({
           }))
       );
 
-      // Prepare additionalInputs with planning_llm and reasoning_llm if enabled
-      const additionalInputs: Record<string, unknown> = { ...inputVariables };
+      // Prepare additionalInputs with planning_llm, reasoning_llm, process type, and manager_llm
+      const additionalInputs: Record<string, unknown> = {
+        ...inputVariables,
+        process: processType
+      };
       if (planningEnabled && planningLLM) {
         additionalInputs.planning_llm = planningLLM;
       }
       if (reasoningEnabled && reasoningLLM) {
         additionalInputs.reasoning_llm = reasoningLLM;
+      }
+      if (processType === 'hierarchical' && managerLLM) {
+        additionalInputs.manager_llm = managerLLM;
       }
       
       console.log('[CrewExecution] Executing with inputs:', additionalInputs);
@@ -219,12 +279,17 @@ export const useCrewExecutionStore = create<CrewExecutionState>((set, get) => ({
         jobId: response.job_id
       });
 
+      // Open Execution History panel automatically when crew is executed
+      const openExecutionHistoryEvent = new CustomEvent('openExecutionHistory');
+      window.dispatchEvent(openExecutionHistoryEvent);
+
       // Dispatch custom jobCreated event to update the run history immediately
-      const jobCreatedEvent = new CustomEvent('jobCreated', { 
-        detail: { 
+      const jobCreatedEvent = new CustomEvent('jobCreated', {
+        detail: {
           jobId: response.execution_id || response.job_id,
           jobName: `Crew Execution (${new Date().toLocaleTimeString()})`,
-          status: 'running'
+          status: 'running',
+          groupId: localStorage.getItem('selectedGroupId') // Include the group ID for security filtering
         }
       });
       console.log('[CrewExecution] Dispatching jobCreated event:', jobCreatedEvent.detail);
@@ -349,11 +414,12 @@ export const useCrewExecutionStore = create<CrewExecutionState>((set, get) => ({
       });
 
       // Dispatch custom jobCreated event to update the run history immediately
-      const jobCreatedEvent = new CustomEvent('jobCreated', { 
-        detail: { 
+      const jobCreatedEvent = new CustomEvent('jobCreated', {
+        detail: {
           jobId: response.execution_id || response.job_id,
           jobName: `Flow Execution (${new Date().toLocaleTimeString()})`,
-          status: 'running'
+          status: 'running',
+          groupId: localStorage.getItem('selectedGroupId') // Include the group ID for security filtering
         }
       });
       console.log('[FlowExecution] Dispatching jobCreated event:', jobCreatedEvent.detail);
@@ -395,7 +461,7 @@ export const useCrewExecutionStore = create<CrewExecutionState>((set, get) => ({
   },
 
   executeTab: async (tabId, nodes, edges, tabName) => {
-    const { selectedModel, planningEnabled, planningLLM, reasoningEnabled, reasoningLLM, schemaDetectionEnabled } = get();
+    const { selectedModel, planningEnabled, planningLLM, reasoningEnabled, reasoningLLM, schemaDetectionEnabled, processType, managerLLM } = get();
     set({ isExecuting: true });
 
     try {
@@ -404,27 +470,65 @@ export const useCrewExecutionStore = create<CrewExecutionState>((set, get) => ({
       // Determine execution type based on node types
       const hasAgentNodes = nodes.some(node => node.type === 'agentNode');
       const hasTaskNodes = nodes.some(node => node.type === 'taskNode');
-      const hasFlowNodes = nodes.some(node => 
-        node.type === 'flowNode' || 
+      const hasFlowNodes = nodes.some(node =>
+        node.type === 'flowNode' ||
         node.type === 'crewNode' ||
         (node.type && node.type.toLowerCase().includes('flow'))
       );
 
       let executionType: 'crew' | 'flow' = 'crew';
-      
+
       if (hasFlowNodes) {
         executionType = 'flow';
       } else if (!hasAgentNodes || !hasTaskNodes) {
         throw new Error('Tab execution requires at least one agent and one task node for crew execution, or flow nodes for flow execution');
       }
 
-      // Prepare additionalInputs with planning_llm and reasoning_llm if enabled
-      const additionalInputs: Record<string, unknown> = {};
+      // Force refresh agents from database to get latest tools and knowledge_sources
+      if (hasAgentNodes) {
+        console.log('[TabExecution] Refreshing agent data from database before execution');
+        const { useAgentStore } = await import('./agent');
+        const agentStore = useAgentStore.getState();
+
+        const refreshedNodes = await Promise.all(
+          nodes.map(async (node) => {
+            if (node.type === 'agentNode' && node.data?.id) {
+              try {
+                const freshAgent = await agentStore.getAgent(node.data.id, true);
+                if (freshAgent) {
+                  console.log(`[TabExecution] Refreshed agent ${freshAgent.name} - tools:`, freshAgent.tools);
+                  return {
+                    ...node,
+                    data: {
+                      ...node.data,
+                      ...freshAgent,
+                      position: node.data.position,
+                    }
+                  };
+                }
+              } catch (error) {
+                console.error(`[TabExecution] Failed to refresh agent ${node.data.id}:`, error);
+              }
+            }
+            return node;
+          })
+        );
+
+        nodes = refreshedNodes;
+      }
+
+      // Prepare additionalInputs with planning_llm, reasoning_llm, process type, and manager_llm
+      const additionalInputs: Record<string, unknown> = {
+        process: processType
+      };
       if (planningEnabled && planningLLM) {
         additionalInputs.planning_llm = planningLLM;
       }
       if (reasoningEnabled && reasoningLLM) {
         additionalInputs.reasoning_llm = reasoningLLM;
+      }
+      if (processType === 'hierarchical' && managerLLM) {
+        additionalInputs.manager_llm = managerLLM;
       }
 
       console.log(`[TabExecution] Executing tab as ${executionType} with model:`, selectedModel);
@@ -449,11 +553,12 @@ export const useCrewExecutionStore = create<CrewExecutionState>((set, get) => ({
       });
 
       // Dispatch custom jobCreated event to update the run history immediately
-      const jobCreatedEvent = new CustomEvent('jobCreated', { 
-        detail: { 
+      const jobCreatedEvent = new CustomEvent('jobCreated', {
+        detail: {
           jobId: response.execution_id || response.job_id,
           jobName: `${tabName || 'Unnamed Tab'} (${new Date().toLocaleTimeString()})`,
-          status: 'running'
+          status: 'running',
+          groupId: localStorage.getItem('selectedGroupId') // Include the group ID for security filtering
         }
       });
       console.log('[TabExecution] Dispatching jobCreated event:', jobCreatedEvent.detail);
@@ -616,11 +721,12 @@ export const useCrewExecutionStore = create<CrewExecutionState>((set, get) => ({
       });
 
       // Dispatch custom jobCreated event to update the run history immediately
-      window.dispatchEvent(new CustomEvent('jobCreated', { 
-        detail: { 
+      window.dispatchEvent(new CustomEvent('jobCreated', {
+        detail: {
           jobId: response.execution_id || response.job_id,
           jobName: `Crew Generation (${new Date().toLocaleTimeString()})`,
-          status: 'running'
+          status: 'running',
+          groupId: localStorage.getItem('selectedGroupId') // Include the group ID for security filtering
         }
       }));
 
@@ -669,4 +775,9 @@ export const useCrewExecutionStore = create<CrewExecutionState>((set, get) => ({
       set({ isExecuting: false });
     }
   }
-})); 
+}));
+
+// Expose store on window for debugging
+if (typeof window !== 'undefined') {
+  (window as any).useCrewExecutionStore = useCrewExecutionStore;
+}

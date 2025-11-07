@@ -17,7 +17,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from src.core.logger import LoggerManager
 from src.models.execution_logs import ExecutionLog
 from src.schemas.execution_logs import LogMessage, ExecutionLogResponse
-from src.repositories.execution_logs_repository import execution_logs_repository
+from src.repositories.execution_logs_repository import ExecutionLogsRepository
 from src.services.execution_logs_queue import enqueue_log, get_job_output_queue
 from src.utils.user_context import GroupContext
 
@@ -37,10 +37,16 @@ class ExecutionLogsService:
     - Storing and retrieving execution logs from the database
     """
     
-    def __init__(self):
-        """Initialize the execution logs service."""
+    def __init__(self, session: AsyncSession):
+        """Initialize the execution logs service.
+
+        Args:
+            session: Database session for dependency injection
+        """
         self.active_connections: Dict[str, Set[WebSocket]] = {}
         self._lock = asyncio.Lock()
+        self.session = session
+        self.repository = ExecutionLogsRepository(session)
     
     async def connect(self, websocket: WebSocket, execution_id: str):
         """
@@ -58,8 +64,10 @@ class ExecutionLogsService:
         
         # Send historical logs when client connects
         try:
-            historical_logs = await execution_logs_repository.get_by_execution_id_with_managed_session(execution_id)
-            
+            historical_logs = await self.repository.get_logs_by_execution_id(
+                execution_id=execution_id
+            )
+
             for log in historical_logs:
                 await websocket.send_text(json.dumps({
                     "execution_id": execution_id,
@@ -81,6 +89,25 @@ class ExecutionLogsService:
             execution_id: ID of the execution to connect to
             group_context: Group context for filtering logs
         """
+        # First verify the execution belongs to the user's group before accepting connection
+        from src.repositories.execution_history_repository import ExecutionHistoryRepository
+
+        # Get group IDs from context for filtering
+        group_ids = group_context.group_ids if group_context and group_context.primary_group_id else None
+
+        # Check if the execution exists and the user has access to it
+        execution_history_repo = ExecutionHistoryRepository(self.session)
+        execution = await execution_history_repo.get_execution_by_job_id(
+            execution_id,  # execution_id is actually the job_id
+            group_ids=group_ids
+        )
+        
+        if not execution:
+            # Either doesn't exist or user doesn't have access - reject connection
+            logger.warning(f"WebSocket connection rejected for execution {execution_id} - not found or access denied for group {group_context.primary_group_id if group_context else 'None'}")
+            await websocket.close(code=1008, reason="Execution not found or access denied")
+            return
+        
         await websocket.accept()
         async with self._lock:
             if execution_id not in self.active_connections:
@@ -90,9 +117,9 @@ class ExecutionLogsService:
         # Send group-filtered historical logs when client connects
         try:
             if group_context.primary_group_id:
-                historical_logs = await execution_logs_repository.get_by_execution_id_and_group_with_managed_session(
-                    execution_id=execution_id,
-                    group_id=group_context.primary_group_id
+                # TODO: Add group filtering to get_logs_by_execution_id method
+                historical_logs = await self.repository.get_logs_by_execution_id(
+                    execution_id=execution_id
                 )
             else:
                 # If no group context, don't send any historical logs for security
@@ -141,13 +168,13 @@ class ExecutionLogsService:
         try:
             logger.debug(f"[create_execution_log] Creating log for execution {execution_id}")
             
-            # Use the repository to create the log with a managed session
-            await execution_logs_repository.create_with_group_managed_session(
+            # Use the repository to create the log with injected session
+            log = await self.repository.create_log(
                 execution_id=execution_id,
                 content=content,
-                timestamp=timestamp or datetime.now(),
-                group_context=group_context
+                timestamp=timestamp or datetime.now()
             )
+            # TODO: Add group context support to create_log method
             
             logger.debug(f"[create_execution_log] Successfully created log for execution {execution_id}")
             return True
@@ -213,7 +240,7 @@ class ExecutionLogsService:
         Returns:
             List of execution log responses
         """
-        logs = await execution_logs_repository.get_by_execution_id_with_managed_session(
+        logs = await self.repository.get_logs_by_execution_id(
             execution_id=execution_id,
             limit=limit,
             offset=offset
@@ -240,25 +267,49 @@ class ExecutionLogsService:
         Returns:
             List of execution log responses for the group
         """
+        # First verify the execution belongs to the user's group
+        from src.repositories.execution_history_repository import ExecutionHistoryRepository
+
+        # Get group IDs from context for filtering
+        group_ids = group_context.group_ids if group_context and group_context.primary_group_id else None
+
+        # Check if the execution exists and the user has access to it
+        execution_history_repo = ExecutionHistoryRepository(self.session)
+        execution = await execution_history_repo.get_execution_by_job_id(
+            execution_id,  # execution_id is actually the job_id
+            group_ids=group_ids
+        )
+        
+        if not execution:
+            # Either doesn't exist or user doesn't have access
+            logger.warning(f"Execution {execution_id} not found or access denied for group {group_context.primary_group_id if group_context else 'None'}")
+            return []  # Return empty list instead of raising error for consistency
+        
         if not group_context.primary_group_id:
-            # If no group context, fall back to non-group filtering for compatibility
-            # This allows logs to be visible in development environments or when group headers are missing
-            logger.warning(f"No group context provided for execution {execution_id}, falling back to non-group logs")
-            logs = await execution_logs_repository.get_by_execution_id_with_managed_session(
-                execution_id=execution_id,
-                limit=limit,
-                offset=offset
-            )
+            # If no group context but execution exists, this might be a single-tenant deployment
+            # Still check ownership for security
+            logger.warning(f"No group context provided for execution {execution_id}")
+            return []  # Deny access when no group context in multi-tenant mode
         else:
             # Use group-aware filtering when group context is available
             # Also include logs with NULL group_id for backward compatibility
-            logs = await execution_logs_repository.get_by_execution_id_and_group_with_managed_session(
-                execution_id=execution_id,
-                group_id=group_context.primary_group_id,
-                limit=limit,
-                offset=offset,
-                include_null_group=True
-            )
+            if self.repository:
+                # Use injected repository if available
+                logs = await self.repository.get_logs_by_execution_id(
+                    execution_id=execution_id,
+                    limit=limit,
+                    offset=offset,
+                    newest_first=True
+                )
+            else:
+                # Use repository with injected session
+                # TODO: Add group filtering to get_logs_by_execution_id method
+                logs = await self.repository.get_logs_by_execution_id(
+                    execution_id=execution_id,
+                    limit=limit,
+                    offset=offset,
+                    newest_first=True
+                )
         
         return [
             ExecutionLogResponse(
@@ -278,22 +329,41 @@ class ExecutionLogsService:
         Returns:
             Number of logs
         """
-        return await execution_logs_repository.count_by_execution_id_with_managed_session(execution_id)
+        return await self.repository.count_by_execution_id(execution_id)
     
     async def delete_logs(self, execution_id: str) -> int:
         """
         Delete all logs for a specific execution.
-        
+
         Args:
             execution_id: ID of the execution to delete logs for
-            
+
         Returns:
             Number of deleted logs
         """
-        return await execution_logs_repository.delete_by_execution_id_with_managed_session(execution_id)
+        return await self.repository.delete_by_execution_id(execution_id)
 
-# Create a singleton instance of the service
-execution_logs_service = ExecutionLogsService()
+    async def delete_by_execution_id(self, execution_id: str) -> int:
+        """
+        Delete all logs for a specific execution (alias for delete_logs).
+
+        Args:
+            execution_id: ID of the execution to delete logs for
+
+        Returns:
+            Number of deleted logs
+        """
+        return await self.delete_logs(execution_id)
+
+    async def delete_all_logs(self) -> int:
+        """
+        Delete all logs from the database.
+
+        Returns:
+            Number of deleted logs
+        """
+        return await self.repository.delete_all()
+
 
 # --- Logs Writer Functions ---
 
@@ -371,13 +441,22 @@ async def logs_writer_loop(shutdown_event: asyncio.Event):
                                     group_email=log_data.get("group_email")
                                 )
                             
-                            # Create log with execution_logs_service
-                            success = await execution_logs_service.create_execution_log(
-                                execution_id=job_id,
-                                content=content,
-                                timestamp=timestamp,
-                                group_context=group_context
-                            )
+                            # Create log using repository directly with session
+                            from src.db.session import async_session_factory
+                            async with async_session_factory() as session:
+                                repo = ExecutionLogsRepository(session)
+                                try:
+                                    log = await repo.create_log(
+                                        execution_id=job_id,
+                                        content=content,
+                                        timestamp=timestamp
+                                    )
+                                    await session.commit()
+                                    success = True
+                                except Exception as e:
+                                    await session.rollback()
+                                    logger.error(f"Error creating log: {e}")
+                                    success = False
                             
                             if not success:
                                 logger.warning(f"[logs_writer_loop] {log_info} ❌ Failed to store log")

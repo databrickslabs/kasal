@@ -19,23 +19,32 @@ from src.repositories.agent_repository import AgentRepository
 from src.repositories.task_repository import TaskRepository
 from src.schemas.agent import AgentCreate
 from src.schemas.task import TaskCreate
-from src.db.session import async_session_factory
-
 # Configure logging
 logger = logging.getLogger(__name__)
 
 class CrewGeneratorRepository:
     """Repository for creating agents and tasks for a generated crew."""
-    
+
+    def __init__(self, session: AsyncSession):
+        """
+        Initialize the repository with session.
+
+        Args:
+            session: SQLAlchemy async session from dependency injection
+        """
+        self.session = session
+
     @classmethod
-    def create_instance(cls):
+    def create_instance(cls, session: AsyncSession):
         """
         Factory method to create a properly configured instance of the repository.
-        
+
+        Args:
+            session: SQLAlchemy async session
         Returns:
             An instance of CrewGeneratorRepository
         """
-        return cls()
+        return cls(session)
     
     def _safe_get_attr(self, obj, attr, default=None):
         """
@@ -64,64 +73,62 @@ class CrewGeneratorRepository:
     async def create(self, entity):
         """
         Create an entity in the database.
-        
+
         Args:
             entity: The entity to create (Agent or Task)
-            
+
         Returns:
             The created entity
         """
-        async with async_session_factory() as session:
-            try:
-                session.add(entity)
-                await session.commit()
-                await session.refresh(entity)
-                return entity
-            except Exception as e:
-                await session.rollback()
-                logger.error(f"Error creating entity: {e}")
-                logger.error(traceback.format_exc())
-                raise
+        try:
+            self.session.add(entity)
+            await self.session.flush()  # Flush to get ID without committing
+            await self.session.refresh(entity)
+            return entity
+        except Exception as e:
+            # Don't rollback here - let the session manager handle it
+            logger.error(f"Error creating entity: {e}")
+            logger.error(traceback.format_exc())
+            raise
     
     async def update(self, entity_id, update_data):
         """
         Update an entity in the database.
-        
+
         Args:
             entity_id: The ID of the entity to update
             update_data: The data to update
-            
+
         Returns:
             The updated entity
         """
-        async with async_session_factory() as session:
-            try:
-                # Determine if it's a Task update by checking context field
-                if "context" in update_data:
-                    # This is a Task update - need to pass the session
-                    task_repo = TaskRepository(session)
-                    # Get existing task
-                    task = await task_repo.get(entity_id)
-                    if task:
-                        # Update context (dependencies)
-                        task.context = update_data["context"]
-                        await session.commit()
-                        await session.refresh(task)
-                        return task
-                    else:
-                        logger.error(f"Task with ID {entity_id} not found for update")
+        try:
+            # Determine if it's a Task update by checking context field
+            if "context" in update_data:
+                # This is a Task update - use the same session
+                task_repo = TaskRepository(self.session)
+                # Get existing task
+                task = await task_repo.get(entity_id)
+                if task:
+                    # Update context (dependencies)
+                    task.context = update_data["context"]
+                    await self.session.flush()  # Just flush, don't commit
+                    await self.session.refresh(task)
+                    return task
                 else:
-                    # For other entities
-                    logger.error(f"Update for entity type not implemented")
-                
-                return None
-            except Exception as e:
-                await session.rollback()
-                logger.error(f"Error updating entity: {e}")
-                logger.error(traceback.format_exc())
-                raise
+                    logger.error(f"Task with ID {entity_id} not found for update")
+            else:
+                # For other entities
+                logger.error(f"Update for entity type not implemented")
+
+            return None
+        except Exception as e:
+            # Don't rollback here - let the session manager handle it
+            logger.error(f"Error updating entity: {e}")
+            logger.error(traceback.format_exc())
+            raise
             
-    async def create_crew_entities(self, crew_dict):
+    async def create_crew_entities(self, crew_dict, group_context=None):
         """
         Create agents and tasks for a crew.
         
@@ -133,6 +140,7 @@ class CrewGeneratorRepository:
         
         Args:
             crew_dict: Dictionary containing 'agents' and 'tasks' lists
+            group_context: Group context for multi-tenant isolation
             
         Returns:
             Dictionary with created 'agents' and 'tasks' in serializable format
@@ -142,19 +150,27 @@ class CrewGeneratorRepository:
         tasks_data = crew_dict.get('tasks', [])
         
         logger.info(f"Creating crew with {len(agents_data)} agents and {len(tasks_data)} tasks")
-        
-        # Step 1: Create all agents first to get their IDs
-        created_agents = await self._create_agents(agents_data)
-        
+
+        # Step 1: Create all agents first to get their IDs (with group context)
+        created_agents = await self._create_agents(agents_data, group_context)
+
+        # Commit agents to database so they exist for foreign key constraints
+        await self.session.commit()
+        logger.info("Committed agents to database for foreign key integrity")
+
         # Step 2: Create a mapping of agent names to their database IDs
         agent_name_to_id = {}
         for agent in created_agents:
             agent_name_to_id[agent.name] = agent.id
             logger.info(f"AGENT MAPPING: '{agent.name}' -> ID: {agent.id}")
-        
-        # Step 3: Create all tasks with proper agent_id assignments
-        created_tasks = await self._create_tasks(tasks_data, agent_name_to_id)
-        
+
+        # Step 3: Create all tasks with proper agent_id assignments (with group context)
+        created_tasks = await self._create_tasks(tasks_data, agent_name_to_id, group_context)
+
+        # Commit tasks to database before creating dependencies
+        await self.session.commit()
+        logger.info("Committed tasks to database before creating dependencies")
+
         # Step 4: Update task dependencies
         await self._create_task_dependencies(created_tasks, tasks_data)
         
@@ -209,24 +225,30 @@ class CrewGeneratorRepository:
             'tasks': serialized_tasks
         }
 
-    async def _create_agents(self, agents_data):
+    async def _create_agents(self, agents_data, group_context=None):
         """
         Create agents in the database.
         
         Args:
             agents_data: List of agent data dictionaries
+            group_context: Group context for multi-tenant isolation
             
         Returns:
             List of created Agent models
         """
         logger.info(f"Creating {len(agents_data)} agents in database")
+        if group_context:
+            logger.info(f"Group context present - group_id: {group_context.primary_group_id}, email: {group_context.group_email}")
+        else:
+            logger.warning("No group context provided - agents will be created without group isolation")
+        
         created_agents = []
         
         for agent_data in agents_data:
             # Log the agent data for debugging
             logger.info(f"Creating agent: {self._safe_get_attr(agent_data, 'name')}")
             
-            # Create the agent
+            # Create the agent with group context
             agent = Agent(
                 id=str(uuid.uuid4()),
                 name=self._safe_get_attr(agent_data, 'name'),
@@ -246,7 +268,10 @@ class CrewGeneratorRepository:
                 max_retry_limit=self._safe_get_attr(agent_data, 'max_retry_limit', 2),
                 use_system_prompt=self._safe_get_attr(agent_data, 'use_system_prompt', True),
                 respect_context_window=self._safe_get_attr(agent_data, 'respect_context_window', True),
-                function_calling_llm=self._safe_get_attr(agent_data, 'function_calling_llm')
+                function_calling_llm=self._safe_get_attr(agent_data, 'function_calling_llm'),
+                # Add group context fields
+                group_id=group_context.primary_group_id if group_context else None,
+                created_by_email=group_context.group_email if group_context else None
             )
             
             # Store the agent in the database
@@ -256,13 +281,14 @@ class CrewGeneratorRepository:
             
         return created_agents
 
-    async def _create_tasks(self, tasks_data, agent_name_to_id):
+    async def _create_tasks(self, tasks_data, agent_name_to_id, group_context=None):
         """
         Create tasks in the database.
         
         Args:
             tasks_data: List of task data dictionaries
             agent_name_to_id: Dictionary mapping agent names to IDs
+            group_context: Group context for multi-tenant isolation
             
         Returns:
             List of created Task models
@@ -359,7 +385,7 @@ class CrewGeneratorRepository:
             elif not agent_id:
                 logger.warning(f"No agent assigned to task '{task_name}' and no agents available")
             
-            # Create the task with the correct agent_id
+            # Create the task with the correct agent_id and group context
             task = Task(
                 id=str(uuid.uuid4()),
                 name=task_name,
@@ -370,7 +396,10 @@ class CrewGeneratorRepository:
                 async_execution=self._safe_get_attr(task_data, 'async_execution', False),
                 output=self._safe_get_attr(task_data, 'output'),
                 human_input=self._safe_get_attr(task_data, 'human_input', False),
-                markdown=self._safe_get_attr(task_data, 'markdown', False)
+                markdown=self._safe_get_attr(task_data, 'markdown', False),
+                # Add group context fields
+                group_id=group_context.primary_group_id if group_context else None,
+                created_by_email=group_context.group_email if group_context else None
             )
             
             # Store the task in the database
@@ -406,85 +435,84 @@ class CrewGeneratorRepository:
         
         logger.info(f"Task name map created with {len(task_name_to_db_task)} entries.")
 
-        async with async_session_factory() as session:
-            # Pass the session to the repository
-            task_repo = TaskRepository(session)
-            tasks_to_update = []
+        # Use the existing session instead of creating a new one
+        task_repo = TaskRepository(self.session)
+        tasks_to_update = []
 
-            for task_data in tasks_data:
-                task_name = self._safe_get_attr(task_data, 'name', '')
+        for task_data in tasks_data:
+            task_name = self._safe_get_attr(task_data, 'name', '')
+
+            # Find the corresponding database task object
+            db_task = task_name_to_db_task.get(task_name)
+            if not db_task:
+                logger.warning(f"Could not find database task for name '{task_name}' when processing dependencies.")
+                continue
+
+            logger.info(f"Processing dependencies for task '{task_name}' (ID: {db_task.id})")
                 
-                # Find the corresponding database task object
-                db_task = task_name_to_db_task.get(task_name)
-                if not db_task:
-                    logger.warning(f"Could not find database task for name '{task_name}' when processing dependencies.")
-                    continue
+            # Get the raw context references stored by the service
+            context_refs = self._safe_get_attr(task_data, '_context_refs', [])
+
+            if context_refs and isinstance(context_refs, list):
+                logger.info(f"Task '{task_name}' has {len(context_refs)} raw context refs: {json.dumps(context_refs)}")
+
+                resolved_dependency_ids = []
                     
-                logger.info(f"Processing dependencies for task '{task_name}' (ID: {db_task.id})")
-                
-                # Get the raw context references stored by the service
-                context_refs = self._safe_get_attr(task_data, '_context_refs', [])
-                
-                if context_refs and isinstance(context_refs, list):
-                    logger.info(f"Task '{task_name}' has {len(context_refs)} raw context refs: {json.dumps(context_refs)}")
-                    
-                    resolved_dependency_ids = []
-                    
-                    for ref in context_refs:
-                        # References could be names or potentially other identifiers
-                        # Assuming they are names for now based on typical LLM output
-                        ref_name = str(ref) # Ensure it's a string
-                        logger.info(f"Looking up dependency ref '{ref_name}' for task '{task_name}'")
+                for ref in context_refs:
+                    # References could be names or potentially other identifiers
+                    # Assuming they are names for now based on typical LLM output
+                    ref_name = str(ref) # Ensure it's a string
+                    logger.info(f"Looking up dependency ref '{ref_name}' for task '{task_name}'")
                         
-                        # Resolve the reference name to a database task ID
-                        dependency_task = task_name_to_db_task.get(ref_name)
-                        if dependency_task:
-                            dependency_id = dependency_task.id
-                            # Ensure we don't add self-dependency (shouldn't happen ideally)
-                            if dependency_id != db_task.id:
-                                resolved_dependency_ids.append(dependency_id)
-                                logger.info(f"Resolved dependency: Task '{task_name}' depends on '{ref_name}' (ID: {dependency_id})")
-                            else:
-                                logger.warning(f"Skipping self-dependency for task '{task_name}' from ref '{ref_name}'")
+                    # Resolve the reference name to a database task ID
+                    dependency_task = task_name_to_db_task.get(ref_name)
+                    if dependency_task:
+                        dependency_id = dependency_task.id
+                        # Ensure we don't add self-dependency (shouldn't happen ideally)
+                        if dependency_id != db_task.id:
+                            resolved_dependency_ids.append(dependency_id)
+                            logger.info(f"Resolved dependency: Task '{task_name}' depends on '{ref_name}' (ID: {dependency_id})")
                         else:
-                            logger.warning(f"Could not resolve context ref '{ref_name}' for task '{task_name}' - task name not found in created tasks.")
-                    
-                    # Update task object if dependencies were resolved
-                    if resolved_dependency_ids:
-                        # Ensure no duplicates
-                        unique_dependency_ids = list(set(resolved_dependency_ids))
-                        if len(unique_dependency_ids) != len(resolved_dependency_ids):
-                             logger.info(f"Removed duplicate dependency IDs for task '{task_name}'")
-                             
-                        logger.info(f"Updating task '{task_name}' (ID: {db_task.id}) context in DB with {len(unique_dependency_ids)} resolved dependency IDs: {unique_dependency_ids}")
-                        # Prepare update data
-                        db_task.context = unique_dependency_ids # Update the ORM object directly
-                        tasks_to_update.append(db_task) # Add to list for bulk update/commit
-                        
+                            logger.warning(f"Skipping self-dependency for task '{task_name}' from ref '{ref_name}'")
                     else:
-                        logger.warning(f"Task '{task_name}' had context refs but none could be resolved to valid task IDs.")
-                else:
-                     logger.info(f"Task '{task_name}' has no context refs.")
-                     # Ensure context is an empty list if no refs were provided or resolved
-                     if db_task.context is None or db_task.context != []:
-                          db_task.context = []
-                          tasks_to_update.append(db_task)
-                          logger.info(f"Ensured context is empty for task '{task_name}' (ID: {db_task.id})")
+                        logger.warning(f"Could not resolve context ref '{ref_name}' for task '{task_name}' - task name not found in created tasks.")
+                    
+                # Update task object if dependencies were resolved
+                if resolved_dependency_ids:
+                    # Ensure no duplicates
+                    unique_dependency_ids = list(set(resolved_dependency_ids))
+                    if len(unique_dependency_ids) != len(resolved_dependency_ids):
+                         logger.info(f"Removed duplicate dependency IDs for task '{task_name}'")
 
-            # Commit all updates at once
-            if tasks_to_update:
-                try:
-                    logger.info(f"Committing context updates for {len(tasks_to_update)} tasks.")
-                    session.add_all(tasks_to_update)
-                    await session.commit()
-                    logger.info("Successfully committed task dependency updates.")
-                except Exception as e:
-                    await session.rollback()
-                    logger.error(f"Error committing task dependency updates: {e}")
-                    logger.error(traceback.format_exc())
-                    # Potentially re-raise or handle as needed
-                    raise
+                    logger.info(f"Updating task '{task_name}' (ID: {db_task.id}) context in DB with {len(unique_dependency_ids)} resolved dependency IDs: {unique_dependency_ids}")
+                    # Prepare update data
+                    db_task.context = unique_dependency_ids # Update the ORM object directly
+                    tasks_to_update.append(db_task) # Add to list for bulk update/commit
+
+                else:
+                    logger.warning(f"Task '{task_name}' had context refs but none could be resolved to valid task IDs.")
             else:
-                logger.info("No task context updates needed.")
+                 logger.info(f"Task '{task_name}' has no context refs.")
+                 # Ensure context is an empty list if no refs were provided or resolved
+                 if db_task.context is None or db_task.context != []:
+                      db_task.context = []
+                      tasks_to_update.append(db_task)
+                      logger.info(f"Ensured context is empty for task '{task_name}' (ID: {db_task.id})")
+
+        # Add all updates to session and flush
+        if tasks_to_update:
+            try:
+                logger.info(f"Flushing context updates for {len(tasks_to_update)} tasks.")
+                self.session.add_all(tasks_to_update)
+                await self.session.flush()  # Just flush, let session manager commit
+                logger.info("Successfully flushed task dependency updates.")
+            except Exception as e:
+                # Don't rollback here - let the session manager handle it
+                logger.error(f"Error flushing task dependency updates: {e}")
+                logger.error(traceback.format_exc())
+                # Re-raise to let the caller handle it
+                raise
+        else:
+            logger.info("No task context updates needed.")
                 
         logger.info("Finished processing task dependencies") 

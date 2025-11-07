@@ -203,4 +203,52 @@ class EngineConfigRepository(BaseRepository[EngineConfig]):
                 await self.session.rollback()
                 raise
         
-        return success 
+        return success
+
+    async def get_crewai_debug_tracing(self) -> bool:
+        """
+        Get the CrewAI debug tracing enabled status.
+
+        Returns:
+            True if debug tracing is enabled, False otherwise (defaults to False if not found)
+        """
+        config = await self.find_by_engine_and_key("crewai", "debug_tracing")
+        if not config:
+            return False  # Default to disabled if not configured
+        return config.config_value.lower() == "true"
+
+    async def set_crewai_debug_tracing(self, enabled: bool) -> bool:
+        """
+        Set the CrewAI debug tracing enabled status.
+
+        Args:
+            enabled: Whether debug tracing should be enabled
+
+        Returns:
+            True if successful
+        """
+        config_value = "true" if enabled else "false"
+
+        # Try to update existing config first
+        success = await self.update_config_value("crewai", "debug_tracing", config_value)
+
+        if not success:
+            # Create new config if it doesn't exist
+            try:
+                new_config_data = {
+                    "engine_name": "crewai",
+                    "engine_type": "workflow",
+                    "config_key": "debug_tracing",
+                    "config_value": config_value,
+                    "enabled": True,
+                    "description": "Controls whether CrewAI detailed debug tracing is enabled"
+                }
+                await self.create(new_config_data)
+                return True
+            except Exception as e:
+                import logging
+                logging.error(f"Error creating CrewAI debug tracing config: {str(e)}")
+                await self.session.rollback()
+                raise
+
+        return success

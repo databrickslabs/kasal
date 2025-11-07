@@ -48,6 +48,12 @@ export const TASK_CALLBACKS: TaskCallbackOption[] = [
     description: 'Stores output in the file system',
     requiresPath: true
   },
+  {
+    value: 'DatabricksVolumeCallback',
+    label: 'Databricks Volume Storage',
+    description: 'Stores output in Databricks Volumes',
+    requiresPath: false  // Path is configured in callback_config
+  },
   
   // Transformation
   {

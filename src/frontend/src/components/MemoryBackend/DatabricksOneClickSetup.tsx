@@ -216,10 +216,11 @@ export const DatabricksOneClickSetup: React.FC = () => {
   
   const detectWorkspaceUrl = async () => {
     try {
-      const response = await apiClient.get('/memory-backend/databricks/workspace-url');
-      if (response.data?.detected && response.data?.workspace_url) {
-        setDetectedWorkspaceUrl(response.data.workspace_url);
-        console.log(`Detected workspace URL from ${response.data.source}: ${response.data.workspace_url}`);
+      // Use the same approach as DatabricksConfiguration to get workspace URL from environment
+      const response = await apiClient.get('/databricks/environment');
+      if (response.data?.databricks_host) {
+        setDetectedWorkspaceUrl(response.data.databricks_host);
+        console.log(`Detected workspace URL from environment: ${response.data.databricks_host}`);
       }
     } catch (error) {
       console.log('Could not detect workspace URL from environment:', error);
@@ -366,9 +367,9 @@ export const DatabricksOneClickSetup: React.FC = () => {
   const handleSetup = async () => {
     // Use detected workspace URL
     const finalWorkspaceUrl = detectedWorkspaceUrl;
-    
+
     if (!finalWorkspaceUrl) {
-      setError('No Databricks workspace detected. Please set DATABRICKS_HOST environment variable and reload.');
+      setError('No Databricks workspace detected. Please configure your Databricks workspace in the Databricks section first.');
       return;
     }
 
@@ -464,6 +465,11 @@ export const DatabricksOneClickSetup: React.FC = () => {
         `/memory-backend/configs/${updatedConfig.backend_id}`,
         updatePayload
       );
+
+      // Dispatch event to notify other components about memory backend configuration change
+      window.dispatchEvent(new CustomEvent('memory-backend-updated', {
+        detail: { config: response.data }
+      }));
 
       if (response.data) {
         console.log('Backend configuration updated successfully');
@@ -882,6 +888,11 @@ export const DatabricksOneClickSetup: React.FC = () => {
           await apiClient.post(`/memory-backend/configs/${response.data.id}/set-default`);
         }
       }
+
+      // Dispatch event to notify other components about memory backend configuration change
+      window.dispatchEvent(new CustomEvent('memory-backend-updated', {
+        detail: { config: response.data }
+      }));
       
       if (response.data) {
         // Update store
@@ -958,8 +969,13 @@ export const DatabricksOneClickSetup: React.FC = () => {
         // Show success message
         const deletedCount = response.data.deleted_count || 0;
         setError(''); // Clear any errors
-        // Show success notification
-        alert(`Successfully emptied ${indexType.replace('_', ' ')} index. ${deletedCount} documents removed.\n\nNote: The index was deleted and recreated to clear all documents.`);
+        
+        // Show appropriate message based on whether index existed
+        if (response.data.message && response.data.message.includes('created new index')) {
+          alert(`Index ${indexType.replace('_', ' ')} was not found, so a new one was created successfully.`);
+        } else {
+          alert(`Successfully emptied ${indexType.replace('_', ' ')} index. ${deletedCount} documents removed.\n\nNote: The index was deleted and recreated to clear all documents.`);
+        }
       } else {
         // For Direct Access indexes, show the detailed message
         const errorMessage = response.data.message || 'Failed to empty index';

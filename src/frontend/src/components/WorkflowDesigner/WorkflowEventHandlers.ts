@@ -7,6 +7,8 @@ import { FlowService } from '../../api/FlowService';
 import { createUniqueEdges } from './WorkflowUtils';
 import { _generateCrewPositions, validateNodePositions } from '../../utils/flowWizardUtils';
 import { useTabManagerStore } from '../../store/tabManager';
+import { CanvasLayoutManager } from '../../utils/CanvasLayoutManager';
+import { useUILayoutStore } from '../../store/uiLayout';
 
 // Context menu handlers
 export const useContextMenuHandlers = () => {
@@ -502,57 +504,143 @@ export const useEventBindings = (
 
   const handleCrewSelectWrapper = useCallback((nodes: Node[], edges: Edge[], crewName?: string, crewId?: string) => {
     console.log('WorkflowDesigner - Handling crew select:', { nodes, edges, crewName, crewId });
-    
+
     // Notify that crew loading has started
     window.dispatchEvent(new CustomEvent('crewLoadStarted'));
-    
+
+    // Reorganize nodes using CanvasLayoutManager for consistent layout
+    const layoutManager = new CanvasLayoutManager({ margin: 20, minNodeSpacing: 50 });
+    const currentUIState = useUILayoutStore.getState().getUILayoutState();
+
+    // Update screen dimensions to current window size
+    currentUIState.screenWidth = window.innerWidth;
+    currentUIState.screenHeight = window.innerHeight;
+
+    layoutManager.updateUIState(currentUIState);
+
+    // Reorganize nodes based on current layout orientation
+    const reorganizedNodes = layoutManager.reorganizeNodes(nodes, 'crew', edges);
+
+    console.log('📐 handleCrewSelectWrapper: Reorganized nodes using CanvasLayoutManager', {
+      layoutOrientation: currentUIState.layoutOrientation,
+      originalNodeCount: nodes.length,
+      reorganizedNodeCount: reorganizedNodes.length,
+      edgeCount: edges.length,
+      originalPositions: nodes.map(n => ({ id: n.id, x: n.position.x, y: n.position.y })),
+      newPositions: reorganizedNodes.map(n => ({ id: n.id, x: n.position.x, y: n.position.y }))
+    });
+
     // Get the tab manager store
-    const { createTab, updateTabNodes, updateTabEdges, setActiveTab, getActiveTab, updateTabCrewInfo } = 
+    const { createTab, updateTabNodes, updateTabEdges, setActiveTab, getActiveTab, updateTabCrewInfo } =
       useTabManagerStore.getState();
-    
+
     // Save the current active tab ID before creating new one
     const previousActiveTabId = getActiveTab()?.id;
     console.log('Previous active tab ID:', previousActiveTabId);
-    
+
     // Create a new tab for the loaded crew with the crew name
     const actualCrewName = crewName || 'Loaded Crew';
     const newTabId = createTab(actualCrewName);
     console.log('Created new tab with ID:', newTabId, 'and name:', actualCrewName);
-    
-    // Set the new tab as active immediately
-    setActiveTab(newTabId);
-    console.log('Set new tab as active:', newTabId);
-    
-    // Update the new tab with the loaded nodes and edges
-    setTimeout(() => {
-      // Double-check that we're updating the correct tab
-      const currentActiveTab = getActiveTab();
-      console.log('Current active tab when updating:', currentActiveTab?.id, currentActiveTab?.name);
-      
-      updateTabNodes(newTabId, nodes);
-      updateTabEdges(newTabId, edges);
-      
-      // If we have a crew name and ID, mark this tab as having loaded crew content
-      if (crewName && crewId) {
-        console.log('Marking tab as loaded crew with name:', crewName, 'and ID:', crewId);
-        // Set the actual crew ID instead of placeholder
-        updateTabCrewInfo(newTabId, crewId, crewName);
+
+    // Update edge handles and styles to match the current layout orientation
+    const currentLayout = currentUIState.layoutOrientation || 'horizontal';
+
+    const updatedEdges = edges.map(e => {
+      const sourceNode = reorganizedNodes.find(n => n.id === e.source);
+      const targetNode = reorganizedNodes.find(n => n.id === e.target);
+
+      // Agent-to-task edges: change based on layout orientation
+      if (sourceNode?.type === 'agentNode' && targetNode?.type === 'taskNode') {
+        const agentSourceHandle = currentLayout === 'vertical' ? 'bottom' : 'right';
+        const taskTargetHandle = currentLayout === 'vertical' ? 'top' : 'left';
+        return {
+          ...e,
+          sourceHandle: agentSourceHandle,
+          targetHandle: taskTargetHandle,
+          style: {
+            ...e.style,
+            stroke: '#2196f3',
+            strokeWidth: 2,
+            // No strokeDasharray = solid line
+          },
+          animated: false
+        };
       }
-      
-      // Also update the current state to trigger re-render
-      setNodes(nodes);
-      setEdges(edges);
-      
-      // Fit view to the loaded nodes
+
+      // Task-to-task edges: ALWAYS horizontal (right → left) regardless of layout
+      if (sourceNode?.type === 'taskNode' && targetNode?.type === 'taskNode') {
+        return {
+          ...e,
+          sourceHandle: 'right',
+          targetHandle: 'left',
+          style: {
+            ...e.style,
+            stroke: '#2196f3',
+            strokeWidth: 2,
+            strokeDasharray: '12', // Dashed line
+          },
+          animated: true
+        };
+      }
+
+      return e;
+    });
+
+    console.log('🔗 Updated edge handles for layout:', {
+      layoutOrientation: currentLayout,
+      agentToTaskHandles: currentLayout === 'vertical' ? 'bottom→top' : 'right→left',
+      taskToTaskHandles: 'right→left (always)',
+      edgeCount: updatedEdges.length
+    });
+
+    // Update the new tab with the reorganized nodes and updated edges BEFORE setting it as active
+    // This ensures useTabSync will restore the correct positions when the tab becomes active
+    updateTabNodes(newTabId, reorganizedNodes);
+    updateTabEdges(newTabId, updatedEdges);
+
+    // Verify the tab was updated correctly
+    const updatedTab = useTabManagerStore.getState().getTab(newTabId);
+
+    console.log('✅ Updated tab with reorganized nodes and edges before activation', {
+      tabId: newTabId,
+      tabNodeCount: updatedTab?.nodes.length,
+      tabEdgeCount: updatedTab?.edges.length,
+      reorganizedNodeCount: reorganizedNodes.length,
+      updatedEdgeCount: updatedEdges.length
+    });
+
+    // If we have a crew name and ID, mark this tab as having loaded crew content
+    if (crewName && crewId) {
+      console.log('Marking tab as loaded crew with name:', crewName, 'and ID:', crewId);
+      updateTabCrewInfo(newTabId, crewId, crewName);
+    }
+
+    // Use setTimeout to ensure Zustand state updates are processed before tab activation
+    // This prevents useTabSync from seeing stale/empty tab data
+    setTimeout(() => {
+      // Now set the new tab as active
+      setActiveTab(newTabId);
+      console.log('Set new tab as active:', newTabId);
+
+      // Directly set the nodes and edges to ensure they're displayed
+      // This overrides any potential clearing from useTabSync
       setTimeout(() => {
-        window.dispatchEvent(new CustomEvent('fitViewToNodes'));
-      }, 200);
-      
-      // Notify that crew loading has completed
-      setTimeout(() => {
-        window.dispatchEvent(new CustomEvent('crewLoadCompleted'));
-      }, 500);
-    }, 100);
+        setNodes(reorganizedNodes);
+        setEdges(updatedEdges);
+        console.log('Set nodes and edges directly after tab activation');
+
+        // Fit view after nodes are set
+        setTimeout(() => {
+          window.dispatchEvent(new CustomEvent('fitViewToNodes'));
+        }, 200);
+
+        // Notify that crew loading has completed
+        setTimeout(() => {
+          window.dispatchEvent(new CustomEvent('crewLoadCompleted'));
+        }, 300);
+      }, 50);
+    }, 10);
   }, [setNodes, setEdges]);
 
   // Update event listeners to use the wrapper

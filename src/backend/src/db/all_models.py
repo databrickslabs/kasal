@@ -10,6 +10,8 @@ from src.models.agent import Agent
 from src.models.task import Task
 from src.models.execution_history import ExecutionHistory, TaskStatus, ErrorTrace
 from src.models.tool import Tool
+from src.models.group_tool import GroupTool
+
 from src.models.log import LLMLog
 from src.models.model_config import ModelConfig
 from src.models.databricks_config import DatabricksConfig
@@ -30,14 +32,17 @@ from src.models.mcp_settings import MCPSettings
 from src.models.group import Group, GroupUser
 from src.models.chat_history import ChatHistory
 
-# User and RBAC models
-from src.models.user import User, UserProfile, RefreshToken, ExternalIdentity, Role, Privilege, RolePrivilege, UserRole, IdentityProvider
+# User models (simplified auth)
+from src.models.user import User, RefreshToken
 
 # Billing models
 from src.models.billing import LLMUsageBilling, BillingPeriod, BillingAlert
 
 # Documentation models
 from src.models.documentation_embedding import DocumentationEmbedding
+
+# Database configuration models
+from src.models.database_config import LakebaseConfig
 
 # Add additional models here as your application grows
 # from src.models.order import Order
@@ -47,20 +52,21 @@ __all__ = [
     "Base",
     "Agent",
     "Task",
-    "ExecutionHistory", 
-    "TaskStatus", 
+    "ExecutionHistory",
+    "TaskStatus",
     "ErrorTrace",
     "Tool",
+    "GroupTool",
     "LLMLog",
     "ModelConfig",
     "DatabricksConfig",
     "InitializationStatus",
     "PromptTemplate",
     "ExecutionTrace",
-    "Crew", 
+    "Crew",
     "Plan",
     "Flow",
-    "FlowExecution", 
+    "FlowExecution",
     "FlowNodeExecution",
     "Schedule",
     "ApiKey",
@@ -73,20 +79,15 @@ __all__ = [
     "Group",
     "GroupUser",
     "ChatHistory",
-    # User and RBAC models
+    # User models (simplified auth)
     "User",
-    "UserProfile", 
     "RefreshToken",
-    "ExternalIdentity",
-    "Role",
-    "Privilege",
-    "RolePrivilege",
-    "UserRole",
-    "IdentityProvider",
     # Billing models
     "LLMUsageBilling",
-    "BillingPeriod", 
+    "BillingPeriod",
     "BillingAlert",
     # Documentation models
-    "DocumentationEmbedding"
-] 
+    "DocumentationEmbedding",
+    # Database configuration models
+    "LakebaseConfig"
+]

@@ -15,7 +15,7 @@ from datetime import datetime, UTC
 from pydantic import BaseModel, Field
 
 from src.core.logger import LoggerManager
-from src.repositories.flow_repository import SyncFlowRepository
+from src.repositories.flow_repository import FlowRepository
 from crewai import Agent, Task, Crew
 from crewai import Process
 from crewai.flow.flow import Flow as CrewAIFlow
@@ -94,13 +94,13 @@ class BackendFlow:
     def repositories(self, value):
         self._repositories = value
 
-    def load_flow(self, repository: Optional[SyncFlowRepository] = None) -> Dict:
+    def load_flow(self, repository: Optional[FlowRepository] = None) -> Dict:
         """
-        Load flow data from the database using repository if provided, 
+        Load flow data from the database using repository if provided,
         otherwise get one from the factory.
-        
+
         Args:
-            repository: Optional SyncFlowRepository instance
+            repository: Optional FlowRepository instance
             
         Returns:
             Dictionary containing flow data
@@ -116,10 +116,9 @@ class BackendFlow:
             if repository:
                 flow = repository.find_by_id(self._flow_id)
             else:
-                # Get repository from factory
-                from src.repositories.flow_repository import get_sync_flow_repository
-                flow_repository = get_sync_flow_repository()
-                flow = flow_repository.find_by_id(self._flow_id)
+                # Log error if no repository provided
+                logger.error(f"No flow repository provided for flow_id {self._flow_id}")
+                raise ValueError(f"No flow repository provided for flow_id {self._flow_id}")
                     
             if not flow:
                 logger.error(f"Flow with ID {self._flow_id} not found")

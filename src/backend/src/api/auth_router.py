@@ -1,13 +1,13 @@
 from datetime import datetime
 from typing import Optional, Dict, Any, List
+from typing import Annotated
 from fastapi import APIRouter, Depends, HTTPException, status, Cookie, Response, Request
 from fastapi.security import OAuth2PasswordBearer, OAuth2PasswordRequestForm
-from sqlalchemy.ext.asyncio import AsyncSession
 import jwt
 from jwt.exceptions import PyJWTError as JWTError
 
 from src.config import settings
-from src.db.session import get_db
+from src.core.dependencies import SessionDep
 from src.schemas.user import (
     UserCreate, UserInDB, Token, UserLogin, PasswordReset, 
     PasswordResetRequest, PasswordChange, OAuthAuthorize, OAuthCallback
@@ -25,13 +25,31 @@ router = APIRouter(
 
 oauth2_scheme = OAuth2PasswordBearer(tokenUrl="auth/login")
 
+# Dependency to get AuthService
+def get_auth_service(session: SessionDep) -> AuthService:
+    """
+    Dependency provider for AuthService.
+
+    Creates service with session following the pattern:
+    Router → Service → Repository → DB
+
+    Args:
+        session: Database session from FastAPI DI (from core.dependencies)
+
+    Returns:
+        AuthService instance with session
+    """
+    return AuthService(session)
+
+# Type alias for cleaner function signatures
+AuthServiceDep = Annotated[AuthService, Depends(get_auth_service)]
+
 @router.post("/register", response_model=UserInDB, status_code=status.HTTP_201_CREATED)
 async def register_user(
     user_data: UserCreate,
-    session: AsyncSession = Depends(get_db)
+    auth_service: AuthServiceDep
 ):
     """Register a new user"""
-    auth_service = AuthService(session)
     
     try:
         user = await auth_service.register_user(user_data)
@@ -44,12 +62,11 @@ async def register_user(
 
 @router.post("/login", response_model=Token)
 async def login_for_access_token(
+    response: Response,
+    auth_service: AuthServiceDep,
     form_data: OAuth2PasswordRequestForm = Depends(),
-    session: AsyncSession = Depends(get_db),
-    response: Response = None,
 ):
     """OAuth2 compatible token login, get an access token for future requests"""
-    auth_service = AuthService(session)
     
     user = await auth_service.authenticate_user(form_data.username, form_data.password)
     if not user:
@@ -78,11 +95,10 @@ async def login_for_access_token(
 @router.post("/login/alternative", response_model=Token)
 async def login_with_json(
     login_data: UserLogin,
-    session: AsyncSession = Depends(get_db),
+    auth_service: AuthServiceDep,
     response: Response = None,
 ):
     """JSON-based login endpoint, alternative to OAuth2 form-based login"""
-    auth_service = AuthService(session)
     
     user = await auth_service.authenticate_user(login_data.username_or_email, login_data.password)
     if not user:
@@ -110,9 +126,9 @@ async def login_with_json(
 
 @router.post("/refresh-token", response_model=Token)
 async def refresh_token(
+    auth_service: AuthServiceDep,
     refresh_token: str = Cookie(None),
     token_in_body: Dict[str, str] = None,
-    session: AsyncSession = Depends(get_db),
     response: Response = None,
 ):
     """Refresh an access token using a refresh token"""
@@ -128,7 +144,6 @@ async def refresh_token(
             headers={"WWW-Authenticate": "Bearer"},
         )
     
-    auth_service = AuthService(session)
     new_tokens = await auth_service.refresh_access_token(token)
     
     if not new_tokens:
@@ -158,14 +173,13 @@ async def refresh_token(
 
 @router.post("/logout", status_code=status.HTTP_204_NO_CONTENT)
 async def logout(
+    auth_service: AuthServiceDep,
+    current_user: User = Depends(get_current_user),
     refresh_token: str = Cookie(None),
     token_in_body: Dict[str, str] = None,
-    session: AsyncSession = Depends(get_db),
     response: Response = None,
-    current_user: User = Depends(get_current_user),
 ):
     """Logout a user by revoking their refresh token"""
-    auth_service = AuthService(session)
     
     # Get refresh token from cookie or request body
     token = refresh_token
@@ -186,7 +200,7 @@ async def logout(
 @router.post("/password-reset-request", status_code=status.HTTP_202_ACCEPTED)
 async def request_password_reset(
     reset_request: PasswordResetRequest,
-    session: AsyncSession = Depends(get_db),
+    auth_service: AuthServiceDep,
 ):
     """Request a password reset token"""
     # This would normally send an email with a reset link
@@ -196,7 +210,7 @@ async def request_password_reset(
 @router.post("/password-reset", status_code=status.HTTP_200_OK)
 async def reset_password(
     reset_data: PasswordReset,
-    session: AsyncSession = Depends(get_db),
+    auth_service: AuthServiceDep,
 ):
     """Reset a password using a token"""
     # This would normally verify the token and reset the password
@@ -206,11 +220,11 @@ async def reset_password(
 @router.post("/password-change", status_code=status.HTTP_200_OK)
 async def change_password(
     password_data: PasswordChange,
+    auth_service: AuthServiceDep,
+    session: SessionDep,
     current_user: User = Depends(get_current_active_user),
-    session: AsyncSession = Depends(get_db),
 ):
     """Change a user's password"""
-    auth_service = AuthService(session)
     user_service = UserService(session)
     
     # Verify current password
@@ -232,8 +246,8 @@ async def change_password(
 @router.get("/oauth/{provider}/authorize")
 async def oauth_authorize(
     provider: str,
+    auth_service: AuthServiceDep,
     redirect_uri: Optional[str] = None,
-    session: AsyncSession = Depends(get_db),
 ):
     """Get OAuth authorization URL"""
     # This would normally return or redirect to the OAuth provider's auth URL
@@ -245,9 +259,9 @@ async def oauth_authorize(
 async def oauth_callback(
     provider: str,
     code: str,
+    auth_service: AuthServiceDep,
     state: Optional[str] = None,
     redirect_uri: Optional[str] = None,
-    session: AsyncSession = Depends(get_db),
     response: Response = None,
 ):
     """Handle OAuth callback and create/login user"""

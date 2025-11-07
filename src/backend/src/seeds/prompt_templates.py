@@ -5,7 +5,7 @@ import logging
 from datetime import datetime
 from sqlalchemy import select
 
-from src.db.session import async_session_factory, SessionLocal
+from src.db.session import async_session_factory
 from src.models.template import PromptTemplate
 
 # Configure logging
@@ -100,9 +100,9 @@ Think carefully about the workflow and how information flows between tasks."""
 
 GENERATE_JOB_NAME_TEMPLATE = """Generate a concise, descriptive name (2-4 words) for an AI job run based on the agents and tasks involved.
 Focus on the specific domain, region, and purpose of the job.
-The name should reflect the main activity (e.g., 'Lebanese News Monitor' for a Lebanese journalist monitoring news).
+The name should reflect the main activity (e.g., 'Swiss News Monitor' for a Swiss journalist monitoring news).
 Prioritize including:
-1. The region or topic (e.g., Lebanese, Beirut)
+1. The region or topic (e.g., Switzerland, Zurich)
 2. The main activity (e.g., News Analysis, Press Review)
 Only return the name, no explanations or additional text.
 Avoid generic terms like 'Agent', 'Task', 'Initiative', or 'Collaboration'."""
@@ -144,7 +144,18 @@ Please follow these strict guidelines when generating your output:
 6. Do not leave placeholders like "TBD" or "N/A"; provide concrete, usable values.
 7. All boolean and null values must use correct JSON syntax.
 8. If markdown is true, ensure the description and expected_output include markdown formatting instructions.
-9. Do not include any explanation or commentary—only return the JSON object."""
+9. Do not include any explanation or commentary—only return the JSON object.
+
+If the user's goal involves creating a presentation, follow these precise guidelines:
+- Generate a single self-contained HTML file with reveal.js fully embedded inline including all CSS and JavaScript directly without external dependencies.
+- Configure viewport constraints in Reveal.initialize() with width: 960, height: 700, margin: 0.04 to fit common screens.
+- Use clean, professional themes like white, black, or league; avoid decorative icons or technical symbols.
+- Structure content with <section> tags for slides; use data-background-color or data-background-gradient for visual interest.
+- Include minified reveal.js and reveal.css inline (embedded code or copied from CDN) so the HTML is standalone.
+- Set readable typography with a base rule like: .reveal .slides { font-size: 36px; } and system fonts; keep a clear h1/h2/h3 hierarchy.
+- Organize slides as: title, overview, key points (one point per slide), conclusion.
+- Enable smooth transitions with data-auto-animate between related slides.
+- Limit expanded content to at most 2× the original word count; favor clarity and readability within the stated viewport boundaries."""
 
 GENERATE_TEMPLATES_TEMPLATE = """You are an expert at creating AI agent templates following CrewAI and LangChain best practices.
 Given an agent's role, goal, and backstory, generate three templates that work together cohesively:
@@ -266,6 +277,17 @@ Ensure:
 8. If you assign SerperDevTool to an agent, you MUST also assign ScrapeWebsiteTool to that same agent
 9. The total number of tasks MUST NOT exceed 6 tasks
 
+If the user's goal involves creating a presentation, follow these precise guidelines:
+- Generate a single self-contained HTML file with reveal.js fully embedded inline including all CSS and JavaScript directly without external dependencies.
+- Configure viewport constraints in Reveal.initialize() with width: 960, height: 700, margin: 0.04 to fit common screens.
+- Use clean, professional themes like white, black, or league; avoid decorative icons or technical symbols.
+- Structure content with <section> tags for slides; use data-background-color or data-background-gradient for visual interest.
+- Include minified reveal.js and reveal.css inline (embedded code or copied from CDN) so the HTML is standalone.
+- Set readable typography with a base rule like: .reveal .slides { font-size: 36px; } and system fonts; keep a clear h1/h2/h3 hierarchy.
+- Organize slides as: title, overview, key points (one point per slide), conclusion.
+- Enable smooth transitions with data-auto-animate between related slides.
+- Limit expanded content to at most 2× the original word count; favor clarity and readability within the stated viewport boundaries.
+
 REMINDER: Your output must be PURE, VALID JSON with no additional text. Double-check your response to ensure it is properly formatted JSON and contains NO MORE THAN 6 TASKS."""
 
 DETECT_INTENT_TEMPLATE = """You are an intelligent intent detection system for a CrewAI workflow designer.
@@ -290,15 +312,11 @@ Analyze the user's message and determine their intent from these categories:
    - Complex workflows: "research then write then review"
    - Collaborative language: "agents working together", "workflow with multiple steps"
    - Multiple related tasks that need coordination
+   - Planning language: "create a plan", "build a plan", "design a plan", "plan that", "plan to"
+   - Strategic terms: "roadmap", "blueprint", "framework", "architecture", "strategy"
+   - Complex multi-step operations: "get all news", "analyze multiple sources", "comprehensive collection"
 
-4. **generate_plan**: User wants to create a plan (similar to crew - with agents and tasks):
-   - CRITICAL: Any message containing "create a plan", "build a plan", "design a plan", "plan that", "plan to"
-   - Strategic language: "strategy", "roadmap", "blueprint", "framework", "architecture"
-   - Complex multi-step operations: "get all", "collect everything", "comprehensive", "complete analysis"
-   - Planning for future actions: "plan for analyzing", "strategy to collect", "approach to gather"
-   - NOTE: Plans are functionally identical to crews - they create multiple agents with tasks
-
-5. **execute_crew**: User wants to execute/run an existing crew:
+4. **execute_crew**: User wants to execute/run an existing crew:
    - Execution commands: "execute crew", "run crew", "start crew", "ec"
    - Action words with crew context: "execute", "run", "start", "launch", "begin"
    - Short commands: "ec" (shorthand for execute crew)
@@ -309,22 +327,15 @@ Analyze the user's message and determine their intent from these categories:
    - Preference adjustments: "choose different model", "adjust settings", "pick tools"
    - Direct mentions: "llm", "maxr", "max rpm", "tools", "config", "settings"
 
-7. **conversation**: User is asking questions, seeking information, or having general conversation:
-   - Questions about the system: "how does this work?", "what can you do?"
-   - Greetings: "hello", "hi", "good morning"
-   - General questions: "what is...", "explain...", "why..."
-   - Status inquiries: "what's the status of...", "show me..."
-
-8. **unknown**: Unclear or ambiguous messages that don't fit the above categories.
+7. **unknown**: Unclear or ambiguous messages that don't fit the above categories.
 
 **CRITICAL RULES**:
-1. If the message contains "create a plan", "plan that", "plan to", or "build a plan", it is ALWAYS generate_plan, NOT generate_task
-2. If the message describes getting "all" of something or multiple complex steps, prefer generate_plan over generate_task
-3. Plans and crews are functionally equivalent - both create agent/task workflows
+1. Many task requests are phrased conversationally. Look for ACTION WORDS and GOALS rather than formal task language.
+2. If the message describes multiple agents or complex workflows, it's generate_crew.
 
 Return a JSON object with:
 {
-    "intent": "generate_task" | "generate_agent" | "generate_crew" | "generate_plan" | "execute_crew" | "configure_crew" | "conversation" | "unknown",
+    "intent": "generate_task" | "generate_agent" | "generate_crew" | "execute_crew" | "configure_crew" | "unknown",
     "confidence": 0.0-1.0,
     "extracted_info": {
         "action_words": ["list", "of", "detected", "action", "words"],
@@ -344,10 +355,10 @@ Examples:
 - "analyze this sales data and create a report" -> generate_task
 - "Build a team of agents to handle customer support" -> generate_crew
 - "Create a research agent and a writer agent with tasks for each" -> generate_crew
-- "Create a plan that will get all the news from switzerland" -> generate_plan
-- "Plan to collect and analyze customer feedback" -> generate_plan
-- "Build a plan for market analysis" -> generate_plan
-- "Create a plan with multiple agents" -> generate_plan
+- "Create a plan that will get all the news from switzerland" -> generate_crew
+- "Plan to collect and analyze customer feedback" -> generate_crew
+- "Build a plan for market analysis" -> generate_crew
+- "Create a plan with multiple agents" -> generate_crew
 - "execute crew" -> execute_crew
 - "run crew" -> execute_crew
 - "ec" -> execute_crew
@@ -357,9 +368,7 @@ Examples:
 - "select tools" -> configure_crew
 - "update max rpm" -> configure_crew
 - "adjust settings" -> configure_crew
-- "How does intent detection work?" -> conversation
-- "Hello, what can you help me with?" -> conversation
-- "Show me my recent tasks" -> conversation"""
+"""
 
 # Define template data
 DEFAULT_TEMPLATES = [

@@ -6,8 +6,7 @@ This module provides endpoints for managing and searching documentation embeddin
 from fastapi import APIRouter, HTTPException, Query, Depends, Header
 from typing import List, Optional, Annotated
 
-from src.core.dependencies import SessionDep
-from src.core.unit_of_work import UnitOfWork
+from src.core.dependencies import SessionDep, GroupContextDep
 from src.services.documentation_embedding_service import DocumentationEmbeddingService
 from src.schemas.documentation_embedding import (
     DocumentationEmbedding as DocumentationEmbeddingSchema,
@@ -24,17 +23,31 @@ router = APIRouter(
     responses={404: {"description": "Not found"}},
 )
 
-# Dependency to get DocumentationEmbeddingService using UnitOfWork with injected session
-async def get_documentation_embedding_service(session: SessionDep) -> DocumentationEmbeddingService:
-    """Get DocumentationEmbeddingService instance with proper session management."""
-    async with UnitOfWork(session=session) as uow:
-        return DocumentationEmbeddingService(uow)
+# Dependency to get DocumentationEmbeddingService
+def get_documentation_embedding_service(session: SessionDep) -> DocumentationEmbeddingService:
+    """
+    Dependency provider for DocumentationEmbeddingService.
+
+    Creates service with session following the pattern:
+    Router → Service → Repository → DB
+
+    Args:
+        session: Database session from FastAPI DI (from core.dependencies)
+
+    Returns:
+        DocumentationEmbeddingService instance with session
+    """
+    return DocumentationEmbeddingService(session)
+
+# Type alias for cleaner function signatures
+DocumentationEmbeddingServiceDep = Annotated[DocumentationEmbeddingService, Depends(get_documentation_embedding_service)]
 
 
 @router.post("/", response_model=DocumentationEmbeddingSchema)
 async def create_documentation_embedding(
     embedding: DocumentationEmbeddingCreate,
-    service: Annotated[DocumentationEmbeddingService, Depends(get_documentation_embedding_service)],
+    service: DocumentationEmbeddingServiceDep,
+    group_context: GroupContextDep,
     x_forwarded_access_token: Optional[str] = Header(None, alias="X-Forwarded-Access-Token"),
     x_auth_request_access_token: Optional[str] = Header(None, alias="X-Auth-Request-Access-Token")
 ):
@@ -51,18 +64,18 @@ async def create_documentation_embedding(
 
 @router.get("/search", response_model=List[DocumentationEmbeddingSchema])
 async def search_documentation_embeddings(
+    service: DocumentationEmbeddingServiceDep,
     query_embedding: List[float] = Query(..., description="Query embedding vector"),
-    limit: int = Query(5, ge=1, le=20, description="Maximum number of results")
+    limit: int = Query(5, ge=1, le=20, description="Maximum number of results"),
+    group_context: GroupContextDep = None
 ):
     """Search for similar documentation embeddings."""
     try:
-        async with UnitOfWork() as uow:
-            service = DocumentationEmbeddingService(uow)
-            results = await service.search_similar_embeddings(
-                query_embedding=query_embedding,
-                limit=limit
-            )
-            return results
+        results = await service.search_similar_embeddings(
+            query_embedding=query_embedding,
+            limit=limit
+        )
+        return results
     except Exception as e:
         logger.error(f"Error searching documentation embeddings: {e}")
         raise HTTPException(status_code=500, detail=str(e))
@@ -70,40 +83,39 @@ async def search_documentation_embeddings(
 
 @router.get("/", response_model=List[DocumentationEmbeddingSchema])
 async def get_documentation_embeddings(
+    service: DocumentationEmbeddingServiceDep,
     skip: int = Query(0, ge=0, description="Number of items to skip"),
     limit: int = Query(100, ge=1, le=1000, description="Maximum number of items to return"),
     source: Optional[str] = Query(None, description="Filter by source"),
-    title: Optional[str] = Query(None, description="Filter by title (partial match)")
+    title: Optional[str] = Query(None, description="Filter by title (partial match)"),
+    group_context: GroupContextDep = None
 ):
     """Get documentation embeddings with optional filtering."""
     try:
-        async with UnitOfWork() as uow:
-            service = DocumentationEmbeddingService(uow)
-            
-            if source:
-                results = await service.search_by_source(source, skip, limit)
-            elif title:
-                results = await service.search_by_title(title, skip, limit)
-            else:
-                results = await service.get_documentation_embeddings(skip, limit)
-            
-            # Convert to dict and clear embeddings to avoid serialization issues
-            # Embeddings are large and not needed in list views
-            result_dicts = []
-            for result in results:
-                result_dict = {
-                    "id": result.id,
-                    "source": result.source,
-                    "title": result.title,
-                    "content": result.content,
-                    "doc_metadata": result.doc_metadata,
-                    "created_at": result.created_at,
-                    "updated_at": result.updated_at,
-                    "embedding": []  # Clear embedding for list view
-                }
-                result_dicts.append(result_dict)
-            
-            return result_dicts
+        if source:
+            results = await service.search_by_source(source, skip, limit)
+        elif title:
+            results = await service.search_by_title(title, skip, limit)
+        else:
+            results = await service.get_documentation_embeddings(skip, limit)
+
+        # Convert to dict and clear embeddings to avoid serialization issues
+        # Embeddings are large and not needed in list views
+        result_dicts = []
+        for result in results:
+            result_dict = {
+                "id": result.id,
+                "source": result.source,
+                "title": result.title,
+                "content": result.content,
+                "doc_metadata": result.doc_metadata,
+                "created_at": result.created_at,
+                "updated_at": result.updated_at,
+                "embedding": []  # Clear embedding for list view
+            }
+            result_dicts.append(result_dict)
+
+        return result_dicts
     except Exception as e:
         import traceback
         error_trace = traceback.format_exc()
@@ -113,14 +125,14 @@ async def get_documentation_embeddings(
 
 @router.get("/recent", response_model=List[DocumentationEmbeddingSchema])
 async def get_recent_documentation_embeddings(
-    limit: int = Query(10, ge=1, le=50, description="Maximum number of recent items")
+    service: DocumentationEmbeddingServiceDep,
+    limit: int = Query(10, ge=1, le=50, description="Maximum number of recent items"),
+    group_context: GroupContextDep = None
 ):
     """Get the most recently created documentation embeddings."""
     try:
-        async with UnitOfWork() as uow:
-            service = DocumentationEmbeddingService(uow)
-            results = await service.get_recent_embeddings(limit)
-            return results
+        results = await service.get_recent_embeddings(limit)
+        return results
     except Exception as e:
         logger.error(f"Error getting recent documentation embeddings: {e}")
         raise HTTPException(status_code=500, detail=str(e))
@@ -128,18 +140,18 @@ async def get_recent_documentation_embeddings(
 
 @router.get("/{embedding_id}", response_model=DocumentationEmbeddingSchema)
 async def get_documentation_embedding(
-    embedding_id: int
+    embedding_id: int,
+    service: DocumentationEmbeddingServiceDep,
+    group_context: GroupContextDep = None
 ):
     """Get a specific documentation embedding by ID."""
     try:
-        async with UnitOfWork() as uow:
-            service = DocumentationEmbeddingService(uow)
-            result = await service.get_documentation_embedding(embedding_id)
-            
-            if not result:
-                raise HTTPException(status_code=404, detail="Documentation embedding not found")
-            
-            return result
+        result = await service.get_documentation_embedding(embedding_id)
+
+        if not result:
+            raise HTTPException(status_code=404, detail="Documentation embedding not found")
+
+        return result
     except HTTPException:
         raise
     except Exception as e:
@@ -149,19 +161,18 @@ async def get_documentation_embedding(
 
 @router.delete("/{embedding_id}")
 async def delete_documentation_embedding(
-    embedding_id: int
+    embedding_id: int,
+    service: DocumentationEmbeddingServiceDep,
+    group_context: GroupContextDep = None
 ):
     """Delete a documentation embedding by ID."""
     try:
-        async with UnitOfWork() as uow:
-            service = DocumentationEmbeddingService(uow)
-            success = await service.delete_documentation_embedding(embedding_id)
-            
-            if not success:
-                raise HTTPException(status_code=404, detail="Documentation embedding not found")
-            
-            await uow.commit()
-            return {"message": "Documentation embedding deleted successfully"}
+        success = await service.delete_documentation_embedding(embedding_id)
+
+        if not success:
+            raise HTTPException(status_code=404, detail="Documentation embedding not found")
+
+        return {"message": "Documentation embedding deleted successfully"}
     except HTTPException:
         raise
     except Exception as e:
@@ -171,6 +182,7 @@ async def delete_documentation_embedding(
 
 @router.post("/seed-all")
 async def seed_all_documentation_embeddings(
+    group_context: GroupContextDep,
     x_forwarded_access_token: Optional[str] = Header(None, alias="X-Forwarded-Access-Token"),
     x_auth_request_access_token: Optional[str] = Header(None, alias="X-Auth-Request-Access-Token")
 ):

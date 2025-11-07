@@ -28,35 +28,41 @@ const EnginesConfiguration: React.FC = () => {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [syncing, setSyncing] = useState(false);
+  const [debugSyncing, setDebugSyncing] = useState(false);
+  const [debugTracingEnabled, setDebugTracingEnabled] = useState<boolean>(false);
 
   // Load initial state from backend
   useEffect(() => {
-    const loadFlowConfig = async () => {
+    const loadConfig = async () => {
       try {
         setLoading(true);
-        const response = await EngineConfigService.getCrewAIFlowEnabled();
-        setCrewAIFlowEnabled(response.flow_enabled);
+        const [flowResp, debugResp] = await Promise.all([
+          EngineConfigService.getCrewAIFlowEnabled(),
+          EngineConfigService.getCrewAIDebugTracing(),
+        ]);
+        setCrewAIFlowEnabled(flowResp.flow_enabled);
+        setDebugTracingEnabled(debugResp.debug_tracing);
       } catch (err) {
-        console.error('Failed to load flow configuration:', err);
+        console.error('Failed to load engine configuration:', err);
         setError('Failed to load configuration from server');
       } finally {
         setLoading(false);
       }
     };
 
-    loadFlowConfig();
+    loadConfig();
   }, [setCrewAIFlowEnabled]);
 
   const handleFlowToggle = async (event: React.ChangeEvent<HTMLInputElement>) => {
     const newValue = event.target.checked;
-    
+
     try {
       setSyncing(true);
       setError(null);
-      
+
       // Update backend first
       await EngineConfigService.setCrewAIFlowEnabled(newValue);
-      
+
       // Update local state only after successful backend update
       setCrewAIFlowEnabled(newValue);
     } catch (err) {
@@ -66,6 +72,22 @@ const EnginesConfiguration: React.FC = () => {
       event.target.checked = !newValue;
     } finally {
       setSyncing(false);
+    }
+  };
+
+  const handleDebugToggle = async (event: React.ChangeEvent<HTMLInputElement>) => {
+    const newValue = event.target.checked;
+    try {
+      setDebugSyncing(true);
+      setError(null);
+      await EngineConfigService.setCrewAIDebugTracing(newValue);
+      setDebugTracingEnabled(newValue);
+    } catch (err) {
+      console.error('Failed to update debug tracing configuration:', err);
+      setError('Failed to save configuration to server');
+      event.target.checked = !newValue;
+    } finally {
+      setDebugSyncing(false);
     }
   };
 
@@ -82,9 +104,9 @@ const EnginesConfiguration: React.FC = () => {
 
   return (
     <Box>
-      <Box sx={{ 
-        display: 'flex', 
-        alignItems: 'center', 
+      <Box sx={{
+        display: 'flex',
+        alignItems: 'center',
         mb: 3
       }}>
         <EngineeringIcon sx={{ mr: 1, color: 'primary.main', fontSize: '1.2rem' }} />
@@ -99,8 +121,8 @@ const EnginesConfiguration: React.FC = () => {
         </Alert>
       )}
 
-      <Alert 
-        severity="info" 
+      <Alert
+        severity="info"
         sx={{ mb: 3 }}
       >
         Configure execution engines and their features. Disabling features will hide related UI components.
@@ -108,9 +130,9 @@ const EnginesConfiguration: React.FC = () => {
 
       {/* CrewAI Engine Section */}
       <Paper sx={{ p: 2, mb: 2 }} elevation={1}>
-        <Box sx={{ 
-          display: 'flex', 
-          alignItems: 'center', 
+        <Box sx={{
+          display: 'flex',
+          alignItems: 'center',
           mb: 2
         }}>
           <SmartToyIcon sx={{ mr: 1, color: 'primary.main', fontSize: '1.1rem' }} />
@@ -160,6 +182,35 @@ const EnginesConfiguration: React.FC = () => {
               </ul>
             </Alert>
           )}
+
+          <Box>
+            <FormControlLabel
+              control={
+                <Box sx={{ display: 'flex', alignItems: 'center' }}>
+                  <Switch
+                    checked={debugTracingEnabled}
+                    onChange={handleDebugToggle}
+                    color="primary"
+                    disabled={debugSyncing}
+                  />
+                  {debugSyncing && (
+                    <CircularProgress size={16} sx={{ ml: 1 }} />
+                  )}
+                </Box>
+              }
+              label={
+                <Box>
+                  <Typography variant="body2" fontWeight="medium">
+                    Enable Debug Tracing
+                  </Typography>
+                  <Typography variant="caption" color="text.secondary">
+                    When enabled, store detailed trace events (memory, knowledge, reasoning, guardrails). When disabled, only essential events are stored.
+                  </Typography>
+                </Box>
+              }
+            />
+          </Box>
+
         </Stack>
       </Paper>
 
@@ -221,7 +272,7 @@ const EnginesConfiguration: React.FC = () => {
           </FormControl>
 
           <Alert severity="info" sx={{ mt: 2 }}>
-            {inputMode === 'dialog' 
+            {inputMode === 'dialog'
               ? 'When variables are detected in your workflow, a dialog will appear to collect all values at once.'
               : 'When variables are detected, the chat will guide you through providing values one by one.'}
           </Alert>
@@ -231,4 +282,4 @@ const EnginesConfiguration: React.FC = () => {
   );
 };
 
-export default EnginesConfiguration; 
+export default EnginesConfiguration;

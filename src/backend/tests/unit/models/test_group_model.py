@@ -14,7 +14,7 @@ from src.models.user import User
 from src.models.group import (
     Group, GroupUser, generate_uuid,
     GroupStatus, GroupUserRole, GroupUserStatus,
-    GROUP_PERMISSIONS
+    get_role_hierarchy, role_has_access
 )
 
 
@@ -29,7 +29,6 @@ class TestGroup:
         # Assert required columns exist
         assert 'id' in columns
         assert 'name' in columns
-        assert 'email_domain' in columns
         assert 'status' in columns
         assert 'auto_created' in columns
         
@@ -43,7 +42,7 @@ class TestGroup:
         columns = Group.__table__.columns
         
         expected_columns = [
-            'id', 'name', 'email_domain', 'status', 'description',
+            'id', 'name', 'status', 'description',
             'auto_created', 'created_by_email', 'created_at', 'updated_at'
         ]
         
@@ -51,54 +50,37 @@ class TestGroup:
             assert col_name in columns, f"Column {col_name} should exist in Group model"
 
     def test_group_generate_group_id_basic(self):
-        """Test Group.generate_group_id with basic domain."""
+        """Test Group.generate_group_id with basic name."""
         # Act
-        group_id = Group.generate_group_id("acme-corp.com")
-        
+        group_id = Group.generate_group_id("Acme Corp")
+
         # Assert
         assert group_id.startswith("acme_corp_")
         assert len(group_id.split("_")[-1]) == 8  # UUID part
         assert "_" in group_id
 
-    def test_group_generate_group_id_with_name(self):
-        """Test Group.generate_group_id with domain and group name."""
+    def test_group_generate_group_id_with_special_chars(self):
+        """Test Group.generate_group_id with special characters."""
         # Act
-        group_id = Group.generate_group_id("tech-startup.io", "Engineering Team")
-        
-        # Assert
-        assert "tech_startup_io_engineering_team_" in group_id
-        assert len(group_id.split("_")[-1]) == 8  # UUID part
+        group_id = Group.generate_group_id("Sales & Marketing")
 
-    def test_group_generate_group_id_special_characters(self):
-        """Test Group.generate_group_id handles special characters."""
-        # Act
-        group_id = Group.generate_group_id("my-company.co.uk", "Sales & Marketing")
-        
         # Assert
-        assert "my_company_co_uk_sales__marketing_" in group_id
+        assert "sales__marketing_" in group_id
         assert "&" not in group_id
         assert "." not in group_id
         assert " " not in group_id
 
-    def test_group_generate_group_name_basic(self):
-        """Test Group.generate_group_name with basic domain."""
+    def test_group_generate_group_id_complex_names(self):
+        """Test Group.generate_group_id handles complex names."""
         # Act
-        name = Group.generate_group_name("acme-corp.com")
-        
-        # Assert
-        assert name == "Acme Corp"
+        group_id1 = Group.generate_group_id("Engineering Team")
+        group_id2 = Group.generate_group_id("Tech-Startup Division")
 
-    def test_group_generate_group_name_complex(self):
-        """Test Group.generate_group_name with complex domain."""
-        # Act
-        name1 = Group.generate_group_name("tech-startup.io")
-        name2 = Group.generate_group_name("my_company.co.uk")
-        name3 = Group.generate_group_name("simple")
-        
         # Assert
-        assert name1 == "Tech Startup"
-        assert name2 == "My Company"
-        assert name3 == "Simple"
+        assert "engineering_team_" in group_id1
+        assert "tech_startup_division_" in group_id2
+        assert len(group_id1.split("_")[-1]) == 8  # UUID part
+        assert len(group_id2.split("_")[-1]) == 8  # UUID part
 
     def test_group_table_name(self):
         """Test that the table name is correctly set."""
@@ -117,7 +99,6 @@ class TestGroup:
         
         # Required fields
         assert columns['name'].nullable is False
-        assert columns['email_domain'].nullable is False
         assert columns['status'].nullable is False
         
         # Optional fields
@@ -145,14 +126,14 @@ class TestGroup:
         # Test that relationship is defined
         assert hasattr(Group, 'group_users'), "Group should have group_users relationship"
 
-    def test_group_different_domains(self):
-        """Test Group email domain column configuration."""
-        # Test that email_domain column exists and is configured correctly
+    def test_group_status_column(self):
+        """Test Group status column configuration."""
+        # Test that status column exists and is configured correctly
         columns = Group.__table__.columns
-        
-        assert 'email_domain' in columns
-        assert columns['email_domain'].nullable is False
-        assert "VARCHAR" in str(columns['email_domain'].type) or "STRING" in str(columns['email_domain'].type)
+
+        assert 'status' in columns
+        assert columns['status'].nullable is False
+        assert "VARCHAR" in str(columns['status'].type) or "STRING" in str(columns['status'].type)
 
     def test_group_auto_created_scenarios(self):
         """Test Group auto_created column configuration."""
@@ -183,8 +164,8 @@ class TestGroupUser:
         assert group_user.group_id == group_id
         assert group_user.user_id == user_id
         # Note: defaults are set at DB level, not on Python object
-        assert group_user.role is None or group_user.role == "USER"  # Default at DB level
-        assert group_user.status is None or group_user.status == "ACTIVE"  # Default at DB level
+        assert group_user.role is None or group_user.role == "operator"  # Default at DB level
+        assert group_user.status is None or group_user.status == "active"  # Default at DB level
         assert group_user.auto_created is None or group_user.auto_created is False  # Default at DB level
 
     def test_group_user_creation_with_all_fields(self):
@@ -192,8 +173,8 @@ class TestGroupUser:
         # Arrange
         group_id = "engineering_team"
         user_id = "developer_001"
-        role = "ADMIN"
-        status = "ACTIVE"
+        role = "admin"
+        status = "active"
         joined_at = datetime.now(timezone.utc)
         auto_created = True
         created_at = datetime.now(timezone.utc)
@@ -223,8 +204,8 @@ class TestGroupUser:
 
     def test_group_user_all_roles(self):
         """Test GroupUser with all possible roles."""
-        roles = ["ADMIN", "MANAGER", "USER", "VIEWER"]
-        
+        roles = ["admin", "editor", "operator"]
+
         for role in roles:
             # Act
             group_user = GroupUser(
@@ -232,14 +213,14 @@ class TestGroupUser:
                 user_id=f"user_{role.lower()}",
                 role=role
             )
-            
+
             # Assert
             assert group_user.role == role
 
     def test_group_user_all_statuses(self):
         """Test GroupUser with all possible statuses."""
-        statuses = ["ACTIVE", "INACTIVE", "SUSPENDED"]
-        
+        statuses = ["active", "inactive", "suspended"]
+
         for status in statuses:
             # Act
             group_user = GroupUser(
@@ -247,7 +228,7 @@ class TestGroupUser:
                 user_id=f"user_{status.lower()}",
                 status=status
             )
-            
+
             # Assert
             assert group_user.status == status
 
@@ -307,7 +288,7 @@ class TestGroupUser:
         group_user = GroupUser(
             group_id="test_group",
             user_id="test_user",
-            role="ADMIN"
+            role="admin"
         )
         
         # Act
@@ -317,7 +298,7 @@ class TestGroupUser:
         assert "GroupUser" in repr_str
         assert "test_group" in repr_str
         assert "test_user" in repr_str
-        assert "ADMIN" in repr_str
+        assert "admin" in repr_str
 
     def test_group_user_membership_scenarios(self):
         """Test different group membership scenarios."""
@@ -325,40 +306,40 @@ class TestGroupUser:
         founder = GroupUser(
             group_id="startup_group",
             user_id="founder_001",
-            role="ADMIN",
+            role="admin",
             auto_created=True
         )
-        
+
         # Invited admin
         admin = GroupUser(
             group_id="startup_group",
             user_id="admin_002",
-            role="ADMIN",
+            role="admin",
             auto_created=False
         )
-        
+
         # Regular team member
         member = GroupUser(
             group_id="startup_group",
             user_id="member_003",
-            role="USER",
+            role="operator",
             auto_created=False
         )
-        
-        # Read-only stakeholder
-        viewer = GroupUser(
+
+        # Content creator
+        editor = GroupUser(
             group_id="startup_group",
-            user_id="viewer_004",
-            role="VIEWER",
+            user_id="editor_004",
+            role="editor",
             auto_created=False
         )
-        
+
         # Assert
         assert founder.auto_created is True
         assert admin.auto_created is False
-        assert founder.role == "ADMIN"
-        assert member.role == "USER"
-        assert viewer.role == "VIEWER"
+        assert founder.role == "admin"
+        assert member.role == "operator"
+        assert editor.role == "editor"
 
 
 class TestGroupEnums:
@@ -375,9 +356,8 @@ class TestGroupEnums:
         """Test GroupUserRole enum values."""
         # Act & Assert
         assert GroupUserRole.ADMIN == "admin"
-        assert GroupUserRole.MANAGER == "manager"
-        assert GroupUserRole.USER == "user"
-        assert GroupUserRole.VIEWER == "viewer"
+        assert GroupUserRole.EDITOR == "editor"
+        assert GroupUserRole.OPERATOR == "operator"
 
     def test_group_user_status_enum(self):
         """Test GroupUserStatus enum values."""
@@ -387,74 +367,47 @@ class TestGroupEnums:
         assert GroupUserStatus.SUSPENDED == "suspended"
 
 
-class TestGroupPermissions:
-    """Test cases for GROUP_PERMISSIONS mapping."""
+class TestGroupRolePermissions:
+    """Test cases for role hierarchy and permission functions."""
 
-    def test_group_permissions_structure(self):
-        """Test that GROUP_PERMISSIONS has correct structure."""
+    def test_role_hierarchy_levels(self):
+        """Test that get_role_hierarchy returns correct hierarchy levels."""
         # Act & Assert
-        assert isinstance(GROUP_PERMISSIONS, dict)
-        assert len(GROUP_PERMISSIONS) == 4
-        
-        # Check all roles are present
-        assert GroupUserRole.ADMIN in GROUP_PERMISSIONS
-        assert GroupUserRole.MANAGER in GROUP_PERMISSIONS
-        assert GroupUserRole.USER in GROUP_PERMISSIONS
-        assert GroupUserRole.VIEWER in GROUP_PERMISSIONS
+        assert get_role_hierarchy(GroupUserRole.ADMIN) == 3
+        assert get_role_hierarchy(GroupUserRole.EDITOR) == 2
+        assert get_role_hierarchy(GroupUserRole.OPERATOR) == 1
 
-    def test_admin_permissions(self):
-        """Test that admin role has comprehensive permissions."""
+    def test_role_hierarchy_ordering(self):
+        """Test that role hierarchy maintains proper ordering."""
         # Act
-        admin_perms = GROUP_PERMISSIONS[GroupUserRole.ADMIN]
-        
-        # Assert
-        assert len(admin_perms) > 20  # Should have many permissions
-        assert any("group:manage" in str(perm) for perm in admin_perms)
-        assert any("user:" in str(perm) for perm in admin_perms)
-        assert any("agent:" in str(perm) for perm in admin_perms)
-        assert any("api_key:" in str(perm) for perm in admin_perms)
+        admin_level = get_role_hierarchy(GroupUserRole.ADMIN)
+        editor_level = get_role_hierarchy(GroupUserRole.EDITOR)
+        operator_level = get_role_hierarchy(GroupUserRole.OPERATOR)
 
-    def test_manager_permissions(self):
-        """Test that manager role has appropriate permissions."""
-        # Act
-        manager_perms = GROUP_PERMISSIONS[GroupUserRole.MANAGER]
-        
         # Assert
-        assert len(manager_perms) > 10  # Should have moderate permissions
-        assert len(manager_perms) < len(GROUP_PERMISSIONS[GroupUserRole.ADMIN])
+        assert admin_level > editor_level
+        assert editor_level > operator_level
 
-    def test_user_permissions(self):
-        """Test that user role has execution permissions."""
-        # Act
-        user_perms = GROUP_PERMISSIONS[GroupUserRole.USER]
-        
-        # Assert
-        assert len(user_perms) > 5  # Should have basic permissions
-        assert any(":read" in str(perm) for perm in user_perms)
-        assert any(":execute" in str(perm) for perm in user_perms)
+    def test_role_has_access_admin(self):
+        """Test that admin role has access to all roles."""
+        # Act & Assert
+        assert role_has_access(GroupUserRole.ADMIN, GroupUserRole.ADMIN)
+        assert role_has_access(GroupUserRole.ADMIN, GroupUserRole.EDITOR)
+        assert role_has_access(GroupUserRole.ADMIN, GroupUserRole.OPERATOR)
 
-    def test_viewer_permissions(self):
-        """Test that viewer role has minimal read-only permissions."""
-        # Act
-        viewer_perms = GROUP_PERMISSIONS[GroupUserRole.VIEWER]
-        
-        # Assert
-        assert len(viewer_perms) > 0  # Should have some permissions
-        assert len(viewer_perms) < len(GROUP_PERMISSIONS[GroupUserRole.USER])
-        assert all(":read" in str(perm) for perm in viewer_perms)  # Should only have read permissions
+    def test_role_has_access_editor(self):
+        """Test that editor role has appropriate access."""
+        # Act & Assert
+        assert not role_has_access(GroupUserRole.EDITOR, GroupUserRole.ADMIN)
+        assert role_has_access(GroupUserRole.EDITOR, GroupUserRole.EDITOR)
+        assert role_has_access(GroupUserRole.EDITOR, GroupUserRole.OPERATOR)
 
-    def test_permission_hierarchy(self):
-        """Test that permission hierarchy makes sense (admin > manager > user > viewer)."""
-        # Act
-        admin_count = len(GROUP_PERMISSIONS[GroupUserRole.ADMIN])
-        manager_count = len(GROUP_PERMISSIONS[GroupUserRole.MANAGER])
-        user_count = len(GROUP_PERMISSIONS[GroupUserRole.USER])
-        viewer_count = len(GROUP_PERMISSIONS[GroupUserRole.VIEWER])
-        
-        # Assert
-        assert admin_count > manager_count
-        assert manager_count > user_count
-        assert user_count > viewer_count
+    def test_role_has_access_operator(self):
+        """Test that operator role has limited access."""
+        # Act & Assert
+        assert not role_has_access(GroupUserRole.OPERATOR, GroupUserRole.ADMIN)
+        assert not role_has_access(GroupUserRole.OPERATOR, GroupUserRole.EDITOR)
+        assert role_has_access(GroupUserRole.OPERATOR, GroupUserRole.OPERATOR)
 
 
 class TestGenerateUuidFunction:
@@ -497,7 +450,6 @@ class TestGroupEdgeCases:
         group = Group(
             id="long_name_group",
             name=long_name,
-            email_domain="long-company.com",
             description=long_description
         )
         
@@ -515,15 +467,23 @@ class TestGroupEdgeCases:
             "my-company-name.business.org"
         ]
         
-        for domain in complex_domains:
+        # Test with company names instead of domains
+        complex_names = [
+            "Sub Department Company UK",
+            "University Division",
+            "Team Startup IO",
+            "Division Enterprise Corp",
+            "My Company Business Org"
+        ]
+
+        for name in complex_names:
             # Act
-            group_id = Group.generate_group_id(domain)
-            group_name = Group.generate_group_name(domain)
-            
+            group_id = Group.generate_group_id(name)
+
             # Assert
             assert "_" in group_id
             assert "." not in group_id
-            assert " " in group_name or group_name.isalpha()
+            assert " " not in group_id
 
     def test_group_user_edge_cases(self):
         """Test GroupUser edge cases."""
@@ -548,27 +508,24 @@ class TestGroupEdgeCases:
         startup = Group(
             id="techstart_ai_12345678",
             name="TechStart AI",
-            email_domain="techstart.ai",
             description="AI-powered startup focusing on automation",
             auto_created=True,
             created_by_email="founder@techstart.ai"
         )
-        
+
         # Enterprise division
         enterprise = Group(
-            id="megacorp_engineering_87654321", 
+            id="megacorp_engineering_87654321",
             name="MegaCorp Engineering Division",
-            email_domain="engineering.megacorp.com",
             description="Engineering division of MegaCorp",
             auto_created=False,
             created_by_email="admin@megacorp.com"
         )
-        
+
         # Educational institution
         university = Group(
             id="university_cs_11223344",
             name="University Computer Science",
-            email_domain="cs.university.edu",
             description="Computer Science department",
             auto_created=False,
             created_by_email="head@cs.university.edu"
@@ -582,7 +539,7 @@ class TestGroupEdgeCases:
         assert "Engineering" in enterprise.name
         
         assert "Computer Science" in university.name
-        assert ".edu" in university.email_domain
+        assert "department" in university.description
 
     def test_group_membership_patterns(self):
         """Test common group membership patterns."""

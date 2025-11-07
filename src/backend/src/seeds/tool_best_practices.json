@@ -1,0 +1,429 @@
+{
+  "tool_best_practices": {
+    "genie_tool": {
+      "name": "Databricks Genie Tool",
+      "description": "Best practices for creating CrewAI tasks that use GenieTool for natural language data queries. The GenieTool is pre-configured with the appropriate Genie Space - you only need to ask questions in natural language.",
+      "important_note": "The GenieTool is configured at the workflow level with the appropriate spaceId. DO NOT include spaceId or technical configuration in task descriptions - just focus on the business questions. IMPORTANT: Always request aggregated data or limit results (e.g., 'top N items', 'summary') to avoid context limitations with large datasets.",
+      "categories": {
+        "task_descriptions": {
+          "title": "Task Description Best Practices",
+          "key_principle": "Write task descriptions as natural language business questions. The GenieTool understands context and handles all technical complexity internally.",
+          "practices": [
+            {
+              "pattern": "Data Analysis Task",
+              "template": "Using the GenieTool, analyze {metric} for {time_period}. Focus on {specific_aspects} and identify {insights_needed}.",
+              "example": "Using the GenieTool, analyze revenue trends for Q4 2023. Focus on product categories and regional performance to identify top growth opportunities.",
+              "guidelines": [
+                "Use natural language - the tool understands business context",
+                "Mention 'GenieTool' or 'Genie' explicitly in the description",
+                "Focus on business questions, not technical implementation",
+                "Be specific about metrics, time periods, and desired insights"
+              ]
+            },
+            {
+              "pattern": "Customer Insights Task",
+              "template": "Ask Genie about {business_question} and provide {analysis_type}.",
+              "example": "Ask Genie about customer purchase patterns for high-value customers (over $10,000 annual spend) and provide segmentation recommendations.",
+              "guidelines": [
+                "Frame requests as business questions",
+                "The tool handles SQL generation automatically",
+                "Include business context and criteria naturally",
+                "Trust the tool to understand complex queries"
+              ]
+            },
+            {
+              "pattern": "Performance Metrics Task",
+              "template": "Use GenieTool to find out {kpi_question} and compare {comparison_basis}.",
+              "example": "Use GenieTool to find out how conversion rates are performing across marketing channels and compare month-over-month trends.",
+              "guidelines": [
+                "Ask questions as you would to a data analyst",
+                "The tool interprets KPIs and metrics intelligently",
+                "Natural language comparisons work best",
+                "No need for technical query specifications"
+              ]
+            },
+            {
+              "pattern": "Simple Query Task",
+              "template": "Ask Genie: {direct_question}",
+              "example": "Ask Genie: What were our top 10 products by revenue last quarter?",
+              "guidelines": [
+                "Direct questions work perfectly",
+                "The simpler the question, the better",
+                "The tool handles complexity behind the scenes",
+                "Focus on what you want to know, not how to get it",
+                "Always limit results (e.g., 'top 10', 'summary', 'overview') to avoid context issues"
+              ]
+            }
+          ]
+        },
+        "expected_outputs": {
+          "title": "Expected Output Best Practices",
+          "key_principle": "GenieTool returns markdown-formatted answers with data, insights, and explanations. Request the format and level of detail you need.",
+          "practices": [
+            {
+              "pattern": "Structured Data Report",
+              "template": "A comprehensive answer that includes:\n- Summary of {metrics}\n- Relevant data tables\n- Key insights\n- Business recommendations",
+              "example": "A comprehensive answer that includes:\n- Summary of revenue, units sold, and profit margins\n- Data tables with product performance\n- Key insights about trends\n- Top 3 actionable recommendations",
+              "guidelines": [
+                "GenieTool formats data automatically",
+                "Request specific insights or recommendations",
+                "The tool provides both data and interpretation",
+                "Answers include context and explanations"
+              ]
+            },
+            {
+              "pattern": "Executive Summary",
+              "template": "A concise executive summary with key findings and data-backed conclusions",
+              "example": "A concise executive summary with 5 key findings about sales performance, supported by specific numbers and trends",
+              "guidelines": [
+                "Request summaries for high-level views",
+                "The tool balances detail with brevity",
+                "Data support is automatically included",
+                "Formatting is handled by the tool"
+              ]
+            },
+            {
+              "pattern": "Direct Answer",
+              "template": "A direct answer to the question with supporting data",
+              "example": "The answer to 'What is our average order value?' with monthly breakdown and trend analysis",
+              "guidelines": [
+                "Simple questions get focused answers",
+                "Supporting context is provided automatically",
+                "Data accuracy is handled by the tool",
+                "No need to specify output format details"
+              ]
+            }
+          ]
+        },
+        "usage_tips": {
+          "title": "GenieTool Usage Tips",
+          "tips": [
+            {
+              "tip": "Natural Language is Best",
+              "explanation": "Write tasks as if you're asking a knowledgeable data analyst. The tool understands business terminology and context.",
+              "good_example": "Find out which marketing campaigns drove the most revenue last quarter",
+              "bad_example": "Execute SQL query to SELECT campaign_id, SUM(revenue) FROM campaigns GROUP BY campaign_id"
+            },
+            {
+              "tip": "Configuration is Automatic",
+              "explanation": "The Genie Space (data source) is configured at the workflow level. Don't include space IDs or technical configuration in tasks.",
+              "good_example": "Analyze customer churn rates over the past 6 months",
+              "bad_example": "Query space_id='abc-123' for customer churn data from the customer_metrics table"
+            },
+            {
+              "tip": "Trust the Tool's Intelligence",
+              "explanation": "GenieTool understands context, handles joins, aggregations, and complex logic automatically.",
+              "good_example": "Compare this year's sales performance to last year, broken down by region and product category",
+              "bad_example": "Join sales_2024 and sales_2023 tables on product_id and region_id, then calculate year-over-year growth"
+            },
+            {
+              "tip": "Focus on Business Outcomes",
+              "explanation": "Describe what insights you need, not how to calculate them.",
+              "good_example": "Identify which customer segments have the highest lifetime value",
+              "bad_example": "Calculate CLV using the formula (Average Order Value × Purchase Frequency × Customer Lifespan)"
+            },
+            {
+              "tip": "Request Summaries, Not Raw Data",
+              "explanation": "To avoid context issues, ask for aggregated insights rather than large datasets. Request top items, summaries, or specific metrics instead of all rows.",
+              "good_example": "What are the top 10 products by revenue? Provide a summary of sales by category.",
+              "bad_example": "List all transactions from last year. Show me every customer order detail."
+            }
+          ]
+        },
+        "error_handling": {
+          "title": "Error Handling Patterns",
+          "note": "GenieTool handles most error scenarios automatically, but you can add fallback instructions.",
+          "practices": [
+            {
+              "scenario": "Data Availability Issues",
+              "task_description_addon": "If recent data isn't available, provide the most recent available data with a note about the timeframe.",
+              "expected_output_addon": "The answer should indicate the actual data range used if different from requested."
+            },
+            {
+              "scenario": "Complex Queries",
+              "task_description_addon": "For complex analyses, break down the findings into clear sections.",
+              "expected_output_addon": "Structured findings with clear headers for each aspect of the analysis."
+            },
+            {
+              "scenario": "Ambiguous Requests",
+              "task_description_addon": "If the question could be interpreted multiple ways, provide the most likely interpretation first.",
+              "expected_output_addon": "The answer should state any assumptions made in interpreting the question."
+            }
+          ]
+        }
+      }
+    },
+    "reveal_js": {
+      "name": "Reveal.js Presentation Tool",
+      "description": "Best practices for creating CrewAI tasks that generate SINGLE self-contained HTML files with reveal.js embedded using CDN links",
+      "important_note": "ALWAYS generate a single, complete HTML file with reveal.js loaded from CDN. Do NOT create separate files or require local dependencies. The output must be one HTML file that works standalone.",
+      "categories": {
+        "task_descriptions": {
+          "title": "Task Description Best Practices",
+          "practices": [
+            {
+              "pattern": "Technical Presentation",
+              "template": "Create a SINGLE HTML file with embedded reveal.js (using CDN) about {topic} with {num_slides} slides. Include {content_types}. Ensure viewport-responsive design.",
+              "example": "Create a SINGLE HTML file with embedded reveal.js (using CDN) about microservices architecture with 10-12 slides. Include code examples with syntax highlighting, transitions, and fragments. Ensure all content fits within viewport boundaries.",
+              "guidelines": [
+                "Emphasize SINGLE HTML file output",
+                "Specify CDN-based reveal.js embedding",
+                "Request viewport-aware content sizing",
+                "Mention transition effects if needed",
+                "Ensure responsive design for all screen sizes"
+              ]
+            },
+            {
+              "pattern": "Business Presentation",
+              "template": "Generate a SINGLE HTML file presentation on {topic} for {audience}. Use reveal.js CDN, fade transitions, and fragments. Ensure content stays within viewport.",
+              "example": "Generate a SINGLE HTML file presentation on Q4 results for executive leadership. Use reveal.js CDN with fade transitions, fragment animations for data reveals. Include speaker notes in HTML comments.",
+              "guidelines": [
+                "Single HTML file with CDN links",
+                "Use fragments for incremental reveals",
+                "Specify transition types (fade, slide, zoom)",
+                "Keep images/charts within viewport bounds",
+                "Include viewport meta tag for responsiveness"
+              ]
+            },
+            {
+              "pattern": "Training Material",
+              "template": "Develop a standalone HTML training presentation covering {topics}. Use reveal.js CDN with code highlighting. Apply max-width/max-height for responsive content.",
+              "example": "Develop a standalone HTML training presentation covering Python async programming. Use reveal.js CDN with highlight.js for code, fade-in fragments, and viewport-constrained content sizing.",
+              "guidelines": [
+                "Complete HTML with all CDN dependencies",
+                "Use Highlight.js CDN for code blocks",
+                "Apply CSS max-width: 100vw, max-height: 100vh",
+                "Include both horizontal and vertical slides",
+                "Test responsiveness with different viewports"
+              ]
+            }
+          ]
+        },
+        "expected_outputs": {
+          "title": "Expected Output Best Practices",
+          "key_principle": "MUST be a single, complete HTML file with reveal.js loaded from CDN. No separate files, no local dependencies.",
+          "practices": [
+            {
+              "pattern": "Complete HTML Presentation",
+              "template": "A single HTML file containing:\n<!DOCTYPE html>\n<html>\n<head>\n  - CDN links for reveal.js CSS/JS\n  - Viewport meta tag\n  - Max-width/height CSS rules\n</head>\n<body>\n  <div class='reveal'><div class='slides'>\n    - All slide content\n  </div></div>\n  - CDN script includes\n  - Reveal.initialize()\n</body>\n</html>",
+              "example": "A complete HTML file with:\n- reveal.js 4.x CDN links from jsdelivr\n- <meta name='viewport' content='width=device-width, initial-scale=1.0'>\n- CSS: .reveal .slides section { max-width: 90vw; max-height: 90vh; }\n- Reveal.initialize({ transition: 'fade', hash: true })",
+              "guidelines": [
+                "Must be valid, complete HTML",
+                "All resources from CDN (no local files)",
+                "Include viewport meta for mobile",
+                "CSS to constrain content to viewport",
+                "Initialize reveal.js with configuration"
+              ]
+            },
+            {
+              "pattern": "CDN Resource Structure",
+              "template": "HTML head with CDN resources:\n- reveal.js core CSS from CDN\n- Theme CSS from CDN (white, black, etc.)\n- Plugin CSS if needed\nHTML body end with:\n- reveal.js core JS from CDN\n- Plugin JS files from CDN\n- Initialization script",
+              "example": "<!-- In HEAD -->\n<link rel='stylesheet' href='https://cdn.jsdelivr.net/npm/reveal.js@4/dist/reveal.css'>\n<link rel='stylesheet' href='https://cdn.jsdelivr.net/npm/reveal.js@4/dist/theme/white.css'>\n<!-- Before </body> -->\n<script src='https://cdn.jsdelivr.net/npm/reveal.js@4/dist/reveal.js'></script>",
+              "guidelines": [
+                "Use specific version numbers in CDN URLs",
+                "Include both CSS and JS from same CDN",
+                "Load plugins (markdown, highlight, notes)",
+                "Configure reveal.js properly",
+                "Test CDN availability"
+              ]
+            },
+            {
+              "pattern": "Responsive Design Implementation",
+              "template": "Viewport-aware CSS:\n- max-width: 95vw for slide content\n- max-height: 95vh for images/charts\n- Responsive font sizes\n- Media queries for mobile\nReveal config:\n- width: 960, height: 700 (defaults)\n- minScale: 0.2, maxScale: 2.0",
+              "example": "<style>\n.reveal .slides section {\n  max-width: 95vw;\n  overflow: hidden;\n}\n.reveal img, .reveal video {\n  max-width: 90%;\n  max-height: 80vh;\n}\n</style>",
+              "guidelines": [
+                "Constrain all content to viewport",
+                "Use relative units (vw, vh, %)",
+                "Test on different screen sizes",
+                "Ensure text remains readable",
+                "Prevent horizontal scrolling"
+              ]
+            }
+          ]
+        },
+        "html_structure_rules": {
+          "title": "HTML Structure & Best Practices",
+          "practices": [
+            {
+              "rule": "Complete HTML Template",
+              "description": "Must include DOCTYPE, complete head/body, CDN links, and initialization",
+              "example": "<!DOCTYPE html>\n<html lang='en'>\n<head>\n  <meta charset='UTF-8'>\n  <meta name='viewport' content='width=device-width, initial-scale=1.0'>\n  <title>Presentation Title</title>\n  <link rel='stylesheet' href='https://cdn.jsdelivr.net/npm/reveal.js@4/dist/reveal.css'>\n  <link rel='stylesheet' href='https://cdn.jsdelivr.net/npm/reveal.js@4/dist/theme/white.css'>\n  <style>\n    .reveal .slides section { max-width: 95vw; max-height: 95vh; }\n  </style>\n</head>\n<body>\n  <div class='reveal'>\n    <div class='slides'>\n      <section>Slide 1</section>\n      <section>Slide 2</section>\n    </div>\n  </div>\n  <script src='https://cdn.jsdelivr.net/npm/reveal.js@4/dist/reveal.js'></script>\n  <script>\n    Reveal.initialize({\n      hash: true,\n      transition: 'fade',\n      transitionSpeed: 'default'\n    });\n  </script>\n</body>\n</html>"
+            },
+            {
+              "rule": "Transitions & Animations",
+              "description": "Use data-transition for slides, class='fragment' for incremental reveals",
+              "example": "<section data-transition='fade'>\n  <h2>Title</h2>\n  <p class='fragment fade-in'>First appears</p>\n  <p class='fragment fade-up'>Then slides up</p>\n  <p class='fragment highlight-red'>Then highlights</p>\n</section>"
+            },
+            {
+              "rule": "Viewport Constraints",
+              "description": "Apply CSS to ensure content stays within viewport boundaries",
+              "example": "<style>\n  .reveal .slides section {\n    max-width: 95vw;\n    max-height: 95vh;\n    overflow: auto;\n  }\n  .reveal img, .reveal iframe {\n    max-width: 90%;\n    max-height: 80vh;\n    object-fit: contain;\n  }\n</style>"
+            },
+            {
+              "rule": "Code Highlighting",
+              "description": "Include highlight.js plugin from CDN for syntax highlighting",
+              "example": "<!-- In HEAD -->\n<link rel='stylesheet' href='https://cdn.jsdelivr.net/npm/reveal.js@4/plugin/highlight/monokai.css'>\n<!-- Before closing BODY -->\n<script src='https://cdn.jsdelivr.net/npm/reveal.js@4/plugin/highlight/highlight.js'></script>\n<!-- In code slides -->\n<pre><code data-trim data-noescape class='language-python'>\ndef analyze_data(df):\n    return df.groupby('category').sum()\n</code></pre>"
+            },
+            {
+              "rule": "Speaker Notes",
+              "description": "Use <aside class='notes'> for speaker notes within sections",
+              "example": "<section>\n  <h2>Main Point</h2>\n  <p>Visible content</p>\n  <aside class='notes'>\n    Remember to emphasize ROI impact.\n    Mention the Q4 targets.\n  </aside>\n</section>"
+            }
+          ]
+        },
+        "critical_requirements": {
+          "title": "CRITICAL Requirements for Reveal.js Output",
+          "requirements": [
+            {
+              "requirement": "Single HTML File Only",
+              "description": "The ENTIRE presentation must be in ONE HTML file. No separate CSS, JS, or asset files.",
+              "correct": "One complete HTML file with all content embedded",
+              "incorrect": "Multiple files, external stylesheets, local JavaScript files"
+            },
+            {
+              "requirement": "CDN Dependencies Only",
+              "description": "All reveal.js resources must be loaded from CDN URLs, not local paths.",
+              "correct": "https://cdn.jsdelivr.net/npm/reveal.js@4/dist/reveal.css",
+              "incorrect": "./reveal.css or dist/reveal.css"
+            },
+            {
+              "requirement": "Viewport Responsiveness",
+              "description": "Content must be constrained to viewport using max-width and max-height CSS.",
+              "correct": "max-width: 95vw; max-height: 95vh; on slide sections",
+              "incorrect": "Fixed pixel sizes that cause overflow"
+            },
+            {
+              "requirement": "Complete HTML Structure",
+              "description": "Must be a valid, complete HTML document that opens directly in any browser.",
+              "correct": "<!DOCTYPE html>, <html>, <head>, <body> with proper closing tags",
+              "incorrect": "HTML fragments or incomplete documents"
+            },
+            {
+              "requirement": "Self-Contained Functionality",
+              "description": "The file must work offline (except for CDN resources) with no server required.",
+              "correct": "All slide content, styles, and configuration in the HTML",
+              "incorrect": "References to external content files or APIs"
+            }
+          ]
+        }
+      }
+    },
+    "data_visualization": {
+      "name": "Data Visualization Tools",
+      "description": "Best practices for creating tasks that generate data visualizations",
+      "categories": {
+        "task_descriptions": {
+          "title": "Task Description Best Practices",
+          "practices": [
+            {
+              "pattern": "Chart Generation",
+              "template": "Create a {chart_type} visualization showing {data_points} over {dimension}. Use {color_scheme} and include {annotations}.",
+              "example": "Create a line chart visualization showing revenue and profit margins over the last 12 months. Use corporate color scheme and include trend annotations.",
+              "guidelines": [
+                "Specify chart type explicitly",
+                "Define data series clearly",
+                "Mention color requirements",
+                "Include annotation needs"
+              ]
+            }
+          ]
+        },
+        "expected_outputs": {
+          "title": "Expected Output Best Practices",
+          "practices": [
+            {
+              "pattern": "Visualization Specification",
+              "template": "A visualization specification including:\n- Chart configuration in JSON/Dict format\n- Data structure with columns and types\n- Styling parameters\n- Interactive features list",
+              "example": "A visualization spec including:\n- Plotly/Chart.js configuration object\n- Data: [{x: date, y: value, series: name}]\n- Colors, fonts, and layout settings\n- Hover tooltips and zoom capabilities",
+              "guidelines": [
+                "Request specific format (JSON/code)",
+                "Define data structure needed",
+                "Include styling requirements",
+                "Specify interactivity needs"
+              ]
+            }
+          ]
+        }
+      }
+    },
+    "general_patterns": {
+      "name": "General CrewAI Patterns",
+      "description": "Universal best practices for all CrewAI task types",
+      "categories": {
+        "task_chaining": {
+          "title": "Task Chaining Patterns",
+          "practices": [
+            {
+              "pattern": "Sequential Processing",
+              "description": "Tasks that depend on previous task outputs",
+              "example": "research_task → analysis_task → report_task",
+              "guidelines": [
+                "Use context parameter to link tasks",
+                "Reference previous outputs explicitly",
+                "Validate input availability",
+                "Handle missing dependencies"
+              ]
+            },
+            {
+              "pattern": "Parallel Processing",
+              "description": "Tasks that can run simultaneously",
+              "example": "data_fetch_task + metric_calc_task → combine_task",
+              "guidelines": [
+                "Use async_execution flag",
+                "Design independent task scopes",
+                "Plan aggregation strategy",
+                "Consider resource limits"
+              ]
+            }
+          ]
+        },
+        "validation_patterns": {
+          "title": "Output Validation",
+          "practices": [
+            {
+              "pattern": "Structured Output Validation",
+              "description": "Using Pydantic models for output validation",
+              "implementation": "expected_output=YourPydanticModel",
+              "benefits": [
+                "Type safety",
+                "Automatic validation",
+                "Clear structure definition",
+                "IDE support"
+              ]
+            },
+            {
+              "pattern": "Guardrails",
+              "description": "Custom validation functions for task outputs",
+              "implementation": "def validate_output(output): return validated_output",
+              "use_cases": [
+                "Format checking",
+                "Content filtering",
+                "Quality assurance",
+                "Security validation"
+              ]
+            }
+          ]
+        }
+      }
+    }
+  },
+  "integration_guidelines": {
+    "title": "Tool Integration Guidelines",
+    "principles": [
+      "Always specify the tool explicitly in task descriptions",
+      "Include tool-specific parameters in the task context",
+      "Design expected outputs that match tool capabilities",
+      "Plan for tool-specific error scenarios",
+      "Use appropriate formatting for each tool's output",
+      "Consider tool performance characteristics in task design"
+    ],
+    "checklist": [
+      "Is the tool mentioned explicitly in the task description?",
+      "Are tool-specific parameters clearly defined?",
+      "Does the expected output match what the tool can provide?",
+      "Are error handling scenarios covered?",
+      "Is the output format appropriate for downstream tasks?",
+      "Have performance considerations been addressed?"
+    ]
+  }
+}

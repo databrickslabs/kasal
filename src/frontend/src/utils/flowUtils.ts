@@ -31,23 +31,21 @@ export const calculateNonOverlappingPosition = (basePosition: { x: number; y: nu
  * Logs edge details for debugging purposes
  */
 export const logEdgeDetails = (edges: Edge[], message: string) => {
-  console.log(message, edges.length);
   
   // Group edges by type (agent-task, task-task)
-  const agentToTaskEdges = edges.filter(edge => 
-    edge.source.includes('agent') && edge.target.includes('task')
-  );
+  // const _agentToTaskEdges = edges.filter(edge => 
+  //   edge.source.includes('agent') && edge.target.includes('task')
+  // );
   
   const taskToTaskEdges = edges.filter(edge => 
     edge.source.includes('task') && edge.target.includes('task')
   );
   
-  console.log(`Edge breakdown: ${agentToTaskEdges.length} agent-to-task edges, ${taskToTaskEdges.length} task-to-task edges`);
   
   // Log a few example edges for debugging
   if (taskToTaskEdges.length > 0) {
-    console.log("Example task-to-task edges:", taskToTaskEdges.slice(0, 3));
+    // Task-to-task edges exist
   } else {
-    console.log("No task-to-task edges found");
+    // No task-to-task edges
   }
 }; 

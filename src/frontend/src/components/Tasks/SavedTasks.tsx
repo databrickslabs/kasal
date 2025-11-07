@@ -70,7 +70,7 @@ function SavedTasks({ refreshTrigger }: SavedTasksProps): JSX.Element {
     const fetchData = async () => {
       try {
         const [toolsResponse, agentsResponse] = await Promise.all([
-          ToolService.listTools(),
+          ToolService.listEnabledTools(),
           AgentService.listAgents()
         ]);
         setTools(toolsResponse);

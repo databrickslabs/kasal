@@ -48,6 +48,6 @@ class FlowNodeExecution(Base):
     error = Column(Text, nullable=True)
     
     # Metadata
-    created_at = Column(DateTime, default=datetime.now(timezone.utc))
-    updated_at = Column(DateTime, default=datetime.now(timezone.utc), onupdate=datetime.now(timezone.utc))
-    completed_at = Column(DateTime, nullable=True) 
+    created_at = Column(DateTime, default=datetime.utcnow)  # Use timezone-naive UTC time for consistency
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)  # Use timezone-naive UTC time for consistency
+    completed_at = Column(DateTime, nullable=True)

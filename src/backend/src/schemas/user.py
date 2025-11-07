@@ -59,7 +59,7 @@ class UserUpdate(BaseModel):
     username: Optional[str] = None
     email: Optional[EmailStr] = None
     status: Optional[UserStatus] = None
-    
+
     @field_validator('username', mode='before')
     def username_validator(cls, v):
         if v is None:
@@ -69,6 +69,12 @@ class UserUpdate(BaseModel):
         if len(v) < 3 or len(v) > 50:
             raise ValueError('Username must be between 3 and 50 characters')
         return v
+
+
+# User permission update (for system admins only)
+class UserPermissionUpdate(BaseModel):
+    is_system_admin: Optional[bool] = None
+    is_personal_workspace_manager: Optional[bool] = None
 
 # Password change
 class PasswordChange(BaseModel):
@@ -125,172 +131,34 @@ class TokenData(BaseModel):
     role: UserRole
     exp: int
 
-# User profile
-class UserProfileBase(BaseModel):
-    display_name: Optional[str] = None
-    avatar_url: Optional[str] = None
-    preferences: Optional[Dict[str, Any]] = None
+# UserProfile schemas removed - display_name moved to User model
 
-class UserProfileCreate(UserProfileBase):
-    pass
+# Complex RBAC schemas removed - using simplified group-based roles
 
-class UserProfileUpdate(UserProfileBase):
-    pass
+# Complex identity provider schemas removed - using simplified auth
 
-class UserProfileInDB(UserProfileBase):
-    id: str
-    user_id: str
-    
-    model_config = {
-        "from_attributes": True
-    }
-
-# Role and privilege schemas
-class PrivilegeBase(BaseModel):
-    name: str  # Format: "resource:action"
-    description: Optional[str] = None
-
-class PrivilegeCreate(PrivilegeBase):
-    pass
-
-class PrivilegeUpdate(BaseModel):
-    description: Optional[str] = None
-
-class PrivilegeInDB(PrivilegeBase):
-    id: str
-    created_at: datetime
-    
-    model_config = {
-        "from_attributes": True
-    }
-
-class RoleBase(BaseModel):
-    name: str
-    description: Optional[str] = None
-
-class RoleCreate(RoleBase):
-    privileges: List[str]  # List of privilege names
-
-class RoleUpdate(BaseModel):
-    name: Optional[str] = None
-    description: Optional[str] = None
-    privileges: Optional[List[str]] = None  # List of privilege names
-
-class RoleInDB(RoleBase):
-    id: str
-    created_at: datetime
-    updated_at: datetime
-    
-    model_config = {
-        "from_attributes": True
-    }
-
-class RoleWithPrivileges(RoleInDB):
-    privileges: List[PrivilegeInDB]
-
-# Identity provider schemas
-class IdentityProviderBase(BaseModel):
-    name: str
-    type: IdentityProviderType
-    enabled: bool = True
-    is_default: bool = False
-
-class IdentityProviderConfig(BaseModel):
-    client_id: Optional[str] = None
-    client_secret: Optional[str] = None
-    tenant_id: Optional[str] = None
-    authorization_endpoint: Optional[str] = None
-    token_endpoint: Optional[str] = None
-    user_info_endpoint: Optional[str] = None
-    scope: Optional[str] = None
-    redirect_uri: Optional[str] = None
-    cert: Optional[str] = None
-    issuer: Optional[str] = None
-    entry_point: Optional[str] = None
-    role_mapping: Optional[Dict[str, Any]] = None
-
-class IdentityProviderCreate(IdentityProviderBase):
-    config: IdentityProviderConfig
-
-class IdentityProviderUpdate(BaseModel):
-    name: Optional[str] = None
-    type: Optional[IdentityProviderType] = None
-    enabled: Optional[bool] = None
-    is_default: Optional[bool] = None
-    config: Optional[IdentityProviderConfig] = None
-
-class IdentityProviderInDB(IdentityProviderBase):
-    id: str
-    config: IdentityProviderConfig
-    created_at: datetime
-    updated_at: datetime
-    
-    model_config = {
-        "from_attributes": True
-    }
-
-class IdentityProviderResponse(IdentityProviderInDB):
-    config: Optional[IdentityProviderConfig] = None  # Allow None for non-admin users
-
-class IdentityProviderListResponse(BaseModel):
-    providers: List[IdentityProviderResponse]
-    total: int
-
-class IdentityProviderUsageStatsResponse(BaseModel):
-    provider_id: str
-    provider_name: str
-    user_count: int
-    login_count: int
-    last_login: Optional[datetime] = None
-    active_users: Optional[int] = None
-
-# External identity schemas
-class ExternalIdentityBase(BaseModel):
-    provider: str
-    provider_user_id: str
-    email: Optional[EmailStr] = None
-
-class ExternalIdentityCreate(ExternalIdentityBase):
-    profile_data: Optional[Dict[str, Any]] = None
-
-class ExternalIdentityInDB(ExternalIdentityBase):
-    id: str
-    user_id: str
-    profile_data: Optional[Dict[str, Any]] = None
-    created_at: datetime
-    last_login: Optional[datetime] = None
-    
-    model_config = {
-        "from_attributes": True
-    }
+# Complex external identity schemas removed - using simplified auth
 
 # User with complete info
 class UserInDB(UserBase):
     id: str
+    display_name: Optional[str] = None  # Moved from UserProfile
     role: UserRole
     status: UserStatus
+    is_system_admin: bool = False
+    is_personal_workspace_manager: bool = False
     created_at: datetime
     updated_at: datetime
     last_login: Optional[datetime] = None
-    
+
     model_config = {
         "from_attributes": True,
         "use_enum_values": True
     }
 
-class UserWithProfile(UserInDB):
-    profile: Optional[UserProfileInDB] = None
+# UserWithProfile removed - display_name is now part of UserInDB
 
-class UserWithExternalIdentities(UserInDB):
-    external_identities: List[ExternalIdentityInDB] = []
-
-class UserComplete(UserInDB):
-    profile: Optional[UserProfileInDB] = None
-    external_identities: List[ExternalIdentityInDB] = []
-
-# Role assignment
-class UserRoleAssign(BaseModel):
-    role_id: str
+# Complex user auth schemas removed - using simplified auth
 
 # OAuth authorization
 class OAuthAuthorize(BaseModel):
@@ -319,25 +187,4 @@ class GroupUpdate(BaseModel):
     name: Optional[str] = None
     description: Optional[str] = None
 
-# Databricks role schemas
-class DatabricksRoleCreate(BaseModel):
-    name: str
-    description: Optional[str] = None
-    privileges: List[str] = []
-
-class DatabricksRoleUpdate(BaseModel):
-    name: Optional[str] = None
-    description: Optional[str] = None
-    privileges: Optional[List[str]] = None
-
-# User role assignment schemas
-class UserRoleAssignment(BaseModel):
-    user_id: str
-    role_id: str
-
-class UserRoleUpdate(BaseModel):
-    role_id: str
-
-
-# Backward compatibility alias for Role schema
-Role = RoleInDB
+# Complex RBAC and Databricks role schemas removed - using simplified group-based roles

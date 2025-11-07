@@ -133,14 +133,19 @@ class TestApiKey:
         assert "INTEGER" in str(id_column.type)
 
     def test_api_key_unique_constraints(self):
-        """Test that name has unique constraint."""
+        """Test that name is indexed and there's a composite unique constraint with group_id."""
         # Act
         columns = ApiKey.__table__.columns
         
         # Assert
-        assert columns['name'].unique is True
+        # Name is no longer unique by itself (composite unique with group_id)
+        assert columns['name'].unique is not True  # Not unique by itself
         assert columns['name'].index is True
         assert columns['name'].nullable is False
+        
+        # Check for group_id column
+        assert 'group_id' in columns
+        assert columns['group_id'].nullable is True  # Can be null for backwards compatibility
 
     def test_api_key_indexes(self):
         """Test that the model has the expected database indexes."""

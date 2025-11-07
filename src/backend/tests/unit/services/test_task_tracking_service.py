@@ -614,7 +614,7 @@ class TestTaskTrackingService:
         task_id = "task-456"
         test_error = Exception("Test error")
         callbacks = task_tracking_service.create_task_callbacks(job_id, task_id)
-        
+
         # Set up service with db attribute
         mock_db = Mock(spec=Session)
         mock_execution = MockExecutionHistory(id=1, job_id=job_id)
@@ -622,9 +622,9 @@ class TestTaskTrackingService:
         task_tracking_service.db = mock_db
 
         # Act & Assert
-        with patch('src.services.task_tracking_service.asyncio.run') as mock_run, \
+        with patch('src.services.task_tracking_service.asyncio.run', side_effect=lambda coro: None) as mock_run, \
              patch('src.services.task_tracking_service.crew_logger') as mock_logger:
-            
+
             result = callbacks["on_error"](test_error)
             assert result == test_error
             mock_logger.error.assert_called()
@@ -638,16 +638,16 @@ class TestTaskTrackingService:
         task_id = "task-456"
         test_error = Exception("Test error")
         callbacks = task_tracking_service.create_task_callbacks(job_id, task_id)
-        
+
         # Set up service with db attribute but no execution history
         mock_db = Mock(spec=Session)
         mock_db.query.return_value.filter.return_value.first.return_value = None
         task_tracking_service.db = mock_db
 
         # Act & Assert
-        with patch('src.services.task_tracking_service.asyncio.run') as mock_run, \
+        with patch('src.services.task_tracking_service.asyncio.run', side_effect=lambda coro: None) as mock_run, \
              patch('src.services.task_tracking_service.crew_logger') as mock_logger:
-            
+
             result = callbacks["on_error"](test_error)
             assert result == test_error
             mock_logger.error.assert_called()
@@ -701,43 +701,32 @@ class TestGetTaskTrackingService:
     @pytest.mark.asyncio
     async def test_get_task_tracking_service_success(self):
         """Test successful creation of TaskTrackingService dependency."""
+        from unittest.mock import MagicMock
         # Act
         with patch('src.services.task_tracking_service.TaskTrackingRepository') as mock_repo_class:
             mock_repo_instance = Mock()
             mock_repo_class.return_value = mock_repo_instance
-            
-            # Use the generator
-            service_gen = get_task_tracking_service()
-            service = await service_gen.__anext__()
+            mock_session = MagicMock()
+
+            service = await get_task_tracking_service(mock_session)
 
             # Assert
             assert isinstance(service, TaskTrackingService)
             assert service.repository == mock_repo_instance
-            mock_repo_class.assert_called_once_with()
-
-            # Test cleanup
-            try:
-                await service_gen.__anext__()
-            except StopAsyncIteration:
-                pass  # Expected
+            mock_repo_class.assert_called_once_with(mock_session)
 
     @pytest.mark.asyncio
     async def test_get_task_tracking_service_cleanup(self):
-        """Test that cleanup happens properly in dependency function."""
-        # Act
+        """Test simple call returns a service (no generator cleanup needed)."""
+        from unittest.mock import MagicMock
         with patch('src.services.task_tracking_service.TaskTrackingRepository') as mock_repo_class:
             mock_repo_instance = Mock()
             mock_repo_class.return_value = mock_repo_instance
-            
-            # Simulate the dependency injection lifecycle
-            async def simulate_dependency():
-                async for service in get_task_tracking_service():
-                    yield service
-            
-            # Use the dependency
-            async for service in simulate_dependency():
-                assert isinstance(service, TaskTrackingService)
-                break
+            mock_session = MagicMock()
+
+            service = await get_task_tracking_service(mock_session)
+            assert isinstance(service, TaskTrackingService)
+            assert service.repository == mock_repo_instance
 
 
 class TestTaskTrackingServiceIntegration:

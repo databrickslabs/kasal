@@ -3,9 +3,9 @@ from typing import Annotated, List, Dict, Any
 from fastapi import APIRouter, Depends, HTTPException, Path, Query, status
 import logging
 
-from src.core.dependencies import SessionDep, GroupContextDep, get_service
+from src.core.dependencies import SessionDep, GroupContextDep
+from src.core.permissions import check_role_in_context
 from src.models.task import Task
-from src.repositories.task_repository import TaskRepository
 from src.schemas.task import Task as TaskSchema
 from src.schemas.task import TaskCreate, TaskUpdate
 from src.services.task_service import TaskService
@@ -19,27 +19,51 @@ router = APIRouter(
 # Set up logging
 logger = logging.getLogger(__name__)
 
-# Dependency to get TaskService
-get_task_service = get_service(TaskService, TaskRepository, Task)
+async def get_task_service(session: SessionDep) -> TaskService:
+    """
+    Dependency provider for TaskService.
+
+    Creates service with properly injected session following the pattern:
+    Router → Service → Repository → DB
+
+    Args:
+        session: Database session from FastAPI DI
+
+    Returns:
+        TaskService instance with injected session
+    """
+    return TaskService(session=session)
+
+# Type alias for cleaner function signatures
+TaskServiceDep = Annotated[TaskService, Depends(get_task_service)]
+
 
 
 @router.post("", response_model=TaskSchema, status_code=status.HTTP_201_CREATED)
 async def create_task(
     task_in: TaskCreate,
-    service: Annotated[TaskService, Depends(get_task_service)],
+    service: TaskServiceDep,
     group_context: GroupContextDep,
 ):
     """
     Create a new task with group isolation.
-    
+    Only Editors and Admins can create tasks.
+
     Args:
         task_in: Task data for creation
         service: Task service injected by dependency
         group_context: Group context from headers
-        
+
     Returns:
         Created task
     """
+    # Check permissions - only editors and admins can create tasks
+    if not check_role_in_context(group_context, ["admin", "editor"]):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Only editors and admins can create tasks"
+        )
+
     try:
         return await service.create_with_group(task_in, group_context)
     except Exception as e:
@@ -49,7 +73,7 @@ async def create_task(
 
 @router.get("", response_model=List[TaskSchema])
 async def list_tasks(
-    service: Annotated[TaskService, Depends(get_task_service)],
+    service: TaskServiceDep,
     group_context: GroupContextDep,
 ):
     """
@@ -72,23 +96,25 @@ async def list_tasks(
 @router.get("/{task_id}", response_model=TaskSchema)
 async def get_task(
     task_id: Annotated[str, Path(title="The ID of the task to get")],
-    service: Annotated[TaskService, Depends(get_task_service)],
+    service: TaskServiceDep,
+    group_context: GroupContextDep,
 ):
     """
-    Get a specific task by ID.
+    Get a specific task by ID with group isolation.
     
     Args:
         task_id: ID of the task to get
         service: Task service injected by dependency
+        group_context: Group context from headers
         
     Returns:
-        Task if found
+        Task if found and belongs to user's group
         
     Raises:
-        HTTPException: If task not found
+        HTTPException: If task not found or not authorized
     """
     try:
-        task = await service.get(task_id)
+        task = await service.get_with_group_check(task_id, group_context)
         if not task:
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND,
@@ -113,24 +139,34 @@ async def get_task(
 async def update_task_full(
     task_id: Annotated[str, Path(title="The ID of the task to update")],
     task_in: dict,
-    service: Annotated[TaskService, Depends(get_task_service)],
+    service: TaskServiceDep,
+    group_context: GroupContextDep,
 ):
     """
-    Update all fields of an existing task.
-    
+    Update all fields of an existing task with group isolation.
+    Only Editors and Admins can update tasks.
+
     Args:
         task_id: ID of the task to update
         task_in: Full task data for update
         service: Task service injected by dependency
-        
+        group_context: Group context from headers
+
     Returns:
         Updated task
-        
+
     Raises:
-        HTTPException: If task not found
+        HTTPException: If task not found or not authorized
     """
+    # Check permissions - only editors and admins can update tasks
+    if not check_role_in_context(group_context, ["admin", "editor"]):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Only editors and admins can update tasks"
+        )
+
     try:
-        task = await service.update_full(task_id, task_in)
+        task = await service.update_full_with_group_check(task_id, task_in, group_context)
         if not task:
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND,
@@ -149,24 +185,34 @@ async def update_task_full(
 async def update_task(
     task_id: Annotated[str, Path(title="The ID of the task to update")],
     task_in: TaskUpdate,
-    service: Annotated[TaskService, Depends(get_task_service)],
+    service: TaskServiceDep,
+    group_context: GroupContextDep,
 ):
     """
-    Update an existing task with partial data.
-    
+    Update an existing task with partial data and group isolation.
+    Only Editors and Admins can update tasks.
+
     Args:
         task_id: ID of the task to update
         task_in: Task data for update
         service: Task service injected by dependency
-        
+        group_context: Group context from headers
+
     Returns:
         Updated task
-        
+
     Raises:
-        HTTPException: If task not found
+        HTTPException: If task not found or not authorized
     """
+    # Check permissions - only editors and admins can update tasks
+    if not check_role_in_context(group_context, ["admin", "editor"]):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Only editors and admins can update tasks"
+        )
+
     try:
-        task = await service.update_with_partial_data(task_id, task_in)
+        task = await service.update_with_group_check(task_id, task_in, group_context)
         if not task:
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND,
@@ -184,20 +230,30 @@ async def update_task(
 @router.delete("/{task_id}", status_code=status.HTTP_204_NO_CONTENT)
 async def delete_task(
     task_id: Annotated[str, Path(title="The ID of the task to delete")],
-    service: Annotated[TaskService, Depends(get_task_service)],
+    service: TaskServiceDep,
+    group_context: GroupContextDep,
 ):
     """
-    Delete a task.
-    
+    Delete a task with group isolation.
+    Only Editors and Admins can delete tasks.
+
     Args:
         task_id: ID of the task to delete
         service: Task service injected by dependency
-        
+        group_context: Group context from headers
+
     Raises:
-        HTTPException: If task not found
+        HTTPException: If task not found or not authorized
     """
+    # Check permissions - only editors and admins can delete tasks
+    if not check_role_in_context(group_context, ["admin", "editor"]):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Only editors and admins can delete tasks"
+        )
+
     try:
-        deleted = await service.delete(task_id)
+        deleted = await service.delete_with_group_check(task_id, group_context)
         if not deleted:
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND,
@@ -213,16 +269,26 @@ async def delete_task(
 
 @router.delete("", status_code=status.HTTP_204_NO_CONTENT)
 async def delete_all_tasks(
-    service: Annotated[TaskService, Depends(get_task_service)],
+    service: TaskServiceDep,
+    group_context: GroupContextDep,
 ):
     """
-    Delete all tasks.
-    
+    Delete all tasks for the current group.
+    Only Admins can delete all tasks.
+
     Args:
         service: Task service injected by dependency
+        group_context: Group context from headers
     """
+    # Check permissions - only admins can delete all tasks
+    if not check_role_in_context(group_context, ["admin"]):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Only admins can delete all tasks"
+        )
+
     try:
-        await service.delete_all()
+        await service.delete_all_for_group(group_context)
     except Exception as e:
         logger.error(f"Error deleting all tasks: {e}")
         raise HTTPException(status_code=500, detail=str(e)) 

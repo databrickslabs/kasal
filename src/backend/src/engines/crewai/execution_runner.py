@@ -7,8 +7,11 @@ the execution lifecycle.
 import logging
 import asyncio
 import traceback
-from typing import Any, Dict
+import threading
+from typing import Any, Dict, Optional
 import os
+from src.services.crew_executor import crew_executor
+from src.services.process_crew_executor import process_crew_executor
 
 
 from crewai import Crew, LLM
@@ -132,12 +135,37 @@ async def run_crew(execution_id: str, crew: Crew, running_jobs: Dict, group_cont
     
     # Initialize AgentTraceEventListener for trace processing (without global event listeners)
     from src.engines.crewai.callbacks.logging_callbacks import AgentTraceEventListener
-    trace_listener = AgentTraceEventListener(job_id=execution_id, group_context=group_context)
+    from src.services.engine_config_service import EngineConfigService
+    from src.db.session import get_db
+
+    # Fetch debug tracing flag from engine configuration (default False on errors)
+    debug_tracing_enabled = False
+    try:
+        from src.db.session import async_session_factory
+        async with async_session_factory() as session:
+            service = EngineConfigService(session)
+            debug_tracing_enabled = await service.get_crewai_debug_tracing()
+    except Exception as e:
+        logger.warning(f"Failed to read CrewAI debug tracing flag; defaulting to False. Error: {e}")
+
+    logger.debug(f"[TRACE_DEBUG] Creating AgentTraceEventListener for execution {execution_id} (debug_tracing={debug_tracing_enabled})")
+    trace_listener = AgentTraceEventListener(job_id=execution_id, group_context=group_context, debug_tracing=debug_tracing_enabled)
+    logger.debug(f"[TRACE_DEBUG] AgentTraceEventListener created successfully")
+
+    # CRITICAL: Register the event listeners with the CrewAI event bus
+    # This was missing and caused events not to be captured
+    from crewai.events import crewai_event_bus
+    logger.debug(f"[TRACE_DEBUG] About to register event listeners with CrewAI event bus")
+    trace_listener.setup_listeners(crewai_event_bus)
+    logger.debug(f"[TRACE_DEBUG] Registered AgentTraceEventListener with CrewAI event bus for execution {execution_id}")
+
+    # Debug: Check if event bus has handlers registered
+    logger.debug(f"[TRACE_DEBUG] Event bus type: {type(crewai_event_bus)}")
+    logger.debug(f"[TRACE_DEBUG] Event bus has handlers: {hasattr(crewai_event_bus, '_handlers')}")
     
-    # Register this execution for LLM event routing
-    from src.engines.crewai.callbacks.llm_event_router import register_execution_for_llm_events
-    register_execution_for_llm_events(execution_id, crew, group_context)
-    logger.info(f"Registered execution {execution_id} for LLM event routing")
+    # Note: LLM event routing has been deprecated in CrewAI 0.177+
+    # LLM events are now captured through AgentExecutionCompletedEvent in logging_callbacks
+    logger.info(f"LLM events will be captured through AgentExecutionCompletedEvent for execution {execution_id}")
     
     # Start the trace writer to process queued traces
     from src.engines.crewai.trace_management import TraceManager
@@ -189,7 +217,11 @@ async def run_crew(execution_id: str, crew: Crew, running_jobs: Dict, group_cont
                         for agent in crew.agents:
                             if not hasattr(agent, 'llm') or agent.llm is None:
                                 # Use LLMManager to configure CrewAI LLM
-                                crewai_llm = await LLMManager.configure_crewai_llm(model)
+                                # SECURITY: Pass group_id for multi-tenant isolation
+                                group_id = config.get('group_id') if config else None
+                                if not group_id:
+                                    raise ValueError("group_id is REQUIRED for LLM configuration")
+                                crewai_llm = await LLMManager.configure_crewai_llm(model, group_id)
                                 agent.llm = crewai_llm
                                 logger.info(f"Updated agent {agent.role} with global LLM {model}")
                     else:
@@ -206,29 +238,26 @@ async def run_crew(execution_id: str, crew: Crew, running_jobs: Dict, group_cont
             try:
                 # Import ApiKeysService to ensure API keys are in environment
                 from src.services.api_keys_service import ApiKeysService
-                
+
+                # SECURITY: Get group_id for multi-tenant isolation
+                group_id = group_context.primary_group_id if group_context else None
+
                 # Explicitly set up API keys for common providers
-                # Handle OpenAI API key properly in Databricks Apps environment
+                # Handle OpenAI API key properly
                 try:
-                    from src.utils.databricks_auth import is_databricks_apps_environment
-                    if not is_databricks_apps_environment():
-                        await ApiKeysService.setup_openai_api_key()
+                    openai_key = await ApiKeysService.get_provider_api_key("openai", group_id=group_id)
+                    if openai_key:
+                        # OpenAI key is configured, set it up
+                        os.environ["OPENAI_API_KEY"] = openai_key
+                        logger.info("OpenAI API key configured and set up")
                     else:
-                        # In Databricks Apps, check if OpenAI key is configured
-                        openai_key = await ApiKeysService.get_provider_api_key("openai")
-                        if openai_key:
-                            # OpenAI key is configured, set it up normally
-                            os.environ["OPENAI_API_KEY"] = openai_key
-                            logger.info("OpenAI API key configured and set up in Databricks Apps environment")
-                        else:
-                            # No OpenAI key configured, set dummy key to satisfy CrewAI validation
-                            os.environ["OPENAI_API_KEY"] = "sk-dummy-databricks-apps-validation-key"
-                            logger.info("No OpenAI API key configured, set dummy key for validation in Databricks Apps environment")
-                except ImportError:
-                    await ApiKeysService.setup_openai_api_key()
-                
-                await ApiKeysService.setup_anthropic_api_key()
-                await ApiKeysService.setup_gemini_api_key()  # Ensure Gemini API key is properly set
+                        # No OpenAI key configured, set dummy key to satisfy CrewAI validation
+                        os.environ["OPENAI_API_KEY"] = "sk-dummy-validation-key"
+                        logger.info("No OpenAI API key configured, set dummy key for validation")
+                except Exception as e:
+                    logger.warning(f"Error setting up OpenAI API key: {e}")
+                    # Set dummy key to satisfy CrewAI validation
+                    os.environ["OPENAI_API_KEY"] = "sk-dummy-validation-key"
                 
                 # Log API key status (don't log the actual keys)
                 logger.info("Verified API keys are set in environment variables")
@@ -331,29 +360,25 @@ async def run_crew(execution_id: str, crew: Crew, running_jobs: Dict, group_cont
                     else:
                         logger.info("No user inputs found after filtering system inputs")
                 
+                
                 # Call crew start callback
                 crew_callbacks['on_start']()
                 
-                # Run the potentially blocking crew.kickoff() in a separate thread
-                # to avoid blocking the asyncio event loop
-                # NOTE: Callbacks are now passed to Crew() constructor in crew_preparation.py
+                # Use the custom CrewExecutor for better thread management
+                # This provides proper thread naming, monitoring, and cancellation support
                 try:
-                    if user_inputs:
-                        result = await asyncio.to_thread(
-                            crew.kickoff, 
-                            inputs=user_inputs
-                        )
-                    else:
-                        result = await asyncio.to_thread(
-                            crew.kickoff
-                        )
-                    
-                    # Call crew completion callback
-                    crew_callbacks['on_complete'](result)
+                    result = await crew_executor.run_crew(
+                        execution_id=execution_id,
+                        crew=crew,
+                        inputs=user_inputs,
+                        on_complete=crew_callbacks.get('on_complete'),
+                        on_error=crew_callbacks.get('on_error'),
+                        timeout=3600  # 1 hour default timeout for crew executions
+                    )
                     
                 except Exception as crew_error:
-                    # Call crew error callback
-                    crew_callbacks['on_error'](crew_error)
+                    # Error callback is already called by crew_executor
+                    logger.error(f"Crew execution failed: {crew_error}")
                     raise  # Re-raise to be handled by outer exception handler
             
             # If kickoff successful, prepare for COMPLETED status
@@ -430,10 +455,8 @@ async def run_crew(execution_id: str, crew: Crew, running_jobs: Dict, group_cont
         # Clean up the CrewLogger
         crew_logger.cleanup_for_job(execution_id)
         
-        # Unregister from LLM event routing
-        from src.engines.crewai.callbacks.llm_event_router import unregister_execution_from_llm_events
-        unregister_execution_from_llm_events(execution_id)
-        logger.info(f"Unregistered execution {execution_id} from LLM event routing")
+        # Note: LLM event routing has been deprecated in CrewAI 0.177+
+        logger.debug(f"LLM event cleanup not needed for execution {execution_id} (handled by AgentTraceEventListener)")
         
         # Clean up MCP tools
         try:
@@ -509,4 +532,203 @@ async def update_execution_status_with_retry(
     if not update_success:
         logger.error(f"Failed to update execution status for {execution_id} after {max_retries} attempts.")
     
-    return update_success 
+    return update_success
+
+
+async def run_crew_in_process(
+    execution_id: str, 
+    config: Dict[str, Any], 
+    running_jobs: Dict,
+    group_context: Optional[GroupContext] = None,
+    user_token: Optional[str] = None
+) -> None:
+    """
+    Run a crew in an isolated process that can be truly terminated.
+    
+    This function uses ProcessCrewExecutor to run the crew in a separate process,
+    which allows for true termination (unlike threads which can't be force-stopped).
+    
+    Args:
+        execution_id: Execution ID
+        config: Complete execution configuration (must be serializable)
+        running_jobs: Dictionary tracking running jobs
+        group_context: Group context for logging isolation
+        user_token: User access token for OAuth authentication
+    """
+    # Log immediately to file to ensure we know the function was called
+    try:
+        import datetime
+        with open(f'/tmp/run_crew_in_process_called_{execution_id[:8]}.log', 'w') as f:
+            f.write(f"[{datetime.datetime.now()}] run_crew_in_process called\n")
+            f.write(f"Execution ID: {execution_id}\n")
+            f.write(f"Has config: {config is not None}\n")
+            f.write(f"Has running_jobs: {running_jobs is not None}\n")
+    except:
+        pass  # Ignore file write errors
+    
+    try:
+        logger.info(f"[run_crew_in_process] Starting for execution {execution_id}")
+    except Exception as e:
+        logger.error(f"[run_crew_in_process] Error logging start: {e}")
+        # Write to file directly as fallback
+        with open(f'/tmp/run_crew_error_{execution_id[:8]}.log', 'w') as f:
+            f.write(f"Error at start of run_crew_in_process: {e}\n")
+            import traceback
+            f.write(traceback.format_exc())
+    
+    # First, ensure status is set to RUNNING
+    from src.services.execution_status_service import ExecutionStatusService
+    await ExecutionStatusService.update_status(
+        job_id=execution_id,
+        status=ExecutionStatus.RUNNING.value,
+        message="CrewAI execution is running in isolated process"
+    )
+    logger.info(f"[run_crew_in_process] Set status to RUNNING for process execution {execution_id}")
+    
+    final_status = ExecutionStatus.FAILED.value  # Default to FAILED
+    final_message = "An unexpected error occurred during crew execution."
+    final_result = None
+    
+    try:
+        # Debug: Write that we got into the function body
+        with open(f'/tmp/run_crew_in_process_{execution_id[:8]}.log', 'w') as f:
+            import datetime
+            f.write(f"[{datetime.datetime.now()}] run_crew_in_process function started\n")
+            f.write(f"Execution ID: {execution_id}\n")
+            f.write(f"Has config: {config is not None}\n")
+    except Exception as debug_error:
+        pass  # Ignore debug errors
+    
+    try:
+        # Extract user inputs from config if available
+        user_inputs = {}
+        if config and 'inputs' in config:
+            all_inputs = config.get('inputs', {})
+            logger.info(f"All inputs received for process execution: {all_inputs}")
+            # System inputs that should not be passed to crew.kickoff
+            system_inputs = {'tools', 'planning_llm', 'reasoning_llm', 'process', 'max_rpm', 'planning', 'reasoning'}
+            # Filter out system inputs to get only user-provided inputs
+            user_inputs = {k: v for k, v in all_inputs.items() if k not in system_inputs}
+            if user_inputs:
+                logger.info(f"Passing user inputs to process execution: {user_inputs}")
+            else:
+                logger.info("No user inputs found after filtering system inputs")
+        
+        # Fetch debug tracing flag before spawning subprocess
+        debug_tracing_enabled = False  # Default value
+        try:
+            # Try to fetch debug tracing configuration
+            from src.services.engine_config_service import EngineConfigService
+            from src.db.session import async_session_factory
+
+            async with async_session_factory() as session:
+                try:
+                    service = EngineConfigService(session)
+                    debug_tracing_enabled = await service.get_crewai_debug_tracing()
+                    logger.info(f"Fetched debug tracing flag for subprocess: {debug_tracing_enabled}")
+                except Exception as e:
+                    logger.warning(f"Failed to fetch debug tracing flag, using default: {e}")
+        except Exception as e:
+            logger.warning(f"Could not access database for debug tracing flag: {e}")
+
+        # Use ProcessCrewExecutor for isolated execution
+        logger.info(f"[run_crew_in_process] Starting process-based execution for {execution_id}")
+        logger.info(f"[run_crew_in_process] Calling process_crew_executor.run_crew_isolated with debug_tracing={debug_tracing_enabled}")
+
+        # CRITICAL: Add user_token to config for OBO authentication in subprocess
+        # This ensures tools can authenticate using the user's token
+        if user_token:
+            config['user_token'] = user_token
+            logger.info(f"[run_crew_in_process] Added user_token to crew_config for OBO authentication")
+        else:
+            logger.info(f"[run_crew_in_process] No user_token - subprocess will use PAT or SPN fallback")
+
+        # CRITICAL: Ensure group_id is in config for PAT authentication fallback
+        # Without this, get_auth_context() cannot query ApiKeysService for PAT tokens
+        if group_context and hasattr(group_context, 'primary_group_id') and group_context.primary_group_id:
+            if 'group_id' not in config or not config['group_id']:
+                config['group_id'] = group_context.primary_group_id
+                logger.info(f"[run_crew_in_process] Added group_id to crew_config: {group_context.primary_group_id}")
+
+        # Run the crew in an isolated process
+        result = await process_crew_executor.run_crew_isolated(
+            execution_id=execution_id,
+            crew_config=config,
+            group_context=group_context,  # MANDATORY for tenant isolation
+            inputs=user_inputs,
+            timeout=3600,  # 1 hour timeout
+            debug_tracing_enabled=debug_tracing_enabled  # Pass the debug tracing flag
+        )
+        
+        logger.info(f"[run_crew_in_process] Process executor returned result for {execution_id}")
+        
+        # Validate result is a dictionary
+        if not isinstance(result, dict):
+            logger.error(f"Process executor returned non-dict result: {type(result)} - {result}")
+            result = {
+                "status": "FAILED",
+                "error": f"Invalid result type: {type(result)}"
+            }
+        
+        # Check the result status
+        if result.get('status') == 'COMPLETED':
+            final_status = ExecutionStatus.COMPLETED.value
+            final_message = "CrewAI execution completed successfully"
+            final_result = result.get('result')
+            logger.info(f"Process execution completed for {execution_id}")
+        elif result.get('status') == 'STOPPED':
+            final_status = ExecutionStatus.STOPPED.value
+            final_message = "CrewAI execution was stopped by user"
+            logger.info(f"Process execution stopped for {execution_id}")
+        elif result.get('status') == 'TIMEOUT':
+            final_status = ExecutionStatus.FAILED.value
+            final_message = result.get('error', 'Execution timed out')
+            logger.error(f"Process execution timed out for {execution_id}")
+        else:
+            final_status = ExecutionStatus.FAILED.value
+            final_message = result.get('error', 'Process execution failed')
+            logger.error(f"Process execution failed for {execution_id}: {final_message}")
+            
+    except asyncio.CancelledError:
+        # Execution was cancelled
+        final_status = ExecutionStatus.CANCELLED.value
+        final_message = "CrewAI execution was cancelled"
+        logger.warning(f"Process execution CANCELLED for {execution_id}")
+        # Try to terminate the process
+        await process_crew_executor.terminate_execution(execution_id)
+        
+    except Exception as e:
+        final_status = ExecutionStatus.FAILED.value
+        final_message = f"CrewAI process execution failed: {str(e)}"
+        logger.error(f"Error in process execution {execution_id}: {str(e)}")
+        logger.error(f"Stack trace: {traceback.format_exc()}")
+        
+    finally:
+        try:
+            # Clean up the running job entry
+            if execution_id in running_jobs:
+                del running_jobs[execution_id]
+                logger.info(f"Removed job {execution_id} from running jobs list.")
+
+            # Log the final status that will be set
+            logger.info(f"[run_crew_in_process] About to update final status for {execution_id}:")
+            logger.info(f"  - final_status: {final_status}")
+            logger.info(f"  - final_message: {final_message}")
+            logger.info(f"  - has final_result: {final_result is not None}")
+
+            # Update final status
+            update_success = await update_execution_status_with_retry(
+                execution_id,
+                final_status,
+                final_message,
+                final_result
+            )
+
+            if update_success:
+                logger.info(f"[run_crew_in_process] Successfully updated status for {execution_id} to {final_status}")
+            else:
+                logger.error(f"[run_crew_in_process] Failed to update status for {execution_id} to {final_status}")
+
+        except Exception as cleanup_error:
+            logger.error(f"Error during cleanup for process execution {execution_id}: {str(cleanup_error)}")
+            logger.error(f"Cleanup error traceback: {traceback.format_exc()}")

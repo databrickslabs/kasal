@@ -171,16 +171,12 @@ class GenieGetQueryResultRequest(BaseModel):
 class GenieAuthConfig(BaseModel):
     """Configuration for Genie authentication."""
     use_obo: bool = Field(True, description="Use On-Behalf-Of authentication")
-    user_token: Optional[str] = Field(None, description="User token for OBO")
-    pat_token: Optional[str] = Field(None, description="Personal Access Token")
+    user_token: Optional[str] = Field(None, description="User token for OBO", exclude=True)
+    pat_token: Optional[str] = Field(None, description="Personal Access Token", exclude=True)
     host: Optional[str] = Field(None, description="Databricks host")
-    
-    class Config:
-        # Don't include tokens in logs
-        fields = {
-            'user_token': {'exclude': True},
-            'pat_token': {'exclude': True}
-        }
+
+    # Pydantic V2 uses model_config instead of Config class
+    model_config = {"json_schema_extra": {"example": {"use_obo": True, "host": "https://example.databricks.com"}}}
 
 
 class GenieExecutionRequest(BaseModel):
