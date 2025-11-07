@@ -1,0 +1,1179 @@
+"""
+Database Backup Repository for handling backup operations with Databricks volumes.
+"""
+import os
+import json
+import sqlite3
+from datetime import datetime, date
+from typing import Dict, List, Optional, Any
+from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy import text
+
+from src.core.logger import LoggerManager
+from src.config.settings import settings
+from src.repositories.databricks_volume_repository import DatabricksVolumeRepository
+
+logger = LoggerManager.get_instance().system
+
+
+class DatabaseBackupRepository:
+    """Repository for database backup operations with Databricks Unity Catalog volumes."""
+    
+    def __init__(self, session: AsyncSession, user_token: Optional[str] = None):
+        """Initialize the repository with session and volume repository.
+
+        Args:
+            session: Database session from service layer
+            user_token: Optional user token for OBO authentication
+        """
+        self.session = session
+        self.volume_repo = DatabricksVolumeRepository(user_token=user_token)
+        self.user_token = user_token
+    
+    @staticmethod
+    def get_database_type() -> str:
+        """
+        Determine the database type from settings.
+        
+        Returns:
+            Database type ('sqlite' or 'postgres')
+        """
+        db_uri = str(settings.DATABASE_URI)
+        if 'sqlite' in db_uri.lower():
+            return 'sqlite'
+        elif 'postgresql' in db_uri.lower() or 'postgres' in db_uri.lower():
+            return 'postgres'
+        else:
+            return 'unknown'
+    
+    async def create_sqlite_backup(
+        self,
+        source_path: str,
+        catalog: str,
+        schema: str,
+        volume_name: str,
+        backup_filename: str
+    ) -> Dict[str, Any]:
+        """
+        Create a backup of SQLite database and upload to Databricks volume.
+
+        Args:
+            source_path: Path to the source database file
+            catalog: Unity Catalog name
+            schema: Schema name
+            volume_name: Volume name
+            backup_filename: Name for the backup file
+
+        Returns:
+            Backup creation result
+        """
+        try:
+            # Read the SQLite database file
+            if not os.path.exists(source_path):
+                return {
+                    "success": False,
+                    "error": f"Database file not found at {source_path}"
+                }
+
+            # Checkpoint WAL to merge all changes into main database file
+            # This ensures we get all recent data, not just checkpointed data
+            try:
+                conn = sqlite3.connect(source_path)
+                conn.execute("PRAGMA wal_checkpoint(TRUNCATE)")
+                conn.close()
+                logger.info(f"WAL checkpoint completed for {source_path}")
+            except Exception as wal_error:
+                logger.warning(f"WAL checkpoint failed (may not be in WAL mode): {wal_error}")
+                # Continue anyway - database might not be using WAL mode
+
+            with open(source_path, 'rb') as f:
+                db_content = f.read()
+            
+            original_size = len(db_content)
+            logger.info(f"Read database file: {source_path}, size: {original_size} bytes")
+            
+            # Upload to Databricks volume using API
+            upload_result = await self.volume_repo.upload_file_to_volume(
+                catalog=catalog,
+                schema=schema,
+                volume_name=volume_name,
+                file_name=backup_filename,
+                file_content=db_content
+            )
+            
+            if not upload_result["success"]:
+                return upload_result
+            
+            logger.info(f"SQLite backup uploaded successfully to volume: {catalog}.{schema}.{volume_name}/{backup_filename}")
+            
+            return {
+                "success": True,
+                "backup_path": upload_result["path"],
+                "backup_size": original_size,
+                "database_type": "sqlite",
+                "catalog": catalog,
+                "schema": schema,
+                "volume": volume_name,
+                "filename": backup_filename
+            }
+            
+        except Exception as e:
+            logger.error(f"Error creating SQLite backup: {e}")
+            return {
+                "success": False,
+                "error": str(e)
+            }
+    
+    async def create_postgres_backup(
+        self,
+        catalog: str,
+        schema: str,
+        volume_name: str,
+        backup_filename: str,
+        export_format: str = "sql",
+        session: Optional[AsyncSession] = None
+    ) -> Dict[str, Any]:
+        """
+        Create a backup of PostgreSQL database and upload to Databricks volume.
+
+        Args:
+            catalog: Unity Catalog name
+            schema: Schema name
+            volume_name: Volume name
+            backup_filename: Name for the backup file
+            export_format: Export format ('sql' or 'sqlite')
+            session: Optional database session (uses stored session if not provided)
+
+        Returns:
+            Backup creation result
+        """
+        try:
+            # Use provided session or stored session
+            db_session = session if session else self.session
+
+            if export_format == "sqlite":
+                # Create a SQLite database from PostgreSQL data
+                return await self._create_postgres_to_sqlite_backup(
+                    db_session, catalog, schema, volume_name, backup_filename
+                )
+            # Build SQL dump content
+            sql_content = []
+            
+            # Add header
+            sql_content.append("-- PostgreSQL database backup")
+            sql_content.append(f"-- Generated by Kasal on {datetime.now().isoformat()}")
+            sql_content.append("-- ")
+            sql_content.append("")
+            sql_content.append("SET statement_timeout = 0;")
+            sql_content.append("SET lock_timeout = 0;")
+            sql_content.append("SET client_encoding = 'UTF8';")
+            sql_content.append("SET standard_conforming_strings = on;")
+            sql_content.append("SET check_function_bodies = false;")
+            sql_content.append("SET client_min_messages = warning;")
+            sql_content.append("")
+            
+            # Get all tables
+            result = await db_session.execute(
+                text("SELECT tablename FROM pg_tables WHERE schemaname = 'public' ORDER BY tablename")
+            )
+            tables = [row[0] for row in result.fetchall()]
+            
+            total_rows = 0
+            
+            for table in tables:
+                sql_content.append(f"-- Table: {table}")
+                sql_content.append("")
+                
+                # Get table columns info for proper INSERT statements
+                col_result = await db_session.execute(
+                    text(f"""
+                        SELECT column_name, data_type 
+                        FROM information_schema.columns 
+                        WHERE table_schema = 'public' 
+                        AND table_name = '{table}'
+                        ORDER BY ordinal_position
+                    """)
+                )
+                columns = [(row[0], row[1]) for row in col_result.fetchall()]
+                column_names = [col[0] for col in columns]
+                
+                # Disable triggers and constraints for this table
+                sql_content.append(f"ALTER TABLE {table} DISABLE TRIGGER ALL;")
+                sql_content.append(f"DELETE FROM {table};")
+                sql_content.append("")
+
+                # Get table data
+                result = await db_session.execute(
+                    text(f"SELECT * FROM {table}")
+                )
+                rows = result.fetchall()
+                
+                if rows:
+                    # Generate INSERT statements
+                    for row in rows:
+                        values = []
+                        for i, value in enumerate(row):
+                            if value is None:
+                                values.append("NULL")
+                            elif isinstance(value, (int, float)):
+                                values.append(str(value))
+                            elif isinstance(value, bool):
+                                values.append("TRUE" if value else "FALSE")
+                            elif isinstance(value, datetime):
+                                values.append(f"'{value.isoformat()}'")
+                            elif isinstance(value, dict):
+                                # Handle JSON/JSONB columns
+                                import json
+                                json_str = json.dumps(value).replace("'", "''")
+                                values.append(f"'{json_str}'::jsonb")
+                            else:
+                                # Escape single quotes in strings
+                                escaped_value = str(value).replace("'", "''")
+                                values.append(f"'{escaped_value}'")
+                        
+                        insert_stmt = f"INSERT INTO {table} ({', '.join(column_names)}) VALUES ({', '.join(values)});"
+                        sql_content.append(insert_stmt)
+                    
+                    total_rows += len(rows)
+                    logger.info(f"Backed up {len(rows)} rows from table {table}")
+                
+                # Re-enable triggers
+                sql_content.append("")
+                sql_content.append(f"ALTER TABLE {table} ENABLE TRIGGER ALL;")
+                sql_content.append("")
+            
+            # Add footer
+            sql_content.append("")
+            sql_content.append("-- End of backup")
+            sql_content.append(f"-- Total tables: {len(tables)}")
+            sql_content.append(f"-- Total rows: {total_rows}")
+            
+            # Convert to bytes
+            sql_bytes = "\n".join(sql_content).encode('utf-8')
+            
+            # Upload to Databricks volume using API
+            upload_result = await self.volume_repo.upload_file_to_volume(
+                catalog=catalog,
+                schema=schema,
+                volume_name=volume_name,
+                file_name=backup_filename,
+                file_content=sql_bytes
+            )
+            
+            if not upload_result["success"]:
+                return upload_result
+            
+            logger.info(f"PostgreSQL SQL backup uploaded successfully to volume: {catalog}.{schema}.{volume_name}/{backup_filename}")
+            
+            return {
+                "success": True,
+                "backup_path": upload_result["path"],
+                "backup_size": len(sql_bytes),
+                "database_type": "postgres",
+                "table_count": len(tables),
+                "total_rows": total_rows,
+                "catalog": catalog,
+                "schema": schema,
+                "volume": volume_name,
+                "filename": backup_filename
+            }
+            
+        except Exception as e:
+            logger.error(f"Error creating PostgreSQL backup: {e}")
+            return {
+                "success": False,
+                "error": str(e)
+            }
+    
+    async def _create_postgres_to_sqlite_backup(
+        self,
+        session: AsyncSession,
+        catalog: str,
+        schema: str,
+        volume_name: str,
+        backup_filename: str
+    ) -> Dict[str, Any]:
+        """
+        Create a SQLite database from PostgreSQL data.
+        
+        Args:
+            session: PostgreSQL database session
+            catalog: Unity Catalog name
+            schema: Schema name
+            volume_name: Volume name
+            backup_filename: Name for the backup file
+            
+        Returns:
+            Backup creation result
+        """
+        import tempfile
+        try:
+            # Create a temporary SQLite database
+            with tempfile.NamedTemporaryFile(suffix='.db', delete=False) as tmp_file:
+                tmp_path = tmp_file.name
+            
+            # Connect to SQLite database
+            conn = sqlite3.connect(tmp_path)
+            cursor = conn.cursor()
+            
+            # Get all tables from PostgreSQL
+            result = await session.execute(
+                text("SELECT tablename FROM pg_tables WHERE schemaname = 'public' ORDER BY tablename")
+            )
+            pg_tables = [row[0] for row in result.fetchall()]
+            
+            total_rows = 0
+            
+            for table_name in pg_tables:
+                # Get table columns info
+                col_result = await session.execute(
+                    text(f"""
+                        SELECT column_name, data_type, is_nullable
+                        FROM information_schema.columns 
+                        WHERE table_schema = 'public' 
+                        AND table_name = '{table_name}'
+                        ORDER BY ordinal_position
+                    """)
+                )
+                columns = [(row[0], row[1], row[2]) for row in col_result.fetchall()]
+                
+                # Create SQLite table
+                create_table_sql = f"CREATE TABLE IF NOT EXISTS {table_name} ("
+                col_definitions = []
+                
+                for col_name, col_type, is_nullable in columns:
+                    # Map PostgreSQL types to SQLite types
+                    sqlite_type = "TEXT"  # Default to TEXT
+                    if 'int' in col_type.lower() or 'serial' in col_type.lower():
+                        sqlite_type = "INTEGER"
+                    elif 'numeric' in col_type.lower() or 'decimal' in col_type.lower() or 'float' in col_type.lower() or 'double' in col_type.lower():
+                        sqlite_type = "REAL"
+                    elif 'bool' in col_type.lower():
+                        sqlite_type = "INTEGER"  # SQLite uses 0/1 for boolean
+                    elif 'timestamp' in col_type.lower() or 'date' in col_type.lower() or 'time' in col_type.lower():
+                        sqlite_type = "TEXT"  # Store dates as ISO format text
+                    elif 'json' in col_type.lower():
+                        sqlite_type = "TEXT"  # Store JSON as text
+                    
+                    null_constraint = "" if is_nullable == 'YES' else " NOT NULL"
+                    
+                    # Handle primary key
+                    if col_name == 'id' and 'int' in col_type.lower():
+                        col_definitions.append(f"{col_name} {sqlite_type} PRIMARY KEY{null_constraint}")
+                    else:
+                        col_definitions.append(f"{col_name} {sqlite_type}{null_constraint}")
+                
+                create_table_sql += ", ".join(col_definitions) + ")"
+                cursor.execute(create_table_sql)
+                
+                # Get data from PostgreSQL
+                result = await session.execute(text(f"SELECT * FROM {table_name}"))
+                rows = result.fetchall()
+                
+                if rows:
+                    # Prepare column names for insertion
+                    col_names = [col[0] for col in columns]
+                    placeholders = ", ".join(["?" for _ in col_names])
+                    insert_sql = f"INSERT INTO {table_name} ({', '.join(col_names)}) VALUES ({placeholders})"
+                    
+                    # Convert and insert rows
+                    for row in rows:
+                        row_values = []
+                        for i, value in enumerate(row):
+                            if value is None:
+                                row_values.append(None)
+                            elif isinstance(value, bool):
+                                row_values.append(1 if value else 0)
+                            elif isinstance(value, (datetime, date)):
+                                row_values.append(value.isoformat())
+                            elif isinstance(value, (dict, list)):
+                                # Convert dict or list to JSON string
+                                row_values.append(json.dumps(value))
+                            else:
+                                row_values.append(str(value))  # Convert everything else to string
+                        
+                        cursor.execute(insert_sql, row_values)
+                    
+                    total_rows += len(rows)
+                    logger.info(f"Converted {len(rows)} rows from PostgreSQL table {table_name} to SQLite")
+            
+            # Commit and close SQLite connection
+            conn.commit()
+            conn.close()
+            
+            # Read the SQLite database file
+            with open(tmp_path, 'rb') as f:
+                db_content = f.read()
+            
+            # Clean up temp file
+            os.unlink(tmp_path)
+            
+            # Upload to Databricks volume
+            upload_result = await self.volume_repo.upload_file_to_volume(
+                catalog=catalog,
+                schema=schema,
+                volume_name=volume_name,
+                file_name=backup_filename,
+                file_content=db_content
+            )
+            
+            if not upload_result["success"]:
+                return upload_result
+            
+            logger.info(f"PostgreSQL data exported as SQLite to volume: {catalog}.{schema}.{volume_name}/{backup_filename}")
+            
+            return {
+                "success": True,
+                "backup_path": upload_result["path"],
+                "backup_size": len(db_content),
+                "database_type": "sqlite",
+                "source_type": "postgres",
+                "table_count": len(pg_tables),
+                "total_rows": total_rows,
+                "catalog": catalog,
+                "schema": schema,
+                "volume": volume_name,
+                "filename": backup_filename
+            }
+            
+        except Exception as e:
+            logger.error(f"Error creating SQLite backup from PostgreSQL: {e}")
+            # Clean up temp file if it exists
+            if 'tmp_path' in locals() and os.path.exists(tmp_path):
+                os.unlink(tmp_path)
+            return {
+                "success": False,
+                "error": str(e)
+            }
+    
+    async def restore_sqlite_backup(
+        self,
+        catalog: str,
+        schema: str,
+        volume_name: str,
+        backup_filename: str,
+        target_path: str,
+        create_safety_backup: bool = True
+    ) -> Dict[str, Any]:
+        """
+        Restore a SQLite database from a Databricks volume backup.
+        
+        Args:
+            catalog: Unity Catalog name
+            schema: Schema name
+            volume_name: Volume name
+            backup_filename: Name of the backup file
+            target_path: Path where the database should be restored
+            create_safety_backup: Whether to create a backup of current database
+            
+        Returns:
+            Restore operation result
+        """
+        try:
+            # Download backup from Databricks volume
+            download_result = await self.volume_repo.download_file_from_volume(
+                catalog=catalog,
+                schema=schema,
+                volume_name=volume_name,
+                file_name=backup_filename
+            )
+            
+            if not download_result["success"]:
+                return download_result
+            
+            backup_content = download_result["content"]
+            
+            # Validate it's a valid SQLite database
+            # We'll write to a temp file first to validate
+            import tempfile
+            with tempfile.NamedTemporaryFile(delete=False, suffix='.db') as tmp_file:
+                tmp_file.write(backup_content)
+                tmp_path = tmp_file.name
+            
+            try:
+                # Validate the backup
+                conn = sqlite3.connect(tmp_path)
+                cursor = conn.cursor()
+                cursor.execute("SELECT name FROM sqlite_master WHERE type='table' LIMIT 1")
+                cursor.fetchone()
+                conn.close()
+            except Exception as e:
+                os.unlink(tmp_path)
+                return {
+                    "success": False,
+                    "error": f"Invalid SQLite database file: {e}"
+                }
+            
+            # Create safety backup if requested and current database exists
+            if create_safety_backup and os.path.exists(target_path):
+                timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+                safety_backup = f"{target_path}.backup_{timestamp}"
+
+                with open(target_path, 'rb') as f:
+                    current_db = f.read()
+
+                # Upload safety backup to volume
+                safety_filename = f"safety_backup_{timestamp}.db"
+                await self.volume_repo.upload_file_to_volume(
+                    catalog=catalog,
+                    schema=schema,
+                    volume_name=volume_name,
+                    file_name=safety_filename,
+                    file_content=current_db
+                )
+                logger.info(f"Created safety backup in volume: {safety_filename}")
+
+            # NEW APPROACH: Table-by-table copy instead of file replacement
+            # This avoids breaking existing database connections (disk I/O errors)
+
+            # STEP 1: Get current admin user info
+            current_admin_info = None
+            if os.path.exists(target_path):
+                try:
+                    current_conn = sqlite3.connect(target_path)
+                    current_cursor = current_conn.cursor()
+
+                    # Get current system admin user
+                    current_cursor.execute("""
+                        SELECT id, email, username, is_system_admin
+                        FROM users
+                        WHERE is_system_admin = 1
+                        LIMIT 1
+                    """)
+                    result = current_cursor.fetchone()
+
+                    if result:
+                        current_admin_info = {
+                            'id': result[0],
+                            'email': result[1],
+                            'username': result[2],
+                            'is_system_admin': result[3]
+                        }
+                        logger.info(f"[IMPORT] Found current admin: {current_admin_info['email']} with UUID: {current_admin_info['id']}")
+
+                    current_conn.close()
+                except Exception as e:
+                    logger.warning(f"[IMPORT] Could not read current admin info: {e}")
+
+            # STEP 2: Connect to both databases
+            try:
+                # Connect to backup database (source)
+                backup_conn = sqlite3.connect(tmp_path)
+                backup_cursor = backup_conn.cursor()
+
+                # Connect to target database (destination)
+                target_conn = sqlite3.connect(target_path)
+                target_cursor = target_conn.cursor()
+
+                # STEP 3: Get list of tables from backup
+                backup_cursor.execute("SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%'")
+                tables = [row[0] for row in backup_cursor.fetchall()]
+                logger.info(f"[IMPORT] Found {len(tables)} tables to import: {tables}")
+
+                # Tables to skip (system tables)
+                skip_tables = {'alembic_version'}  # Don't import migration version
+
+                # STEP 4: Copy each table
+                imported_tables = []
+                for table_name in tables:
+                    if table_name in skip_tables:
+                        logger.info(f"[IMPORT] Skipping system table: {table_name}")
+                        continue
+
+                    logger.info(f"[IMPORT] Importing table: {table_name}")
+
+                    try:
+                        # Get column names from backup table
+                        backup_cursor.execute(f"PRAGMA table_info({table_name})")
+                        columns_info = backup_cursor.fetchall()
+                        column_names = [col[1] for col in columns_info]
+
+                        # Clear existing data in target table
+                        target_cursor.execute(f"DELETE FROM {table_name}")
+                        logger.info(f"[IMPORT]   Cleared {table_name} table")
+
+                        # Get all data from backup table
+                        backup_cursor.execute(f"SELECT * FROM {table_name}")
+                        rows = backup_cursor.fetchall()
+
+                        if rows:
+                            # Special handling for users table to preserve admin UUID
+                            if table_name == 'users' and current_admin_info:
+                                logger.info(f"[IMPORT]   Processing users table with admin UUID preservation")
+
+                                # Insert rows, but update admin user's UUID
+                                placeholders = ','.join(['?' for _ in column_names])
+                                insert_sql = f"INSERT INTO {table_name} ({','.join(column_names)}) VALUES ({placeholders})"
+
+                                admin_email = current_admin_info['email']
+                                admin_uuid = current_admin_info['id']
+
+                                for row in rows:
+                                    row_list = list(row)
+
+                                    # Find email column index
+                                    email_idx = column_names.index('email')
+
+                                    # If this is the admin user, replace their UUID
+                                    if row_list[email_idx] == admin_email:
+                                        id_idx = column_names.index('id')
+                                        old_uuid = row_list[id_idx]
+                                        row_list[id_idx] = admin_uuid
+
+                                        # Ensure is_system_admin is set to 1
+                                        if 'is_system_admin' in column_names:
+                                            admin_idx = column_names.index('is_system_admin')
+                                            row_list[admin_idx] = 1
+
+                                        logger.info(f"[IMPORT]   Preserving admin UUID: {old_uuid} -> {admin_uuid} for {admin_email}")
+
+                                    target_cursor.execute(insert_sql, row_list)
+                            else:
+                                # Regular table - insert all rows
+                                placeholders = ','.join(['?' for _ in column_names])
+                                insert_sql = f"INSERT INTO {table_name} ({','.join(column_names)}) VALUES ({placeholders})"
+                                target_cursor.executemany(insert_sql, rows)
+
+                            logger.info(f"[IMPORT]   Imported {len(rows)} rows into {table_name}")
+                            imported_tables.append(table_name)
+                        else:
+                            logger.info(f"[IMPORT]   Table {table_name} is empty")
+                            imported_tables.append(table_name)
+
+                    except Exception as table_error:
+                        logger.error(f"[IMPORT] Error importing table {table_name}: {table_error}")
+                        import traceback
+                        logger.error(f"[IMPORT] Traceback: {traceback.format_exc()}")
+                        # Continue with other tables
+
+                # STEP 5: Commit all changes
+                target_conn.commit()
+                logger.info(f"[IMPORT] Successfully committed changes for {len(imported_tables)} tables")
+
+                # STEP 6: Close connections
+                backup_conn.close()
+                target_conn.close()
+
+                logger.info(f"[IMPORT] ✓ Import completed successfully")
+
+            except Exception as import_error:
+                logger.error(f"[IMPORT] Error during table-by-table import: {import_error}")
+                import traceback
+                logger.error(f"[IMPORT] Traceback: {traceback.format_exc()}")
+                os.unlink(tmp_path)
+                return {
+                    "success": False,
+                    "error": f"Failed to import database: {import_error}"
+                }
+            
+            # Clean up temp file
+            os.unlink(tmp_path)
+            
+            logger.info(f"SQLite database restored successfully from volume backup")
+            
+            return {
+                "success": True,
+                "restored_from": f"{catalog}.{schema}.{volume_name}/{backup_filename}",
+                "restored_size": len(backup_content),
+                "database_type": "sqlite"
+            }
+            
+        except Exception as e:
+            logger.error(f"Error restoring SQLite backup: {e}")
+            return {
+                "success": False,
+                "error": str(e)
+            }
+    
+    async def restore_postgres_backup(
+        self,
+        catalog: str,
+        schema: str,
+        volume_name: str,
+        backup_filename: str,
+        session: Optional[AsyncSession] = None
+    ) -> Dict[str, Any]:
+        """
+        Restore a PostgreSQL database from a Databricks volume backup.
+
+        Args:
+            catalog: Unity Catalog name
+            schema: Schema name
+            volume_name: Volume name
+            backup_filename: Name of the backup file
+            session: Optional database session (uses stored session if not provided)
+
+        Returns:
+            Restore operation result
+        """
+        try:
+            # Use provided session or stored session
+            db_session = session if session else self.session
+
+            # Download backup from Databricks volume
+            download_result = await self.volume_repo.download_file_from_volume(
+                catalog=catalog,
+                schema=schema,
+                volume_name=volume_name,
+                file_name=backup_filename
+            )
+            
+            if not download_result["success"]:
+                return download_result
+            
+            backup_content = download_result["content"]
+            
+            # Check if it's SQL or JSON format
+            if backup_filename.endswith('.sql'):
+                # Execute SQL statements
+                sql_content = backup_content.decode('utf-8')
+                
+                # Split SQL statements and execute them
+                # We need to be careful with statements that contain semicolons in strings
+                statements = []
+                current_statement = []
+                in_string = False
+                escape_next = False
+                
+                for line in sql_content.split('\n'):
+                    # Skip comments and empty lines
+                    if line.strip().startswith('--') or not line.strip():
+                        continue
+                    
+                    current_statement.append(line)
+                    
+                    # Check if this line ends a statement (ends with ; and not in a string)
+                    for char in line:
+                        if escape_next:
+                            escape_next = False
+                            continue
+                        if char == '\\':
+                            escape_next = True
+                        elif char == "'":
+                            in_string = not in_string
+                    
+                    if line.rstrip().endswith(';') and not in_string:
+                        statements.append('\n'.join(current_statement))
+                        current_statement = []
+                
+                # Execute statements
+                restored_tables = set()
+                total_rows = 0
+                
+                for stmt in statements:
+                    if stmt.strip():
+                        try:
+                            # Track which tables we're working with
+                            if 'INSERT INTO' in stmt.upper():
+                                # Extract table name
+                                table_match = stmt.upper().split('INSERT INTO')[1].split('(')[0].strip()
+                                restored_tables.add(table_match.lower())
+                                total_rows += 1
+                            
+                            await db_session.execute(text(stmt))
+                        except Exception as stmt_error:
+                            logger.warning(f"Error executing statement: {stmt_error}")
+                            # Continue with other statements
+
+                await db_session.commit()
+                
+                return {
+                    "success": True,
+                    "restored_from": f"{catalog}.{schema}.{volume_name}/{backup_filename}",
+                    "database_type": "postgres",
+                    "restored_tables": list(restored_tables),
+                    "total_rows": total_rows
+                }
+                
+            else:
+                # Handle JSON format (legacy)
+                backup_data = json.loads(backup_content)
+                
+                if backup_data.get("database_type") != "postgres":
+                    return {
+                        "success": False,
+                        "error": "Backup file is not a PostgreSQL backup"
+                    }
+                
+                # Clear existing data and restore
+                restored_tables = []
+                for table_name, rows in backup_data["tables"].items():
+                    # Clear table
+                    await db_session.execute(text(f"TRUNCATE TABLE {table_name} CASCADE"))
+
+                    # Insert rows
+                    for row_data in rows:
+                        columns = ', '.join(row_data.keys())
+                        placeholders = ', '.join([f":{k}" for k in row_data.keys()])
+                        insert_query = f"INSERT INTO {table_name} ({columns}) VALUES ({placeholders})"
+                        await db_session.execute(text(insert_query), row_data)
+                    
+                    restored_tables.append(f"{table_name} ({len(rows)} rows)")
+                    logger.info(f"Restored {len(rows)} rows to table {table_name}")
+                
+                await db_session.commit()
+                
+                return {
+                    "success": True,
+                    "restored_from": f"{catalog}.{schema}.{volume_name}/{backup_filename}",
+                    "database_type": "postgres",
+                    "restored_tables": restored_tables
+                }
+            
+        except Exception as e:
+            logger.error(f"Error restoring PostgreSQL backup: {e}")
+            await db_session.rollback()
+            return {
+                "success": False,
+                "error": str(e)
+            }
+    
+    async def list_backups(
+        self,
+        catalog: str,
+        schema: str,
+        volume_name: str,
+        prefix: str = "kasal_backup_"
+    ) -> List[Dict[str, Any]]:
+        """
+        List all backup files in a Databricks volume.
+        
+        Args:
+            catalog: Unity Catalog name
+            schema: Schema name
+            volume_name: Volume name
+            prefix: Filename prefix to filter backups
+            
+        Returns:
+            List of backup file information
+        """
+        try:
+            # List volume contents using API
+            list_result = await self.volume_repo.list_volume_contents(
+                catalog=catalog,
+                schema=schema,
+                volume_name=volume_name
+            )
+            
+            if not list_result["success"]:
+                logger.warning(f"Failed to list volume contents: {list_result.get('error')}")
+                return []
+            
+            backups = []
+            for file_info in list_result.get("files", []):
+                filename = file_info.get("name", "")
+                
+                # Filter for backup files
+                if (filename.startswith(prefix) and 
+                    (filename.endswith(".db") or filename.endswith(".json") or filename.endswith(".sql")) and
+                    not file_info.get("is_directory", False)):
+                    
+                    # Determine backup type
+                    backup_type = "unknown"
+                    if filename.endswith(".db"):
+                        backup_type = "sqlite"
+                    elif filename.endswith(".json"):
+                        backup_type = "postgres_json"
+                    elif filename.endswith(".sql"):
+                        backup_type = "postgres_sql"
+                    
+                    # Try to extract timestamp from filename
+                    try:
+                        timestamp_str = filename.replace(prefix, "").split('.')[0]
+                        created_time = datetime.strptime(timestamp_str, "%Y%m%d_%H%M%S")
+                    except:
+                        # Use modification time if available
+                        mod_time = file_info.get("modification_time")
+                        created_time = datetime.fromtimestamp(mod_time / 1000) if mod_time else datetime.now()
+                    
+                    backups.append({
+                        "filename": filename,
+                        "path": file_info.get("path"),
+                        "size": file_info.get("file_size", 0),
+                        "created_at": created_time,
+                        "backup_type": backup_type
+                    })
+            
+            # Sort by creation time, most recent first
+            backups.sort(key=lambda x: x["created_at"], reverse=True)
+            
+            return backups
+            
+        except Exception as e:
+            logger.error(f"Error listing backups: {e}")
+            return []
+    
+    async def delete_backup(
+        self,
+        catalog: str,
+        schema: str,
+        volume_name: str,
+        backup_filename: str
+    ) -> Dict[str, Any]:
+        """
+        Delete a backup file from Databricks volume.
+        
+        Args:
+            catalog: Unity Catalog name
+            schema: Schema name
+            volume_name: Volume name
+            backup_filename: Name of the backup file to delete
+            
+        Returns:
+            Deletion result
+        """
+        try:
+            # Validate filename to prevent issues
+            if ".." in backup_filename or "/" in backup_filename or "\\" in backup_filename:
+                return {
+                    "success": False,
+                    "error": "Invalid backup filename"
+                }
+            
+            # Delete from volume using API
+            delete_result = await self.volume_repo.delete_volume_file(
+                catalog=catalog,
+                schema=schema,
+                volume_name=volume_name,
+                file_name=backup_filename
+            )
+            
+            if delete_result["success"]:
+                logger.info(f"Deleted backup: {backup_filename}")
+            
+            return delete_result
+            
+        except Exception as e:
+            logger.error(f"Error deleting backup: {e}")
+            return {
+                "success": False,
+                "error": str(e)
+            }
+    
+    async def cleanup_old_backups(
+        self,
+        catalog: str,
+        schema: str,
+        volume_name: str,
+        keep_count: int = 5,
+        prefix: str = "kasal_backup_"
+    ) -> Dict[str, Any]:
+        """
+        Clean up old backup files in volume, keeping only the most recent ones.
+        
+        Args:
+            catalog: Unity Catalog name
+            schema: Schema name
+            volume_name: Volume name
+            keep_count: Number of recent backups to keep
+            prefix: Filename prefix to filter backups
+            
+        Returns:
+            Cleanup result with list of deleted files
+        """
+        try:
+            backups = await self.list_backups(catalog, schema, volume_name, prefix)
+            
+            if len(backups) <= keep_count:
+                return {
+                    "success": True,
+                    "deleted": [],
+                    "message": f"No cleanup needed, only {len(backups)} backups exist"
+                }
+            
+            # Delete older backups
+            deleted = []
+            for backup in backups[keep_count:]:
+                result = await self.delete_backup(
+                    catalog=catalog,
+                    schema=schema,
+                    volume_name=volume_name,
+                    backup_filename=backup["filename"]
+                )
+                if result["success"]:
+                    deleted.append(backup["filename"])
+            
+            logger.info(f"Cleaned up {len(deleted)} old backups")
+            
+            return {
+                "success": True,
+                "deleted": deleted,
+                "message": f"Deleted {len(deleted)} old backups"
+            }
+            
+        except Exception as e:
+            logger.error(f"Error cleaning up old backups: {e}")
+            return {
+                "success": False,
+                "error": str(e)
+            }
+    
+    async def get_database_info(
+        self,
+        db_path: Optional[str] = None,
+        session: Optional[AsyncSession] = None
+    ) -> Dict[str, Any]:
+        """
+        Get information about the database.
+
+        Args:
+            db_path: Path to the SQLite database file (for SQLite)
+            session: Database session (for PostgreSQL/Lakebase)
+
+        Returns:
+            Database information
+        """
+        try:
+            # Determine database type based on parameters
+            # Priority: explicit db_path (SQLite) > explicit session (PostgreSQL/Lakebase) > check settings
+            logger.debug(f"[DB INFO] get_database_info called with db_path={db_path}, session={session is not None}")
+
+            if db_path is not None:
+                # Explicit SQLite path provided
+                db_type = 'sqlite'
+                logger.debug(f"[DB INFO] Using SQLite (explicit db_path provided: {db_path})")
+            elif session is not None:
+                # Explicit session provided - assume PostgreSQL/Lakebase
+                db_type = 'postgres'
+                logger.debug(f"[DB INFO] Using PostgreSQL/Lakebase (explicit session provided)")
+            else:
+                # No explicit parameters - check settings
+                db_type = self.get_database_type()
+                logger.debug(f"[DB INFO] Using database type from settings: {db_type}")
+
+            # Use provided session or stored session for PostgreSQL/Lakebase
+            db_session = session if session else self.session
+            logger.debug(f"[DB INFO] Final db_type={db_type}, db_session={db_session is not None}")
+
+            if db_type == 'sqlite':
+                # If db_path is None, try to get it from settings
+                if db_path is None:
+                    from src.config.settings import settings
+                    db_path = settings.SQLITE_DB_PATH
+                    if not db_path:
+                        db_path = "./app.db"  # Fallback default
+
+                    # Ensure absolute path
+                    if not os.path.isabs(db_path):
+                        db_path = os.path.abspath(db_path)
+
+                    logger.info(f"[DB INFO] db_path was None, using settings: {db_path}")
+
+                if not db_path or not os.path.exists(db_path):
+                    return {
+                        "success": False,
+                        "error": f"Database file not found at {db_path}"
+                    }
+                
+                file_stats = os.stat(db_path)
+                
+                # Get database content info
+                conn = sqlite3.connect(db_path)
+                cursor = conn.cursor()
+                
+                # Get all tables
+                cursor.execute("SELECT name FROM sqlite_master WHERE type='table'")
+                tables = [row[0] for row in cursor.fetchall()]
+                
+                # Get row counts for each table
+                table_info = {}
+                for table in tables:
+                    cursor.execute(f"SELECT COUNT(*) FROM {table}")
+                    count = cursor.fetchone()[0]
+                    table_info[table] = count
+                
+                # Get memory backends if table exists
+                memory_backends = []
+                if 'memory_backends' in table_info:
+                    cursor.execute("""
+                        SELECT id, name, backend_type, is_default, created_at, group_id
+                        FROM memory_backends
+                        ORDER BY created_at DESC
+                        LIMIT 5
+                    """)
+                    for row in cursor.fetchall():
+                        memory_backends.append({
+                            "id": row[0],
+                            "name": row[1],
+                            "backend_type": row[2],
+                            "is_default": bool(row[3]),
+                            "created_at": str(row[4]) if row[4] else None,
+                            "group_id": row[5] if len(row) > 5 else None
+                        })
+                
+                conn.close()
+                
+                return {
+                    "success": True,
+                    "database_type": "sqlite",
+                    "path": db_path,
+                    "size": file_stats.st_size,
+                    "created_at": datetime.fromtimestamp(file_stats.st_ctime),
+                    "modified_at": datetime.fromtimestamp(file_stats.st_mtime),
+                    "tables": table_info,
+                    "total_tables": len(tables),
+                    "memory_backends": memory_backends
+                }
+                
+            elif db_type == 'postgres' and db_session:
+                # Get all tables
+                result = await db_session.execute(
+                    text("SELECT tablename FROM pg_tables WHERE schemaname = 'public'")
+                )
+                tables = [row[0] for row in result.fetchall()]
+
+                # Get row counts for each table
+                table_info = {}
+                for table in tables:
+                    result = await db_session.execute(text(f"SELECT COUNT(*) FROM {table}"))
+                    count = result.scalar()
+                    table_info[table] = count
+
+                # Get database size
+                result = await db_session.execute(
+                    text("SELECT pg_database_size(current_database())")
+                )
+                db_size = result.scalar()
+
+                # Get memory backends if table exists
+                memory_backends = []
+                if 'memory_backends' in table_info:
+                    result = await db_session.execute(
+                        text("""
+                            SELECT id, name, backend_type, is_default, created_at, group_id
+                            FROM memory_backends
+                            ORDER BY created_at DESC
+                            LIMIT 5
+                        """)
+                    )
+                    for row in result.fetchall():
+                        memory_backends.append({
+                            "id": row[0],
+                            "name": row[1],
+                            "backend_type": row[2],
+                            "is_default": bool(row[3]),
+                            "created_at": str(row[4]) if row[4] else None,
+                            "group_id": row[5] if len(row) > 5 else None
+                        })
+                
+                return {
+                    "success": True,
+                    "database_type": "postgres",
+                    "size": db_size,
+                    "tables": table_info,
+                    "total_tables": len(tables),
+                    "memory_backends": memory_backends
+                }
+                
+            else:
+                return {
+                    "success": False,
+                    "error": f"Unsupported database type: {db_type}"
+                }
+                
+        except Exception as e:
+            logger.error(f"Error getting database info: {e}")
+            return {
+                "success": False,
+                "error": str(e)
+            }

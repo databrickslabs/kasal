@@ -1,0 +1,555 @@
+"""
+Service for managing execution logs and WebSocket connections.
+
+This module provides functionality for broadcasting execution logs to connected clients,
+storing logs in the database, and managing WebSocket connections.
+"""
+
+import asyncio
+import json
+from typing import Dict, Set, List, Any, Optional
+from datetime import datetime
+from queue import Empty
+
+from fastapi import WebSocket
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from src.core.logger import LoggerManager
+from src.models.execution_logs import ExecutionLog
+from src.schemas.execution_logs import LogMessage, ExecutionLogResponse
+from src.repositories.execution_logs_repository import ExecutionLogsRepository
+from src.services.execution_logs_queue import enqueue_log, get_job_output_queue
+from src.utils.user_context import GroupContext
+
+# Get logger from the centralized logging system
+logger = LoggerManager.get_instance().system
+
+# Singleton instance of the logs writer task
+_logs_writer_task: Optional[asyncio.Task] = None
+
+class ExecutionLogsService:
+    """
+    Service for managing execution logs and WebSocket connections.
+    
+    This service handles:
+    - WebSocket connection management
+    - Broadcasting logs to connected clients
+    - Storing and retrieving execution logs from the database
+    """
+    
+    def __init__(self, session: AsyncSession):
+        """Initialize the execution logs service.
+
+        Args:
+            session: Database session for dependency injection
+        """
+        self.active_connections: Dict[str, Set[WebSocket]] = {}
+        self._lock = asyncio.Lock()
+        self.session = session
+        self.repository = ExecutionLogsRepository(session)
+    
+    async def connect(self, websocket: WebSocket, execution_id: str):
+        """
+        Connect a client to an execution's WebSocket stream.
+        
+        Args:
+            websocket: WebSocket connection to register
+            execution_id: ID of the execution to connect to
+        """
+        await websocket.accept()
+        async with self._lock:
+            if execution_id not in self.active_connections:
+                self.active_connections[execution_id] = set()
+            self.active_connections[execution_id].add(websocket)
+        
+        # Send historical logs when client connects
+        try:
+            historical_logs = await self.repository.get_logs_by_execution_id(
+                execution_id=execution_id
+            )
+
+            for log in historical_logs:
+                await websocket.send_text(json.dumps({
+                    "execution_id": execution_id,
+                    "content": log.content,
+                    "timestamp": log.timestamp.isoformat(),
+                    "type": "historical"
+                }))
+        except Exception as e:
+            logger.error(f"Error sending historical logs: {e}")
+        
+        logger.debug(f"Client connected to execution {execution_id}. Total connections: {len(self.active_connections[execution_id])}")
+    
+    async def connect_with_group(self, websocket: WebSocket, execution_id: str, group_context: GroupContext):
+        """
+        Connect a client to an execution's WebSocket stream with group filtering.
+        
+        Args:
+            websocket: WebSocket connection to register
+            execution_id: ID of the execution to connect to
+            group_context: Group context for filtering logs
+        """
+        # First verify the execution belongs to the user's group before accepting connection
+        from src.repositories.execution_history_repository import ExecutionHistoryRepository
+
+        # Get group IDs from context for filtering
+        group_ids = group_context.group_ids if group_context and group_context.primary_group_id else None
+
+        # Check if the execution exists and the user has access to it
+        execution_history_repo = ExecutionHistoryRepository(self.session)
+        execution = await execution_history_repo.get_execution_by_job_id(
+            execution_id,  # execution_id is actually the job_id
+            group_ids=group_ids
+        )
+        
+        if not execution:
+            # Either doesn't exist or user doesn't have access - reject connection
+            logger.warning(f"WebSocket connection rejected for execution {execution_id} - not found or access denied for group {group_context.primary_group_id if group_context else 'None'}")
+            await websocket.close(code=1008, reason="Execution not found or access denied")
+            return
+        
+        await websocket.accept()
+        async with self._lock:
+            if execution_id not in self.active_connections:
+                self.active_connections[execution_id] = set()
+            self.active_connections[execution_id].add(websocket)
+        
+        # Send group-filtered historical logs when client connects
+        try:
+            if group_context.primary_group_id:
+                # TODO: Add group filtering to get_logs_by_execution_id method
+                historical_logs = await self.repository.get_logs_by_execution_id(
+                    execution_id=execution_id
+                )
+            else:
+                # If no group context, don't send any historical logs for security
+                historical_logs = []
+            
+            for log in historical_logs:
+                await websocket.send_text(json.dumps({
+                    "execution_id": execution_id,
+                    "content": log.content,
+                    "timestamp": log.timestamp.isoformat(),
+                    "type": "historical"
+                }))
+        except Exception as e:
+            logger.error(f"Error sending historical logs: {e}")
+        
+        logger.debug(f"Client connected to execution {execution_id} with group {group_context.primary_group_id}. Total connections: {len(self.active_connections[execution_id])}")
+
+    async def disconnect(self, websocket: WebSocket, execution_id: str):
+        """
+        Disconnect a client from an execution's WebSocket stream.
+        
+        Args:
+            websocket: WebSocket connection to unregister
+            execution_id: ID of the execution to disconnect from
+        """
+        async with self._lock:
+            if execution_id in self.active_connections:
+                self.active_connections[execution_id].discard(websocket)
+                if not self.active_connections[execution_id]:
+                    del self.active_connections[execution_id]
+        logger.debug(f"Client disconnected from execution {execution_id}")
+
+    async def create_execution_log(self, execution_id: str, content: str, timestamp: datetime = None, group_context: GroupContext = None) -> bool:
+        """
+        Create a new execution log entry via the repository layer.
+        
+        Args:
+            execution_id: ID of the execution to log for
+            content: The log message content
+            timestamp: Optional timestamp for the log entry (defaults to current time)
+            group_context: Optional group context for multi-group isolation
+            
+        Returns:
+            bool: True if log was created successfully, False otherwise
+        """
+        try:
+            logger.debug(f"[create_execution_log] Creating log for execution {execution_id}")
+            
+            # Use the repository to create the log with injected session
+            log = await self.repository.create_log(
+                execution_id=execution_id,
+                content=content,
+                timestamp=timestamp or datetime.now()
+            )
+            # TODO: Add group context support to create_log method
+            
+            logger.debug(f"[create_execution_log] Successfully created log for execution {execution_id}")
+            return True
+        except Exception as e:
+            logger.error(f"[create_execution_log] Error creating log for execution {execution_id}: {e}")
+            logger.error("[create_execution_log] Exception details:", exc_info=True)
+            return False
+
+    async def broadcast_to_execution(self, execution_id: str, message: str, group_context: GroupContext = None):
+        """
+        Broadcast a log message to all clients connected to an execution.
+        
+        Args:
+            execution_id: ID of the execution to broadcast to
+            message: Content message to broadcast
+            group_context: Group context for logging isolation
+        """
+        logger.debug(f"[broadcast_to_execution] Starting broadcast for execution {execution_id}")
+        
+        # Enqueue the log message to be written to the database asynchronously with group context
+        success = enqueue_log(execution_id=execution_id, content=message, group_context=group_context)
+        if not success:
+            logger.error(f"[broadcast_to_execution] Failed to enqueue log for execution {execution_id}")
+
+        # Now handle WebSocket connections if any exist
+        if execution_id not in self.active_connections:
+            logger.debug(f"[broadcast_to_execution] No active connections for execution {execution_id}")
+            return
+
+        message_data = {
+            "execution_id": execution_id,
+            "content": message,
+            "timestamp": datetime.utcnow().isoformat(),
+            "type": "live"
+        }
+
+        logger.debug(f"[broadcast_to_execution] Broadcasting to {len(self.active_connections[execution_id])} connections")
+        disconnected = set()
+        for connection in self.active_connections[execution_id]:
+            try:
+                await connection.send_text(json.dumps(message_data))
+                logger.debug("[broadcast_to_execution] Successfully sent message to connection")
+            except Exception as e:
+                logger.error(f"[broadcast_to_execution] Error sending message to client: {e}")
+                logger.error("[broadcast_to_execution] Stack trace:", exc_info=True)
+                disconnected.add(connection)
+
+        # Clean up disconnected clients
+        if disconnected:
+            logger.info(f"[broadcast_to_execution] Cleaned up {len(disconnected)} disconnected clients")
+            async with self._lock:
+                self.active_connections[execution_id] -= disconnected
+
+    async def get_execution_logs(self, execution_id: str, limit: int = 1000, offset: int = 0) -> List[ExecutionLogResponse]:
+        """
+        Fetch historical execution logs from the database.
+        
+        Args:
+            execution_id: ID of the execution to fetch logs for
+            limit: Maximum number of logs to fetch
+            offset: Number of logs to skip
+            
+        Returns:
+            List of execution log responses
+        """
+        logs = await self.repository.get_logs_by_execution_id(
+            execution_id=execution_id,
+            limit=limit,
+            offset=offset
+        )
+        
+        return [
+            ExecutionLogResponse(
+                content=log.content,
+                timestamp=log.timestamp.isoformat()
+            )
+            for log in logs
+        ]
+    
+    async def get_execution_logs_by_group(self, execution_id: str, group_context: GroupContext, limit: int = 1000, offset: int = 0) -> List[ExecutionLogResponse]:
+        """
+        Fetch historical execution logs from the database filtered by group.
+        
+        Args:
+            execution_id: ID of the execution to fetch logs for
+            group_context: Group context for filtering
+            limit: Maximum number of logs to fetch
+            offset: Number of logs to skip
+            
+        Returns:
+            List of execution log responses for the group
+        """
+        # First verify the execution belongs to the user's group
+        from src.repositories.execution_history_repository import ExecutionHistoryRepository
+
+        # Get group IDs from context for filtering
+        group_ids = group_context.group_ids if group_context and group_context.primary_group_id else None
+
+        # Check if the execution exists and the user has access to it
+        execution_history_repo = ExecutionHistoryRepository(self.session)
+        execution = await execution_history_repo.get_execution_by_job_id(
+            execution_id,  # execution_id is actually the job_id
+            group_ids=group_ids
+        )
+        
+        if not execution:
+            # Either doesn't exist or user doesn't have access
+            logger.warning(f"Execution {execution_id} not found or access denied for group {group_context.primary_group_id if group_context else 'None'}")
+            return []  # Return empty list instead of raising error for consistency
+        
+        if not group_context.primary_group_id:
+            # If no group context but execution exists, this might be a single-tenant deployment
+            # Still check ownership for security
+            logger.warning(f"No group context provided for execution {execution_id}")
+            return []  # Deny access when no group context in multi-tenant mode
+        else:
+            # Use group-aware filtering when group context is available
+            # Also include logs with NULL group_id for backward compatibility
+            if self.repository:
+                # Use injected repository if available
+                logs = await self.repository.get_logs_by_execution_id(
+                    execution_id=execution_id,
+                    limit=limit,
+                    offset=offset,
+                    newest_first=True
+                )
+            else:
+                # Use repository with injected session
+                # TODO: Add group filtering to get_logs_by_execution_id method
+                logs = await self.repository.get_logs_by_execution_id(
+                    execution_id=execution_id,
+                    limit=limit,
+                    offset=offset,
+                    newest_first=True
+                )
+        
+        return [
+            ExecutionLogResponse(
+                content=log.content,
+                timestamp=log.timestamp.isoformat()
+            )
+            for log in logs
+        ]
+    
+    async def count_logs(self, execution_id: str) -> int:
+        """
+        Count logs for a specific execution.
+        
+        Args:
+            execution_id: ID of the execution to count logs for
+            
+        Returns:
+            Number of logs
+        """
+        return await self.repository.count_by_execution_id(execution_id)
+    
+    async def delete_logs(self, execution_id: str) -> int:
+        """
+        Delete all logs for a specific execution.
+
+        Args:
+            execution_id: ID of the execution to delete logs for
+
+        Returns:
+            Number of deleted logs
+        """
+        return await self.repository.delete_by_execution_id(execution_id)
+
+    async def delete_by_execution_id(self, execution_id: str) -> int:
+        """
+        Delete all logs for a specific execution (alias for delete_logs).
+
+        Args:
+            execution_id: ID of the execution to delete logs for
+
+        Returns:
+            Number of deleted logs
+        """
+        return await self.delete_logs(execution_id)
+
+    async def delete_all_logs(self) -> int:
+        """
+        Delete all logs from the database.
+
+        Returns:
+            Number of deleted logs
+        """
+        return await self.repository.delete_all()
+
+
+# --- Logs Writer Functions ---
+
+async def logs_writer_loop(shutdown_event: asyncio.Event):
+    """
+    Background task that reads from the job output queue and writes logs to the database.
+    
+    Args:
+        shutdown_event: Event to signal shutdown
+    """
+    try:
+        logger.info("[logs_writer_loop] Logs writer task started.")
+        
+        # Get job output queue
+        queue = get_job_output_queue()
+        logger.debug(f"[logs_writer_loop] Queue retrieved. Initial approximate size: {queue.qsize()}")
+        
+        batch_count = 0
+        total_log_count = 0
+        empty_count = 0  # Count consecutive empty queue occurrences
+        
+        while not shutdown_event.is_set():
+            # Create a small batch of logs to process together
+            batch = []
+            batch_target_size = 10  # Process up to this many at once
+            
+            try:
+                # Try to collect a batch of logs
+                for _ in range(batch_target_size):
+                    try:
+                        # Log queue status periodically
+                        if _ == 0:
+                            logger.debug(f"[logs_writer_loop] Waiting for logs... Queue size: ~{queue.qsize()}")
+                        
+                        # Non-blocking get with timeout
+                        log_data = queue.get(block=True, timeout=0.1)
+                        
+                        # Check if this is the shutdown signal (None)
+                        if log_data is None:
+                            logger.debug("[logs_writer_loop] Received shutdown signal (None) in queue.")
+                            continue
+                            
+                        batch.append(log_data)
+                        queue.task_done()
+                        empty_count = 0  # Reset empty count when we get an item
+                    except Empty:
+                        # Queue is empty, break out of the batch collection loop
+                        empty_count += 1
+                        if empty_count % 100 == 0:  # Log every 100 consecutive empty checks
+                            logger.debug(f"[logs_writer_loop] Queue empty for {empty_count} consecutive checks")
+                        break
+                
+                # If we collected any logs, process them
+                if batch:
+                    batch_count += 1
+                    total_log_count += len(batch)
+                    
+                    # Log batch processing
+                    logger.debug(f"[logs_writer_loop] Processing batch #{batch_count} with {len(batch)} logs. Total processed: {total_log_count}")
+                    
+                    # Process each log in the batch
+                    failures = 0
+                    for idx, log_data in enumerate(batch):
+                        try:
+                            job_id = log_data.get("job_id", "unknown")
+                            content = log_data.get("content", "")
+                            timestamp = log_data.get("timestamp", datetime.now())
+                            log_info = f"[{job_id}:{idx+1}/{len(batch)}]"
+                            
+                            # Extract group information if available
+                            group_context = None
+                            if log_data.get("group_id") or log_data.get("group_email"):
+                                group_context = GroupContext(
+                                    group_ids=[log_data.get("group_id")] if log_data.get("group_id") else None,
+                                    group_email=log_data.get("group_email")
+                                )
+                            
+                            # Create log using repository directly with session
+                            from src.db.session import async_session_factory
+                            async with async_session_factory() as session:
+                                repo = ExecutionLogsRepository(session)
+                                try:
+                                    log = await repo.create_log(
+                                        execution_id=job_id,
+                                        content=content,
+                                        timestamp=timestamp
+                                    )
+                                    await session.commit()
+                                    success = True
+                                except Exception as e:
+                                    await session.rollback()
+                                    logger.error(f"Error creating log: {e}")
+                                    success = False
+                            
+                            if not success:
+                                logger.warning(f"[logs_writer_loop] {log_info} ❌ Failed to store log")
+                                failures += 1
+                                
+                        except Exception as e:
+                            logger.error(f"[logs_writer_loop] Error processing log: {e}", exc_info=True)
+                            failures += 1
+                    
+                    if failures > 0:
+                        logger.warning(f"[logs_writer_loop] Batch #{batch_count} processed with {failures} failures.")
+                    else:
+                        logger.debug(f"[logs_writer_loop] Batch #{batch_count} processed successfully.")
+                
+                # If no logs were collected, sleep briefly to avoid CPU spinning
+                else:
+                    await asyncio.sleep(0.5)
+                
+            except Exception as e:
+                logger.error(f"[logs_writer_loop] Batch processing error: {e}", exc_info=True)
+                # Sleep to avoid rapid retry on persistent errors
+                await asyncio.sleep(1)
+            
+        logger.info("[logs_writer_loop] Shutdown event received, exiting logs writer loop.")
+    
+    except asyncio.CancelledError:
+        logger.warning("[logs_writer_loop] Logs writer task cancelled.")
+    except Exception as e:
+        logger.critical(f"[logs_writer_loop] Unhandled exception in logs writer loop: {e}", exc_info=True)
+    finally:
+        logger.info("[logs_writer_loop] Logs writer task stopped.")
+
+async def start_logs_writer(shutdown_event: asyncio.Event) -> asyncio.Task:
+    """
+    Start the logs writer loop if it hasn't been started yet.
+    
+    Args:
+        shutdown_event: Event to signal shutdown
+        
+    Returns:
+        The writer task
+    """
+    global _logs_writer_task
+    
+    if _logs_writer_task is None or _logs_writer_task.done():
+        logger.info("[start_logs_writer] Starting logs writer task...")
+        _logs_writer_task = asyncio.create_task(logs_writer_loop(shutdown_event))
+        logger.info("[start_logs_writer] Logs writer task started.")
+    else:
+        logger.debug("[start_logs_writer] Logs writer task already running.")
+        
+    return _logs_writer_task
+
+async def stop_logs_writer(timeout: float = 5.0) -> bool:
+    """
+    Stop the logs writer task.
+    
+    Args:
+        timeout: Maximum time to wait for the task to stop
+        
+    Returns:
+        True if stopped successfully, False otherwise
+    """
+    global _logs_writer_task
+    
+    if _logs_writer_task is None or _logs_writer_task.done():
+        logger.debug("[stop_logs_writer] Logs writer task not running or already stopped.")
+        return True
+        
+    logger.info("[stop_logs_writer] Stopping logs writer task...")
+    try:
+        # Add None to logs queue to help unblock queue.get()
+        try:
+            from queue import Full
+            logs_queue = get_job_output_queue()
+            logs_queue.put_nowait(None)
+        except Full:
+            logger.warning("[stop_logs_writer] Logs queue full, writer might take longer to stop.")
+            
+        # Wait for task to complete
+        await asyncio.wait_for(_logs_writer_task, timeout=timeout)
+        logger.info("[stop_logs_writer] Logs writer task stopped gracefully.")
+        _logs_writer_task = None
+        return True
+    except asyncio.TimeoutError:
+        logger.warning("[stop_logs_writer] Logs writer task did not stop in time, cancelling.")
+        _logs_writer_task.cancel()
+        try:
+            await _logs_writer_task
+        except asyncio.CancelledError:
+            pass
+        _logs_writer_task = None
+        return True
+    except Exception as e:
+        logger.error(f"[stop_logs_writer] Error stopping logs writer task: {e}", exc_info=True)
+        return False 

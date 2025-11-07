@@ -1,0 +1,348 @@
+"""
+Service for agent generation operations.
+
+This module provides business logic for generating agent configurations
+using LLM models to convert natural language descriptions into
+structured CrewAI agent configurations.
+"""
+
+import logging
+import json
+import os
+import traceback
+from typing import Dict, Any, List, Optional
+
+import litellm
+
+from src.utils.prompt_utils import robust_json_parser
+from src.services.template_service import TemplateService
+
+from src.repositories.log_repository import LLMLogRepository
+from src.services.log_service import LLMLogService
+from src.core.llm_manager import LLMManager
+from src.utils.user_context import GroupContext
+
+# Configure logging
+logger = logging.getLogger(__name__)
+
+class AgentGenerationService:
+    """Service for agent generation operations."""
+
+    def __init__(self, session: Any):
+        """
+        Initialize the service with database session.
+
+        Args:
+            session: Database session from dependency injection
+        """
+        self.session = session
+        # Initialize log service with repository using the same session
+        self.log_service = LLMLogService(LLMLogRepository(session))
+    
+    async def _log_llm_interaction(self, endpoint: str, prompt: str, response: str, model: str,
+                                  group_context: Optional[GroupContext] = None) -> None:
+        """
+        Log LLM interaction using the log service.
+
+        Args:
+            endpoint: API endpoint that was called
+            prompt: Input prompt text
+            response: Response from the LLM
+            model: Model used for generation
+            group_context: Optional group context for multi-group isolation
+        """
+        try:
+            await self.log_service.create_log(
+                endpoint=endpoint,
+                prompt=prompt,
+                response=response,
+                model=model,
+                status='success',
+                group_context=group_context
+            )
+            logger.info(f"Logged {endpoint} interaction to database")
+        except Exception as e:
+            logger.error(f"Failed to log LLM interaction: {str(e)}")
+            logger.error(f"Traceback: {traceback.format_exc()}")
+
+    async def _get_relevant_documentation(self, user_prompt: str, tools: List[str] = None, limit: int = 5) -> str:
+        """
+        Retrieve relevant documentation embeddings based on the agent generation request.
+        Specifically looks for agent patterns and tool-specific best practices.
+
+        Args:
+            user_prompt: The user's prompt for agent generation
+            tools: Optional list of tools to find specific tool documentation
+            limit: Maximum number of documentation chunks to retrieve (default 5 for agents)
+
+        Returns:
+            String containing relevant documentation formatted for context
+        """
+        try:
+            # Build enhanced query including tool context if available
+            search_query = user_prompt
+
+            # Add tool names to search for tool-specific best practices
+            if tools and len(tools) > 0:
+                tool_names = ", ".join(tools) if isinstance(tools[0], str) else ", ".join([t.get('name', '') for t in tools])
+                search_query += f"\n\nTools: {tool_names}"
+
+            # Add keywords to find agent-specific best practices
+            search_query += "\n\nAgent role goal backstory tools capabilities best practices"
+
+            logger.info("Creating embedding for agent generation query to find relevant documentation")
+
+            # Configure embedder (default to Databricks for consistency)
+            embedder_config = {
+                'provider': 'databricks',
+                'config': {'model': 'databricks-gte-large-en'}
+            }
+
+            # Get the embedding for the search query
+            embedding_response = await LLMManager.get_embedding(search_query, embedder_config=embedder_config)
+            if not embedding_response:
+                logger.warning("Failed to create embedding for agent generation query")
+                return ""
+
+            query_embedding = embedding_response
+
+            # Retrieve similar documentation based on the embedding
+            logger.info(f"Searching for {limit} most relevant documentation chunks for agent generation")
+            doc_service = DocumentationEmbeddingService(self.session)
+            similar_docs = await doc_service.search_similar_embeddings(
+                query_embedding=query_embedding,
+                limit=limit
+            )
+
+            if not similar_docs or len(similar_docs) == 0:
+                logger.warning("No relevant documentation found for agent generation")
+                return ""
+
+            # Format the documentation for context, emphasizing agent patterns
+            docs_context = "\n\n## Agent Generation Best Practices and Examples\n\n"
+
+            for doc in similar_docs:
+                # Prioritize agent and tool best practices
+                if 'agent' in doc.title.lower() or 'tool' in doc.source.lower() or 'best_practices' in doc.source:
+                    docs_context = f"### {doc.title}\n\n{doc.content}\n\n" + docs_context
+                else:
+                    docs_context += f"### {doc.title}\n\n{doc.content}\n\n"
+
+            logger.info(f"Retrieved {len(similar_docs)} relevant documentation chunks for agent generation")
+            return docs_context
+
+        except Exception as e:
+            logger.error(f"Error retrieving documentation for agent generation: {str(e)}")
+            logger.error(traceback.format_exc())
+            return ""
+    
+    async def generate_agent(self, prompt_text: str, model: str = None, tools: List[str] = None,
+                            group_context: Optional[GroupContext] = None, fast_planning: bool = True) -> Dict[str, Any]:
+        """
+        Generate agent configuration from natural language description.
+        
+        This method processes a natural language description of an agent
+        and returns a structured configuration that can be used with CrewAI.
+        
+        Args:
+            prompt_text: Natural language description of the agent
+            model: Model to use for generation, defaults to environment variable or "databricks-llama-4-maverick"
+            tools: List of tools available to the agent
+            group_context: Optional group context for multi-group isolation
+            
+        Returns:
+            Dict[str, Any]: Agent configuration in JSON format
+            
+        Raises:
+            ValueError: If there's a problem with the configuration
+            Exception: For any other errors during generation
+        """
+        # Default values
+        model = model or os.getenv("AGENT_MODEL", "databricks-llama-4-maverick")
+        # IMPORTANT: Do not assign any tools during generation
+        # Tools should be added manually after generation if needed
+        tools = []  # Always empty, ignoring the tools parameter
+        
+        logger.info(f"Generating agent with model: {model} and tools: {tools}")
+        
+        try:
+            # Get and prepare prompt template (composed with group/user overrides)
+            system_message = await self._prepare_prompt_template(tools, group_context)
+
+            # Documentation context disabled: skip vector search/embedding for agent generation
+            documentation_context = None
+
+            # Generate agent configuration without external documentation context
+            agent_config = await self._generate_agent_config(
+                prompt_text, system_message, model, documentation_context, fast_planning=fast_planning
+            )
+
+            # Log the interaction
+            try:
+                await self._log_llm_interaction(
+                    endpoint='generate-agent',
+                    prompt=f"System: {system_message}\nUser: {prompt_text}",
+                    response=json.dumps(agent_config),
+                    model=model,
+                    group_context=group_context
+                )
+            except Exception as e:
+                # Just log the error, don't fail the request
+                logger.error(f"Failed to log interaction: {str(e)}")
+            
+            return agent_config
+            
+        except Exception as e:
+            logger.error(f"Error generating agent: {str(e)}")
+            logger.error(f"Traceback: {traceback.format_exc()}")
+            raise
+    
+    async def _prepare_prompt_template(self, tools: List[str], group_context: Optional[GroupContext]) -> str:
+        """
+        Prepare the prompt template (with group/user appended overrides).
+
+        Args:
+            tools: List of tools (ignored for generation)
+            group_context: Current request's group context
+
+        Returns:
+            str: Complete system message
+
+        Raises:
+            ValueError: If prompt template is not found
+        """
+        # Get composed prompt template from database using the TemplateService
+        system_message = await TemplateService.get_effective_template_content("generate_agent", group_context)
+
+        if not system_message:
+            raise ValueError("Required prompt template 'generate_agent' not found in database")
+
+        return system_message
+    
+    async def _generate_agent_config(self, prompt_text: str, system_message: str, model: str,
+                                     documentation_context: str = None, fast_planning: bool = False) -> Dict[str, Any]:
+        """
+        Generate and process agent configuration.
+
+        Args:
+            prompt_text: Natural language description of the agent
+            system_message: System message with template and tools context
+            model: Model to use for generation
+            documentation_context: Optional relevant documentation for enhanced generation
+
+        Returns:
+            Dict[str, Any]: Processed agent configuration
+
+        Raises:
+            ValueError: If agent configuration is invalid
+            Exception: For generation errors
+        """
+        # Prepare messages for LLM
+        messages = [
+            {"role": "system", "content": system_message}
+        ]
+
+        # (No documentation context injected)
+
+        # Add the user's prompt
+        messages.append({"role": "user", "content": prompt_text})
+        
+        # Configure litellm using the LLMManager
+        model_params = await LLMManager.configure_litellm(model)
+        
+        # Generate completion with litellm directly
+        try:
+            # Use the rate limit handler utility to handle potential rate limit errors
+            response = await litellm.acompletion(
+                **model_params,
+                messages=messages,
+                temperature=0.2 if fast_planning else 0.7,
+                max_tokens=1200 if fast_planning else 4000
+            )
+            
+            # Extract and parse content
+            content = response["choices"][0]["message"]["content"]
+            setup = robust_json_parser(content)
+            
+            # Validate and process the configuration
+            return self._process_agent_config(setup, model)
+        except Exception as e:
+            logger.error(f"Error generating completion: {str(e)}")
+            raise ValueError(f"Failed to generate agent configuration: {str(e)}")
+    
+    def _process_agent_config(self, setup: Dict[str, Any], model: str, tools: List[str] = None) -> Dict[str, Any]:
+        """
+        Process and validate agent configuration.
+        
+        Args:
+            setup: Raw agent configuration from LLM
+            model: Model used for generation
+            tools: List of approved tools
+            
+        Returns:
+            Dict[str, Any]: Processed agent configuration
+            
+        Raises:
+            ValueError: If required fields are missing
+        """
+        tools = tools or []
+        
+        # Validate required fields
+        required_fields = ["name", "role", "goal", "backstory"]
+        for field in required_fields:
+            if field not in setup:
+                raise ValueError(f"Missing required field in agent configuration: {field}")
+        
+        # Update the advanced_config.llm field to use the selected model
+        if "advanced_config" not in setup:
+            setup["advanced_config"] = {
+                "llm": model,
+                "function_calling_llm": None,
+                "max_iter": 25,
+                "max_rpm": None,
+                "max_execution_time": None,
+                "verbose": False,
+                "allow_delegation": False,
+                "cache": True,
+                "system_template": None,
+                "prompt_template": None,
+                "response_template": None,
+                "allow_code_execution": False,
+                "code_execution_mode": "safe",
+                "max_retry_limit": 2,
+                "use_system_prompt": True,
+                "respect_context_window": True
+            }
+        else:
+            # Update the LLM field in advanced_config to use the selected model
+            setup["advanced_config"]["llm"] = model
+            
+            # Ensure all required advanced_config fields exist
+            default_config = {
+                "function_calling_llm": None,
+                "max_iter": 25,
+                "max_rpm": None,
+                "max_execution_time": None,
+                "verbose": False,
+                "allow_delegation": False,
+                "cache": True,
+                "system_template": None,
+                "prompt_template": None,
+                "response_template": None,
+                "allow_code_execution": False,
+                "code_execution_mode": "safe",
+                "max_retry_limit": 2,
+                "use_system_prompt": True,
+                "respect_context_window": True
+            }
+            
+            for key, value in default_config.items():
+                if key not in setup["advanced_config"]:
+                    setup["advanced_config"][key] = value
+        
+        # IMPORTANT: Do not assign any tools during generation
+        # Tools should be added manually after generation if needed
+        # Always set tools to empty array regardless of what was requested or generated
+        setup["tools"] = []
+        
+        return setup 

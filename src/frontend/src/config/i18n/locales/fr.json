@@ -1,0 +1,188 @@
+{
+  "common": {
+    "save": "Enregistrer",
+    "cancel": "Annuler",
+    "loading": "Chargement...",
+    "error": "Erreur",
+    "success": "Succès",
+    "close": "Fermer",
+    "delete": "Supprimer",
+    "view": "Voir",
+    "confirm": "Confirmer",
+    "enabled": "Activé",
+    "disabled": "Désactivé"
+  },
+  "navigation": {
+    "nemo": "Nemo",
+    "runs": "Historique des exécutions",
+    "logs": "Journaux",
+    "tools": "Outils",
+    "ucTools": "Outils UC",
+    "apiKeys": "Clés API",
+    "configuration": "Configuration"
+  },
+  "configuration": {
+    "title": "Configuration",
+    "language": {
+      "title": "Paramètres de langue",
+      "select": "Sélectionner la langue",
+      "saved": "Paramètres de langue enregistrés avec succès"
+    },
+    "databricks": {
+      "title": "Paramètres Databricks",
+      "workspaceUrl": "URL de l'espace de travail Databricks",
+      "warehouseId": "ID de l'entrepôt",
+      "catalog": "Catalogue",
+      "schema": "Schéma",
+      "secretScope": "Portée des secrets",
+      "saved": "Configuration Databricks enregistrée avec succès",
+      "info": "La configuration Databricks est utilisée pour se connecter à votre espace de travail Databricks. Le jeton Databricks doit être géré dans la section des clés API."
+    },
+    "tools": {
+      "title": "Gestion des outils",
+      "manageTools": "Gérer les outils",
+      "toolsConfig": "Configurez vos outils et extensions d'IA"
+    },
+    "logs": {
+      "title": "Gestion des journaux",
+      "viewLogs": "Voir les journaux",
+      "logsConfig": "Configurez les préférences de journalisation et consultez les journaux système"
+    }
+  },
+  "runHistory": {
+    "title": "Historique des exécutions",
+    "search": "Rechercher des exécutions...",
+    "filter": "Filtrer les exécutions",
+    "noSearchResults": "Aucun résultat ne correspond à votre recherche",
+    "noRuns": "Aucune exécution disponible",
+    "loadError": "Échec du chargement de l'historique des exécutions",
+    "deleteError": "Échec de la suppression des exécutions",
+    "deleteConfirm": "Êtes-vous sûr de vouloir supprimer toutes les exécutions ? Cette action ne peut pas être annulée.",
+    "deleteAllRuns": "Supprimer tout l'historique",
+    "columns": {
+      "jobId": "Nom de l'exécution",
+      "status": "État",
+      "startTime": "Date de création",
+      "duration": "Durée",
+      "actions": "Actions"
+    },
+    "status": {
+      "pending": "En attente",
+      "running": "En cours",
+      "completed": "Terminé",
+      "failed": "Échoué"
+    },
+    "actions": {
+      "viewTrace": "Voir la trace d'exécution",
+      "viewResult": "Voir le résultat",
+      "viewInputs": "Voir les entrées",
+      "viewLogs": "Voir les journaux",
+      "downloadPdf": "Télécharger le PDF",
+      "schedule": "Planifier la tâche"
+    }
+  },
+  "logs": {
+    "title": "Journaux API LLM",
+    "filterByEndpoint": "Filtrer par point de terminaison",
+    "allEndpoints": "Tous les points de terminaison",
+    "noLogs": "Aucun journal disponible",
+    "columns": {
+      "timestamp": "Horodatage",
+      "endpoint": "Point de terminaison",
+      "model": "Modèle",
+      "tokens": "Jetons",
+      "duration": "Durée",
+      "status": "État"
+    },
+    "details": {
+      "title": "Détails de la requête",
+      "prompt": "Invite :",
+      "response": "Réponse :",
+      "additionalData": "Données supplémentaires :",
+      "error": "Erreur :"
+    },
+    "executionLogs": {
+      "title": "Journaux d'exécution",
+      "connecting": "Connexion au flux de journaux...",
+      "connectionError": "Échec de la connexion au flux de journaux. Veuillez réessayer.",
+      "autoScrollOn": "Défilement automatique ACTIVÉ",
+      "autoScrollOff": "Défilement automatique DÉSACTIVÉ",
+      "refreshLogs": "Actualiser les journaux"
+    }
+  },
+  "tools": {
+    "regular": {
+      "title": "Outils existants",
+      "addTool": "Ajouter un nouvel outil",
+      "editTool": "Modifier l'outil",
+      "columns": {
+        "title": "Titre",
+        "description": "Description",
+        "icon": "Icône",
+        "actions": "Actions"
+      },
+      "form": {
+        "title": "Titre",
+        "description": "Description",
+        "icon": "Icône",
+        "configuration": "Configuration",
+        "addParameter": "Ajouter un paramètre",
+        "parameterName": "Nom du paramètre",
+        "value": "Valeur"
+      },
+      "messages": {
+        "deleteConfirm": "Êtes-vous sûr de vouloir supprimer cet outil ?",
+        "errorLoading": "Erreur lors du chargement des outils",
+        "errorFetching": "Impossible de récupérer les dernières données de l'outil",
+        "errorDeleting": "Erreur lors de la suppression de l'outil",
+        "updateSuccess": "Outil mis à jour avec succès !",
+        "createSuccess": "Outil créé avec succès !",
+        "deleteSuccess": "Outil supprimé avec succès !"
+      }
+    },
+    "uc": {
+      "title": "Outils Unity Catalog",
+      "noTools": "Aucun outil Unity Catalog trouvé.",
+      "columns": {
+        "name": "Nom",
+        "catalog": "Catalogue",
+        "schema": "Schéma",
+        "description": "Description",
+        "actions": "Actions"
+      },
+      "details": {
+        "title": "Détails de la fonction",
+        "noDescription": "Aucune description disponible"
+      }
+    }
+  },
+  "nemo": {
+    "model": {
+      "label": "Choisir le modèle",
+      "provider": "Fournisseur"
+    },
+    "planning": {
+      "label": "Planification",
+      "tooltip": "Lorsqu'elle est activée, un planificateur IA créera un plan étape par étape pour votre équipe avant l'exécution, améliorant la coordination et la performance des tâches"
+    },
+    "buttons": {
+      "schedule": "Planifier",
+      "addAgent": "Ajouter un agent",
+      "addTask": "Ajouter une tâche",
+      "generatePlan": "Générer un plan",
+      "execute": "Exécuter",
+      "openPlan": "Ouvrir le plan",
+      "savePlan": "Enregistrer le plan",
+      "deleteEdge": "Supprimer la connexion",
+      "apiKeys": "Gérer les clés API",
+      "tools": "Gérer les outils",
+      "logs": "Voir les journaux",
+      "configuration": "Configuration"
+    },
+    "errors": {
+      "agentConnection": "Impossible de connecter un agent à un autre agent",
+      "missingNodes": "Veuillez ajouter à la fois des agents et des tâches avant de générer des connexions",
+      "jobExecution": "Échec de l'exécution de la tâche"
+    }
+  }
+} 

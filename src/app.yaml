@@ -1,0 +1,17 @@
+command: ['python', 'entrypoint.py']
+environment_vars:
+  PYTHONPATH: './backend:${PYTHONPATH}'
+  PYTHONUNBUFFERED: '1'
+  # Frontend static files will be available via import-dir
+  FRONTEND_STATIC_DIR: './frontend_static'
+
+  # Logging Configuration
+  KASAL_LOG_LEVEL: 'INFO'           # Global log level
+  KASAL_LOG_APP: 'INFO'             # Application modules
+  KASAL_LOG_THIRD_PARTY: 'WARNING'  # Third-party libraries
+  KASAL_LOG_CONSOLE: 'true'         # Enable console output
+  KASAL_LOG_FILE: 'true'            # Enable file logging
+
+apt_packages:
+  - libpq-dev
+
