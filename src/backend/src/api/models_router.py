@@ -312,18 +312,27 @@ async def toggle_model(
 ):
     """
     Enable or disable a model configuration.
+    Only Admins can toggle model configurations.
 
     Args:
         model_key: Key of the model configuration to toggle
         toggle_data: Toggle data with enabled flag
         service: ModelConfig service injected by dependency
+        group_context: Group context for permissions
 
     Returns:
         Updated model configuration
 
     Raises:
-        HTTPException: If model not found
+        HTTPException: If model not found or user lacks permissions
     """
+    # Check permissions - only admins can toggle model configurations
+    if not check_role_in_context(group_context, ["admin"]):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Only admins can toggle model configurations"
+        )
+
     try:
         logger.info(f"API call: PATCH /models/{model_key}/toggle - Setting enabled={toggle_data.enabled}")
 

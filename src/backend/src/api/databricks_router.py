@@ -101,14 +101,22 @@ async def get_databricks_config(
 ):
     """
     Get current Databricks configuration.
-    
+    Only workspace admins can view Databricks configuration.
+
     Args:
         group_context: Group context for multi-tenant operations
         service: Databricks service
-        
+
     Returns:
         Current Databricks configuration
     """
+    # Check permissions - only workspace admins can view Databricks configuration
+    if not is_workspace_admin(group_context):
+        raise HTTPException(
+            status_code=403,
+            detail="Only workspace admins can view Databricks configuration"
+        )
+
     try:
         config = await service.get_databricks_config()
         if not config:
@@ -149,14 +157,22 @@ async def check_personal_token_required(
 ):
     """
     Check if personal access token is required for Databricks.
-    
+    Only workspace admins can check personal token requirements.
+
     Args:
         group_context: Group context for multi-tenant operations
         service: Databricks service
-        
+
     Returns:
         Status indicating if personal token is required
     """
+    # Check permissions - only workspace admins can check token requirements
+    if not is_workspace_admin(group_context):
+        raise HTTPException(
+            status_code=403,
+            detail="Only workspace admins can check personal token requirements"
+        )
+
     try:
         return await service.check_personal_token_required()
     except Exception as e:
@@ -171,14 +187,22 @@ async def check_databricks_connection(
 ):
     """
     Check connection to Databricks.
-    
+    Only workspace admins can check Databricks connection status.
+
     Args:
         group_context: Group context for multi-tenant operations
         service: Databricks service
-        
+
     Returns:
         Connection status
     """
+    # Check permissions - only workspace admins can check connection status
+    if not is_workspace_admin(group_context):
+        raise HTTPException(
+            status_code=403,
+            detail="Only workspace admins can check Databricks connection status"
+        )
+
     try:
         return await service.check_databricks_connection()
     except Exception as e:
@@ -187,13 +211,26 @@ async def check_databricks_connection(
 
 
 @router.get("/environment", response_model=Dict)
-async def get_databricks_environment():
+async def get_databricks_environment(
+    group_context: GroupContextDep,
+):
     """
     Get information about the Databricks environment.
+    Only workspace admins can view Databricks environment information.
+
+    Args:
+        group_context: Group context for multi-tenant operations
 
     Returns:
         Dictionary containing environment information including workspace URL and authentication status
     """
+    # Check permissions - only workspace admins can view environment information
+    if not is_workspace_admin(group_context):
+        raise HTTPException(
+            status_code=403,
+            detail="Only workspace admins can view Databricks environment information"
+        )
+
     try:
         # Get workspace URL directly from DatabricksAuth config
         # This works even if full authentication isn't available

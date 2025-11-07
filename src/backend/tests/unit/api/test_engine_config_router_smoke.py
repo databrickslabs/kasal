@@ -16,9 +16,11 @@ from src.schemas.engine_config import EngineConfigCreate, EngineConfigToggleUpda
 
 
 class Ctx:
-    def __init__(self, user_role=None, primary_group_id='g1'):
+    def __init__(self, user_role=None, primary_group_id='g1', is_system_admin=False):
         self.user_role = user_role
         self.primary_group_id = primary_group_id
+        # Add current_user attribute for system admin checks
+        self.current_user = type('obj', (object,), {'is_system_admin': is_system_admin})()
 
 
 @pytest.mark.asyncio
@@ -94,7 +96,8 @@ async def test_create_toggle_update_value_permission_and_404s(monkeypatch):
 
 @pytest.mark.asyncio
 async def test_crewai_toggles():
-    group_ctx = Ctx()
+    # System admin required for engine configuration endpoints
+    group_ctx = Ctx(is_system_admin=True)
     svc = AsyncMock()
     svc.get_crewai_flow_enabled = AsyncMock(return_value=True)
     resp = await get_crewai_flow_enabled(service=svc, group_context=group_ctx)

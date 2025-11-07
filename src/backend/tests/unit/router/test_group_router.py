@@ -36,7 +36,8 @@ def mock_current_user():
             self.status = UserStatus.ACTIVE
             self.created_at = datetime.utcnow()
             self.updated_at = datetime.utcnow()
-    
+            self.is_system_admin = True  # System admin for tests
+
     return MockUser()
 
 
@@ -369,13 +370,14 @@ class TestGroupRouter:
     
     @patch('src.api.group_router.GroupService')
     def test_list_group_users_success(self, mock_service_class, client, mock_db_session):
-        """Test successful group users listing."""
+        """Test successful group users listing (system admin)."""
         mock_service = AsyncMock()
         mock_service_class.return_value = mock_service
-        
+
         mock_group = MagicMock()
         mock_service.get_group_by_id.return_value = mock_group
-        
+
+        # System admin doesn't need membership check
         mock_service.list_group_users.return_value = [
             {
                 "id": "gu-1",
@@ -390,9 +392,9 @@ class TestGroupRouter:
                 "updated_at": datetime.utcnow()
             }
         ]
-        
+
         response = client.get("/groups/group-1/users?skip=0&limit=10")
-        
+
         assert response.status_code == 200
         data = response.json()
         assert len(data) == 1
@@ -401,16 +403,18 @@ class TestGroupRouter:
     
     @patch('src.api.group_router.GroupService')
     def test_list_group_users_default_pagination(self, mock_service_class, client, mock_db_session):
-        """Test group users listing with default pagination."""
+        """Test group users listing with default pagination (system admin)."""
         mock_service = AsyncMock()
         mock_service_class.return_value = mock_service
-        
+
         mock_group = MagicMock()
         mock_service.get_group_by_id.return_value = mock_group
+
+        # System admin doesn't need membership check
         mock_service.list_group_users.return_value = []
-        
+
         response = client.get("/groups/group-1/users")
-        
+
         assert response.status_code == 200
         mock_service.list_group_users.assert_called_once_with(group_id="group-1", skip=0, limit=100)
     
