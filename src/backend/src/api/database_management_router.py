@@ -70,7 +70,7 @@ async def export_database(
 ) -> ExportResponse:
     """
     Export database to a Databricks volume.
-    Only Admins can export databases.
+    SECURITY: Only system admins can export the entire database.
 
     Args:
         request: Export request with catalog, schema, and volume name
@@ -80,11 +80,18 @@ async def export_database(
     Returns:
         Export result with Databricks URL for the backup
     """
-    # Check permissions - only admins can export databases
-    if not check_role_in_context(group_context, ["admin"]):
+    # SECURITY: Only system admins can export the entire database
+    # Workspace admins should NOT be able to export all tenants' data
+    is_system_admin = (
+        hasattr(group_context, 'current_user') and
+        group_context.current_user and
+        getattr(group_context.current_user, 'is_system_admin', False)
+    )
+
+    if not is_system_admin:
         raise HTTPException(
             status_code=403,
-            detail="Only admins can export databases"
+            detail="Only system administrators can export the database. This operation exports data from all workspaces."
         )
 
     try:
@@ -133,7 +140,7 @@ async def import_database(
 ) -> ImportResponse:
     """
     Import database from a Databricks volume.
-    Only Admins can import databases.
+    SECURITY: Only system admins can import and overwrite the entire database.
 
     Args:
         request: Import request with catalog, schema, volume name, and backup filename
@@ -143,11 +150,18 @@ async def import_database(
     Returns:
         Import result with database statistics
     """
-    # Check permissions - only admins can import databases
-    if not check_role_in_context(group_context, ["admin"]):
+    # SECURITY: Only system admins can import the entire database
+    # Workspace admins should NOT be able to overwrite all tenants' data
+    is_system_admin = (
+        hasattr(group_context, 'current_user') and
+        group_context.current_user and
+        getattr(group_context.current_user, 'is_system_admin', False)
+    )
+
+    if not is_system_admin:
         raise HTTPException(
             status_code=403,
-            detail="Only admins can import databases"
+            detail="Only system administrators can import database backups. This operation replaces data from all workspaces."
         )
 
     try:
@@ -185,7 +199,8 @@ async def list_backups(
 ) -> ListBackupsResponse:
     """
     List all database backups in a Databricks volume.
-    
+    SECURITY: Only system admins can list database backups.
+
     Args:
         request: Request with catalog, schema, and volume name
         service: Database management service (injected)
@@ -194,6 +209,19 @@ async def list_backups(
     Returns:
         List of available backups with their Databricks URLs
     """
+    # SECURITY: Only system admins can list database backups
+    is_system_admin = (
+        hasattr(group_context, 'current_user') and
+        group_context.current_user and
+        getattr(group_context.current_user, 'is_system_admin', False)
+    )
+
+    if not is_system_admin:
+        raise HTTPException(
+            status_code=403,
+            detail="Only system administrators can list database backups."
+        )
+
     try:
         # Use the injected service
         result = await service.list_backups(

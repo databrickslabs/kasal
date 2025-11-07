@@ -30,43 +30,45 @@ from src.schemas.database_management import (
 
 
 class Ctx:
-    def __init__(self, user_role=None, primary_group_id="g1", group_email="u@x", access_token="tok"):
+    def __init__(self, user_role=None, primary_group_id="g1", group_email="u@x", access_token="tok", is_system_admin=False):
         self.user_role = user_role
         self.primary_group_id = primary_group_id
         self.group_email = group_email
         self.access_token = access_token
+        # Add current_user attribute for system admin checks
+        self.current_user = type('obj', (object,), {'is_system_admin': is_system_admin})()
 
 
 @pytest.mark.asyncio
 async def test_export_import_permissions_and_success():
     svc = AsyncMock()
-    ctx_user = Ctx(user_role="user")
-    ctx_admin = Ctx(user_role="admin")
+    ctx_user = Ctx(user_role="user", is_system_admin=False)
+    ctx_system_admin = Ctx(user_role="admin", is_system_admin=True)
 
-    # Non-admin export -> 403
+    # Non-system-admin export -> 403
     with pytest.raises(HTTPException) as ei:
         await export_database(ExportRequest(), service=svc, group_context=ctx_user)
     assert ei.value.status_code == 403
 
-    # Admin export -> success
+    # System admin export -> success
     svc.export_to_volume = AsyncMock(return_value={"success": True, "backup_filename": "b.db"})
-    out = await export_database(ExportRequest(), service=svc, group_context=ctx_admin)
+    out = await export_database(ExportRequest(), service=svc, group_context=ctx_system_admin)
     assert out.success is True
 
-    # Non-admin import -> 403
+    # Non-system-admin import -> 403
     with pytest.raises(HTTPException):
         await import_database(ImportRequest(catalog="c", schema="s", volume_name="v", backup_filename="b.db"), service=svc, group_context=ctx_user)
 
-    # Admin import -> success
+    # System admin import -> success
     svc.import_from_volume = AsyncMock(return_value={"success": True, "imported_from": "v/b.db"})
-    out2 = await import_database(ImportRequest(catalog="c", schema="s", volume_name="v", backup_filename="b.db"), service=svc, group_context=ctx_admin)
+    out2 = await import_database(ImportRequest(catalog="c", schema="s", volume_name="v", backup_filename="b.db"), service=svc, group_context=ctx_system_admin)
     assert out2.success is True
 
 
 @pytest.mark.asyncio
 async def test_list_info_and_permission_checks():
     svc = AsyncMock()
-    ctx = Ctx(user_role="admin")
+    ctx = Ctx(user_role="admin", is_system_admin=True)
 
     # list_backups
     svc.list_backups = AsyncMock(return_value={"success": True, "backups": []})

@@ -4,7 +4,7 @@ from fastapi import APIRouter, Depends, HTTPException, status
 import logging
 
 from src.core.dependencies import SessionDep, GroupContextDep
-from src.core.permissions import check_role_in_context
+from src.core.permissions import check_role_in_context, is_system_admin
 from src.models.engine_config import EngineConfig
 from src.schemas.engine_config import (
     EngineConfigCreate,
@@ -407,19 +407,27 @@ async def get_crewai_flow_enabled(
 ):
     """
     Get the CrewAI flow enabled status.
-    
+    Only system administrators can access engine configuration.
+
     Args:
         service: EngineConfig service injected by dependency
-        
+
     Returns:
         Flow enabled status
     """
+    # Check permissions - only system admins can access engine configuration
+    if not is_system_admin(group_context):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Only system administrators can access engine configuration"
+        )
+
     try:
         logger.info("API call: GET /engine-config/crewai/flow-enabled")
-        
+
         enabled = await service.get_crewai_flow_enabled()
         logger.info(f"CrewAI flow enabled status: {enabled}")
-        
+
         return {"flow_enabled": enabled}
     except Exception as e:
         logger.error(f"Error getting CrewAI flow enabled status: {str(e)}")
@@ -434,6 +442,7 @@ async def set_crewai_flow_enabled(
 ):
     """
     Set the CrewAI flow enabled status.
+    Only system administrators can manage engine configuration.
 
     Args:
         config_data: Flow configuration data
@@ -442,6 +451,13 @@ async def set_crewai_flow_enabled(
     Returns:
         Success status
     """
+    # Check permissions - only system admins can manage engine configuration
+    if not is_system_admin(group_context):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Only system administrators can manage engine configuration"
+        )
+
     try:
         logger.info(f"API call: PATCH /engine-config/crewai/flow-enabled - enabled={config_data.flow_enabled}")
 
@@ -468,7 +484,15 @@ async def get_crewai_debug_tracing(
 ):
     """
     Get the CrewAI debug tracing status.
+    Only system administrators can access engine configuration.
     """
+    # Check permissions - only system admins can access engine configuration
+    if not is_system_admin(group_context):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Only system administrators can access engine configuration"
+        )
+
     try:
         logger.info("API call: GET /engine-config/crewai/debug-tracing")
         enabled = await service.get_crewai_debug_tracing()
@@ -486,7 +510,15 @@ async def set_crewai_debug_tracing(
 ):
     """
     Set the CrewAI debug tracing enabled status.
+    Only system administrators can manage engine configuration.
     """
+    # Check permissions - only system admins can manage engine configuration
+    if not is_system_admin(group_context):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Only system administrators can manage engine configuration"
+        )
+
     try:
         logger.info(f"API call: PATCH /engine-config/crewai/debug-tracing - debug_tracing={config_data.debug_tracing}")
         success = await service.set_crewai_debug_tracing(config_data.debug_tracing)

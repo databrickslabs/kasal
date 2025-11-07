@@ -565,6 +565,19 @@ class GroupService:
 
         return group, group_user
 
+    async def get_user_group_membership(self, user_id: str, group_id: str) -> Optional[GroupUser]:
+        """
+        Get a user's membership in a specific group.
+
+        Args:
+            user_id: User ID
+            group_id: Group ID
+
+        Returns:
+            GroupUser: The user's membership in the group, or None if not a member
+        """
+        return await self.group_user_repo.get_by_group_and_user(group_id, user_id)
+
 
 # Legacy compatibility - maintain old names for backward compatibility during migration
 TenantService = GroupService

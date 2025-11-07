@@ -178,16 +178,24 @@ async def create_databricks_index(
 ) -> Dict[str, Any]:
     """
     Create a new Databricks Vector Search index.
-    
+    Only workspace admins can create Databricks indexes.
+
     Args:
         request: Request containing index creation parameters
         req: FastAPI request for extracting user token
         group_context: Current group context
         service: Memory backend service
-        
+
     Returns:
         Index creation result
     """
+    # Check permissions - only workspace admins can create indexes
+    if not is_workspace_admin(group_context):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Only workspace admins can create Databricks indexes"
+        )
+
     try:
         # Extract parameters
         try:
@@ -570,6 +578,7 @@ async def one_click_databricks_setup(
     """
     One-click setup for Databricks Vector Search.
     Creates all endpoints and indexes automatically.
+    Only workspace admins can set up memory backend for their workspace.
 
     Args:
         request: Request containing workspace_url, catalog, and schema
@@ -580,6 +589,13 @@ async def one_click_databricks_setup(
     Returns:
         Setup result with created resources
     """
+    # Check permissions - only workspace admins can set up memory backend
+    if not is_workspace_admin(group_context):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Only workspace admins can set up memory backend"
+        )
+
     try:
         # CRITICAL: Set UserContext for authentication system to access group_id
         # The authentication system needs group_id to look up PAT tokens from database
@@ -783,16 +799,24 @@ async def delete_databricks_index(
 ) -> Dict[str, Any]:
     """
     Delete a Databricks Vector Search index.
-    
+    Only workspace admins can delete Databricks indexes.
+
     Args:
         request: Request containing deletion parameters
         req: FastAPI request for extracting user token
         group_context: Current group context
         service: Memory backend service
-        
+
     Returns:
         Deletion result
     """
+    # Check permissions - only workspace admins can delete indexes
+    if not is_workspace_admin(group_context):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Only workspace admins can delete Databricks indexes"
+        )
+
     try:
         # Extract parameters
         workspace_url = request.get("workspace_url")
@@ -838,16 +862,24 @@ async def delete_databricks_endpoint(
 ) -> Dict[str, Any]:
     """
     Delete a Databricks Vector Search endpoint.
-    
+    Only workspace admins can delete Databricks endpoints.
+
     Args:
         request: Request containing deletion parameters
         req: FastAPI request for extracting user token
         group_context: Current group context
         service: Memory backend service
-        
+
     Returns:
         Deletion result
     """
+    # Check permissions - only workspace admins can delete endpoints
+    if not is_workspace_admin(group_context):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Only workspace admins can delete Databricks endpoints"
+        )
+
     try:
         # Extract parameters
         workspace_url = request.get("workspace_url")
@@ -931,16 +963,24 @@ async def switch_to_disabled_mode(
     service: Annotated[MemoryBackendService, Depends(get_memory_backend_service)],
 ) -> Dict[str, Any]:
     """
-    Switch to disabled mode by deleting all memory backend configurations 
+    Switch to disabled mode by deleting all memory backend configurations
     and creating a new disabled configuration.
-    
+    Only workspace admins can switch to disabled mode.
+
     Args:
         group_context: Current group context
         service: Memory backend service
-        
+
     Returns:
         Success status with deleted count and new disabled configuration
     """
+    # Check permissions - only workspace admins can switch to disabled mode
+    if not is_workspace_admin(group_context):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Only workspace admins can switch memory backend to disabled mode"
+        )
+
     try:
         # Delete all configurations and create disabled one
         result = await service.delete_all_and_create_disabled(group_context.primary_group_id)
@@ -1054,16 +1094,24 @@ async def empty_index(
 ) -> Dict[str, Any]:
     """
     Empty a Databricks Vector Search index by deleting and recreating it.
-    
+    Only workspace admins can empty Databricks indexes.
+
     Args:
         request: Request containing index parameters
         req: FastAPI request for extracting user token
         group_context: Current group context
         service: Memory backend service
-        
+
     Returns:
         Operation result
     """
+    # Check permissions - only workspace admins can empty indexes
+    if not is_workspace_admin(group_context):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Only workspace admins can empty Databricks indexes"
+        )
+
     try:
         # Extract parameters
         workspace_url = request.get("workspace_url")
