@@ -5,9 +5,9 @@ import {
   IconButton,
   Tooltip,
 } from '@mui/material';
-import { 
-  SmartToy as SmartToyIcon,
+import {
   ChevronRight as ChevronRightIcon,
+  ChevronLeft as ChevronLeftIcon,
 } from '@mui/icons-material';
 import WorkflowChat from './WorkflowChat';
 import { Node, Edge } from 'reactflow';
@@ -25,19 +25,21 @@ interface ChatPanelProps {
   onToggleCollapse?: () => void;
   chatSessionId?: string;
   onOpenLogs?: (jobId: string) => void;
+  chatSide?: 'left' | 'right';
 }
 
-const ChatPanel: React.FC<ChatPanelProps> = ({ 
-  onNodesGenerated, 
-  onLoadingStateChange, 
-  isVisible = true, 
-  nodes = [], 
-  edges = [], 
+const ChatPanel: React.FC<ChatPanelProps> = ({
+  onNodesGenerated,
+  onLoadingStateChange,
+  isVisible = true,
+  nodes = [],
+  edges = [],
   onExecuteCrew,
   isCollapsed = false,
   onToggleCollapse,
   chatSessionId,
-  onOpenLogs
+  onOpenLogs,
+  chatSide = 'right'
 }) => {
   const { selectedModel, setSelectedModel } = useCrewExecutionStore();
   const { selectedTools } = useJobManagementStore();
@@ -45,14 +47,15 @@ const ChatPanel: React.FC<ChatPanelProps> = ({
   if (isCollapsed) {
     // Collapsed state - show only icon and expand button
     return (
-      <Paper 
-        sx={{ 
+      <Paper
+        data-tour="chat-toggle"
+        sx={{
           width: 60,
-          height: '100%', 
-          display: 'flex', 
+          height: '100%',
+          display: 'flex',
           flexDirection: 'column',
           alignItems: 'center',
-          borderLeft: 1,
+          ...(chatSide === 'right' ? { borderLeft: 1 } : { borderRight: 1 }),
           borderColor: 'divider',
           borderRadius: 0,
           boxShadow: 'none',
@@ -61,9 +64,9 @@ const ChatPanel: React.FC<ChatPanelProps> = ({
           contain: 'layout size',
         }}
       >
-        <Box sx={{ 
-          p: 1.5, 
-          borderBottom: 1, 
+        <Box sx={{
+          p: 1.5,
+          borderBottom: 1,
           borderColor: 'divider',
           backgroundColor: theme => theme.palette.mode === 'dark' ? 'grey.900' : 'grey.50',
           width: '100%',
@@ -72,17 +75,14 @@ const ChatPanel: React.FC<ChatPanelProps> = ({
           alignItems: 'center',
           gap: 1
         }}>
-          <SmartToyIcon 
-            sx={{ 
-              fontSize: '1.5rem', 
-              color: 'primary.main',
-            }} 
+          <Box component="img" src="/kasal-icon-24.png" alt="Kasal"
+            sx={{ width: 24, height: 24, borderRadius: 0.5 }}
           />
-          <Tooltip title="Expand Kasal Chat" placement="left">
-            <IconButton 
-              size="small" 
+          <Tooltip title="Expand Kasal Chat" placement={chatSide === 'right' ? 'left' : 'right'}>
+            <IconButton
+              size="small"
               onClick={onToggleCollapse}
-              sx={{ 
+              sx={{
                 backgroundColor: 'primary.main',
                 color: 'primary.contrastText',
                 '&:hover': {
@@ -90,7 +90,11 @@ const ChatPanel: React.FC<ChatPanelProps> = ({
                 }
               }}
             >
-              <ChevronRightIcon fontSize="small" />
+              {chatSide === 'right' ? (
+                <ChevronLeftIcon fontSize="small" />
+              ) : (
+                <ChevronRightIcon fontSize="small" />
+              )}
             </IconButton>
           </Tooltip>
         </Box>
@@ -100,13 +104,14 @@ const ChatPanel: React.FC<ChatPanelProps> = ({
 
   // Expanded state - full chat panel
   return (
-    <Paper 
-      sx={{ 
-        height: '100%', 
+    <Paper
+      data-tour="chat-panel"
+      sx={{
+        height: '100%',
         width: '100%',
-        display: 'flex', 
+        display: 'flex',
         flexDirection: 'column',
-        borderLeft: 1,
+        ...(chatSide === 'right' ? { borderLeft: 1 } : { borderRight: 1 }),
         borderColor: 'divider',
         borderRadius: 0,
         boxShadow: 'none',
@@ -118,8 +123,8 @@ const ChatPanel: React.FC<ChatPanelProps> = ({
         contain: 'layout size', // Strict CSS containment
       }}
     >
-      <Box sx={{ 
-        flex: 1, 
+      <Box sx={{
+        flex: 1,
         overflow: 'hidden',
         display: 'flex',
         flexDirection: 'column',

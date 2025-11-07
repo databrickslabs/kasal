@@ -69,7 +69,12 @@ class TestRunCrew:
              patch('src.engines.crewai.callbacks.streaming_callbacks.EventStreamingCallback') as mock_event_streaming, \
              patch('src.core.llm_manager.LLMManager') as mock_llm_manager, \
              patch('src.services.api_keys_service.ApiKeysService') as mock_api_keys, \
-             patch('asyncio.to_thread', new_callable=AsyncMock) as mock_to_thread, \
+             patch('src.services.crew_executor.crew_executor.run_crew', new_callable=AsyncMock) as mock_crew_executor_run, \
+             patch('src.engines.crewai.callbacks.execution_callback.create_execution_callbacks') as mock_create_callbacks, \
+             patch('src.engines.crewai.callbacks.execution_callback.create_crew_callbacks') as mock_create_crew_callbacks, \
+             patch('src.engines.crewai.callbacks.execution_callback.log_crew_initialization'), \
+             patch('src.engines.crewai.trace_management.TraceManager.ensure_writer_started', new_callable=AsyncMock), \
+             patch('src.engines.crewai.callbacks.logging_callbacks.AgentTraceEventListener'), \
              patch('src.engines.crewai.tools.mcp_handler.stop_all_adapters', new_callable=AsyncMock) as mock_stop_adapters, \
              patch('src.engines.crewai.execution_runner.update_execution_status_with_retry', new_callable=AsyncMock) as mock_update_status:
             
@@ -84,7 +89,13 @@ class TestRunCrew:
             mock_api_keys.setup_openai_api_key = AsyncMock()
             mock_api_keys.setup_anthropic_api_key = AsyncMock()
             mock_api_keys.setup_gemini_api_key = AsyncMock()
-            mock_to_thread.return_value = "crew execution result"
+            mock_crew_executor_run.return_value = "crew execution result"
+            mock_create_callbacks.return_value = (MagicMock(), MagicMock())
+            mock_create_crew_callbacks.return_value = {
+                'on_start': MagicMock(),
+                'on_complete': MagicMock(),
+                'on_error': MagicMock()
+            }
             mock_update_status.return_value = True
             mock_stop_adapters.return_value = None
             
@@ -108,7 +119,7 @@ class TestRunCrew:
             )
             
             # Verify crew execution
-            mock_to_thread.assert_called_once_with(sample_crew.kickoff)
+            mock_crew_executor_run.assert_called_once()
             
             # Verify final status update
             mock_update_status.assert_called_once_with(
@@ -121,15 +132,19 @@ class TestRunCrew:
     async def test_run_crew_cleanup_operations(self, sample_crew, sample_running_jobs):
         """Test cleanup operations are performed."""
         execution_id = "test-exec-id"
-        
+
         with patch('src.services.execution_status_service.ExecutionStatusService') as mock_status_service, \
              patch('src.engines.crewai.crew_logger.crew_logger') as mock_crew_logger, \
              patch('src.engines.crewai.callbacks.streaming_callbacks.EventStreamingCallback') as mock_event_streaming, \
              patch('src.services.api_keys_service.ApiKeysService') as mock_api_keys, \
-             patch('asyncio.to_thread', new_callable=AsyncMock) as mock_to_thread, \
+             patch('src.services.crew_executor.crew_executor.run_crew', new_callable=AsyncMock) as mock_crew_executor_run, \
+             patch('src.engines.crewai.callbacks.execution_callback.create_execution_callbacks') as mock_create_callbacks, \
+             patch('src.engines.crewai.callbacks.execution_callback.create_crew_callbacks') as mock_create_crew_callbacks, \
+             patch('src.engines.crewai.callbacks.execution_callback.log_crew_initialization'), \
+             patch('src.engines.crewai.trace_management.TraceManager.ensure_writer_started', new_callable=AsyncMock), \
+             patch('src.engines.crewai.callbacks.logging_callbacks.AgentTraceEventListener'), \
              patch('src.engines.crewai.tools.mcp_handler.stop_all_adapters', new_callable=AsyncMock) as mock_stop_adapters, \
-             patch('src.engines.crewai.execution_runner.update_execution_status_with_retry', new_callable=AsyncMock) as mock_update_status, \
-             patch('src.utils.databricks_auth.is_databricks_apps_environment', return_value=False):
+             patch('src.engines.crewai.execution_runner.update_execution_status_with_retry', new_callable=AsyncMock) as mock_update_status:
             
             # Setup mocks
             mock_status_service.update_status = AsyncMock()
@@ -142,7 +157,13 @@ class TestRunCrew:
             mock_api_keys.setup_openai_api_key = AsyncMock()
             mock_api_keys.setup_anthropic_api_key = AsyncMock()
             mock_api_keys.setup_gemini_api_key = AsyncMock()
-            mock_to_thread.return_value = "success"
+            mock_crew_executor_run.return_value = "success"
+            mock_create_callbacks.return_value = (MagicMock(), MagicMock())
+            mock_create_crew_callbacks.return_value = {
+                'on_start': MagicMock(),
+                'on_complete': MagicMock(),
+                'on_error': MagicMock()
+            }
             mock_update_status.return_value = True
             mock_stop_adapters.return_value = None
             
@@ -164,15 +185,19 @@ class TestRunCrew:
     async def test_run_crew_no_user_context(self, sample_crew, sample_running_jobs):
         """Test crew execution without user token or group context."""
         execution_id = "test-exec-id"
-        
+
         with patch('src.services.execution_status_service.ExecutionStatusService') as mock_status_service, \
              patch('src.engines.crewai.crew_logger.crew_logger') as mock_crew_logger, \
              patch('src.engines.crewai.callbacks.streaming_callbacks.EventStreamingCallback') as mock_event_streaming, \
              patch('src.services.api_keys_service.ApiKeysService') as mock_api_keys, \
-             patch('asyncio.to_thread', new_callable=AsyncMock) as mock_to_thread, \
+             patch('src.services.crew_executor.crew_executor.run_crew', new_callable=AsyncMock) as mock_crew_executor_run, \
+             patch('src.engines.crewai.callbacks.execution_callback.create_execution_callbacks') as mock_create_callbacks, \
+             patch('src.engines.crewai.callbacks.execution_callback.create_crew_callbacks') as mock_create_crew_callbacks, \
+             patch('src.engines.crewai.callbacks.execution_callback.log_crew_initialization'), \
+             patch('src.engines.crewai.trace_management.TraceManager.ensure_writer_started', new_callable=AsyncMock), \
+             patch('src.engines.crewai.callbacks.logging_callbacks.AgentTraceEventListener'), \
              patch('src.engines.crewai.tools.mcp_handler.stop_all_adapters', new_callable=AsyncMock) as mock_stop_adapters, \
-             patch('src.engines.crewai.execution_runner.update_execution_status_with_retry', new_callable=AsyncMock) as mock_update_status, \
-             patch('src.utils.databricks_auth.is_databricks_apps_environment', return_value=False):
+             patch('src.engines.crewai.execution_runner.update_execution_status_with_retry', new_callable=AsyncMock) as mock_update_status:
             
             # Setup mocks
             mock_status_service.update_status = AsyncMock()
@@ -184,7 +209,13 @@ class TestRunCrew:
             mock_api_keys.setup_openai_api_key = AsyncMock()
             mock_api_keys.setup_anthropic_api_key = AsyncMock()
             mock_api_keys.setup_gemini_api_key = AsyncMock()
-            mock_to_thread.return_value = "success"
+            mock_crew_executor_run.return_value = "success"
+            mock_create_callbacks.return_value = (MagicMock(), MagicMock())
+            mock_create_crew_callbacks.return_value = {
+                'on_start': MagicMock(),
+                'on_complete': MagicMock(),
+                'on_error': MagicMock()
+            }
             mock_update_status.return_value = True
             mock_stop_adapters.return_value = None
             

@@ -13,29 +13,32 @@ from src.models.execution_status import ExecutionStatus
 from src.repositories.execution_repository import ExecutionRepository
 from src.utils.asyncio_utils import execute_db_operation_with_fresh_engine
 
+from sqlalchemy.ext.asyncio import AsyncSession
+
 logger = logging.getLogger(__name__)
 
 class ExecutionStatusService:
     """
     Service for managing execution status operations.
     """
-    
+
     @staticmethod
     async def update_status(
         job_id: str,
         status: str,
         message: str,
-        result: Any = None
+        result: Any = None,
+        session: AsyncSession | None = None
     ) -> bool:
         """
         Update the status of an execution in the database.
-        
+
         Args:
             job_id: Execution ID (string UUID, maps to job_id field)
             status: New status string value
             message: Status message
             result: Optional result data
-            
+
         Returns:
             True if successful, False otherwise
         """
@@ -43,20 +46,20 @@ class ExecutionStatusService:
         if not job_id or not isinstance(job_id, str):
             logger.error(f"[ExecutionStatusService] Invalid job_id: {job_id}")
             return False
-            
+
         try:
             # Define the database operation
             async def _update_operation(session):
                 repo = ExecutionRepository(session)
-                
+
                 # Find the execution record by job_id (string UUID)
                 logger.debug(f"[ExecutionStatusService] Finding execution by job_id: {job_id} to update status.")
                 execution_record = await repo.get_execution_by_job_id(job_id=job_id)
-                
+
                 if not execution_record:
                     logger.error(f"[ExecutionStatusService] Execution record not found for job_id: {job_id}. Cannot update status.")
                     return False
-                
+
                 # Get the integer primary key (id) from the record
                 record_id = execution_record.id
                 logger.debug(f"[ExecutionStatusService] Found record_id: {record_id} for job_id: {job_id}. Preparing update data.")
@@ -66,11 +69,11 @@ class ExecutionStatusService:
                     "status": status,
                     "error": message  # Changed from "message" to "error" to match the database column
                 }
-                
+
                 # Add result if provided - properly handle JSON serialization
                 if result is not None:
                     logger.info(f"[ExecutionStatusService] Processing result of type {type(result)} for job_id: {job_id}")
-                    
+
                     # The result field is defined as JSON in the model
                     try:
                         # Check if we need to serialize to JSON
@@ -80,20 +83,20 @@ class ExecutionStatusService:
                         else:
                             # For other types, convert to string representation
                             update_data["result"] = str(result)
-                            
+
                         logger.info(f"[ExecutionStatusService] Successfully processed result for job_id: {job_id}")
                     except Exception as json_err:
                         logger.error(f"[ExecutionStatusService] Error processing result for job_id: {job_id}: {str(json_err)}")
                         # Still add the result as a string if JSON serialization fails
                         update_data["result"] = str(result)
-                
+
                 # Set completed_at if status is a terminal status
                 if status in [ExecutionStatus.COMPLETED.value, ExecutionStatus.FAILED.value, ExecutionStatus.CANCELLED.value]:
                     from datetime import datetime
                     # Always set completed_at to current time for terminal statuses
                     update_data["completed_at"] = datetime.now()  # Use timezone-naive datetime
                     logger.info(f"[ExecutionStatusService] Setting completed_at for terminal status {status} on job {job_id}")
-                
+
                 logger.info(f"[ExecutionStatusService] Update data keys: {', '.join(update_data.keys())}")
 
                 # Call the repository update method using the integer record_id
@@ -102,7 +105,7 @@ class ExecutionStatusService:
                     execution_id=record_id, # Use the integer ID here
                     data=update_data
                 )
-                
+
                 # Explicitly flush and commit the session to catch potential DB errors early
                 if updated_execution:
                     logger.debug(f"[ExecutionStatusService] Flushing session after updating record_id: {record_id} for job_id: {job_id}")
@@ -117,21 +120,147 @@ class ExecutionStatusService:
                     await session.rollback()
                     return False
 
-            # Execute the operation with a fresh engine/session
+            # Execute the operation with a provided session if available; otherwise fall back
+            if session is not None:
+                return await _update_operation(session)
             return await execute_db_operation_with_fresh_engine(_update_operation)
-                
+
         except Exception as e:
             logger.error(f"[ExecutionStatusService] Error during update/flush/commit for job_id {job_id}: {str(e)}", exc_info=True)
             return False
-    
+
     @staticmethod
-    async def get_status(execution_id: str) -> Optional[Any]:
+    async def update_mlflow_trace_id(
+        job_id: str,
+        trace_id: str,
+        experiment_name: Optional[str] = None,
+        session: AsyncSession | None = None
+    ) -> bool:
+        """
+        Update the MLflow trace ID for an execution.
+
+        Args:
+            job_id: Execution ID (string UUID, maps to job_id field)
+            trace_id: MLflow trace ID to store
+            experiment_name: Optional MLflow experiment name
+
+        Returns:
+            True if successful, False otherwise
+        """
+        # Validate job_id and trace_id
+        if not job_id or not isinstance(job_id, str):
+            logger.error(f"[ExecutionStatusService] Invalid job_id: {job_id}")
+            return False
+
+        if not trace_id or not isinstance(trace_id, str):
+            logger.error(f"[ExecutionStatusService] Invalid trace_id: {trace_id}")
+            return False
+
+        try:
+            # Define the database operation
+            async def _update_trace_operation(session):
+                repo = ExecutionRepository(session)
+
+                # Find the execution record by job_id
+                logger.debug(f"[ExecutionStatusService] Finding execution by job_id: {job_id} to update MLflow trace ID.")
+                execution_record = await repo.get_execution_by_job_id(job_id=job_id)
+
+                if not execution_record:
+                    logger.error(f"[ExecutionStatusService] Execution record not found for job_id: {job_id}. Cannot update MLflow trace ID.")
+                    return False
+
+                # Get the integer primary key (id) from the record
+                record_id = execution_record.id
+                logger.debug(f"[ExecutionStatusService] Found record_id: {record_id} for job_id: {job_id}. Updating MLflow trace ID.")
+
+                # Prepare update data
+                update_data = {
+                    "mlflow_trace_id": trace_id
+                }
+
+                if experiment_name:
+                    update_data["mlflow_experiment_name"] = experiment_name
+
+                logger.info(f"[ExecutionStatusService] Updating MLflow trace ID {trace_id} for job_id: {job_id}")
+
+                # Call the repository update method
+                updated_execution = await repo.update_execution(
+                    execution_id=record_id,
+                    data=update_data
+                )
+
+                # Flush and commit
+                if updated_execution:
+                    await session.flush()
+                    await session.commit()
+                    logger.info(f"[ExecutionStatusService] Successfully updated MLflow trace ID for job_id: {job_id}")
+                    return True
+                else:
+                    logger.error(f"[ExecutionStatusService] Failed to update MLflow trace ID for job_id: {job_id}")
+                    await session.rollback()
+                    return False
+
+            # Execute the operation with a provided session if available; otherwise fall back
+            if session is not None:
+                return await _update_trace_operation(session)
+            return await execute_db_operation_with_fresh_engine(_update_trace_operation)
+
+        except Exception as e:
+            logger.error(f"[ExecutionStatusService] Error updating MLflow trace ID for job_id {job_id}: {str(e)}", exc_info=True)
+            return False
+
+    @staticmethod
+    async def update_mlflow_evaluation_run_id(
+        session: AsyncSession,
+        job_id: str,
+        evaluation_run_id: str
+    ) -> bool:
+        """
+        Update the MLflow evaluation run ID for an execution.
+
+        Args:
+            session: Async SQLAlchemy session (from router dependency)
+            job_id: Execution ID (string UUID, maps to job_id field)
+            evaluation_run_id: MLflow evaluation run ID to store
+
+        Returns:
+            True if successful, False otherwise
+        """
+        logger.info(f"[ExecutionStatusService] Updating MLflow evaluation run ID for job_id: {job_id}, evaluation_run_id: {evaluation_run_id}")
+
+        try:
+            # Use repository to find and update the execution by job_id
+            repo = ExecutionRepository(session)
+            execution_record = await repo.get_execution_by_job_id(job_id=job_id)
+
+            if not execution_record:
+                logger.warning(f"[ExecutionStatusService] No execution found with job_id: {job_id}")
+                return False
+
+            # Update the MLflow evaluation run ID using repository update
+            record_id = execution_record.id
+            await repo.update_execution(
+                execution_id=record_id,
+                data={"mlflow_evaluation_run_id": evaluation_run_id}
+            )
+
+            # Commit the changes
+            await session.commit()
+            logger.info(f"[ExecutionStatusService] Successfully updated MLflow evaluation run ID for job_id: {job_id}")
+            return True
+
+        except Exception as e:
+            logger.error(f"[ExecutionStatusService] Error updating MLflow evaluation run ID for job_id {job_id}: {str(e)}", exc_info=True)
+            return False
+
+    @staticmethod
+    async def get_status(execution_id: str, session: AsyncSession | None = None) -> Optional[Any]:
         """
         Get the status of an execution from the database.
-        
+
         Args:
             execution_id: Execution ID
-            
+
         Returns:
             Execution object or None if not found
         """
@@ -139,69 +268,92 @@ class ExecutionStatusService:
         if not execution_id or not isinstance(execution_id, str):
             logger.error(f"[ExecutionStatusService] Invalid execution_id: {execution_id}")
             return None
-            
+
         try:
             # Define the database operation
             async def _get_operation(session):
                 repo = ExecutionRepository(session)
                 return await repo.get_execution_by_job_id(job_id=execution_id)
-            
-            # Execute the operation with a fresh engine/session
+
+            # Execute the operation with a provided session if available; otherwise fall back
+            if session is not None:
+                return await _get_operation(session)
             return await execute_db_operation_with_fresh_engine(_get_operation)
-            
+
         except Exception as e:
             logger.error(f"Error getting execution status: {str(e)}")
             return None
 
     @staticmethod
-    async def create_execution(execution_data: Dict[str, Any], group_context=None) -> bool:
+    async def create_execution(execution_data: Dict[str, Any], group_context=None, session: AsyncSession | None = None) -> bool:
         """
         Create a new execution record in the database with group context.
-        
+
         Args:
             execution_data: Dictionary with execution data
             group_context: Group context for multi-group data isolation
-            
+
         Returns:
             True if successful, False otherwise
         """
         from src.db.session import async_session_factory
         from src.repositories.execution_repository import ExecutionRepository
-        
+
         # Validate job_id
         job_id = execution_data.get('job_id')
         if not job_id or not isinstance(job_id, str):
             logger.error(f"[ExecutionStatusService] Invalid job_id in execution data: {job_id}")
             return False
-            
+
         try:
             # Add group information to execution data if group context is provided
             if group_context:
                 execution_data["group_id"] = group_context.primary_group_id
                 execution_data["group_email"] = group_context.group_email
                 logger.info(f"[ExecutionStatusService] Adding group context to execution: group_id={group_context.primary_group_id}, groups={group_context.group_ids}, email={group_context.group_email}")
-            
-            # Create database session internally
-            async with async_session_factory() as session:
-                # Create repository instance
+
+            # Prefer using a provided session (router-injected). Fallback to internal factory for backward compatibility.
+            if session is not None:
                 repo = ExecutionRepository(session)
-                
+
                 # Check if record already exists (with group filtering if available)
                 group_ids = group_context.group_ids if group_context else None
                 existing = await repo.get_execution_by_job_id(job_id=job_id, group_ids=group_ids)
                 if existing:
                     logger.info(f"[ExecutionStatusService] Execution record with job_id: {job_id} already exists, skipping creation")
                     return True
-                
+
                 # Create execution record
                 logger.debug(f"[ExecutionStatusService] Creating execution record with job_id: {job_id}")
-                execution = await repo.create_execution(data=execution_data)
-                
+                await repo.create_execution(data=execution_data)
+
                 # Explicitly commit transaction
                 await session.commit()
-                
+
                 logger.info(f"[ExecutionStatusService] Successfully created execution record with job_id: {job_id}")
                 return True
+            else:
+                # Create database session internally (legacy path)
+                async with async_session_factory() as session:
+                    # Create repository instance
+                    repo = ExecutionRepository(session)
+
+                    # Check if record already exists (with group filtering if available)
+                    group_ids = group_context.group_ids if group_context else None
+                    existing = await repo.get_execution_by_job_id(job_id=job_id, group_ids=group_ids)
+                    if existing:
+                        logger.info(f"[ExecutionStatusService] Execution record with job_id: {job_id} already exists, skipping creation")
+                        return True
+
+                    # Create execution record
+                    logger.debug(f"[ExecutionStatusService] Creating execution record with job_id: {job_id}")
+                    await repo.create_execution(data=execution_data)
+
+                    # Explicitly commit transaction
+                    await session.commit()
+
+                    logger.info(f"[ExecutionStatusService] Successfully created execution record with job_id: {job_id}")
+                    return True
         except Exception as e:
             logger.error(f"[ExecutionStatusService] Error creating execution record: {e}", exc_info=True)
-            return False 
+            return False

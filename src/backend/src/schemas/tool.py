@@ -29,6 +29,8 @@ class ToolUpdate(BaseModel):
 class ToolResponse(ToolBase):
     """Schema for tool responses"""
     id: int = Field(..., description="Unique identifier for the tool")
+    group_id: Optional[str] = Field(default=None, description="Group ID if this is a workspace-specific override")
+
     created_at: datetime = Field(..., description="Timestamp when the tool was created")
     updated_at: datetime = Field(..., description="Timestamp when the tool was last updated")
 
@@ -46,4 +48,4 @@ class ToolListResponse(BaseModel):
 class ToggleResponse(BaseModel):
     """Schema for toggle enabled response"""
     message: str = Field(..., description="Success message")
-    enabled: bool = Field(..., description="Current enabled state") 
+    enabled: bool = Field(..., description="Current enabled state")

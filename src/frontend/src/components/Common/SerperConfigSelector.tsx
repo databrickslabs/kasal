@@ -79,7 +79,8 @@ const LOCALES = [
   { value: 'hi', label: 'Hindi (hi)' },
 ];
 
-// Serper.dev API endpoints
+// Serper.dev API endpoints - Only include supported search types
+// Note: CrewAI's SerperDevTool only supports 'search' and 'news' types
 const SERPER_ENDPOINTS = [
   { 
     value: 'search', 
@@ -93,48 +94,9 @@ const SERPER_ENDPOINTS = [
     url: 'https://google.serper.dev/news',
     description: 'Google News results with recent articles from various sources'
   },
-  { 
-    value: 'images', 
-    label: 'Images', 
-    url: 'https://google.serper.dev/images',
-    description: 'Google Images search results with image URLs, titles, and source information'
-  },
-  { 
-    value: 'videos', 
-    label: 'Videos', 
-    url: 'https://google.serper.dev/videos',
-    description: 'Google Videos search results from YouTube and other video platforms'
-  },
-  { 
-    value: 'places', 
-    label: 'Places', 
-    url: 'https://google.serper.dev/places',
-    description: 'Google Places/Maps results with local business information and reviews'
-  },
-  { 
-    value: 'shopping', 
-    label: 'Shopping', 
-    url: 'https://google.serper.dev/shopping',
-    description: 'Google Shopping results with product listings and prices'
-  },
-  { 
-    value: 'scholar', 
-    label: 'Scholar', 
-    url: 'https://google.serper.dev/scholar',
-    description: 'Google Scholar results for academic papers and citations'
-  },
-  { 
-    value: 'patents', 
-    label: 'Patents', 
-    url: 'https://google.serper.dev/patents',
-    description: 'Google Patents search results for patent documents'
-  },
-  { 
-    value: 'autocomplete', 
-    label: 'Autocomplete', 
-    url: 'https://google.serper.dev/autocomplete',
-    description: 'Google search suggestions and autocomplete results'
-  },
+  // The following endpoints are not supported by CrewAI's SerperDevTool implementation
+  // Images, Videos, Places, Shopping, Scholar, Patents, Autocomplete are available in Serper API
+  // but require a custom tool implementation to use them
 ];
 
 const DEFAULT_CONFIG: SerperConfig = {

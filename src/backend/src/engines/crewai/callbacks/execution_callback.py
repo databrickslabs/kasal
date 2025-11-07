@@ -50,7 +50,9 @@ def create_execution_callbacks(job_id: str, config: Dict[str, Any] = None, group
         "last_known_agent": None,
         "task_index": 0,  # Track which task we're on
         "agent_tools": {},  # agent role -> list of tool names
-        "tool_to_agent": {}  # tool name -> agent role
+        "tool_to_agent": {},  # tool name -> agent role
+        "last_task_id": None,  # Track the last task to detect changes
+        "task_started_logged": set()  # Track which tasks have had their start logged
     }
     
     # Build agent lookup from crew if available
@@ -313,6 +315,76 @@ def create_execution_callbacks(job_id: str, config: Dict[str, Any] = None, group
             
             logger.info(f"{log_prefix} FINAL: Extracted agent: '{agent_name}' from {type(step_output).__name__}")
             
+            # Check if we're starting a new task
+            current_task = execution_context.get("current_task")
+            
+            # DEBUG: Log execution context state
+            logger.debug(f"{log_prefix} [DEBUG STEP] Current agent: {agent_name}")
+            logger.debug(f"{log_prefix} [DEBUG STEP] Current task from context: {current_task}")
+            logger.debug(f"{log_prefix} [DEBUG STEP] Last task ID: {execution_context.get('last_task_id')}")
+            logger.debug(f"{log_prefix} [DEBUG STEP] Task index: {execution_context.get('task_index', 0)}")
+            logger.debug(f"{log_prefix} [DEBUG STEP] Tasks already logged: {execution_context.get('task_started_logged', set())}")
+            
+            if current_task:
+                # Get the task ID
+                task_id = None
+                task_description = "Unknown Task"
+                
+                if hasattr(current_task, '_kasal_task_id'):
+                    task_id = str(current_task._kasal_task_id)
+                elif hasattr(current_task, 'id'):
+                    task_id = str(current_task.id)
+                
+                if hasattr(current_task, 'description'):
+                    task_description = current_task.description
+                
+                # If no task ID found, generate one based on task index and description
+                if not task_id:
+                    task_idx = execution_context.get("task_index", 0)
+                    task_id = f"task_{task_idx}_{hash(task_description)}"
+                    logger.info(f"{log_prefix} [DEBUG STEP] Generated task ID: {task_id} for task index {task_idx}")
+                
+                logger.info(f"{log_prefix} [DEBUG STEP] Task description: {task_description[:50]}...")
+                logger.info(f"{log_prefix} [DEBUG STEP] Task ID: {task_id}")
+                logger.info(f"{log_prefix} [DEBUG STEP] Will log start event? {task_id and task_id not in execution_context['task_started_logged']}")
+                
+                # Check if this is a new task that we haven't logged a start for
+                if task_id and task_id not in execution_context["task_started_logged"]:
+                    # Log task_started event
+                    logger.info(f"{log_prefix} Task started: {task_description} (ID: {task_id})")
+                    
+                    # Enqueue task_started trace
+                    task_started_data = {
+                        "type": "task_started",
+                        "agent_role": agent_name,
+                        "task_description": task_description
+                    }
+                    
+                    if task_id:
+                        task_started_data["task_id"] = task_id
+                    
+                    trace_data = {
+                        "job_id": job_id,
+                        "event_source": "task",
+                        "event_context": task_description,
+                        "event_type": "task_started",
+                        "timestamp": timestamp.isoformat(),
+                        "output_content": f"Task '{task_description}' started by agent '{agent_name}'",
+                        "extra_data": task_started_data
+                    }
+                    
+                    # Add group context if available
+                    if group_context:
+                        trace_data["group_id"] = group_context.primary_group_id
+                        trace_data["group_email"] = group_context.group_email
+                    
+                    try:
+                        trace_queue.put_nowait(trace_data)
+                        execution_context["task_started_logged"].add(task_id)
+                        logger.debug(f"{log_prefix} Task started trace enqueued successfully")
+                    except Exception as trace_error:
+                        logger.error(f"{log_prefix} Failed to enqueue task started trace: {trace_error}")
+            
             # Limit content length for logging
             content_preview = content[:500] + "..." if len(content) > 500 else content
             
@@ -375,11 +447,23 @@ def create_execution_callbacks(job_id: str, config: Dict[str, Any] = None, group
             # Get task information
             task_description = "Unknown Task"
             task_obj = None
+            task_id = None
             if hasattr(task_output, 'description'):
                 task_description = task_output.description
             elif hasattr(task_output, 'task') and hasattr(task_output.task, 'description'):
                 task_description = task_output.task.description
                 task_obj = task_output.task
+            
+            # Try to get task ID from task object
+            if task_obj:
+                # First check for our custom Kasal task ID (matches database)
+                if hasattr(task_obj, '_kasal_task_id'):
+                    task_id = str(task_obj._kasal_task_id)
+                    logger.debug(f"{log_prefix} Found Kasal task ID: {task_id}")
+                elif hasattr(task_obj, 'id'):
+                    task_id = str(task_obj.id)
+                elif hasattr(task_obj, '_id'):
+                    task_id = str(task_obj._id)
             
             # Update current task in context
             if task_obj:
@@ -477,14 +561,42 @@ def create_execution_callbacks(job_id: str, config: Dict[str, Any] = None, group
                     next_task_idx = current_task_idx + 1
                     execution_context["task_index"] = next_task_idx
                     
+                    logger.info(f"{log_prefix} [DEBUG TASK COMPLETE] Current task index: {current_task_idx}, Next task index: {next_task_idx}")
+                    logger.info(f"{log_prefix} [DEBUG TASK COMPLETE] Total tasks: {len(crew_ref.tasks) if crew_ref and hasattr(crew_ref, 'tasks') else 0}")
+                    
                     if next_task_idx < len(crew_ref.tasks):
                         next_task = crew_ref.tasks[next_task_idx]
+                        logger.info(f"{log_prefix} [DEBUG TASK COMPLETE] Next task object: {next_task}")
+                        
                         if next_task and hasattr(next_task, 'agent') and hasattr(next_task.agent, 'role'):
                             next_agent_name = next_task.agent.role
+                            
+                            # Get next task ID for debugging
+                            next_task_id = None
+                            if hasattr(next_task, '_kasal_task_id'):
+                                next_task_id = str(next_task._kasal_task_id)
+                            elif hasattr(next_task, 'id'):
+                                next_task_id = str(next_task.id)
+                            
+                            logger.info(f"{log_prefix} [DEBUG TASK COMPLETE] Next task ID: {next_task_id}")
+                            logger.info(f"{log_prefix} [DEBUG TASK COMPLETE] Before context update - current_task: {execution_context.get('current_task')}")
+                            logger.info(f"{log_prefix} [DEBUG TASK COMPLETE] Before context update - last_task_id: {execution_context.get('last_task_id')}")
+                            
                             # IMMEDIATELY update context to the next agent
                             execution_context["current_agent"] = next_agent_name
                             execution_context["current_task"] = next_task
                             execution_context["last_known_agent"] = next_agent_name
+                            
+                            # Clear the last task ID to allow the next task's start to be logged
+                            execution_context["last_task_id"] = None
+                            
+                            # IMPORTANT: Remove the next task from task_started_logged so it can be logged again
+                            if next_task_id and next_task_id in execution_context["task_started_logged"]:
+                                execution_context["task_started_logged"].discard(next_task_id)
+                                logger.info(f"{log_prefix} [DEBUG TASK COMPLETE] Cleared task {next_task_id} from logged set to allow re-logging")
+                            
+                            logger.info(f"{log_prefix} [DEBUG TASK COMPLETE] After context update - current_task: {execution_context.get('current_task')}")
+                            logger.info(f"{log_prefix} [DEBUG TASK COMPLETE] After context update - last_task_id: {execution_context.get('last_task_id')}")
                             logger.info(f"{log_prefix} *** CONTEXT SWITCH: Task {current_task_idx} ({agent_name}) completed → Task {next_task_idx} ({next_agent_name}) starting ***")
                         else:
                             logger.warning(f"{log_prefix} Next task exists but has no agent")
@@ -512,6 +624,16 @@ def create_execution_callbacks(job_id: str, config: Dict[str, Any] = None, group
                 logger.error(f"{log_prefix} Failed to enqueue execution log: {log_error}")
             
             # Enqueue to trace queue for detailed analysis
+            extra_data = {
+                "type": "task_callback",
+                "agent_role": agent_name,
+                "task_description": task_description
+            }
+            
+            # Add task_id if we found one
+            if task_id:
+                extra_data["task_id"] = task_id
+            
             trace_data = {
                 "job_id": job_id,
                 "event_source": "task",
@@ -519,11 +641,7 @@ def create_execution_callbacks(job_id: str, config: Dict[str, Any] = None, group
                 "event_type": "task_completed",
                 "timestamp": timestamp.isoformat(),
                 "output_content": content,
-                "extra_data": {
-                    "type": "task_callback",
-                    "agent_role": agent_name,
-                    "task_description": task_description
-                }
+                "extra_data": extra_data
             }
             
             # Add group context if available

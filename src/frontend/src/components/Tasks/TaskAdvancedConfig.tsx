@@ -18,6 +18,7 @@ import { type TaskAdvancedConfigProps } from '../../types/task';
 import { TASK_CALLBACKS, type TaskCallbackOption } from '../../types/taskCallbacks';
 import HelpOutlineIcon from '@mui/icons-material/HelpOutline';
 import { SchemaService } from '../../api/SchemaService';
+import { DatabricksVolumeConfigComponent, type DatabricksVolumeConfig } from './DatabricksVolumeConfig';
 
 export type ConditionType = 'is_data_missing';
 
@@ -25,7 +26,7 @@ export type ConditionType = 'is_data_missing';
 const TaskAdvancedConfigComponent: React.FC<TaskAdvancedConfigProps> = ({
   advancedConfig,
   onConfigChange,
-  availableTasks,
+  availableTasks: _availableTasks,
 }) => {
   const [selectedCallback, setSelectedCallback] = useState<TaskCallbackOption | null>(
     advancedConfig.callback 
@@ -34,6 +35,7 @@ const TaskAdvancedConfigComponent: React.FC<TaskAdvancedConfigProps> = ({
   );
   
   const [pydanticModels, setPydanticModels] = useState<Array<{ value: string, label: string }>>([]);
+  const [databricksConfig, setDatabricksConfig] = useState<DatabricksVolumeConfig | null>(null);
   
   // Fetch Pydantic models from SchemaService
   useEffect(() => {
@@ -73,7 +75,78 @@ const TaskAdvancedConfigComponent: React.FC<TaskAdvancedConfigProps> = ({
     if (!callback?.requiresPath) {
       onConfigChange('output_file', null);
     }
-  }, [onConfigChange]);
+    
+    // Initialize Databricks config if DatabricksVolumeCallback is selected
+    if (value === 'DatabricksVolumeCallback') {
+      // Only set default config if we don't already have one
+      if (!databricksConfig) {
+        const defaultConfig: DatabricksVolumeConfig = {
+          volume_path: 'main.default.task_outputs',  // Using new format
+          file_format: 'json',
+          create_date_dirs: true,
+          max_file_size_mb: 50.0  // 50MB is sufficient for model outputs
+        };
+        setDatabricksConfig(defaultConfig);
+        onConfigChange('callback_config', {...defaultConfig});
+      }
+    } else {
+      setDatabricksConfig(null);
+      onConfigChange('callback_config', null);
+    }
+  }, [onConfigChange, databricksConfig]);
+
+  // Initialize DatabricksVolumeConfig when component mounts or advancedConfig changes
+  useEffect(() => {
+    console.log('TaskAdvancedConfig useEffect triggered');
+    console.log('  - callback:', advancedConfig.callback);
+    console.log('  - callback_config:', JSON.stringify(advancedConfig.callback_config, null, 2));
+    console.log('  - current databricksConfig state:', databricksConfig);
+    
+    if (advancedConfig.callback === 'DatabricksVolumeCallback') {
+      if (advancedConfig.callback_config) {
+        // Restore the databricks configuration from saved callback_config
+        const savedConfig = advancedConfig.callback_config as unknown as DatabricksVolumeConfig;
+        console.log('Restoring saved databricksConfig:', savedConfig);
+        console.log('  - volume_path from saved:', savedConfig.volume_path);
+        
+        // Create a properly typed config object
+        const restoredConfig: DatabricksVolumeConfig = {
+          volume_path: savedConfig.volume_path || 'main.default.task_outputs',
+          file_format: (savedConfig.file_format || 'json') as 'json' | 'csv' | 'txt',
+          create_date_dirs: savedConfig.create_date_dirs !== undefined ? savedConfig.create_date_dirs : true,
+          max_file_size_mb: savedConfig.max_file_size_mb || 50.0,
+          workspace_url: savedConfig.workspace_url,
+          token: savedConfig.token
+        };
+        
+        console.log('Setting databricksConfig to restored config:', restoredConfig);
+        setDatabricksConfig(restoredConfig);
+      } else if (!databricksConfig) {
+        // No saved config but callback is selected, set default
+        console.log('No saved config, setting default databricksConfig');
+        const defaultConfig: DatabricksVolumeConfig = {
+          volume_path: 'main.default.task_outputs',
+          file_format: 'json',
+          create_date_dirs: true,
+          max_file_size_mb: 50.0
+        };
+        setDatabricksConfig(defaultConfig);
+      }
+      
+      // Ensure the selected callback is set
+      const callback = TASK_CALLBACKS.find(cb => cb.value === 'DatabricksVolumeCallback');
+      if (callback && !selectedCallback) {
+        console.log('Setting selectedCallback to DatabricksVolumeCallback');
+        setSelectedCallback(callback);
+      }
+    } else {
+      // Different callback selected, clear databricks config
+      if (databricksConfig) {
+        console.log('Clearing databricksConfig - different callback selected');
+        setDatabricksConfig(null);
+      }
+    }
+  }, [advancedConfig.callback, advancedConfig.callback_config, databricksConfig, selectedCallback]);
 
   // Handle guardrail type changes
   const handleGuardrailTypeChange = useCallback((value: string) => {
@@ -338,6 +411,16 @@ const TaskAdvancedConfigComponent: React.FC<TaskAdvancedConfigProps> = ({
           onChange={(e) => onConfigChange('output_file', e.target.value || null)}
           fullWidth
           helperText="Path where the output will be saved"
+        />
+      )}
+      
+      {selectedCallback?.value === 'DatabricksVolumeCallback' && (
+        <DatabricksVolumeConfigComponent
+          config={databricksConfig}
+          onChange={(config) => {
+            setDatabricksConfig(config);
+            onConfigChange('callback_config', {...config});
+          }}
         />
       )}
 

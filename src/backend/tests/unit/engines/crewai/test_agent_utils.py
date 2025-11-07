@@ -1,5 +1,5 @@
 import pytest
-from unittest.mock import MagicMock, patch
+from unittest.mock import MagicMock, patch, PropertyMock
 
 from src.engines.crewai.utils.agent_utils import (
     extract_agent_name_from_event,
@@ -10,374 +10,316 @@ from src.engines.crewai.utils.agent_utils import (
 class TestExtractAgentNameFromEvent:
     """Test suite for extract_agent_name_from_event function."""
     
-    def test_extract_from_event_with_agent_role(self):
+    def test_extract_from_event_with_agent_role_field(self):
+        """Test extracting agent name from event with agent_role field."""
+        # Create a simple class to avoid MagicMock auto-attribute creation
+        class TestEvent:
+            def __init__(self):
+                self.agent_role = "Data Analyst"
+        
+        mock_event = TestEvent()
+        
+        result = extract_agent_name_from_event(mock_event)
+        assert result == "Data Analyst"
+    
+    def test_extract_from_event_with_agent_object(self):
         """Test extracting agent name from event with agent.role."""
-        mock_event = MagicMock()
-        mock_agent = MagicMock()
-        mock_agent.role = "Data Analyst"
-        mock_event.agent = mock_agent
+        # Create simple classes to avoid MagicMock issues
+        class TestAgent:
+            def __init__(self):
+                self.role = "Senior Developer"
         
-        with patch('src.engines.crewai.utils.agent_utils.logger') as mock_logger:
-            result = extract_agent_name_from_event(mock_event, "TEST")
-            
-            assert result == "Data Analyst"
-            mock_logger.info.assert_any_call("TEST DEBUG: Extracting agent name from MagicMock")
-    
-    def test_extract_from_event_with_agent_name_fallback(self):
-        """Test extracting agent name using name fallback."""
-        mock_event = MagicMock()
-        mock_agent = MagicMock()
-        mock_agent.role = None  # No role
-        mock_agent.name = "Agent Smith"
-        mock_event.agent = mock_agent
+        class TestEvent:
+            def __init__(self):
+                self.agent = TestAgent()
         
-        with patch('src.engines.crewai.utils.agent_utils.logger') as mock_logger:
-            result = extract_agent_name_from_event(mock_event, "TEST")
-            
-            assert result == "Agent Smith"
-            mock_logger.info.assert_any_call("TEST Using agent.name as fallback: Agent Smith")
-    
-    def test_extract_from_event_with_agent_id_fallback(self):
-        """Test extracting agent name using id fallback."""
-        mock_event = MagicMock()
-        mock_agent = MagicMock()
-        mock_agent.role = None
-        mock_agent.name = None
-        mock_agent.id = "12345"
-        mock_event.agent = mock_agent
+        mock_event = TestEvent()
         
-        with patch('src.engines.crewai.utils.agent_utils.logger') as mock_logger:
-            result = extract_agent_name_from_event(mock_event, "TEST")
-            
-            assert result == "Agent-12345"
-            mock_logger.info.assert_any_call("TEST Using agent.id as fallback: Agent-12345")
-    
-    def test_extract_from_event_context_agent(self):
-        """Test extracting agent name from event.context.agent."""
-        mock_event = MagicMock()
-        mock_event.agent = None  # No direct agent
-        
-        mock_context = MagicMock()
-        mock_agent = MagicMock()
-        mock_agent.role = "Context Agent"
-        mock_context.agent = mock_agent
-        mock_event.context = mock_context
-        
-        with patch('src.engines.crewai.utils.agent_utils.logger'):
-            result = extract_agent_name_from_event(mock_event)
-            
-            assert result == "Context Agent"
+        result = extract_agent_name_from_event(mock_event)
+        assert result == "Senior Developer"
     
     def test_extract_from_crew_event(self):
         """Test extracting from crew-level events."""
-        # Create a mock object that will return correct type name
         class CrewKickoffStartedEvent:
-            def __init__(self):
-                self.agent = None
+            pass
         
         mock_event = CrewKickoffStartedEvent()
         
         result = extract_agent_name_from_event(mock_event)
-        
-        assert result == "Crew"
+        assert result == "Crew Manager"
     
-    def test_extract_from_task_event_without_agent(self):
-        """Test extracting from task events without agent info."""
-        # Create a mock object that will return correct type name
-        class TaskCompletedEvent:
-            pass
-        
-        mock_event = TaskCompletedEvent()
-        # Don't add agent attribute
-        
-        result = extract_agent_name_from_event(mock_event)
-        
-        assert result == "System"
-    
-    def test_extract_from_llm_event_with_system_message(self):
-        """Test extracting agent name from LLM event system messages."""
-        # Create a mock object that will return correct type name
-        class LLMCallStartedEvent:
-            def __init__(self):
-                self.agent = None
-                self.messages = [
-                    {"role": "system", "content": "You are Data Scientist. Analyze the data carefully."},
-                    {"role": "user", "content": "Please analyze this dataset."}
-                ]
-        
-        mock_event = LLMCallStartedEvent()
-        
-        with patch('src.engines.crewai.utils.agent_utils.logger') as mock_logger:
-            result = extract_agent_name_from_event(mock_event, "TEST")
-            
-            assert result == "Data Scientist"
-            mock_logger.info.assert_any_call("TEST DEBUG: Extracted agent from system message: Data Scientist")
-    
-    def test_extract_from_llm_event_with_multiline_system_message(self):
-        """Test extracting from system message with newlines."""
-        # Create a mock object that will return correct type name
-        class LLMCallCompletedEvent:
-            def __init__(self):
-                self.agent = None
-                self.messages = [
-                    {
-                        "role": "system", 
-                        "content": "You are Research Assistant\nYour job is to conduct thorough research."
-                    }
-                ]
-        
-        mock_event = LLMCallCompletedEvent()
-        
-        result = extract_agent_name_from_event(mock_event)
-        
-        # The function extracts up to newline or end - in this case there's no period so it gets more text
-        assert "Research Assistant" in result
-    
-    def test_extract_fallback_unknown_agent(self):
-        """Test fallback to unknown agent format."""
-        # Create a mock object that will return correct type name
+    def test_extract_from_event_without_agent_raises_error(self):
+        """Test that events without agent info raise ValueError."""
         class CustomEvent:
-            def __init__(self):
-                self.agent = None
+            pass
         
         mock_event = CustomEvent()
         
-        with patch('src.engines.crewai.utils.agent_utils.logger') as mock_logger:
-            result = extract_agent_name_from_event(mock_event, "TEST")
-            
-            assert result == "UnknownAgent-CustomEvent"
-            mock_logger.info.assert_any_call("TEST DEBUG: No agent information found in CustomEvent event")
+        with pytest.raises(ValueError, match="Cannot determine agent for event type"):
+            extract_agent_name_from_event(mock_event)
     
-    def test_extract_with_empty_agent_object(self):
-        """Test with agent object that exists but is None."""
-        # Create a simple class to avoid MagicMock behavior that interferes with testing
-        class SimpleEvent:
+    def test_extract_with_none_agent_raises_error(self):
+        """Test that event with None agent raises ValueError."""
+        class TestEvent:
             def __init__(self):
                 self.agent = None
         
-        mock_event = SimpleEvent()
+        mock_event = TestEvent()
         
-        with patch('src.engines.crewai.utils.agent_utils.logger') as mock_logger:
-            result = extract_agent_name_from_event(mock_event, "TEST")
-            
-            # Should generate the expected log and fallback to UnknownAgent pattern
-            assert result.startswith("UnknownAgent-")
-            mock_logger.info.assert_any_call("TEST DEBUG: Event has agent attribute but agent is: None")
+        with pytest.raises(ValueError, match="Cannot determine agent for event type"):
+            extract_agent_name_from_event(mock_event)
     
-    def test_extract_with_debug_logging(self):
-        """Test debug logging for agent without role."""
-        mock_event = MagicMock()
-        mock_agent = MagicMock()
-        mock_agent.role = None
-        mock_agent.name = None
-        mock_agent.id = None
-        mock_event.agent = mock_agent
-        
-        # Mock dir() to return some attributes
-        with patch('builtins.dir', return_value=['public_attr', 'another_attr', '_private']), \
-             patch('src.engines.crewai.utils.agent_utils.logger') as mock_logger:
-            
-            result = extract_agent_name_from_event(mock_event, "TEST")
-            
-            # Should log available attributes
-            mock_logger.debug.assert_any_call(
-                "TEST Agent exists but missing 'role'. Available attributes: ['public_attr', 'another_attr']"
-            )
-    
-    def test_extract_with_empty_system_message(self):
-        """Test LLM event with empty system message."""
-        # Create a mock object that will return correct type name
-        class LLMCallStartedEvent:
+    def test_extract_with_agent_missing_role_raises_error(self):
+        """Test that agent without role attribute raises ValueError."""
+        class TestAgent:
             def __init__(self):
-                self.agent = None
-                self.messages = [
-                    {"role": "system", "content": ""},
-                    {"role": "user", "content": "Test message"}
-                ]
+                self.name = "Test Agent"  # Has name but no role
         
-        mock_event = LLMCallStartedEvent()
+        class TestEvent:
+            def __init__(self):
+                self.agent = TestAgent()
+        
+        mock_event = TestEvent()
+        
+        # The implementation checks for agent.role and if not found, falls through to the general error
+        with pytest.raises(ValueError, match="Cannot determine agent for event type"):
+            extract_agent_name_from_event(mock_event)
+    
+    def test_extract_with_empty_agent_role_field(self):
+        """Test event with empty agent_role field falls back to agent object."""
+        class TestAgent:
+            def __init__(self):
+                self.role = "Backup Role"
+        
+        class TestEvent:
+            def __init__(self):
+                self.agent_role = None  # Empty agent_role
+                self.agent = TestAgent()
+        
+        mock_event = TestEvent()
         
         result = extract_agent_name_from_event(mock_event)
-        
-        assert result == "UnknownAgent-LLMCallStartedEvent"
+        assert result == "Backup Role"
     
-    def test_extract_with_malformed_system_message(self):
-        """Test system message that doesn't match expected pattern."""
-        # Create a mock object that will return correct type name
-        class LLMCallStartedEvent:
+    def test_extract_with_empty_agent_role_string(self):
+        """Test event with empty string agent_role field falls back to agent object."""
+        class TestAgent:
             def __init__(self):
-                self.agent = None
-                self.messages = [
-                    {"role": "system", "content": "This is not the right pattern"},
-                    {"role": "user", "content": "Test"}
-                ]
+                self.role = "Fallback Role"
         
-        mock_event = LLMCallStartedEvent()
+        class TestEvent:
+            def __init__(self):
+                self.agent_role = ""  # Empty string
+                self.agent = TestAgent()
+        
+        mock_event = TestEvent()
         
         result = extract_agent_name_from_event(mock_event)
-        
-        assert result == "UnknownAgent-LLMCallStartedEvent"
+        assert result == "Fallback Role"
     
-    def test_extract_with_no_messages(self):
-        """Test LLM event with no messages."""
-        # Create a mock object that will return correct type name
-        class LLMCallStartedEvent:
-            def __init__(self):
-                self.agent = None
-                self.messages = []
+    def test_crew_completion_event(self):
+        """Test CrewKickoffCompletedEvent returns Crew Manager."""
+        class CrewKickoffCompletedEvent:
+            pass
         
-        mock_event = LLMCallStartedEvent()
+        mock_event = CrewKickoffCompletedEvent()
         
         result = extract_agent_name_from_event(mock_event)
+        assert result == "Crew Manager"
+    
+    def test_agent_execution_completed_event(self):
+        """Test AgentExecutionCompletedEvent with agent.role."""
+        class TestAgent:
+            def __init__(self):
+                self.role = "Research Assistant"
         
-        assert result == "UnknownAgent-LLMCallStartedEvent"
+        class AgentExecutionCompletedEvent:
+            def __init__(self):
+                self.agent = TestAgent()
+        
+        mock_event = AgentExecutionCompletedEvent()
+        
+        result = extract_agent_name_from_event(mock_event)
+        assert result == "Research Assistant"
 
 
 class TestExtractAgentNameFromObject:
     """Test suite for extract_agent_name_from_object function."""
     
-    def test_extract_from_none_agent(self):
-        """Test extracting from None agent."""
-        result = extract_agent_name_from_object(None)
-        assert result == "NoAgent"
+    def test_extract_from_none_agent_raises_error(self):
+        """Test extracting from None agent raises ValueError."""
+        with pytest.raises(ValueError, match="Agent object is None"):
+            extract_agent_name_from_object(None)
     
     def test_extract_from_agent_with_role(self):
         """Test extracting from agent with role."""
-        mock_agent = MagicMock()
-        mock_agent.role = "Senior Developer"
+        class TestAgent:
+            def __init__(self):
+                self.role = "Senior Developer"
+        
+        mock_agent = TestAgent()
         
         result = extract_agent_name_from_object(mock_agent)
         assert result == "Senior Developer"
     
-    def test_extract_from_agent_with_name_fallback(self):
-        """Test extracting using name fallback."""
-        mock_agent = MagicMock()
-        mock_agent.role = None
-        mock_agent.name = "Alice"
-        
-        with patch('src.engines.crewai.utils.agent_utils.logger') as mock_logger:
-            result = extract_agent_name_from_object(mock_agent, "TEST")
-            
-            assert result == "Alice"
-            mock_logger.info.assert_called_with("TEST Using agent.name as fallback: Alice")
-    
-    def test_extract_from_agent_with_id_fallback(self):
-        """Test extracting using id fallback."""
-        mock_agent = MagicMock()
-        mock_agent.role = None
-        mock_agent.name = None
-        mock_agent.id = "agent-456"
-        
-        with patch('src.engines.crewai.utils.agent_utils.logger') as mock_logger:
-            result = extract_agent_name_from_object(mock_agent, "TEST")
-            
-            assert result == "Agent-agent-456"
-            mock_logger.info.assert_called_with("TEST Using agent.id as fallback: Agent-agent-456")
-    
-    def test_extract_from_agent_no_identifiers(self):
-        """Test extracting from agent with no identifiers."""
-        # Create a custom class to avoid MagicMock type issues
-        class CustomAgent:
+    def test_extract_from_agent_without_role_raises_error(self):
+        """Test extracting from agent without role raises ValueError."""
+        class TestAgent:
             def __init__(self):
-                self.role = None
-                self.name = None
-                self.id = None
-                self.method1 = "test"
-                self.method2 = "test"
-                self._private = "test"
+                self.name = "Alice"  # Has name but no role
+                self.id = "123"
         
-        mock_agent = CustomAgent()
+        mock_agent = TestAgent()
         
-        with patch('src.engines.crewai.utils.agent_utils.logger') as mock_logger:
-            result = extract_agent_name_from_object(mock_agent, "TEST")
-            
-            assert result == "UnknownAgent-CustomAgent"
-            # Check that warning was called with agent attributes (method1, method2 but not _private)
-            mock_logger.warning.assert_called()
-            call_args = mock_logger.warning.call_args[0][0]
-            assert "TEST Agent object missing role/name/id" in call_args
-            assert "method1" in call_args
-            assert "method2" in call_args
-            assert "_private" not in call_args
+        with pytest.raises(ValueError, match="Agent object missing 'role' attribute"):
+            extract_agent_name_from_object(mock_agent)
     
     def test_extract_with_empty_role(self):
-        """Test with empty string role."""
-        mock_agent = MagicMock()
-        mock_agent.role = ""
-        mock_agent.name = "Backup Name"
-        
-        with patch('src.engines.crewai.utils.agent_utils.logger'):
-            result = extract_agent_name_from_object(mock_agent)
-            
-            assert result == "Backup Name"
-    
-    def test_extract_with_empty_name(self):
-        """Test with empty string name."""
-        mock_agent = MagicMock()
-        mock_agent.role = None
-        mock_agent.name = ""
-        mock_agent.id = "backup-id"
-        
-        with patch('src.engines.crewai.utils.agent_utils.logger'):
-            result = extract_agent_name_from_object(mock_agent)
-            
-            assert result == "Agent-backup-id"
-    
-    def test_extract_with_zero_id(self):
-        """Test with zero as id (should not work since 0 is falsy)."""
-        # Create a custom class to avoid MagicMock type issues
-        class MockAgent:
+        """Test agent with empty/None role raises ValueError."""
+        class TestAgent:
             def __init__(self):
                 self.role = None
-                self.name = None
-                self.id = 0
+                self.name = "Backup Name"
         
-        mock_agent = MockAgent()
+        mock_agent = TestAgent()
         
-        with patch('src.engines.crewai.utils.agent_utils.logger'):
-            result = extract_agent_name_from_object(mock_agent)
-            
-            # 0 is falsy, so should fall back to UnknownAgent pattern
-            assert result == "UnknownAgent-MockAgent"
+        with pytest.raises(ValueError, match="Agent object missing 'role' attribute"):
+            extract_agent_name_from_object(mock_agent)
+    
+    def test_extract_with_empty_string_role(self):
+        """Test agent with empty string role raises ValueError."""
+        class TestAgent:
+            def __init__(self):
+                self.role = ""
+                self.name = "Backup Name"
+        
+        mock_agent = TestAgent()
+        
+        with pytest.raises(ValueError, match="Agent object missing 'role' attribute"):
+            extract_agent_name_from_object(mock_agent)
     
     def test_extract_with_numeric_role(self):
         """Test with numeric role value."""
-        mock_agent = MagicMock()
-        mock_agent.role = 123
+        class TestAgent:
+            def __init__(self):
+                self.role = 123
+        
+        mock_agent = TestAgent()
         
         result = extract_agent_name_from_object(mock_agent)
         assert result == "123"
     
-    def test_extract_with_complex_object_attributes(self):
-        """Test with agent having complex object attributes."""
-        # Create a custom class to avoid MagicMock type issues
-        class CrewAIAgent:
-            def __init__(self):
-                self.role = None
-                self.name = None
-                self.id = None
-                self.config = {"setting": "value"}
-                self.tools = ["tool1", "tool2"]
-                self.memory = MagicMock()
-                self._internal = "private"
-        
-        mock_agent = CrewAIAgent()
-        
-        result = extract_agent_name_from_object(mock_agent)
-        
-        assert result == "UnknownAgent-CrewAIAgent"
-    
     def test_extract_preserves_string_conversion(self):
         """Test that result is properly converted to string."""
-        mock_agent = MagicMock()
-        
-        # Mock role as a custom object
         class CustomRole:
             def __str__(self):
                 return "Custom Role Object"
         
-        mock_agent.role = CustomRole()
+        class TestAgent:
+            def __init__(self):
+                self.role = CustomRole()
+        
+        mock_agent = TestAgent()
         
         result = extract_agent_name_from_object(mock_agent)
         assert result == "Custom Role Object"
         assert isinstance(result, str)
+    
+    def test_extract_with_log_prefix(self):
+        """Test logging with prefix when agent has role."""
+        class TestAgent:
+            def __init__(self):
+                self.role = "Test Role"
+        
+        mock_agent = TestAgent()
+        
+        with patch('src.engines.crewai.utils.agent_utils.logger') as mock_logger:
+            result = extract_agent_name_from_object(mock_agent, "TEST_PREFIX")
+            assert result == "Test Role"
+            # No error logging should occur for valid agent
+            mock_logger.error.assert_not_called()
+    
+    def test_extract_error_logging_for_none(self):
+        """Test error logging when agent is None."""
+        with patch('src.engines.crewai.utils.agent_utils.logger') as mock_logger:
+            with pytest.raises(ValueError):
+                extract_agent_name_from_object(None, "TEST_PREFIX")
+            
+            mock_logger.error.assert_called_once()
+            call_args = mock_logger.error.call_args[0][0]
+            assert "TEST_PREFIX" in call_args
+            assert "CRITICAL" in call_args
+            assert "Agent object is None" in call_args
+    
+    def test_extract_error_logging_for_missing_role(self):
+        """Test error logging when agent missing role."""
+        class TestAgent:
+            def __init__(self):
+                self.name = "Test"
+                self.id = "123"
+        
+        mock_agent = TestAgent()
+        
+        with patch('src.engines.crewai.utils.agent_utils.logger') as mock_logger:
+            with pytest.raises(ValueError):
+                extract_agent_name_from_object(mock_agent, "TEST_PREFIX")
+            
+            mock_logger.error.assert_called_once()
+            call_args = mock_logger.error.call_args[0][0]
+            assert "TEST_PREFIX" in call_args
+            assert "CRITICAL" in call_args
+            assert "missing 'role' attribute" in call_args
+
+
+class TestEventWithLogPrefix:
+    """Test log_prefix parameter usage."""
+    
+    def test_event_log_prefix_in_error(self):
+        """Test log_prefix appears in error logs."""
+        class TestEvent:
+            pass
+        
+        mock_event = TestEvent()
+        
+        with patch('src.engines.crewai.utils.agent_utils.logger') as mock_logger:
+            with pytest.raises(ValueError):
+                extract_agent_name_from_event(mock_event, "MY_PREFIX")
+            
+            mock_logger.error.assert_called_once()
+            call_args = mock_logger.error.call_args[0][0]
+            assert "MY_PREFIX" in call_args
+    
+    def test_object_log_prefix_in_error(self):
+        """Test log_prefix appears in object error logs."""
+        with patch('src.engines.crewai.utils.agent_utils.logger') as mock_logger:
+            with pytest.raises(ValueError):
+                extract_agent_name_from_object(None, "OBJ_PREFIX")
+            
+            mock_logger.error.assert_called_once()
+            call_args = mock_logger.error.call_args[0][0]
+            assert "OBJ_PREFIX" in call_args
+
+
+class TestSourceParameter:
+    """Test that source parameter is accepted but unused."""
+    
+    def test_source_parameter_ignored(self):
+        """Test source parameter doesn't affect behavior."""
+        class TestAgent:
+            def __init__(self):
+                self.role = "Test Role"
+        
+        class TestEvent:
+            def __init__(self):
+                self.agent = TestAgent()
+        
+        mock_event = TestEvent()
+        
+        # Should work the same with or without source
+        result1 = extract_agent_name_from_event(mock_event)
+        result2 = extract_agent_name_from_event(mock_event, source="some_source")
+        result3 = extract_agent_name_from_event(mock_event, "", "another_source")
+        
+        assert result1 == "Test Role"
+        assert result2 == "Test Role"
+        assert result3 == "Test Role"

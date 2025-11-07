@@ -1,0 +1,96 @@
+{"type":"_aim","source":"mcp-knowledge-graph"}
+{"type":"entity","name":"KnowledgeSourceSearchIssue","entityType":"bug","observations":["Chunks save successfully to vector index but task search fails","Knowledge save: group_id=user_admin_admin_com works","Task search: No active Databricks backend found for knowledge search","Memory backend configuration lookup failing during task execution","Vector search returns 0 results when task tries to find knowledge chunks","FIXED: agent_helpers.py now uses DatabricksVectorKnowledgeSource instead of DatabricksVolumeKnowledgeSource","This eliminates duplicate file download and chunking during execution","Agents will now read from the vector index instead of re-processing volume files"]}
+{"type":"entity","name":"DatabricksVolumeKnowledgeSource","entityType":"component","observations":["Inherits from BaseKnowledgeSource, not DatabricksVectorKnowledgeSource","Created in agent_helpers.py without agent_ids parameter","Missing agent_ids field causes all vector documents to have Agent IDs: None","Need to add agent_ids field and pass Kasal agent UUID during creation"]}
+{"type":"entity","name":"CorrectKnowledgeFlow","entityType":"solution","observations":["Upload Process: Files uploaded to Databricks Volumes + automatically chunked to vector index","Agent Runtime: Uses DatabricksVectorKnowledgeSource to read from index with proper filtering","No duplicate file processing - clean separation of upload vs retrieval","Agent access control works via agent_ids filtering in vector search","Execution ID 2a101386-dd77-402b-896a-0d474d684581 should now work correctly"]}
+{"type":"entity","name":"HumanInTheLoop","entityType":"pattern","observations":["Core CrewAI capability for human interaction","Enables interactive task execution with user input","Supports validation and approval workflows","Allows human feedback during agent execution","Critical for high-stakes decision making"]}
+{"type":"entity","name":"HumanInputTask","entityType":"feature","observations":["Task with human_input=True parameter","Pauses execution for human intervention","Collects user input during task execution","Supports clarification and validation requests","Can be combined with expected_output for guided input"]}
+{"type":"entity","name":"HumanFeedbackTraining","entityType":"capability","observations":["Training mode for collecting human feedback","Activated with crew.train(n_iterations=X)","Stores feedback in .pkl files for reuse","Improves agent performance through iterations","Supports both task and crew level feedback"]}
+{"type":"entity","name":"GuardrailValidation","entityType":"feature","observations":["Output validation with retry mechanism","Uses guardrails parameter on tasks","Validates agent outputs against criteria","Retries task execution if validation fails","Supports custom validation functions"]}
+{"type":"entity","name":"InteractiveWorkflow","entityType":"pattern","observations":["Workflow pattern for human-agent collaboration","Combines automated and manual steps","Supports approval gates and checkpoints","Enables real-time course correction","Used in customer support and content creation"]}
+{"type":"entity","name":"FeedbackLoop","entityType":"mechanism","observations":["Continuous improvement through human input","Collects ratings and corrections","Updates agent behavior based on feedback","Persists learnings across sessions","Enables adaptive agent performance"]}
+{"type":"entity","name":"HumanApproval","entityType":"feature","observations":["Approval mechanism for critical decisions","Pauses workflow for human review","Supports accept/reject/modify actions","Can be conditional based on risk level","Integrates with output_json for structured approvals"]}
+{"type":"entity","name":"TrainingDataCollection","entityType":"process","observations":["Systematic collection of human feedback","Stores interactions in training files","Builds dataset for agent improvement","Tracks decision rationales","Supports batch and incremental training"]}
+{"type":"entity","name":"ValidationGate","entityType":"component","observations":["Checkpoint for output verification","Implements custom validation logic","Can trigger retry or escalation","Supports multiple validation criteria","Logs validation results for analysis"]}
+{"type":"entity","name":"HumanEscalation","entityType":"pattern","observations":["Escalation path for complex scenarios","Triggers when agent confidence is low","Routes to human expert for resolution","Maintains context for handoff","Learns from escalation outcomes"]}
+{"type":"entity","name":"HumanInputParameter","entityType":"configuration","observations":["human_input=True on Task initialization","Enables interactive mode for specific tasks","Can be set per task independently","Works with async and sync execution","Example: Task(description='Review code', human_input=True)"]}
+{"type":"entity","name":"TrainingIteration","entityType":"process","observations":["Single cycle of human feedback collection","crew.train(n_iterations=3) for 3 cycles","Each iteration improves agent responses","Feedback stored incrementally","Can be resumed from saved state"]}
+{"type":"entity","name":"GuardrailFunction","entityType":"implementation","observations":["Python function for output validation","Returns boolean for pass/fail","Can access full task context","Supports async validation","Example: def validate_output(output): return len(output) > 100"]}
+{"type":"entity","name":"HumanFeedbackStorage","entityType":"storage","observations":["Pickle files (.pkl) for feedback persistence","Stored in project directory by default","Can be versioned and shared","Enables offline training","Format: crew_training_TIMESTAMP.pkl"]}
+{"type":"entity","name":"InteractivePrompt","entityType":"interface","observations":["CLI interface for human input","Displays context and instructions","Supports multi-line input","Can include suggested responses","Handles timeout and cancellation"]}
+{"type":"entity","name":"Flows","entityType":"feature","observations":["Event-driven workflow orchestration system","Granular control over execution paths","Supports conditional logic and loops","Dynamic state management","Production-ready automation workflows","Native crew integration","Single LLM call support"]}
+{"type":"entity","name":"WebhookStreaming","entityType":"capability","observations":["Real-time webhook updates during execution","Supports system and custom events","Bearer token authentication","Enterprise Event Streaming feature","Monitor model calls and tool usage","Realtime delivery option","Authentication details configuration"]}
+{"type":"entity","name":"MCPIntegration","entityType":"integration","observations":["Model Context Protocol support","Bidirectional MCP capability","Access to thousands of community tools","Remote MC client connectivity","Desktop and web application support","Agent-native infrastructure integration","Hundreds of MCP servers available"]}
+{"type":"entity","name":"AsyncExecution","entityType":"capability","observations":["Asynchronous task execution","async_execution=True parameter","Parallel processing support","Concurrent task handling","Downstream task dependency management","asyncio.gather() implementation","Enhanced crew productivity"]}
+{"type":"entity","name":"ConditionalTasks","entityType":"feature","observations":["Conditional task execution logic","YAML-based configuration support","Dynamic workflow branching","Decision points in processes","Outcome-based flow control","Flexible execution paths","Context-aware task selection"]}
+{"type":"entity","name":"StructuredOutput","entityType":"feature","observations":["TaskOutput class encapsulation","Multiple output formats (raw, JSON, Pydantic)","output_json property configuration","output_pydantic model support","Dictionary-style indexing","to_dict() method available","Type-safe output handling"]}
+{"type":"entity","name":"PlanningMode","entityType":"mode","observations":["planning=True configuration","Manager agent coordination","Strategic task allocation","Role-based assignment","Capability-aware distribution","Hierarchical process support","Optimal efficiency focus"]}
+{"type":"entity","name":"EventBus","entityType":"system","observations":["Event-driven architecture","Custom listener creation","Multiple event type support","Webhook registration capability","Authentication token support","Platform integration enabler","Debugging and monitoring support"]}
+{"type":"entity","name":"EnterpriseSuite","entityType":"product","observations":["Unified control plane","Real-time observability","Advanced security measures","Actionable insights dashboard","24/7 enterprise support","Cloud and on-premise deployment","Role-based access control"]}
+{"type":"entity","name":"PrivateToolRepository","entityType":"feature","observations":["Centralized tool management","Custom tool deployment","Role-based access control","Enterprise scale support","Cross-workflow tool access","Version management","Security compliance"]}
+{"type":"entity","name":"HierarchicalProcess","entityType":"pattern","observations":["Organizational hierarchy simulation","Manager-worker structure","Efficient task delegation","Top-down coordination","Automatic task distribution","Optimal resource allocation","Traditional management model"]}
+{"type":"entity","name":"SequentialProcess","entityType":"pattern","observations":["Linear task progression","One-after-another execution","Specific order requirement","Task dependency handling","Simple workflow pattern","Predictable execution flow","Clear task sequencing"]}
+{"type":"entity","name":"ParallelProcessing","entityType":"capability","observations":["Concurrent task execution","Multiple crew coordination","Independent task handling","Scalable work distribution","asyncio implementation","Performance optimization","Resource efficiency"]}
+{"type":"entity","name":"HallucinationDetection","entityType":"feature","observations":["Enterprise guardrail feature","Out-of-the-box detection","Output validation system","Accuracy improvement","False information prevention","Automatic correction","Trust enhancement"]}
+{"type":"relation","from":"DatabricksVolumeKnowledgeSource","to":"KnowledgeSourceSearchIssue","relationType":"causes"}
+{"type":"relation","from":"HumanInTheLoop","to":"Crew","relationType":"integrates_with"}
+{"type":"relation","from":"HumanInTheLoop","to":"Task","relationType":"enhances"}
+{"type":"relation","from":"HumanInputTask","to":"Task","relationType":"extends"}
+{"type":"relation","from":"HumanInputTask","to":"HumanInTheLoop","relationType":"implements"}
+{"type":"relation","from":"HumanFeedbackTraining","to":"Training","relationType":"extends"}
+{"type":"relation","from":"HumanFeedbackTraining","to":"FeedbackLoop","relationType":"enables"}
+{"type":"relation","from":"GuardrailValidation","to":"Task","relationType":"validates"}
+{"type":"relation","from":"GuardrailValidation","to":"ValidationGate","relationType":"implements"}
+{"type":"relation","from":"InteractiveWorkflow","to":"Flow","relationType":"specializes"}
+{"type":"relation","from":"InteractiveWorkflow","to":"HumanInTheLoop","relationType":"applies"}
+{"type":"relation","from":"FeedbackLoop","to":"Agent","relationType":"improves"}
+{"type":"relation","from":"FeedbackLoop","to":"Memory","relationType":"updates"}
+{"type":"relation","from":"HumanApproval","to":"HumanInTheLoop","relationType":"implements"}
+{"type":"relation","from":"HumanApproval","to":"Task","relationType":"gates"}
+{"type":"relation","from":"TrainingDataCollection","to":"HumanFeedbackTraining","relationType":"supports"}
+{"type":"relation","from":"TrainingDataCollection","to":"Training","relationType":"feeds_into"}
+{"type":"relation","from":"ValidationGate","to":"Task","relationType":"monitors"}
+{"type":"relation","from":"ValidationGate","to":"HumanEscalation","relationType":"triggers"}
+{"type":"relation","from":"HumanEscalation","to":"HumanInTheLoop","relationType":"implements"}
+{"type":"relation","from":"HumanEscalation","to":"Agent","relationType":"overrides"}
+{"type":"relation","from":"Task","to":"HumanInputTask","relationType":"can_become"}
+{"type":"relation","from":"Crew","to":"HumanFeedbackTraining","relationType":"can_use"}
+{"type":"relation","from":"Agent","to":"HumanEscalation","relationType":"can_escalate_to"}
+{"type":"relation","from":"Flow","to":"HumanApproval","relationType":"can_include"}
+{"type":"relation","from":"Memory","to":"TrainingDataCollection","relationType":"stores"}
+{"type":"relation","from":"HumanInputParameter","to":"HumanInputTask","relationType":"configures"}
+{"type":"relation","from":"TrainingIteration","to":"HumanFeedbackTraining","relationType":"executes_in"}
+{"type":"relation","from":"GuardrailFunction","to":"GuardrailValidation","relationType":"implements"}
+{"type":"relation","from":"HumanFeedbackStorage","to":"TrainingDataCollection","relationType":"persists"}
+{"type":"relation","from":"InteractivePrompt","to":"HumanInputTask","relationType":"interfaces_with"}
+{"type":"relation","from":"HumanFeedbackStorage","to":"Memory","relationType":"extends"}
+{"type":"relation","from":"InteractivePrompt","to":"HumanApproval","relationType":"enables"}
+{"type":"relation","from":"GuardrailFunction","to":"ValidationGate","relationType":"powers"}
+{"type":"relation","from":"Flows","to":"Crew","relationType":"integrates_with"}
+{"type":"relation","from":"Flows","to":"ConditionalTasks","relationType":"enables"}
+{"type":"relation","from":"Flows","to":"EventBus","relationType":"uses"}
+{"type":"relation","from":"WebhookStreaming","to":"EventBus","relationType":"extends"}
+{"type":"relation","from":"WebhookStreaming","to":"EnterpriseSuite","relationType":"part_of"}
+{"type":"relation","from":"MCPIntegration","to":"Tool","relationType":"extends"}
+{"type":"relation","from":"MCPIntegration","to":"EnterpriseSuite","relationType":"enhances"}
+{"type":"relation","from":"AsyncExecution","to":"Task","relationType":"enhances"}
+{"type":"relation","from":"AsyncExecution","to":"ParallelProcessing","relationType":"enables"}
+{"type":"relation","from":"ConditionalTasks","to":"Task","relationType":"extends"}
+{"type":"relation","from":"ConditionalTasks","to":"Process","relationType":"enhances"}
+{"type":"relation","from":"StructuredOutput","to":"Task","relationType":"formats"}
+{"type":"relation","from":"StructuredOutput","to":"TaskOutput","relationType":"structures"}
+{"type":"relation","from":"PlanningMode","to":"Crew","relationType":"configures"}
+{"type":"relation","from":"PlanningMode","to":"HierarchicalProcess","relationType":"enables"}
+{"type":"relation","from":"EventBus","to":"Observability","relationType":"supports"}
+{"type":"relation","from":"EnterpriseSuite","to":"Crew","relationType":"manages"}
+{"type":"relation","from":"PrivateToolRepository","to":"Tool","relationType":"manages"}
+{"type":"relation","from":"PrivateToolRepository","to":"EnterpriseSuite","relationType":"part_of"}
+{"type":"relation","from":"HierarchicalProcess","to":"Process","relationType":"specializes"}
+{"type":"relation","from":"SequentialProcess","to":"Process","relationType":"specializes"}
+{"type":"relation","from":"ParallelProcessing","to":"Process","relationType":"enhances"}
+{"type":"relation","from":"HallucinationDetection","to":"GuardrailValidation","relationType":"extends"}
+{"type":"relation","from":"HallucinationDetection","to":"EnterpriseSuite","relationType":"part_of"}
+{"type":"relation","from":"Agent","to":"HierarchicalProcess","relationType":"participates_in"}
+{"type":"relation","from":"Manager","to":"PlanningMode","relationType":"uses"}
+{"type":"relation","from":"Task","to":"AsyncExecution","relationType":"can_use"}
+{"type":"relation","from":"Crew","to":"Flows","relationType":"can_use"}
+{"type":"relation","from":"Tool","to":"MCPIntegration","relationType":"extended_by"}

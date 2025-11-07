@@ -15,7 +15,6 @@ export const useCanvasHandlers = ({
   onEdgesChange
 }: UseCanvasHandlersProps) => {
   const handleEdgesChange = useCallback((changes: EdgeChange[]) => {
-    console.log("Edge changes:", changes);
     
     // Filter out duplicate edge additions
     const processedChanges = changes.filter((change, index) => {
@@ -27,7 +26,6 @@ export const useCanvasHandlers = ({
         );
         
         if (isDuplicate) {
-          console.log(`Filtering out duplicate edge addition: ${change.item?.id}`);
           return false;
         }
       }
@@ -38,12 +36,10 @@ export const useCanvasHandlers = ({
   }, [onEdgesChange]);
 
   const handleNodesChange = useCallback((changes: NodeChange[]) => {
-    console.log("Node changes:", changes);
     onNodesChange(changes);
   }, [onNodesChange]);
 
   const handleClear = useCallback(() => {
-    console.log("Clearing all nodes and edges");
     
     // Clear both nodes and edges atomically to prevent orphaned connections
     // First clear all edges, then all nodes to ensure proper cleanup

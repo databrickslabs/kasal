@@ -63,12 +63,14 @@ class TestExecutionRunnerCallbackIntegration:
              patch("src.engines.crewai.callbacks.execution_callback.create_crew_callbacks") as mock_create_crew_callbacks, \
              patch("src.engines.crewai.callbacks.execution_callback.log_crew_initialization"), \
              patch("src.services.execution_status_service.ExecutionStatusService.update_status"), \
-             patch("asyncio.to_thread") as mock_to_thread, \
+             patch("src.services.crew_executor.crew_executor.run_crew") as mock_crew_executor_run, \
              patch("src.services.api_keys_service.ApiKeysService.setup_openai_api_key"), \
              patch("src.services.api_keys_service.ApiKeysService.setup_anthropic_api_key"), \
              patch("src.services.api_keys_service.ApiKeysService.setup_gemini_api_key"), \
              patch("src.engines.crewai.tools.mcp_handler.stop_all_adapters"), \
-             patch("src.engines.crewai.execution_runner.update_execution_status_with_retry"):
+             patch("src.engines.crewai.execution_runner.update_execution_status_with_retry"), \
+             patch("src.engines.crewai.trace_management.TraceManager.ensure_writer_started"), \
+             patch("src.engines.crewai.callbacks.logging_callbacks.AgentTraceEventListener"):
             
             # Setup callback mocks
             mock_create_callbacks.return_value = (mock_step_callback, mock_task_callback)
@@ -77,7 +79,7 @@ class TestExecutionRunnerCallbackIntegration:
                 'on_complete': MagicMock(),
                 'on_error': MagicMock()
             }
-            mock_to_thread.return_value = "Test result"
+            mock_crew_executor_run.return_value = "Test result"
             
             # Setup config for running jobs
             running_jobs[execution_id] = {"config": sample_config}
@@ -114,12 +116,14 @@ class TestExecutionRunnerCallbackIntegration:
              patch("src.engines.crewai.callbacks.execution_callback.create_crew_callbacks") as mock_create_crew_callbacks, \
              patch("src.engines.crewai.callbacks.execution_callback.log_crew_initialization"), \
              patch("src.services.execution_status_service.ExecutionStatusService.update_status"), \
-             patch("asyncio.to_thread") as mock_to_thread, \
+             patch("src.services.crew_executor.crew_executor.run_crew") as mock_crew_executor_run, \
              patch("src.services.api_keys_service.ApiKeysService.setup_openai_api_key"), \
              patch("src.services.api_keys_service.ApiKeysService.setup_anthropic_api_key"), \
              patch("src.services.api_keys_service.ApiKeysService.setup_gemini_api_key"), \
              patch("src.engines.crewai.tools.mcp_handler.stop_all_adapters"), \
-             patch("src.engines.crewai.execution_runner.update_execution_status_with_retry"):
+             patch("src.engines.crewai.execution_runner.update_execution_status_with_retry"), \
+             patch("src.engines.crewai.trace_management.TraceManager.ensure_writer_started"), \
+             patch("src.engines.crewai.callbacks.logging_callbacks.AgentTraceEventListener"):
             
             # Setup mocks - callbacks creation succeeds but setting on crew fails
             mock_step_callback = MagicMock()
@@ -130,7 +134,7 @@ class TestExecutionRunnerCallbackIntegration:
                 'on_complete': MagicMock(),
                 'on_error': MagicMock()
             }
-            mock_to_thread.return_value = "Test result"
+            mock_crew_executor_run.return_value = "Test result"
             
             # Make setting callbacks on crew fail by making them read-only properties
             type(mock_crew).step_callback = property(lambda self: None, 
@@ -151,7 +155,7 @@ class TestExecutionRunnerCallbackIntegration:
             )
             
             # Verify execution continued despite callback error
-            mock_to_thread.assert_called_once()
+            mock_crew_executor_run.assert_called_once()
     
     def test_callback_isolation_between_instances(self):
         """Test that different callback instances are isolated."""

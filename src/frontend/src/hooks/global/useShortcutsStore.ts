@@ -1,5 +1,4 @@
 import { useShortcutsStore as useStore } from '../../store/shortcuts';
-import { ShortcutConfig } from '../../types/shortcuts';
 
 /**
  * Hook for accessing the shortcuts state and actions
@@ -21,4 +20,4 @@ export const useShortcutsStore = () => {
     toggleShortcuts,
     setShortcutsVisible
   };
-}; 
+};

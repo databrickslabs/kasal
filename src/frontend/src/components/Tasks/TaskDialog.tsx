@@ -13,15 +13,18 @@ import {
   Box,
   Button,
   Tooltip,
+  Typography,
 } from '@mui/material';
 import CloseIcon from '@mui/icons-material/Close';
 import TaskIcon from '@mui/icons-material/Assignment';
 import DeleteIcon from '@mui/icons-material/Delete';
 import AddIcon from '@mui/icons-material/Add';
+import HelpOutlineIcon from '@mui/icons-material/HelpOutline';
 import { Task, TaskService } from '../../api/TaskService';
 import { TaskSelectionDialogProps } from '../../types/task';
 import TaskForm from './TaskForm';
 import { ToolService, Tool } from '../../api/ToolService';
+import TaskBestPractices from '../BestPractices/TaskBestPractices';
 
 const TaskSelectionDialog: React.FC<TaskSelectionDialogProps> = ({
   open,
@@ -30,12 +33,14 @@ const TaskSelectionDialog: React.FC<TaskSelectionDialogProps> = ({
   tasks,
   onShowTaskForm,
   fetchTasks,
+  openInCreateMode = false,
 }) => {
   const [selectedTask, setSelectedTask] = useState<Task | undefined>(undefined);
-  const [showTaskForm, setShowTaskForm] = useState(false);
+  const [showTaskForm, setShowTaskForm] = useState(openInCreateMode);
   const [selectedTasks, setSelectedTasks] = useState<Task[]>([]);
   const [tools, setTools] = useState<Tool[]>([]);
   const [isDeleting, setIsDeleting] = useState(false);
+  const [showBestPractices, setShowBestPractices] = useState(false);
 
   useEffect(() => {
     let mounted = true;
@@ -45,10 +50,14 @@ const TaskSelectionDialog: React.FC<TaskSelectionDialogProps> = ({
         if (open) {
           const [_, toolsData] = await Promise.all([
             fetchTasks(),
-            ToolService.listTools()
+            ToolService.listEnabledTools()
           ]);
           if (mounted) {
             setTools(toolsData);
+            // If opening in create mode, show the form immediately
+            if (openInCreateMode) {
+              setShowTaskForm(true);
+            }
           }
         }
       } catch (error) {
@@ -60,8 +69,11 @@ const TaskSelectionDialog: React.FC<TaskSelectionDialogProps> = ({
 
     return () => {
       mounted = false;
+      if (!open) {
+        setShowTaskForm(false);
+      }
     };
-  }, [open, fetchTasks]);
+  }, [open, fetchTasks, openInCreateMode]);
 
   const handleDeleteTask = async (task: Task) => {
     if (!task.id) return;
@@ -118,6 +130,61 @@ const TaskSelectionDialog: React.FC<TaskSelectionDialogProps> = ({
     }
   };
 
+  // If in create mode, show only the form
+  if (openInCreateMode) {
+    return (
+      <>
+        <Dialog open={open} onClose={onClose} maxWidth="md" fullWidth>
+          <DialogTitle>
+            <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', pr: 5 }}>
+              <Typography variant="h6">
+                Create Task
+              </Typography>
+              <Button
+                startIcon={<HelpOutlineIcon />}
+                onClick={() => setShowBestPractices(true)}
+                variant="outlined"
+                size="small"
+                sx={{ ml: 2 }}
+              >
+                Best Practices
+              </Button>
+            </Box>
+            <IconButton
+              aria-label="close"
+              onClick={onClose}
+              sx={{ position: 'absolute', right: 8, top: 8 }}
+            >
+              <CloseIcon />
+            </IconButton>
+          </DialogTitle>
+        <DialogContent>
+          <TaskForm
+            tools={tools}
+            onCancel={onClose}
+            isCreateMode={true}
+            hideTitle={true}
+            onTaskSaved={async (createdTask) => {
+              await fetchTasks();
+              if (createdTask) {
+                onTaskSelect([createdTask]);
+                onClose();
+              }
+            }}
+          />
+        </DialogContent>
+      </Dialog>
+      
+      {/* Best Practices Dialog */}
+      <TaskBestPractices
+        open={showBestPractices}
+        onClose={() => setShowBestPractices(false)}
+      />
+    </>
+    );
+  }
+
+  // Show the manage interface
   return (
     <>
       <Dialog open={open} onClose={onClose} maxWidth="md" fullWidth>

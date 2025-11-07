@@ -20,7 +20,7 @@ import {
   MenuItem
 } from '@mui/material';
 import { CrewService } from '../../api/CrewService';
-import { CrewResponse, CrewSelectionDialogProps } from '../../types/crews';
+import { CrewResponse } from '../../types/crews';
 import PersonIcon from '@mui/icons-material/Person';
 import TaskIcon from '@mui/icons-material/Task';
 import DownloadIcon from '@mui/icons-material/Download';

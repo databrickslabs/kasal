@@ -8,49 +8,53 @@ import {
   CircularProgress,
   List,
   ListItem,
+  ListItemButton,
   ListItemText,
   Divider,
-  ListItemButton,
   Tooltip,
   Stack,
   Menu,
   MenuItem,
 } from '@mui/material';
 import ArrowUpwardIcon from '@mui/icons-material/ArrowUpward';
-import SmartToyIcon from '@mui/icons-material/SmartToy';
 import ChatIcon from '@mui/icons-material/Chat';
 import AddIcon from '@mui/icons-material/Add';
 import DeleteIcon from '@mui/icons-material/Delete';
-import RefreshIcon from '@mui/icons-material/Refresh';
 import CloseIcon from '@mui/icons-material/Close';
+import RefreshIcon from '@mui/icons-material/Refresh';
 import KeyboardArrowDownIcon from '@mui/icons-material/KeyboardArrowDown';
 import ChevronLeftIcon from '@mui/icons-material/ChevronLeft';
-import TerminalIcon from '@mui/icons-material/Terminal';
+import PlayArrowIcon from '@mui/icons-material/PlayArrow';
+import SwapHorizIcon from '@mui/icons-material/SwapHoriz';
+
 import DispatcherService, { DispatchResult, ConfigureCrewResult } from '../../api/DispatcherService';
 import { useWorkflowStore } from '../../store/workflow';
 import { useCrewExecutionStore } from '../../store/crewExecution';
+import { useChatMessagesStore } from '../../store/chatMessagesStore';
+import { useKnowledgeConfigStore } from '../../store/knowledgeConfigStore';
+import { useModelConfigStore } from '../../store/modelConfig';
 import { Node as FlowNode } from 'reactflow';
 import { ChatHistoryService } from '../../api/ChatHistoryService';
 import { ModelService } from '../../api/ModelService';
 import TraceService from '../../api/TraceService';
 import { CanvasLayoutManager } from '../../utils/CanvasLayoutManager';
-import { useUILayoutState } from '../../store/uiLayout';
+import { useUILayoutState, useUILayoutStore } from '../../store/uiLayout';
 
 // Import types
-import { 
-  WorkflowChatProps, 
-  ChatMessage, 
-  ModelConfig, 
-  GeneratedAgent, 
-  GeneratedTask, 
-  GeneratedCrew 
+import {
+  WorkflowChatProps,
+  ChatMessage,
+  ModelConfig,
+  GeneratedAgent,
+  GeneratedTask,
+  GeneratedCrew
 } from './types';
 
 // Import utilities
 import { hasCrewContent, isExecuteCommand, extractJobIdFromCommand } from './utils/chatHelpers';
-import { 
-  createAgentGenerationHandler, 
-  createTaskGenerationHandler, 
+import {
+  createAgentGenerationHandler,
+  createTaskGenerationHandler,
   createCrewGenerationHandler,
   handleConfigureCrew
 } from './utils/nodeGenerationHandlers';
@@ -62,6 +66,7 @@ import { useExecutionMonitoring } from './hooks/useExecutionMonitoring';
 // Import components
 import { ChatMessageItem } from './components/ChatMessageItem';
 import { GroupedTraceMessages } from './components/GroupedTraceMessages';
+import { KnowledgeFileUpload } from './KnowledgeFileUpload';
 
 const WorkflowChat: React.FC<WorkflowChatProps> = ({
   onNodesGenerated,
@@ -83,20 +88,42 @@ const WorkflowChat: React.FC<WorkflowChatProps> = ({
   const [models, setModels] = useState<Record<string, ModelConfig>>({});
   const [isLoadingModels, setIsLoadingModels] = useState(false);
   const [modelMenuAnchor, setModelMenuAnchor] = useState<null | HTMLElement>(null);
-  
+
   // Variable collection state
   const [isCollectingVariables, setIsCollectingVariables] = useState(false);
   const [variablesToCollect, setVariablesToCollect] = useState<string[]>([]);
   const [collectedVariables, setCollectedVariables] = useState<Record<string, string>>({});
   const [currentVariableIndex, setCurrentVariableIndex] = useState(0);
   const [pendingExecutionType, setPendingExecutionType] = useState<'crew' | 'flow'>('crew');
-  
+
+  // Use Zustand store for knowledge configuration
+  const {
+    isMemoryBackendConfigured,
+    isKnowledgeSourceEnabled,
+    checkConfiguration,
+  } = useKnowledgeConfigStore();
+
+  // Use Zustand store for model configuration
+  const { refreshKey } = useModelConfigStore();
+
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
   const { setNodes, setEdges } = useWorkflowStore();
   const { setInputMode, inputMode, setInputVariables, executeCrew, executeFlow } = useCrewExecutionStore();
   const uiLayoutState = useUILayoutState();
-  
+  const { chatPanelSide, setChatPanelSide } = useUILayoutStore();
+
+  const messagesContainerRef = useRef<HTMLDivElement>(null);
+  const isUserNearBottomRef = useRef(true);
+  const handleMessagesScroll = () => {
+    const el = messagesContainerRef.current;
+    if (!el) return;
+    const threshold = 80;
+    const atBottom = el.scrollHeight - el.scrollTop - el.clientHeight <= threshold;
+    isUserNearBottomRef.current = atBottom;
+  };
+
+
   // Create enhanced layout manager instance
   const layoutManagerRef = useRef<CanvasLayoutManager>(
     new CanvasLayoutManager({
@@ -110,10 +137,15 @@ const WorkflowChat: React.FC<WorkflowChatProps> = ({
     })
   );
 
-  // Use extracted hooks
+  // Use Zustand store for messages
   const {
-    messages,
-    setMessages,
+    setMessages: setZustandMessages,
+    getDeduplicatedMessages,
+    setCurrentSession,
+  } = useChatMessagesStore();
+
+  // Use extracted hooks (excluding messages which are now handled by Zustand)
+  const {
     sessionId,
     setSessionId: _setSessionId,
     chatSessions,
@@ -127,14 +159,35 @@ const WorkflowChat: React.FC<WorkflowChatProps> = ({
     startNewChat,
   } = useChatSession(providedChatSessionId);
 
+  // Get messages from Zustand store
+  const messages = getDeduplicatedMessages(sessionId);
+
+  // Set current session in Zustand store when sessionId changes
+  useEffect(() => {
+    if (sessionId) {
+      setCurrentSession(sessionId);
+    }
+  }, [sessionId, setCurrentSession]);
+
+  // Create a Zustand-compatible setMessages function
+  const setMessages = (updater: React.SetStateAction<ChatMessage[]>) => {
+    if (typeof updater === 'function') {
+      const currentMessages = getDeduplicatedMessages(sessionId);
+      const newMessages = updater(currentMessages);
+      setZustandMessages(sessionId, newMessages);
+    } else {
+      setZustandMessages(sessionId, updater);
+    }
+  };
+
   const {
     executingJobId,
     setExecutingJobId,
-    lastExecutionJobId,
+    lastExecutionJobId: _lastExecutionJobId,
     setLastExecutionJobId,
     executionStartTime: _executionStartTime,
   } = useExecutionMonitoring(sessionId, saveMessageToBackend, setMessages);
-  
+
   const scrollToBottom = () => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   };
@@ -189,13 +242,12 @@ const WorkflowChat: React.FC<WorkflowChatProps> = ({
 
     if (typeof window !== 'undefined') {
       window.addEventListener('resize', handleResize);
-      
+
       (window as unknown as Record<string, unknown>).debugCanvasLayout = () => {
         const debug = layoutManagerRef.current.getLayoutDebugInfo();
-        console.log('🎯 Canvas Layout Debug Info:', debug);
         return debug;
       };
-      
+
       return () => {
         window.removeEventListener('resize', handleResize);
         delete (window as unknown as Record<string, unknown>).debugCanvasLayout;
@@ -204,7 +256,9 @@ const WorkflowChat: React.FC<WorkflowChatProps> = ({
   }, []);
 
   useEffect(() => {
-    scrollToBottom();
+    if (isUserNearBottomRef.current) {
+      scrollToBottom();
+    }
   }, [messages]);
 
   // Notify parent of loading state changes
@@ -218,14 +272,14 @@ const WorkflowChat: React.FC<WorkflowChatProps> = ({
   useEffect(() => {
     const focusAttempts = [0, 100, 300, 500, 1000];
     const timeouts: NodeJS.Timeout[] = [];
-    
+
     focusAttempts.forEach(delay => {
       const timeoutId = setTimeout(() => {
         inputRef.current?.focus();
       }, delay);
       timeouts.push(timeoutId);
     });
-    
+
     return () => {
       timeouts.forEach(clearTimeout);
     };
@@ -249,7 +303,7 @@ const WorkflowChat: React.FC<WorkflowChatProps> = ({
     }
   }, [isVisible]);
 
-  // Fetch models when component mounts
+  // Fetch models when component mounts or when refreshKey changes
   useEffect(() => {
     const fetchModels = async () => {
       setIsLoadingModels(true);
@@ -258,7 +312,7 @@ const WorkflowChat: React.FC<WorkflowChatProps> = ({
         const response = await modelService.getEnabledModels();
         setModels(response as Record<string, ModelConfig>);
       } catch (error) {
-        console.error('Error fetching models:', error);
+
         setModels({
           'databricks-llama-4-maverick': {
             name: 'databricks-llama-4-maverick',
@@ -273,7 +327,12 @@ const WorkflowChat: React.FC<WorkflowChatProps> = ({
       }
     };
     fetchModels();
-  }, []);
+  }, [refreshKey]);
+
+  // Initialize knowledge configuration on mount
+  useEffect(() => {
+    checkConfiguration();
+  }, [checkConfiguration]);
 
   // Create handlers using extracted utilities
   const handleAgentGenerated = createAgentGenerationHandler(
@@ -312,7 +371,7 @@ const WorkflowChat: React.FC<WorkflowChatProps> = ({
     if (isCollectingVariables && variablesToCollect.length > 0 && currentVariableIndex < variablesToCollect.length) {
       const currentVariable = variablesToCollect[currentVariableIndex];
       const value = inputValue.trim();
-      
+
       // Save user's response
       const userMessage: ChatMessage = {
         id: `msg-${Date.now()}`,
@@ -323,17 +382,17 @@ const WorkflowChat: React.FC<WorkflowChatProps> = ({
       setMessages(prev => [...prev, userMessage]);
       setInputValue('');
       saveMessageToBackend(userMessage);
-      
+
       // Store the collected variable
       const updatedVariables = { ...collectedVariables, [currentVariable]: value };
       setCollectedVariables(updatedVariables);
-      
+
       // Check if we have more variables to collect
       if (currentVariableIndex + 1 < variablesToCollect.length) {
         // Ask for the next variable
         setCurrentVariableIndex(currentVariableIndex + 1);
         const nextVariable = variablesToCollect[currentVariableIndex + 1];
-        
+
         const promptMessage: ChatMessage = {
           id: `msg-${Date.now() + 1}`,
           type: 'assistant',
@@ -346,7 +405,7 @@ const WorkflowChat: React.FC<WorkflowChatProps> = ({
         // All variables collected, execute the crew
         setIsCollectingVariables(false);
         setInputVariables(updatedVariables);
-        
+
         const confirmMessage: ChatMessage = {
           id: `msg-${Date.now() + 1}`,
           type: 'assistant',
@@ -355,7 +414,7 @@ const WorkflowChat: React.FC<WorkflowChatProps> = ({
         };
         setMessages(prev => [...prev, confirmMessage]);
         saveMessageToBackend(confirmMessage);
-        
+
         // Execute with the collected variables
         const pendingMessage: ChatMessage = {
           id: `exec-pending-${Date.now()}`,
@@ -364,46 +423,46 @@ const WorkflowChat: React.FC<WorkflowChatProps> = ({
           timestamp: new Date(),
         };
         setMessages(prev => [...prev, pendingMessage]);
-        
+
         if (pendingExecutionType === 'crew') {
           await executeCrew(nodes, edges);
         } else {
           await executeFlow(nodes, edges);
         }
-        
+
         // Reset collection state
         setVariablesToCollect([]);
         setCollectedVariables({});
         setCurrentVariableIndex(0);
       }
-      
+
       return;
     }
 
     // Check if user is responding to execution prompt
     const lastMessage = messages[messages.length - 1];
-    const isExecutionPromptResponse = lastMessage?.type === 'assistant' && 
+    const isExecutionPromptResponse = lastMessage?.type === 'assistant' &&
                                      lastMessage?.content.includes('Would you like to execute this crew now?');
-    
+
     if (isExecutionPromptResponse) {
       const response = inputValue.trim().toLowerCase();
-      
+
       const userMessage: ChatMessage = {
         id: `msg-${Date.now()}`,
         type: 'user',
         content: inputValue,
         timestamp: new Date(),
       };
-      
+
       setMessages(prev => [...prev, userMessage]);
       setInputValue('');
       saveMessageToBackend(userMessage);
-      
+
       if (response === 'yes' || response === 'y' || response === 'yeah' || response === 'sure' || response === 'ok' || response === 'okay') {
         if (hasCrewContent(nodes)) {
           // Check if we need to collect variables
           const variables = extractVariablesFromNodes(nodes);
-          
+
           if (variables.length > 0 && inputMode === 'chat') {
             // Start variable collection in chat mode
             setIsCollectingVariables(true);
@@ -411,7 +470,7 @@ const WorkflowChat: React.FC<WorkflowChatProps> = ({
             setCollectedVariables({});
             setCurrentVariableIndex(0);
             setPendingExecutionType('crew');
-            
+
             const introMessage: ChatMessage = {
               id: `msg-${Date.now() + 1}`,
               type: 'assistant',
@@ -454,13 +513,13 @@ const WorkflowChat: React.FC<WorkflowChatProps> = ({
         content: inputValue,
         timestamp: new Date(),
       };
-      
+
       setMessages(prev => [...prev, userMessage]);
       setInputValue('');
       saveMessageToBackend(userMessage);
-      
+
       setInputMode('dialog');
-      
+
       const responseMessage: ChatMessage = {
         id: `msg-${Date.now() + 1}`,
         type: 'assistant',
@@ -471,7 +530,7 @@ const WorkflowChat: React.FC<WorkflowChatProps> = ({
       saveMessageToBackend(responseMessage);
       return;
     }
-    
+
     if (lowerInput === 'input mode chat' || lowerInput === 'input chat') {
       const userMessage: ChatMessage = {
         id: `msg-${Date.now()}`,
@@ -479,13 +538,13 @@ const WorkflowChat: React.FC<WorkflowChatProps> = ({
         content: inputValue,
         timestamp: new Date(),
       };
-      
+
       setMessages(prev => [...prev, userMessage]);
       setInputValue('');
       saveMessageToBackend(userMessage);
-      
+
       setInputMode('chat');
-      
+
       const responseMessage: ChatMessage = {
         id: `msg-${Date.now() + 1}`,
         type: 'assistant',
@@ -505,19 +564,19 @@ const WorkflowChat: React.FC<WorkflowChatProps> = ({
         content: inputValue,
         timestamp: new Date(),
       };
-      
+
       setMessages(prev => [...prev, userMessage]);
       setInputValue('');
       saveMessageToBackend(userMessage);
-      
+
       const specificJobId = extractJobIdFromCommand(inputValue);
-      
+
       if (specificJobId) {
         setIsLoading(true);
-        
+
         try {
           const traces = await TraceService.getTraces(specificJobId);
-          
+
           if (traces && traces.length > 0) {
             const assistantMessage: ChatMessage = {
               id: `msg-${Date.now() + 1}`,
@@ -526,7 +585,7 @@ const WorkflowChat: React.FC<WorkflowChatProps> = ({
               timestamp: new Date(),
             };
             setMessages(prev => [...prev, assistantMessage]);
-            
+
             traces.forEach((trace, index) => {
               let content = '';
               if (typeof trace.output === 'string') {
@@ -538,11 +597,11 @@ const WorkflowChat: React.FC<WorkflowChatProps> = ({
               } else if (trace.output) {
                 content = JSON.stringify(trace.output, null, 2);
               }
-              
+
               if (!content.trim()) {
                 return;
               }
-              
+
               const traceMessage: ChatMessage = {
                 id: `trace-display-${trace.id}-${index}`,
                 type: 'trace',
@@ -554,7 +613,7 @@ const WorkflowChat: React.FC<WorkflowChatProps> = ({
                 eventType: trace.event_type,
                 jobId: specificJobId || undefined
               };
-              
+
               setMessages(prev => [...prev, traceMessage]);
               saveMessageToBackend(traceMessage);
             });
@@ -568,7 +627,7 @@ const WorkflowChat: React.FC<WorkflowChatProps> = ({
             setMessages(prev => [...prev, assistantMessage]);
           }
         } catch (error) {
-          console.error('Error fetching execution traces:', error);
+
           const errorMessage: ChatMessage = {
             id: `msg-${Date.now() + 1}`,
             type: 'assistant',
@@ -579,14 +638,14 @@ const WorkflowChat: React.FC<WorkflowChatProps> = ({
         } finally {
           setIsLoading(false);
         }
-        
+
         return;
       }
-      
+
       if (hasCrewContent(nodes)) {
         // Check if we need to collect variables
         const variables = extractVariablesFromNodes(nodes);
-        
+
         if (variables.length > 0 && inputMode === 'chat') {
           // Start variable collection in chat mode
           setIsCollectingVariables(true);
@@ -594,7 +653,7 @@ const WorkflowChat: React.FC<WorkflowChatProps> = ({
           setCollectedVariables({});
           setCurrentVariableIndex(0);
           setPendingExecutionType('crew');
-          
+
           const introMessage: ChatMessage = {
             id: `msg-${Date.now() + 1}`,
             type: 'assistant',
@@ -612,12 +671,12 @@ const WorkflowChat: React.FC<WorkflowChatProps> = ({
             timestamp: new Date(),
           };
           setMessages(prev => [...prev, pendingMessage]);
-          
+
           onExecuteCrew();
         }
         return;
       }
-      
+
       const assistantMessage: ChatMessage = {
         id: `msg-${Date.now() + 1}`,
         type: 'assistant',
@@ -628,7 +687,7 @@ const WorkflowChat: React.FC<WorkflowChatProps> = ({
       return;
     }
 
-    console.log('Sending message:', inputValue);
+
 
     const userMessage: ChatMessage = {
       id: `msg-${Date.now()}`,
@@ -643,14 +702,149 @@ const WorkflowChat: React.FC<WorkflowChatProps> = ({
 
     saveMessageToBackend(userMessage);
 
+    // Progressive canvas feedback: add temporary placeholder nodes/edges while generating
+    let cleanupPlaceholders: (() => void) | null = null;
+    const lower = userMessage.content.trim().toLowerCase();
+    let cleanupProgress: (() => void) | null = null;
+    const wantsCrewOrPlan = /\b(create|build|make|generate|draft|compose|design)\b.*\b(plan|crew|workflow)\b/.test(lower)
+      || /\b(plan|crew|workflow)\b.*\b(create|build|make|generate|draft|compose|design)\b/.test(lower)
+      || lower.includes('create a plan')
+      || lower.includes('create plan');
+    const wantsAgent = /\b(create|add|new|make|generate)\b.*\b(agent)\b/.test(lower) || lower.includes('create an agent') || lower.includes('create agent');
+    const wantsTask = /\b(create|add|new|make|generate)\b.*\b(task)\b/.test(lower) || lower.includes('create a task') || lower.includes('create task');
+
+    const addTempProgress = (text: string) => {
+      const msg: ChatMessage = {
+        id: `progress-${Date.now()}`,
+        type: 'assistant',
+        content: text,
+        timestamp: new Date(),
+        isIntermediate: true,
+      } as ChatMessage;
+      setMessages(prev => [...prev, msg]);
+      return () => setMessages(prev => prev.filter(m => m.id !== msg.id));
+    };
+
     try {
-      console.log('Calling dispatcher service...');
+      // Add placeholders based on intent keywords so users see progress immediately
+      if (wantsCrewOrPlan) {
+        cleanupProgress = addTempProgress('\u23f3 Generating plan/crew…');
+        // staged progress updates while waiting for dispatcher
+        const progressCleanups: Array<() => void> = [];
+        const timers: number[] = [];
+        // Keep initial cleanup too
+        const initialCleanup = cleanupProgress;
+        if (initialCleanup) progressCleanups.push(initialCleanup);
+        const addStage = (delay: number, text: string) => {
+          const t = window.setTimeout(() => {
+            const c = addTempProgress(text);
+            progressCleanups.push(c);
+          }, delay);
+          timers.push(t);
+        };
+        addStage(1000, '🧠 Analyzing request…');
+        addStage(3000, '🤖 Drafting agent…');
+        addStage(4500, '📝 Drafting task…');
+        // redefine cleanup to clear timers and remove staged messages
+        cleanupProgress = () => {
+          timers.forEach((t) => window.clearTimeout(t));
+          progressCleanups.forEach((fn) => fn());
+        };
+
+        const now = Date.now();
+        const tempAgentId = `agent-temp-${now}`;
+        const tempTaskId = `task-temp-${now}`;
+
+        // Add agent placeholder
+        setNodes((cur) => {
+          const pos = layoutManagerRef.current.getAgentNodePosition(cur as FlowNode[], 'crew') || { x: 100, y: 100 };
+          const n: FlowNode = {
+            id: tempAgentId,
+            type: 'agentNode',
+            position: pos,
+            data: { label: 'Creating agent…', loading: true },
+          };
+          return [...(cur as FlowNode[]), n];
+        });
+        // Add task placeholder slightly after (subtle motion/progression)
+        setTimeout(() => {
+          setNodes((cur) => {
+            const pos = layoutManagerRef.current.getTaskNodePosition(cur as FlowNode[], 'crew') || { x: 380, y: 100 };
+            const n: FlowNode = {
+              id: tempTaskId,
+              type: 'taskNode',
+              position: pos,
+              data: { label: 'Creating task…', taskId: tempTaskId, loading: true },
+            };
+            return [...(cur as FlowNode[]), n];
+          });
+          // Connect placeholders with animated edge
+          setEdges((cur) => [
+            ...cur,
+            {
+              id: `edge-${tempAgentId}-${tempTaskId}`,
+              source: tempAgentId,
+              target: tempTaskId,
+              type: 'default',
+              animated: true,
+              sourceHandle: 'right',
+              targetHandle: 'left',
+            },
+          ]);
+        }, 5000);
+
+        cleanupPlaceholders = () => {
+          setEdges((cur) => cur.filter((e) => e.id !== `edge-${tempAgentId}-${tempTaskId}`));
+          setNodes((cur) => (cur as FlowNode[]).filter((n) => n.id !== tempAgentId && n.id !== tempTaskId));
+        };
+      } else if (wantsAgent) {
+        cleanupProgress = addTempProgress('\u23f3 Creating agent…');
+        const now = Date.now();
+        const tempAgentId = `agent-temp-${now}`;
+        setNodes((cur) => {
+          const pos = layoutManagerRef.current.getAgentNodePosition(cur as FlowNode[], 'crew') || { x: 100, y: 100 };
+          const n: FlowNode = {
+            id: tempAgentId,
+            type: 'agentNode',
+            position: pos,
+            data: { label: 'Creating agent…', loading: true },
+          };
+          return [...(cur as FlowNode[]), n];
+        });
+        cleanupPlaceholders = () => {
+          setNodes((cur) => (cur as FlowNode[]).filter((n) => n.id !== tempAgentId));
+        };
+      } else if (wantsTask) {
+        cleanupProgress = addTempProgress('\u23f3 Creating task\u2026');
+        const now = Date.now();
+        const tempTaskId = `task-temp-${now}`;
+        setNodes((cur) => {
+          const pos = layoutManagerRef.current.getTaskNodePosition(cur as FlowNode[], 'crew') || { x: 380, y: 100 };
+          const n: FlowNode = {
+            id: tempTaskId,
+            type: 'taskNode',
+            position: pos,
+            data: { label: 'Creating task…', taskId: tempTaskId, loading: true },
+          };
+          return [...(cur as FlowNode[]), n];
+        });
+        cleanupPlaceholders = () => {
+          setNodes((cur) => (cur as FlowNode[]).filter((n) => n.id !== tempTaskId));
+        };
+      }
+
       const result: DispatchResult = await DispatcherService.dispatch({
         message: userMessage.content,
         model: selectedModel,
         tools: selectedTools,
       });
-      console.log('Dispatcher response:', result);
+
+      // Remove any temporary progress message
+      if (cleanupProgress) {
+        cleanupProgress();
+        cleanupProgress = null;
+      }
+
 
       const assistantMessage: ChatMessage = {
         id: `msg-${Date.now() + 1}`,
@@ -664,6 +858,12 @@ const WorkflowChat: React.FC<WorkflowChatProps> = ({
 
       setMessages(prev => [...prev, assistantMessage]);
       saveMessageToBackend(assistantMessage);
+
+      // Remove any temporary placeholders before rendering final nodes
+      if (cleanupPlaceholders) {
+        cleanupPlaceholders();
+        cleanupPlaceholders = null;
+      }
 
       if (result.generation_result) {
         switch (result.dispatcher.intent) {
@@ -686,18 +886,27 @@ const WorkflowChat: React.FC<WorkflowChatProps> = ({
         }
       }
     } catch (error) {
-      console.error('Error processing message:', error);
-      
+
+
       const errorMessage: ChatMessage = {
         id: `msg-${Date.now() + 1}`,
         type: 'assistant',
         content: '❌ Failed to process your request. Please try again or rephrase your message.',
         timestamp: new Date(),
       };
-      
+
       setMessages(prev => [...prev, errorMessage]);
       saveMessageToBackend(errorMessage);
     } finally {
+      // Ensure placeholders/progress are removed on error/cancellation
+      if (cleanupPlaceholders) {
+        cleanupPlaceholders();
+        cleanupPlaceholders = null;
+      }
+      if (cleanupProgress) {
+        cleanupProgress();
+        cleanupProgress = null;
+      }
       setIsLoading(false);
       const focusDelays = [0, 50, 100, 200, 300, 500, 800, 1200];
       focusDelays.forEach(delay => {
@@ -710,7 +919,7 @@ const WorkflowChat: React.FC<WorkflowChatProps> = ({
 
   const getAssistantResponse = (result: DispatchResult): string => {
     const { dispatcher, generation_result } = result;
-    
+
     if (dispatcher.intent === 'unknown') {
       return "I'm not sure what you want to create. Please specify if you want to create an agent, a task, or a complete crew.";
     }
@@ -731,23 +940,23 @@ const WorkflowChat: React.FC<WorkflowChatProps> = ({
       case 'generate_crew': {
         const crew = generation_result as GeneratedCrew;
         let response = "I've created a crew with:\n";
-        
+
         if (crew.agents && crew.agents.length > 0) {
           response += "\n**Agents & Tasks:**\n";
           crew.agents.forEach((agent, index) => {
             response += `${index + 1}. **${agent.name}** (${agent.role}) - ${agent.goal}\n`;
-            
-            const agentTasks = crew.tasks?.filter((task) => 
+
+            const agentTasks = crew.tasks?.filter((task) =>
               task.agent_id === agent.id || task.agent_id?.toString() === agent.id?.toString()
             ) || [];
-            
+
             if (agentTasks.length > 0) {
               agentTasks.forEach((task) => {
                 response += `   → ${task.name}: ${task.description}\n`;
               });
             }
           });
-          
+
           const unassignedTasks = crew.tasks?.filter((task) => !task.agent_id) || [];
           if (unassignedTasks.length > 0) {
             response += "\n**Unassigned Tasks:**\n";
@@ -756,30 +965,30 @@ const WorkflowChat: React.FC<WorkflowChatProps> = ({
             });
           }
         }
-        
+
         response += "\nTo execute plan type either **execute crew** or **ec**";
         return response;
       }
       case 'generate_plan': {
         const crew = generation_result as GeneratedCrew;
         let response = "I've created a plan with:\n";
-        
+
         if (crew.agents && crew.agents.length > 0) {
           response += "\n**Agents & Tasks:**\n";
           crew.agents.forEach((agent, index) => {
             response += `${index + 1}. **${agent.name}** (${agent.role}) - ${agent.goal}\n`;
-            
-            const agentTasks = crew.tasks?.filter((task) => 
+
+            const agentTasks = crew.tasks?.filter((task) =>
               task.agent_id === agent.id || task.agent_id?.toString() === agent.id?.toString()
             ) || [];
-            
+
             if (agentTasks.length > 0) {
               agentTasks.forEach((task) => {
                 response += `   → ${task.name}: ${task.description}\n`;
               });
             }
           });
-          
+
           const unassignedTasks = crew.tasks?.filter((task) => !task.agent_id) || [];
           if (unassignedTasks.length > 0) {
             response += "\n**Unassigned Tasks:**\n";
@@ -788,7 +997,7 @@ const WorkflowChat: React.FC<WorkflowChatProps> = ({
             });
           }
         }
-        
+
         response += "\nTo execute plan type either **execute crew** or **ec**";
         return response;
       }
@@ -799,29 +1008,33 @@ const WorkflowChat: React.FC<WorkflowChatProps> = ({
 
   const handleKeyPress = (e: React.KeyboardEvent) => {
     e.stopPropagation();
-    
+
     if (e.key === 'Enter' && !e.shiftKey) {
       e.preventDefault();
       handleSendMessage();
     }
   };
+  const isSendMode = inputValue.trim().length > 0;
+  const canRunCrew = hasCrewContent(nodes);
+  const isActionDisabled = isLoading || !!executingJobId || (!isSendMode && !canRunCrew);
+
 
 
   return (
-    <Box 
-      sx={{ 
-        height: '100%', 
-        display: 'flex', 
-        flexDirection: 'column', 
+    <Box
+      sx={{
+        height: '100%',
+        display: 'flex',
+        flexDirection: 'column',
         position: 'relative',
         overflow: 'hidden',
         maxWidth: '100%',
         width: '100%',
       }}>
       {/* Header with session controls */}
-      <Box sx={{ 
-        p: 1, 
-        borderBottom: 1, 
+      <Box sx={{
+        p: 1,
+        borderBottom: 1,
         borderColor: 'divider',
         display: 'flex',
         alignItems: 'center',
@@ -830,22 +1043,22 @@ const WorkflowChat: React.FC<WorkflowChatProps> = ({
         flexShrink: 0,
       }}>
         <Box sx={{ display: 'flex', flexDirection: 'column' }}>
-          <Typography 
-            variant="subtitle2" 
-            sx={{ 
-              display: 'flex', 
-              alignItems: 'center', 
+          <Typography
+            variant="subtitle2"
+            sx={{
+              display: 'flex',
+              alignItems: 'center',
               gap: 1,
               fontWeight: 600
             }}
           >
-            <SmartToyIcon fontSize="small" />
+            <Box component="img" src="/kasal-icon-16.png" alt="Kasal" sx={{ width: 16, height: 16, borderRadius: 0.5 }} />
             Kasal
           </Typography>
           {currentSessionName !== 'New Chat' && (
-            <Typography 
-              variant="caption" 
-              sx={{ 
+            <Typography
+              variant="caption"
+              sx={{
                 color: 'text.secondary',
                 ml: 3
               }}
@@ -861,8 +1074,8 @@ const WorkflowChat: React.FC<WorkflowChatProps> = ({
             </IconButton>
           </Tooltip>
           <Tooltip title="Chat History">
-            <IconButton 
-              size="small" 
+            <IconButton
+              size="small"
               onClick={() => {
                 setShowSessionList(true);
                 loadChatSessions();
@@ -871,27 +1084,17 @@ const WorkflowChat: React.FC<WorkflowChatProps> = ({
               <ChatIcon fontSize="small" />
             </IconButton>
           </Tooltip>
-          {onOpenLogs && (
-            <Tooltip title={executingJobId || lastExecutionJobId ? "Execution Logs" : "No execution logs available"}>
-              <span>
-                <IconButton 
-                  size="small" 
-                  onClick={() => {
-                    const jobId = executingJobId || lastExecutionJobId;
-                    if (jobId) {
-                      onOpenLogs(jobId);
-                    }
-                  }}
-                  disabled={!executingJobId && !lastExecutionJobId}
-                >
-                  <TerminalIcon fontSize="small" />
-                </IconButton>
-              </span>
-            </Tooltip>
-          )}
+          <Tooltip title={chatPanelSide === 'right' ? 'Move Chat to Left' : 'Move Chat to Right'}>
+            <IconButton
+              size="small"
+              onClick={() => setChatPanelSide(chatPanelSide === 'right' ? 'left' : 'right')}
+            >
+              <SwapHorizIcon fontSize="small" />
+            </IconButton>
+          </Tooltip>
           <Tooltip title="Collapse Chat">
-            <IconButton 
-              size="small" 
+            <IconButton
+              size="small"
               onClick={onToggleCollapse}
             >
               <ChevronLeftIcon fontSize="small" />
@@ -917,20 +1120,20 @@ const WorkflowChat: React.FC<WorkflowChatProps> = ({
         }}
       >
         {/* Session list header and content (simplified for brevity) */}
-        <Box sx={{ 
-          p: 1.5, 
-          borderBottom: 1, 
+        <Box sx={{
+          p: 1.5,
+          borderBottom: 1,
           borderColor: 'divider',
           backgroundColor: theme => theme.palette.mode === 'dark' ? 'grey.900' : 'grey.50',
-          display: 'flex', 
-          alignItems: 'center', 
+          display: 'flex',
+          alignItems: 'center',
           justifyContent: 'space-between'
         }}>
           <Typography variant="subtitle2" sx={{ fontWeight: 600 }}>Chat History</Typography>
           <Stack direction="row" spacing={0.5}>
             <Tooltip title="Refresh">
-              <IconButton 
-                size="small" 
+              <IconButton
+                size="small"
                 onClick={loadChatSessions}
                 disabled={isLoadingSessions}
               >
@@ -938,8 +1141,8 @@ const WorkflowChat: React.FC<WorkflowChatProps> = ({
               </IconButton>
             </Tooltip>
             <Tooltip title="Close">
-              <IconButton 
-                size="small" 
+              <IconButton
+                size="small"
                 onClick={() => setShowSessionList(false)}
               >
                 <CloseIcon fontSize="small" />
@@ -947,7 +1150,7 @@ const WorkflowChat: React.FC<WorkflowChatProps> = ({
             </Tooltip>
           </Stack>
         </Box>
-        
+
         {/* Session list content */}
         <Box sx={{ flex: 1, overflow: 'auto', p: 2 }}>
           {chatSessions.length === 0 ? (
@@ -961,8 +1164,8 @@ const WorkflowChat: React.FC<WorkflowChatProps> = ({
                   key={session.session_id}
                   onClick={() => loadSessionMessages(session.session_id)}
                   selected={session.session_id === sessionId}
-                  sx={{ 
-                    borderRadius: 1, 
+                  sx={{
+                    borderRadius: 1,
                     mb: 1,
                     border: 1,
                     borderColor: 'divider',
@@ -989,7 +1192,7 @@ const WorkflowChat: React.FC<WorkflowChatProps> = ({
                           localStorage.setItem('chatSessionJobNames', JSON.stringify(sessionJobNames));
                           loadChatSessions();
                         } catch (error) {
-                          console.error('Failed to delete session:', error);
+
                           const errorMessage: ChatMessage = {
                             id: `error-${Date.now()}`,
                             type: 'assistant',
@@ -1025,18 +1228,21 @@ const WorkflowChat: React.FC<WorkflowChatProps> = ({
         />
       )}
 
-      <Box sx={{ 
-        flex: 1, 
-        overflow: 'auto', 
-        px: 1, // Reduced horizontal padding from 2 to 1
-        py: 2, // Keep vertical padding
-        width: '100%', 
-        maxWidth: '100%',
-        position: 'relative',
-        minWidth: 0, // Prevent flex item from growing
-        display: 'flex',
-        flexDirection: 'column',
-      }}>
+      <Box
+        ref={messagesContainerRef}
+        onScroll={handleMessagesScroll}
+        sx={{
+          flex: 1,
+          overflow: 'auto',
+          px: 1, // Reduced horizontal padding from 2 to 1
+          py: 2, // Keep vertical padding
+          width: '100%',
+          maxWidth: '100%',
+          position: 'relative',
+          minWidth: 0, // Prevent flex item from growing
+          display: 'flex',
+          flexDirection: 'column',
+        }}>
         {messages.length === 0 ? (
           <Box sx={{ textAlign: 'center', mt: 4 }}>
             <Typography variant="body2" color="text.secondary" paragraph>
@@ -1044,19 +1250,19 @@ const WorkflowChat: React.FC<WorkflowChatProps> = ({
             </Typography>
             <List dense>
               <ListItem>
-                <ListItemText 
+                <ListItemText
                   primary="Create an agent that can analyze financial data"
                   secondary="Creates a single agent"
                 />
               </ListItem>
               <ListItem>
-                <ListItemText 
+                <ListItemText
                   primary="I need a task to summarize documents"
                   secondary="Creates a single task"
                 />
               </ListItem>
               <ListItem>
-                <ListItemText 
+                <ListItemText
                   primary="Build a research team with a researcher and writer"
                   secondary="Complete a plan"
                 />
@@ -1064,14 +1270,17 @@ const WorkflowChat: React.FC<WorkflowChatProps> = ({
             </List>
           </Box>
         ) : (
-          <List sx={{ 
-            width: '100%', 
+          <List sx={{
+            width: '100%',
             maxWidth: '100%',
             pt: 0, // Remove top padding
             pb: 0, // Remove bottom padding
           }}>
             {(() => {
-              const filteredMessages = messages.filter(message => {
+              // Messages are already deduplicated by Zustand store
+              const deduplicatedMessages = messages;
+
+              const filteredMessages = deduplicatedMessages.filter(message => {
                 // Filter out execution start and completion messages
                 if (message.type === 'execution' && (
                   message.content.includes('🚀 Started execution:') ||
@@ -1107,8 +1316,10 @@ const WorkflowChat: React.FC<WorkflowChatProps> = ({
               return groupedMessages.map((item, index) => {
                 if (Array.isArray(item)) {
                   // It's a group of trace messages
+                  // Use first and last message IDs plus index for uniqueness
+                  const groupKey = `trace-group-${item[0].id}-${item[item.length - 1].id}-${index}`;
                   return (
-                    <React.Fragment key={`trace-group-${item[0].id}`}>
+                    <React.Fragment key={groupKey}>
                       <GroupedTraceMessages messages={item} onOpenLogs={onOpenLogs} />
                       {index < groupedMessages.length - 1 && <Divider component="li" sx={{ ml: 0 }} />}
                     </React.Fragment>
@@ -1129,8 +1340,8 @@ const WorkflowChat: React.FC<WorkflowChatProps> = ({
         <div ref={messagesEndRef} />
       </Box>
 
-      <Paper 
-        elevation={3} 
+      <Paper
+        elevation={3}
         sx={{ p: 2, borderTop: 1, borderColor: 'divider', borderRadius: 0, flexShrink: 0 }}
       >
         <Box sx={{ position: 'relative' }}>
@@ -1138,7 +1349,7 @@ const WorkflowChat: React.FC<WorkflowChatProps> = ({
             ref={inputRef}
             fullWidth
             variant="outlined"
-            placeholder={executingJobId ? "Execution in progress..." : hasCrewContent(nodes) ? "Type 'execute crew' or 'ec'..." : "Describe what you want to create..."}
+            placeholder={executingJobId ? "Execution in progress..." : "Describe what you want to create..."}
             value={inputValue}
             onChange={(e) => setInputValue(e.target.value)}
             onKeyDown={(e) => {
@@ -1164,13 +1375,179 @@ const WorkflowChat: React.FC<WorkflowChatProps> = ({
                 <Box
                   sx={{
                     position: 'absolute',
-                    right: 40,
+                    right: 35,
                     bottom: 8,
                     display: 'flex',
                     alignItems: 'center',
-                    gap: 1,
+                    gap: 0.25,
                   }}
                 >
+                  {/* Knowledge File Upload */}
+                  <Box sx={{ display: 'flex', alignItems: 'center' }}>
+                    <KnowledgeFileUpload
+                      executionId={sessionId || 'default'}
+                      groupId={localStorage.getItem('groupId') || 'default'}
+                      hasAgents={nodes.some(n => n.type === 'agentNode')}
+                      hasTasks={nodes.some(n => n.type === 'taskNode')}
+                      disabled={
+                        isLoading ||
+                        !!executingJobId ||
+                        !isMemoryBackendConfigured ||
+                        !isKnowledgeSourceEnabled ||
+                        !nodes.some(n => n.type === 'agentNode') ||
+                        !nodes.some(n => n.type === 'taskNode')
+                      }
+                      onFilesUploaded={(files) => {
+                        console.log('Knowledge files uploaded:', files);
+                      }}
+                      onTasksUpdated={async (uploadedFilePath) => {
+                        console.log('[WorkflowChat] Updating task nodes with file path:', uploadedFilePath);
+
+                        // Find the agent connected to tasks (for agent_id in tool_configs)
+                        const agentNode = nodes.find(n => n.type === 'agentNode');
+                        const agentId = agentNode?.data?.agentId || agentNode?.id;
+                        console.log('[WorkflowChat] Found agent for access control:', agentId);
+
+                        // Update all task nodes to include DatabricksKnowledgeSearchTool with file path in tool_configs
+                        const updatedNodes = nodes.map(node => {
+                          if (node.type === 'taskNode') {
+                            const currentTools = node.data.tools || [];
+                            const currentToolConfigs = node.data.tool_configs || {};
+
+                            // Add DatabricksKnowledgeSearchTool to tools array if not present
+                            const hasKnowledgeTool = currentTools.includes('DatabricksKnowledgeSearchTool') ||
+                                                      currentTools.includes('36');
+                            const updatedTools = hasKnowledgeTool ? currentTools : [...currentTools, 'DatabricksKnowledgeSearchTool'];
+
+                            // Add file path AND agent_id to tool_configs for DatabricksKnowledgeSearchTool
+                            const existingFilePaths = currentToolConfigs.DatabricksKnowledgeSearchTool?.file_paths || [];
+                            const updatedToolConfigs = {
+                              ...currentToolConfigs,
+                              DatabricksKnowledgeSearchTool: {
+                                ...currentToolConfigs.DatabricksKnowledgeSearchTool,
+                                file_paths: existingFilePaths.includes(uploadedFilePath)
+                                  ? existingFilePaths
+                                  : [...existingFilePaths, uploadedFilePath],
+                                agent_id: agentId  // Add agent_id for access control filtering
+                              }
+                            };
+
+                            console.log(`[WorkflowChat] Updated task ${node.data.label}:`, {
+                              tools: updatedTools,
+                              tool_configs: updatedToolConfigs
+                            });
+
+                            // Update the task in the backend
+                            if (node.data.taskId) {
+                              import('../../api/TaskService').then(({ TaskService }) => {
+                                TaskService.updateTask(node.data.taskId, {
+                                  tools: updatedTools,
+                                  tool_configs: updatedToolConfigs
+                                }).catch(err => {
+                                  console.error(`Failed to update task ${node.data.taskId}:`, err);
+                                });
+                              });
+                            }
+
+                            return {
+                              ...node,
+                              data: {
+                                ...node.data,
+                                tools: updatedTools,
+                                tool_configs: updatedToolConfigs
+                              }
+                            };
+                          }
+                          return node;
+                        });
+
+                        setNodes(updatedNodes as FlowNode[]);
+                        console.log('[WorkflowChat] Task nodes updated successfully');
+                      }}
+                      onAgentsUpdated={(updatedAgents) => {
+
+
+
+
+
+
+// Check if any agent has knowledge sources
+                        const hasKnowledgeSources = updatedAgents.some(agent =>
+                          agent.knowledge_sources && agent.knowledge_sources.length > 0
+                        );
+
+                        // Update the canvas nodes with the updated agent data
+                        const updatedNodes = nodes.map(node => {
+                          if (node.type === 'agentNode') {
+                            const updatedAgent = updatedAgents.find(a => {
+                              // Try multiple matching strategies
+                              const matches =
+                                a.id === node.data.agentId ||  // Match by agentId
+                                a.id === node.data.id ||        // Match by id
+                                (a.id && `agent-${a.id}` === node.id) ||  // Match by node.id pattern
+                                `agent-${a.name}` === node.id;  // Match by name pattern
+
+                              return matches;
+                            });
+
+                            if (updatedAgent) {
+                              return {
+                                ...node,
+                                data: {
+                                  ...node.data,
+                                  ...updatedAgent,  // Update all agent fields
+                                  agentId: updatedAgent.id,  // Ensure agentId is set
+                                  tools: updatedAgent.tools,  // Explicitly set tools array
+                                  knowledge_sources: updatedAgent.knowledge_sources  // Explicitly set knowledge_sources
+                                }
+                              };
+                            }
+                          }
+
+                          // Update task nodes to add DatabricksKnowledgeSearchTool if knowledge sources exist
+                          if (node.type === 'taskNode' && hasKnowledgeSources) {
+                            const currentTools = node.data.tools || [];
+                            const hasKnowledgeTool = currentTools.includes('DatabricksKnowledgeSearchTool') ||
+                                                      currentTools.includes('36');
+
+                            // Add the tool if it doesn't exist
+                            if (!hasKnowledgeTool) {
+                              return {
+                                ...node,
+                                data: {
+                                  ...node.data,
+                                  tools: [...currentTools, 'DatabricksKnowledgeSearchTool']
+                                }
+                              };
+                            }
+                          }
+
+                          return node;
+                        });
+                        setNodes(updatedNodes as FlowNode[]);
+
+
+
+                      }}
+                      // Pass only agents that are currently on the canvas
+                      availableAgents={nodes
+                        .filter(node => node.type === 'agentNode')
+                        .map(node => {
+
+
+
+
+
+
+
+                          return {
+                            ...node.data,
+                            id: node.data.agentId || node.data.id  // Ensure we have an ID
+                          };
+                        })}
+                          compact={true}
+                        />
+                  </Box>
                   {/* Model Selector */}
                   {setSelectedModel && (
                     <Box
@@ -1193,9 +1570,9 @@ const WorkflowChat: React.FC<WorkflowChatProps> = ({
                         },
                       }}
                     >
-                      <Typography 
-                        variant="caption" 
-                        sx={{ 
+                      <Typography
+                        variant="caption"
+                        sx={{
                           fontSize: '0.75rem',
                           overflow: 'hidden',
                           textOverflow: 'ellipsis',
@@ -1205,18 +1582,26 @@ const WorkflowChat: React.FC<WorkflowChatProps> = ({
                       >
                         {(() => {
                           const modelName = models[selectedModel]?.name || selectedModel;
-                          if (modelName.includes('databricks-gpt-oss-120b')) return 'GPT OSS 120B';
-                          if (modelName.includes('databricks-gpt-oss-20b')) return 'GPT OSS 20B';
-                          if (modelName.includes('databricks-llama-4-maverick')) return 'Llama 4';
-                          if (modelName.includes('databricks-meta-llama-3-1-405b-instruct')) return 'Llama 3';
-                          if (modelName.includes('databricks-meta-llama-3-3-70b-instruct')) return 'Llama 3';
-                          if (modelName.includes('databricks-llama-70b')) return 'Llama 3 70B';
-                          if (modelName.includes('databricks-llama-405b')) return 'Llama 3 405B';
-                          if (modelName.includes('gpt-4')) return 'GPT-4';
-                          if (modelName.includes('gpt-3.5')) return 'GPT-3.5';
-                          if (modelName.includes('claude')) return 'Claude';
-                          if (modelName.length > 15) return modelName.substring(0, 15) + '...';
-                          return modelName;
+                          // Remove databricks- prefix for cleaner display
+                          const displayName = modelName.replace(/^databricks-/, '');
+
+                          // Special cases for better readability
+                          if (displayName.includes('gpt-oss-120b')) return 'GPT OSS 120B';
+                          if (displayName.includes('gpt-oss-20b')) return 'GPT OSS 20B';
+                          if (displayName.includes('llama-4-maverick')) return 'Llama 4';
+                          if (displayName.includes('meta-llama-3-1-405b')) return 'Llama 3.1 405B';
+                          if (displayName.includes('meta-llama-3-3-70b')) return 'Llama 3.3 70B';
+                          if (displayName.includes('gpt-5-mini')) return 'GPT-5 Mini';
+                          if (displayName.includes('gpt-5-nano')) return 'GPT-5 Nano';
+                          if (displayName.includes('gpt-5')) return 'GPT-5';
+                          if (displayName.includes('gemini-2-5-pro')) return 'Gemini 2.5 Pro';
+                          if (displayName.includes('gemini-2-5-flash')) return 'Gemini 2.5 Flash';
+                          if (displayName.includes('claude-sonnet-4-5')) return 'Claude 4.5';
+                          if (displayName.includes('claude-sonnet-4')) return 'Claude 4';
+                          if (displayName.includes('qwen3-next-80b')) return 'Qwen3 80B';
+                          if (displayName.includes('gemma-3-12b')) return 'Gemma 3 12B';
+                          if (displayName.length > 15) return displayName.substring(0, 15) + '...';
+                          return displayName;
                         })()}
                       </Typography>
                       <KeyboardArrowDownIcon sx={{ fontSize: 14 }} />
@@ -1272,7 +1657,28 @@ const WorkflowChat: React.FC<WorkflowChatProps> = ({
                         >
                           <Box sx={{ width: '100%' }}>
                             <Typography variant="body2" sx={{ fontSize: '0.813rem' }}>
-                              {model.name}
+                              {(() => {
+                                // Remove databricks- prefix for cleaner display
+                                const displayName = model.name.replace(/^databricks-/, '');
+
+                                // Special cases for better readability
+                                if (displayName.includes('gpt-oss-120b')) return 'GPT OSS 120B';
+                                if (displayName.includes('gpt-oss-20b')) return 'GPT OSS 20B';
+                                if (displayName.includes('llama-4-maverick')) return 'Llama 4';
+                                if (displayName.includes('meta-llama-3-1-405b')) return 'Llama 3.1 405B';
+                                if (displayName.includes('meta-llama-3-3-70b')) return 'Llama 3.3 70B';
+                                if (displayName.includes('gpt-5-mini')) return 'GPT-5 Mini';
+                                if (displayName.includes('gpt-5-nano')) return 'GPT-5 Nano';
+                                if (displayName.includes('gpt-5')) return 'GPT-5';
+                                if (displayName.includes('gemini-2-5-pro')) return 'Gemini 2.5 Pro';
+                                if (displayName.includes('gemini-2-5-flash')) return 'Gemini 2.5 Flash';
+                                if (displayName.includes('claude-sonnet-4-5')) return 'Claude Sonnet 4.5';
+                                if (displayName.includes('claude-3-7-sonnet')) return 'Claude 3.7 Sonnet';
+                                if (displayName.includes('claude-sonnet-4')) return 'Claude Sonnet 4';
+                                if (displayName.includes('qwen3-next-80b')) return 'Qwen3 Next 80B';
+                                if (displayName.includes('gemma-3-12b')) return 'Gemma 3 12B';
+                                return displayName;
+                              })()}
                             </Typography>
                             {model.provider && (
                               <Typography
@@ -1296,31 +1702,35 @@ const WorkflowChat: React.FC<WorkflowChatProps> = ({
             }}
           />
           {/* Send button */}
-          <IconButton
-            color="primary"
-            onClick={handleSendMessage}
-            disabled={!inputValue.trim() || isLoading || !!executingJobId}
-            sx={{ 
-              position: 'absolute',
-              right: 8,
-              bottom: 8,
-              padding: '6px',
-              backgroundColor: 'primary.main',
-              color: 'primary.contrastText',
-              borderRadius: '50%',
-              width: 28,
-              height: 28,
-              '&:hover': {
-                backgroundColor: 'primary.dark',
-              },
-              '&.Mui-disabled': {
-                backgroundColor: 'action.disabledBackground',
-                color: 'action.disabled',
-              },
-            }}
-          >
-            {isLoading || executingJobId ? <CircularProgress size={16} sx={{ color: 'inherit' }} /> : <ArrowUpwardIcon sx={{ fontSize: 16 }} />}
-          </IconButton>
+              <IconButton
+                color="primary"
+                onClick={isSendMode ? handleSendMessage : () => { if (canRunCrew && onExecuteCrew) onExecuteCrew(); }}
+                disabled={isActionDisabled}
+                sx={{
+                  position: 'absolute',
+                  right: 8,
+                  bottom: 8,
+                  padding: '6px',
+                  backgroundColor: 'primary.main',
+                  color: 'primary.contrastText',
+                  borderRadius: '50%',
+                  width: 28,
+                  height: 28,
+                  '&:hover': {
+                    backgroundColor: 'primary.dark',
+                  },
+                  '&.Mui-disabled': {
+                    backgroundColor: 'action.disabledBackground',
+                    color: 'action.disabled',
+                  },
+                }}
+              >
+                {isLoading || executingJobId ? (
+                  <CircularProgress size={16} sx={{ color: 'inherit' }} />
+                ) : (
+                  isSendMode ? <ArrowUpwardIcon sx={{ fontSize: 16 }} /> : <PlayArrowIcon sx={{ fontSize: 16 }} />
+                )}
+              </IconButton>
         </Box>
       </Paper>
     </Box>

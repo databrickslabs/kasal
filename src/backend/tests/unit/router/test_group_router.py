@@ -36,7 +36,8 @@ def mock_current_user():
             self.status = UserStatus.ACTIVE
             self.created_at = datetime.utcnow()
             self.updated_at = datetime.utcnow()
-    
+            self.is_system_admin = True  # System admin for tests
+
     return MockUser()
 
 
@@ -47,10 +48,10 @@ def mock_group_context():
         def __init__(self):
             self.primary_group_id = "group-1"
             self.group_email = "test@example.com"
-            self.email_domain = "example.com"
             self.user_id = "user-123"
             self.access_token = "test-token"
-    
+            self.user_role = "admin"  # Add user_role attribute
+
     return MockGroupContext()
 
 
@@ -100,7 +101,6 @@ class TestGroupRouter:
             {
                 "id": "group-1",
                 "name": "Group 1",
-                "email_domain": "group1.com",
                 "status": GroupStatus.ACTIVE,
                 "description": "Test group 1",
                 "auto_created": False,
@@ -112,7 +112,6 @@ class TestGroupRouter:
             {
                 "id": "group-2",
                 "name": "Group 2",
-                "email_domain": "group2.com",
                 "status": GroupStatus.ACTIVE,
                 "description": "Test group 2",
                 "auto_created": True,
@@ -166,7 +165,6 @@ class TestGroupRouter:
         mock_group = MagicMock()
         mock_group.id = "group-3"
         mock_group.name = "New Group"
-        mock_group.email_domain = "newgroup.com"
         mock_group.status = GroupStatus.ACTIVE
         mock_group.description = "A new test group"
         mock_group.auto_created = False
@@ -179,7 +177,6 @@ class TestGroupRouter:
         
         group_data = {
             "name": "New Group",
-            "email_domain": "newgroup.com",
             "description": "A new test group"
         }
         
@@ -188,7 +185,6 @@ class TestGroupRouter:
         assert response.status_code == 201
         data = response.json()
         assert data["name"] == "New Group"
-        assert data["email_domain"] == "newgroup.com"
         assert data["user_count"] == 0
     
     @patch('src.api.group_router.GroupService')
@@ -200,7 +196,6 @@ class TestGroupRouter:
         
         group_data = {
             "name": "New Group",
-            "email_domain": "invalid-domain",
             "description": "A new test group"
         }
         
@@ -218,7 +213,6 @@ class TestGroupRouter:
         
         group_data = {
             "name": "New Group",
-            "email_domain": "newgroup.com",
             "description": "A new test group"
         }
         
@@ -236,7 +230,6 @@ class TestGroupRouter:
         mock_group = MagicMock()
         mock_group.id = "group-1"
         mock_group.name = "Test Group"
-        mock_group.email_domain = "test.com"
         mock_group.status = GroupStatus.ACTIVE
         mock_group.description = "Test description"
         mock_group.auto_created = False
@@ -288,7 +281,6 @@ class TestGroupRouter:
         mock_group = MagicMock()
         mock_group.id = "group-1"
         mock_group.name = "Updated Group"
-        mock_group.email_domain = "updated.com"
         mock_group.status = GroupStatus.ACTIVE
         mock_group.description = "Updated description"
         mock_group.auto_created = False
@@ -378,20 +370,21 @@ class TestGroupRouter:
     
     @patch('src.api.group_router.GroupService')
     def test_list_group_users_success(self, mock_service_class, client, mock_db_session):
-        """Test successful group users listing."""
+        """Test successful group users listing (system admin)."""
         mock_service = AsyncMock()
         mock_service_class.return_value = mock_service
-        
+
         mock_group = MagicMock()
         mock_service.get_group_by_id.return_value = mock_group
-        
+
+        # System admin doesn't need membership check
         mock_service.list_group_users.return_value = [
             {
                 "id": "gu-1",
                 "group_id": "group-1",
                 "user_id": "user-1",
                 "email": "user1@example.com",
-                "role": GroupUserRole.USER,
+                "role": GroupUserRole.OPERATOR,
                 "status": GroupUserStatus.ACTIVE,
                 "joined_at": datetime.utcnow(),
                 "auto_created": False,
@@ -399,9 +392,9 @@ class TestGroupRouter:
                 "updated_at": datetime.utcnow()
             }
         ]
-        
+
         response = client.get("/groups/group-1/users?skip=0&limit=10")
-        
+
         assert response.status_code == 200
         data = response.json()
         assert len(data) == 1
@@ -410,16 +403,18 @@ class TestGroupRouter:
     
     @patch('src.api.group_router.GroupService')
     def test_list_group_users_default_pagination(self, mock_service_class, client, mock_db_session):
-        """Test group users listing with default pagination."""
+        """Test group users listing with default pagination (system admin)."""
         mock_service = AsyncMock()
         mock_service_class.return_value = mock_service
-        
+
         mock_group = MagicMock()
         mock_service.get_group_by_id.return_value = mock_group
+
+        # System admin doesn't need membership check
         mock_service.list_group_users.return_value = []
-        
+
         response = client.get("/groups/group-1/users")
-        
+
         assert response.status_code == 200
         mock_service.list_group_users.assert_called_once_with(group_id="group-1", skip=0, limit=100)
     
@@ -490,7 +485,7 @@ class TestGroupRouter:
         
         user_data = {
             "user_email": "user@example.com",
-            "role": "user"
+            "role": "operator"
         }
         
         response = client.post("/groups/nonexistent/users", json=user_data)
@@ -510,7 +505,7 @@ class TestGroupRouter:
         
         user_data = {
             "user_email": "user@example.com",
-            "role": "user"
+            "role": "operator"
         }
         
         response = client.post("/groups/group-1/users", json=user_data)
@@ -530,7 +525,7 @@ class TestGroupRouter:
         
         user_data = {
             "user_email": "user@example.com",
-            "role": "user"
+            "role": "operator"
         }
         
         response = client.post("/groups/group-1/users", json=user_data)
@@ -544,7 +539,8 @@ class TestGroupRouter:
         """Test successful group user update."""
         mock_service = AsyncMock()
         mock_service_class.return_value = mock_service
-        
+        mock_service.session = mock_db_session  # Add session to mock service
+
         mock_group_user = MagicMock()
         mock_group_user.id = "gu-1"
         mock_group_user.group_id = "group-1"
@@ -580,7 +576,8 @@ class TestGroupRouter:
         """Test group user update when user not found in database."""
         mock_service = AsyncMock()
         mock_service_class.return_value = mock_service
-        
+        mock_service.session = mock_db_session  # Add session to mock service
+
         mock_group_user = MagicMock()
         mock_group_user.id = "gu-1"
         mock_group_user.group_id = "group-1"
@@ -671,7 +668,7 @@ class TestGroupRouter:
         assert response.status_code == 500
         assert "Failed to remove user from group" in response.json()["detail"]
     
-    def test_get_group_stats_success(self, client, mock_db_session):
+    def test_get_group_stats_success(self, client, mock_db_session, mock_group_context):
         """Test successful group statistics retrieval."""
         from fastapi import FastAPI
         from src.api.group_router import get_group_stats
@@ -701,8 +698,9 @@ class TestGroupRouter:
             # Test the function directly
             async def run_test():
                 result = await get_group_stats(
-                    session=mock_db_session,
-                    admin_user=MockAdminUser()
+                    service=mock_service,
+                    admin_user=MockAdminUser(),
+                    group_context=mock_group_context
                 )
                 return result
                 
@@ -712,7 +710,7 @@ class TestGroupRouter:
             assert result.active_groups == 8
             assert result.total_users == 50
     
-    def test_get_group_stats_exception(self, client, mock_db_session):
+    def test_get_group_stats_exception(self, client, mock_db_session, mock_group_context):
         """Test group statistics retrieval with service exception."""
         from src.api.group_router import get_group_stats
         from fastapi import HTTPException
@@ -734,8 +732,9 @@ class TestGroupRouter:
             async def run_test():
                 try:
                     await get_group_stats(
-                        session=mock_db_session,
-                        admin_user=MockAdminUser()
+                        service=mock_service,
+                        admin_user=MockAdminUser(),
+                        group_context=mock_group_context
                     )
                     assert False, "Expected HTTPException to be raised"
                 except HTTPException as e:
@@ -752,7 +751,6 @@ class TestGroupRouter:
         data = response.json()
         assert data["group_id"] == "group-1"
         assert data["group_email"] == "test@example.com"
-        assert data["email_domain"] == "example.com"
         assert data["user_id"] == "user-123"
         assert data["access_token_present"] is True
         assert "test@example.com" in data["message"]

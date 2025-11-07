@@ -211,7 +211,7 @@ class AgentConfig:
             "goal": agent_data.goal,
             "backstory": agent_data.backstory,
             "verbose": True,
-            "allow_delegation": getattr(agent_data, 'allow_delegation', True),
+            "allow_delegation": getattr(agent_data, 'allow_delegation', False),
             "config": {}  # Always ensure there's an empty dict for config
         }
         

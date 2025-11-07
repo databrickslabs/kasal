@@ -3,6 +3,8 @@ import { persist } from 'zustand/middleware';
 import { Node, Edge, Connection } from 'reactflow';
 import { FlowConfiguration } from '../types/flow';
 import { createEdge, edgeExists } from '../utils/edgeUtils';
+import { useUILayoutStore } from './uiLayout';
+import { getEdgeStyle } from '../config/edgeConfig';
 
 interface ContextMenuState {
   mouseX: number;
@@ -81,12 +83,37 @@ export const useWorkflowStore = create<WorkflowState>()(
           return { nodes };
         }),
       
-      setEdges: (edges) => 
+      setEdges: (edges) =>
         set((state) => {
+          let processedEdges: Edge[];
+
           if (typeof edges === 'function') {
-            return { edges: edges(state.edges) };
+            processedEdges = edges(state.edges);
+          } else {
+            processedEdges = edges;
           }
-          return { edges };
+
+          // Ensure edges have correct animated property AND styles
+          const enhancedEdges = processedEdges.map(edge => {
+            const isTaskToTask = edge.source?.startsWith('task-') && edge.target?.startsWith('task-');
+            const isAgentToTask = edge.source?.startsWith('agent-') && edge.target?.startsWith('task-');
+
+            // Set animated to true only for task-to-task edges
+            if (isTaskToTask) {
+              const edgeStyle = getEdgeStyle(edge.source, edge.target, true, edge.style || {});
+              return { ...edge, animated: true, style: edgeStyle };
+            }
+
+            // Set animated to false for agent-to-task edges
+            if (isAgentToTask) {
+              const edgeStyle = getEdgeStyle(edge.source, edge.target, false, edge.style || {});
+              return { ...edge, animated: false, style: edgeStyle };
+            }
+
+            return edge;
+          });
+
+          return { edges: enhancedEdges };
         }),
       
       setSelectedEdges: (edges: Edge[]) => 
@@ -199,13 +226,19 @@ export const useWorkflowStore = create<WorkflowState>()(
               return state;
             }
 
-            return { 
-              edges: [...state.edges, createEdge(swappedConnection, 'crewEdge', true)] 
+            return {
+              edges: [...state.edges, createEdge(swappedConnection, 'crewEdge', true)]
             };
           }
 
-          return { 
-            edges: [...state.edges, createEdge(connection)] 
+          // Get current layout orientation
+          const currentLayout = useUILayoutStore.getState().layoutOrientation || 'horizontal';
+
+          // Create edge with layout-aware configuration
+          const newEdge = createEdge(connection, 'default', undefined, {}, currentLayout);
+
+          return {
+            edges: [...state.edges, newEdge]
           };
         }),
       
@@ -236,4 +269,9 @@ export const useWorkflowStore = create<WorkflowState>()(
       }),
     }
   )
-); 
+);
+
+// Expose store on window for debugging
+if (typeof window !== 'undefined') {
+  (window as any).useWorkflowStore = useWorkflowStore;
+}

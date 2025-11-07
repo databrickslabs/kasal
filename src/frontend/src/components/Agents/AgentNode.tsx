@@ -1,18 +1,20 @@
 import React, { useCallback, useState, useEffect } from 'react';
 import { Handle, Position, useReactFlow } from 'reactflow';
-import { Box, Typography, Dialog, DialogContent, IconButton, Tooltip } from '@mui/material';
+import { Box, Typography, Dialog, DialogContent, IconButton, Tooltip, CircularProgress } from '@mui/material';
 import PersonIcon from '@mui/icons-material/Person';
 import DeleteIcon from '@mui/icons-material/Delete';
 import EditIcon from '@mui/icons-material/Edit';
 import CodeIcon from '@mui/icons-material/Code';
 import MemoryIcon from '@mui/icons-material/Memory';
-import FileIcon from '@mui/icons-material/FileUpload';
-import { AgentService, Agent } from '../../api/AgentService';
+import { Agent } from '../../api/AgentService';
 import AgentForm from './AgentForm';
 import { ToolService } from '../../api/ToolService';
 import { Tool, KnowledgeSource } from '../../types/agent';
 import { Theme } from '@mui/material/styles';
 import { useTabDirtyState } from '../../hooks/workflow/useTabDirtyState';
+import { useAgentStore } from '../../store/agent';
+import { useUILayoutStore } from '../../store/uiLayout';
+import { useCrewExecutionStore } from '../../store/crewExecution';
 
 interface AgentNodeData {
   agentId: string;
@@ -50,13 +52,7 @@ interface AgentNodeData {
 const AgentNode: React.FC<{ data: AgentNodeData; id: string }> = ({ data, id }) => {
   const { setNodes, setEdges, getNodes, getEdges } = useReactFlow();
   const [isEditing, setIsEditing] = useState(false);
-  const [agentData, setAgentData] = useState<Agent | null>(null);
   const [tools, setTools] = useState<Tool[]>([]);
-  const [editTooltipOpen, setEditTooltipOpen] = useState(false);
-  const [deleteTooltipOpen, setDeleteTooltipOpen] = useState(false);
-  const [fileTooltipOpen, setFileTooltipOpen] = useState(false);
-  const [codeTooltipOpen, setCodeTooltipOpen] = useState(false);
-  const [memoryTooltipOpen, setMemoryTooltipOpen] = useState(false);
 
   // Local selection state
   const [isSelected, setIsSelected] = useState(false);
@@ -64,13 +60,32 @@ const AgentNode: React.FC<{ data: AgentNodeData; id: string }> = ({ data, id }) 
   // Tab dirty state management
   const { markCurrentTabDirty } = useTabDirtyState();
 
+  // Use agent store instead of local state
+  const { getAgent, updateAgent } = useAgentStore();
+  const [agentData, setAgentData] = useState<Agent | null>(null);
+
+  // Get current layout orientation and process type
+  const layoutOrientation = useUILayoutStore(state => state.layoutOrientation);
+  const processType = useCrewExecutionStore(state => state.processType);
+
+  // Load agent data using store
+  useEffect(() => {
+    if (data.agentId) {
+      const loadAgentData = async () => {
+        const agent = await getAgent(data.agentId);
+        setAgentData(agent);
+      };
+      loadAgentData();
+    }
+  }, [data.agentId, getAgent]);
+
   useEffect(() => {
     loadTools();
   }, []);
 
   const loadTools = async () => {
     try {
-      const toolsList = await ToolService.listTools();
+      const toolsList = await ToolService.listEnabledTools();
       setTools(toolsList.map(tool => ({
         ...tool,
         id: String(tool.id)
@@ -87,61 +102,74 @@ const AgentNode: React.FC<{ data: AgentNodeData; id: string }> = ({ data, id }) 
   }, [id, isSelected]);
 
   const handleDelete = useCallback(() => {
-    setEditTooltipOpen(false);
-    setDeleteTooltipOpen(false);
-    setFileTooltipOpen(false);
-    setCodeTooltipOpen(false);
-    setMemoryTooltipOpen(false);
-    
     setNodes(nodes => nodes.filter(node => node.id !== id));
-    setEdges(edges => edges.filter(edge => 
+    setEdges(edges => edges.filter(edge =>
       edge.source !== id && edge.target !== id
     ));
   }, [id, setNodes, setEdges]);
 
-  const handleEditClick = async () => {
+  const handleEditClick = useCallback(async () => {
     try {
-      setEditTooltipOpen(false);
-      setDeleteTooltipOpen(false);
-      setFileTooltipOpen(false);
-      setCodeTooltipOpen(false);
-      setMemoryTooltipOpen(false);
-      
+      // Don't manually close tooltips - let them close naturally
       document.activeElement && (document.activeElement as HTMLElement).blur();
-      
-      const agentIdToUse = data.agentId;
-      
+
+      // Try different sources for the agent ID
+      const agentIdToUse = data.agentId || data.id || data.agent_id;
+
       if (!agentIdToUse) {
-        console.error('Agent ID is missing in node data:', data);
+        console.warn('Agent ID is missing in node data, using data directly:', data);
+        // If there's no ID, use the data directly (might be a new unsaved agent)
+        // Convert label to name for Agent type
+        const agentFromData: Agent = {
+          id: undefined,
+          name: String(data.label || data.name || ''),
+          role: String(data.role || ''),
+          goal: String(data.goal || ''),
+          backstory: String(data.backstory || ''),
+          llm: String(data.llm || ''),
+          tools: data.tools || [],
+          max_iter: data.max_iter || 25,
+          verbose: data.verbose || false,
+          allow_delegation: data.allow_delegation || false,
+          cache: data.cache || true,
+          allow_code_execution: data.allow_code_execution || false,
+          code_execution_mode: (data.code_execution_mode === 'unsafe' ? 'unsafe' : 'safe') as 'safe' | 'unsafe',
+          memory: data.memory,
+          tool_configs: data.tool_configs,
+          temperature: typeof data.temperature === 'number' ? data.temperature : undefined,
+          function_calling_llm: data.function_calling_llm,
+          max_rpm: data.max_rpm,
+          max_execution_time: data.max_execution_time,
+          embedder_config: (data.embedder_config as import('../../types/agent').EmbedderConfig | undefined),
+          knowledge_sources: data.knowledge_sources,
+        };
+        setAgentData(agentFromData);
+        setIsEditing(true);
         return;
       }
 
-      const response = await AgentService.getAgent(agentIdToUse);
+      // Use store to get agent data (will fetch if not cached)
+      const response = await getAgent(agentIdToUse as string);
       if (response) {
+        console.log(`Got agent ${response.name} with ${response.knowledge_sources?.length || 0} knowledge sources`);
         setAgentData(response);
         setIsEditing(true);
       }
     } catch (error) {
       console.error('Failed to fetch agent data:', error);
     }
-  };
+  }, [data.agentId, data.id, data.agent_id]);
 
   useEffect(() => {
-    if (isEditing) {
-      setEditTooltipOpen(false);
-      setDeleteTooltipOpen(false);
-      setFileTooltipOpen(false);
-      setCodeTooltipOpen(false);
-      setMemoryTooltipOpen(false);
-    }
+    // Cleanup when dialog opens/closes if needed
   }, [isEditing]);
 
   const handleDoubleClick = useCallback(() => {
     const nodes = getNodes();
     const edges = getEdges();
-    
+
     const taskNodes = nodes.filter(node => node.type === 'taskNode');
-    
+
     const availableTaskNodes = taskNodes.filter(taskNode => {
       const hasIncomingEdge = edges.some(edge => edge.target === taskNode.id);
       return !hasIncomingEdge;
@@ -152,10 +180,17 @@ const AgentNode: React.FC<{ data: AgentNodeData; id: string }> = ({ data, id }) 
     if (sortedTaskNodes.length > 0) {
       const targetNode = sortedTaskNodes[0];
 
+      // Get current layout orientation from store
+      const { layoutOrientation } = useUILayoutStore.getState();
+      const sourceHandle = layoutOrientation === 'vertical' ? 'bottom' : 'right';
+      const targetHandle = layoutOrientation === 'vertical' ? 'top' : 'left';
+
       const newEdge = {
         id: `${id}-${targetNode.id}`,
         source: id,
         target: targetNode.id,
+        sourceHandle,
+        targetHandle,
         type: 'default',
       };
 
@@ -165,6 +200,12 @@ const AgentNode: React.FC<{ data: AgentNodeData; id: string }> = ({ data, id }) 
 
   const handleUpdateNode = useCallback(async (updatedAgent: Agent) => {
     try {
+      // Update the store cache
+      updateAgent(updatedAgent.id?.toString() || data.agentId, updatedAgent);
+
+      // Update the local agentData state if it exists (for when edit dialog is open)
+      setAgentData(updatedAgent);
+
       setNodes(nodes => nodes.map(node => {
         if (node.id === id) {
           return {
@@ -204,43 +245,60 @@ const AgentNode: React.FC<{ data: AgentNodeData; id: string }> = ({ data, id }) 
     } catch (error) {
       console.error('Failed to update node:', error);
     }
-  }, [id, setNodes]);
+  }, [id, setNodes, updateAgent, data.agentId]);
 
+  // Removed problematic useEffect that was causing infinite API calls
+  // Agent data is now managed by the store and fetched once on mount
+
+  // Update agentData when node data changes (e.g., after knowledge sources are added)
   useEffect(() => {
-    if (!isEditing && data.agentId) {
-      const refreshAgentData = async () => {
-        try {
-          const refreshedAgent = await AgentService.getAgent(data.agentId);
-          if (refreshedAgent) {
-            handleUpdateNode(refreshedAgent);
-          }
-        } catch (error) {
-          console.error('Failed to refresh agent data:', error);
-        }
-      };
-      
-      refreshAgentData();
+    if (isEditing && data.knowledge_sources !== agentData?.knowledge_sources) {
+      // Update agentData with new knowledge sources from node data
+      setAgentData(prev => prev ? {
+        ...prev,
+        knowledge_sources: data.knowledge_sources || []
+      } : null);
     }
-  }, [isEditing, data.agentId, handleUpdateNode]);
+  }, [data.knowledge_sources, isEditing, agentData?.knowledge_sources]);
 
-  // Improved click handler with local selection
+  // Enhanced click handler: left-click opens form, right-click enables dragging
   const handleNodeClick = useCallback((event: React.MouseEvent) => {
     // Completely stop event propagation
     event.preventDefault();
     event.stopPropagation();
-    
+
+    // If any MUI Dialog is open, ignore canvas node clicks to prevent click-through
+    const hasOpenDialog = document.querySelectorAll('.MuiDialog-root').length > 0;
+    if (hasOpenDialog) {
+      console.log('AgentNode click ignored because a dialog is open');
+      return;
+    }
+
     // Check if the click was on an interactive element
     const target = event.target as HTMLElement;
     const isButton = !!target.closest('button');
     const isActionButton = !!target.closest('.action-buttons');
-    
+
     if (!isButton && !isActionButton) {
-      console.log(`AgentNode click on ${id} - toggling selection`);
-      toggleSelection();
+      if (event.button === 0) {
+        // Left-click: Open agent form for editing
+        console.log(`AgentNode left-click on ${id} - opening edit form`);
+        handleEditClick();
+      } else if (event.button === 2) {
+        // Right-click: Enable dragging by selecting the node
+        console.log(`AgentNode right-click on ${id} - enabling drag mode`);
+        toggleSelection();
+      }
     } else {
       console.log(`AgentNode click on ${id} ignored - clicked on button or action button`);
     }
-  }, [id, toggleSelection]);
+  }, [id, toggleSelection, handleEditClick]);
+
+  // Handle context menu (right-click) to prevent browser default menu
+  const handleContextMenu = useCallback((event: React.MouseEvent) => {
+    event.preventDefault();
+    event.stopPropagation();
+  }, []);
 
   const getAgentNodeStyles = () => {
     const baseStyles = {
@@ -252,17 +310,17 @@ const AgentNode: React.FC<{ data: AgentNodeData; id: string }> = ({ data, id }) 
       justifyContent: 'space-between',
       gap: 0.1,
       position: 'relative',
-      background: (theme: Theme) => isSelected 
+      background: (theme: Theme) => isSelected
         ? `${theme.palette.primary.light}20` // Light background when selected
         : theme.palette.background.paper,
       borderRadius: '12px',
-      boxShadow: (theme: Theme) => isSelected 
-        ? `0 0 0 2px ${theme.palette.primary.main}` 
-        : `0 2px 4px ${theme.palette.mode === 'light' 
-          ? 'rgba(0, 0, 0, 0.1)' 
+      boxShadow: (theme: Theme) => isSelected
+        ? `0 0 0 2px ${theme.palette.primary.main}`
+        : `0 2px 4px ${theme.palette.mode === 'light'
+          ? 'rgba(0, 0, 0, 0.1)'
           : 'rgba(0, 0, 0, 0.4)'}`,
-      border: (theme: Theme) => `1px solid ${isSelected 
-        ? theme.palette.primary.main 
+      border: (theme: Theme) => `1px solid ${isSelected
+        ? theme.palette.primary.main
         : theme.palette.primary.light}`,
       transition: 'all 0.3s ease',
       padding: '16px 8px',
@@ -309,7 +367,7 @@ const AgentNode: React.FC<{ data: AgentNodeData; id: string }> = ({ data, id }) 
         }
       };
     }
-    
+
     if (data.isCompleted) {
       return {
         ...baseStyles,
@@ -338,52 +396,85 @@ const AgentNode: React.FC<{ data: AgentNodeData; id: string }> = ({ data, id }) 
     return baseStyles;
   };
 
-  const hasFiles = data.knowledge_sources?.some(source => 
-    source.type !== 'text' && source.type !== 'url' && source.fileInfo?.exists
-  );
+  // Note: Knowledge source indicators removed from AgentNode
+  // Knowledge sources are now managed at task level
+  // Files are stored on agents but displayed on task nodes
 
   return (
     <Box
       sx={{
         ...getAgentNodeStyles(),
-        cursor: 'move'
+        cursor: 'pointer'
       }}
       onClick={handleNodeClick}
+      onContextMenu={handleContextMenu}
       data-agentid={data.agentId}
       data-nodeid={id}
       data-nodetype="agent"
       data-selected={isSelected ? 'true' : 'false'}
     >
-      {hasFiles && (
-        <Box 
-          sx={{ 
-            position: 'absolute', 
-            top: 4, 
-            left: 4, 
-            color: 'success.main',
-            display: 'flex'
-          }}
-        >
-          <Tooltip 
-            title="Has uploaded files" 
-            disableInteractive 
-            placement="top"
-            open={fileTooltipOpen}
-            onOpen={() => setFileTooltipOpen(true)}
-            onClose={() => setFileTooltipOpen(false)}
-          >
-            <FileIcon fontSize="small" />
-          </Tooltip>
-        </Box>
-      )}
-      
+
+      {/* Target handles - only visible in hierarchical mode */}
+      {/* Top handle - for manager connections in vertical layout */}
+      <Handle
+        type="target"
+        position={Position.Top}
+        id="top"
+        style={{
+          background: '#ff9800',
+          width: '7px',
+          height: '7px',
+          opacity: (layoutOrientation === 'vertical' && processType === 'hierarchical') ? 1 : 0,
+          pointerEvents: (layoutOrientation === 'vertical' && processType === 'hierarchical') ? 'all' : 'none'
+        }}
+      />
+
+      {/* Left handle - for manager connections in horizontal layout */}
+      <Handle
+        type="target"
+        position={Position.Left}
+        id="left"
+        style={{
+          background: '#ff9800',
+          width: '7px',
+          height: '7px',
+          opacity: (layoutOrientation === 'horizontal' && processType === 'hierarchical') ? 1 : 0,
+          pointerEvents: (layoutOrientation === 'horizontal' && processType === 'hierarchical') ? 'all' : 'none'
+        }}
+      />
+
+      {/* Source handles - for task connections */}
+      {/* Bottom handle - visible only in vertical layout */}
+      <Handle
+        type="source"
+        position={Position.Bottom}
+        id="bottom"
+        style={{
+          background: '#2196f3',
+          width: '7px',
+          height: '7px',
+          opacity: layoutOrientation === 'vertical' ? 1 : 0,
+          pointerEvents: layoutOrientation === 'vertical' ? 'all' : 'none'
+        }}
+        onDoubleClick={handleDoubleClick}
+      />
+
+      {/* Right handle - visible only in horizontal layout */}
       <Handle
         type="source"
         position={Position.Right}
-        style={{ background: '#2196f3', width: '7px', height: '7px' }}
+        id="right"
+        style={{
+          background: '#2196f3',
+          width: '7px',
+          height: '7px',
+          opacity: layoutOrientation === 'horizontal' ? 1 : 0,
+          pointerEvents: layoutOrientation === 'horizontal' ? 'all' : 'none'
+        }}
         onDoubleClick={handleDoubleClick}
       />
-      
+
+
       <Box sx={{
         backgroundColor: (theme: Theme) => `${theme.palette.primary.main}20`,
         borderRadius: '50%',
@@ -395,7 +486,7 @@ const AgentNode: React.FC<{ data: AgentNodeData; id: string }> = ({ data, id }) 
       }}>
         <PersonIcon sx={{ color: (theme: Theme) => theme.palette.primary.main, fontSize: '1.5rem' }} />
       </Box>
-      
+
       <Typography variant="body2" sx={{
         fontWeight: 500,
         textAlign: 'center',
@@ -426,7 +517,7 @@ const AgentNode: React.FC<{ data: AgentNodeData; id: string }> = ({ data, id }) 
           boxShadow: (theme: Theme) => `0 2px 4px ${theme.palette.primary.main}15`,
         }
       }}>
-        <MemoryIcon sx={{ 
+        <MemoryIcon sx={{
           fontSize: '0.65rem',
           mr: 0.25,
           color: (theme: Theme) => theme.palette.primary.main,
@@ -448,13 +539,10 @@ const AgentNode: React.FC<{ data: AgentNodeData; id: string }> = ({ data, id }) 
 
       <Box sx={{ display: 'flex', gap: 1, mt: 1 }}>
         {data.allow_code_execution && (
-          <Tooltip 
-            title="Code Execution Enabled" 
-            disableInteractive 
+          <Tooltip
+            title="Code Execution Enabled"
+            disableInteractive
             placement="top"
-            open={codeTooltipOpen}
-            onOpen={() => setCodeTooltipOpen(true)}
-            onClose={() => setCodeTooltipOpen(false)}
           >
             <div>
               <CodeIcon sx={{ fontSize: '1rem', color: '#2196f3' }} />
@@ -462,17 +550,14 @@ const AgentNode: React.FC<{ data: AgentNodeData; id: string }> = ({ data, id }) 
           </Tooltip>
         )}
         {data.memory && (
-          <Tooltip 
+          <Tooltip
             title={`Memory: ${
-              data.embedder_config?.provider 
-                ? `${data.embedder_config.provider} embeddings` 
+              data.embedder_config?.provider
+                ? `${data.embedder_config.provider} embeddings`
                 : 'OpenAI embeddings (default)'
             }`}
             disableInteractive
             placement="top"
-            open={memoryTooltipOpen}
-            onOpen={() => setMemoryTooltipOpen(true)}
-            onClose={() => setMemoryTooltipOpen(false)}
           >
             <div>
               <MemoryIcon sx={{ fontSize: '1rem', color: '#2196f3' }} />
@@ -482,13 +567,10 @@ const AgentNode: React.FC<{ data: AgentNodeData; id: string }> = ({ data, id }) 
       </Box>
 
       <Box className="action-buttons">
-        <Tooltip 
-          title="Edit Agent" 
-          disableInteractive 
+        <Tooltip
+          title="Edit Agent"
+          disableInteractive
           placement="top"
-          open={editTooltipOpen}
-          onOpen={() => setEditTooltipOpen(true)}
-          onClose={() => setEditTooltipOpen(false)}
         >
           <IconButton
             size="small"
@@ -505,13 +587,10 @@ const AgentNode: React.FC<{ data: AgentNodeData; id: string }> = ({ data, id }) 
             <EditIcon sx={{ fontSize: '1rem', color: '#2196f3' }} />
           </IconButton>
         </Tooltip>
-        <Tooltip 
-          title="Delete Agent" 
-          disableInteractive 
+        <Tooltip
+          title="Delete Agent"
+          disableInteractive
           placement="top"
-          open={deleteTooltipOpen}
-          onOpen={() => setDeleteTooltipOpen(true)}
-          onClose={() => setDeleteTooltipOpen(false)}
         >
           <IconButton
             size="small"
@@ -530,6 +609,38 @@ const AgentNode: React.FC<{ data: AgentNodeData; id: string }> = ({ data, id }) 
         </Tooltip>
       </Box>
 
+
+      {Boolean((data as Record<string, unknown>)?.loading) && (
+        <Box
+          sx={{
+            position: 'absolute',
+            inset: 0,
+            borderRadius: '12px',
+            background: (theme: { palette: { mode: string } }) => theme.palette.mode === 'light'
+              ? 'linear-gradient(180deg, rgba(255,255,255,0.6), rgba(255,255,255,0.4))'
+              : 'linear-gradient(180deg, rgba(0,0,0,0.3), rgba(0,0,0,0.2))',
+            backdropFilter: 'blur(1px)',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            zIndex: 5,
+          }}
+        >
+          <Box sx={{
+            display: 'flex', alignItems: 'center', gap: 1,
+            animation: 'bounce 1.2s ease-in-out infinite',
+            '@keyframes bounce': {
+              '0%': { transform: 'translateY(0)' },
+              '50%': { transform: 'translateY(-3px)' },
+              '100%': { transform: 'translateY(0)' },
+            },
+          }}>
+            <CircularProgress size={16} sx={{ color: 'primary.main' }} />
+            <Typography variant="caption" color="textSecondary">Creating…</Typography>
+          </Box>
+        </Box>
+      )}
+
       {isEditing && agentData && (
         <Dialog
           open={isEditing}
@@ -537,11 +648,11 @@ const AgentNode: React.FC<{ data: AgentNodeData; id: string }> = ({ data, id }) 
           maxWidth="md"
           fullWidth
           PaperProps={{
-            sx: { 
-              display: 'flex', 
+            sx: {
+              display: 'flex',
               flexDirection: 'column',
-              height: '85vh', 
-              maxHeight: '85vh' 
+              height: '85vh',
+              maxHeight: '85vh'
             }
           }}
         >
@@ -567,4 +678,4 @@ const AgentNode: React.FC<{ data: AgentNodeData; id: string }> = ({ data, id }) 
   );
 };
 
-export default AgentNode; 
+export default React.memo(AgentNode);

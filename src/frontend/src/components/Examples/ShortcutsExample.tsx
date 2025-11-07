@@ -174,7 +174,7 @@ const ShortcutsExample: React.FC = () => {
             }}
           >
             <Typography variant="caption">
-              Try keyboard shortcuts: 'dd' to delete, Alt+C to clear canvas
+              Try keyboard shortcuts: &#39;dd&#39; to delete, Alt+C to clear canvas
             </Typography>
           </Box>
         </Box>
@@ -207,7 +207,7 @@ const ShortcutsExample: React.FC = () => {
             <Box sx={{ mt: 2 }}>
               <Typography variant="body2" color="text.secondary">
                 Note: Click on the canvas first to enable keyboard shortcuts.
-                They won't work if you're focused on an input or textarea.
+                They won&#39;t work if you&#39;re focused on an input or textarea.
               </Typography>
             </Box>
             

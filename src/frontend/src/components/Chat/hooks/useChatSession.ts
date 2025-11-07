@@ -3,10 +3,13 @@ import { SaveMessageRequest, ChatSession, ChatMessage as BackendChatMessage } fr
 import { ChatHistoryServiceEnhanced as ChatHistoryService } from '../../../api/ChatHistoryServiceEnhanced';
 import { ChatMessage } from '../types';
 import { v4 as uuidv4 } from 'uuid';
+import { useChatMessagesStore } from '../../../store/chatMessagesStore';
 
 export const useChatSession = (providedChatSessionId?: string) => {
-  const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [sessionId, setSessionId] = useState<string>(providedChatSessionId || uuidv4());
+
+  // Use Zustand store for messages
+  const { setMessages: setZustandMessages, addMessage } = useChatMessagesStore();
   const [chatSessions, setChatSessions] = useState<ChatSession[]>([]);
   const [isLoadingSessions, setIsLoadingSessions] = useState(false);
   const [currentSessionName, setCurrentSessionName] = useState('New Chat');
@@ -20,11 +23,9 @@ export const useChatSession = (providedChatSessionId?: string) => {
   useEffect(() => {
     const initializeSession = () => {
       if (providedChatSessionId) {
-        console.log(`[WorkflowChat] Using provided chat session ID: ${providedChatSessionId}`);
         setSessionId(providedChatSessionId);
       } else {
         const newSessionId = ChatHistoryService.generateSessionId();
-        console.log(`[WorkflowChat] Generated new chat session ID: ${newSessionId}`);
         setSessionId(newSessionId);
       }
     };
@@ -72,22 +73,21 @@ export const useChatSession = (providedChatSessionId?: string) => {
   useEffect(() => {
     const loadChatHistory = async () => {
       if (!sessionId) return;
-      
+
       try {
-        console.log(`[WorkflowChat] Loading chat history for session: ${sessionId}`);
-        setMessages([]);
-        
+        // Clear Zustand store for this session
+        setZustandMessages(sessionId, []);
+
         try {
           const response = await ChatHistoryService.getSessionMessages(sessionId);
           if (response.messages && response.messages.length > 0) {
             const loadedMessages = response.messages.map(convertBackendMessage);
-            setMessages(loadedMessages);
-            console.log(`[WorkflowChat] Loaded ${loadedMessages.length} messages for session: ${sessionId}`);
+            setZustandMessages(sessionId, loadedMessages);
           } else {
-            console.log(`[WorkflowChat] Initialized new/empty chat session: ${sessionId}`);
+            // No messages in session, continue with empty state
           }
         } catch (sessionError) {
-          console.log(`[WorkflowChat] Starting new chat session: ${sessionId}`);
+          // Session loading failed, continue with empty session
         }
       } catch (error) {
         console.error('Error loading chat history:', error);
@@ -95,7 +95,7 @@ export const useChatSession = (providedChatSessionId?: string) => {
     };
 
     loadChatHistory();
-  }, [sessionId]);
+  }, [sessionId, setZustandMessages]);
 
   // Save message to backend
   const saveMessageToBackend = useCallback(async (message: ChatMessage): Promise<void> => {
@@ -151,16 +151,11 @@ export const useChatSession = (providedChatSessionId?: string) => {
           timestamp: new Date(),
         };
         
-        setMessages(prev => {
-          const hasErrorMessage = prev.some(msg => msg.content.includes('Chat history is temporarily disabled'));
-          if (!hasErrorMessage) {
-            return [...prev, errorMessage];
-          }
-          return prev;
-        });
+        // Add error message to Zustand store
+        addMessage(sessionId, errorMessage);
       }
     }
-  }, [sessionId, chatHistoryDisabled, FAILURE_THRESHOLD]);
+  }, [sessionId, chatHistoryDisabled, FAILURE_THRESHOLD, addMessage]);
 
   // Load user's chat sessions
   const loadChatSessions = async () => {
@@ -176,7 +171,7 @@ export const useChatSession = (providedChatSessionId?: string) => {
         content: '❌ Failed to load chat history. Please try again.',
         timestamp: new Date(),
       };
-      setMessages(prev => [...prev, errorMessage]);
+      addMessage(sessionId, errorMessage);
     } finally {
       setIsLoadingSessions(false);
     }
@@ -197,7 +192,7 @@ export const useChatSession = (providedChatSessionId?: string) => {
       }
       
       const loadedMessages = response.messages.map(convertBackendMessage);
-      setMessages(loadedMessages);
+      setZustandMessages(selectedSessionId, loadedMessages);
       setSessionId(selectedSessionId);
       setCurrentSessionName(`Session from ${new Date(response.messages[0]?.timestamp || Date.now()).toLocaleDateString()}`);
     } catch (error) {
@@ -208,7 +203,7 @@ export const useChatSession = (providedChatSessionId?: string) => {
         content: '❌ Failed to load session messages. Please try again.',
         timestamp: new Date(),
       };
-      setMessages(prev => [...prev, errorMessage]);
+      addMessage(selectedSessionId, errorMessage);
     } finally {
       setIsLoadingSessions(false);
     }
@@ -218,13 +213,11 @@ export const useChatSession = (providedChatSessionId?: string) => {
   const startNewChat = () => {
     const newSessionId = ChatHistoryService.generateSessionId();
     setSessionId(newSessionId);
-    setMessages([]);
+    setZustandMessages(newSessionId, []); // Clear messages in Zustand store
     setCurrentSessionName('New Chat');
   };
 
   return {
-    messages,
-    setMessages,
     sessionId,
     setSessionId,
     chatSessions,

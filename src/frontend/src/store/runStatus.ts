@@ -4,14 +4,15 @@ import { runService } from '../api/ExecutionHistoryService';
 
 // Constants for polling intervals
 const INTERVALS = {
-  CHECK_INTERVAL: 5000,        // Check state every 5 seconds (down from 10)
-  RUNNING_JOBS: 10000,         // Poll every 10 seconds for running jobs (down from 15)
-  INITIAL_BACKOFF: 60000,      // Start with 1 minute for backoff
-  MAX_BACKOFF: 5 * 60 * 1000,  // Maximum 5 minute backoff
+  CHECK_INTERVAL: 5000,        // Base check interval
+  RUNNING_JOBS: 5000,          // Poll every 5 seconds for running jobs
   USER_INACTIVE: 10 * 60 * 1000, // Consider user inactive after 10 minutes
   NEW_JOB_POLLING: 3000,       // Poll every 3 seconds for the first minute after job creation
-  DEBOUNCE_THRESHOLD: 5000     // Minimum time between API calls (1 second)
+  DEBOUNCE_THRESHOLD: 1000     // Minimum time between API calls (1 second)
 } as const;
+
+// Exponential backoff steps used when no jobs are running
+const BACKOFF_STEPS = [5000, 10000, 30000, 60000] as const;
 
 interface RunStatusState {
   currentRun: ExtendedRun | null;
@@ -26,6 +27,7 @@ interface RunStatusState {
   hasRunningJobs: boolean;
   consecutiveEmptyFetches: number;
   backoffInterval: number;
+  backoffStep: number;
   isUserActive: boolean;
   pollingInterval: NodeJS.Timeout | null;
   processedCompletions: Set<string>; // Track which jobs we've already sent completion events for
@@ -45,6 +47,7 @@ interface RunStatusState {
   stopPolling: () => void;
   setUserActive: (active: boolean) => void;
   cleanup: () => void;
+  clearRunHistory: () => void;
 }
 
 export const useRunStatusStore = create<RunStatusState>((set, get) => {
@@ -52,8 +55,23 @@ export const useRunStatusStore = create<RunStatusState>((set, get) => {
   const setupEventListeners = () => {
     // Create a function that will be called when a new job is created
     const jobCreatedHandler = (event: CustomEvent) => {
-      const { jobId, jobName, status } = event.detail || {};
+      const { jobId, jobName, status, groupId } = event.detail || {};
       if (jobId) {
+        // SECURITY FIX: Only add the run if it belongs to the current user's selected workspace
+        const selectedGroupId = localStorage.getItem('selectedGroupId');
+
+        // If the event includes a groupId, check if it matches the selected workspace
+        if (groupId && groupId !== selectedGroupId) {
+          console.log(`[RunStatusStore] Ignoring jobCreated for different group: ${groupId} (selected: ${selectedGroupId})`);
+          return;
+        }
+
+        // If no groupId in event, skip for safety (can't verify ownership)
+        if (!groupId) {
+          console.log(`[RunStatusStore] Ignoring jobCreated without groupId for security`);
+          return;
+        }
+
         // Create a placeholder run for immediate display
         const newRun: ExtendedRun = {
           id: jobId,
@@ -65,8 +83,8 @@ export const useRunStatusStore = create<RunStatusState>((set, get) => {
           agents_yaml: '',
           tasks_yaml: ''
         };
-        
-        console.log(`[RunStatusStore] Job created: ${jobId}, adding to store with status ${newRun.status}`);
+
+
         // Add the placeholder run and start tracking it
         const store = get();
         store.addRun(newRun);
@@ -109,7 +127,8 @@ export const useRunStatusStore = create<RunStatusState>((set, get) => {
     lastNewJobTimestamp: 0,
     hasRunningJobs: false,
     consecutiveEmptyFetches: 0,
-    backoffInterval: INTERVALS.INITIAL_BACKOFF,
+    backoffInterval: BACKOFF_STEPS[0],
+    backoffStep: 0,
     isUserActive: true,
     pollingInterval: null,
     processedCompletions: new Set<string>(),
@@ -152,7 +171,7 @@ export const useRunStatusStore = create<RunStatusState>((set, get) => {
         // For completed or failed jobs, make sure we set the completed_at time
         let completedAt = currentRun.completed_at;
         if ((status.toLowerCase() === 'completed' || status.toLowerCase() === 'failed') && !completedAt) {
-          console.log(`[RunStatusStore] Setting completed_at timestamp for newly completed job ${jobId}`);
+
           completedAt = now;
         }
 
@@ -213,7 +232,6 @@ export const useRunStatusStore = create<RunStatusState>((set, get) => {
       
       // Add debounce to prevent too many API calls in quick succession
       if (now - state.lastFetchAttempt < INTERVALS.DEBOUNCE_THRESHOLD) {
-        console.log('[RunStatusStore] Debouncing API call, too soon after previous call');
         return;
       }
       
@@ -226,9 +244,30 @@ export const useRunStatusStore = create<RunStatusState>((set, get) => {
         
         // Get current processedCompletions set
         const currentProcessedCompletions = new Set(state.processedCompletions);
-        
+
+        // SECURITY: Filter runs by group_id before processing
+        const selectedGroupId = localStorage.getItem('selectedGroupId');
+        const securityFilteredRuns = response.runs.filter(run => {
+          // Only include runs that belong to the selected group
+          if (!selectedGroupId) {
+
+            return false;
+          }
+          if (!run.group_id) {
+
+            return false;
+          }
+          if (run.group_id !== selectedGroupId) {
+
+            return false;
+          }
+          return true;
+        });
+
+
+
         // Process the response data to ensure we have proper status information
-        const processedRuns = response.runs.map(run => {
+        const processedRuns = securityFilteredRuns.map(run => {
           // Check if this run's status has changed from running to completed/failed
           const currentActiveRun = state.activeRuns[run.job_id];
           
@@ -242,46 +281,52 @@ export const useRunStatusStore = create<RunStatusState>((set, get) => {
           if (wasRunning && (run.status.toLowerCase() === 'completed' || run.status.toLowerCase() === 'failed')) {
             // Check if we've already processed this completion to avoid duplicate events
             const completionKey = `${run.job_id}-${run.status.toLowerCase()}`;
-            if (currentProcessedCompletions.has(completionKey)) {
-              console.log(`[RunStatusStore] Already processed ${run.status} event for job ${run.job_id}, skipping`);
-              return run;
+            const alreadyProcessed = currentProcessedCompletions.has(completionKey);
+            
+            if (alreadyProcessed) {
+
+              // Don't return here! We still need to update the run data in the store
+              // Just skip the event dispatch below
             }
             
             // Dispatch appropriate event for status change
-            console.log(`[RunStatusStore] Job ${run.job_id} status changed to ${run.status} (was running/queued)`);
-            console.log(`[RunStatusStore] Job details - status: ${run.status}, error: ${run.error}, result: ${JSON.stringify(run.result)}`);
+
+
             
             // Check if status is COMPLETED but there's an error field
             if (run.status.toLowerCase() === 'completed' && run.error) {
-              console.warn(`[RunStatusStore] WARNING: Job ${run.job_id} has status COMPLETED but also has error: ${run.error}`);
+
               // If status is COMPLETED, ignore the error field and treat as success
             }
             
-            // Only dispatch ONE event based on status, ignoring error field if status is completed
-            if (run.status.toLowerCase() === 'completed') {
-              console.log(`[RunStatusStore] Dispatching jobCompleted event for job ${run.job_id}`);
-              
-              // Mark as processed before dispatching
-              currentProcessedCompletions.add(completionKey);
-              
-              window.dispatchEvent(new CustomEvent('jobCompleted', { 
-                detail: { 
-                  jobId: run.job_id,
-                  result: run.result
-                }
-              }));
-            } else if (run.status.toLowerCase() === 'failed') {
-              console.log(`[RunStatusStore] Dispatching jobFailed event for job ${run.job_id} with error: ${run.error}`);
-              
-              // Mark as processed before dispatching
-              currentProcessedCompletions.add(completionKey);
-              
-              window.dispatchEvent(new CustomEvent('jobFailed', { 
-                detail: { 
-                  jobId: run.job_id,
-                  error: run.error || 'Job execution failed'
-                }
-              }));
+            // Only dispatch events if we haven't already processed this completion
+            if (!alreadyProcessed) {
+              // Only dispatch ONE event based on status, ignoring error field if status is completed
+              if (run.status.toLowerCase() === 'completed') {
+
+                
+                // Mark as processed before dispatching
+                currentProcessedCompletions.add(completionKey);
+                
+                window.dispatchEvent(new CustomEvent('jobCompleted', { 
+                  detail: { 
+                    jobId: run.job_id,
+                    result: run.result
+                  }
+                }));
+              } else if (run.status.toLowerCase() === 'failed') {
+
+                
+                // Mark as processed before dispatching
+                currentProcessedCompletions.add(completionKey);
+                
+                window.dispatchEvent(new CustomEvent('jobFailed', { 
+                  detail: { 
+                    jobId: run.job_id,
+                    error: run.error || 'Job execution failed'
+                  }
+                }));
+              }
             }
           }
           
@@ -290,7 +335,6 @@ export const useRunStatusStore = create<RunStatusState>((set, get) => {
           if ((run.status.toLowerCase() === 'completed' || run.status.toLowerCase() === 'failed')) {
             // Ensure the completed job has a completed_at timestamp
             if (!run.completed_at) {
-              console.log(`[RunStatusStore] Fixing missing completed_at for job ${run.job_id} with status ${run.status}`);
               return {
                 ...run,
                 completed_at: run.updated_at || new Date().toISOString()
@@ -301,7 +345,7 @@ export const useRunStatusStore = create<RunStatusState>((set, get) => {
             const completedTime = new Date(run.completed_at).getTime();
             
             if (completedTime <= createdTime) {
-              console.log(`[RunStatusStore] Fixing zero duration for completed job ${run.job_id}: created=${run.created_at}, completed=${run.completed_at}`);
+
               // Add at least 1 second for duration
               const adjustedCompletedTime = new Date(createdTime + 1000).toISOString();
               return {
@@ -314,19 +358,28 @@ export const useRunStatusStore = create<RunStatusState>((set, get) => {
         });
 
         // Update the running jobs flag and reset counters if we got data
-        const hasActiveJobs = processedRuns.some(run => 
+        const hasActiveJobs = processedRuns.some(run =>
           run.status.toLowerCase() === 'running' || run.status.toLowerCase() === 'queued' || run.status.toLowerCase() === 'pending'
         );
-        
+
         // Reset counters if we got data with active jobs
         if (hasActiveJobs) {
-          set({ 
+          set({
             consecutiveEmptyFetches: 0,
-            backoffInterval: INTERVALS.INITIAL_BACKOFF,
+            backoffInterval: BACKOFF_STEPS[0],
+            backoffStep: 0,
             hasRunningJobs: true
           });
         } else {
-          set({ hasRunningJobs: false });
+          set((state) => {
+            const nextStep = Math.min(state.backoffStep + 1, BACKOFF_STEPS.length - 1);
+            return {
+              hasRunningJobs: false,
+              consecutiveEmptyFetches: state.consecutiveEmptyFetches + 1,
+              backoffStep: nextStep,
+              backoffInterval: BACKOFF_STEPS[nextStep]
+            };
+          });
         }
 
         // Always update the fetch time and processed completions
@@ -356,7 +409,7 @@ export const useRunStatusStore = create<RunStatusState>((set, get) => {
         });
 
       } catch (error) {
-        console.error('[RunStatusStore] Error fetching run history:', error);
+
         // Capture and format the error message
         const errorMessage = error instanceof Error ? error.message : String(error);
         set({ 
@@ -374,68 +427,55 @@ export const useRunStatusStore = create<RunStatusState>((set, get) => {
 
     startPolling: () => {
       const state = get();
-      
-      // Clear any existing interval first
+
+      // Clear any existing timer first
       if (state.pollingInterval) {
-        clearInterval(state.pollingInterval);
+        clearTimeout(state.pollingInterval as unknown as number);
       }
-      
-      // Calculate the interval based on activity and jobs
-      let interval: number = INTERVALS.CHECK_INTERVAL;
-      
-      // More frequent polling for new jobs, but not less than debounce threshold
-      if (Date.now() - state.lastNewJobTimestamp < 60000) {
-        console.log('[RunStatusStore] Using more frequent polling interval for new job');
-        interval = Math.max(INTERVALS.NEW_JOB_POLLING, INTERVALS.DEBOUNCE_THRESHOLD);
-      }
-      // Use faster polling when we have running jobs, but not less than debounce threshold
-      else if (state.hasRunningJobs) {
-        interval = Math.max(INTERVALS.RUNNING_JOBS, INTERVALS.DEBOUNCE_THRESHOLD);
-      }
-      // Use backoff interval if user is inactive
-      else if (!state.isUserActive) {
-        console.log('[RunStatusStore] User inactive, using backoff interval');
-        interval = state.backoffInterval;
-      }
-      
-      // Start new interval with calculated frequency
-      const newInterval = setInterval(async () => {
+
+      const poll = async () => {
         const currentState = get();
-        
-        // Check if we should fetch
+
+        // Decide whether to fetch now
         const shouldFetch =
-          currentState.isUserActive || // Always fetch if user is active
-          currentState.hasRunningJobs || // Always fetch if there are running jobs
-          (Date.now() - currentState.lastFetchAttempt > currentState.backoffInterval); // Use backoff for inactive users
-        
-        // Debug periodic polling state
-        if (Date.now() - currentState.lastFetchTime > 60000) {
-          console.log(`[RunStatusStore] Polling state: user_active=${currentState.isUserActive}, running_jobs=${currentState.hasRunningJobs}, last_fetch=${Math.round((Date.now() - currentState.lastFetchTime)/1000)}s ago`);
-        }
-        
+          currentState.hasRunningJobs ||
+          (Date.now() - currentState.lastNewJobTimestamp < 60000) ||
+          currentState.isUserActive;
+
         if (shouldFetch) {
-          // Perform the fetch
           try {
             await currentState.fetchRunHistory();
-          } catch (error) {
-            console.error('[RunStatusStore] Error in polling fetch:', error);
-            // No need to update error state here, fetchRunHistory will handle it
+          } catch (_err) {
+            // fetchRunHistory handles error state
           }
         }
-      }, interval);
-      
-      // Update interval in store
-      set({ pollingInterval: newInterval });
-      
-      console.log(`[RunStatusStore] Started polling with interval ${interval}ms`);
+
+        // Compute next delay based on state AFTER fetch
+        const afterState = get();
+        let nextDelay: number;
+
+        if (Date.now() - afterState.lastNewJobTimestamp < 60000) {
+          nextDelay = Math.max(INTERVALS.NEW_JOB_POLLING, INTERVALS.DEBOUNCE_THRESHOLD);
+        } else if (afterState.hasRunningJobs) {
+          nextDelay = Math.max(INTERVALS.RUNNING_JOBS, INTERVALS.DEBOUNCE_THRESHOLD);
+        } else {
+          nextDelay = afterState.backoffInterval; // 5s -> 10s -> 30s -> 60s
+        }
+
+        const t = setTimeout(poll, nextDelay);
+        set({ pollingInterval: t });
+      };
+
+      // Kick off the loop immediately
+      const t = setTimeout(poll, 0);
+      set({ pollingInterval: t });
     },
 
     stopPolling: () => {
       const { pollingInterval } = get();
       if (pollingInterval) {
-        clearInterval(pollingInterval);
+        clearTimeout(pollingInterval as unknown as number);
         set({ pollingInterval: null });
-        console.log('[RunStatusStore] Stopped polling');
       }
     },
 
@@ -446,9 +486,9 @@ export const useRunStatusStore = create<RunStatusState>((set, get) => {
       if (active) {
         const { refreshRunHistory, startPolling } = get();
         void refreshRunHistory();
-        
+
         // Reset backoff and restart polling
-        set({ backoffInterval: INTERVALS.INITIAL_BACKOFF });
+        set({ backoffInterval: BACKOFF_STEPS[0], backoffStep: 0 });
         startPolling();
       }
     },
@@ -457,6 +497,21 @@ export const useRunStatusStore = create<RunStatusState>((set, get) => {
       const { stopPolling } = get();
       stopPolling();
       cleanupListeners();
+    },
+
+    clearRunHistory: () => {
+
+      set({
+        runHistory: [],
+        activeRuns: {},
+        currentRun: null,
+        processedCompletions: new Set(),
+        error: null,
+        isLoading: false,
+        lastFetchTime: Date.now(),
+        lastFetchAttempt: Date.now(),
+        consecutiveEmptyFetches: 0
+      });
     }
   };
 }); 

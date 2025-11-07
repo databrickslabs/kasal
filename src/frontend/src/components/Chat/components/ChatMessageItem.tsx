@@ -14,7 +14,6 @@ import {
 } from '@mui/material';
 import SmartToyIcon from '@mui/icons-material/SmartToy';
 import PersonIcon from '@mui/icons-material/Person';
-import TerminalIcon from '@mui/icons-material/Terminal';
 import GroupIcon from '@mui/icons-material/Group';
 import AssignmentIcon from '@mui/icons-material/Assignment';
 import AccountTreeIcon from '@mui/icons-material/AccountTree';
@@ -30,10 +29,6 @@ interface ChatMessageItemProps {
 }
 
 export const ChatMessageItem: React.FC<ChatMessageItemProps> = ({ message, onOpenLogs }) => {
-  // Debug logging for result messages
-  if (message.type === 'result') {
-    console.log('[ChatMessageItem] Rendering RESULT message:', message);
-  }
   const getIntentIcon = (intent?: string) => {
     switch (intent) {
       case 'generate_agent':
@@ -457,7 +452,7 @@ export const ChatMessageItem: React.FC<ChatMessageItemProps> = ({ message, onOpe
             {message.type === 'user' ? (
               <PersonIcon sx={{ fontSize: 20 }} />
             ) : message.type === 'execution' || message.type === 'trace' ? (
-              <TerminalIcon sx={{ fontSize: 20 }} />
+              <SmartToyIcon sx={{ fontSize: 20 }} />
             ) : message.type === 'result' ? (
               <SmartToyIcon sx={{ fontSize: 20 }} />
             ) : (

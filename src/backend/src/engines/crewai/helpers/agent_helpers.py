@@ -15,51 +15,23 @@ from src.engines.crewai.helpers.tool_helpers import resolve_tool_ids_to_names
 # Get logger from the centralized logging system
 logger = LoggerManager.get_instance().crew
 
-def process_knowledge_sources(knowledge_sources: List[Any]) -> List[str]:
-    """
-    Process knowledge sources and return paths.
-    
-    Args:
-        knowledge_sources: List of knowledge sources, which can be strings, 
-                          dictionaries with 'path' property, or objects with 'path' property
-                          
-    Returns:
-        List of string paths
-    """
-    if not knowledge_sources:
-        return knowledge_sources
-    
-    logger.info(f"Processing knowledge sources: {knowledge_sources}")
-    
-    # If knowledge_sources is a list of strings (paths), return as is
-    if all(isinstance(source, str) for source in knowledge_sources):
-        return knowledge_sources
-        
-    # If knowledge_sources contains objects with a 'path' property, extract just the paths
-    paths = []
-    for source in knowledge_sources:
-        if isinstance(source, dict) and 'path' in source:
-            paths.append(source['path'])
-        elif hasattr(source, 'path'):
-            paths.append(source.path)
-        elif isinstance(source, str):
-            paths.append(source)
-    
-    logger.info(f"Processed paths: {paths}")
-    return paths
+# NOTE: Knowledge sources are now implemented as tools (DatabricksKnowledgeSearchTool)
+# Agents should have the DatabricksKnowledgeSearchTool in their tools list instead of knowledge_sources
+# The tool provides direct control over when and how knowledge is searched
 
 
 async def create_agent(
-    agent_key: str, 
-    agent_config: Dict, 
-    tools: List[Any] = None, 
+    agent_key: str,
+    agent_config: Dict,
+    tools: List[Any] = None,
     config: Dict = None,
     tool_service = None,
-    tool_factory = None
+    tool_factory = None,
+    agent_id: Optional[str] = None
 ) -> Agent:
     """
     Creates an Agent instance from the provided configuration.
-    
+
     Args:
         agent_key: The unique identifier for the agent
         agent_config: Dictionary containing agent configuration
@@ -67,10 +39,11 @@ async def create_agent(
         config: Global configuration dictionary containing API keys
         tool_service: Optional tool service for resolving tool IDs to names
         tool_factory: Optional tool factory for creating tools
-        
+        agent_id: Optional Kasal agent UUID for knowledge source access control
+
     Returns:
         Agent: A configured CrewAI Agent instance
-        
+
     Raises:
         ValueError: If required fields are missing
     """
@@ -84,9 +57,12 @@ async def create_agent(
         if not agent_config[field]:  # Check if field is empty
             raise ValueError(f"Field '{field}' cannot be empty in agent configuration")
     
-    # Process knowledge sources if present
+    # NOTE: Knowledge sources removed - use DatabricksKnowledgeSearchTool instead
     if 'knowledge_sources' in agent_config:
-        agent_config['knowledge_sources'] = process_knowledge_sources(agent_config['knowledge_sources'])
+        logger.warning(f"[CREW] Agent {agent_key} has knowledge_sources configured, but this is deprecated. Use DatabricksKnowledgeSearchTool in the agent's tools list instead.")
+        # Remove knowledge_sources from config to avoid confusion
+        agent_config = agent_config.copy()
+        del agent_config['knowledge_sources']
     
     # Handle LLM configuration
     llm = None
@@ -102,7 +78,19 @@ async def create_agent(
                 # Use LLMManager to configure the LLM with proper provider prefix
                 model_name = agent_config['llm']
                 logger.info(f"Configuring agent {agent_key} LLM using LLMManager for model: {model_name}")
-                llm = await LLMManager.configure_crewai_llm(model_name)
+                
+                # Check if agent has temperature override
+                temperature = None
+                if 'temperature' in agent_config and agent_config['temperature'] is not None:
+                    # Convert from 0-100 to 0.0-1.0 range
+                    temperature = agent_config['temperature'] / 100.0
+                    logger.info(f"Using temperature override {temperature} for agent {agent_key}")
+                
+                # SECURITY: Pass group_id for multi-tenant isolation
+                group_id_param = config.get('group_id') if config else None
+                if not group_id_param:
+                    raise ValueError("group_id is REQUIRED for LLM configuration")
+                llm = await LLMManager.configure_crewai_llm(model_name, group_id_param, temperature)
                 logger.info(f"Successfully configured LLM for agent {agent_key} using model: {model_name}")
             elif isinstance(agent_config['llm'], dict):
                 # If a dictionary is provided with LLM parameters, use crewai LLM directly
@@ -113,8 +101,20 @@ async def create_agent(
                 # If a model name is specified, configure it through LLMManager
                 if 'model' in llm_config:
                     model_name = llm_config['model']
+                    
+                    # Check if agent has temperature override
+                    temperature = None
+                    if 'temperature' in agent_config and agent_config['temperature'] is not None:
+                        # Convert from 0-100 to 0.0-1.0 range
+                        temperature = agent_config['temperature'] / 100.0
+                        logger.info(f"Using temperature override {temperature} for agent {agent_key}")
+                    
                     # Get properly configured LLM for the model
-                    configured_llm = await LLMManager.configure_crewai_llm(model_name)
+                    # SECURITY: Pass group_id for multi-tenant isolation
+                    group_id_param = config.get('group_id') if config else None
+                    if not group_id_param:
+                        raise ValueError("group_id is REQUIRED for LLM configuration")
+                    configured_llm = await LLMManager.configure_crewai_llm(model_name, group_id_param, temperature)
                     
                     # Extract the configured parameters
                     if hasattr(configured_llm, 'model'):
@@ -128,13 +128,24 @@ async def create_agent(
                                     llm_kwargs[attr] = value
                     else:
                         # Fallback if we can't extract params
-                        llm_kwargs = {'model': model_name}
+                        # Check if it's a Databricks model and add prefix if needed
+                        if 'databricks' in model_name.lower() and not model_name.startswith('databricks/'):
+                            llm_kwargs = {'model': f'databricks/{model_name}'}
+                            logger.info(f"Added databricks/ prefix to model: databricks/{model_name}")
+                        else:
+                            llm_kwargs = {'model': model_name}
                     
                     # Apply any additional parameters from llm_config
                     for key, value in llm_config.items():
                         if value is not None:
                             llm_kwargs[key] = value
-                    
+
+                    # Ensure Databricks models have the correct prefix
+                    model_in_kwargs = llm_kwargs.get('model', '')
+                    if 'databricks' in model_in_kwargs.lower() and not model_in_kwargs.startswith('databricks/'):
+                        llm_kwargs['model'] = f'databricks/{model_in_kwargs}'
+                        logger.info(f"Ensured databricks/ prefix for model: {llm_kwargs['model']}")
+
                     # Use GPT5Handler to transform parameters if needed
                     model_name = llm_kwargs.get('model', '')
                     if GPT5Handler.is_gpt5_model(model_name):
@@ -149,7 +160,11 @@ async def create_agent(
                 else:
                     # No model specified, use default with additional parameters
                     logger.warning(f"LLM config missing 'model', using default with additional parameters")
-                    default_llm = await LLMManager.configure_crewai_llm("gpt-4o")
+                    # SECURITY: Pass group_id for multi-tenant isolation
+                    group_id_param = config.get('group_id') if config else None
+                    if not group_id_param:
+                        raise ValueError("group_id is REQUIRED for LLM configuration")
+                    default_llm = await LLMManager.configure_crewai_llm("gpt-4o", group_id_param)
                     
                     # Extract and merge parameters
                     llm_kwargs = {}
@@ -163,7 +178,13 @@ async def create_agent(
                     for key, value in llm_config.items():
                         if value is not None:
                             llm_kwargs[key] = value
-                    
+
+                    # Ensure Databricks models have the correct prefix
+                    model_in_kwargs = llm_kwargs.get('model', '')
+                    if 'databricks' in model_in_kwargs.lower() and not model_in_kwargs.startswith('databricks/'):
+                        llm_kwargs['model'] = f'databricks/{model_in_kwargs}'
+                        logger.info(f"Ensured databricks/ prefix for default model: {llm_kwargs['model']}")
+
                     # Use GPT5Handler to transform parameters if needed
                     model_name = llm_kwargs.get('model', '')
                     if GPT5Handler.is_gpt5_model(model_name):
@@ -177,7 +198,11 @@ async def create_agent(
         else:
             # Use default model
             logger.info(f"No LLM specified for agent {agent_key}, using default")
-            llm = await LLMManager.configure_crewai_llm("gpt-4o")
+            # SECURITY: Pass group_id for multi-tenant isolation
+            group_id_param = config.get('group_id') if config else None
+            if not group_id_param:
+                raise ValueError("group_id is REQUIRED for LLM configuration")
+            llm = await LLMManager.configure_crewai_llm("gpt-4o", group_id_param)
             
     except Exception as e:
         # Fallback to simple string if configuration fails
@@ -197,10 +222,11 @@ async def create_agent(
         from src.services.mcp_service import MCPService
         from src.engines.crewai.tools.mcp_integration import MCPIntegration
         
-        async with UnitOfWork() as uow:
-            mcp_service = await MCPService.from_unit_of_work(uow)
+        from src.db.session import async_session_factory
+        async with async_session_factory() as session:
+            mcp_service = MCPService(session)
             mcp_tools = await MCPIntegration.create_mcp_tools_for_agent(
-                agent_config, agent_key, mcp_service
+                agent_config, agent_key, mcp_service, config
             )
             agent_tools.extend(mcp_tools)
             logger.info(f"Added {len(mcp_tools)} MCP tools to agent {agent_key}")
@@ -268,7 +294,10 @@ async def create_agent(
                             agent_tools.append(tool_instance)
                             logger.info(f"Added tool instance {tool_name} to agent {agent_key}")
                     else:
-                        logger.warning(f"Could not create tool instance for {tool_name}")
+                        logger.error(f"Could not create tool instance for {tool_name}")
+                        logger.error(f"Tool factory returned None - check tool factory logs for details")
+                        logger.error(f"Tool config: {tool_config}")
+                        logger.error(f"Tool override: {tool_override}")
             else:
                 # Without tool_factory, just append the tool names (this won't work for CrewAI)
                 agent_tools.extend([name for name in tool_names if name])
@@ -306,7 +335,7 @@ async def create_agent(
         'tools': agent_tools or [],
         'llm': llm,
         'verbose': agent_config.get('verbose', True),
-        'allow_delegation': agent_config.get('allow_delegation', True),
+        'allow_delegation': agent_config.get('allow_delegation', False),
         'cache': agent_config.get('cache', False),
         # SECURITY: Always force allow_code_execution to False for safety
         'allow_code_execution': False,  # Hardcoded to False - ignoring agent_config
@@ -317,9 +346,10 @@ async def create_agent(
 
     # Add additional agent configuration parameters
     additional_params = [
-        'max_iter', 'max_rpm', 'memory', 'code_execution_mode', 
-        'knowledge_sources', 'max_context_window_size', 'max_tokens',
+        'max_iter', 'max_rpm', 'memory', 'code_execution_mode',
+        'max_context_window_size', 'max_tokens',
         'reasoning', 'max_reasoning_attempts'
+        # Note: knowledge_sources removed - use DatabricksKnowledgeSearchTool instead
     ]
     
     for param in additional_params:

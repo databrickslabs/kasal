@@ -23,7 +23,6 @@ def mock_group_context():
     context = GroupContext(
         group_ids=["group-123"],
         group_email="test@example.com",
-        email_domain="example.com",
         user_id="user-123"
     )
     return context
@@ -442,7 +441,7 @@ class TestDetectIntentOnly:
         )
     
     @patch('src.api.dispatcher_router.DispatcherService.create')
-    def test_detect_intent_only_conversation_intent(self, mock_create_service, client):
+    def test_detect_intent_only_execute_crew_intent(self, mock_create_service, client):
         """Test intent detection for conversational requests."""
         # Mock service instance
         mock_service = AsyncMock()
@@ -450,7 +449,7 @@ class TestDetectIntentOnly:
         
         # Mock intent detection result for conversation
         intent_result = {
-            "intent": "conversation",
+            "intent": "execute_crew",
             "confidence": 0.78,
             "extracted_info": {
                 "question_type": "general_inquiry",
@@ -468,7 +467,7 @@ class TestDetectIntentOnly:
         
         assert response.status_code == 200
         data = response.json()
-        assert data["intent"] == "conversation"
+        assert data["intent"] == "execute_crew"
         assert data["confidence"] == 0.78
         assert data["extracted_info"]["question_type"] == "general_inquiry"
         # Should use default model when none specified

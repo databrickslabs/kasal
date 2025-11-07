@@ -9,9 +9,13 @@ from typing import Optional, List
 import logging
 from sqlalchemy.exc import SQLAlchemyError
 
-from src.repositories.execution_logs_repository import execution_logs_repository
-from src.repositories.execution_trace_repository import execution_trace_repository
-from src.repositories.execution_history_repository import execution_history_repository
+from src.repositories.execution_history_repository import ExecutionHistoryRepository
+from src.repositories.execution_logs_repository import ExecutionLogsRepository
+# Services should call other services, not repositories directly
+from typing import TYPE_CHECKING
+if TYPE_CHECKING:
+    from src.services.execution_trace_service import ExecutionTraceService
+    from src.services.execution_logs_service import ExecutionLogsService
 from src.schemas.execution_history import (
     ExecutionHistoryItem, 
     ExecutionHistoryList,
@@ -26,24 +30,24 @@ logger = logging.getLogger(__name__)
 
 class ExecutionHistoryService:
     """Service for accessing and managing execution history."""
-    
+
     def __init__(
-        self, 
-        execution_history_repository,
-        execution_logs_repository,
-        execution_trace_repository
+        self,
+        session,
+        execution_history_repository=None,
+        execution_logs_repository=None
     ):
         """
-        Initialize the service with repositories.
-        
+        Initialize the service with session and optionally a repository.
+
         Args:
-            execution_history_repository: Repository for execution history
-            execution_logs_repository: Repository for execution logs
-            execution_trace_repository: Repository for execution traces
+            session: Database session from FastAPI DI
+            execution_history_repository: Optional repository instance (for testing)
+            execution_logs_repository: Optional logs repository instance (for testing)
         """
-        self.history_repo = execution_history_repository
-        self.logs_repo = execution_logs_repository
-        self.trace_repo = execution_trace_repository
+        self.session = session
+        self.history_repo = execution_history_repository or ExecutionHistoryRepository(session)
+        self.logs_repo = execution_logs_repository or ExecutionLogsRepository(session)
     
     async def get_execution_history(self, limit: int = 50, offset: int = 0, group_ids: List[str] = None) -> ExecutionHistoryList:
         """
@@ -207,15 +211,16 @@ class ExecutionHistoryService:
                     )
             
             # Get logs from our repository
-            logs = await self.logs_repo.get_by_execution_id_with_managed_session(
+            logs = await self.logs_repo.get_logs_by_execution_id(
                 execution_id=execution_id,
                 limit=limit,
                 offset=offset,
                 newest_first=True
             )
-                
+
             # Get total count
-            total_count = await self.logs_repo.count_by_execution_id_with_managed_session(
+            total_count = await self.logs_repo.count_by_execution_id(
+                self.session,
                 execution_id=execution_id
             )
             
@@ -263,7 +268,7 @@ class ExecutionHistoryService:
                 return None
             
             # Get logs from our repository
-            logs = await self.logs_repo.get_by_execution_id_with_managed_session(
+            logs = await self.logs_repo.get_logs_by_execution_id(
                 execution_id=execution_id
             )
             
@@ -293,19 +298,29 @@ class ExecutionHistoryService:
     async def delete_all_executions(self) -> DeleteResponse:
         """
         Delete all executions and their associated data.
-        
+
         Returns:
             DeleteResponse with information about the deleted data
         """
         try:
             logger.info("Attempting to delete all executions and their associated data")
-            
+
+            # Import services here to avoid circular imports
+            from src.services.execution_trace_service import ExecutionTraceService
+            from src.services.execution_logs_service import ExecutionLogsService
+
+            # Create service instances
+            trace_service = ExecutionTraceService(self.session)
+            logs_service = ExecutionLogsService(self.session)
+
             # Delete all traces first to avoid foreign key constraint violations
-            trace_count = await self.trace_repo.delete_all()
-            
+            # For now we need to access the repository directly since ExecutionTraceService
+            # doesn't have a delete_all method yet. This should be refactored.
+            trace_count = await trace_service.repository.delete_all()
+
             # Delete all logs
-            log_count = await self.logs_repo.delete_all_with_managed_session()
-            
+            log_count = await logs_service.delete_all_logs()
+
             # Delete all executions and associated data last (after dependent records are gone)
             result = await self.history_repo.delete_all_executions()
             
@@ -356,11 +371,21 @@ class ExecutionHistoryService:
                 
             job_id = run.job_id
             
+            # Import services here to avoid circular imports
+            from src.services.execution_trace_service import ExecutionTraceService
+            from src.services.execution_logs_service import ExecutionLogsService
+
+            # Create service instances
+            trace_service = ExecutionTraceService(self.session)
+            logs_service = ExecutionLogsService(self.session)
+
             # Delete associated traces first (to avoid foreign key constraint violations)
-            trace_count = await self.trace_repo.delete_by_job_id(job_id)
-            
-            # Delete execution logs - use the managed session version
-            output_count = await self.logs_repo.delete_by_execution_id_with_managed_session(job_id)
+            # For now we need to access the repository directly since ExecutionTraceService
+            # doesn't have a public delete_by_job_id method yet. This should be refactored.
+            trace_count = await trace_service.repository.delete_by_job_id(job_id)
+
+            # Delete execution logs
+            output_count = await logs_service.delete_by_execution_id(job_id)
             
             # Delete execution using repository (after dependent records are gone)
             result = await self.history_repo.delete_execution(execution_id)
@@ -414,11 +439,21 @@ class ExecutionHistoryService:
                 
             execution_id = run.id
             
+            # Import services here to avoid circular imports
+            from src.services.execution_trace_service import ExecutionTraceService
+            from src.services.execution_logs_service import ExecutionLogsService
+
+            # Create service instances
+            trace_service = ExecutionTraceService(self.session)
+            logs_service = ExecutionLogsService(self.session)
+
             # Delete associated traces first (to avoid foreign key constraint violations)
-            trace_count = await self.trace_repo.delete_by_job_id(job_id)
-            
-            # Delete execution logs - use the managed session version
-            output_count = await self.logs_repo.delete_by_execution_id_with_managed_session(job_id)
+            # For now we need to access the repository directly since ExecutionTraceService
+            # doesn't have a public delete_by_job_id method yet. This should be refactored.
+            trace_count = await trace_service.repository.delete_by_job_id(job_id)
+
+            # Delete execution logs
+            output_count = await logs_service.delete_by_execution_id(job_id)
             
             # Delete execution using repository (after dependent records are gone)
             result = await self.history_repo.delete_execution_by_job_id(job_id)
@@ -498,15 +533,16 @@ class ExecutionHistoryService:
             logger.error(f"Error retrieving execution with job_id {job_id}: {str(e)}", exc_info=True)
             raise
 
-def get_execution_history_service() -> ExecutionHistoryService:
+from src.core.dependencies import SessionDep
+
+def get_execution_history_service(session: SessionDep) -> ExecutionHistoryService:
     """
     Factory function to create an instance of ExecutionHistoryService.
-    
+
+    Args:
+        session: Database session from FastAPI DI
+
     Returns:
-        ExecutionHistoryService instance initialized with repositories
+        ExecutionHistoryService instance initialized with session
     """
-    return ExecutionHistoryService(
-        execution_history_repository=execution_history_repository,
-        execution_logs_repository=execution_logs_repository,
-        execution_trace_repository=execution_trace_repository
-    ) 
+    return ExecutionHistoryService(session) 

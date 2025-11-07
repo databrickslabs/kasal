@@ -13,15 +13,18 @@ import {
   Divider,
   Box,
   Tooltip,
+  Typography,
 } from '@mui/material';
 import CloseIcon from '@mui/icons-material/Close';
 import PersonIcon from '@mui/icons-material/Person';
 import DeleteIcon from '@mui/icons-material/Delete';
 import AddIcon from '@mui/icons-material/Add';
+import HelpOutlineIcon from '@mui/icons-material/HelpOutline';
 import { Agent, Tool, AgentDialogProps } from '../../types/agent';
 import { AgentService } from '../../api/AgentService';
 import { ToolService } from '../../api/ToolService';
 import AgentForm from './AgentForm';
+import AgentBestPractices from '../BestPractices/AgentBestPractices';
 
 const AgentDialog: React.FC<AgentDialogProps> = ({
   open,
@@ -31,16 +34,18 @@ const AgentDialog: React.FC<AgentDialogProps> = ({
   onShowAgentForm,
   fetchAgents,
   showErrorMessage,
+  openInCreateMode = false,
 }) => {
   const [isDeleting, setIsDeleting] = useState(false);
-  const [showAgentForm, setShowAgentForm] = useState(false);
+  const [showAgentForm, setShowAgentForm] = useState(openInCreateMode);
   const [selectedAgents, setSelectedAgents] = useState<Agent[]>([]);
   const [tools, setTools] = useState<Tool[]>([]);
+  const [showBestPractices, setShowBestPractices] = useState(false);
   const [isInitialized, setIsInitialized] = useState(false);
 
   const loadTools = useCallback(async () => {
     try {
-      const toolsList = await ToolService.listTools();
+      const toolsList = await ToolService.listEnabledTools();
       setTools(toolsList.map(tool => ({
         ...tool,
         id: String(tool.id)
@@ -57,13 +62,18 @@ const AgentDialog: React.FC<AgentDialogProps> = ({
         loadTools()
       ]);
       setIsInitialized(true);
+      // If opening in create mode, show the form immediately
+      if (openInCreateMode) {
+        setShowAgentForm(true);
+      }
     }
-  }, [open, isInitialized, fetchAgents, loadTools]);
+  }, [open, isInitialized, fetchAgents, loadTools, openInCreateMode]);
 
   useEffect(() => {
     if (!open) {
       setIsInitialized(false);
       setSelectedAgents([]);
+      setShowAgentForm(false);
     }
   }, [open]);
 
@@ -87,9 +97,15 @@ const AgentDialog: React.FC<AgentDialogProps> = ({
     setShowAgentForm(true);
   };
 
-  const handleAgentSaved = async () => {
+  const handleAgentSaved = async (agent?: Agent) => {
     setShowAgentForm(false);
     await fetchAgents();
+    
+    // If in create mode and agent was saved, place it on canvas and close
+    if (openInCreateMode && agent) {
+      onAgentSelect([agent]);
+      onClose();
+    }
   };
 
   const handleAgentToggle = (agent: Agent) => {
@@ -137,11 +153,72 @@ const AgentDialog: React.FC<AgentDialogProps> = ({
     }
   };
 
+  // If in create mode, show only the form
+  if (openInCreateMode) {
+    return (
+      <>
+        <Dialog open={open} onClose={onClose} maxWidth="md" fullWidth>
+        <DialogTitle>
+          <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', pr: 5 }}>
+            <Typography variant="h6">
+              Create Agent
+            </Typography>
+            <Button
+              startIcon={<HelpOutlineIcon />}
+              onClick={() => setShowBestPractices(true)}
+              variant="outlined"
+              size="small"
+              sx={{ ml: 2 }}
+            >
+              Best Practices
+            </Button>
+          </Box>
+          <IconButton
+            aria-label="close"
+            onClick={onClose}
+            sx={{ position: 'absolute', right: 8, top: 8 }}
+          >
+            <CloseIcon />
+          </IconButton>
+        </DialogTitle>
+        <DialogContent>
+          <AgentForm
+            tools={tools}
+            onCancel={onClose}
+            onAgentSaved={handleAgentSaved}
+            isCreateMode={true}
+          />
+        </DialogContent>
+      </Dialog>
+      
+      {/* Best Practices Dialog */}
+      <AgentBestPractices
+        open={showBestPractices}
+        onClose={() => setShowBestPractices(false)}
+      />
+    </>
+    );
+  }
+
+  // Show the manage interface
   return (
     <>
       <Dialog open={open} onClose={onClose} maxWidth="sm" fullWidth>
         <DialogTitle>
-          Manage Agents
+          <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', pr: 5 }}>
+            <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+              Manage Agents
+              <Tooltip title="Learn about agent best practices">
+                <IconButton
+                  size="small"
+                  onClick={() => window.open('https://docs.crewai.com/core-concepts/Agents/', '_blank')}
+                  sx={{ ml: 1 }}
+                >
+                  <HelpOutlineIcon fontSize="small" />
+                </IconButton>
+              </Tooltip>
+            </Box>
+          </Box>
           <IconButton
             aria-label="close"
             onClick={onClose}

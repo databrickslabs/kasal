@@ -65,7 +65,7 @@ def robust_json_parser(text):
     try:
         return json.loads(text)
     except json.JSONDecodeError:
-        logger.warning("Initial JSON parsing failed, attempting recovery")
+        logger.info("Initial JSON parsing failed, attempting recovery")
     
     # Step 1: Remove markdown code block formatting
     code_block_pattern = re.compile(r'```(?:json)?\s*([\s\S]*?)\s*```')

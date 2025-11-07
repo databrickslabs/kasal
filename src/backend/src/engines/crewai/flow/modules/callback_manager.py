@@ -1,36 +1,107 @@
-"""
-Callback manager module for CrewAI flow execution.
+"""Callback orchestration manager for CrewAI flow execution.
 
-This module handles initialization and management of callbacks for CrewAI flows.
+This module provides centralized management of all callbacks used during
+CrewAI flow execution, ensuring proper initialization, registration, and
+lifecycle management of event listeners.
+
+The CallbackManager acts as the single point of coordination for all
+callback-related operations in the flow execution pipeline, managing
+various types of callbacks including streaming, tracing, and event logging.
+
+Key Features:
+    - Centralized callback initialization and registration
+    - Automatic event bus integration
+    - Error-resilient callback setup with fallbacks
+    - Support for multiple callback types (streaming, tracing, events)
+    - Multi-tenant isolation through group context
+
+Callback Types Managed:
+    - JobOutputCallback: Streams execution output to database
+    - EventStreamingCallback: Captures real-time CrewAI events
+    - AgentTraceEventListener: Records execution traces
+    - Custom event listeners via BaseEventListener
+
+Example:
+    >>> callbacks = CallbackManager.init_callbacks(
+    ...     job_id="exec_123",
+    ...     config={"enable_streaming": True},
+    ...     group_context=user_context
+    ... )
+    >>> # Use callbacks in flow execution
+    >>> flow.execute(callbacks=callbacks['handlers'])
 """
 import logging
 from typing import Dict, List, Optional, Any, Union
 
 from src.core.logger import LoggerManager
-from crewai.utilities.events import crewai_event_bus
+from crewai.events import crewai_event_bus
 
 # Initialize logger
 logger = LoggerManager.get_instance().crew
 
 class CallbackManager:
-    """
-    Helper class for managing callbacks in CrewAI flows.
+    """Centralized manager for CrewAI flow execution callbacks.
+    
+    This class provides static methods for initializing, registering, and
+    managing all callbacks required during CrewAI flow execution. It ensures
+    proper setup of event listeners and their registration with the CrewAI
+    event bus system.
+    
+    The manager handles various callback types including streaming callbacks
+    for real-time output, trace callbacks for execution monitoring, and
+    event callbacks for capturing CrewAI events.
+    
+    Methods:
+        init_callbacks: Initialize all callbacks for a flow execution
+        ensure_event_listeners_registered: Register listeners with event bus
+        cleanup_callbacks: Clean up and unregister callbacks
+    
+    Note:
+        All methods are static as the manager doesn't maintain state
+        between callback initializations. Each flow execution gets its
+        own set of callback instances.
     """
     
     @staticmethod
     def init_callbacks(job_id=None, config=None, group_context=None):
-        """
-        Initialize all necessary callbacks for flow execution.
-        This ensures all event listeners are properly set up and registered 
-        with the CrewAI event bus.
+        """Initialize all necessary callbacks for flow execution.
+        
+        Creates and configures all required callbacks for monitoring and
+        streaming flow execution. Ensures proper registration with the
+        CrewAI event bus and handles initialization failures gracefully.
         
         Args:
-            job_id: Optional job ID for tracking
-            config: Optional configuration dictionary
-            group_context: Optional group context for multi-tenant isolation
+            job_id: Optional unique identifier for the execution.
+                Required for callback initialization. If not provided,
+                returns empty callback list.
+            config: Optional configuration dictionary controlling:
+                - enable_streaming: Enable/disable output streaming
+                - enable_tracing: Enable/disable execution tracing
+                - callback_settings: Additional callback-specific settings
+            group_context: Optional multi-tenant context containing:
+                - primary_group_id: Group identifier for isolation
+                - access_token: User authentication token
+                - group_email: Group email for notifications
             
         Returns:
-            dict: Dictionary containing initialized callbacks
+            Dict[str, Any]: Dictionary containing:
+                - handlers: List of initialized callback instances
+                - streaming: JobOutputCallback instance (if created)
+                - event_streaming: EventStreamingCallback instance (if created)
+                - agent_trace: AgentTraceEventListener instance (if created)
+                - start_trace_writer: Boolean indicating trace writer needed
+        
+        Note:
+            The method is resilient to individual callback failures and will
+            continue initializing other callbacks even if one fails.
+        
+        Example:
+            >>> callbacks = CallbackManager.init_callbacks(
+            ...     job_id="exec_123",
+            ...     config={"enable_streaming": True},
+            ...     group_context=GroupContext(primary_group_id="grp_456")
+            ... )
+            >>> crew.kickoff(callbacks=callbacks['handlers'])
         """
         logger.info(f"Initializing callbacks for flow with job_id {job_id}")
         
@@ -46,7 +117,7 @@ class CallbackManager:
             # Create streaming callback for job output
             try:
                 from src.engines.crewai.callbacks.streaming_callbacks import JobOutputCallback
-                streaming_cb = JobOutputCallback(job_id=job_id, max_retries=3, group_context=group_context)
+                streaming_cb = JobOutputCallback(job_id=job_id, guardrail_max_retries=3, group_context=group_context)
                 logger.info(f"Created JobOutputCallback for job {job_id}")
                 handlers.append(streaming_cb)
                 callbacks_dict['streaming'] = streaming_cb

@@ -1,0 +1,143 @@
+{"type":"_aim","source":"mcp-knowledge-graph"}
+{"type":"entity","name":"CrewAI","entityType":"framework","observations":["Python framework for orchestrating autonomous AI agents","Version used in Kasal supports Flow framework for advanced orchestration","Provides multi-agent collaboration with role-based task assignment","Built-in memory persistence and knowledge management","Supports multiple LLM providers (OpenAI, Anthropic, Databricks, Ollama, etc.)","Event-driven architecture with callback support","Production-ready with enterprise features"]}
+{"type":"entity","name":"Agent","entityType":"core_component","observations":["Individual AI actors with specific roles and goals","Configured with role, goal, backstory for personality","Supports tools assignment for enhanced capabilities","Memory enabled for context retention across interactions","Can delegate tasks to other agents","Supports multimodal capabilities for image processing","Configurable with LLM model selection","Implements reasoning capabilities for complex problem solving"]}
+{"type":"entity","name":"Crew","entityType":"core_component","observations":["Collection of agents working together","Manages task orchestration and agent coordination","Supports sequential and hierarchical process types","Configurable memory system (short-term, long-term, entity)","Handles task dependencies and execution flow","Supports planning and replay features","Event-driven callbacks for execution monitoring","Deterministic crew IDs for memory persistence"]}
+{"type":"entity","name":"Task","entityType":"core_component","observations":["Discrete work units assigned to agents","Contains description and expected_output fields","Supports context from other tasks for dependencies","Can be configured with specific tools","Supports async execution for parallelism","Implements guardrails for output validation","Supports callbacks for completion events","Can generate structured output (JSON/Pydantic)"]}
+{"type":"entity","name":"Flow","entityType":"core_component","observations":["Advanced workflow orchestration system","Event-driven architecture with @start and @listen decorators","Supports state management with Pydantic models","Enables conditional execution and routing","Persistent state across sessions","Dynamic crew and agent creation at runtime","Structured state with type safety","Method-level and class-level persistence options"]}
+{"type":"entity","name":"Process","entityType":"execution_pattern","observations":["Defines task execution strategy","Sequential: tasks execute one after another","Hierarchical: manager agent coordinates task execution","Configurable with manager_llm or manager_agent","Controls workflow execution flow","Determines agent interaction patterns"]}
+{"type":"entity","name":"Memory","entityType":"subsystem","observations":["Comprehensive memory system for agents and crews","Short-term memory for recent interactions","Long-term memory with SQLite storage","Entity memory for relationship tracking","Supports multiple embedder providers (OpenAI, Ollama, Google, Azure, Vertex)","Configurable storage paths and backends","Event-driven memory operations","Reset capabilities for debugging"]}
+{"type":"entity","name":"ShortTermMemory","entityType":"memory_type","observations":["Stores recent task and interaction context","ChromaDB-based by default","Configurable with custom embedders","Session-scoped retention","Automatic cleanup policies","Used for immediate context in conversations"]}
+{"type":"entity","name":"LongTermMemory","entityType":"memory_type","observations":["Persistent memory across sessions","SQLite storage backend (LTMSQLiteStorage)","Stores important learnings and experiences","Configurable storage paths","Survives crew restarts","Knowledge accumulation over time"]}
+{"type":"entity","name":"EntityMemory","entityType":"memory_type","observations":["Tracks entities and relationships","Graph-based knowledge representation","ChromaDB storage for entity embeddings","Relationship mapping between entities","Used for understanding connections","Supports entity extraction from conversations"]}
+{"type":"entity","name":"ExternalMemory","entityType":"memory_type","observations":["Integration with external memory providers","Supports Mem0 for advanced memory features","Custom storage implementations allowed","Separate from built-in memory system","Configurable with embedder configs","Enables specialized memory backends"]}
+{"type":"entity","name":"Tool","entityType":"extension_system","observations":["Extensible capability system for agents","@tool decorator for custom tools","Async tool support for non-blocking operations","Built-in caching mechanisms","Max usage count limitations","Integration with external services","BaseTool class for complex implementations","Tool factories for centralized management"]}
+{"type":"entity","name":"CrewAI_Tools","entityType":"tool_collection","observations":["SerperDevTool for web search","FileReadTool for file operations","WebScrapingTool for data extraction","CodeInterpreterTool for code execution","ComposioTool for service integrations","LlamaIndexTool for document processing","BraveSearchTool for web research","Custom tool creation support"]}
+{"type":"entity","name":"Knowledge","entityType":"subsystem","observations":["Knowledge source management for agent context","Supports various source types (files, strings, URLs)","Integration with vector search systems","Factory pattern for source creation","Dynamic knowledge loading","Context enhancement for agents"]}
+{"type":"entity","name":"Callbacks","entityType":"event_system","observations":["Event-driven execution monitoring","Task completion callbacks","Memory operation events","Execution status updates","Error handling callbacks","Custom event listeners","Integration with logging systems"]}
+{"type":"entity","name":"CrewBase","entityType":"decorator","observations":["Class decorator for crew definition","Auto-collects agents and tasks","Supports YAML configuration loading","Provides before_kickoff and after_kickoff hooks","Simplifies crew creation syntax","Type-safe agent and task collection"]}
+{"type":"entity","name":"ConditionalTask","entityType":"task_type","observations":["Tasks with conditional execution logic","Condition functions determine execution","Enables dynamic workflow branching","Skips tasks when conditions not met","Used for adaptive workflows"]}
+{"type":"entity","name":"Guardrail","entityType":"validation","observations":["Output validation for tasks","Function-based validation logic","Retry mechanism on validation failure","Configurable max retry attempts","Ensures output quality and format"]}
+{"type":"entity","name":"StructuredOutput","entityType":"output_format","observations":["Type-safe output generation","Pydantic model validation","JSON schema support","Ensures consistent output format","Used for API integrations"]}
+{"type":"entity","name":"AgentAdapter","entityType":"integration","observations":["Integration of external agent frameworks","LangGraphAgentAdapter for LangGraph agents","OpenAIAgentAdapter for OpenAI agents","BaseAgentAdapter for custom implementations","Enables multi-framework collaboration"]}
+{"type":"entity","name":"Reasoning","entityType":"capability","observations":["Agent reasoning capability","Multi-attempt reasoning with max_reasoning_attempts","Improves decision making quality","Enhances problem-solving abilities","Configurable per agent"]}
+{"type":"entity","name":"Multimodal","entityType":"capability","observations":["Image processing capabilities","Automatic AddImageTool integration","Vision-based task execution","Supports image URLs and files","Enables visual analysis tasks"]}
+{"type":"entity","name":"CodeExecution","entityType":"capability","observations":["Allow agents to write and execute code","allow_code_execution flag enables feature","Python code execution support","Problem-solving through programming","Security considerations required"]}
+{"type":"entity","name":"HumanInput","entityType":"capability","observations":["Human-in-the-loop task execution","human_input=True on tasks","Allows user intervention during execution","Validation and clarification requests","Interactive task completion"]}
+{"type":"entity","name":"Planning","entityType":"capability","observations":["Crew-level planning feature","planning=True enables strategic planning","Task decomposition and organization","Improves complex task handling","Pre-execution planning phase"]}
+{"type":"entity","name":"Replay","entityType":"capability","observations":["Task replay functionality","Replay from specific task_id","Reuses previous inputs or provides new ones","Useful for debugging and testing","Maintains execution history"]}
+{"type":"entity","name":"LLMSelection","entityType":"configuration","observations":["Model selection per agent or crew","Supports multiple providers simultaneously","Cost optimization through model choice","Function calling LLM configuration","Provider-specific parameters"]}
+{"type":"entity","name":"Embedder","entityType":"configuration","observations":["Vector embedding configuration","OpenAI text-embedding models","Ollama local embeddings","Google, Azure, Vertex AI support","Configurable per memory type","Model selection for embeddings"]}
+{"type":"entity","name":"Storage","entityType":"configuration","observations":["Memory storage configuration","SQLite for long-term memory","ChromaDB for vector storage","Custom storage implementations","Platform-specific paths (macOS, Linux, Windows)","Project-scoped storage isolation"]}
+{"type":"entity","name":"YAMLConfiguration","entityType":"pattern","observations":["agents.yaml for agent definitions","tasks.yaml for task definitions","Templating with variables like {topic}","Separation of configuration from code","Maintainable crew definitions","Config loading in CrewBase classes"]}
+{"type":"entity","name":"FlowState","entityType":"pattern","observations":["Pydantic models for state schema","Type-safe state management","Automatic ID generation","State persistence between methods","Structured data passing","Cross-method state access"]}
+{"type":"entity","name":"EventDriven","entityType":"pattern","observations":["@start decorator for entry points","@listen decorator for event handlers","Method chaining through events","Asynchronous event processing","Flow orchestration pattern"]}
+{"type":"entity","name":"ToolCaching","entityType":"optimization","observations":["Custom cache_function for tools","Conditional caching logic","Performance optimization","Reduces redundant API calls","Configurable cache strategies"]}
+{"type":"entity","name":"ParallelExecution","entityType":"optimization","observations":["async_execution=True for tasks","Multiple tasks run concurrently","Context aggregation from parallel tasks","Performance improvement for independent tasks","Non-blocking task execution"]}
+{"type":"entity","name":"MemoryReset","entityType":"maintenance","observations":["reset_memories() method on crews","Selective memory type clearing","Debug and testing utility","Command types: short, long, entity, knowledge","Clean slate for new executions"]}
+{"type":"entity","name":"BestPractices","entityType":"guidelines","observations":["Specific agent roles over generic ones","Detailed backstories for context","Tool assignment based on task needs","Memory enablement for complex workflows","Async execution for performance","Structured output for integrations","Error handling with guardrails"]}
+{"type":"entity","name":"EnterpriseFeatures","entityType":"capability_set","observations":["Agent repositories for reusability","Tool repositories for sharing","Salesforce integration","HubSpot integration","Memory providers (Mem0)","Production deployment support","Team collaboration features"]}
+{"type":"entity","name":"CLI","entityType":"tool","observations":["crewai create for project scaffolding","crewai run for execution","crewai flow kickoff for flows","crewai tool commands for tool management","Project initialization utilities"]}
+{"type":"entity","name":"Deployment","entityType":"infrastructure","observations":["Docker containerization support","Environment variable configuration","API endpoint exposure","Webhook integrations","Production scaling considerations"]}
+{"type":"relation","from":"CrewAI","to":"Agent","relationType":"contains"}
+{"type":"relation","from":"CrewAI","to":"Crew","relationType":"contains"}
+{"type":"relation","from":"CrewAI","to":"Task","relationType":"contains"}
+{"type":"relation","from":"CrewAI","to":"Flow","relationType":"contains"}
+{"type":"relation","from":"Crew","to":"Agent","relationType":"orchestrates"}
+{"type":"relation","from":"Crew","to":"Task","relationType":"executes"}
+{"type":"relation","from":"Crew","to":"Process","relationType":"uses"}
+{"type":"relation","from":"Crew","to":"Memory","relationType":"utilizes"}
+{"type":"relation","from":"Agent","to":"Task","relationType":"performs"}
+{"type":"relation","from":"Agent","to":"Tool","relationType":"uses"}
+{"type":"relation","from":"Agent","to":"Memory","relationType":"accesses"}
+{"type":"relation","from":"Agent","to":"Knowledge","relationType":"leverages"}
+{"type":"relation","from":"Agent","to":"LLMSelection","relationType":"configured_with"}
+{"type":"relation","from":"Task","to":"Tool","relationType":"can_use"}
+{"type":"relation","from":"Task","to":"Guardrail","relationType":"validates_with"}
+{"type":"relation","from":"Task","to":"StructuredOutput","relationType":"generates"}
+{"type":"relation","from":"Task","to":"ConditionalTask","relationType":"specializes_to"}
+{"type":"relation","from":"Flow","to":"Crew","relationType":"orchestrates"}
+{"type":"relation","from":"Flow","to":"FlowState","relationType":"manages"}
+{"type":"relation","from":"Flow","to":"EventDriven","relationType":"implements"}
+{"type":"relation","from":"Memory","to":"ShortTermMemory","relationType":"includes"}
+{"type":"relation","from":"Memory","to":"LongTermMemory","relationType":"includes"}
+{"type":"relation","from":"Memory","to":"EntityMemory","relationType":"includes"}
+{"type":"relation","from":"Memory","to":"ExternalMemory","relationType":"can_integrate"}
+{"type":"relation","from":"Memory","to":"Embedder","relationType":"configured_with"}
+{"type":"relation","from":"Memory","to":"Storage","relationType":"uses"}
+{"type":"relation","from":"Tool","to":"CrewAI_Tools","relationType":"provided_by"}
+{"type":"relation","from":"Tool","to":"ToolCaching","relationType":"optimized_with"}
+{"type":"relation","from":"Agent","to":"Reasoning","relationType":"can_enable"}
+{"type":"relation","from":"Agent","to":"Multimodal","relationType":"can_enable"}
+{"type":"relation","from":"Agent","to":"CodeExecution","relationType":"can_enable"}
+{"type":"relation","from":"Task","to":"HumanInput","relationType":"can_enable"}
+{"type":"relation","from":"Task","to":"ParallelExecution","relationType":"can_use"}
+{"type":"relation","from":"Crew","to":"Planning","relationType":"can_enable"}
+{"type":"relation","from":"Crew","to":"Replay","relationType":"supports"}
+{"type":"relation","from":"Crew","to":"Callbacks","relationType":"emits"}
+{"type":"relation","from":"CrewBase","to":"YAMLConfiguration","relationType":"loads"}
+{"type":"relation","from":"CrewBase","to":"Crew","relationType":"creates"}
+{"type":"relation","from":"AgentAdapter","to":"Agent","relationType":"integrates_with"}
+{"type":"relation","from":"CrewAI","to":"EnterpriseFeatures","relationType":"provides"}
+{"type":"relation","from":"CrewAI","to":"CLI","relationType":"includes"}
+{"type":"relation","from":"CrewAI","to":"Deployment","relationType":"supports"}
+{"type":"relation","from":"Memory","to":"MemoryReset","relationType":"provides"}
+{"type":"relation","from":"CrewAI","to":"BestPractices","relationType":"recommends"}
+{"type":"entity","name":"Testing","entityType":"capability","observations":["crewai test command for crew evaluation","Configurable iterations and model selection","Performance metrics generation","Test modes with different LLM models","Validation of agent behavior","Integration testing support","Automated testing workflows","Result comparison across iterations"]}
+{"type":"entity","name":"Training","entityType":"capability","observations":["crewai train command for agent training","Human feedback integration","Training data persistence (.pkl files)","Iterative improvement cycles","Support for different LLM evaluators","Minimum 7B model recommended for evaluation","Training data aggregation by agent role","Automatic suggestion application in non-training runs"]}
+{"type":"entity","name":"Debugging","entityType":"capability","observations":["Verbose mode for detailed logging","Memory reset capabilities for clean slate","Knowledge retrieval event monitoring","Memory performance tracking","Error event tracking with notifications","State logging in flows","Visual state inspection tools","Context limit error handling"]}
+{"type":"entity","name":"ErrorHandling","entityType":"pattern","observations":["Try-except blocks for robust execution","Guardrail validation with retry logic","Structured error responses","Memory operation failure events","Knowledge retrieval error handling","API request timeout handling","Invalid response format handling","Graceful degradation patterns"]}
+{"type":"entity","name":"Observability","entityType":"subsystem","observations":["Multiple integration providers supported","Arize Phoenix for tracing","Langtrace for comprehensive tracking","LangDB AI Gateway integration","OpenLIT OpenTelemetry support","Langfuse for detailed monitoring","Portkey for enterprise governance","Weave for execution flow tracking"]}
+{"type":"entity","name":"ArizePhoenix","entityType":"observability_tool","observations":["OpenTelemetry instrumentation","Automatic trace capture","Project-based organization","Real-time monitoring dashboard","Agent interaction tracking","LLM call monitoring","Task execution visualization"]}
+{"type":"entity","name":"Langtrace","entityType":"observability_tool","observations":["SDK-based integration","Must initialize before CrewAI imports","Automatic agent tracking","Tool call monitoring","Response capture","Comprehensive workflow tracing"]}
+{"type":"entity","name":"LangDB","entityType":"observability_tool","observations":["AI Gateway functionality","Model routing and management","Automatic tracing initialization","Project-based organization","LLM provider abstraction","Cost tracking capabilities"]}
+{"type":"entity","name":"Portkey","entityType":"observability_tool","observations":["Enterprise governance features","Budget control and rate limiting","Virtual key management","User-specific API keys","Access control and permissions","Model usage tracking","Compliance monitoring"]}
+{"type":"entity","name":"WebhookStreaming","entityType":"integration","observations":["Real-time event streaming","Configurable event subscription","Authentication support (bearer tokens)","Task completion callbacks","Crew kickoff notifications","LLM call monitoring","Custom endpoint configuration"]}
+{"type":"entity","name":"APIIntegration","entityType":"integration","observations":["RESTful API endpoints","Health check endpoints","Status monitoring endpoints","Kickoff API with webhook support","Structured JSON payloads","Authentication via bearer tokens","Async execution support"]}
+{"type":"entity","name":"EnterpriseIntegrations","entityType":"integration_set","observations":["Salesforce CRM integration","HubSpot marketing automation","Stripe payment processing","Linear project management","Shopify e-commerce","Slack communication","GitHub code repository","Microsoft Teams collaboration"]}
+{"type":"entity","name":"MCPIntegration","entityType":"integration","observations":["Model Context Protocol support","Stdio server integration","Custom server parameters","Tool discovery and registration","Lifecycle management","Environment variable passing","Error handling and cleanup"]}
+{"type":"entity","name":"DeploymentCLI","entityType":"deployment_tool","observations":["crewai deploy create for new deployments","crewai deploy push for updates","crewai deploy status for monitoring","crewai deploy logs for debugging","crewai deploy list for overview","crewai deploy remove for cleanup","Environment variable management","Automatic repository detection"]}
+{"type":"entity","name":"ProductionDeployment","entityType":"deployment","observations":["Docker containerization support","Environment variable configuration","Health check endpoints","Webhook automation","API endpoint exposure","Scaling considerations","Resource management","Security best practices"]}
+{"type":"entity","name":"EnvironmentVariables","entityType":"configuration","observations":["API key management","Provider credentials","Base URL configuration","Project identifiers","Security token handling","Naming convention requirements","No _TOKEN, _PASSWORD, _SECRET suffixes","Configuration validation"]}
+{"type":"entity","name":"PerformanceOptimization","entityType":"pattern","observations":["Parallel task execution","Tool caching strategies","Embedder selection for speed","Batch operations","Context window management","Memory efficient operations","LLM model selection for cost","Rate limiting configurations"]}
+{"type":"entity","name":"SecurityBestPractices","entityType":"guidelines","observations":["Secure credential storage","API key rotation","Access control implementation","Data isolation strategies","Audit logging","Error message sanitization","Input validation","Output sanitization"]}
+{"type":"entity","name":"KnowledgeEvents","entityType":"event_system","observations":["KnowledgeRetrievalStartedEvent","KnowledgeRetrievalCompletedEvent","Custom event listeners","Event bus integration","Query tracking","Chunk retrieval monitoring","Performance metrics"]}
+{"type":"entity","name":"MemoryEvents","entityType":"event_system","observations":["MemorySaveStartedEvent","MemorySaveCompletedEvent","MemoryQueryStartedEvent","MemoryQueryCompletedEvent","MemorySaveFailedEvent","MemoryQueryFailedEvent","Event-driven monitoring","Performance tracking"]}
+{"type":"entity","name":"FlowDebugging","entityType":"debugging_tool","observations":["State logging capabilities","Visual state inspection","Rich library integration","JSON formatting for state","Step-by-step tracking","Error state management","Checkpoint creation"]}
+{"type":"entity","name":"TestingStrategies","entityType":"pattern","observations":["Unit testing for individual components","Integration testing for workflows","Performance testing with metrics","Model comparison testing","Embedder performance testing","Knowledge retrieval testing","Memory operation validation","Error scenario testing"]}
+{"type":"entity","name":"TrainingWorkflow","entityType":"workflow","observations":["Setup training mode","Human feedback collection","Iterative improvement cycles","Data aggregation by agent","Suggestion consolidation","Quality scoring","Final summary generation","Automatic loading in production"]}
+{"type":"entity","name":"CustomLLM","entityType":"extension","observations":["BaseLLM class inheritance","Message formatting implementation","Tool calling support","Streaming capabilities","Error handling requirements","Testing integration","CrewAI compatibility"]}
+{"type":"entity","name":"GuardrailValidation","entityType":"validation","observations":["Function-based validators","Retry logic on failure","Structured error responses","JSON validation support","Pydantic model validation","Max retry configuration","Custom validation logic"]}
+{"type":"entity","name":"StateManagement","entityType":"pattern","observations":["Pydantic model definitions","Type-safe state access","State persistence options","Cross-method state sharing","Error state tracking","State visualization tools","Checkpoint management"]}
+{"type":"entity","name":"AsyncExecution","entityType":"pattern","observations":["Async task support","Parallel crew execution","Non-blocking operations","Context aggregation","Performance benefits","Dependency management","Error propagation"]}
+{"type":"entity","name":"ResourceManagement","entityType":"pattern","observations":["Memory cleanup strategies","Connection lifecycle","Server process management","File handle management","Temporary file cleanup","Cache invalidation","Resource pooling"]}
+{"type":"relation","from":"Testing","to":"CrewAI","relationType":"validates"}
+{"type":"relation","from":"Training","to":"Agent","relationType":"improves"}
+{"type":"relation","from":"Debugging","to":"Memory","relationType":"inspects"}
+{"type":"relation","from":"ErrorHandling","to":"Task","relationType":"protects"}
+{"type":"relation","from":"Observability","to":"CrewAI","relationType":"monitors"}
+{"type":"relation","from":"ArizePhoenix","to":"Observability","relationType":"implements"}
+{"type":"relation","from":"Langtrace","to":"Observability","relationType":"implements"}
+{"type":"relation","from":"LangDB","to":"Observability","relationType":"implements"}
+{"type":"relation","from":"Portkey","to":"Observability","relationType":"implements"}
+{"type":"relation","from":"WebhookStreaming","to":"APIIntegration","relationType":"extends"}
+{"type":"relation","from":"EnterpriseIntegrations","to":"CrewAI","relationType":"extends"}
+{"type":"relation","from":"MCPIntegration","to":"Tool","relationType":"extends"}
+{"type":"relation","from":"DeploymentCLI","to":"ProductionDeployment","relationType":"manages"}
+{"type":"relation","from":"ProductionDeployment","to":"CrewAI","relationType":"hosts"}
+{"type":"relation","from":"EnvironmentVariables","to":"ProductionDeployment","relationType":"configures"}
+{"type":"relation","from":"PerformanceOptimization","to":"CrewAI","relationType":"enhances"}
+{"type":"relation","from":"SecurityBestPractices","to":"ProductionDeployment","relationType":"secures"}
+{"type":"relation","from":"KnowledgeEvents","to":"Knowledge","relationType":"monitors"}
+{"type":"relation","from":"MemoryEvents","to":"Memory","relationType":"monitors"}
+{"type":"relation","from":"FlowDebugging","to":"Flow","relationType":"inspects"}
+{"type":"relation","from":"TestingStrategies","to":"Testing","relationType":"implements"}
+{"type":"relation","from":"TrainingWorkflow","to":"Training","relationType":"implements"}
+{"type":"relation","from":"CustomLLM","to":"LLMSelection","relationType":"extends"}
+{"type":"relation","from":"GuardrailValidation","to":"Guardrail","relationType":"implements"}
+{"type":"relation","from":"StateManagement","to":"FlowState","relationType":"implements"}
+{"type":"relation","from":"AsyncExecution","to":"ParallelExecution","relationType":"enables"}
+{"type":"relation","from":"ResourceManagement","to":"CrewAI","relationType":"maintains"}
+{"type":"relation","from":"Testing","to":"TestingStrategies","relationType":"uses"}
+{"type":"relation","from":"Training","to":"TrainingWorkflow","relationType":"follows"}
+{"type":"relation","from":"Debugging","to":"FlowDebugging","relationType":"uses"}
+{"type":"relation","from":"ErrorHandling","to":"GuardrailValidation","relationType":"uses"}

@@ -4,6 +4,7 @@ from fastapi import APIRouter
 from src.api.agents_router import router as agents_router
 from src.api.crews_router import router as crews_router
 from src.api.databricks_router import router as databricks_router
+from src.api.databricks_knowledge_router import router as databricks_knowledge_router
 from src.api.flows_router import router as flows_router
 from src.api.healthcheck_router import router as healthcheck_router
 from src.api.logs_router import router as logs_router
@@ -14,7 +15,11 @@ from src.api.tasks_router import router as tasks_router
 from src.api.templates_router import router as templates_router
 from src.api.schemas_router import router as schemas_router
 from src.api.tools_router import router as tools_router
-from src.api.upload_router import router as upload_router
+from src.api.group_tools_router import router as group_tools_router
+from src.api.mlflow_router import router as mlflow_router
+
+# DISABLED: Local file uploads are not allowed - use Databricks volumes instead
+# from src.api.upload_router import router as upload_router
 from src.api.task_tracking_router import router as task_tracking_router
 from src.api.scheduler_router import router as scheduler_router
 from src.api.agent_generation_router import router as agent_generation_router
@@ -29,15 +34,11 @@ from src.api.execution_trace_router import router as execution_trace_router
 from src.api.flow_execution_router import router as flow_execution_router
 from src.api.mcp_router import router as mcp_router
 from src.api.dispatcher_router import router as dispatcher_router
+# from src.api.dspy_router import router as dspy_router  # Temporarily disabled
 from src.api.engine_config_router import router as engine_config_router
-from src.api.databricks_role_router import router as databricks_role_router
-# User management routers
+# User management routers (simplified)
 from src.api.auth_router import router as auth_router
 from src.api.users_router import router as users_router
-from src.api.roles_router import router as roles_router
-from src.api.privileges_router import router as privileges_router
-from src.api.user_roles_router import router as user_roles_router
-from src.api.identity_providers_router import router as identity_providers_router
 from src.api.group_router import router as group_router
 from src.api.chat_history_router import router as chat_history_router
 from src.api.memory_backend_router import router as memory_backend_router
@@ -52,6 +53,7 @@ api_router = APIRouter()
 api_router.include_router(agents_router)
 api_router.include_router(crews_router)
 api_router.include_router(databricks_router)
+api_router.include_router(databricks_knowledge_router)
 api_router.include_router(flows_router)
 api_router.include_router(healthcheck_router)
 api_router.include_router(logs_router)
@@ -60,9 +62,13 @@ api_router.include_router(databricks_secrets_router)
 api_router.include_router(api_keys_router)
 api_router.include_router(tasks_router)
 api_router.include_router(templates_router)
+api_router.include_router(group_tools_router)
+api_router.include_router(mlflow_router)
+
 api_router.include_router(schemas_router)
 api_router.include_router(tools_router)
-api_router.include_router(upload_router)
+# DISABLED: Local file uploads are not allowed - use Databricks volumes instead
+# api_router.include_router(upload_router)
 api_router.include_router(task_tracking_router)
 api_router.include_router(scheduler_router)
 api_router.include_router(agent_generation_router)
@@ -78,15 +84,11 @@ api_router.include_router(runs_router)
 api_router.include_router(execution_logs_router)
 api_router.include_router(mcp_router)
 api_router.include_router(dispatcher_router)
+# api_router.include_router(dspy_router)  # Temporarily disabled
 api_router.include_router(engine_config_router)
-api_router.include_router(databricks_role_router)
-# Include user management routers
+# Include user management routers (simplified)
 api_router.include_router(auth_router)
 api_router.include_router(users_router)
-api_router.include_router(roles_router)
-api_router.include_router(privileges_router)
-api_router.include_router(user_roles_router)
-api_router.include_router(identity_providers_router)
 api_router.include_router(group_router)
 api_router.include_router(chat_history_router)
 api_router.include_router(memory_backend_router)
@@ -99,6 +101,7 @@ __all__ = [
     "agents_router",
     "crews_router",
     "databricks_router",
+    "databricks_knowledge_router",
     "flows_router",
     "healthcheck_router",
     "logs_router",
@@ -109,7 +112,7 @@ __all__ = [
     "templates_router",
     "schemas_router",
     "tools_router",
-    "upload_router",
+    # "upload_router",  # DISABLED: Local file uploads not allowed
     "task_tracking_router",
     "scheduler_router",
     "agent_generation_router",
@@ -124,19 +127,15 @@ __all__ = [
     "mcp_router",
     "dispatcher_router",
     "engine_config_router",
-    "databricks_role_router",
-    # Add user management routers to __all__
+    # User management routers (simplified)
     "auth_router",
     "users_router",
     "runs_router",
-    "roles_router",
-    "privileges_router",
-    "user_roles_router",
-    "identity_providers_router",
     "group_router",
     "chat_history_router",
     "memory_backend_router",
     "documentation_embeddings_router",
     "database_management_router",
-    "genie_router"
+    "genie_router",
+    "mlflow_router",
 ]

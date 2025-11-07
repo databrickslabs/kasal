@@ -5,6 +5,7 @@ Handles Genie-related API endpoints using proper service/repository architecture
 """
 
 from fastapi import APIRouter, Request, HTTPException, Depends
+from src.core.dependencies import GroupContextDep
 from typing import Optional
 import logging
 
@@ -20,6 +21,7 @@ from src.schemas.genie import (
     GenieAuthConfig
 )
 from src.utils.databricks_auth import extract_user_token_from_request
+from src.utils.user_context import UserContext
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api/genie", tags=["genie"])
@@ -29,29 +31,35 @@ router = APIRouter(prefix="/api/genie", tags=["genie"])
 async def get_genie_spaces(
     request: Request,
     page_token: Optional[str] = None,
-    page_size: int = 50
+    page_size: int = 50,
+    group_context: GroupContextDep = None
 ) -> GenieSpacesResponse:
     """
     Fetch available Genie spaces from Databricks with pagination.
-    
+
     Args:
         request: FastAPI request object
         page_token: Token for fetching next page
         page_size: Number of items per page (default 50, max 200)
-    
+        group_context: Group context from dependency injection
+
     Returns:
         GenieSpacesResponse: List of available Genie spaces with pagination info
     """
     try:
+        # Set group context for this request so get_auth_context() can access it
+        if group_context:
+            UserContext.set_group_context(group_context)
+
         # Extract user token for OBO authentication if available
         user_token = extract_user_token_from_request(request)
-        
+
         # Create auth config with user token for OBO
         auth_config = GenieAuthConfig(
             use_obo=True,
             user_token=user_token
         )
-        
+
         # Create service with auth config
         service = GenieService(auth_config)
         
@@ -77,28 +85,34 @@ async def get_genie_spaces(
 @router.post("/spaces/search", response_model=GenieSpacesResponse)
 async def search_genie_spaces(
     request: Request,
-    spaces_request: GenieSpacesRequest
+    spaces_request: GenieSpacesRequest,
+    group_context: GroupContextDep = None
 ) -> GenieSpacesResponse:
     """
     Search and filter Genie spaces from Databricks with pagination.
-    
+
     Args:
         request: FastAPI request object
         spaces_request: Request with search, filter, and pagination parameters
-    
+        group_context: Group context from dependency injection
+
     Returns:
         GenieSpacesResponse: List of filtered Genie spaces with pagination info
     """
     try:
+        # Set group context for this request so get_auth_context() can access it
+        if group_context:
+            UserContext.set_group_context(group_context)
+
         # Extract user token for OBO authentication if available
         user_token = extract_user_token_from_request(request)
-        
+
         # Create auth config with user token for OBO
         auth_config = GenieAuthConfig(
             use_obo=True,
             user_token=user_token
         )
-        
+
         # Create service with auth config
         service = GenieService(auth_config)
         
@@ -116,7 +130,11 @@ async def search_genie_spaces(
 
 
 @router.get("/spaces/{space_id}", response_model=GenieSpace)
-async def get_genie_space_details(space_id: str, request: Request) -> GenieSpace:
+async def get_genie_space_details(
+    space_id: str,
+    request: Request,
+    group_context: GroupContextDep = None
+) -> GenieSpace:
     """
     Get details for a specific Genie space.
     
@@ -158,7 +176,8 @@ async def get_genie_space_details(space_id: str, request: Request) -> GenieSpace
 @router.post("/execute", response_model=GenieExecutionResponse)
 async def execute_genie_query(
     request: Request,
-    execution_request: GenieExecutionRequest
+    execution_request: GenieExecutionRequest,
+    group_context: GroupContextDep = None
 ) -> GenieExecutionResponse:
     """
     Execute a Genie query in a specific space.
@@ -201,7 +220,8 @@ async def execute_genie_query(
 @router.post("/send-message", response_model=GenieSendMessageResponse)
 async def send_genie_message(
     request: Request,
-    message_request: GenieSendMessageRequest
+    message_request: GenieSendMessageRequest,
+    group_context: GroupContextDep = None
 ) -> GenieSendMessageResponse:
     """
     Send a message to Genie.

@@ -94,9 +94,8 @@ class TestGroupUserRole:
     def test_group_user_role_values(self):
         """Test GroupUserRole enum values."""
         assert GroupUserRole.ADMIN == "admin"
-        assert GroupUserRole.MANAGER == "manager"
-        assert GroupUserRole.USER == "user"
-        assert GroupUserRole.VIEWER == "viewer"
+        assert GroupUserRole.EDITOR == "editor"
+        assert GroupUserRole.OPERATOR == "operator"
     
     def test_group_user_role_is_string_enum(self):
         """Test that GroupUserRole inherits from str and Enum."""
@@ -106,16 +105,16 @@ class TestGroupUserRole:
     def test_group_user_role_hierarchy(self):
         """Test GroupUserRole hierarchy implications."""
         # Test that all roles are distinct
-        roles = [GroupUserRole.ADMIN, GroupUserRole.MANAGER, GroupUserRole.USER, GroupUserRole.VIEWER]
-        assert len(set(roles)) == 4
-        
+        roles = [GroupUserRole.ADMIN, GroupUserRole.EDITOR, GroupUserRole.OPERATOR]
+        assert len(set(roles)) == 3
+
         # Test role values for hierarchy logic
         assert GroupUserRole.ADMIN == "admin"  # Highest privilege
-        assert GroupUserRole.VIEWER == "viewer"  # Lowest privilege
+        assert GroupUserRole.OPERATOR == "operator"  # Lowest privilege
     
     def test_group_user_role_all_values(self):
         """Test that all expected GroupUserRole values are present."""
-        expected_values = {"admin", "manager", "user", "viewer"}
+        expected_values = {"admin", "editor", "operator"}
         actual_values = {role.value for role in GroupUserRole}
         assert actual_values == expected_values
 
@@ -169,17 +168,15 @@ class TestTenantUserRole:
     def test_tenant_user_role_values(self):
         """Test TenantUserRole enum values."""
         assert TenantUserRole.ADMIN == "admin"
-        assert TenantUserRole.MANAGER == "manager"
-        assert TenantUserRole.USER == "user"
-        assert TenantUserRole.VIEWER == "viewer"
+        assert TenantUserRole.EDITOR == "editor"
+        assert TenantUserRole.OPERATOR == "operator"
     
     def test_tenant_user_role_backward_compatibility(self):
         """Test TenantUserRole backward compatibility with GroupUserRole."""
         # Should have same values as GroupUserRole
         assert TenantUserRole.ADMIN == GroupUserRole.ADMIN
-        assert TenantUserRole.MANAGER == GroupUserRole.MANAGER
-        assert TenantUserRole.USER == GroupUserRole.USER
-        assert TenantUserRole.VIEWER == GroupUserRole.VIEWER
+        assert TenantUserRole.EDITOR == GroupUserRole.EDITOR
+        assert TenantUserRole.OPERATOR == GroupUserRole.OPERATOR
     
     def test_tenant_user_role_is_string_enum(self):
         """Test that TenantUserRole inherits from str and Enum."""
@@ -236,7 +233,7 @@ class TestEnumComparisons:
         """Test that enums can be compared with strings."""
         assert UserRole.ADMIN == "admin"
         assert GroupStatus.ACTIVE == "active"
-        assert GroupUserRole.MANAGER == "manager"
+        assert GroupUserRole.EDITOR == "editor"
         
         # Test inequality
         assert UserRole.ADMIN != "user"

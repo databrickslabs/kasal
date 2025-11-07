@@ -7,14 +7,12 @@ This module provides functions for recording and retrieving agent execution trac
 import logging
 from typing import Optional, Dict, Any
 from datetime import datetime, UTC
-from sqlalchemy.orm import Session
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.exc import SQLAlchemyError
 
 from src.models.execution_history import ExecutionHistory
 from src.models.execution_trace import ExecutionTrace
 from src.core.logger import LoggerManager
-from src.db.session import SessionLocal
 
 # Get logger from the centralized logging system
 logger = LoggerManager.get_instance().system
@@ -22,12 +20,12 @@ logger = LoggerManager.get_instance().system
 class AgentTraceRepository:
     """Repository class for handling agent trace operations."""
     
-    def __init__(self, db: Optional[Session] = None):
+    def __init__(self, db: Optional[AsyncSession] = None):
         """
-        Initialize the repository with database session.
-        
+        Initialize the repository with async database session.
+
         Args:
-            db: SQLAlchemy session
+            db: SQLAlchemy async session
         """
         self.db = db
     
@@ -116,11 +114,10 @@ class AgentTraceRepository:
             Created ExecutionTrace record if successful, None otherwise
         """
         try:
-            # If no db is provided, create a new session
+            # If no db is provided, raise an error
             if self.db is None:
-                logger.info(f"No db session provided, creating a new one for job_id: {job_id}")
-                db = SessionLocal()
-                close_session = True
+                logger.error(f"No db session provided for job_id: {job_id}")
+                raise ValueError("Database session is required")
             else:
                 db = self.db
                 close_session = False
@@ -165,13 +162,13 @@ class AgentTraceRepository:
 # Global instance for convenience 
 agent_trace_repository = AgentTraceRepository(None)
 
-def get_agent_trace_repository(db: Optional[Session] = None) -> AgentTraceRepository:
+def get_agent_trace_repository(db: Optional[AsyncSession] = None) -> AgentTraceRepository:
     """
     Get a configured agent trace repository.
-    
+
     Args:
-        db: SQLAlchemy session
-        
+        db: SQLAlchemy async session
+
     Returns:
         Configured AgentTraceRepository instance
     """

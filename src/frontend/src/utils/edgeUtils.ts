@@ -1,4 +1,9 @@
 import { Connection, Edge } from 'reactflow';
+import {
+  shouldEdgeBeAnimated,
+  getDefaultHandles,
+  getEdgeStyle
+} from '../config/edgeConfig';
 
 /**
  * Generates a standardized edge ID based on the connection parameters
@@ -23,26 +28,40 @@ export const edgeExists = (
 };
 
 /**
- * Creates a new edge with standardized properties
+ * Creates a new edge with standardized properties using centralized configuration
  */
 export const createEdge = (
   connection: Connection,
   type = 'default',
-  animated = false,
-  style: Record<string, string | number> = {}
+  animated?: boolean,
+  style: Record<string, string | number> = {},
+  layout?: 'horizontal' | 'vertical'
 ): Edge => {
   if (!connection.source || !connection.target) {
     throw new Error('Source and target are required for creating an edge');
   }
 
+  // Get default handles from centralized config (with layout consideration)
+  const defaultHandles = getDefaultHandles(connection.source, connection.target, layout);
+  const sourceHandle = connection.sourceHandle ?? defaultHandles.sourceHandle;
+  const targetHandle = connection.targetHandle ?? defaultHandles.targetHandle;
+
+  // Determine if edge should be animated (use provided value or auto-detect)
+  const shouldAnimate = animated !== undefined
+    ? animated
+    : shouldEdgeBeAnimated(connection.source, connection.target);
+
+  // Get edge style from centralized config
+  const edgeStyle = getEdgeStyle(connection.source, connection.target, shouldAnimate, style);
+
   return {
-    id: generateEdgeId(connection),
+    id: generateEdgeId({ ...connection, sourceHandle, targetHandle }),
     source: connection.source,
     target: connection.target,
-    sourceHandle: connection.sourceHandle || null,
-    targetHandle: connection.targetHandle || null,
+    sourceHandle,
+    targetHandle,
     type,
-    animated,
-    style
+    animated: shouldAnimate,
+    style: edgeStyle
   };
-}; 
+};

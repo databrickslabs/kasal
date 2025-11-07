@@ -11,6 +11,7 @@ import {
 import { useTranslation } from 'react-i18next';
 import { useWorkflowStore } from '../../store/workflow';
 
+
 interface UseFlowManagerProps {
   showErrorMessage: (message: string) => void;
 }
@@ -159,7 +160,13 @@ export const useFlowManager = ({ showErrorMessage }: UseFlowManagerProps) => {
         return;
       }
 
-      storeAddEdge(params);
+      // Enforce horizontal connectors for Agent -> Task edges: agent right -> task left
+      let enforcedParams = params;
+      if (sourceNode.type === 'agentNode' && targetNode.type === 'taskNode') {
+        enforcedParams = { ...params, sourceHandle: 'right', targetHandle: 'left' };
+      }
+
+      storeAddEdge(enforcedParams);
     }
   }, [nodes, storeAddEdge, t, showErrorMessage]);
 

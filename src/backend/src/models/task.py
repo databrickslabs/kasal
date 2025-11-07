@@ -41,6 +41,7 @@ class Task(Base):
     
     # Advanced configuration
     callback = Column(String)
+    callback_config = Column(JSON, nullable=True)  # Configuration for callbacks like DatabricksVolume
     human_input = Column(Boolean, default=False)
     converter_cls = Column(String)
     guardrail = Column(String, nullable=True)  # Store guardrail configuration as JSON string

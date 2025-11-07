@@ -19,12 +19,14 @@ logger = LoggerManager.get_instance().system
 class DatabaseBackupRepository:
     """Repository for database backup operations with Databricks Unity Catalog volumes."""
     
-    def __init__(self, user_token: Optional[str] = None):
-        """Initialize the repository with volume repository.
-        
+    def __init__(self, session: AsyncSession, user_token: Optional[str] = None):
+        """Initialize the repository with session and volume repository.
+
         Args:
+            session: Database session from service layer
             user_token: Optional user token for OBO authentication
         """
+        self.session = session
         self.volume_repo = DatabricksVolumeRepository(user_token=user_token)
         self.user_token = user_token
     
@@ -54,14 +56,14 @@ class DatabaseBackupRepository:
     ) -> Dict[str, Any]:
         """
         Create a backup of SQLite database and upload to Databricks volume.
-        
+
         Args:
             source_path: Path to the source database file
             catalog: Unity Catalog name
             schema: Schema name
             volume_name: Volume name
             backup_filename: Name for the backup file
-            
+
         Returns:
             Backup creation result
         """
@@ -72,7 +74,18 @@ class DatabaseBackupRepository:
                     "success": False,
                     "error": f"Database file not found at {source_path}"
                 }
-            
+
+            # Checkpoint WAL to merge all changes into main database file
+            # This ensures we get all recent data, not just checkpointed data
+            try:
+                conn = sqlite3.connect(source_path)
+                conn.execute("PRAGMA wal_checkpoint(TRUNCATE)")
+                conn.close()
+                logger.info(f"WAL checkpoint completed for {source_path}")
+            except Exception as wal_error:
+                logger.warning(f"WAL checkpoint failed (may not be in WAL mode): {wal_error}")
+                # Continue anyway - database might not be using WAL mode
+
             with open(source_path, 'rb') as f:
                 db_content = f.read()
             
@@ -113,32 +126,35 @@ class DatabaseBackupRepository:
     
     async def create_postgres_backup(
         self,
-        session: AsyncSession,
         catalog: str,
         schema: str,
         volume_name: str,
         backup_filename: str,
-        export_format: str = "sql"
+        export_format: str = "sql",
+        session: Optional[AsyncSession] = None
     ) -> Dict[str, Any]:
         """
         Create a backup of PostgreSQL database and upload to Databricks volume.
-        
+
         Args:
-            session: Database session
             catalog: Unity Catalog name
             schema: Schema name
             volume_name: Volume name
             backup_filename: Name for the backup file
             export_format: Export format ('sql' or 'sqlite')
-            
+            session: Optional database session (uses stored session if not provided)
+
         Returns:
             Backup creation result
         """
         try:
+            # Use provided session or stored session
+            db_session = session if session else self.session
+
             if export_format == "sqlite":
                 # Create a SQLite database from PostgreSQL data
                 return await self._create_postgres_to_sqlite_backup(
-                    session, catalog, schema, volume_name, backup_filename
+                    db_session, catalog, schema, volume_name, backup_filename
                 )
             # Build SQL dump content
             sql_content = []
@@ -157,7 +173,7 @@ class DatabaseBackupRepository:
             sql_content.append("")
             
             # Get all tables
-            result = await session.execute(
+            result = await db_session.execute(
                 text("SELECT tablename FROM pg_tables WHERE schemaname = 'public' ORDER BY tablename")
             )
             tables = [row[0] for row in result.fetchall()]
@@ -169,7 +185,7 @@ class DatabaseBackupRepository:
                 sql_content.append("")
                 
                 # Get table columns info for proper INSERT statements
-                col_result = await session.execute(
+                col_result = await db_session.execute(
                     text(f"""
                         SELECT column_name, data_type 
                         FROM information_schema.columns 
@@ -185,9 +201,9 @@ class DatabaseBackupRepository:
                 sql_content.append(f"ALTER TABLE {table} DISABLE TRIGGER ALL;")
                 sql_content.append(f"DELETE FROM {table};")
                 sql_content.append("")
-                
+
                 # Get table data
-                result = await session.execute(
+                result = await db_session.execute(
                     text(f"SELECT * FROM {table}")
                 )
                 rows = result.fetchall()
@@ -492,10 +508,10 @@ class DatabaseBackupRepository:
             if create_safety_backup and os.path.exists(target_path):
                 timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
                 safety_backup = f"{target_path}.backup_{timestamp}"
-                
+
                 with open(target_path, 'rb') as f:
                     current_db = f.read()
-                
+
                 # Upload safety backup to volume
                 safety_filename = f"safety_backup_{timestamp}.db"
                 await self.volume_repo.upload_file_to_volume(
@@ -506,10 +522,149 @@ class DatabaseBackupRepository:
                     file_content=current_db
                 )
                 logger.info(f"Created safety backup in volume: {safety_filename}")
-            
-            # Restore the database
-            with open(target_path, 'wb') as f:
-                f.write(backup_content)
+
+            # NEW APPROACH: Table-by-table copy instead of file replacement
+            # This avoids breaking existing database connections (disk I/O errors)
+
+            # STEP 1: Get current admin user info
+            current_admin_info = None
+            if os.path.exists(target_path):
+                try:
+                    current_conn = sqlite3.connect(target_path)
+                    current_cursor = current_conn.cursor()
+
+                    # Get current system admin user
+                    current_cursor.execute("""
+                        SELECT id, email, username, is_system_admin
+                        FROM users
+                        WHERE is_system_admin = 1
+                        LIMIT 1
+                    """)
+                    result = current_cursor.fetchone()
+
+                    if result:
+                        current_admin_info = {
+                            'id': result[0],
+                            'email': result[1],
+                            'username': result[2],
+                            'is_system_admin': result[3]
+                        }
+                        logger.info(f"[IMPORT] Found current admin: {current_admin_info['email']} with UUID: {current_admin_info['id']}")
+
+                    current_conn.close()
+                except Exception as e:
+                    logger.warning(f"[IMPORT] Could not read current admin info: {e}")
+
+            # STEP 2: Connect to both databases
+            try:
+                # Connect to backup database (source)
+                backup_conn = sqlite3.connect(tmp_path)
+                backup_cursor = backup_conn.cursor()
+
+                # Connect to target database (destination)
+                target_conn = sqlite3.connect(target_path)
+                target_cursor = target_conn.cursor()
+
+                # STEP 3: Get list of tables from backup
+                backup_cursor.execute("SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%'")
+                tables = [row[0] for row in backup_cursor.fetchall()]
+                logger.info(f"[IMPORT] Found {len(tables)} tables to import: {tables}")
+
+                # Tables to skip (system tables)
+                skip_tables = {'alembic_version'}  # Don't import migration version
+
+                # STEP 4: Copy each table
+                imported_tables = []
+                for table_name in tables:
+                    if table_name in skip_tables:
+                        logger.info(f"[IMPORT] Skipping system table: {table_name}")
+                        continue
+
+                    logger.info(f"[IMPORT] Importing table: {table_name}")
+
+                    try:
+                        # Get column names from backup table
+                        backup_cursor.execute(f"PRAGMA table_info({table_name})")
+                        columns_info = backup_cursor.fetchall()
+                        column_names = [col[1] for col in columns_info]
+
+                        # Clear existing data in target table
+                        target_cursor.execute(f"DELETE FROM {table_name}")
+                        logger.info(f"[IMPORT]   Cleared {table_name} table")
+
+                        # Get all data from backup table
+                        backup_cursor.execute(f"SELECT * FROM {table_name}")
+                        rows = backup_cursor.fetchall()
+
+                        if rows:
+                            # Special handling for users table to preserve admin UUID
+                            if table_name == 'users' and current_admin_info:
+                                logger.info(f"[IMPORT]   Processing users table with admin UUID preservation")
+
+                                # Insert rows, but update admin user's UUID
+                                placeholders = ','.join(['?' for _ in column_names])
+                                insert_sql = f"INSERT INTO {table_name} ({','.join(column_names)}) VALUES ({placeholders})"
+
+                                admin_email = current_admin_info['email']
+                                admin_uuid = current_admin_info['id']
+
+                                for row in rows:
+                                    row_list = list(row)
+
+                                    # Find email column index
+                                    email_idx = column_names.index('email')
+
+                                    # If this is the admin user, replace their UUID
+                                    if row_list[email_idx] == admin_email:
+                                        id_idx = column_names.index('id')
+                                        old_uuid = row_list[id_idx]
+                                        row_list[id_idx] = admin_uuid
+
+                                        # Ensure is_system_admin is set to 1
+                                        if 'is_system_admin' in column_names:
+                                            admin_idx = column_names.index('is_system_admin')
+                                            row_list[admin_idx] = 1
+
+                                        logger.info(f"[IMPORT]   Preserving admin UUID: {old_uuid} -> {admin_uuid} for {admin_email}")
+
+                                    target_cursor.execute(insert_sql, row_list)
+                            else:
+                                # Regular table - insert all rows
+                                placeholders = ','.join(['?' for _ in column_names])
+                                insert_sql = f"INSERT INTO {table_name} ({','.join(column_names)}) VALUES ({placeholders})"
+                                target_cursor.executemany(insert_sql, rows)
+
+                            logger.info(f"[IMPORT]   Imported {len(rows)} rows into {table_name}")
+                            imported_tables.append(table_name)
+                        else:
+                            logger.info(f"[IMPORT]   Table {table_name} is empty")
+                            imported_tables.append(table_name)
+
+                    except Exception as table_error:
+                        logger.error(f"[IMPORT] Error importing table {table_name}: {table_error}")
+                        import traceback
+                        logger.error(f"[IMPORT] Traceback: {traceback.format_exc()}")
+                        # Continue with other tables
+
+                # STEP 5: Commit all changes
+                target_conn.commit()
+                logger.info(f"[IMPORT] Successfully committed changes for {len(imported_tables)} tables")
+
+                # STEP 6: Close connections
+                backup_conn.close()
+                target_conn.close()
+
+                logger.info(f"[IMPORT] ✓ Import completed successfully")
+
+            except Exception as import_error:
+                logger.error(f"[IMPORT] Error during table-by-table import: {import_error}")
+                import traceback
+                logger.error(f"[IMPORT] Traceback: {traceback.format_exc()}")
+                os.unlink(tmp_path)
+                return {
+                    "success": False,
+                    "error": f"Failed to import database: {import_error}"
+                }
             
             # Clean up temp file
             os.unlink(tmp_path)
@@ -532,26 +687,29 @@ class DatabaseBackupRepository:
     
     async def restore_postgres_backup(
         self,
-        session: AsyncSession,
         catalog: str,
         schema: str,
         volume_name: str,
-        backup_filename: str
+        backup_filename: str,
+        session: Optional[AsyncSession] = None
     ) -> Dict[str, Any]:
         """
         Restore a PostgreSQL database from a Databricks volume backup.
-        
+
         Args:
-            session: Database session
             catalog: Unity Catalog name
             schema: Schema name
             volume_name: Volume name
             backup_filename: Name of the backup file
-            
+            session: Optional database session (uses stored session if not provided)
+
         Returns:
             Restore operation result
         """
         try:
+            # Use provided session or stored session
+            db_session = session if session else self.session
+
             # Download backup from Databricks volume
             download_result = await self.volume_repo.download_file_from_volume(
                 catalog=catalog,
@@ -612,12 +770,12 @@ class DatabaseBackupRepository:
                                 restored_tables.add(table_match.lower())
                                 total_rows += 1
                             
-                            await session.execute(text(stmt))
+                            await db_session.execute(text(stmt))
                         except Exception as stmt_error:
                             logger.warning(f"Error executing statement: {stmt_error}")
                             # Continue with other statements
-                
-                await session.commit()
+
+                await db_session.commit()
                 
                 return {
                     "success": True,
@@ -641,19 +799,19 @@ class DatabaseBackupRepository:
                 restored_tables = []
                 for table_name, rows in backup_data["tables"].items():
                     # Clear table
-                    await session.execute(text(f"TRUNCATE TABLE {table_name} CASCADE"))
-                    
+                    await db_session.execute(text(f"TRUNCATE TABLE {table_name} CASCADE"))
+
                     # Insert rows
                     for row_data in rows:
                         columns = ', '.join(row_data.keys())
                         placeholders = ', '.join([f":{k}" for k in row_data.keys()])
                         insert_query = f"INSERT INTO {table_name} ({columns}) VALUES ({placeholders})"
-                        await session.execute(text(insert_query), row_data)
+                        await db_session.execute(text(insert_query), row_data)
                     
                     restored_tables.append(f"{table_name} ({len(rows)} rows)")
                     logger.info(f"Restored {len(rows)} rows to table {table_name}")
                 
-                await session.commit()
+                await db_session.commit()
                 
                 return {
                     "success": True,
@@ -664,7 +822,7 @@ class DatabaseBackupRepository:
             
         except Exception as e:
             logger.error(f"Error restoring PostgreSQL backup: {e}")
-            await session.rollback()
+            await db_session.rollback()
             return {
                 "success": False,
                 "error": str(e)
@@ -857,18 +1015,50 @@ class DatabaseBackupRepository:
     ) -> Dict[str, Any]:
         """
         Get information about the database.
-        
+
         Args:
             db_path: Path to the SQLite database file (for SQLite)
-            session: Database session (for PostgreSQL)
-            
+            session: Database session (for PostgreSQL/Lakebase)
+
         Returns:
             Database information
         """
         try:
-            db_type = self.get_database_type()
-            
+            # Determine database type based on parameters
+            # Priority: explicit db_path (SQLite) > explicit session (PostgreSQL/Lakebase) > check settings
+            logger.debug(f"[DB INFO] get_database_info called with db_path={db_path}, session={session is not None}")
+
+            if db_path is not None:
+                # Explicit SQLite path provided
+                db_type = 'sqlite'
+                logger.debug(f"[DB INFO] Using SQLite (explicit db_path provided: {db_path})")
+            elif session is not None:
+                # Explicit session provided - assume PostgreSQL/Lakebase
+                db_type = 'postgres'
+                logger.debug(f"[DB INFO] Using PostgreSQL/Lakebase (explicit session provided)")
+            else:
+                # No explicit parameters - check settings
+                db_type = self.get_database_type()
+                logger.debug(f"[DB INFO] Using database type from settings: {db_type}")
+
+            # Use provided session or stored session for PostgreSQL/Lakebase
+            db_session = session if session else self.session
+            logger.debug(f"[DB INFO] Final db_type={db_type}, db_session={db_session is not None}")
+
             if db_type == 'sqlite':
+                # If db_path is None, try to get it from settings
+                if db_path is None:
+                    from src.config.settings import settings
+                    db_path = settings.SQLITE_DB_PATH
+                    if not db_path:
+                        db_path = "./app.db"  # Fallback default
+
+                    # Ensure absolute path
+                    if not os.path.isabs(db_path):
+                        db_path = os.path.abspath(db_path)
+
+                    logger.info(f"[DB INFO] db_path was None, using settings: {db_path}")
+
                 if not db_path or not os.path.exists(db_path):
                     return {
                         "success": False,
@@ -925,30 +1115,30 @@ class DatabaseBackupRepository:
                     "memory_backends": memory_backends
                 }
                 
-            elif db_type == 'postgres' and session:
+            elif db_type == 'postgres' and db_session:
                 # Get all tables
-                result = await session.execute(
+                result = await db_session.execute(
                     text("SELECT tablename FROM pg_tables WHERE schemaname = 'public'")
                 )
                 tables = [row[0] for row in result.fetchall()]
-                
+
                 # Get row counts for each table
                 table_info = {}
                 for table in tables:
-                    result = await session.execute(text(f"SELECT COUNT(*) FROM {table}"))
+                    result = await db_session.execute(text(f"SELECT COUNT(*) FROM {table}"))
                     count = result.scalar()
                     table_info[table] = count
-                
+
                 # Get database size
-                result = await session.execute(
+                result = await db_session.execute(
                     text("SELECT pg_database_size(current_database())")
                 )
                 db_size = result.scalar()
-                
+
                 # Get memory backends if table exists
                 memory_backends = []
                 if 'memory_backends' in table_info:
-                    result = await session.execute(
+                    result = await db_session.execute(
                         text("""
                             SELECT id, name, backend_type, is_default, created_at, group_id
                             FROM memory_backends

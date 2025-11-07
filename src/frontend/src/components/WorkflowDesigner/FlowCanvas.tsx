@@ -57,7 +57,7 @@ if (typeof window !== 'undefined') {
     ) {
       event.stopImmediatePropagation();
       event.preventDefault();
-      console.debug('ResizeObserver error suppressed:', event.message);
+
     }
   };
   
@@ -67,7 +67,7 @@ if (typeof window !== 'undefined') {
         (event.reason.message.includes('ResizeObserver loop') || 
          event.reason.message.includes('ResizeObserver Loop'))) {
       event.preventDefault();
-      console.debug('ResizeObserver promise rejection suppressed:', event.reason.message);
+
     }
   });
 }
@@ -200,7 +200,9 @@ const FlowCanvas: React.FC<FlowCanvasProps> = ({
       window.dispatchEvent(event);
       showTemporaryNotification('Opening Flow selection dialog (press lf)');
     },
-    disabled: isRendering || hasError
+    disabled: isRendering || hasError,
+    instanceId: 'flow-canvas',  // Unique identifier for this instance
+    priority: 5  // Lower priority than crew canvas
   });
 
   // Filter to only show flow nodes - define this before using it
@@ -227,22 +229,44 @@ const FlowCanvas: React.FC<FlowCanvasProps> = ({
     }
   }, [nodes]);
   
-  // Automatically fit view when nodes change
+  // Auto-fit view only on initial load or significant changes
+  const prevNodeCountRef = useRef(flowNodes.length);
+  const hasInitialFitRef = useRef(false);
+
   useEffect(() => {
-    // Only run if we're not rendering and we have an instance
-    if (!isRendering && reactFlowInstanceRef.current && flowNodes.length > 0) {
-      // Add a small delay to allow nodes to properly render
-      const fitViewTimer = setTimeout(() => {
-        if (reactFlowInstanceRef.current) {
-          reactFlowInstanceRef.current.fitView({ 
-            padding: 0.2, 
-            includeHiddenNodes: false,
-            duration: 800 // Smooth animation
-          });
+    const prevCount = prevNodeCountRef.current;
+    const currentCount = flowNodes.length;
+
+    // Only fit view on initial load or when nodes are added/removed
+    if (!isRendering && reactFlowInstanceRef.current && currentCount > 0) {
+      // Check if this is initial load or a significant change
+      const shouldFitView = !hasInitialFitRef.current || Math.abs(currentCount - prevCount) > 0;
+
+      if (shouldFitView) {
+        // Mark initial fit as done
+        if (!hasInitialFitRef.current) {
+          hasInitialFitRef.current = true;
         }
-      }, 300);
-      
-      return () => clearTimeout(fitViewTimer);
+
+        // Update the ref
+        prevNodeCountRef.current = currentCount;
+
+        // Add a small delay to allow nodes to properly render
+        const fitViewTimer = setTimeout(() => {
+          if (reactFlowInstanceRef.current) {
+            // Use requestAnimationFrame to avoid ResizeObserver loops
+            window.requestAnimationFrame(() => {
+              reactFlowInstanceRef.current?.fitView({
+                padding: 0.2,
+                includeHiddenNodes: false,
+                duration: 800 // Smooth animation
+              });
+            });
+          }
+        }, 300);
+
+        return () => clearTimeout(fitViewTimer);
+      }
     }
   }, [flowNodes.length, isRendering]);
   
@@ -608,8 +632,8 @@ const FlowCanvas: React.FC<FlowCanvasProps> = ({
           snapToGrid={true}
           minZoom={0.1}
           maxZoom={4}
-          fitView
-          fitViewOptions={{ padding: 0.2 }}
+          // Removed automatic fitView to prevent ResizeObserver loops
+          // fitView is handled manually in handleInit and via controls
           style={{ background: isDarkMode ? '#1a1a1a' : '#f5f5f5' }}
         >
           <Background 

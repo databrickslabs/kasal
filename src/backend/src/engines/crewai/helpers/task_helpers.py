@@ -149,6 +149,81 @@ async def get_pydantic_class_from_name(schema_name: str) -> Optional[Type[BaseMo
 # explicit MCP servers from task config and global MCP servers
 
 
+def create_callback_from_string(callback_name: str, task_key: str, callback_config: Optional[dict] = None, execution_name: Optional[str] = None):
+    """
+    Create a callable callback from a string name.
+    
+    Args:
+        callback_name: Name of the callback
+        task_key: Task identifier
+        callback_config: Optional configuration for the callback
+        execution_name: Optional execution name for organizing outputs
+        
+    Returns:
+        A callable function or None if callback is not supported
+    """
+    logger.info(f"Creating callback from string: {callback_name} for task {task_key} with execution_name: {execution_name}")
+    
+    if callback_name == 'DatabricksVolumeCallback':
+        try:
+            from src.engines.crewai.callbacks.databricks_volume_callback import DatabricksVolumeCallback
+            
+            # Create the callback instance with configuration
+            databricks_callback = DatabricksVolumeCallback(
+                task_key=task_key,
+                volume_path=callback_config.get('volume_path', '/Volumes/main/default/task_outputs') if callback_config else '/Volumes/main/default/task_outputs',
+                file_format=callback_config.get('file_format', 'json') if callback_config else 'json',
+                create_date_dirs=callback_config.get('create_date_dirs', True) if callback_config else True,
+                workspace_url=callback_config.get('workspace_url') if callback_config else None,
+                token=callback_config.get('token') if callback_config else None,
+                execution_name=execution_name  # Pass the execution name for folder organization
+            )
+            
+            # Create a synchronous wrapper for the async callback
+            def databricks_callback_wrapper(output):
+                """Synchronous wrapper for DatabricksVolumeCallback"""
+                import asyncio
+                import threading
+                from concurrent.futures import ThreadPoolExecutor
+                
+                def run_async_callback():
+                    """Run the async callback in a separate thread with its own event loop"""
+                    loop = asyncio.new_event_loop()
+                    asyncio.set_event_loop(loop)
+                    try:
+                        result = loop.run_until_complete(databricks_callback.execute(output))
+                        logger.info(f"DatabricksVolumeCallback executed successfully for task {task_key}")
+                        return result
+                    except Exception as e:
+                        logger.error(f"DatabricksVolumeCallback execution failed: {str(e)}")
+                        raise
+                    finally:
+                        loop.close()
+                
+                try:
+                    # Run the async callback in a separate thread to avoid event loop conflicts
+                    with ThreadPoolExecutor(max_workers=1) as executor:
+                        future = executor.submit(run_async_callback)
+                        result = future.result(timeout=30)  # 30 second timeout
+                    
+                    return output  # Return the original output to continue the chain
+                except Exception as e:
+                    logger.error(f"DatabricksVolumeCallback wrapper failed: {str(e)}")
+                    # Don't fail the task if callback fails, just log the error
+                    return output
+            
+            return databricks_callback_wrapper
+            
+        except Exception as e:
+            logger.error(f"Failed to create DatabricksVolumeCallback: {str(e)}")
+            return None
+    
+    # Add other callback types here as they are implemented
+    # For now, log a warning for unknown callbacks
+    logger.warning(f"Unknown callback type: {callback_name}. Callback will be skipped.")
+    return None
+
+
 async def create_task(
     task_key: str, 
     task_config: dict, 
@@ -157,7 +232,8 @@ async def create_task(
     output_dir: Optional[str] = None, 
     config: dict = None,
     tool_service = None,
-    tool_factory = None
+    tool_factory = None,
+    execution_name: Optional[str] = None
 ) -> Task:
     """
     Creates a Task instance from the provided configuration.
@@ -189,15 +265,15 @@ async def create_task(
     
     # Use centralized MCP integration module for task MCP tools
     try:
-        from src.core.unit_of_work import UnitOfWork
         from src.services.mcp_service import MCPService
         from src.engines.crewai.tools.mcp_integration import MCPIntegration
         
-        async with UnitOfWork() as uow:
-            mcp_service = await MCPService.from_unit_of_work(uow)
+        from src.db.session import async_session_factory
+        async with async_session_factory() as session:
+            mcp_service = MCPService(session)
             # This will automatically handle global + explicit servers
             mcp_tools = await MCPIntegration.create_mcp_tools_for_task(
-                task_config, task_key, mcp_service
+                task_config, task_key, mcp_service, config
             )
             task_tools.extend(mcp_tools)
             logger.info(f"Added {len(mcp_tools)} MCP tools to task {task_key}")
@@ -232,10 +308,10 @@ async def create_task(
                         task_tool_configs = task_config.get('tool_configs', {})
                         tool_override = task_tool_configs.get(tool_name, {})
                         
-                        # Debug logging for GenieTool spaceId
-                        if tool_name == "GenieTool":
-                            logger.info(f"Task {task_key} - GenieTool task_tool_configs: {task_tool_configs}")
-                            logger.info(f"Task {task_key} - GenieTool tool_override: {tool_override}")
+                        # Debug logging for tool configs
+                        if tool_name in ["GenieTool", "SerperDevTool", "DatabricksKnowledgeSearchTool"]:
+                            logger.info(f"Task {task_key} - {tool_name} task_tool_configs: {task_tool_configs}")
+                            logger.info(f"Task {task_key} - {tool_name} tool_override: {tool_override}")
                         
                         # Create the tool instance with overrides
                         tool_instance = tool_factory.create_tool(
@@ -273,7 +349,9 @@ async def create_task(
                                 }
                                 logger.info(f"Added tool instance {tool_name} to task {task_key} with details: {tool_info}")
                         else:
-                            logger.warning(f"Could not create tool instance for {tool_name}")
+                            logger.error(f"Could not create tool instance for {tool_name}")
+                            logger.error(f"Tool factory returned None - check tool factory logs for details")
+                            logger.error(f"Tool config: {tool_config}")
                     except Exception as e:
                         logger.error(f"Error creating tool {tool_name}: {str(e)}")
             else:
@@ -306,7 +384,36 @@ async def create_task(
         "max_retries": task_config.get("max_retries", 3),
         "markdown": task_config.get("markdown", False)
     }
-    
+
+    # KNOWLEDGE INTEGRATION FIX: Search vector index for relevant knowledge chunks
+    # that this specific agent has access to, based on task context
+    try:
+        # Get agent ID for access control filtering
+        agent_id = None
+        if hasattr(agent, 'id'):
+            agent_id = agent.id
+        elif hasattr(agent, '_agent_id'):
+            agent_id = agent._agent_id
+
+        # Try to get agent_id from config if not available directly
+        if not agent_id and hasattr(config, 'get'):
+            # Look for agent configurations that match this agent
+            for agent_config in config.get('agents', []):
+                config_agent_name = agent_config.get('name', agent_config.get('id', agent_config.get('role', '')))
+                if config_agent_name == agent_name:
+                    agent_id = agent_config.get('id')
+                    break
+
+        if agent_id:
+            logger.info(f"Task {task_key}: Found agent ID {agent_id} for access control")
+            logger.info(f"Task {task_key}: Knowledge retrieval will be handled automatically by CrewAI's agent knowledge sources")
+        else:
+            logger.warning(f"Task {task_key}: Could not determine agent ID for knowledge access control")
+
+    except Exception as knowledge_error:
+        logger.error(f"Task {task_key}: Error processing agent knowledge with access control: {knowledge_error}", exc_info=True)
+        # Continue with task creation even if knowledge extraction fails
+
     # If markdown is enabled, append markdown instructions
     if task_args["markdown"]:
         task_args["description"] += "\n\nPlease format your response using markdown syntax."
@@ -314,6 +421,69 @@ async def create_task(
 
     # Store any existing callback from the task_config for later use
     existing_callback = task_config.get('callback', None)
+    callback_config = task_config.get('callback_config', None)
+    
+    # Check for global Databricks volume configuration if no callback is set
+    if not existing_callback:
+        try:
+            from src.services.databricks_service import DatabricksService
+            from src.services.memory_backend_service import MemoryBackendService
+            from src.db.session import async_session_factory
+
+            async with async_session_factory() as session:
+                databricks_service = DatabricksService(session)
+                databricks_config = await databricks_service.get_databricks_config()
+
+                # Only consider auto-adding the DatabricksVolumeCallback if:
+                # - Global volume uploads are enabled, AND
+                # - The active memory backend for this workspace/group is Databricks
+                if databricks_config and databricks_config.volume_enabled and databricks_config.volume_path:
+                    group_id = None
+                    try:
+                        group_id = config.get('group_id') if isinstance(config, dict) else None
+                    except Exception:
+                        group_id = None
+
+                    active_is_databricks = False
+                    try:
+                        memory_service = MemoryBackendService(session)
+                        active_config = await memory_service.get_active_config(group_id) if group_id else None
+                        if active_config:
+                            # Treat a "disabled" memory config (all types false) as NOT Databricks
+                            all_disabled = (not active_config.enable_short_term and not active_config.enable_long_term and not active_config.enable_entity)
+                            if not all_disabled and getattr(active_config, 'backend_type', None) and getattr(active_config.backend_type, 'value', str(active_config.backend_type)) in ['databricks', 'DATABRICKS']:
+                                active_is_databricks = True
+                    except Exception as me:
+                        logger.debug(f"Could not determine active memory backend for group {group_id}: {me}")
+                        active_is_databricks = False
+
+                    if active_is_databricks:
+                        logger.info(f"Global volume configuration found and active memory backend is Databricks for task {task_key}: path={databricks_config.volume_path}")
+                        # Set DatabricksVolumeCallback as the default callback
+                        existing_callback = 'DatabricksVolumeCallback'
+
+                        # Use task-specific config if available, otherwise use global config
+                        if not callback_config:
+                            callback_config = {
+                                'volume_path': databricks_config.volume_path,
+                                'file_format': databricks_config.volume_file_format or 'json',
+                                'create_date_dirs': databricks_config.volume_create_date_dirs if databricks_config.volume_create_date_dirs is not None else True
+                            }
+                            logger.info(f"Using global volume configuration for task {task_key}: {callback_config}")
+                        else:
+                            # Task has its own callback_config, merge with global defaults
+                            if 'volume_path' not in callback_config:
+                                callback_config['volume_path'] = databricks_config.volume_path
+                            if 'file_format' not in callback_config:
+                                callback_config['file_format'] = databricks_config.volume_file_format or 'json'
+                            if 'create_date_dirs' not in callback_config:
+                                callback_config['create_date_dirs'] = databricks_config.volume_create_date_dirs if databricks_config.volume_create_date_dirs is not None else True
+                            logger.info(f"Merged task-specific config with global defaults for task {task_key}: {callback_config}")
+                    else:
+                        logger.info(f"Skipping auto DatabricksVolumeCallback for task {task_key}: active memory backend is not Databricks (group_id={group_id})")
+        except Exception as e:
+            logger.debug(f"Could not check global volume configuration or memory backend: {e}")
+            # Continue without global config
     
     # Handle guardrail if present in the task configuration
     if 'guardrail' in task_config and task_config['guardrail']:
@@ -408,16 +578,36 @@ async def create_task(
                 guardrail_logger.warning(f"Failed to create guardrail for task {task_key}, guardrail will not be applied")
                 # If guardrail creation failed but we have an existing callback, use it
                 if existing_callback:
-                    task_args['callback'] = existing_callback
+                    if isinstance(existing_callback, str):
+                        callback_func = create_callback_from_string(existing_callback, task_key, callback_config, execution_name)
+                        if callback_func:
+                            task_args['callback'] = callback_func
+                    else:
+                        task_args['callback'] = existing_callback
         except Exception as e:
             guardrail_logger.error(f"Error setting up guardrail for task {task_key}: {str(e)}")
             guardrail_logger.error(f"Stack trace: {traceback.format_exc()}")
             # If guardrail setup failed but we have an existing callback, use it
             if existing_callback:
-                task_args['callback'] = existing_callback
+                if isinstance(existing_callback, str):
+                    callback_func = create_callback_from_string(existing_callback, task_key, callback_config, execution_name)
+                    if callback_func:
+                        task_args['callback'] = callback_func
+                else:
+                    task_args['callback'] = existing_callback
     elif existing_callback:
         # No guardrail, but we have an existing callback
-        task_args['callback'] = existing_callback
+        if isinstance(existing_callback, str):
+            # Create callback from string name
+            callback_func = create_callback_from_string(existing_callback, task_key, callback_config, execution_name)
+            if callback_func:
+                task_args['callback'] = callback_func
+                logger.info(f"Created callback {existing_callback} for task {task_key}")
+            else:
+                logger.warning(f"Could not create callback {existing_callback} for task {task_key}, skipping callback")
+        else:
+            # Callback is already a function
+            task_args['callback'] = existing_callback
 
     # Add output file for tasks that need it
     if output_dir and task_config.get('output_file_enabled', False):
@@ -508,6 +698,24 @@ async def create_task(
     try:
         # Create the task with properly separated parameters
         task = Task(**task_args)
+        
+        # Store the task ID from config if available
+        # This ID matches the database task ID and is used for status tracking
+        if 'id' in task_config:
+            # DEBUG: Log the raw task ID from config
+            logger.info(f"[DEBUG] Raw task_config['id']: {task_config['id']}")
+            
+            # Extract just the UUID part if the ID has a prefix like "task-"
+            task_id = task_config['id']
+            if isinstance(task_id, str) and task_id.startswith('task-'):
+                logger.info(f"[DEBUG] Stripping 'task-' prefix from: {task_id}")
+                # Remove the "task-" prefix to get just the UUID
+                task_id = task_id[5:]  # len('task-') = 5
+            
+            # DEBUG: Log what we're actually storing
+            logger.info(f"[DEBUG] Storing _kasal_task_id as: {task_id}")
+            task._kasal_task_id = task_id
+            logger.info(f"Attached Kasal task ID to task: {task_id} (from {task_config['id']})")
         
         logger.info(f"Successfully created task: {task_key}")
         

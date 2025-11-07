@@ -113,7 +113,7 @@ class PerplexitySearchTool(BaseTool):
         """
         try:
             url = "https://api.perplexity.ai/chat/completions"
-            
+
             # Create base payload with required parameters
             payload = {
                 "model": self._model,
@@ -135,26 +135,26 @@ class PerplexitySearchTool(BaseTool):
                 "presence_penalty": self._presence_penalty,
                 "frequency_penalty": self._frequency_penalty,
             }
-            
+
             # Add optional parameters that are supported by the API
             if self._search_domain_filter and self._search_domain_filter != ["<any>"]:
                 payload["search_domain_filter"] = self._search_domain_filter
-                
+
             if self._return_images:
                 payload["return_images"] = self._return_images
-                
+
             if self._return_related_questions:
                 payload["return_related_questions"] = self._return_related_questions
-                
+
             if self._search_recency_filter:
                 payload["search_recency_filter"] = self._search_recency_filter
-                
+
             # Add web_search_options if specified and in correct format
             if self._web_search_options and isinstance(self._web_search_options, dict):
                 # Only include if it contains valid keys
                 if "search_context_size" in self._web_search_options:
                     payload["web_search_options"] = self._web_search_options
-            
+
             headers = {
                 "Authorization": f"Bearer {self._api_key}",
                 "Content-Type": "application/json"
@@ -162,7 +162,7 @@ class PerplexitySearchTool(BaseTool):
 
             logger.info(f"Executing Perplexity API request with query: {query}")
             logger.debug(f"Perplexity API payload: {json.dumps(payload, indent=2)}")
-            
+
             response = requests.post(url, json=payload, headers=headers)
             if not response.ok:
                 logger.error(f"Error from Perplexity API: {response.status_code} - {response.text}")

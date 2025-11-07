@@ -23,19 +23,26 @@ import {
   DialogActions,
   IconButton,
   InputAdornment,
+  Tooltip,
 } from '@mui/material';
 import { type Task } from '../../api/TaskService';
+import { type Agent } from '../../types/agent';
 import ExpandMoreIcon from '@mui/icons-material/ExpandMore';
 import OpenInFullIcon from '@mui/icons-material/OpenInFull';
 import CloseIcon from '@mui/icons-material/Close';
+import DeleteIcon from '@mui/icons-material/Delete';
+import HelpOutlineIcon from '@mui/icons-material/HelpOutline';
+import AttachFileIcon from '@mui/icons-material/AttachFile';
 import { TaskAdvancedConfig } from './TaskAdvancedConfig';
 import { TaskService } from '../../api/TaskService';
+import { DatabricksService } from '../../api/DatabricksService';
 import useStableResize from '../../hooks/global/useStableResize';
 import { GenieSpaceSelector } from '../Common/GenieSpaceSelector';
 import { PerplexityConfigSelector } from '../Common/PerplexityConfigSelector';
 import { SerperConfigSelector } from '../Common/SerperConfigSelector';
 import { MCPServerSelector } from '../Common/MCPServerSelector';
 import { PerplexityConfig, SerperConfig } from '../../types/config';
+import TaskBestPractices from '../BestPractices/TaskBestPractices';
 
 interface TaskFormProps {
   initialData?: Task;
@@ -45,6 +52,8 @@ interface TaskFormProps {
   isEdit?: boolean;
   tools: Tool[];
   hideTitle?: boolean;
+  isCreateMode?: boolean;
+  agent?: Agent;  // Agent associated with this task (for showing knowledge sources)
 }
 
 interface Tool {
@@ -55,7 +64,7 @@ interface Tool {
   enabled?: boolean;
 }
 
-const TaskForm: React.FC<TaskFormProps> = ({ initialData, onCancel, onTaskSaved, onSubmit, isEdit, tools, hideTitle }) => {
+const TaskForm: React.FC<TaskFormProps> = ({ initialData, onCancel, onTaskSaved, onSubmit, isEdit, tools, hideTitle, isCreateMode, agent }) => {
   const [expandedAccordion, setExpandedAccordion] = useState<boolean>(false);
   const [expandedDescription, setExpandedDescription] = useState<boolean>(false);
   const [expandedOutput, setExpandedOutput] = useState<boolean>(false);
@@ -82,6 +91,7 @@ const TaskForm: React.FC<TaskFormProps> = ({ initialData, onCancel, onTaskSaved,
       output_json: null,
       output_pydantic: null,
       callback: null,
+      callback_config: null,
       human_input: false,
       guardrail: null,
       markdown: false
@@ -97,6 +107,7 @@ const TaskForm: React.FC<TaskFormProps> = ({ initialData, onCancel, onTaskSaved,
       output_json: initialData.config.output_json ?? null,
       output_pydantic: initialData.config.output_pydantic ?? null,
       callback: initialData.config.callback ?? null,
+      callback_config: initialData.config.callback_config ?? null,
       human_input: initialData.config.human_input ?? false,
       condition: initialData.config.condition,
       guardrail: initialData.config.guardrail ?? null,
@@ -105,16 +116,16 @@ const TaskForm: React.FC<TaskFormProps> = ({ initialData, onCancel, onTaskSaved,
   });
   const [error, setError] = useState<string | null>(null);
   const [availableTasks, setAvailableTasks] = useState<Task[]>([]);
-  const [selectedGenieSpace, setSelectedGenieSpace] = useState<string>('');
+  const [selectedGenieSpace, setSelectedGenieSpace] = useState<{ id: string; name: string } | null>(null);
   const [perplexityConfig, setPerplexityConfig] = useState<PerplexityConfig>({});
   const [serperConfig, setSerperConfig] = useState<SerperConfig>({});
   const [selectedMcpServers, setSelectedMcpServers] = useState<string[]>([]);
   const [toolConfigs, setToolConfigs] = useState<Record<string, unknown>>(initialData?.tool_configs || {});
+  const [showBestPractices, setShowBestPractices] = useState(false);
+  const [workspaceUrlFromBackend, setWorkspaceUrlFromBackend] = useState<string>('');
 
   useEffect(() => {
     if (initialData?.tools) {
-      console.log('Setting tools from initialData:', initialData.tools);
-      console.log('Available tools:', tools);
       setFormData(prev => ({
         ...prev,
         tools: initialData.tools
@@ -122,36 +133,34 @@ const TaskForm: React.FC<TaskFormProps> = ({ initialData, onCancel, onTaskSaved,
     }
     // Load tool_configs and set Genie space and Perplexity config if they exist
     if (initialData?.tool_configs) {
-      console.log('TaskForm: Loading tool_configs from initialData:', initialData.tool_configs);
       setToolConfigs(initialData.tool_configs);
-      
+
       // Check for GenieTool config - try both spaceId and space_id for compatibility
       const genieConfig = initialData.tool_configs.GenieTool as Record<string, unknown>;
       if (genieConfig) {
-        console.log('TaskForm: Found GenieTool config:', genieConfig);
         const spaceId = genieConfig.spaceId || genieConfig.space_id;
+        const spaceName = genieConfig.spaceName || genieConfig.space_name || spaceId; // Fallback to ID if name not stored
         if (spaceId && typeof spaceId === 'string') {
-          console.log('TaskForm: Setting selectedGenieSpace to:', spaceId);
-          setSelectedGenieSpace(spaceId);
+          setSelectedGenieSpace({
+            id: spaceId as string,
+            name: spaceName as string
+          });
         }
       }
-      
+
       if (initialData.tool_configs.PerplexityTool) {
-        console.log('TaskForm: Found PerplexityTool config:', initialData.tool_configs.PerplexityTool);
         setPerplexityConfig(initialData.tool_configs.PerplexityTool as PerplexityConfig);
       }
-      
+
       if (initialData.tool_configs.SerperDevTool) {
-        console.log('TaskForm: Found SerperDevTool config:', initialData.tool_configs.SerperDevTool);
         setSerperConfig(initialData.tool_configs.SerperDevTool as SerperConfig);
       }
-      
+
       // Check for MCP_SERVERS config
       if (initialData.tool_configs.MCP_SERVERS) {
-        console.log('TaskForm: Found MCP_SERVERS config:', initialData.tool_configs.MCP_SERVERS);
         const mcpConfig = initialData.tool_configs.MCP_SERVERS as Record<string, unknown>;
-        const mcpServers = Array.isArray(mcpConfig.servers) 
-          ? mcpConfig.servers 
+        const mcpServers = Array.isArray(mcpConfig.servers)
+          ? mcpConfig.servers
           : Array.isArray(initialData.tool_configs.MCP_SERVERS)
           ? initialData.tool_configs.MCP_SERVERS  // Fallback for old format
           : [];
@@ -175,6 +184,23 @@ const TaskForm: React.FC<TaskFormProps> = ({ initialData, onCancel, onTaskSaved,
     void fetchTasks();
   }, []);
 
+  useEffect(() => {
+    // Fetch workspace URL from backend environment
+    const fetchWorkspaceUrl = async () => {
+      try {
+        const databricksService = DatabricksService.getInstance();
+        const envInfo = await databricksService.getDatabricksEnvironment();
+        if (envInfo.databricks_host) {
+          setWorkspaceUrlFromBackend(envInfo.databricks_host);
+        }
+      } catch (error) {
+        console.error('Error fetching Databricks environment:', error);
+      }
+    };
+
+    void fetchWorkspaceUrl();
+  }, []);
+
 
   const handleInputChange = (field: keyof Task, value: string) => {
     setFormData((prev: Task) => ({
@@ -183,27 +209,28 @@ const TaskForm: React.FC<TaskFormProps> = ({ initialData, onCancel, onTaskSaved,
     }));
   };
 
-  const handleAdvancedConfigChange = (field: string, value: string | number | boolean | null) => {
-    console.log(`Changing ${field} to:`, value);
-    
+  const handleAdvancedConfigChange = (field: string, value: string | number | boolean | null | Record<string, unknown>) => {
+
     setFormData(prev => {
       // Handle special fields that exist at the top level of formData
       if (field === 'async_execution') {
-        console.log(`Setting async_execution to ${value} (type: ${typeof value})`);
         return {
           ...prev,
           async_execution: value === undefined ? false : Boolean(value)
         };
       }
-      
+
       // Create updated config for all other fields
       const updatedConfig = {
         ...prev.config,
         [field]: field === 'condition' ? (value ? 'is_data_missing' : undefined) : value,
       };
-      
-      console.log('Updated config will be:', updatedConfig);
-      
+
+      // Debug logging for callback_config updates
+      if (field === 'callback_config') {
+        console.log('TaskForm - Updating callback_config:', value);
+      }
+
       return {
         ...prev,
         config: updatedConfig
@@ -212,12 +239,11 @@ const TaskForm: React.FC<TaskFormProps> = ({ initialData, onCancel, onTaskSaved,
   };
 
   const handleToolsChange = (event: SelectChangeEvent<string[]>) => {
-    const selectedTools = Array.isArray(event.target.value) 
-      ? event.target.value 
+    const selectedTools = Array.isArray(event.target.value)
+      ? event.target.value
       : [event.target.value];
-    
-    console.log('Tools selected:', selectedTools);
-    
+
+
     setFormData(prev => ({
       ...prev,
       tools: selectedTools
@@ -236,20 +262,28 @@ const TaskForm: React.FC<TaskFormProps> = ({ initialData, onCancel, onTaskSaved,
           setError('Task name is required');
           return;
         }
-        
-        console.log('Current formData before saving:', formData);
-        console.log('Current config values:', {
-          output_pydantic: formData.config.output_pydantic,
-          callback: formData.config.callback
+
+        // If GenieTool is selected, ensure a Genie Space is specified
+        const isGenieSelected = formData.tools.some(toolId => {
+          const tool = tools.find(t =>
+            String(t.id) === String(toolId) ||
+            t.id === Number(toolId) ||
+            t.title === toolId
+          );
+          return tool?.title === 'GenieTool';
         });
+        if (isGenieSelected && !selectedGenieSpace) {
+          setError('Please select a Genie Space when GenieTool is selected');
+          return;
+        }
 
         // Build tool_configs for tools that need configuration
         let updatedToolConfigs = { ...toolConfigs };
-        
+
         // Handle GenieTool config
         if (selectedGenieSpace && formData.tools.some(toolId => {
-          const tool = tools.find(t => 
-            String(t.id) === String(toolId) || 
+          const tool = tools.find(t =>
+            String(t.id) === String(toolId) ||
             t.id === Number(toolId) ||
             t.title === toolId
           );
@@ -258,18 +292,19 @@ const TaskForm: React.FC<TaskFormProps> = ({ initialData, onCancel, onTaskSaved,
           updatedToolConfigs = {
             ...updatedToolConfigs,
             GenieTool: {
-              spaceId: selectedGenieSpace
+              spaceId: selectedGenieSpace.id,
+              spaceName: selectedGenieSpace.name
             }
           };
         } else if (!selectedGenieSpace) {
           // Remove GenieTool config if no space selected
           delete updatedToolConfigs.GenieTool;
         }
-        
+
         // Handle PerplexityTool config
         if (perplexityConfig && Object.keys(perplexityConfig).length > 0 && formData.tools.some(toolId => {
-          const tool = tools.find(t => 
-            String(t.id) === String(toolId) || 
+          const tool = tools.find(t =>
+            String(t.id) === String(toolId) ||
             t.id === Number(toolId) ||
             t.title === toolId
           );
@@ -280,8 +315,8 @@ const TaskForm: React.FC<TaskFormProps> = ({ initialData, onCancel, onTaskSaved,
             PerplexityTool: perplexityConfig
           };
         } else if (!formData.tools.some(toolId => {
-          const tool = tools.find(t => 
-            String(t.id) === String(toolId) || 
+          const tool = tools.find(t =>
+            String(t.id) === String(toolId) ||
             t.id === Number(toolId) ||
             t.title === toolId
           );
@@ -290,11 +325,11 @@ const TaskForm: React.FC<TaskFormProps> = ({ initialData, onCancel, onTaskSaved,
           // Remove PerplexityTool config if tool not selected
           delete updatedToolConfigs.PerplexityTool;
         }
-        
+
         // Handle SerperDevTool config
         if (serperConfig && Object.keys(serperConfig).length > 0 && formData.tools.some(toolId => {
-          const tool = tools.find(t => 
-            String(t.id) === String(toolId) || 
+          const tool = tools.find(t =>
+            String(t.id) === String(toolId) ||
             t.id === Number(toolId) ||
             t.title === toolId
           );
@@ -305,8 +340,8 @@ const TaskForm: React.FC<TaskFormProps> = ({ initialData, onCancel, onTaskSaved,
             SerperDevTool: serperConfig
           };
         } else if (!formData.tools.some(toolId => {
-          const tool = tools.find(t => 
-            String(t.id) === String(toolId) || 
+          const tool = tools.find(t =>
+            String(t.id) === String(toolId) ||
             t.id === Number(toolId) ||
             t.title === toolId
           );
@@ -315,7 +350,7 @@ const TaskForm: React.FC<TaskFormProps> = ({ initialData, onCancel, onTaskSaved,
           // Remove SerperDevTool config if tool not selected
           delete updatedToolConfigs.SerperDevTool;
         }
-        
+
         // Handle MCP_SERVERS config - use dict format to match schema
         if (selectedMcpServers && selectedMcpServers.length > 0) {
           updatedToolConfigs = {
@@ -328,7 +363,7 @@ const TaskForm: React.FC<TaskFormProps> = ({ initialData, onCancel, onTaskSaved,
           // Remove MCP_SERVERS config if none selected
           delete updatedToolConfigs.MCP_SERVERS;
         }
-        
+
         // Create a cleaned version of the form data
         const cleanedFormData: Task = {
           ...formData,
@@ -340,41 +375,30 @@ const TaskForm: React.FC<TaskFormProps> = ({ initialData, onCancel, onTaskSaved,
             ...formData.config,
             condition: formData.config.condition === 'is_data_missing' ? 'is_data_missing' : undefined,
             callback: formData.config.callback,
+            callback_config: formData.config.callback_config,
             // Ensure output_pydantic is properly set in config
             output_pydantic: formData.config.output_pydantic,
             // Ensure config.markdown is synchronized with top-level markdown
             markdown: formData.config.markdown ?? formData.markdown
           }
         };
-        
-        
-        console.log('Cleaned formData to save:', cleanedFormData);
-        console.log('Final config values to save:', {
-          output_pydantic: cleanedFormData.config.output_pydantic,
-          callback: cleanedFormData.config.callback
-        });
+
+
 
         try {
           // Create or update the task in the database
           let savedTask;
           if (formData.id) {
-            console.log('Updating existing task with ID:', formData.id);
             savedTask = await TaskService.updateTask(formData.id, cleanedFormData);
           } else {
-            console.log('Creating new task');
             savedTask = await TaskService.createTask(cleanedFormData);
           }
-          
-          console.log('Task saved successfully:', savedTask);
-          console.log('Saved config values:', {
-            output_pydantic: savedTask.config.output_pydantic,
-            callback: savedTask.config.callback
-          });
+
 
           if (onTaskSaved) {
             onTaskSaved(savedTask);
           }
-          
+
           // Close the form after successful save
           if (onCancel) {
             onCancel();
@@ -399,7 +423,7 @@ const TaskForm: React.FC<TaskFormProps> = ({ initialData, onCancel, onTaskSaved,
   const handleAccordionChange = (_event: React.SyntheticEvent, isExpanded: boolean) => {
     setExpandedAccordion(isExpanded);
   };
-  
+
   // Use our custom resize hook to safely handle resizes
   useStableResize(
     () => {
@@ -426,42 +450,111 @@ const TaskForm: React.FC<TaskFormProps> = ({ initialData, onCancel, onTaskSaved,
     setExpandedOutput(false);
   };
 
+  const handleGenieSpaceClick = async (event: React.MouseEvent) => {
+    // Prevent any bubbling that might interfere
+    event.stopPropagation();
+
+    if (!selectedGenieSpace) {
+      console.warn('No Genie space selected');
+      return;
+    }
+
+    try {
+      console.log('Fetching Databricks configuration...');
+      const databricksService = DatabricksService.getInstance();
+      const config = await databricksService.getDatabricksConfig();
+      console.log('Databricks config:', config);
+
+      // Use workspaceUrlFromBackend if available, otherwise fall back to config.workspace_url
+      const workspaceUrlSource = workspaceUrlFromBackend || config?.workspace_url;
+
+      if (workspaceUrlSource) {
+        // Ensure the URL has https:// and remove trailing slash if present
+        let workspaceUrl = workspaceUrlSource.startsWith('https://')
+          ? workspaceUrlSource
+          : `https://${workspaceUrlSource}`;
+
+        // Remove trailing slash to avoid double slashes
+        workspaceUrl = workspaceUrl.replace(/\/$/, '');
+
+        // Construct the Genie room URL
+        // Format: https://{workspace}/genie/rooms/{space_id}/monitoring
+        const genieUrl = `${workspaceUrl}/genie/rooms/${selectedGenieSpace.id}/monitoring`;
+
+
+        console.log('Opening Genie URL:', genieUrl);
+        // Open in new tab
+        window.open(genieUrl, '_blank', 'noopener,noreferrer');
+      } else {
+        console.warn('Databricks workspace URL not configured');
+        alert('Databricks workspace URL is not configured. Please configure it in Settings > Configuration > Databricks.');
+      }
+    } catch (error) {
+      console.error('Error opening Genie space:', error);
+      alert('Error opening Genie space. Please check the console for details.');
+    }
+  };
+
+  // Derived validation flags
+  const isGenieToolSelected = formData.tools.some(toolId => {
+    const tool = tools.find(t =>
+      String(t.id) === String(toolId) ||
+      t.id === Number(toolId) ||
+      t.title === toolId
+    );
+    return tool?.title === 'GenieTool';
+  });
+  const isGenieSpaceMissing = isGenieToolSelected && !selectedGenieSpace;
+
   return (
     <>
-      <Card sx={{ 
-        display: 'flex', 
-        flexDirection: 'column', 
+      <Card sx={{
+        display: 'flex',
+        flexDirection: 'column',
         height: '70vh',
         position: 'relative',
         overflow: 'hidden'
       }}>
-        <Box sx={{ p: 3, pb: 2 }}>
-          <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 3 }}>
-            {!hideTitle && (
-              <Typography variant="h6">
-                {initialData?.id ? 'Edit Task' : 'Create New Task'}
-              </Typography>
-            )}
-          </Box>
-          <Divider />
-        </Box>
 
-        <Box sx={{ 
-          flex: '1 1 auto', 
+        {!isCreateMode && (
+          <Box sx={{ p: 3, pb: 2 }}>
+            <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 3 }}>
+              {!hideTitle && (
+                <Typography variant="h6">
+                  {initialData?.id ? 'Edit Task' : 'Create New Task'}
+                </Typography>
+              )}
+              <Button
+                startIcon={<HelpOutlineIcon />}
+                onClick={() => setShowBestPractices(true)}
+                variant="outlined"
+                size="small"
+                sx={{ ml: 2 }}
+              >
+                Best Practices
+              </Button>
+            </Box>
+            <Divider />
+          </Box>
+        )}
+
+        <Box sx={{
+          flex: '1 1 auto',
           overflow: 'auto',
-          px: 3, 
+          px: 3,
           pb: 2,
-          height: 'calc(90vh - 170px)',
+          pt: isCreateMode ? 3 : 0,
+          height: isCreateMode ? 'calc(90vh - 120px)' : 'calc(90vh - 170px)',
         }}>
-          <Box 
-            component="form" 
+          <Box
+            component="form"
             onSubmit={(e: React.FormEvent<HTMLFormElement>) => {
               e.preventDefault();
               void handleSave();
             }}
-            sx={{ 
-              display: 'flex', 
-              flexDirection: 'column', 
+            sx={{
+              display: 'flex',
+              flexDirection: 'column',
               gap: 2
             }}
           >
@@ -544,16 +637,29 @@ const TaskForm: React.FC<TaskFormProps> = ({ initialData, onCancel, onTaskSaved,
                   <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 0.5 }}>
                     {(selected as string[]).map((toolId) => {
                       // Try to find tool by comparing both string and number forms
-                      const tool = tools.find(t => 
-                        String(t.id) === String(toolId) || 
+                      const tool = tools.find(t =>
+                        String(t.id) === String(toolId) ||
                         t.id === Number(toolId) ||
                         t.title === toolId  // Also check by title for backward compatibility
                       );
                       return (
-                        <Chip 
+                        <Chip
                           key={toolId}
                           label={tool ? tool.title : `Tool ${toolId}`}
                           size="small"
+                          onDelete={() => {
+                            const newTools = formData.tools.filter(id => String(id) !== String(toolId));
+                            handleToolsChange({ target: { value: newTools } } as SelectChangeEvent<string[]>);
+                          }}
+                          onMouseDown={(event: React.MouseEvent) => {
+                            event.stopPropagation(); // Prevent dropdown from opening when clicking delete icon
+                          }}
+                          deleteIcon={
+                            <DeleteIcon
+                              fontSize="small"
+                              sx={{ fontSize: '16px !important' }}
+                            />
+                          }
                         />
                       );
                     })}
@@ -583,50 +689,117 @@ const TaskForm: React.FC<TaskFormProps> = ({ initialData, onCancel, onTaskSaved,
               </Select>
             </FormControl>
 
-            {/* Genie Space Selector - Show only when GenieTool is selected */}
+            {/* Knowledge Sources / File Attachments Display - Show when agent has uploaded files */}
+            {agent && agent.knowledge_sources && agent.knowledge_sources.length > 0 && (
+              <Box sx={{
+                mt: 2,
+                p: 2,
+                backgroundColor: 'rgba(76, 175, 80, 0.04)',
+                borderRadius: 1,
+                border: '1px solid rgba(76, 175, 80, 0.12)'
+              }}>
+                <Box sx={{ display: 'flex', alignItems: 'center', mb: 1 }}>
+                  <AttachFileIcon sx={{ mr: 1, color: 'success.main', fontSize: '1.2rem' }} />
+                  <Typography
+                    variant="subtitle2"
+                    color="success.main"
+                    sx={{ fontWeight: 600, fontSize: '0.875rem' }}
+                  >
+                    Knowledge Files Attached ({agent.knowledge_sources.length})
+                  </Typography>
+                </Box>
+                <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mb: 1 }}>
+                  The DatabricksKnowledgeSearchTool will automatically search these files during task execution.
+                </Typography>
+                <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 1 }}>
+                  {agent.knowledge_sources.map((source, index) => (
+                    <Chip
+                      key={index}
+                      icon={<AttachFileIcon />}
+                      label={source.fileInfo?.filename || source.source}
+                      size="small"
+                      color="success"
+                      variant="outlined"
+                      sx={{ fontWeight: 500 }}
+                    />
+                  ))}
+                </Box>
+              </Box>
+            )}
+
+            {/* Genie Space Display - Show only when GenieTool is selected */}
             {formData.tools.some(toolId => {
-              const tool = tools.find(t => 
-                String(t.id) === String(toolId) || 
+              const tool = tools.find(t =>
+                String(t.id) === String(toolId) ||
                 t.id === Number(toolId) ||
                 t.title === toolId
               );
               return tool?.title === 'GenieTool';
             }) && (
               <Box sx={{ mt: 2 }}>
-                <GenieSpaceSelector
-                  value={selectedGenieSpace}
-                  onChange={(value) => {
-                    setSelectedGenieSpace(value as string || '');
-                    // Update tool configs when space changes
-                    if (value) {
-                      setToolConfigs(prev => ({
-                        ...prev,
-                        GenieTool: {
-                          spaceId: value as string
+                <Typography variant="subtitle2" sx={{ mb: 1 }}>Genie Space</Typography>
+                {selectedGenieSpace ? (
+                  <Tooltip title={`Space ID: ${selectedGenieSpace.id} - Click to open in Databricks`} arrow>
+                    <Chip
+                      label={selectedGenieSpace.name}
+                      size="medium"
+                      color="primary"
+                      variant="outlined"
+                      onClick={handleGenieSpaceClick}
+                      onDelete={() => {
+                        setSelectedGenieSpace(null);
+                        // Remove GenieTool config when space is removed
+                        setToolConfigs(prev => {
+                          const newConfigs = { ...prev };
+                          delete newConfigs.GenieTool;
+                          return newConfigs;
+                        });
+                      }}
+                      deleteIcon={<DeleteIcon fontSize="small" />}
+                      sx={{
+                        cursor: 'pointer',
+                        '&:hover': {
+                          backgroundColor: 'rgba(25, 118, 210, 0.08)',
                         }
-                      }));
-                    } else {
-                      // Remove GenieTool config if no space selected
-                      setToolConfigs(prev => {
-                        const newConfigs = { ...prev };
-                        delete newConfigs.GenieTool;
-                        return newConfigs;
-                      });
-                    }
-                  }}
-                  label="Genie Space"
-                  placeholder="Search for Genie spaces..."
-                  helperText="Select the Genie space to use with this task"
-                  required
-                  fullWidth
-                />
+                      }}
+                    />
+                  </Tooltip>
+                ) : (
+                  <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+                    <GenieSpaceSelector
+                      value=""
+                      onChange={(value, spaceName) => {
+                        if (value) {
+                          setSelectedGenieSpace({
+                            id: value as string,
+                            name: spaceName || (value as string)  // Use the name if provided, otherwise fallback to ID
+                          });
+                          // Update tool configs when space is selected
+                          setToolConfigs(prev => ({
+                            ...prev,
+                            GenieTool: {
+                              spaceId: value as string,
+                              spaceName: spaceName || (value as string)
+                            }
+                          }));
+                        }
+                      }}
+                      label=""
+                      placeholder="Select a Genie space..."
+                      required
+                      error={isGenieSpaceMissing}
+                      helperText={isGenieSpaceMissing ? 'Genie Space is required when GenieTool is selected' : ''}
+                      fullWidth
+                    />
+                  </Box>
+                )}
               </Box>
             )}
 
             {/* Perplexity Configuration - Show only when PerplexityTool is selected */}
             {formData.tools.some(toolId => {
-              const tool = tools.find(t => 
-                String(t.id) === String(toolId) || 
+              const tool = tools.find(t =>
+                String(t.id) === String(toolId) ||
                 t.id === Number(toolId) ||
                 t.title === toolId
               );
@@ -652,8 +825,8 @@ const TaskForm: React.FC<TaskFormProps> = ({ initialData, onCancel, onTaskSaved,
 
             {/* Serper Configuration - Show only when SerperDevTool is selected */}
             {formData.tools.some(toolId => {
-              const tool = tools.find(t => 
-                String(t.id) === String(toolId) || 
+              const tool = tools.find(t =>
+                String(t.id) === String(toolId) ||
                 t.id === Number(toolId) ||
                 t.title === toolId
               );
@@ -681,27 +854,27 @@ const TaskForm: React.FC<TaskFormProps> = ({ initialData, onCancel, onTaskSaved,
             <Box sx={{ mt: 2 }}>
               {/* Show selected MCP servers visually */}
               {selectedMcpServers.length > 0 && (
-                <Box sx={{ 
-                  mb: 2, 
-                  p: 2, 
-                  backgroundColor: 'rgba(25, 118, 210, 0.04)', 
+                <Box sx={{
+                  mb: 2,
+                  p: 2,
+                  backgroundColor: 'rgba(25, 118, 210, 0.04)',
                   borderRadius: 1,
                   border: '1px solid rgba(25, 118, 210, 0.12)'
                 }}>
-                  <Typography 
-                    variant="subtitle2" 
-                    color="primary" 
-                    sx={{ 
-                      mb: 1, 
+                  <Typography
+                    variant="subtitle2"
+                    color="primary"
+                    sx={{
+                      mb: 1,
                       fontWeight: 600,
                       fontSize: '0.875rem'
                     }}
                   >
                     Selected MCP Servers ({selectedMcpServers.length})
                   </Typography>
-                  <Box sx={{ 
-                    display: 'flex', 
-                    flexWrap: 'wrap', 
+                  <Box sx={{
+                    display: 'flex',
+                    flexWrap: 'wrap',
                     gap: 1
                   }}>
                     {selectedMcpServers.map((server) => (
@@ -719,8 +892,8 @@ const TaskForm: React.FC<TaskFormProps> = ({ initialData, onCancel, onTaskSaved,
                             MCP_SERVERS: newServers
                           }));
                         }}
-                        sx={{ 
-                          '& .MuiChip-deleteIcon': { 
+                        sx={{
+                          '& .MuiChip-deleteIcon': {
                             fontSize: '18px',
                             '&:hover': {
                               color: 'error.main'
@@ -733,7 +906,7 @@ const TaskForm: React.FC<TaskFormProps> = ({ initialData, onCancel, onTaskSaved,
                   </Box>
                 </Box>
               )}
-              
+
               <MCPServerSelector
                 value={selectedMcpServers}
                 onChange={(servers) => {
@@ -753,11 +926,11 @@ const TaskForm: React.FC<TaskFormProps> = ({ initialData, onCancel, onTaskSaved,
               />
             </Box>
 
-            <Accordion 
+            <Accordion
               expanded={expandedAccordion}
               onChange={handleAccordionChange}
               ref={accordionRef}
-              TransitionProps={{ 
+              TransitionProps={{
                 unmountOnExit: false,
                 timeout: { enter: 300, exit: 200 }
               }}
@@ -777,6 +950,7 @@ const TaskForm: React.FC<TaskFormProps> = ({ initialData, onCancel, onTaskSaved,
                     cache_response: formData.config?.cache_response || false,
                     cache_ttl: formData.config?.cache_ttl || 3600,
                     callback: formData.config?.callback || null,
+                    callback_config: formData.config?.callback_config || null,
                     context: formData.context || [],
                     dependencies: [],
                     error_handling: formData.config?.error_handling || 'default',
@@ -801,11 +975,11 @@ const TaskForm: React.FC<TaskFormProps> = ({ initialData, onCancel, onTaskSaved,
           </Box>
         </Box>
 
-        <Box 
-          sx={{ 
-            display: 'flex', 
-            gap: 2, 
-            justifyContent: 'flex-end', 
+        <Box
+          sx={{
+            display: 'flex',
+            gap: 2,
+            justifyContent: 'flex-end',
             p: 2,
             backgroundColor: 'white',
             borderTop: '1px solid rgba(0, 0, 0, 0.12)',
@@ -815,28 +989,28 @@ const TaskForm: React.FC<TaskFormProps> = ({ initialData, onCancel, onTaskSaved,
           }}
         >
           <Button onClick={onCancel}>Cancel</Button>
-          <Button onClick={() => void handleSave()} variant="contained" color="primary">
+          <Button onClick={() => void handleSave()} variant="contained" color="primary" disabled={isGenieSpaceMissing}>
             Save
           </Button>
         </Box>
       </Card>
-      <Snackbar 
-        open={!!error} 
-        autoHideDuration={6000} 
+      <Snackbar
+        open={!!error}
+        autoHideDuration={6000}
         onClose={() => setError(null)}
         anchorOrigin={{ vertical: 'top', horizontal: 'center' }}
       >
-        <Alert 
-          onClose={() => setError(null)} 
-          severity="error" 
+        <Alert
+          onClose={() => setError(null)}
+          severity="error"
           variant="filled"
           sx={{ width: '100%' }}
         >
           {error}
         </Alert>
       </Snackbar>
-      <Dialog 
-        open={expandedDescription} 
+      <Dialog
+        open={expandedDescription}
         onClose={handleCloseDescriptionDialog}
         fullWidth
         maxWidth="md"
@@ -867,8 +1041,8 @@ const TaskForm: React.FC<TaskFormProps> = ({ initialData, onCancel, onTaskSaved,
           </Button>
         </DialogActions>
       </Dialog>
-      <Dialog 
-        open={expandedOutput} 
+      <Dialog
+        open={expandedOutput}
         onClose={handleCloseOutputDialog}
         fullWidth
         maxWidth="md"
@@ -899,6 +1073,12 @@ const TaskForm: React.FC<TaskFormProps> = ({ initialData, onCancel, onTaskSaved,
           </Button>
         </DialogActions>
       </Dialog>
+
+      {/* Best Practices Dialog */}
+      <TaskBestPractices
+        open={showBestPractices}
+        onClose={() => setShowBestPractices(false)}
+      />
 
     </>
   );

@@ -19,7 +19,6 @@ export class SchemaService {
   private constructor() {
     // Initialize service
     this.clearCaches();
-    console.log('SchemaService initialized');
   }
 
   public static getInstance(): SchemaService {
@@ -53,7 +52,6 @@ export class SchemaService {
    * Clear all caches
    */
   public clearCaches(): void {
-    console.log('Clearing schema caches');
     this.schemasCache = null;
     this.schemasByTypeCache = {};
   }
@@ -64,17 +62,14 @@ export class SchemaService {
   public async getSchemas(): Promise<Schema[]> {
     // Check cache first
     if (this.isCacheValid(this.schemasCache) && this.schemasCache) {
-      console.log('Using cached schemas');
       return this.schemasCache.data;
     }
 
     try {
-      console.log('Fetching schemas from API...');
       const response = await apiClient.get<SchemaListResponse>('/schemas');
       
       if (response.data && response.data.schemas) {
         let schemas = response.data.schemas;
-        console.log(`Received ${schemas.length} schemas from API`);
         
         // Process schemas to ensure schema_definition is properly handled
         schemas = schemas.map(schema => {
@@ -112,17 +107,14 @@ export class SchemaService {
     // Check cache first
     const typeCache = this.schemasByTypeCache[schemaType];
     if (this.isCacheValid(typeCache)) {
-      console.log(`Using cached schemas for type ${schemaType}`);
       return typeCache.data;
     }
 
     try {
-      console.log(`Fetching schemas of type ${schemaType} from API...`);
       const response = await apiClient.get<SchemaListResponse>(`/schemas/by-type/${schemaType}`);
       
       if (response.data && response.data.schemas) {
         const schemas = response.data.schemas;
-        console.log(`Received ${schemas.length} schemas of type ${schemaType} from API`);
         
         // Update cache
         this.schemasByTypeCache[schemaType] = this.setCache(typeCache, schemas);
@@ -143,11 +135,9 @@ export class SchemaService {
    */
   public async getSchema(schemaName: string): Promise<Schema | null> {
     try {
-      console.log(`Fetching schema ${schemaName} from API...`);
       const response = await apiClient.get<Schema>(`/schemas/${schemaName}`);
       
       if (response.data) {
-        console.log(`Received schema ${schemaName} from API`);
         let schema = response.data;
         
         // Process schema to ensure schema_definition is properly handled
@@ -185,7 +175,6 @@ export class SchemaService {
    */
   public async createSchema(schema: SchemaCreate): Promise<Schema | null> {
     try {
-      console.log(`Creating schema ${schema.name}...`);
       
       // Ensure schema uses schema_definition field
       const schemaToSend = { ...schema };
@@ -193,7 +182,6 @@ export class SchemaService {
       const response = await apiClient.post<Schema>('/schemas', schemaToSend);
       
       if (response.data) {
-        console.log(`Schema ${schema.name} created successfully`);
         
         // Clear caches to ensure fresh data on next fetch
         this.clearCaches();
@@ -232,7 +220,6 @@ export class SchemaService {
    */
   public async updateSchema(schemaName: string, schema: SchemaCreate): Promise<Schema | null> {
     try {
-      console.log(`Updating schema ${schemaName}...`);
       
       // Ensure schema uses schema_definition field
       const schemaToSend = { ...schema };
@@ -240,7 +227,6 @@ export class SchemaService {
       const response = await apiClient.put<Schema>(`/schemas/${schemaName}`, schemaToSend);
       
       if (response.data) {
-        console.log(`Schema ${schemaName} updated successfully`);
         
         // Clear caches to ensure fresh data on next fetch
         this.clearCaches();
@@ -261,10 +247,8 @@ export class SchemaService {
    */
   public async deleteSchema(schemaName: string): Promise<boolean> {
     try {
-      console.log(`Deleting schema ${schemaName}...`);
       await apiClient.delete(`/schemas/${schemaName}`);
       
-      console.log(`Schema ${schemaName} deleted successfully`);
       
       // Clear caches to ensure fresh data on next fetch
       this.clearCaches();

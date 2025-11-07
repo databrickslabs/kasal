@@ -1,7 +1,12 @@
+import { Run } from '../api/ExecutionHistoryService';
+
 export interface ShowTraceProps {
   open: boolean;
   onClose: () => void;
   runId: string;
+  run?: Run;
+  onViewResult?: (run: Run) => void;
+  onShowLogs?: (jobId: string) => void;
 }
 
 export interface Trace {
@@ -13,6 +18,7 @@ export interface Trace {
   created_at: string;
   output: string | Record<string, unknown>;
   extra_data?: Record<string, unknown>;
+  trace_metadata?: Record<string, unknown>;
 }
 
 export interface TaskDetails {

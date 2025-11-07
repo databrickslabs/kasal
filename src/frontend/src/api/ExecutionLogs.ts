@@ -1,5 +1,5 @@
 import { EventEmitter } from 'events';
-import { config } from '../config/api/ApiConfig';
+import { config, apiClient } from '../config/api/ApiConfig';
 
 export interface LogMessage {
   id?: number;
@@ -42,15 +42,10 @@ class ExecutionLogService {
 
   async getHistoricalLogs(jobId: string, limit = 1000, offset = 0): Promise<LogMessage[]> {
     try {
-      const response = await fetch(`${this.apiUrl}/runs/${jobId}/outputs?limit=${limit}&offset=${offset}`);
-      if (!response.ok) {
-        if (response.status === 404) {
-          console.warn(`No logs found for job ${jobId}`);
-          return [];
-        }
-        throw new Error(`HTTP error! status: ${response.status}`);
-      }
-      const data = await response.json();
+      const response = await apiClient.get(`/runs/${jobId}/outputs`, {
+        params: { limit, offset }
+      });
+      const data = response.data;
       
       const logs = data.logs || [];
       return logs.map((log: BackendLogEntry) => ({
@@ -62,7 +57,11 @@ class ExecutionLogService {
         timestamp: log.timestamp,
         type: 'historical'
       }));
-    } catch (error) {
+    } catch (error: unknown) {
+      if (error instanceof Error && 'response' in error && (error as any).response?.status === 404) {
+        console.warn(`No logs found for job ${jobId}`);
+        return [];
+      }
       console.error('Error fetching historical logs:', error);
       throw error;
     }
@@ -98,6 +97,46 @@ class ExecutionLogService {
         try {
           const data = JSON.parse(event.data);
           
+          // Check if the content is a JSON string containing task status update
+          let parsedContent: Record<string, unknown> | null = null;
+          try {
+            if (typeof data.content === 'string' && data.content.includes('"type":"task_status_update"')) {
+              parsedContent = JSON.parse(data.content);
+            }
+          } catch {
+            // Not a JSON content, treat as regular log
+          }
+          
+          // Handle task status updates
+          if (parsedContent && parsedContent.type === 'task_status_update') {
+            // Import the store dynamically to avoid circular dependencies
+            import('../store/taskExecutionStore').then(({ useTaskExecutionStore }) => {
+              const { setTaskState } = useTaskExecutionStore.getState();
+
+              if (parsedContent) {
+                const taskId = (parsedContent as any).task_id || `task_${(parsedContent as any).task_name}`;
+                const status = (parsedContent as any).event_type === 'TASK_STARTED' ? 'running' :
+                              (parsedContent as any).event_type === 'TASK_COMPLETED' ? 'completed' :
+                              'failed';
+
+                setTaskState(taskId, {
+                  status,
+                  task_name: (parsedContent as any).task_name,
+                  [`${status === 'running' ? 'started' : status}_at`]: (parsedContent as any).timestamp
+                });
+
+                console.log(`Task status update: ${taskId} is now ${status}`);
+              }
+            });
+            
+            // Also emit event for other listeners
+            this.eventEmitter.emit(`task-status-${jobId}`, parsedContent);
+            
+            // Don't emit as a regular log since it's a status update
+            return;
+          }
+          
+          // Handle regular log messages
           const logMessage: LogMessage = {
             id: data.id || Date.now(),
             job_id: jobId,
@@ -197,6 +236,14 @@ class ExecutionLogService {
 
   onClose(jobId: string, callback: (event: CloseEvent) => void): () => void {
     const eventName = `close-${jobId}`;
+    this.eventEmitter.on(eventName, callback);
+    return () => {
+      this.eventEmitter.off(eventName, callback);
+    };
+  }
+
+  onTaskStatus(jobId: string, callback: (status: Record<string, unknown>) => void): () => void {
+    const eventName = `task-status-${jobId}`;
     this.eventEmitter.on(eventName, callback);
     return () => {
       this.eventEmitter.off(eventName, callback);

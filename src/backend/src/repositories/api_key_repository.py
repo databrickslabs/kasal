@@ -23,26 +23,30 @@ class ApiKeyRepository(BaseRepository[ApiKey]):
         """
         super().__init__(ApiKey, session)
     
-    async def find_by_name(self, name: str) -> Optional[ApiKey]:
+    async def find_by_name(self, name: str, group_id: Optional[str] = None) -> Optional[ApiKey]:
         """
-        Find an API key by name.
+        Find an API key by name, optionally filtered by group.
         
         Args:
             name: Name to search for
+            group_id: Optional group ID to filter by
             
         Returns:
             ApiKey if found, else None
         """
         query = select(self.model).where(self.model.name == name)
+        if group_id is not None:
+            query = query.where(self.model.group_id == group_id)
         result = await self.session.execute(query)
         return result.scalars().first()
     
-    def find_by_name_sync(self, name: str) -> Optional[ApiKey]:
+    def find_by_name_sync(self, name: str, group_id: Optional[str] = None) -> Optional[ApiKey]:
         """
-        Find an API key by name synchronously.
+        Find an API key by name synchronously, optionally filtered by group.
         
         Args:
             name: Name to search for
+            group_id: Optional group ID to filter by
             
         Returns:
             ApiKey if found, else None
@@ -51,17 +55,24 @@ class ApiKeyRepository(BaseRepository[ApiKey]):
             raise TypeError("Session must be a synchronous SQLAlchemy Session for find_by_name_sync")
         
         query = select(self.model).where(self.model.name == name)
+        if group_id is not None:
+            query = query.where(self.model.group_id == group_id)
         result = self.session.execute(query)
         return result.scalars().first()
     
-    async def find_all(self) -> List[ApiKey]:
+    async def find_all(self, group_id: Optional[str] = None) -> List[ApiKey]:
         """
-        Find all API keys.
+        Find all API keys, optionally filtered by group.
         
+        Args:
+            group_id: Optional group ID to filter by
+            
         Returns:
             List of all API keys
         """
         query = select(self.model)
+        if group_id is not None:
+            query = query.where(self.model.group_id == group_id)
         result = await self.session.execute(query)
         return list(result.scalars().all())
     

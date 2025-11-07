@@ -25,7 +25,6 @@ def mock_group_context():
     return GroupContext(
         group_ids=["test-group"],
         group_email="test@example.com",
-        email_domain="example.com",
         user_id="user-123"
     )
 

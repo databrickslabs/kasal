@@ -26,7 +26,9 @@ import FileIcon from '@mui/icons-material/InsertDriveFile';
 import CheckCircleIcon from '@mui/icons-material/CheckCircle';
 import ErrorIcon from '@mui/icons-material/Error';
 
-import { uploadService, UploadedFileInfo } from '../../api/UploadService';
+// DISABLED: Local file uploads removed - use Databricks volumes instead
+// import { uploadService, UploadedFileInfo } from '../../api/UploadService';
+import { UploadedFileInfo } from '../../types/agent';
 import { KnowledgeSourcesSectionProps } from '../../types/agent';
 
 type KnowledgeSourceMetadata = {
@@ -51,6 +53,22 @@ const sourceTypes = [
   { value: 'url', label: 'URL', description: 'Web URLs or online resources' },
   { value: 'docling', label: 'CrewDocling', description: 'Multiple file formats including TXT, PDF, DOCX, HTML' },
 ];
+
+// Helper function to format file size
+const formatFileSize = (bytes?: number): string => {
+  if (bytes === undefined) return 'Unknown size';
+  
+  const units = ['B', 'KB', 'MB', 'GB'];
+  let size = bytes;
+  let unitIndex = 0;
+  
+  while (size >= 1024 && unitIndex < units.length - 1) {
+    size /= 1024;
+    unitIndex++;
+  }
+  
+  return `${size.toFixed(1)} ${units[unitIndex]}`;
+};
 
 export const KnowledgeSourcesSection: React.FC<KnowledgeSourcesSectionProps> = ({
   knowledgeSources,
@@ -86,7 +104,9 @@ export const KnowledgeSourcesSection: React.FC<KnowledgeSourcesSectionProps> = (
       
       try {
         // Always verify file existence to ensure fileInfo is current
-        const fileInfo = await uploadService.checkKnowledgeFile(source.source);
+        // DISABLED: Local file checking removed - use Databricks volumes
+        // const fileInfo = await uploadService.checkKnowledgeFile(source.source);
+        const fileInfo = { filename: source.source, path: source.source, full_path: source.source, is_uploaded: false, exists: false };
         
         // Update source with file info
         updatedSources[index] = {
@@ -203,7 +223,9 @@ export const KnowledgeSourcesSection: React.FC<KnowledgeSourcesSectionProps> = (
     
     try {
       // Check if file exists on server
-      const fileInfo = await uploadService.checkKnowledgeFile(filename);
+      // DISABLED: Local file checking removed - use Databricks volumes
+      // const fileInfo = await uploadService.checkKnowledgeFile(filename);
+      const fileInfo = { filename, path: filename, full_path: filename, is_uploaded: false, exists: false };
       
       // Update source with file info
       const newSources = [...knowledgeSources];
@@ -239,7 +261,9 @@ export const KnowledgeSourcesSection: React.FC<KnowledgeSourcesSectionProps> = (
 
     try {
       // Upload file using the UploadService
-      const response = await uploadService.uploadKnowledgeFile(file);
+      // DISABLED: Local file upload removed - use Databricks volumes
+    // const response = await uploadService.uploadKnowledgeFile(file);
+    const response = { filename: file.name, path: file.name, full_path: file.name, is_uploaded: false, exists: false, file_size_bytes: file.size, success: false };
 
       // Update the knowledge source with the file path returned from the server
       if (response.success) {
@@ -460,7 +484,7 @@ export const KnowledgeSourcesSection: React.FC<KnowledgeSourcesSectionProps> = (
                               <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
                                 <span>{source.source.split('/').pop()}</span>
                                 <Typography variant="caption" sx={{ color: 'text.secondary' }}>
-                                  ({uploadService.formatFileSize(source.fileInfo.file_size_bytes)})
+                                  ({formatFileSize(source.fileInfo.file_size_bytes)})
                                 </Typography>
                                 <CheckCircleIcon fontSize="small" color="success" />
                               </Box>

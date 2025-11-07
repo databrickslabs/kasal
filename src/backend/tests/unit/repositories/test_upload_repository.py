@@ -5,6 +5,10 @@ Tests the functionality of upload repository including
 file saving, file listing, file existence checking, and error handling.
 """
 import pytest
+
+# Skip all tests in this module since upload functionality has been disabled
+# in favor of Databricks volumes
+pytestmark = pytest.mark.skip(reason="Upload functionality disabled - using Databricks volumes instead")
 import os
 import tempfile
 import shutil
@@ -15,7 +19,10 @@ from io import BytesIO
 
 from fastapi import UploadFile
 
-from src.repositories.upload_repository import UploadRepository
+# Create a dummy UploadRepository since the actual module is disabled
+class UploadRepository:
+    """Dummy class for disabled upload repository"""
+    pass
 
 
 # Mock UploadFile class

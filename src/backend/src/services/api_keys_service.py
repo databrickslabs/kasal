@@ -24,64 +24,87 @@ logger = logging.getLogger(__name__)
 class ApiKeysService(BaseService):
     """Service for managing API keys."""
     
-    def __init__(self, session=None, repository=None):
+    def __init__(self, session: AsyncSession, group_id: Optional[str] = None):
         """
-        Initialize the service with session or repository.
-        
+        Initialize the service with session.
+
         Args:
-            session: SQLAlchemy session (can be async or sync, for backwards compatibility)
-            repository: ApiKeyRepository instance (preferred way)
+            session: Database session from FastAPI DI
+            group_id: Group ID for multi-tenant filtering
         """
-        if repository is not None:
-            self.repository = repository
-            self.session = None  # No session needed when repository is provided
-            self.is_async = True  # Assume always async with repository
-        elif session is not None:
-            self.session = session
-            self.repository = ApiKeyRepository(session)
-            self.is_async = not isinstance(session, Session)
-        else:
-            raise ValueError("Either session or repository must be provided")
-        
+        self.repository = ApiKeyRepository(session)
         self.encryption_utils = EncryptionUtils()
+        self.group_id = group_id
+        self.session = None  # For compatibility with older code
+        self.is_async = True  # Always async now
     
     async def find_by_name(self, name: str) -> Optional[ApiKey]:
         """
-        Find an API key by name.
-        
+        Find an API key by name within the current group context.
+
+        SECURITY: This method REQUIRES a group_id for multi-tenant isolation.
+        API keys are ALWAYS scoped to a group and cannot be queried system-wide.
+
         Args:
             name: Name to search for
-            
+
         Returns:
             ApiKey if found, else None
+
+        Raises:
+            ValueError: If group_id is None (multi-tenant isolation required)
         """
         if not self.is_async:
             # If using a sync session, call the sync method
             return self.find_by_name_sync(name)
-        return await self.repository.find_by_name(name)
+
+        # SECURITY CHECK: ALWAYS enforce group_id filtering
+        if self.group_id is None:
+            raise ValueError(
+                "SECURITY: Cannot query API keys without group_id. "
+                "All API keys must be scoped to a group for multi-tenant isolation. "
+                "Provide a valid group_id when creating ApiKeysService."
+            )
+
+        return await self.repository.find_by_name(name, group_id=self.group_id)
     
     def find_by_name_sync(self, name: str) -> Optional[ApiKey]:
         """
-        Find an API key by name synchronously.
-        
+        Find an API key by name synchronously within the current group context.
+
+        SECURITY: This method REQUIRES a group_id for multi-tenant isolation.
+        API keys are ALWAYS scoped to a group and cannot be queried system-wide.
+
         Args:
             name: Name to search for
-            
+
         Returns:
             ApiKey if found, else None
+
+        Raises:
+            ValueError: If group_id is None (multi-tenant isolation required)
         """
         # Make sure we're using a synchronous session
         if not isinstance(self.session, Session):
             raise TypeError("This method requires a synchronous session")
-        
-        return self.repository.find_by_name_sync(name)
+
+        # SECURITY CHECK: ALWAYS enforce group_id filtering
+        if self.group_id is None:
+            raise ValueError(
+                "SECURITY: Cannot query API keys without group_id. "
+                "All API keys must be scoped to a group for multi-tenant isolation. "
+                "Provide a valid group_id when creating ApiKeysService."
+            )
+
+        return self.repository.find_by_name_sync(name, group_id=self.group_id)
     
-    async def create_api_key(self, api_key_data: ApiKeyCreate) -> ApiKey:
+    async def create_api_key(self, api_key_data: ApiKeyCreate, created_by_email: Optional[str] = None) -> ApiKey:
         """
         Create a new API key with encrypted value.
         
         Args:
             api_key_data: API key data for creation
+            created_by_email: Email of the user creating the key
             
         Returns:
             Created API key
@@ -93,7 +116,9 @@ class ApiKeysService(BaseService):
         api_key_dict = {
             "name": api_key_data.name,
             "encrypted_value": encrypted_value,
-            "description": api_key_data.description or ""
+            "description": api_key_data.description or "",
+            "group_id": self.group_id,
+            "created_by_email": created_by_email
         }
         
         # Save to database
@@ -158,12 +183,12 @@ class ApiKeysService(BaseService):
     
     async def get_all_api_keys(self) -> List[ApiKey]:
         """
-        Get all API keys with decrypted values.
+        Get all API keys with decrypted values for the current group.
         
         Returns:
             List of all API keys with decrypted values
         """
-        api_keys = await self.repository.find_all()
+        api_keys = await self.repository.find_all(group_id=self.group_id)
         
         # Decrypt values for the response
         for key in api_keys:
@@ -187,7 +212,7 @@ class ApiKeysService(BaseService):
         Returns:
             List of API keys with metadata and set/not set status
         """
-        api_keys = await self.repository.find_all()
+        api_keys = await self.repository.find_all(group_id=self.group_id)
         
         # Set status indicator instead of actual values for security
         for key in api_keys:
@@ -198,32 +223,45 @@ class ApiKeysService(BaseService):
         return api_keys
     
     @classmethod
-    async def get_api_key_value(cls, db: AsyncSession = None, key_name: str = None):
+    async def get_api_key_value(cls, db: AsyncSession = None, key_name: str = None, group_id: str = None):
         """
         Get the value of an API key by name (decrypted).
-        
+
+        SECURITY: Requires group_id for multi-tenant isolation.
+
         Args:
             db: Database session (deprecated, kept for backwards compatibility)
             key_name: Name of the API key
-            
+            group_id: Group ID for multi-tenant filtering (REQUIRED)
+
         Returns:
             Decrypted API key value if found, else None
+
+        Raises:
+            ValueError: If group_id is not provided
         """
         # If key_name was passed as first argument and db as second or not at all
         if db is not None and isinstance(db, str):
             key_name = db
             db = None
-        
-        # Create a service instance using UnitOfWork pattern
-        from src.core.unit_of_work import UnitOfWork
-        async with UnitOfWork() as uow:
-            service = await cls.from_unit_of_work(uow)
-            
+
+        # SECURITY CHECK: group_id is required
+        if group_id is None:
+            raise ValueError(
+                "SECURITY: group_id is required for get_api_key_value(). "
+                "All API key operations must be scoped to a group."
+            )
+
+        # Create a service instance using session factory
+        from src.db.session import async_session_factory
+        async with async_session_factory() as session:
+            service = cls(session, group_id=group_id)
+
             # Find the API key
             api_key = await service.find_by_name(key_name)
             if not api_key:
                 return None
-            
+
             # Decrypt and return the value
             try:
                 return EncryptionUtils.decrypt_value(api_key.encrypted_value)
@@ -291,173 +329,223 @@ class ApiKeysService(BaseService):
             return False
             
     @classmethod
-    async def setup_openai_api_key(cls, db: AsyncSession = None) -> bool:
+    async def setup_openai_api_key(cls, db: AsyncSession = None, group_id: str = None) -> bool:
         """
         Set up the OpenAI API key from the database.
-        
+
+        SECURITY: Requires group_id for multi-tenant isolation.
+
         Args:
             db: Optional database session (for backwards compatibility)
-            
+            group_id: Group ID for multi-tenant filtering (REQUIRED)
+
         Returns:
             True if key was found and set up successfully, False otherwise
+
+        Raises:
+            ValueError: If group_id is not provided
         """
+        if group_id is None:
+            raise ValueError(
+                "SECURITY: group_id is REQUIRED for setup_openai_api_key(). "
+                "All API key operations must be scoped to a group."
+            )
         try:
-            # Create a service instance using UnitOfWork pattern
-            from src.core.unit_of_work import UnitOfWork
-            async with UnitOfWork() as uow:
-                value = await cls.get_provider_api_key("openai")
-                if value:
-                    os.environ["OPENAI_API_KEY"] = value
-                    logger.info("OpenAI API key set up successfully")
-                    return True
-                else:
-                    logger.warning("OpenAI API key not found in database")
-                    return False
+            # Use the class method that handles session internally
+            value = await cls.get_provider_api_key("openai", group_id=group_id)
+            if value:
+                os.environ["OPENAI_API_KEY"] = value
+                logger.info("OpenAI API key set up successfully")
+                return True
+            else:
+                logger.warning("OpenAI API key not found in database")
+                return False
         except Exception as e:
             logger.error(f"Error setting up OpenAI API key: {str(e)}")
             return False
         
     @classmethod
-    async def setup_anthropic_api_key(cls, db: AsyncSession = None) -> bool:
+    async def setup_anthropic_api_key(cls, db: AsyncSession = None, group_id: str = None) -> bool:
         """
         Set up the Anthropic API key from the database.
-        
+
+        SECURITY: Requires group_id for multi-tenant isolation.
+
         Args:
             db: Optional database session (for backwards compatibility)
-            
+            group_id: Group ID for multi-tenant filtering (REQUIRED)
+
         Returns:
             True if key was found and set up successfully, False otherwise
+
+        Raises:
+            ValueError: If group_id is not provided
         """
+        if group_id is None:
+            raise ValueError(
+                "SECURITY: group_id is REQUIRED for setup_anthropic_api_key(). "
+                "All API key operations must be scoped to a group."
+            )
         try:
-            # Create a service instance using UnitOfWork pattern
-            from src.core.unit_of_work import UnitOfWork
-            async with UnitOfWork() as uow:
-                value = await cls.get_provider_api_key("anthropic")
-                if value:
-                    os.environ["ANTHROPIC_API_KEY"] = value
-                    logger.info("Anthropic API key set up successfully")
-                    return True
-                else:
-                    logger.warning("Anthropic API key not found in database")
-                    return False
+            # Use the class method that handles session internally
+            value = await cls.get_provider_api_key("anthropic", group_id=group_id)
+            if value:
+                os.environ["ANTHROPIC_API_KEY"] = value
+                logger.info("Anthropic API key set up successfully")
+                return True
+            else:
+                logger.warning("Anthropic API key not found in database")
+                return False
         except Exception as e:
             logger.error(f"Error setting up Anthropic API key: {str(e)}")
             return False
         
     @classmethod
-    async def setup_deepseek_api_key(cls, db: AsyncSession = None) -> bool:
+    async def setup_deepseek_api_key(cls, db: AsyncSession = None, group_id: str = None) -> bool:
         """
         Set up the DeepSeek API key from the database.
-        
+
+        SECURITY: Requires group_id for multi-tenant isolation.
+
         Args:
             db: Optional database session (for backwards compatibility)
-            
+            group_id: Group ID for multi-tenant filtering (REQUIRED)
+
         Returns:
             True if key was found and set up successfully, False otherwise
+
+        Raises:
+            ValueError: If group_id is not provided
         """
+        if group_id is None:
+            raise ValueError(
+                "SECURITY: group_id is REQUIRED for setup_deepseek_api_key(). "
+                "All API key operations must be scoped to a group."
+            )
         try:
-            # Create a service instance using UnitOfWork pattern
-            from src.core.unit_of_work import UnitOfWork
-            async with UnitOfWork() as uow:
-                value = await cls.get_provider_api_key("deepseek")
-                if value:
-                    os.environ["DEEPSEEK_API_KEY"] = value
-                    logger.info("DeepSeek API key set up successfully")
-                    return True
-                else:
-                    logger.warning("DeepSeek API key not found in database")
-                    return False
+            # Use the class method that handles session internally
+            value = await cls.get_provider_api_key("deepseek", group_id=group_id)
+            if value:
+                os.environ["DEEPSEEK_API_KEY"] = value
+                logger.info("DeepSeek API key set up successfully")
+                return True
+            else:
+                logger.warning("DeepSeek API key not found in database")
+                return False
         except Exception as e:
             logger.error(f"Error setting up DeepSeek API key: {str(e)}")
             return False
             
     @classmethod
-    async def setup_gemini_api_key(cls, db: AsyncSession = None) -> bool:
+    async def setup_gemini_api_key(cls, db: AsyncSession = None, group_id: str = None) -> bool:
         """
         Set up the Gemini API key from the database.
-        
+
+        SECURITY: Requires group_id for multi-tenant isolation.
+
         Args:
             db: Optional database session (for backwards compatibility)
-            
+            group_id: Group ID for multi-tenant filtering (REQUIRED)
+
         Returns:
             True if key was found and set up successfully, False otherwise
+
+        Raises:
+            ValueError: If group_id is not provided
         """
+        if group_id is None:
+            raise ValueError(
+                "SECURITY: group_id is REQUIRED for setup_gemini_api_key(). "
+                "All API key operations must be scoped to a group."
+            )
         try:
-            # Create a service instance using UnitOfWork pattern
-            from src.core.unit_of_work import UnitOfWork
-            async with UnitOfWork() as uow:
-                value = await cls.get_provider_api_key("gemini")
-                if value:
-                    os.environ["GEMINI_API_KEY"] = value
-                    logger.info("Gemini API key set up successfully")
-                    return True
-                else:
-                    logger.warning("Gemini API key not found in database")
-                    return False
+            # Use the class method that handles session internally
+            value = await cls.get_provider_api_key("gemini", group_id=group_id)
+            if value:
+                os.environ["GEMINI_API_KEY"] = value
+                logger.info("Gemini API key set up successfully")
+                return True
+            else:
+                logger.warning("Gemini API key not found in database")
+                return False
         except Exception as e:
             logger.error(f"Error setting up Gemini API key: {str(e)}")
             return False
         
     @classmethod
-    async def setup_all_api_keys(cls, db = None) -> None:
+    async def setup_all_api_keys(cls, db = None, group_id: str = None) -> None:
         """
         Set up all supported API keys from the database.
-        
+
+        SECURITY: Requires group_id for multi-tenant isolation.
+
         Args:
             db: Optional database session (for backwards compatibility)
+            group_id: Group ID for multi-tenant filtering (REQUIRED)
+
+        Raises:
+            ValueError: If group_id is not provided
         """
+        if group_id is None:
+            raise ValueError(
+                "SECURITY: group_id is REQUIRED for setup_all_api_keys(). "
+                "All API key operations must be scoped to a group."
+            )
+
         # Check if we have a synchronous session
         if db is not None and isinstance(db, Session):
-            # Use the synchronous methods
+            # NOTE: Sync methods are deprecated and don't support group_id properly
+            # This path should not be used in production
+            logger.warning("Using deprecated sync API key setup - security may be compromised")
             ApiKeysService.setup_provider_api_key_sync(db, "OPENAI_API_KEY")
             ApiKeysService.setup_provider_api_key_sync(db, "ANTHROPIC_API_KEY")
             ApiKeysService.setup_provider_api_key_sync(db, "DEEPSEEK_API_KEY")
             ApiKeysService.setup_provider_api_key_sync(db, "GEMINI_API_KEY")
         else:
             # Use the async methods that now use UnitOfWork
-            await cls.setup_openai_api_key()
-            await cls.setup_anthropic_api_key()
-            await cls.setup_deepseek_api_key()
-            await cls.setup_gemini_api_key()
+            await cls.setup_openai_api_key(group_id=group_id)
+            await cls.setup_anthropic_api_key(group_id=group_id)
+            await cls.setup_deepseek_api_key(group_id=group_id)
+            await cls.setup_gemini_api_key(group_id=group_id)
     
     @classmethod
-    async def from_unit_of_work(cls, uow):
-        """
-        Create a service instance from a UnitOfWork.
-        
-        Args:
-            uow: UnitOfWork instance
-            
-        Returns:
-            ApiKeysService: Service instance using the UnitOfWork's repository
-        """
-        return cls(repository=uow.api_key_repository)
-    
-    @classmethod
-    async def get_provider_api_key(cls, provider: str) -> Optional[str]:
+    async def get_provider_api_key(cls, provider: str, group_id: str) -> Optional[str]:
         """
         Get API key for a specific provider using the repository pattern.
         This method handles encryption/decryption and doesn't require a db session.
-        
+
+        SECURITY: Requires group_id for multi-tenant isolation.
+
         Args:
             provider: Provider name (e.g., 'openai', 'anthropic', 'deepseek')
-            
+            group_id: Group ID for multi-tenant filtering (REQUIRED)
+
         Returns:
             Decrypted API key if found, None otherwise
+
+        Raises:
+            ValueError: If group_id is not provided
         """
+        # SECURITY CHECK: group_id is required
+        if group_id is None:
+            raise ValueError(
+                "SECURITY: group_id is required for get_provider_api_key(). "
+                "All API key operations must be scoped to a group."
+            )
+
         try:
-            # Create a service instance using UnitOfWork pattern
-            from src.core.unit_of_work import UnitOfWork
-            async with UnitOfWork() as uow:
-                service = await cls.from_unit_of_work(uow)
-                
+            # Create a service instance using session factory
+            from src.db.session import async_session_factory
+            async with async_session_factory() as session:
+                service = cls(session, group_id=group_id)
+
                 # Find the API key by name (provider name with _API_KEY suffix)
                 key_name = f"{provider.upper()}_API_KEY"
                 api_key = await service.find_by_name(key_name)
                 if not api_key:
-                    logger.warning(f"No API key found for provider: {provider}")
+                    logger.warning(f"No API key found for provider: {provider} with group_id: {group_id}")
                     return None
-                
+
                 # Decrypt the API key value
                 try:
                     decrypted_value = EncryptionUtils.decrypt_value(api_key.encrypted_value)
@@ -465,7 +553,7 @@ class ApiKeysService(BaseService):
                 except Exception as e:
                     logger.error(f"Error decrypting API key for provider {provider}: {str(e)}")
                     return None
-                    
+
         except Exception as e:
             logger.error(f"Error getting provider API key: {str(e)}")
             return None 

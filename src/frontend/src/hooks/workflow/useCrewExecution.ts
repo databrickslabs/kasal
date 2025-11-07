@@ -3,7 +3,6 @@ import { Node, Edge } from 'reactflow';
 import { useCrewExecutionStore } from '../../store/crewExecution';
 import { useErrorStore } from '../../store/error';
 import { useRunStatusStore } from '../../store/runStatus';
-import { logEdgeDetails } from '../../utils/flowUtils';
 
 interface CrewExecutionResponse {
   job_id: string;
@@ -30,8 +29,6 @@ export const useCrewExecution = (): UseCrewExecutionResult => {
       if (typeof setIsExecuting === 'function') {
         setIsExecuting(true);
       }
-      
-      logEdgeDetails(edges, "Starting crew execution with edges:");
       
       const currentNodes = nodes.map(node => ({ ...node }));
       const currentEdges = edges.map(edge => ({ ...edge }));

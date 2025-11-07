@@ -107,7 +107,14 @@ export const useWorkflowRedux = ({ showErrorMessage }: UseWorkflowReduxProps) =>
         return;
       }
 
-      addEdge(params);
+      // Enforce horizontal connectors for Agent -> Task edges: agent right -> task left
+      // This is consistent regardless of layout orientation
+      let enforcedParams = params;
+      if (sourceNode.type === 'agentNode' && targetNode.type === 'taskNode') {
+        enforcedParams = { ...params, sourceHandle: 'right', targetHandle: 'left' };
+      }
+
+      addEdge(enforcedParams);
     }
   }, [nodes, addEdge, t, showErrorMessage]);
 

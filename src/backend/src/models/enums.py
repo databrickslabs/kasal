@@ -19,9 +19,8 @@ class GroupStatus(str, Enum):
 
 class GroupUserRole(str, Enum):
     ADMIN = "admin"           # Full control within group
-    MANAGER = "manager"       # Can manage users and workflows
-    USER = "user"            # Can execute workflows
-    VIEWER = "viewer"        # Read-only access
+    EDITOR = "editor"         # Can build and modify workflows
+    OPERATOR = "operator"     # Can execute workflows and monitor
 
 class GroupUserStatus(str, Enum):
     ACTIVE = "active"
@@ -36,9 +35,8 @@ class TenantStatus(str, Enum):
 
 class TenantUserRole(str, Enum):
     ADMIN = "admin"           # Full control within tenant
-    MANAGER = "manager"       # Can manage users and workflows
-    USER = "user"            # Can execute workflows
-    VIEWER = "viewer"        # Read-only access
+    EDITOR = "editor"         # Can build and modify workflows
+    OPERATOR = "operator"     # Can execute workflows and monitor
 
 class TenantUserStatus(str, Enum):
     ACTIVE = "active"

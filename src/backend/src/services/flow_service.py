@@ -310,7 +310,7 @@ class FlowService:
             await repository.delete_all()
         except Exception as e:
             logger.error(f"Error deleting all flows: {str(e)}")
-            raise HTTPException(status_code=500, detail=f"Error deleting all flows: {str(e)}")
+            raise HTTPException(status_code=500, detail=f"Error deleting all flows for group: {str(e)}")
             
     async def validate_flow_data(self, flow_in: FlowCreate) -> Dict[str, Any]:
         """

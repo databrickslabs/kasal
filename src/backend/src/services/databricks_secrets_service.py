@@ -10,8 +10,6 @@ import logging
 import aiohttp
 import base64
 from typing import List, Optional, Dict, Tuple, Any
-from sqlalchemy.orm import Session
-from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.core.base_service import BaseService
 from src.repositories.databricks_config_repository import DatabricksConfigRepository
@@ -22,17 +20,29 @@ logger = logging.getLogger(__name__)
 
 class DatabricksSecretsService(BaseService):
     """Service for managing Databricks secrets."""
-    
-    def __init__(self, databricks_repository: DatabricksConfigRepository):
+
+    def __init__(self, session: Any, group_id: Optional[str] = None):
         """
-        Initialize the service with a repository instance.
-        
+        Initialize the service with session.
+
         Args:
-            databricks_repository: Repository for Databricks configuration
+            session: Database session from dependency injection
+            group_id: Group ID for multi-tenant isolation (SECURITY)
         """
-        self.databricks_repository = databricks_repository
+        self.session = session
+        self.group_id = group_id  # SECURITY: Store for multi-tenant API key operations
+        self.databricks_repository = DatabricksConfigRepository(session)
         self.api_keys_service = None
-        self.databricks_service = None  # Will be set later
+        self._databricks_service = None  # Will be created lazily
+
+    @property
+    def databricks_service(self):
+        """Lazy load databricks_service to avoid circular dependency."""
+        if self._databricks_service is None:
+            # Import here to avoid circular imports at module level
+            from src.services.databricks_service import DatabricksService
+            self._databricks_service = DatabricksService(self.session)
+        return self._databricks_service
     
     def set_databricks_service(self, databricks_service):
         """
@@ -107,11 +117,13 @@ class DatabricksSecretsService(BaseService):
                 logger.warning("Databricks not configured properly")
                 return []
             
-            # Use token from environment variable
-            token = os.getenv("DATABRICKS_TOKEN", "")
-            if not token:
-                logger.warning("DATABRICKS_TOKEN environment variable not set")
+            # Use unified authentication
+            from src.utils.databricks_auth import get_auth_context
+            auth = await get_auth_context()
+            if not auth:
+                logger.warning("Failed to get authentication context")
                 return []
+            token = auth.token
             
             # Make REST API call to list secrets in scope
             url = f"{config.workspace_url}/api/2.0/secrets/list"
@@ -174,11 +186,13 @@ class DatabricksSecretsService(BaseService):
                 logger.warning("Databricks not configured properly")
                 return ""
             
-            # Use token from environment variable
-            token = os.getenv("DATABRICKS_TOKEN", "")
-            if not token:
-                logger.warning("DATABRICKS_TOKEN environment variable not set")
+            # Use unified authentication
+            from src.utils.databricks_auth import get_auth_context
+            auth = await get_auth_context()
+            if not auth:
+                logger.warning("Failed to get authentication context")
                 return ""
+            token = auth.token
             
             # Make REST API call to get secret value
             url = f"{config.workspace_url}/api/2.0/secrets/get"
@@ -232,11 +246,13 @@ class DatabricksSecretsService(BaseService):
                 logger.warning("Databricks not configured properly")
                 return False
             
-            # Use token from environment variable
-            token = os.getenv("DATABRICKS_TOKEN", "")
-            if not token:
-                logger.warning("DATABRICKS_TOKEN environment variable not set")
+            # Use unified authentication
+            from src.utils.databricks_auth import get_auth_context
+            auth = await get_auth_context()
+            if not auth:
+                logger.warning("Failed to get authentication context")
                 return False
+            token = auth.token
             
             # Ensure the scope exists
             await self.create_databricks_secret_scope(config.workspace_url, token, scope)
@@ -289,11 +305,13 @@ class DatabricksSecretsService(BaseService):
                 logger.warning("Databricks not configured properly")
                 return False
             
-            # Use token from environment variable
-            token = os.getenv("DATABRICKS_TOKEN", "")
-            if not token:
-                logger.warning("DATABRICKS_TOKEN environment variable not set")
+            # Use unified authentication
+            from src.utils.databricks_auth import get_auth_context
+            auth = await get_auth_context()
+            if not auth:
+                logger.warning("Failed to get authentication context")
                 return False
+            token = auth.token
             
             # Make REST API call to delete secret
             url = f"{config.workspace_url}/api/2.0/secrets/delete"
@@ -371,7 +389,7 @@ class DatabricksSecretsService(BaseService):
         return await self.set_databricks_secret_value(scope, "DATABRICKS_TOKEN", token)
 
     @classmethod
-    async def setup_provider_api_key(cls, db: AsyncSession, key_name: str) -> bool:
+    async def setup_provider_api_key(cls, db: Any, key_name: str) -> bool:
         """
         Set up an API key for a provider from database.
         
@@ -385,9 +403,18 @@ class DatabricksSecretsService(BaseService):
         try:
             # Use ApiKeysService to get the key first
             from src.services.api_keys_service import ApiKeysService
-            
+
+            # SECURITY: Get group_id (db parameter might be session or group_id depending on caller)
+            # This is a class method so we need to infer group_id from context
+            from src.utils.user_context import UserContext
+            try:
+                group_context = UserContext.get_group_context()
+                group_id = group_context.primary_group_id if group_context and hasattr(group_context, 'primary_group_id') else None
+            except Exception:
+                group_id = None
+
             # Try to get API key from API keys table
-            value = await ApiKeysService.get_api_key_value(db, key_name)
+            value = await ApiKeysService.get_api_key_value(db, key_name, group_id=group_id)
             
             # If not found in API keys, try Databricks secrets
             if not value:
@@ -421,7 +448,7 @@ class DatabricksSecretsService(BaseService):
             return False
             
     @staticmethod
-    def _setup_provider_api_key_sync(db: Session, key_name: str) -> bool:
+    def _setup_provider_api_key_sync(db: Any, key_name: str) -> bool:
         """
         Set up an API key for any provider from the database (synchronous).
         
@@ -478,7 +505,8 @@ class DatabricksSecretsService(BaseService):
             
             # Use the service static method to get provider API key
             from src.services.api_keys_service import ApiKeysService
-            key = await ApiKeysService.get_provider_api_key(provider)
+            # SECURITY: Pass group_id for multi-tenant isolation
+            key = await ApiKeysService.get_provider_api_key(provider, group_id=self.group_id)
             return key or ""
         except Exception as e:
             logger.error(f"Error getting provider API key: {str(e)}")

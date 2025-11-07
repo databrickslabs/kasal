@@ -26,10 +26,13 @@ import {
   IconButton,
   InputAdornment,
   Alert,
+  Tooltip,
 } from '@mui/material';
 import ExpandMoreIcon from '@mui/icons-material/ExpandMore';
+import HelpOutlineIcon from '@mui/icons-material/HelpOutline';
 import OpenInFullIcon from '@mui/icons-material/OpenInFull';
 import CloseIcon from '@mui/icons-material/Close';
+import DeleteIcon from '@mui/icons-material/Delete';
 import { AgentService } from '../../api/AgentService';
 import { Agent, AgentFormProps, KnowledgeSource } from '../../types/agent';
 import { ModelService } from '../../api/ModelService';
@@ -38,10 +41,13 @@ import { PerplexityConfig, SerperConfig } from '../../types/config';
 
 import { GenerateService } from '../../api/GenerateService';
 import { DefaultMemoryBackendService } from '../../api/DefaultMemoryBackendService';
+import { DatabricksService } from '../../api/DatabricksService';
+import { useAgentStore } from '../../store/agent';
 import { GenieSpaceSelector } from '../Common/GenieSpaceSelector';
 import { PerplexityConfigSelector } from '../Common/PerplexityConfigSelector';
 import { SerperConfigSelector } from '../Common/SerperConfigSelector';
 import { MCPServerSelector } from '../Common/MCPServerSelector';
+import AgentBestPractices from '../BestPractices/AgentBestPractices';
 // TODO: Re-enable when knowledge sources are restored
 // import { KnowledgeSourcesSection } from './KnowledgeSourcesSection';
 
@@ -60,7 +66,8 @@ type AgentFormData = Omit<Agent, 'id' | 'created_at'> & {
   id?: string;
 };
 
-const AgentForm: React.FC<AgentFormProps> = ({ initialData, onCancel, onAgentSaved, tools }) => {
+const AgentForm: React.FC<AgentFormProps> = ({ initialData, onCancel, onAgentSaved, tools, isCreateMode }) => {
+  const { updateAgent } = useAgentStore();
   const [models, setModels] = useState<Models>(DEFAULT_FALLBACK_MODEL);
   const [loadingModels, setLoadingModels] = useState(true);
   const [expandedGoal, setExpandedGoal] = useState<boolean>(false);
@@ -68,7 +75,7 @@ const AgentForm: React.FC<AgentFormProps> = ({ initialData, onCancel, onAgentSav
   const [expandedSystemTemplate, setExpandedSystemTemplate] = useState<boolean>(false);
   const [expandedPromptTemplate, setExpandedPromptTemplate] = useState<boolean>(false);
   const [expandedResponseTemplate, setExpandedResponseTemplate] = useState<boolean>(false);
-  const [selectedGenieSpace, setSelectedGenieSpace] = useState<string>('');
+  const [selectedGenieSpace, setSelectedGenieSpace] = useState<{ id: string; name: string } | null>(null);
   const [perplexityConfig, setPerplexityConfig] = useState<PerplexityConfig>({});
   const [serperConfig, setSerperConfig] = useState<SerperConfig>({});
   const [selectedMcpServers, setSelectedMcpServers] = useState<string[]>([]);
@@ -91,6 +98,7 @@ const AgentForm: React.FC<AgentFormProps> = ({ initialData, onCancel, onAgentSav
       goal: initialData?.goal || '',
       backstory: initialData?.backstory || '',
       llm: initialData?.llm || 'databricks-llama-4-maverick',
+      temperature: initialData?.temperature || undefined,
       tools: initialData?.tools ? initialData.tools.map(id => String(id)) : [],
       function_calling_llm: initialData?.function_calling_llm || undefined,
       max_iter: initialData?.max_iter || 25,
@@ -128,33 +136,31 @@ const AgentForm: React.FC<AgentFormProps> = ({ initialData, onCancel, onAgentSav
   // Load tool_configs and set Genie space and Perplexity config if they exist
   useEffect(() => {
     if (initialData?.tool_configs) {
-      console.log('AgentForm: Loading tool_configs from initialData:', initialData.tool_configs);
       setToolConfigs(initialData.tool_configs);
       
       // Check for GenieTool config - try both spaceId and space_id for compatibility
       const genieConfig = initialData.tool_configs.GenieTool as Record<string, unknown>;
       if (genieConfig) {
-        console.log('AgentForm: Found GenieTool config:', genieConfig);
         const spaceId = genieConfig.spaceId || genieConfig.space_id;
+        const spaceName = genieConfig.spaceName || genieConfig.space_name || spaceId; // Fallback to ID if name not stored
         if (spaceId && typeof spaceId === 'string') {
-          console.log('AgentForm: Setting selectedGenieSpace to:', spaceId);
-          setSelectedGenieSpace(spaceId);
+          setSelectedGenieSpace({
+            id: spaceId as string,
+            name: spaceName as string
+          });
         }
       }
       
       if (initialData.tool_configs.PerplexityTool) {
-        console.log('AgentForm: Found PerplexityTool config:', initialData.tool_configs.PerplexityTool);
         setPerplexityConfig(initialData.tool_configs.PerplexityTool);
       }
       
       if (initialData.tool_configs.SerperDevTool) {
-        console.log('AgentForm: Found SerperDevTool config:', initialData.tool_configs.SerperDevTool);
         setSerperConfig(initialData.tool_configs.SerperDevTool);
       }
       
       // Check for MCP_SERVERS config
       if (initialData.tool_configs.MCP_SERVERS) {
-        console.log('AgentForm: Found MCP_SERVERS config:', initialData.tool_configs.MCP_SERVERS);
         const mcpConfig = initialData.tool_configs.MCP_SERVERS as Record<string, unknown>;
         const mcpServers = Array.isArray(mcpConfig.servers) 
           ? mcpConfig.servers 
@@ -183,7 +189,6 @@ const AgentForm: React.FC<AgentFormProps> = ({ initialData, onCancel, onAgentSav
           if (currentModelKey && !fetchedModels[currentModelKey]) {
             // If current model is invalid, select the first available one
             const firstModelKey = Object.keys(fetchedModels)[0];
-            console.log(`Model ${currentModelKey} not available, using ${firstModelKey} instead`);
             
             // Update the form data with the new model
             setFormData(prev => ({
@@ -211,6 +216,7 @@ const AgentForm: React.FC<AgentFormProps> = ({ initialData, onCancel, onAgentSav
   }, []);
 
   const [isGeneratingTemplates, setIsGeneratingTemplates] = useState(false);
+  const [showBestPractices, setShowBestPractices] = useState(false);
 
   const handleSubmit = async () => {
     if (!formData) return;
@@ -229,7 +235,8 @@ const AgentForm: React.FC<AgentFormProps> = ({ initialData, onCancel, onAgentSav
       updatedToolConfigs = {
         ...updatedToolConfigs,
         GenieTool: {
-          spaceId: selectedGenieSpace
+          spaceId: selectedGenieSpace.id,
+          spaceName: selectedGenieSpace.name
         }
       };
     } else if (!selectedGenieSpace) {
@@ -331,6 +338,10 @@ const AgentForm: React.FC<AgentFormProps> = ({ initialData, onCancel, onAgentSav
       }
 
       if (savedAgent && onAgentSaved) {
+        // Update the Zustand store to ensure consistency
+        if (savedAgent.id) {
+          updateAgent(savedAgent.id, savedAgent);
+        }
         onAgentSaved(savedAgent);
       }
     } catch (error) {
@@ -353,17 +364,17 @@ const AgentForm: React.FC<AgentFormProps> = ({ initialData, onCancel, onAgentSav
 
   const handleToolsChange = (event: SelectChangeEvent<string[]>) => {
     // Get the selected values from the event
-    const selectedValues = Array.isArray(event.target.value) 
-      ? event.target.value 
+    const selectedValues = Array.isArray(event.target.value)
+      ? event.target.value
       : [event.target.value];
     
-    // Log selections for debugging
-    console.log('Current tools:', formData.tools);
-    console.log('New selection from event:', selectedValues);
     
     // Create a new set of tools, ensuring all IDs are strings
     const newTools = selectedValues.map(id => String(id));
-    
+
+    // NOTE: Knowledge sources are now managed at task level, not agent level
+    // Previously, we tracked DatabricksKnowledgeSearchTool changes here
+
     // Check if any tools appear to be duplicated (different format but same ID)
     // This helps detect potential issues
     const toolCounts = new Map<string, number>();
@@ -383,10 +394,15 @@ const AgentForm: React.FC<AgentFormProps> = ({ initialData, onCancel, onAgentSav
     
     // Ensure uniqueness
     const uniqueTools = Array.from(new Set(newTools));
-    console.log('Final unique tools:', uniqueTools);
-    
+
     // Update the form data
     handleInputChange('tools', uniqueTools);
+
+    // Sync with Zustand store if editing existing agent
+    // This ensures the AgentNode displays the correct attachment icon
+    if (initialData?.id) {
+      updateAgent(initialData.id, { tools: uniqueTools });
+    }
   };
 
   const handleGenerateTemplates = async () => {
@@ -414,6 +430,15 @@ const AgentForm: React.FC<AgentFormProps> = ({ initialData, onCancel, onAgentSav
   };
 
   const canGenerateTemplates = Boolean(formData.role && formData.goal && formData.backstory);
+
+  const handleRemoveTool = (toolIdToRemove: string) => {
+    // Create a new array without the removed tool
+    const newTools = formData.tools.filter(id => String(id) !== String(toolIdToRemove));
+
+    // Use the existing handleToolsChange to ensure all logic is applied
+    // including checking for DatabricksKnowledgeSearchTool removal
+    handleToolsChange({ target: { value: newTools } } as SelectChangeEvent<string[]>);
+  };
 
 
 
@@ -457,6 +482,47 @@ const AgentForm: React.FC<AgentFormProps> = ({ initialData, onCancel, onAgentSav
     setExpandedResponseTemplate(false);
   };
 
+  const handleGenieSpaceClick = async (event: React.MouseEvent) => {
+    // Prevent any bubbling that might interfere
+    event.stopPropagation();
+
+    if (!selectedGenieSpace) {
+      console.warn('No Genie space selected');
+      return;
+    }
+
+    try {
+      console.log('Fetching Databricks configuration...');
+      const databricksService = DatabricksService.getInstance();
+      const config = await databricksService.getDatabricksConfig();
+      console.log('Databricks config:', config);
+
+      if (config && config.workspace_url) {
+        // Ensure the URL has https:// and remove trailing slash if present
+        let workspaceUrl = config.workspace_url.startsWith('https://')
+          ? config.workspace_url
+          : `https://${config.workspace_url}`;
+
+        // Remove trailing slash to avoid double slashes
+        workspaceUrl = workspaceUrl.replace(/\/$/, '');
+
+        // Construct the Genie room URL
+        // Format: https://{workspace}/genie/rooms/{space_id}/monitoring
+        const genieUrl = `${workspaceUrl}/genie/rooms/${selectedGenieSpace.id}/monitoring`;
+
+        console.log('Opening Genie URL:', genieUrl);
+        // Open in new tab
+        window.open(genieUrl, '_blank', 'noopener,noreferrer');
+      } else {
+        console.warn('Databricks workspace URL not configured');
+        alert('Databricks workspace URL is not configured. Please configure it in Settings > Configuration > Databricks.');
+      }
+    } catch (error) {
+      console.error('Error opening Genie space:', error);
+      alert('Error opening Genie space. Please check the console for details.');
+    }
+  };
+
   return (
     <>
       <Card sx={{ 
@@ -466,21 +532,33 @@ const AgentForm: React.FC<AgentFormProps> = ({ initialData, onCancel, onAgentSav
         position: 'relative',
         overflow: 'hidden'
       }}>
-        <Box sx={{ p: 3, pb: 2 }}>
-          <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 3 }}>
-            <Typography variant="h6">
-              {initialData?.id ? 'Edit Agent' : 'Create New Agent'}
-            </Typography>
+        {!isCreateMode && (
+          <Box sx={{ p: 3, pb: 2 }}>
+            <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 3 }}>
+              <Typography variant="h6">
+                {initialData?.id ? 'Edit Agent' : 'Create New Agent'}
+              </Typography>
+              <Button
+                startIcon={<HelpOutlineIcon />}
+                onClick={() => setShowBestPractices(true)}
+                variant="outlined"
+                size="small"
+                sx={{ ml: 2 }}
+              >
+                Best Practices
+              </Button>
+            </Box>
+            <Divider />
           </Box>
-          <Divider />
-        </Box>
+        )}
 
         <Box sx={{ 
           flex: '1 1 auto', 
           overflow: 'auto',
           px: 3, 
           pb: 2,
-          height: 'calc(90vh - 170px)',
+          pt: isCreateMode ? 3 : 0,
+          height: isCreateMode ? 'calc(90vh - 120px)' : 'calc(90vh - 170px)',
         }}>
           <Box sx={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
             {/* Basic Information */}
@@ -671,20 +749,33 @@ const AgentForm: React.FC<AgentFormProps> = ({ initialData, onCancel, onAgentSav
                     {(selected as string[]).map((toolId, index) => {
                       // Ensure tool ID comparison works with both string and numeric IDs
                       const tool = tools.find(t => String(t.id) === String(toolId));
+                      // If it's DatabricksKnowledgeSearchTool (not in DB), show friendly name
+                      const label = tool ? tool.title :
+                                   (String(toolId) === 'DatabricksKnowledgeSearchTool' ? 'Databricks Knowledge Search Tool' : String(toolId));
                       return (
-                        <Chip 
+                        <Chip
                           key={`selected-tool-${toolId}-${index}`}
-                          label={tool ? tool.title : `Tool ${index + 1}`}
+                          label={label}
                           size="small"
+                          onDelete={() => {
+                            handleRemoveTool(toolId);
+                          }}
+                          onMouseDown={(event: React.MouseEvent) => {
+                            event.stopPropagation(); // Prevent dropdown from opening when clicking delete icon
+                          }}
+                          deleteIcon={
+                            <DeleteIcon
+                              fontSize="small"
+                              sx={{ fontSize: '16px !important' }}
+                            />
+                          }
                         />
                       );
                     })}
                   </Box>
                 )}
               >
-                {tools
-                  .filter(tool => tool.enabled !== false) // Only show enabled tools
-                  .map((tool) => (
+                {tools.map((tool) => (
                     <MenuItem key={`tool-${tool.id}`} value={String(tool.id)}>
                       <Box sx={{ display: 'flex', flexDirection: 'column' }}>
                         <Typography>{tool.title}</Typography>
@@ -697,39 +788,66 @@ const AgentForm: React.FC<AgentFormProps> = ({ initialData, onCancel, onAgentSav
               </Select>
             </FormControl>
 
-            {/* Genie Space Selector - Show only when GenieTool is selected */}
+            {/* Genie Space Display - Show only when GenieTool is selected */}
             {formData.tools.some(toolId => {
               const tool = tools.find(t => String(t.id) === String(toolId));
               return tool?.title === 'GenieTool';
             }) && (
               <Box sx={{ mt: 2 }}>
-                <GenieSpaceSelector
-                  value={selectedGenieSpace}
-                  onChange={(value) => {
-                    setSelectedGenieSpace(value as string || '');
-                    // Update tool configs when space changes
-                    if (value) {
-                      setToolConfigs(prev => ({
-                        ...prev,
-                        GenieTool: {
-                          spaceId: value as string
+                <Typography variant="subtitle2" sx={{ mb: 1 }}>Genie Space</Typography>
+                {selectedGenieSpace ? (
+                  <Tooltip title={`Space ID: ${selectedGenieSpace.id} - Click to open in Databricks`} arrow>
+                    <Chip
+                      label={selectedGenieSpace.name}
+                      size="medium"
+                      color="primary"
+                      variant="outlined"
+                      onClick={handleGenieSpaceClick}
+                      onDelete={() => {
+                        setSelectedGenieSpace(null);
+                        // Remove GenieTool config when space is removed
+                        setToolConfigs(prev => {
+                          const newConfigs = { ...prev };
+                          delete newConfigs.GenieTool;
+                          return newConfigs;
+                        });
+                      }}
+                      deleteIcon={<DeleteIcon fontSize="small" />}
+                      sx={{
+                        cursor: 'pointer',
+                        '&:hover': {
+                          backgroundColor: 'rgba(25, 118, 210, 0.08)',
                         }
-                      }));
-                    } else {
-                      // Remove GenieTool config if no space selected
-                      setToolConfigs(prev => {
-                        const newConfigs = { ...prev };
-                        delete newConfigs.GenieTool;
-                        return newConfigs;
-                      });
-                    }
-                  }}
-                  label="Genie Space"
-                  placeholder="Search for Genie spaces..."
-                  helperText="Select the Genie space to use with this agent"
-                  required
-                  fullWidth
-                />
+                      }}
+                    />
+                  </Tooltip>
+                ) : (
+                  <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+                    <GenieSpaceSelector
+                      value=""
+                      onChange={(value, spaceName) => {
+                        if (value) {
+                          setSelectedGenieSpace({
+                            id: value as string,
+                            name: spaceName || value as string  // Use the name if provided, otherwise fallback to ID
+                          });
+                          // Update tool configs when space is selected
+                          setToolConfigs(prev => ({
+                            ...prev,
+                            GenieTool: {
+                              spaceId: value as string,
+                              spaceName: spaceName || value as string
+                            }
+                          }));
+                        }
+                      }}
+                      label=""
+                      placeholder="Select a Genie space..."
+                      helperText=""
+                      fullWidth
+                    />
+                  </Box>
+                )}
               </Box>
             )}
 
@@ -855,18 +973,7 @@ const AgentForm: React.FC<AgentFormProps> = ({ initialData, onCancel, onAgentSav
               />
             </Box>
 
-            {/* TODO: Re-enable knowledge sources in the future */}
-            {/* <Accordion>
-              <AccordionSummary expandIcon={<ExpandMoreIcon />}>
-                <Typography>Knowledge Sources</Typography>
-              </AccordionSummary>
-              <AccordionDetails>
-                <KnowledgeSourcesSection
-                  knowledgeSources={formData.knowledge_sources || []}
-                  onChange={(sources) => handleInputChange('knowledge_sources', sources)}
-                />
-              </AccordionDetails>
-            </Accordion> */}
+            {/* Knowledge Sources section removed - now managed at task level */}
 
             {/* LLM Configuration */}
             <Accordion>
@@ -910,6 +1017,24 @@ const AgentForm: React.FC<AgentFormProps> = ({ initialData, onCancel, onAgentSav
                         )}
                       </Select>
                     </FormControl>
+                  </Grid>
+                  <Grid item xs={12}>
+                    <TextField
+                      fullWidth
+                      type="number"
+                      label="Temperature Override (0-100)"
+                      value={formData.temperature || ''}
+                      onChange={(e) => {
+                        const value = e.target.value ? parseInt(e.target.value) : undefined;
+                        if (value === undefined || (value >= 0 && value <= 100)) {
+                          handleInputChange('temperature', value);
+                        }
+                      }}
+                      helperText="Override the default model temperature. 0 = deterministic, 100 = creative. Leave empty to use model default."
+                      InputProps={{
+                        inputProps: { min: 0, max: 100 }
+                      }}
+                    />
                   </Grid>
                   <Grid item xs={12}>
                     <FormControl fullWidth>
@@ -1540,6 +1665,11 @@ const AgentForm: React.FC<AgentFormProps> = ({ initialData, onCancel, onAgentSav
         </DialogActions>
       </Dialog>
 
+      {/* Best Practices Dialog */}
+      <AgentBestPractices
+        open={showBestPractices}
+        onClose={() => setShowBestPractices(false)}
+      />
 
     </>
   );

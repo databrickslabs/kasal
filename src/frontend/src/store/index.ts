@@ -22,4 +22,5 @@ export type AppDispatch = typeof store.dispatch;
 export * from './hooks';
 export * from './nodeActions';
 export * from './shortcuts';
-export * from './flowConfig'; 
+export * from './flowConfig';
+export * from './agent'; 

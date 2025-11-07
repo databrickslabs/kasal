@@ -32,7 +32,7 @@ interface CacheEntry<T> {
 export class ModelService {
   private static instance: ModelService;
   private readonly CACHE_TTL = 30 * 60 * 1000; // 30 minutes in milliseconds
-  
+
   // Cache for models
   private modelsCache: CacheEntry<Models> | null = null;
   private enabledModelsCache: CacheEntry<Models> | null = null;
@@ -95,7 +95,7 @@ export class ModelService {
       // Check if any models exist in the database
       const response = await apiClient.get<ApiModelListResponse>('/models');
       const modelsData = this.extractModelsFromResponse(response);
-      
+
       if (modelsData.length === 0) {
         // Create default models in the database
         const createPromises = Object.entries(defaultModels).map(([key, model]) => {
@@ -110,7 +110,7 @@ export class ModelService {
             enabled: true
           });
         });
-        
+
         await Promise.all(createPromises);
       }
     } catch (error) {
@@ -128,16 +128,16 @@ export class ModelService {
       console.warn('No models received from API');
       return this.DEFAULT_FALLBACK_MODEL;
     }
-    
+
     const models: Models = {};
-    
+
     apiModels.forEach((model: ApiModelResponse, index) => {
       // Make sure the model has valid key and name
       if (!model.key || !model.name) {
         console.warn(`Skipping model at index ${index} due to missing key or name:`, model);
         return;
       }
-      
+
       models[model.key] = {
         name: model.name,
         provider: model.provider,
@@ -148,13 +148,13 @@ export class ModelService {
         enabled: model.enabled !== false // Default to enabled if not specified
       };
     });
-    
+
     // If no valid models were processed, use the fallback
     if (Object.keys(models).length === 0) {
       console.warn('No valid models processed, using fallback');
       return this.DEFAULT_FALLBACK_MODEL;
     }
-    
+
     return models;
   }
 
@@ -166,36 +166,36 @@ export class ModelService {
       console.warn('API returned empty response or no data');
       return [];
     }
-    
+
     try {
       // Backend ApiModelListResponse format
       if (typeof response.data === 'object' && response.data.models && Array.isArray(response.data.models)) {
         return response.data.models;
       }
-      
+
       // Direct array of models
       if (Array.isArray(response.data)) {
         return response.data;
       }
-      
+
       // Models wrapped in results field
       if (typeof response.data === 'object' && response.data.results && Array.isArray(response.data.results)) {
         return response.data.results;
       }
-      
+
       // Extract models from object format (key-value pairs where values are models)
       if (typeof response.data === 'object' && !Array.isArray(response.data)) {
         const potentialModels: ApiModelResponse[] = [];
-        
+
         Object.entries(response.data).forEach(([key, value]) => {
           // Skip metadata-like fields
           if (key === 'count' || key === 'total' || key === 'page' || key === 'limit') return;
-          
+
           // If value is an object with required model fields
           if (typeof value === 'object' && value !== null && 'name' in value) {
             // Either it already has a key property or we'll use the key from the object
             const modelKey = ('key' in value) ? String(value.key) : key;
-            
+
             potentialModels.push({
               id: ('id' in value) ? Number(value.id) : 0,
               key: modelKey,
@@ -211,17 +211,17 @@ export class ModelService {
             });
           }
         });
-        
+
         if (potentialModels.length > 0) {
           return potentialModels;
         }
       }
-      
+
       console.warn('Response data format not recognized, could not extract models');
     } catch (error) {
       console.error('Error extracting models from response:', error);
     }
-    
+
     // Fallback for all unhandled formats
     console.warn('Could not extract any models from the API response, using fallback model');
     return [{
@@ -245,7 +245,7 @@ export class ModelService {
   public async getModels(forceRefresh = false): Promise<Models> {
     // First, ensure models are initialized
     await this.initializeModelsIfNeeded();
-    
+
     // Check cache first, but allow force refresh with forceRefresh parameter
     if (!forceRefresh && this.isCacheValid(this.modelsCache) && this.modelsCache) {
       return this.modelsCache.data;
@@ -254,23 +254,23 @@ export class ModelService {
     try {
       const response = await apiClient.get<ApiModelListResponse>('/models');
       const modelsData = this.extractModelsFromResponse(response);
-      
+
       if (modelsData.length === 0) {
         console.warn('No models data found in API response, using fallback model');
         // Try loading from default static models as a fallback
         this.modelsCache = this.setCache(this.modelsCache, defaultModels);
         return defaultModels;
       }
-      
+
       const models = this.convertApiResponseToModels(modelsData);
-      
+
       // Update cache
       this.modelsCache = this.setCache(this.modelsCache, models);
-      
+
       return models;
     } catch (error: unknown) {
       console.error('Error fetching models from API:', error);
-      
+
       // More detailed error information
       if (axios.isAxiosError(error)) {
         const axiosError = error as AxiosError;
@@ -279,7 +279,7 @@ export class ModelService {
           console.error('Error response status:', axiosError.response.status);
         }
       }
-      
+
       // Return fallback model when API fails
       this.modelsCache = this.setCache(this.modelsCache, this.DEFAULT_FALLBACK_MODEL);
       return this.DEFAULT_FALLBACK_MODEL;
@@ -319,12 +319,12 @@ export class ModelService {
           throw error;
         });
       });
-      
+
       await Promise.all(updatePromises);
-      
+
       // Clear caches to force refresh
       this.clearCaches();
-      
+
       // Get updated models
       return this.getModels(true);
     } catch (error) {
@@ -342,15 +342,15 @@ export class ModelService {
       await apiClient.patch<ApiModelResponse>(`/models/${modelKey}/toggle`, {
         enabled: enabled
       });
-      
+
       // Clear caches to force refresh
       this.clearCaches();
-      
+
       // Get updated models
       return this.getModels(true);
-    } catch (error) {
+    } catch (error: unknown) {
       console.error(`Error ${enabled ? 'enabling' : 'disabling'} model ${modelKey}:`, error);
-      
+
       if (axios.isAxiosError(error)) {
         const axiosError = error as AxiosError;
         if (axiosError.response) {
@@ -358,7 +358,7 @@ export class ModelService {
           console.error('Error response status:', axiosError.response.status);
         }
       }
-      
+
       throw error;
     }
   }
@@ -372,15 +372,15 @@ export class ModelService {
       const response = await apiClient.post<ApiModelListResponse>('/models/enable-all');
       const modelsData = this.extractModelsFromResponse(response);
       const models = this.convertApiResponseToModels(modelsData);
-      
+
       // Clear caches to force refresh
       this.clearCaches();
-      
+
       // Update cache
       this.modelsCache = this.setCache(this.modelsCache, models);
-      
+
       return models;
-    } catch (error) {
+    } catch (error: unknown) {
       console.error('Error enabling all models:', error);
       throw error;
     }
@@ -395,19 +395,50 @@ export class ModelService {
       const response = await apiClient.post<ApiModelListResponse>('/models/disable-all');
       const modelsData = this.extractModelsFromResponse(response);
       const models = this.convertApiResponseToModels(modelsData);
-      
+
       // Clear caches to force refresh
       this.clearCaches();
-      
+
       // Update cache
       this.modelsCache = this.setCache(this.modelsCache, models);
-      
+
       return models;
-    } catch (error) {
+    } catch (error: unknown) {
       console.error('Error disabling all models:', error);
       throw error;
     }
+
   }
+
+  /**
+   * Get global (system-wide) models only
+   */
+  public async getGlobalModels(): Promise<Models> {
+    try {
+      const response = await apiClient.get<ApiModelListResponse>('/models/global');
+      const modelsData = this.extractModelsFromResponse(response);
+      return this.convertApiResponseToModels(modelsData);
+    } catch (error: unknown) {
+      console.error('Error fetching global models:', error);
+      return this.DEFAULT_FALLBACK_MODEL;
+    }
+  }
+
+  /**
+   * Toggle a global (system-wide) model
+   */
+  public async enableGlobalModel(modelKey: string, enabled: boolean): Promise<Models> {
+    try {
+      await apiClient.patch<ApiModelResponse>(`/models/global/${modelKey}/toggle`, { enabled });
+      // Clear caches and return refreshed global models
+      this.clearCaches();
+      return this.getGlobalModels();
+    } catch (error: unknown) {
+      console.error(`Error toggling global model ${modelKey}:`, error);
+      throw error;
+    }
+  }
+
 
   /**
    * Get only enabled models
@@ -421,71 +452,71 @@ export class ModelService {
     try {
       // First, ensure models are initialized
       await this.initializeModelsIfNeeded();
-      
+
       const response = await apiClient.get<ApiModelListResponse>('/models/enabled');
       const modelsData = this.extractModelsFromResponse(response);
-      
+
       if (modelsData.length === 0) {
         console.warn('No enabled models found in API response, falling back to filtration');
         // Try filtering enabled models from all models
         const allModels = await this.getModels(true);
         const enabledModels: Models = {};
-        
+
         for (const [key, model] of Object.entries(allModels)) {
           if (model.enabled) {
             enabledModels[key] = model;
           }
         }
-        
+
         if (Object.keys(enabledModels).length > 0) {
           this.enabledModelsCache = this.setCache(this.enabledModelsCache, enabledModels);
           return enabledModels;
         }
-        
+
         // If no enabled models found anywhere, use fallback
         this.enabledModelsCache = this.setCache(this.enabledModelsCache, this.DEFAULT_FALLBACK_MODEL);
         return this.DEFAULT_FALLBACK_MODEL;
       }
-      
+
       const models = this.convertApiResponseToModels(modelsData);
-      
+
       // Update cache
       this.enabledModelsCache = this.setCache(this.enabledModelsCache, models);
-      
+
       return models;
     } catch (error: unknown) {
       console.error('Error fetching enabled models from API:', error);
-      
+
       // Fall back to filtering enabled models from all models
       try {
         const allModels = await this.getModels(true);
         const enabledModels: Models = {};
-        
+
         for (const [key, model] of Object.entries(allModels)) {
           if (model.enabled) {
             enabledModels[key] = model;
           }
         }
-        
+
         // If we got any enabled models, use them
         if (Object.keys(enabledModels).length > 0) {
           this.enabledModelsCache = this.setCache(this.enabledModelsCache, enabledModels);
           return enabledModels;
         }
-      } catch (innerError) {
+      } catch (innerError: unknown) {
         console.error('Error filtering enabled models:', innerError);
       }
-      
+
       // If all else fails, return default models
       // Use our static fallback models
       const defaultEnabledModels: Models = {};
-      
+
       for (const [key, model] of Object.entries(defaultModels)) {
         if (model.enabled) {
           defaultEnabledModels[key] = model;
         }
       }
-      
+
       this.enabledModelsCache = this.setCache(this.enabledModelsCache, defaultEnabledModels);
       return defaultEnabledModels;
     }
@@ -507,31 +538,31 @@ export class ModelService {
     if (this.isCacheValid(this.enabledModelsCache) && this.enabledModelsCache) {
       return this.enabledModelsCache.data;
     }
-    
+
     if (this.isCacheValid(this.modelsCache) && this.modelsCache) {
       const enabledModels: Models = {};
-      
+
       for (const [key, model] of Object.entries(this.modelsCache.data)) {
         if (model.enabled) {
           enabledModels[key] = model;
         }
       }
-      
+
       // If we have any enabled models, return them
       if (Object.keys(enabledModels).length > 0) {
         return enabledModels;
       }
     }
-    
+
     // No valid cache, use default models
     const defaultEnabledModels: Models = {};
-    
+
     for (const [key, model] of Object.entries(defaultModels)) {
       if (model.enabled) {
         defaultEnabledModels[key] = model;
       }
     }
-    
+
     return defaultEnabledModels;
   }
 
@@ -551,13 +582,13 @@ export class ModelService {
         extended_thinking: model.extended_thinking,
         enabled: model.enabled !== false
       });
-      
+
       // Clear caches to force refresh
       this.clearCaches();
-      
+
       // Get updated models
       return this.getModels(true);
-    } catch (error) {
+    } catch (error: unknown) {
       console.error('Error creating model:', error);
       throw error;
     }
@@ -568,35 +599,35 @@ export class ModelService {
    */
   public async deleteModel(modelKey: string): Promise<Models> {
     console.log(`[ModelService.deleteModel] START - Deleting model with key: ${modelKey}`);
-    
+
     try {
       // Make sure we have the model before trying to delete it
       console.log(`[ModelService.deleteModel] Fetching current models to verify model exists`);
       const existingModels = await this.getModels(true);
-      
+
       console.log(`[ModelService.deleteModel] Checking if model ${modelKey} exists in:`, Object.keys(existingModels));
       if (!existingModels[modelKey]) {
         console.warn(`[ModelService.deleteModel] Model ${modelKey} doesn't exist or already deleted`);
         return existingModels; // Return current models if model doesn't exist
       }
-      
+
       console.log(`[ModelService.deleteModel] Found model to delete:`, existingModels[modelKey]);
-      
+
       // Call the delete endpoint
       console.log(`[ModelService.deleteModel] Sending DELETE request to: /models/${modelKey}`);
       const response = await apiClient.delete(`/models/${modelKey}`);
-      
+
       console.log(`[ModelService.deleteModel] DELETE response:`, {
         status: response.status,
         statusText: response.statusText,
         headers: response.headers,
         data: response.data
       });
-      
+
       // Clear caches to force refresh
       console.log(`[ModelService.deleteModel] Clearing caches after deletion`);
       this.clearCaches();
-      
+
       // OPTIMIZATION: If backend returns 204/200, we'll create an optimistic update
       // by removing the model from our local data even if it still appears in the backend response
       if (response.status === 204 || response.status === 200) {
@@ -604,32 +635,32 @@ export class ModelService {
         // Create optimistic update by manually removing the model from our copy
         const optimisticModels = { ...existingModels };
         delete optimisticModels[modelKey];
-        
+
         // Update our cache with the optimistic data
         this.modelsCache = this.setCache(this.modelsCache, optimisticModels);
-        
+
         console.log(`[ModelService.deleteModel] SUCCESS: Optimistically removed model ${modelKey}`);
         console.log(`[ModelService.deleteModel] END - Deletion complete for ${modelKey}`);
-        
+
         return optimisticModels;
       } else {
         // If status is unexpected, use the regular approach
         console.log(`[ModelService.deleteModel] Unexpected status ${response.status}, fetching updated models list`);
         const updatedModels = await this.getModels(true);
-        
+
         // Verify the model was actually deleted
         if (updatedModels[modelKey]) {
           console.warn(`[ModelService.deleteModel] WARNING: Model ${modelKey} still exists after deletion!`, updatedModels[modelKey]);
         } else {
           console.log(`[ModelService.deleteModel] SUCCESS: Model ${modelKey} confirmed deleted`);
         }
-        
+
         console.log(`[ModelService.deleteModel] END - Deletion complete for ${modelKey}`);
         return updatedModels;
       }
-    } catch (error) {
+    } catch (error: unknown) {
       console.error(`[ModelService.deleteModel] ERROR - Failed to delete model ${modelKey}:`, error);
-      
+
       if (axios.isAxiosError(error)) {
         const axiosError = error as AxiosError;
         if (axiosError.response) {
@@ -646,11 +677,11 @@ export class ModelService {
           // Something happened in setting up the request
           console.error('[ModelService.deleteModel] Request setup error:', axiosError.message);
         }
-        
+
         console.error('[ModelService.deleteModel] Config used for request:', axiosError.config);
       }
-      
+
       throw error;
     }
   }
-} 
+}

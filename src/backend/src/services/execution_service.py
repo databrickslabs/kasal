@@ -1,8 +1,27 @@
-"""
-Service for execution-related operations.
+"""Execution service for managing AI agent workflow executions.
 
-This module provides business logic for execution operations including
-running execution jobs, tracking status, and generating descriptive names.
+This module provides the core service layer for managing execution operations
+in the AI agent system. It handles flow execution, status tracking, and 
+coordination between different execution engines.
+
+Key Features:
+    - Asynchronous flow execution with job tracking
+    - Thread pool management for concurrent operations
+    - Integration with CrewAI execution engine
+    - Automatic execution name generation
+    - Status monitoring and error handling
+
+The service acts as the main orchestrator for all execution-related operations,
+delegating specific tasks to specialized services while maintaining a unified
+interface for the API layer.
+
+Example:
+    >>> service = ExecutionService()
+    >>> result = await service.execute_flow(
+    ...     flow_id=flow_uuid,
+    ...     job_id="job_123",
+    ...     config={"timeout": 300}
+    ... )
 """
 
 import logging
@@ -34,7 +53,23 @@ crew_logger = LoggerManager.get_instance().crew
 exec_logger = LoggerManager.get_instance().crew
 
 class ExecutionService:
-    """Service for executing flows and managing executions"""
+    """High-level service for orchestrating AI agent workflow executions.
+    
+    This service provides the main interface for executing flows, managing
+    execution lifecycles, and coordinating between different execution engines.
+    It maintains a thread pool for concurrent operations and tracks active
+    executions across the system.
+    
+    Attributes:
+        executions: Class-level dictionary tracking all active executions
+        _thread_pool: Thread pool executor for concurrent operations (10 workers)
+        execution_name_service: Service for generating descriptive execution names
+        crewai_execution_service: Service for CrewAI-specific execution logic
+    
+    Note:
+        The service uses class-level attributes for shared state across instances,
+        enabling centralized execution tracking in a multi-threaded environment.
+    """
     
     # Initialize the executions dictionary as a class attribute
     executions = {}
@@ -42,10 +77,25 @@ class ExecutionService:
     # Initialize the thread pool executor
     _thread_pool = concurrent.futures.ThreadPoolExecutor(max_workers=10)
     
-    def __init__(self):
-        """Initialize the service"""
+    def __init__(self, session=None):
+        """Initialize the ExecutionService with required dependencies.
+
+        Args:
+            session: Optional database session for repository operations.
+                     If provided, repositories will use this session instead
+                     of creating their own.
+
+        Sets up the execution name service for generating descriptive names
+        and the CrewAI execution service for handling CrewAI-specific operations.
+
+        Note:
+            Uses factory methods to ensure proper configuration of dependent services.
+        """
+        # Store the session for repository operations
+        self.session = session
+
         # Use factory method to create properly configured ExecutionNameService
-        self.execution_name_service = ExecutionNameService.create()
+        self.execution_name_service = ExecutionNameService.create(session)
         # Create a CrewAIExecutionService instance for all execution operations
         self.crewai_execution_service = CrewAIExecutionService()
     
@@ -54,18 +104,40 @@ class ExecutionService:
                            edges: Optional[List[Dict[str, Any]]] = None,
                            job_id: Optional[str] = None,
                            config: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
-        """
-        Execute a flow based on the provided parameters.
+        """Execute a flow asynchronously with job tracking.
+        
+        Orchestrates the execution of either a saved flow (by ID) or a dynamic
+        flow (by nodes/edges). Generates a job ID if not provided and delegates
+        to the CrewAI execution service for actual processing.
         
         Args:
-            flow_id: Optional ID of a saved flow to execute
-            nodes: Optional list of nodes for a dynamic flow
-            edges: Optional list of edges for a dynamic flow
-            job_id: Optional job ID for tracking the execution
-            config: Optional configuration parameters
+            flow_id: Optional UUID of a saved flow to execute. If provided,
+                the flow definition will be loaded from storage.
+            nodes: Optional list of node definitions for dynamic flow execution.
+                Each node represents an agent or task in the workflow.
+            edges: Optional list of edge definitions connecting nodes.
+                Defines the execution order and dependencies.
+            job_id: Optional unique identifier for tracking this execution.
+                Auto-generated if not provided.
+            config: Optional configuration dictionary with execution parameters
+                such as timeout, retry settings, or environment variables.
             
         Returns:
-            Dictionary with execution result
+            Dictionary containing execution result with keys:
+                - job_id: The execution job identifier
+                - status: Current execution status
+                - result: Execution output (when completed)
+                - error: Error details (if failed)
+        
+        Raises:
+            HTTPException: Re-raised from underlying services for HTTP errors
+            HTTPException(500): For unexpected errors during execution
+        
+        Example:
+            >>> result = await service.execute_flow(
+            ...     flow_id=uuid.UUID("123e4567-e89b-12d3-a456-426614174000"),
+            ...     config={"timeout": 300, "max_retries": 3}
+            ... )
         """
         logger.info(f"Executing flow with ID: {flow_id}, job_id: {job_id}")
         
@@ -233,7 +305,8 @@ class ExecutionService:
         execution_id: str,
         config: CrewConfig,
         execution_type: str = "crew",
-        group_context: GroupContext = None
+        group_context: GroupContext = None,
+        session = None
     ) -> Dict[str, Any]:
         """
         Run a crew execution with the provided configuration.
@@ -309,20 +382,16 @@ class ExecutionService:
             elif execution_type.lower() == "crew":
                 exec_logger.debug(f"[run_crew_execution] This is a CREW execution - delegating to CrewAIExecutionService")
                 
-                # Set up Databricks configuration if needed for crew executions
-                if config.model and 'databricks' in config.model.lower():
-                    exec_logger.info(f"Setting up Databricks token for crew execution with model {config.model}")
-                    from src.services.databricks_service import DatabricksService
-                    setup_result = await DatabricksService.setup_token()
-                    if not setup_result:
-                        exec_logger.warning("Failed to set up Databricks token, crew execution may fail if it requires Databricks")
-                
+                # NOTE: Databricks authentication is now handled via get_auth_context() in databricks_auth.py
+                # No need to set up environment variables here - each component uses unified auth
+
                 exec_logger.debug(f"[run_crew_execution] Calling crew_execution_service.run_crew_execution for job_id: {execution_id}")
                 # This call should handle PREPARING/RUNNING updates internally
                 result = await crew_execution_service.run_crew_execution(
                     execution_id=execution_id,
                     config=config,
-                    group_context=group_context
+                    group_context=group_context,
+                    session=session
                 )
                 exec_logger.info(f"[run_crew_execution] Successfully initiated crew execution via CrewAIExecutionService for job_id: {execution_id}. Result: {result}")
                 return result # Return result from run_crew_execution
@@ -358,34 +427,47 @@ class ExecutionService:
             
             raise # Re-raise the original exception
     
-    @staticmethod
-    async def list_executions(group_ids: List[str] = None) -> List[Dict[str, Any]]:
+    async def list_executions(self, group_ids: List[str] = None, user_email: str = None, limit: int = 50, offset: int = 0) -> List[Dict[str, Any]]:
         """
-        List executions from both database and in-memory storage with group filtering.
-        
+        List executions from both database and in-memory storage with group and user filtering.
+
         Args:
             group_ids: List of group IDs for filtering
-        
+            user_email: User email for user-level filtering
+            limit: Maximum number of executions to return
+            offset: Number of executions to skip
+
         Returns:
             List of execution data dictionaries
         """
         try:
             # Get executions from database using ExecutionRepository
-            from src.db.session import async_session_factory
             from src.repositories.execution_repository import ExecutionRepository
-            
-            logger.info("Attempting to connect to database for listing executions")
-            
-            async with async_session_factory() as db:
-                repo = ExecutionRepository(db)
-                # Get executions with group filtering using the correct repository method
-                db_executions_list, _ = await repo.get_execution_history(
-                    limit=1000,  # Get more records for compatibility with the old behavior
-                    offset=0,
-                    group_ids=group_ids
+
+            logger.debug(f"[list_executions] Starting database query - group_ids: {group_ids}, user_email: {user_email}")
+
+            if self.session:
+                logger.debug(f"[list_executions] Using injected database session: {self.session}")
+                repo = ExecutionRepository(self.session)
+                logger.debug(f"[list_executions] Created repository: {repo}")
+
+                # Get executions with group and user filtering using the correct repository method
+                logger.debug(f"[list_executions] Calling repo.get_execution_history with group_ids={group_ids}")
+                db_executions_list, total_count = await repo.get_execution_history(
+                    limit=limit,
+                    offset=offset,
+                    group_ids=group_ids,
+                    user_email=user_email
                 )
+                logger.debug(f"[list_executions] Repository returned {len(db_executions_list)} items, total_count={total_count}")
                 
-                logger.info(f"Successfully retrieved {len(db_executions_list)} executions from database")
+                logger.debug(f"[list_executions] Database returned {len(db_executions_list)} executions for group_ids: {group_ids}")
+
+                # Debug what we got
+                if db_executions_list:
+                    logger.debug(f"[list_executions] First execution: job_id={db_executions_list[0].job_id}, group_id={db_executions_list[0].group_id}, run_name={db_executions_list[0].run_name}")
+                else:
+                    logger.warning(f"[list_executions] No executions found for group_ids: {group_ids}")
                 
                 # Convert to list of dicts, including inputs with agents_yaml and tasks_yaml
                 import json
@@ -399,6 +481,7 @@ class ExecutionService:
                         "result": e.result,
                         "error": e.error,
                         "group_email": e.group_email,
+                        "group_id": e.group_id,  # CRITICAL: Include group_id for frontend security filtering
                         "inputs": e.inputs  # Include the inputs field
                     }
                     
@@ -410,7 +493,10 @@ class ExecutionService:
                             exec_dict['tasks_yaml'] = json.dumps(e.inputs['tasks_yaml']) if isinstance(e.inputs['tasks_yaml'], dict) else e.inputs.get('tasks_yaml', '')
                     
                     db_executions.append(exec_dict)
-            
+            else:
+                logger.error(f"[list_executions] No database session available")
+                db_executions = []
+
             # Get in-memory executions that might not be in the database yet
             memory_executions = {}
             for execution_id, execution_data in ExecutionService.executions.items():
@@ -426,7 +512,7 @@ class ExecutionService:
                     execution_data["execution_id"] = execution_id
                 results.append(execution_data)
             
-            logger.info(f"Returning {len(results)} total executions ({len(db_executions)} from DB, {len(memory_executions)} from memory)")
+            logger.debug(f"Returning {len(results)} total executions ({len(db_executions)} from DB, {len(memory_executions)} from memory)")
             return results
                 
         except Exception as e:
@@ -434,6 +520,9 @@ class ExecutionService:
             logger.error(f"Error type: {type(e).__name__}")
             import traceback
             logger.error(f"Full traceback: {traceback.format_exc()}")
+
+            # CRITICAL: Re-raise the exception so we can see what's happening
+            raise
             
             # Check database configuration
             from src.config.settings import settings
@@ -468,15 +557,9 @@ class ExecutionService:
         success = False
         
         try:
-            # Set up Databricks configuration if needed
-            # This is important for executions that might need to use Databricks services
-            if config.model and 'databricks' in config.model.lower():
-                exec_logger.info(f"Setting up Databricks token for execution with model {config.model}")
-                from src.services.databricks_service import DatabricksService
-                setup_result = DatabricksService.setup_token_sync()
-                if not setup_result:
-                    exec_logger.warning("Failed to set up Databricks token, execution may fail if it requires Databricks")
-            
+            # NOTE: Databricks authentication is now handled via get_auth_context() in databricks_auth.py
+            # No need to set up environment variables here - each component uses unified auth
+
             # Main execution logic would go here
             # For non-crew executions, such as flows
             if execution_type == "flow":
@@ -550,8 +633,7 @@ class ExecutionService:
         except Exception as e:
             exec_logger.error(f"Error updating execution status: {str(e)}")
     
-    @staticmethod
-    async def get_execution_status(execution_id: str, group_ids: List[str] = None) -> Dict[str, Any]:
+    async def get_execution_status(self, execution_id: str, group_ids: List[str] = None) -> Dict[str, Any]:
         """
         Get the current status of an execution from the database with group filtering.
         
@@ -564,8 +646,16 @@ class ExecutionService:
         """
         try:
             # Use ExecutionHistoryRepository to get execution with group filtering
-            from src.repositories.execution_history_repository import execution_history_repository
-            execution = await execution_history_repository.get_execution_by_job_id(execution_id, group_ids=group_ids)
+            from src.repositories.execution_history_repository import ExecutionHistoryRepository
+
+            # Create repository with session if available
+            if self.session:
+                repository = ExecutionHistoryRepository(self.session)
+                execution = await repository.get_execution_by_job_id(execution_id, group_ids=group_ids)
+            else:
+                # Log error if no session available
+                exec_logger.error(f"No database session available for getting execution status")
+                return None
             
             if not execution:
                 # Check in-memory for very early states if needed
@@ -578,7 +668,11 @@ class ExecutionService:
                 "created_at": execution.created_at,
                 "result": execution.result,
                 "run_name": execution.run_name,
-                "error": execution.error
+                "error": execution.error,
+                # MLflow integration fields
+                "mlflow_trace_id": execution.mlflow_trace_id,
+                "mlflow_experiment_name": execution.mlflow_experiment_name,
+                "mlflow_evaluation_run_id": execution.mlflow_evaluation_run_id
             }
         except Exception as e:
             exec_logger.error(f"Error getting execution status for {execution_id}: {str(e)}")
@@ -628,6 +722,30 @@ class ExecutionService:
             agents_yaml = config.agents_yaml if isinstance(config.agents_yaml, dict) else {}
             tasks_yaml = config.tasks_yaml if isinstance(config.tasks_yaml, dict) else {}
             
+            # Log the agents_yaml to see if knowledge_sources are present
+            crew_logger.info(f"[ExecutionService.create_execution] Received agents_yaml with {len(agents_yaml)} agents")
+            for agent_id, agent_config in agents_yaml.items():
+                crew_logger.info(f"[ExecutionService.create_execution] Agent {agent_id} keys: {list(agent_config.keys())}")
+                if "knowledge_sources" in agent_config:
+                    knowledge_sources = agent_config.get("knowledge_sources", [])
+                    crew_logger.info(f"[ExecutionService.create_execution] Agent {agent_id} has {len(knowledge_sources)} knowledge_sources")
+                    for idx, source in enumerate(knowledge_sources):
+                        crew_logger.info(f"[ExecutionService.create_execution] Agent {agent_id} knowledge_source[{idx}]: {source}")
+                else:
+                    crew_logger.warning(f"[ExecutionService.create_execution] Agent {agent_id} has NO knowledge_sources field")
+            
+            # Ensure GroupContext is available in UserContext for authentication
+            # This is critical for both OBO (user_token) and PAT (group_id) authentication
+            if group_context:
+                from src.utils.user_context import UserContext
+                UserContext.set_group_context(group_context)
+                crew_logger.info(f"[ExecutionService.create_execution] Set GroupContext for execution name generation: primary_group_id={group_context.primary_group_id}, has_access_token={bool(group_context.access_token)}")
+
+                # Also set user_token if available for OBO authentication
+                if hasattr(group_context, 'access_token') and group_context.access_token:
+                    UserContext.set_user_token(group_context.access_token)
+                    crew_logger.info("[ExecutionService.create_execution] Set user_token for OBO authentication")
+
             request = ExecutionNameGenerationRequest(
                 agents_yaml=agents_yaml,
                 tasks_yaml=tasks_yaml,
@@ -663,22 +781,23 @@ class ExecutionService:
                 if not flow_id:
                     exec_logger.info(f"[ExecutionService.create_execution] No flow_id provided for execution_id: {execution_id}, trying to find most recent flow")
                     try:
-                        # Directly query for the most recent flow from the database
-                        from src.db.session import SessionLocal
+                        # Use async query for the most recent flow from the database
+                        from src.db.session import async_session_factory
                         from src.models.flow import Flow
-                        
-                        db = SessionLocal()
-                        try:
-                            # Get the most recent flow
-                            most_recent_flow = db.query(Flow).order_by(Flow.created_at.desc()).first()
+                        from sqlalchemy import select, desc
+
+                        async with async_session_factory() as db:
+                            # Get the most recent flow using async query
+                            stmt = select(Flow).order_by(desc(Flow.created_at)).limit(1)
+                            result = await db.execute(stmt)
+                            most_recent_flow = result.scalars().first()
+
                             if most_recent_flow:
                                 flow_id = most_recent_flow.id
                                 exec_logger.info(f"[ExecutionService.create_execution] Found most recent flow with ID {flow_id} for execution_id: {execution_id}")
                             else:
                                 exec_logger.error(f"[ExecutionService.create_execution] No flows found in database for execution_id: {execution_id}")
                                 raise ValueError("No flow found in the database. Please create a flow first.")
-                        finally:
-                            db.close()
                     except Exception as e:
                         exec_logger.error(f"[ExecutionService.create_execution] Error finding most recent flow: {str(e)}")
                         raise ValueError(f"Error finding most recent flow: {str(e)}")
@@ -768,10 +887,11 @@ class ExecutionService:
                     try:
                         task_logger.debug(f"[run_execution_task] Calling ExecutionService.run_crew_execution for execution_id: {execution_id}")
                         await ExecutionService.run_crew_execution(
-                            execution_id=execution_id, 
-                            config=config, 
+                            execution_id=execution_id,
+                            config=config,
                             execution_type=execution_type,
-                            group_context=group_context
+                            group_context=group_context,
+                            session=self.session
                         )
                         task_logger.info(f"[run_execution_task] ExecutionService.run_crew_execution completed for execution_id: {execution_id}")
                     except Exception as task_error:
@@ -795,12 +915,17 @@ class ExecutionService:
             else:
                 # Fallback using asyncio.create_task
                 crew_logger.warning(f"[ExecutionService.create_execution] FastAPI BackgroundTasks not available for {execution_id}, using asyncio.create_task.")
-                asyncio.create_task(ExecutionService._run_in_background(
+                task = asyncio.create_task(ExecutionService._run_in_background(
                     execution_id=execution_id,
                     config=config,
                     execution_type=execution_type,
-                    group_context=group_context
+                    group_context=group_context,
+                    session=self.session
                 ))
+                # Store the task reference so we can cancel it later
+                if execution_id in ExecutionService.executions:
+                    ExecutionService.executions[execution_id]["task"] = task
+                    crew_logger.debug(f"[ExecutionService.create_execution] Stored asyncio task reference for {execution_id}")
                 crew_logger.info(f"[ExecutionService.create_execution] Launched _run_in_background task via asyncio for execution_id: {execution_id}")
 
             crew_logger.info(f"[ExecutionService.create_execution] Execution {execution_id} launch initiated. Returning initial response.")
@@ -822,7 +947,7 @@ class ExecutionService:
             )
     
     @staticmethod
-    async def _run_in_background(execution_id: str, config: CrewConfig, execution_type: str = "crew", group_context: GroupContext = None):
+    async def _run_in_background(execution_id: str, config: CrewConfig, execution_type: str = "crew", group_context: GroupContext = None, session = None):
         """
         Run an execution in the background using a new database session.
         This is used when FastAPI's background_tasks is not available.
@@ -838,10 +963,11 @@ class ExecutionService:
         try:
             task_logger.debug(f"[_run_in_background] Calling ExecutionService.run_crew_execution for execution_id: {execution_id}")
             await ExecutionService.run_crew_execution(
-                execution_id=execution_id, 
-                config=config, 
+                execution_id=execution_id,
+                config=config,
                 execution_type=execution_type,
-                group_context=group_context
+                group_context=group_context,
+                session=session
             )
             task_logger.info(f"[_run_in_background] ExecutionService.run_crew_execution completed for execution_id: {execution_id}")
         except Exception as e:
@@ -915,3 +1041,182 @@ class ExecutionService:
         """
         response = await self.execution_name_service.generate_execution_name(request)
         return {"name": response.name}
+    
+    async def stop_execution(
+        self,
+        execution_id: str,
+        stop_type: str,
+        reason: Optional[str] = None,
+        requested_by: Optional[str] = None,
+        preserve_partial_results: bool = True,
+        db: Optional[Any] = None
+    ) -> Dict[str, Any]:
+        """
+        Stop a running execution.
+        
+        Args:
+            execution_id: ID of the execution to stop
+            stop_type: Type of stop (graceful or force)
+            reason: Optional reason for stopping
+            requested_by: User who requested the stop
+            preserve_partial_results: Whether to save partial results
+            db: Database session
+            
+        Returns:
+            Dict with stop status and partial results if available
+        """
+        from src.models.execution_status import ExecutionStatus
+        from src.schemas.execution import StopExecutionResponse
+        from src.models.execution_history import ExecutionHistory
+        from sqlalchemy import update
+        from datetime import datetime
+        
+        try:
+            # Update execution status to STOPPING
+            if db:
+                # First set the is_stopping flag and status to STOPPING
+                update_stmt = (
+                    update(ExecutionHistory)
+                    .where(ExecutionHistory.job_id == execution_id)
+                    .values(
+                        status=ExecutionStatus.STOPPING.value,
+                        is_stopping=True,
+                        stop_reason=reason,
+                        stop_requested_by=requested_by
+                    )
+                )
+                await db.execute(update_stmt)
+                await db.commit()
+                
+                # Get current execution state for partial results
+                from sqlalchemy import select
+                stmt = select(ExecutionHistory).where(ExecutionHistory.job_id == execution_id)
+                result = await db.execute(stmt)
+                execution = result.scalar_one_or_none()
+                
+                partial_results = None
+                if preserve_partial_results and execution:
+                    partial_results = execution.result
+            
+            # Check if execution is in our active executions dictionary
+            if execution_id in self.executions:
+                execution_info = self.executions[execution_id]
+                
+                # For force stop, cancel the asyncio task if it exists
+                if stop_type == "force" and "task" in execution_info:
+                    task = execution_info["task"]
+                    if not task.done():
+                        task.cancel()
+                        crew_logger.info(f"Force cancelled task for execution {execution_id}")
+                
+                # For graceful stop, set a flag that the execution should check
+                if stop_type == "graceful":
+                    execution_info["stop_requested"] = True
+                    crew_logger.info(f"Graceful stop requested for execution {execution_id}")
+            
+            # Try to stop using ProcessCrewExecutor first (for process-based executions)
+            process_terminated = False
+            try:
+                from src.services.process_crew_executor import process_crew_executor
+                
+                # Try to terminate the process
+                process_terminated = await process_crew_executor.terminate_execution(execution_id)
+                if process_terminated:
+                    crew_logger.info(f"Successfully terminated process for execution {execution_id}")
+                else:
+                    crew_logger.info(f"Execution {execution_id} not found in ProcessCrewExecutor (may be thread-based)")
+                    
+            except Exception as process_error:
+                crew_logger.debug(f"Could not stop via ProcessCrewExecutor: {process_error}")
+            
+            # If not process-based, try the thread-based crew_executor  
+            if not process_terminated:
+                try:
+                    from src.services.crew_executor import crew_executor
+                    
+                    # Request cooperative stop through the executor
+                    stop_requested = crew_executor.request_stop(execution_id)
+                    if stop_requested:
+                        crew_logger.info(f"Stop requested for execution {execution_id} via CrewExecutor")
+                        
+                        # For force stop, also cancel the asyncio task if it exists
+                        if stop_type == "force" and execution_id in self.executions and "task" in self.executions[execution_id]:
+                            task = self.executions[execution_id]["task"]
+                            if not task.done():
+                                task.cancel()
+                                crew_logger.info(f"Force cancelled asyncio task for execution {execution_id}")
+                                
+                                # Wait briefly for cancellation
+                                try:
+                                    await asyncio.wait_for(asyncio.shield(task), timeout=2.0)
+                                except (asyncio.CancelledError, asyncio.TimeoutError):
+                                    crew_logger.info(f"Task cancellation completed for {execution_id}")
+                    else:
+                        crew_logger.warning(f"Execution {execution_id} not found in CrewExecutor")
+                        
+                except Exception as executor_error:
+                    crew_logger.warning(f"Could not stop via CrewExecutor: {executor_error}")
+            
+            # Also try to cancel via CrewAIEngineService
+            try:
+                from src.engines.crewai.crewai_engine_service import CrewAIEngineService
+                crew_service = CrewAIEngineService()
+                cancelled = await crew_service.cancel_execution(execution_id)
+                if cancelled:
+                    crew_logger.info(f"Successfully cancelled execution {execution_id} via CrewAIEngineService")
+            except Exception as cancel_error:
+                crew_logger.warning(f"Could not cancel via CrewAIEngineService: {cancel_error}")
+            
+            # Remove from active executions to stop tracking it
+            if execution_id in self.executions:
+                del self.executions[execution_id]
+                crew_logger.info(f"Removed {execution_id} from active executions tracking")
+            
+            # Log that we've attempted to stop the execution threads
+            crew_logger.info(
+                f"Execution {execution_id} stop initiated. ThreadManager attempted to stop related threads. "
+                "Note: CrewAI does not natively support cancellation, but threads have been targeted for termination."
+            )
+            
+            # Final update to mark as STOPPED
+            if db:
+                final_update_stmt = (
+                    update(ExecutionHistory)
+                    .where(ExecutionHistory.job_id == execution_id)
+                    .values(
+                        status=ExecutionStatus.STOPPED.value,
+                        is_stopping=False,
+                        stopped_at=datetime.utcnow(),
+                        partial_results=partial_results if preserve_partial_results else None
+                    )
+                )
+                await db.execute(final_update_stmt)
+                await db.commit()
+            
+            return {
+                "execution_id": execution_id,
+                "status": ExecutionStatus.STOPPED.value,
+                "message": f"Execution {stop_type} stopped successfully",
+                "partial_results": partial_results
+            }
+            
+        except Exception as e:
+            crew_logger.error(f"Error stopping execution {execution_id}: {str(e)}")
+            
+            # Try to update status to indicate stop failed
+            if db:
+                try:
+                    error_update_stmt = (
+                        update(ExecutionHistory)
+                        .where(ExecutionHistory.job_id == execution_id)
+                        .values(
+                            is_stopping=False,
+                            error=f"Failed to stop: {str(e)}"
+                        )
+                    )
+                    await db.execute(error_update_stmt)
+                    await db.commit()
+                except:
+                    pass
+            
+            raise Exception(f"Failed to stop execution: {str(e)}")

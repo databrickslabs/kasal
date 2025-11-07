@@ -1,10 +1,10 @@
-import { ApiService } from './ApiService';
+import { apiClient } from '../config/api/ApiConfig';
+const ApiService = apiClient;
 
 // Types for group management
 export interface Group {
   id: string;
   name: string;
-  email_domain: string;
   status: 'active' | 'suspended' | 'archived';
   description?: string;
   auto_created: boolean;
@@ -14,12 +14,16 @@ export interface Group {
   user_count: number;
 }
 
+export interface GroupWithRole extends Group {
+  user_role?: 'ADMIN' | 'EDITOR' | 'OPERATOR';
+}
+
 export interface GroupUser {
   id: string;
   group_id: string;
   user_id: string;
   email: string;
-  role: 'admin' | 'manager' | 'user' | 'viewer';
+  role: 'admin' | 'editor' | 'operator';
   status: 'active' | 'inactive' | 'suspended';
   joined_at: string;
   auto_created: boolean;
@@ -29,7 +33,6 @@ export interface GroupUser {
 
 export interface CreateGroupRequest {
   name: string;
-  email_domain: string;
   description?: string;
 }
 
@@ -41,11 +44,11 @@ export interface UpdateGroupRequest {
 
 export interface AssignUserRequest {
   user_email: string;
-  role: 'admin' | 'manager' | 'user' | 'viewer';
+  role: 'admin' | 'editor' | 'operator';
 }
 
 export interface UpdateGroupUserRequest {
-  role?: 'admin' | 'manager' | 'user' | 'viewer';
+  role?: 'admin' | 'editor' | 'operator';
   status?: 'active' | 'inactive' | 'suspended';
 }
 
@@ -64,7 +67,20 @@ export class GroupService {
   }
 
   /**
-   * Get all groups
+   * Get current user's groups with their roles
+   */
+  async getMyGroups(): Promise<GroupWithRole[]> {
+    try {
+      const response = await ApiService.get('/groups/my-groups');
+      return response.data;
+    } catch (error) {
+      console.error('Error fetching user groups:', error);
+      throw new Error('Failed to fetch user groups');
+    }
+  }
+
+  /**
+   * Get all groups (admin only)
    */
   async getGroups(skip = 0, limit = 100): Promise<Group[]> {
     try {
@@ -81,7 +97,8 @@ export class GroupService {
    */
   async getGroup(groupId: string): Promise<Group> {
     try {
-      const response = await ApiService.get(`/groups/${groupId}`);
+      const encodedGroupId = encodeURIComponent(groupId);
+      const response = await ApiService.get(`/groups/${encodedGroupId}`);
       return response.data;
     } catch (error) {
       console.error(`Error fetching group ${groupId}:`, error);
@@ -107,7 +124,8 @@ export class GroupService {
    */
   async updateGroup(groupId: string, groupData: UpdateGroupRequest): Promise<Group> {
     try {
-      const response = await ApiService.put(`/groups/${groupId}`, groupData);
+      const encodedGroupId = encodeURIComponent(groupId);
+      const response = await ApiService.put(`/groups/${encodedGroupId}`, groupData);
       return response.data;
     } catch (error) {
       console.error(`Error updating group ${groupId}:`, error);
@@ -120,7 +138,8 @@ export class GroupService {
    */
   async deleteGroup(groupId: string): Promise<void> {
     try {
-      await ApiService.delete(`/groups/${groupId}`);
+      const encodedGroupId = encodeURIComponent(groupId);
+      await ApiService.delete(`/groups/${encodedGroupId}`);
     } catch (error) {
       console.error(`Error deleting group ${groupId}:`, error);
       throw new Error('Failed to delete group');
@@ -132,7 +151,8 @@ export class GroupService {
    */
   async getGroupUsers(groupId: string, skip = 0, limit = 100): Promise<GroupUser[]> {
     try {
-      const response = await ApiService.get(`/groups/${groupId}/users?skip=${skip}&limit=${limit}`);
+      const encodedGroupId = encodeURIComponent(groupId);
+      const response = await ApiService.get(`/groups/${encodedGroupId}/users?skip=${skip}&limit=${limit}`);
       return response.data;
     } catch (error) {
       console.error(`Error fetching users for group ${groupId}:`, error);
@@ -145,7 +165,8 @@ export class GroupService {
    */
   async assignUserToGroup(groupId: string, userData: AssignUserRequest): Promise<GroupUser> {
     try {
-      const response = await ApiService.post(`/groups/${groupId}/users`, userData);
+      const encodedGroupId = encodeURIComponent(groupId);
+      const response = await ApiService.post(`/groups/${encodedGroupId}/users`, userData);
       return response.data;
     } catch (error) {
       console.error(`Error assigning user to group ${groupId}:`, error);
@@ -157,12 +178,14 @@ export class GroupService {
    * Update a user's role/status in a group
    */
   async updateGroupUser(
-    groupId: string, 
-    userId: string, 
+    groupId: string,
+    userId: string,
     userData: UpdateGroupUserRequest
   ): Promise<GroupUser> {
     try {
-      const response = await ApiService.put(`/groups/${groupId}/users/${userId}`, userData);
+      const encodedGroupId = encodeURIComponent(groupId);
+      const encodedUserId = encodeURIComponent(userId);
+      const response = await ApiService.put(`/groups/${encodedGroupId}/users/${encodedUserId}`, userData);
       return response.data;
     } catch (error) {
       console.error(`Error updating user ${userId} in group ${groupId}:`, error);
@@ -175,7 +198,9 @@ export class GroupService {
    */
   async removeUserFromGroup(groupId: string, userId: string): Promise<void> {
     try {
-      await ApiService.delete(`/groups/${groupId}/users/${userId}`);
+      const encodedGroupId = encodeURIComponent(groupId);
+      const encodedUserId = encodeURIComponent(userId);
+      await ApiService.delete(`/groups/${encodedGroupId}/users/${encodedUserId}`);
     } catch (error) {
       console.error(`Error removing user ${userId} from group ${groupId}:`, error);
       throw new Error('Failed to remove user from group');

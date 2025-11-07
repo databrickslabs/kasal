@@ -1,7 +1,33 @@
-"""
-CrewAI Engine Service module.
+"""CrewAI Engine Service for AI agent orchestration.
 
-This module provides the CrewAI engine service implementation.
+This module provides the core engine service for CrewAI-based agent execution,
+handling both individual crew executions and complex flow orchestrations.
+
+The service integrates with the CrewAI framework to manage multi-agent systems,
+coordinate task execution, and provide comprehensive tracing and monitoring
+capabilities for AI workflows.
+
+Key Features:
+    - Crew preparation and configuration management
+    - Flow orchestration for complex multi-crew workflows
+    - Process-based execution isolation for reliability
+    - Real-time trace capture and event monitoring
+    - Tool factory integration for dynamic tool loading
+    - Multi-tenant support with group context isolation
+
+Architecture:
+    The service extends BaseEngineService and acts as the primary interface
+    between the application layer and the CrewAI framework. It manages the
+    lifecycle of crew executions, from configuration through completion.
+
+Example:
+    >>> service = CrewAIEngineService()
+    >>> await service.initialize(llm_provider="openai", model="gpt-4")
+    >>> result = await service.run_execution(
+    ...     execution_id="exec_123",
+    ...     execution_config=crew_config,
+    ...     group_context=group_ctx
+    ... )
 """
 
 import logging
@@ -15,7 +41,7 @@ from src.models.execution_status import ExecutionStatus
 
 # Import helper modules
 from src.engines.crewai.trace_management import TraceManager
-from src.engines.crewai.execution_runner import run_crew, update_execution_status_with_retry
+from src.engines.crewai.execution_runner import run_crew, run_crew_in_process, update_execution_status_with_retry
 from src.engines.crewai.config_adapter import normalize_config, normalize_flow_config
 from src.engines.crewai.crew_preparation import CrewPreparation
 from src.engines.crewai.flow_preparation import FlowPreparation
@@ -23,7 +49,7 @@ from src.services.tool_service import ToolService
 from src.engines.crewai.tools.tool_factory import ToolFactory
 
 # Import the logging callbacks
-from src.engines.crewai.callbacks.logging_callbacks import AgentTraceEventListener, TaskCompletionLogger, DetailedOutputLogger
+from src.engines.crewai.callbacks.logging_callbacks import AgentTraceEventListener, TaskCompletionEventListener
 
 # Import CrewAI components
 from crewai import Crew
@@ -38,19 +64,44 @@ from src.utils.user_context import GroupContext
 logger = LoggerManager.get_instance().crew
 
 class CrewAIEngineService(BaseEngineService):
-    """
-    CrewAI Engine Service implementation
+    """Core engine service for CrewAI agent orchestration and execution.
     
-    This service handles CrewAI agent/crew configuration, preparation,
-    and execution management, as well as flow execution.
+    This service provides comprehensive management of CrewAI-based agent systems,
+    handling everything from crew configuration to execution monitoring. It supports
+    both simple crew executions and complex flow orchestrations with multiple crews.
+    
+    The service integrates with various subsystems including:
+    - Trace management for execution monitoring
+    - Tool factory for dynamic tool provisioning
+    - Process isolation for reliable execution
+    - Event callbacks for real-time updates
+    
+    Attributes:
+        _running_jobs: Dictionary mapping execution IDs to job information
+        _get_execution_repository: Factory function for execution repository access
+        _status_service: Reference to ExecutionStatusService for status updates
+    
+    Inheritance:
+        Extends BaseEngineService to provide CrewAI-specific implementation
+    
+    Note:
+        The service uses process-based execution for isolation and reliability,
+        ensuring that crew failures don't affect the main application process.
     """
     
     def __init__(self, db=None):
-        """
-        Initialize the CrewAI engine service
+        """Initialize the CrewAI engine service with database connection.
+        
+        Sets up the service with repository access patterns and initializes
+        tracking structures for running jobs.
         
         Args:
-            db: The database connection to pass to repositories
+            db: Optional database connection for repository access.
+                If not provided, repositories will use their default connections.
+        
+        Note:
+            The service doesn't store the db directly but uses repository
+            factory functions to maintain proper separation of concerns.
         """
         # Don't store db directly - repositories should handle db access
         self._running_jobs = {}  # Map of execution_id -> job info
@@ -64,14 +115,29 @@ class CrewAIEngineService(BaseEngineService):
         
 
     async def initialize(self, **kwargs) -> bool:
-        """
-        Initialize the engine service
+        """Initialize the CrewAI engine service and its dependencies.
+        
+        Performs startup initialization including trace writer setup,
+        logger configuration, and LLM provider initialization.
         
         Args:
-            **kwargs: Additional parameters
+            **kwargs: Initialization parameters including:
+                - llm_provider: LLM provider name (default: "openai")
+                - model: Model identifier (default: "gpt-4o")
+                - Additional provider-specific configuration
             
         Returns:
-            bool: True if initialization successful
+            bool: True if initialization successful, False otherwise
+        
+        Note:
+            This method ensures the trace writer is started for execution
+            monitoring and configures the CrewAI library logging.
+        
+        Example:
+            >>> success = await service.initialize(
+            ...     llm_provider="anthropic",
+            ...     model="claude-3-opus"
+            ... )
         """
         # Ensure trace writer is started when engine initializes
         await TraceManager.ensure_writer_started()
@@ -90,17 +156,48 @@ class CrewAIEngineService(BaseEngineService):
             logger.error(f"Failed to initialize CrewAI engine: {str(e)}")
             return False
     
-    async def run_execution(self, execution_id: str, execution_config: Dict[str, Any], group_context: GroupContext = None) -> str:
-        """
-        Run a CrewAI execution with the given configuration.
+    async def run_execution(self, execution_id: str, execution_config: Dict[str, Any], group_context: GroupContext = None, session = None) -> str:
+        """Execute a CrewAI crew with process isolation and comprehensive monitoring.
+        
+        Orchestrates the complete execution lifecycle including crew preparation,
+        process-based execution, trace capture, and status updates. Supports
+        multi-tenant isolation through group context.
         
         Args:
-            execution_id: Unique ID for this execution
-            execution_config: Configuration for the execution
-            group_context: Group context for logging isolation
+            execution_id: Unique identifier for tracking this execution.
+                Used for trace correlation and status updates.
+            execution_config: Complete crew configuration including:
+                - crew: Crew-level settings (name, process, memory, etc.)
+                - agents: List of agent configurations
+                - tasks: List of task configurations
+                - tools: Tool configurations and API keys
+                - output_settings: Output format and destination
+            group_context: Optional multi-tenant context containing:
+                - primary_group_id: Group identifier for isolation
+                - access_token: User token for authenticated operations
+                - group_email: Group email for notifications
             
         Returns:
-            Execution ID
+            str: The execution ID for tracking the execution
+        
+        Raises:
+            Exception: Propagates exceptions from crew preparation or execution
+        
+        Note:
+            The method assumes the execution record is already created with
+            RUNNING status by the caller. It focuses on actual execution
+            and status updates.
+        
+        Example:
+            >>> exec_id = await service.run_execution(
+            ...     execution_id="exec_123",
+            ...     execution_config={
+            ...         "crew": {"name": "Research Crew"},
+            ...         "agents": [...],
+            ...         "tasks": [...]
+            ...     },
+            ...     group_context=user_group_context
+            ... )
         """
         try:
             # Normalize config to ensure consistent format
@@ -116,6 +213,17 @@ class CrewAIEngineService(BaseEngineService):
             agent_configs = execution_config.get("agents", [])
             task_configs = execution_config.get("tasks", [])
             
+            # Log agent configurations to debug knowledge_sources
+            logger.info(f"[CrewAIEngineService] Processing {len(agent_configs)} agents for execution {execution_id}")
+            for idx, agent_config in enumerate(agent_configs):
+                agent_id = agent_config.get('id', f'agent_{idx}')
+                logger.info(f"[CrewAIEngineService] Agent {agent_id} config keys: {list(agent_config.keys())}")
+                if 'knowledge_sources' in agent_config:
+                    ks = agent_config['knowledge_sources']
+                    logger.info(f"[CrewAIEngineService] Agent {agent_id} has {len(ks)} knowledge_sources: {ks}")
+                else:
+                    logger.info(f"[CrewAIEngineService] Agent {agent_id} has NO knowledge_sources")
+            
             # Setup output directory
             output_dir = self._setup_output_directory(execution_id)
             execution_config['output_dir'] = output_dir
@@ -129,38 +237,46 @@ class CrewAIEngineService(BaseEngineService):
             logger.info(f"[CrewAIEngineService] Starting run_execution for ID: {execution_id} (already has RUNNING status)")
             
             try:
-                # Create services using the Unit of Work pattern
-                from src.core.unit_of_work import UnitOfWork
+                # Create services using the passed session
                 from src.services.tool_service import ToolService
                 from src.services.api_keys_service import ApiKeysService
-                
-                # Use a single UnitOfWork to manage all repositories
-                async with UnitOfWork() as uow:
-                    # Create services from the UnitOfWork
-                    tool_service = await ToolService.from_unit_of_work(uow)
-                    api_keys_service = await ApiKeysService.from_unit_of_work(uow)
-                    
-                    # Extract user token from group context for tool factory
-                    user_token = group_context.access_token if group_context else None
-                    
-                    # Create a tool factory instance with API keys service and user token
-                    tool_factory = await ToolFactory.create(execution_config, api_keys_service, user_token)
-                    logger.info(f"[CrewAIEngineService] Created ToolFactory for {execution_id} with user token: {bool(user_token)}")
-                    
-                    # Use the CrewPreparation class for crew setup with tool_service and tool_factory
-                    # Pass user_token for OBO authentication in Databricks Apps
-                    crew_preparation = CrewPreparation(execution_config, tool_service, tool_factory, user_token)
-                    if not await crew_preparation.prepare():
-                        logger.error(f"[CrewAIEngineService] Failed to prepare crew for {execution_id}")
-                        await self._update_execution_status(
-                            execution_id, 
-                            ExecutionStatus.FAILED.value,
-                            "Failed to prepare crew"
-                        )
-                        return execution_id
-                    
-                    # Get the prepared crew for use after UnitOfWork context
-                    crew = crew_preparation.crew
+
+                # Extract group_id for API keys service
+                group_id = group_context.primary_group_id if group_context else None
+
+                # Use the passed session for services
+                if session:
+                    # Create services directly with session
+                    tool_service = ToolService(session)
+                    api_keys_service = ApiKeysService(session, group_id=group_id)
+                else:
+                    # Fallback: create a new session if none provided
+                    from src.db.session import async_session_factory
+                    async with async_session_factory() as db_session:
+                        tool_service = ToolService(db_session)
+                        api_keys_service = ApiKeysService(db_session, group_id=group_id)
+
+                # Extract user token from group context for tool factory
+                user_token = group_context.access_token if group_context else None
+
+                # Create a tool factory instance with API keys service and user token
+                tool_factory = await ToolFactory.create(execution_config, api_keys_service, user_token)
+                logger.info(f"[CrewAIEngineService] Created ToolFactory for {execution_id} with user token: {bool(user_token)}")
+
+                # IMPORTANT: Do NOT prepare crew in main process when using subprocess execution
+                # The subprocess will prepare its own crew with the full config including knowledge_sources
+                # Preparing here would modify the config and remove knowledge_sources before subprocess gets them
+
+                # Debug log to check if knowledge_sources are still present
+                logger.info(f"[CrewAIEngineService] DEBUG: Config before subprocess for {execution_id}:")
+                for idx, agent_config in enumerate(execution_config.get("agents", [])):
+                    agent_id = agent_config.get('id', f'agent_{idx}')
+                    ks = agent_config.get('knowledge_sources', [])
+                    logger.info(f"[CrewAIEngineService] Agent {agent_id} has {len(ks)} knowledge_sources: {ks}")
+
+                # Skip crew preparation in main process - let subprocess handle it
+                # This preserves the original config with knowledge_sources intact
+                crew = None  # No crew object needed in main process for subprocess execution
             
             except Exception as e:
                 logger.error(f"[CrewAIEngineService] Error running CrewAI execution {execution_id}: {str(e)}", exc_info=True)
@@ -174,28 +290,9 @@ class CrewAIEngineService(BaseEngineService):
                     logger.critical(f"[CrewAIEngineService] CRITICAL: Failed to update status to FAILED for {execution_id} after run_execution error: {update_err}", exc_info=True)
                 raise
             
-            # --- Instantiate Event Listeners --- 
-            logger.debug(f"[CrewAIEngineService] Instantiating event listeners for {execution_id}")
-            try:
-                # Create the event listeners with proper error handling
-                # Just creating the instances is enough - they'll register with the event bus during init
-                agent_trace_callback = AgentTraceEventListener(job_id=execution_id, group_context=group_context)
-                logger.info(f"[CrewAIEngineService] Successfully created AgentTraceEventListener for {execution_id} with group_context")
-                
-                # Add task completion logger
-                task_completion_logger = TaskCompletionLogger(job_id=execution_id)
-                logger.info(f"[CrewAIEngineService] Successfully created TaskCompletionLogger for {execution_id}")
-                
-                # Add detailed output logger
-                detailed_output_logger = DetailedOutputLogger(job_id=execution_id)
-                logger.info(f"[CrewAIEngineService] Successfully created DetailedOutputLogger for {execution_id}")
-                
-                # No need to manually register with the crew - the listeners register with the global event bus
-                logger.info(f"[CrewAIEngineService] All event listeners initialized for {execution_id}")
-            except Exception as callback_error:
-                logger.error(f"[CrewAIEngineService] Error creating event listeners: {callback_error}", exc_info=True)
-                # Continue execution without the callbacks - we don't want to fail the entire execution
-                # if trace logging doesn't work
+            # Event listeners are now initialized in the subprocess
+            # This ensures they're in the same process as the crew execution
+            logger.debug(f"[CrewAIEngineService] Event listeners will be initialized in subprocess for {execution_id}")
             
             # Status is already RUNNING from creation, no need to update
             logger.info(f"[CrewAIEngineService] Execution {execution_id} ready to start (status already RUNNING)")
@@ -203,22 +300,40 @@ class CrewAIEngineService(BaseEngineService):
             # User token was already extracted and passed to tool factory above
             user_token = group_context.access_token if group_context else None
             
-            # Create a task for crew execution
-            execution_task = asyncio.create_task(run_crew(
-                execution_id=execution_id, 
-                crew=crew,
-                running_jobs=self._running_jobs,
-                group_context=group_context,
-                user_token=user_token,
-                config=execution_config
-            ))
+            # Use process-based execution for true termination capability
+            logger.info(f"[CrewAIEngineService] Starting process-based execution for {execution_id}")
             
-            # Store job info
+            # Create a task for process-based crew execution with exception handler
+            async def run_with_exception_handler():
+                try:
+                    logger.info(f"[CrewAIEngineService] About to call run_crew_in_process for {execution_id}")
+                    await run_crew_in_process(
+                        execution_id=execution_id,
+                        config=execution_config,
+                        running_jobs=self._running_jobs,
+                        group_context=group_context,
+                        user_token=user_token
+                    )
+                    logger.info(f"[CrewAIEngineService] run_crew_in_process completed for {execution_id}")
+                except Exception as e:
+                    logger.error(f"[CrewAIEngineService] CRITICAL: Exception in run_crew_in_process for {execution_id}: {e}", exc_info=True)
+                    # Write to file as backup
+                    import traceback
+                    with open(f'/tmp/task_error_{execution_id[:8]}.log', 'w') as f:
+                        f.write(f"Exception in background task: {e}\n")
+                        f.write(traceback.format_exc())
+            
+            execution_task = asyncio.create_task(run_with_exception_handler())
+            
+            logger.info(f"[CrewAIEngineService] Created execution task for {execution_id}")
+            
+            # Store job info (no crew object since it runs in a separate process)
             self._running_jobs[execution_id] = {
                 "task": execution_task,
-                "crew": crew,
+                "crew": None,  # Crew runs in separate process
                 "start_time": datetime.now(),
-                "config": execution_config
+                "config": execution_config,
+                "execution_mode": "process"  # Mark this as process-based
             }
             
             return execution_id
@@ -342,6 +457,38 @@ class CrewAIEngineService(BaseEngineService):
         try:
             # Get the job info
             job_info = self._running_jobs[execution_id]
+            execution_mode = job_info.get("execution_mode", "thread")
+            
+            # If process-based execution, terminate the process
+            if execution_mode == "process":
+                from src.services.process_crew_executor import process_crew_executor
+                terminated = await process_crew_executor.terminate_execution(execution_id)
+                if terminated:
+                    logger.info(f"Successfully terminated process for execution {execution_id}")
+                    
+                    # Cancel the asyncio task as well
+                    task = job_info["task"]
+                    if task and not task.done():
+                        task.cancel()
+                        try:
+                            await task
+                        except asyncio.CancelledError:
+                            pass
+                    
+                    # Update status in database
+                    await self._update_execution_status(
+                        execution_id,
+                        ExecutionStatus.STOPPED.value,
+                        "Execution stopped by user (process terminated)"
+                    )
+                    
+                    # Clean up
+                    del self._running_jobs[execution_id]
+                    return True
+                else:
+                    logger.warning(f"Could not terminate process for execution {execution_id}")
+            
+            # For thread-based execution (fallback or if process termination fails)
             task = job_info["task"]
             
             # Cancel the task
@@ -353,11 +500,11 @@ class CrewAIEngineService(BaseEngineService):
             except asyncio.CancelledError:
                 pass
             
-            # Update status in database
+            # Update status in database - use STOPPED instead of CANCELLED for user-initiated stops
             await self._update_execution_status(
                 execution_id, 
-                ExecutionStatus.CANCELLED.value,
-                "Execution cancelled by user"
+                ExecutionStatus.STOPPED.value,
+                "Execution stopped by user"
             )
             
             # Clean up
@@ -403,62 +550,70 @@ class CrewAIEngineService(BaseEngineService):
             )
             
             try:
-                # Create services using the Unit of Work pattern
-                from src.core.unit_of_work import UnitOfWork
+                # Create services using the passed session
                 from src.services.tool_service import ToolService
                 from src.services.api_keys_service import ApiKeysService
-                
-                # Use a single UnitOfWork to manage all repositories
-                async with UnitOfWork() as uow:
-                    # Create services from the UnitOfWork
-                    tool_service = await ToolService.from_unit_of_work(uow)
-                    api_keys_service = await ApiKeysService.from_unit_of_work(uow)
-                    
-                    # Create a tool factory instance with API keys service
-                    tool_factory = await ToolFactory.create(flow_config, api_keys_service)
-                    logger.info(f"[CrewAIEngineService] Created ToolFactory for flow {execution_id}")
-                    
-                    # Use the FlowPreparation class for flow setup
-                    from pathlib import Path
-                    output_path = Path(flow_config.get('output_dir', '/tmp'))
-                    flow_preparation = FlowPreparation(flow_config, output_path)
-                    try:
-                        prepared_flow = flow_preparation.prepare()
-                        flow = prepared_flow.get('flow')  # Extract the flow from prepared components
-                    except Exception as prep_error:
-                        logger.error(f"[CrewAIEngineService] Flow preparation failed: {prep_error}")
-                        prepared_flow = None
-                        
-                    if not prepared_flow:
-                        logger.error(f"[CrewAIEngineService] Failed to prepare flow for {execution_id}")
-                        await self._update_execution_status(
-                            execution_id, 
-                            ExecutionStatus.FAILED.value,
-                            "Failed to prepare flow"
-                        )
-                        return execution_id
-                    
-                    # Flow was already extracted from prepared_flow above
-                    
-                    # Store flow configuration and instance in running jobs
-                    self._running_jobs[execution_id] = {
-                        "type": "flow",
-                        "config": flow_config,
-                        "flow": flow,
-                        "start_time": datetime.now(UTC)
-                    }
-                    
-                    # Update status to RUNNING
+
+                # Extract group_id for API keys service
+                group_id = group_context.primary_group_id if group_context else None
+
+                # Use the passed session for services
+                if session:
+                    # Create services directly with session
+                    tool_service = ToolService(session)
+                    api_keys_service = ApiKeysService(session, group_id=group_id)
+                else:
+                    # Fallback: create a new session if none provided
+                    from src.db.session import async_session_factory
+                    async with async_session_factory() as db_session:
+                        tool_service = ToolService(db_session)
+                        api_keys_service = ApiKeysService(db_session, group_id=group_id)
+
+                # Create a tool factory instance with API keys service
+                tool_factory = await ToolFactory.create(flow_config, api_keys_service)
+                logger.info(f"[CrewAIEngineService] Created ToolFactory for flow {execution_id}")
+
+                # Use the FlowPreparation class for flow setup
+                from pathlib import Path
+                output_path = Path(flow_config.get('output_dir', '/tmp'))
+                flow_preparation = FlowPreparation(flow_config, output_path)
+                try:
+                    prepared_flow = flow_preparation.prepare()
+                    flow = prepared_flow.get('flow')  # Extract the flow from prepared components
+                except Exception as prep_error:
+                    logger.error(f"[CrewAIEngineService] Flow preparation failed: {prep_error}")
+                    prepared_flow = None
+
+                if not prepared_flow:
+                    logger.error(f"[CrewAIEngineService] Failed to prepare flow for {execution_id}")
                     await self._update_execution_status(
                         execution_id,
-                        ExecutionStatus.RUNNING.value,
-                        "Flow execution started"
+                        ExecutionStatus.FAILED.value,
+                        "Failed to prepare flow"
                     )
-                    
-                    # Execute the flow asynchronously
-                    asyncio.create_task(self._execute_flow(execution_id, flow))
-                    
                     return execution_id
+
+                # Flow was already extracted from prepared_flow above
+
+                # Store flow configuration and instance in running jobs
+                self._running_jobs[execution_id] = {
+                    "type": "flow",
+                    "config": flow_config,
+                    "flow": flow,
+                    "start_time": datetime.now(UTC)
+                }
+
+                # Update status to RUNNING
+                await self._update_execution_status(
+                    execution_id,
+                    ExecutionStatus.RUNNING.value,
+                    "Flow execution started"
+                )
+
+                # Execute the flow asynchronously
+                asyncio.create_task(self._execute_flow(execution_id, flow))
+
+                return execution_id
                     
             except Exception as e:
                 logger.error(f"[CrewAIEngineService] Error running flow execution {execution_id}: {str(e)}", exc_info=True)

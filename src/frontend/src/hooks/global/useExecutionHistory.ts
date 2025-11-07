@@ -5,6 +5,7 @@ import { toast } from 'react-hot-toast';
 import { useTranslation } from 'react-i18next';
 import { runService } from '../../api/ExecutionHistoryService';
 import { logger } from '../../utils/logger';
+import { useGroupStore } from '../../store/groups';
 
 // Create a specialized logger for this module
 const historyLogger = logger.createChild('ExecutionHistory');
@@ -27,6 +28,9 @@ export const useRunHistory = () => {
     fetchRunHistory,
     setError
   } = useRunStatusStore();
+
+  // Get the current group ID from the store (reactive)
+  const currentGroupId = useGroupStore(state => state.currentGroupId);
 
   // Helper function to calculate duration for sorting
   const calculateSortDuration = (run: Run): number => {
@@ -154,20 +158,50 @@ export const useRunHistory = () => {
     }
   };
 
-  // Filter the runs based on the search query
+  // Filter the runs based on the search query AND group
   const filteredRuns = useMemo(() => {
     // Ensure runHistory is an array
     const safeRunHistory = Array.isArray(runHistory) ? runHistory : [];
-    
+
+    // Log for debugging
+    historyLogger.debug(`Filtering runs - Total: ${safeRunHistory.length}, Selected Group: ${currentGroupId}`);
+
+    // Filter by group first (security filter)
+    let groupFilteredRuns = safeRunHistory;
+    if (currentGroupId) {
+      const beforeFilter = safeRunHistory.length;
+      groupFilteredRuns = safeRunHistory.filter((run) => {
+        // If the run has a group_id, it must match the selected workspace
+        // If no group_id, check if it's an old run that should be filtered out
+        if (run?.group_id) {
+          const matches = run.group_id === currentGroupId;
+          if (!matches) {
+            historyLogger.debug(`Filtering out run ${run.run_name} - group ${run.group_id} doesn't match ${currentGroupId}`);
+          }
+          return matches;
+        }
+        // For runs without group_id (legacy), we can't verify ownership
+        // These should be filtered out for security
+        historyLogger.debug(`Filtering out run ${run?.run_name} - no group_id (legacy/orphan)`);
+        return false;
+      });
+      historyLogger.debug(`Group filter applied: ${beforeFilter} → ${groupFilteredRuns.length} runs`);
+    } else {
+      // No selected group - this shouldn't happen in normal operation
+      historyLogger.warn('No currentGroupId found - returning empty array for security');
+      groupFilteredRuns = [];
+    }
+
+    // Then filter by search query
     return searchQuery
-      ? safeRunHistory.filter((run) => {
+      ? groupFilteredRuns.filter((run) => {
           // Convert search query and run name to lowercase for case-insensitive search
           const query = searchQuery.toLowerCase();
           const runName = run?.run_name?.toLowerCase() || '';
           return runName.includes(query);
         })
-      : safeRunHistory;
-  }, [runHistory, searchQuery]);
+      : groupFilteredRuns;
+  }, [runHistory, searchQuery, currentGroupId]);
 
   const sortedRuns = useMemo(() => {
     // Make sure filteredRuns is an array
@@ -210,22 +244,9 @@ export const useRunHistory = () => {
     );
   }, [runHistory]);
   
-  // Auto-refresh on an interval (only depends on fetchRuns)
-  useEffect(() => {
-    // Set up interval that checks the ref
-    const intervalId = setInterval(() => {
-      // Only refresh if there are running jobs
-      if (hasRunningJobsRef.current) {
-        historyLogger.debug('Refreshing data, running jobs detected');
-        fetchRuns().catch(err => 
-          historyLogger.error('Error refreshing in interval:', err)
-        );
-      }
-    }, 10000); // Check every 10 seconds
-    
-    // Clean up interval on unmount
-    return () => clearInterval(intervalId);
-  }, [fetchRuns]); // Only depends on fetchRuns, not runHistory
+  // Removed redundant interval polling: store's startPolling handles refresh.
+  // Keeping a local interval here led to duplicate TimerFire activity and long tasks.
+  // If a component needs a one-off refresh, call fetchRuns() directly or dispatch events.
 
   // Debounced loading state management
   useEffect(() => {
@@ -247,10 +268,46 @@ export const useRunHistory = () => {
     };
   }, [isLoading, runHistory.length]);
 
-  // Initial fetch
+  // Clear orphan runs and fetch fresh data when group changes
   useEffect(() => {
+    if (!currentGroupId) {
+      historyLogger.info('No group selected yet, skipping fetch');
+      return;
+    }
+
+    historyLogger.info(`Group context initialized/changed: ${currentGroupId}`);
+
+    // Clear any cached runs without group_id from the store
+    const currentState = useRunStatusStore.getState();
+    const cleanedHistory = currentState.runHistory.filter(run => {
+      // Only keep runs that have a group_id matching the selected one
+      if (!run.group_id) {
+        historyLogger.debug(`Removing orphan run from cache: ${run.run_name}`);
+        return false;
+      }
+      if (run.group_id !== currentGroupId) {
+        historyLogger.debug(`Removing run from different group: ${run.run_name} (${run.group_id})`);
+        return false;
+      }
+      return true;
+    });
+
+    // Update the store if we removed any orphan runs
+    if (cleanedHistory.length !== currentState.runHistory.length) {
+      historyLogger.info(`Cleaned ${currentState.runHistory.length - cleanedHistory.length} orphan/invalid runs from cache`);
+      useRunStatusStore.setState({
+        ...currentState,
+        runHistory: cleanedHistory,
+        activeRuns: Object.fromEntries(
+          Object.entries(currentState.activeRuns)
+            .filter(([_, run]) => run.group_id === currentGroupId)
+        )
+      });
+    }
+
+    // Fetch fresh data
     fetchRuns();
-  }, [fetchRuns]);
+  }, [currentGroupId, fetchRuns]);
 
   return {
     runs: sortedRuns,

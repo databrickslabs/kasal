@@ -1,17 +1,8 @@
 import React, { useState, useCallback } from 'react';
 import { BaseEdge, EdgeProps, getSmoothStepPath, EdgeText } from 'reactflow';
-import { keyframes } from '@mui/system';
 import { Dialog, DialogContent } from '@mui/material';
 import { EdgeStateForm } from '../Flow';
-
-const flowAnimation = keyframes`
-  from {
-    stroke-dashoffset: 24;
-  }
-  to {
-    stroke-dashoffset: 0;
-  }
-`;
+import { getEdgeStyle, getEdgeLabel, edgeColors } from '../../config/edgeConfig';
 
 interface ExtendedEdgeProps extends EdgeProps {
   data?: {
@@ -53,14 +44,13 @@ const AnimatedEdge: React.FC<ExtendedEdgeProps> = ({
 
   // Check if both source and target are flow nodes
   const isFlowEdge = source?.includes('flow') && target?.includes('flow');
-  
-  // Determine the label text based on edge type
+
+  // Get label from centralized config
   let label: string;
-  if (isFlowEdge) {
-    label = data?.stateType ? `${data.stateType} state` : 'state';
+  if (isFlowEdge && data?.stateType) {
+    label = `${data.stateType} state`;
   } else {
-    const isTaskDependency = source?.includes('task') && target?.includes('task');
-    label = isTaskDependency ? 'dependency' : 'assigned';
+    label = getEdgeLabel(source, target);
   }
 
   // Calculate position for UI elements
@@ -74,23 +64,13 @@ const AnimatedEdge: React.FC<ExtendedEdgeProps> = ({
   const maxX = Math.max(sourceX, targetX) + 8;
   const minY = Math.min(sourceY, targetY) - 10;
   const maxY = Math.max(sourceY, targetY) + 10;
-  
+
   // Calculate the width and height for the path hover area
   const width = maxX - minX;
   const height = maxY - minY;
 
-  // Set lower z-index for the edge path to ensure node buttons remain clickable
-  const edgeStyles = {
-    ...style,
-    zIndex: 0, // Lower z-index to keep edges behind nodes
-    strokeWidth: 2,
-    stroke: isFlowEdge ? '#9c27b0' : '#2196f3', // Purple for flow edges, blue for task edges
-    strokeDasharray: isFlowEdge ? '5' : '12',
-    // Only apply animation if the 'animated' prop is true
-    animation: animated ? `${flowAnimation} 0.5s linear infinite` : 'none',
-    filter: 'drop-shadow(0 1px 2px rgba(33, 150, 243, 0.3))',
-    pointerEvents: 'none' as const
-  };
+  // Get edge styles from centralized configuration
+  const edgeStyles = getEdgeStyle(source, target, animated, style);
 
   const handleMouseEnter = useCallback(() => {
     if (!isHovered) {
@@ -190,22 +170,22 @@ const AnimatedEdge: React.FC<ExtendedEdgeProps> = ({
                 rx="2"
                 pointerEvents="all"
               />
-              <line 
-                x1="-4" 
-                y1="-4" 
-                x2="4" 
-                y2="4" 
-                stroke="#666" 
+              <line
+                x1="-4"
+                y1="-4"
+                x2="4"
+                y2="4"
+                stroke={edgeColors.delete}
                 strokeWidth="1.5"
                 opacity="0.8"
                 pointerEvents="none"
               />
-              <line 
-                x1="4" 
-                y1="-4" 
-                x2="-4" 
-                y2="4" 
-                stroke="#666" 
+              <line
+                x1="4"
+                y1="-4"
+                x2="-4"
+                y2="4"
+                stroke={edgeColors.delete}
                 strokeWidth="1.5"
                 opacity="0.8"
                 pointerEvents="none"
@@ -235,7 +215,7 @@ const AnimatedEdge: React.FC<ExtendedEdgeProps> = ({
                   cy="0"
                   r="4"
                   fill="none"
-                  stroke="#666"
+                  stroke={edgeColors.delete}
                   strokeWidth="1.5"
                   opacity="0.8"
                   pointerEvents="none"
@@ -245,7 +225,7 @@ const AnimatedEdge: React.FC<ExtendedEdgeProps> = ({
                   y1="-3"
                   x2="0"
                   y2="-6"
-                  stroke="#666"
+                  stroke={edgeColors.delete}
                   strokeWidth="1.5"
                   opacity="0.8"
                   pointerEvents="none"
@@ -255,7 +235,7 @@ const AnimatedEdge: React.FC<ExtendedEdgeProps> = ({
                   y1="3"
                   x2="0"
                   y2="6"
-                  stroke="#666"
+                  stroke={edgeColors.delete}
                   strokeWidth="1.5"
                   opacity="0.8"
                   pointerEvents="none"
@@ -265,7 +245,7 @@ const AnimatedEdge: React.FC<ExtendedEdgeProps> = ({
                   y1="0"
                   x2="-6"
                   y2="0"
-                  stroke="#666"
+                  stroke={edgeColors.delete}
                   strokeWidth="1.5"
                   opacity="0.8"
                   pointerEvents="none"
@@ -275,7 +255,7 @@ const AnimatedEdge: React.FC<ExtendedEdgeProps> = ({
                   y1="0"
                   x2="6"
                   y2="0"
-                  stroke="#666"
+                  stroke={edgeColors.delete}
                   strokeWidth="1.5"
                   opacity="0.8"
                   pointerEvents="none"

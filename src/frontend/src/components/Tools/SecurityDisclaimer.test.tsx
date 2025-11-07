@@ -2,7 +2,8 @@ import React from 'react';
 import { render, screen, fireEvent } from '@testing-library/react';
 import { ThemeProvider } from '@mui/material/styles';
 import { createTheme } from '@mui/material/styles';
-import SecurityDisclaimer from './SecurityDisclaimer';
+import SecurityDisclaimer, { TOOL_SECURITY_INFO } from './SecurityDisclaimer';
+import type { Tool } from '../../types/tool';
 
 const theme = createTheme();
 
@@ -10,7 +11,7 @@ describe('SecurityDisclaimer', () => {
   const mockOnClose = jest.fn();
   const mockOnConfirm = jest.fn();
 
-  const renderComponent = (tool: any = null) => {
+  const renderComponent = (tool: Tool | null = null) => {
     return render(
       <ThemeProvider theme={theme}>
         <SecurityDisclaimer
@@ -28,7 +29,7 @@ describe('SecurityDisclaimer', () => {
   });
 
   it('should render DatabricksJobsTool security information', () => {
-    const databricksJobsTool = {
+    const databricksJobsTool: Tool = {
       id: '70',
       title: 'DatabricksJobsTool',
       description: 'Test description',
@@ -46,7 +47,7 @@ describe('SecurityDisclaimer', () => {
   });
 
   it('should display correct risks for DatabricksJobsTool', () => {
-    const databricksJobsTool = {
+    const databricksJobsTool: Tool = {
       id: '70',
       title: 'DatabricksJobsTool',
       description: 'Test description',
@@ -64,7 +65,7 @@ describe('SecurityDisclaimer', () => {
   });
 
   it('should display correct mitigations for DatabricksJobsTool', () => {
-    const databricksJobsTool = {
+    const databricksJobsTool: Tool = {
       id: '70',
       title: 'DatabricksJobsTool',
       description: 'Test description',
@@ -85,7 +86,7 @@ describe('SecurityDisclaimer', () => {
   });
 
   it('should show single-tenant information for DatabricksJobsTool', () => {
-    const databricksJobsTool = {
+    const databricksJobsTool: Tool = {
       id: '70',
       title: 'DatabricksJobsTool',
       description: 'Test description',
@@ -102,11 +103,8 @@ describe('SecurityDisclaimer', () => {
   });
 
   it('should include DatabricksJobsTool in TOOL_SECURITY_INFO', () => {
-    // Import TOOL_SECURITY_INFO from the component
-    const { TOOL_SECURITY_INFO } = require('./SecurityDisclaimer');
-    
     expect(TOOL_SECURITY_INFO).toHaveProperty('DatabricksJobsTool');
-    
+
     const jobsToolInfo = TOOL_SECURITY_INFO['DatabricksJobsTool'];
     expect(jobsToolInfo.riskLevel).toBe('HIGH');
     expect(jobsToolInfo.singleTenantRiskLevel).toBe('MEDIUM');

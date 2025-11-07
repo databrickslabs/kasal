@@ -1,23 +1,23 @@
-litellm
+litellm==1.74.9
 asyncpg
-aiosqlite 
+pg8000  # Pure Python PostgreSQL driver for synchronous operations in subprocesses
+aiosqlite
 pydantic-settings
 cryptography
 python-multipart
 databricks
-databricks-sdk
+databricks-sdk>=0.65.0  # Latest version - Lakebase features may require additional setup
 databricks-vectorsearch
 croniter
-crewai==0.175.0
+crewai[tools]>=0.193.2
 pydantic[email]
 passlib
 email-validator
 google-api-python-client
 pysendpulse
 langchain
-crewai_tools==0.45.0
+crewai_tools>=0.73.1
 nixtla
-pysendpulse
 greenlet
 wheel
 selenium
@@ -28,10 +28,24 @@ mcpadapt
 pytest
 pytest-asyncio
 
-# Add explicit version of bcrypt to prevent version conflicts
+# Dependency conflict resolution
 bcrypt==4.0.1
-# Add compatible starlette version for fastapi 0.115.0
 starlette==0.40.0
+httpx-sse==0.4.0  # Required by cohere 5.18.0
+rich>=13.7.0,<14.0.0  # Required by embedchain 0.1.128
 
 # Add any other dependencies your project requires below
 pytest-cov
+psutil  # For process management and cleanup in ProcessCrewExecutor
+mlflow==3.4.0  # For LLM observability and tracking in Databricks
+protobuf>=5.29.0,<6.0.0  # mem0ai compatibility
+databricks-agents>=1.4.0
+grpcio-status>=1.62.0,<1.71.0  # Compatible with protobuf <6.0.0
+
+# DSPy dependencies for prompt optimization
+dspy-ai>=2.5.0  # DSPy framework for prompt optimization
+optuna>=3.5.0  # For hyperparameter optimization with DSPy
+numpy>=1.24.0  # Required by DSPy for numerical operations
+redis>=5.0.0  # Optional: For distributed caching of optimized modules
+
+# Security - Prompt injection detection

@@ -19,10 +19,9 @@ from src.schemas.databricks_vector_index import (
     IndexState,
     IndexType
 )
-from src.repositories.databricks_auth_helper import DatabricksAuthHelper
+from src.utils.databricks_auth import get_auth_context
 
-logger = LoggerManager.get_instance().system
-vector_search_logger = LoggerManager.get_instance().databricks_vector_search
+logger = LoggerManager.get_instance().databricks_vector_search
 
 
 class DatabricksVectorIndexRepository:
@@ -39,14 +38,20 @@ class DatabricksVectorIndexRepository:
         if workspace_url:
             self.workspace_url = workspace_url.rstrip('/')
         else:
-            # Try to get from environment variable
-            env_url = os.getenv('DATABRICKS_HOST', '').rstrip('/')
-            if env_url:
-                self.workspace_url = env_url
-                logger.info(f"Using DATABRICKS_HOST from environment: {self.workspace_url}")
-            else:
+            # Get from unified authentication
+            try:
+                from src.utils.databricks_auth import get_auth_context
+                import asyncio
+                auth = asyncio.run(get_auth_context())
+                if auth:
+                    self.workspace_url = auth.workspace_url.rstrip('/')
+                    logger.debug(f"Using workspace URL from unified {auth.auth_method} auth: {self.workspace_url}")
+                else:
+                    self.workspace_url = ""
+                    logger.warning("No Databricks workspace URL available from unified auth")
+            except Exception as e:
                 self.workspace_url = ""
-                logger.warning("No Databricks workspace URL configured. Set DATABRICKS_HOST environment variable.")
+                logger.warning(f"Failed to get workspace URL from unified auth: {e}")
     
     async def _get_auth_token(self, user_token: Optional[str] = None) -> str:
         """
@@ -66,10 +71,11 @@ class DatabricksVectorIndexRepository:
         Raises:
             Exception: If no authentication token can be obtained
         """
-        return await DatabricksAuthHelper.get_auth_token(
-            workspace_url=self.workspace_url,
-            user_token=user_token
-        )
+        # Use unified authentication system
+        auth = await get_auth_context(user_token=user_token)
+        if not auth:
+            raise Exception("Failed to get authentication context")
+        return auth.token
     
     
     async def create_index(
@@ -188,7 +194,7 @@ class DatabricksVectorIndexRepository:
                 "Content-Type": "application/json"
             }
             
-            logger.info(f"Getting index {index_name} via REST API at {url}")
+            logger.debug(f"Getting index {index_name} via REST API at {url}")
             
             # Make the REST API call
             async with aiohttp.ClientSession() as session:
@@ -200,11 +206,11 @@ class DatabricksVectorIndexRepository:
                         index_status = data.get("status", {})
                         
                         # Debug logging to see exact values from Databricks
-                        logger.info(f"Raw Databricks index data keys: {list(data.keys())}")
-                        logger.info(f"Raw index status: {index_status}")
-                        logger.info(f"Raw state value: {repr(index_status.get('state'))}")
-                        logger.info(f"Raw detailed_state value: {repr(index_status.get('detailed_state'))}")
-                        logger.info(f"Raw ready value: {repr(index_status.get('ready'))}")
+                        logger.debug(f"Raw Databricks index data keys: {list(data.keys())}")
+                        logger.debug(f"Raw index status: {index_status}")
+                        logger.debug(f"Raw state value: {repr(index_status.get('state'))}")
+                        logger.debug(f"Raw detailed_state value: {repr(index_status.get('detailed_state'))}")
+                        logger.debug(f"Raw ready value: {repr(index_status.get('ready'))}")
                         
                         # Parse state with proper handling
                         raw_state = index_status.get("state")
@@ -235,7 +241,7 @@ class DatabricksVectorIndexRepository:
                         raw_ready = index_status.get("ready", False)
                         ready = bool(raw_ready) if raw_ready is not None else False
                         
-                        logger.info(f"Parsed state: {state}, ready: {ready}")
+                        logger.debug(f"Parsed state: {state}, ready: {ready}")
                         
                         # Determine index type
                         # ALWAYS use DIRECT_ACCESS - no DELTA_SYNC allowed
@@ -323,7 +329,7 @@ class DatabricksVectorIndexRepository:
             # Add endpoint filter as query parameter
             params = {"endpoint_name": endpoint_name}
             
-            logger.info(f"Listing indexes for endpoint {endpoint_name} via REST API")
+            logger.debug(f"Listing indexes for endpoint {endpoint_name} via REST API")
             
             # Make the REST API call
             async with aiohttp.ClientSession() as session:
@@ -470,19 +476,22 @@ class DatabricksVectorIndexRepository:
         index_name: str,
         endpoint_name: str,
         embedding_dimension: int,
-        user_token: Optional[str] = None
+        user_token: Optional[str] = None,
+        index_type: Optional[str] = None
     ) -> Dict[str, Any]:
         """
         Empty all vectors from a Direct Access index by deleting and recreating it.
         
         Since Direct Access indexes don't support bulk delete via the API,
         this method deletes the entire index and recreates it with the same configuration.
+        If the index doesn't exist, it creates a new one.
         
         Args:
             index_name: Full index name to empty
             endpoint_name: Endpoint hosting the index  
             embedding_dimension: Dimension of the index embeddings
             user_token: Optional user token for OBO authentication
+            index_type: Optional index type (short_term, long_term, entity, document) for schema
             
         Returns:
             Dict with operation result
@@ -509,11 +518,91 @@ class DatabricksVectorIndexRepository:
                 # Get index info
                 async with session.get(describe_url, headers=headers) as response:
                     if response.status != 200:
+                        # Index doesn't exist, create it instead
+                        logger.info(f"Index {index_name} not found, creating new index")
+                        
+                        # Determine index type from name if not provided
+                        if not index_type:
+                            if "short_term" in index_name or "short-term" in index_name:
+                                index_type = "short_term"
+                            elif "long_term" in index_name or "long-term" in index_name:
+                                index_type = "long_term"
+                            elif "entity" in index_name:
+                                index_type = "entity"
+                            elif "document" in index_name:
+                                index_type = "document"
+                            else:
+                                # Default to short_term if we can't determine
+                                index_type = "short_term"
+                        
+                        # Get schema from centralized definition
+                        from src.schemas.databricks_index_schemas import DatabricksIndexSchemas
+                        schema_def = DatabricksIndexSchemas.get_schema(index_type)
+                        
+                        if not schema_def:
+                            logger.error(f"Unknown index type: {index_type}")
+                            return {
+                                "success": False,
+                                "deleted_count": 0,
+                                "message": f"Cannot create index: unknown index type {index_type}",
+                                "error": "Unknown index type"
+                            }
+                        
+                        # Create the index
+                        create_payload = {
+                            "name": index_name,
+                            "endpoint_name": endpoint_name,
+                            "primary_key": "id",
+                            "index_type": "DIRECT_ACCESS",
+                            "direct_access_index_spec": {
+                                "embedding_vector_columns": [{
+                                    "name": "embedding",
+                                    "embedding_dimension": embedding_dimension
+                                }],
+                                "schema_json": json.dumps(schema_def)
+                            }
+                        }
+                        
+                        create_url = f"{self.workspace_url}/api/2.0/vector-search/indexes"
+                        
+                        async with session.post(create_url, headers=headers, json=create_payload) as response:
+                            response_text = await response.text()
+                            if response.status not in [200, 201]:
+                                return {
+                                    "success": False,
+                                    "deleted_count": 0,
+                                    "message": f"Failed to create index: {response_text[:200]}",
+                                    "error": "Creation failed"
+                                }
+                        
+                        logger.info(f"Successfully created new index {index_name}")
+                        
+                        # Wait for index to be ready
+                        max_attempts = 12  # 60 seconds total
+                        for attempt in range(max_attempts):
+                            await asyncio.sleep(5)
+                            
+                            async with session.get(describe_url, headers=headers) as response:
+                                if response.status == 200:
+                                    new_info = await response.json()
+                                    status = new_info.get("status", {})
+                                    if status.get("ready"):
+                                        logger.info(f"Index {index_name} is ready after {(attempt + 1) * 5} seconds")
+                                        return {
+                                            "success": True,
+                                            "deleted_count": 0,
+                                            "message": f"Successfully created new index {index_name}"
+                                        }
+                                    else:
+                                        state = status.get("detailed_state", "UNKNOWN")
+                                        logger.info(f"Index state: {state}, attempt {attempt + 1}/{max_attempts}")
+                        
+                        # If we get here, index was created but may not be fully ready
+                        logger.warning(f"Index {index_name} created but may not be fully ready yet")
                         return {
-                            "success": False,
+                            "success": True,
                             "deleted_count": 0,
-                            "message": f"Index {index_name} not found or not accessible",
-                            "error": "Index not found"
+                            "message": f"Index {index_name} created. It may take a moment to be fully ready."
                         }
                     
                     index_info = await response.json()
@@ -657,11 +746,7 @@ class DatabricksVectorIndexRepository:
             }
             
             # Log search parameters for debugging
-            vector_search_logger.info(f"[similarity_search] Index: {index_name}")
-            vector_search_logger.info(f"[similarity_search] Query vector dimension: {len(query_vector)}")
-            vector_search_logger.info(f"[similarity_search] Requested columns: {columns[:5]}..." if len(columns) > 5 else f"[similarity_search] Requested columns: {columns}")
-            vector_search_logger.info(f"[similarity_search] Num results requested: {num_results}")
-            vector_search_logger.info(f"[similarity_search] Filters: {filters}")
+            logger.debug(f"[similarity_search] Index: {index_name}, filters: {filters}, num_results: {num_results}")
             
             # Prepare the payload
             payload = {
@@ -670,7 +755,7 @@ class DatabricksVectorIndexRepository:
                 "num_results": num_results
             }
             if filters:
-                payload["filters"] = filters
+                payload["filters_json"] = json.dumps(filters)
             
             # Make the REST API call
             async with aiohttp.ClientSession() as session:
@@ -681,11 +766,11 @@ class DatabricksVectorIndexRepository:
                         # Log detailed results
                         if results and 'result' in results:
                             data_array = results.get('result', {}).get('data_array', [])
-                            vector_search_logger.info(f"[similarity_search] Returned {len(data_array)} results")
+                            logger.debug(f"[similarity_search] Returned {len(data_array)} results")
                             if len(data_array) == 0 and filters:
-                                vector_search_logger.warning(f"[similarity_search] No results found with filters: {filters}")
+                                logger.warning(f"[similarity_search] No results found with filters: {filters}")
                                 # Try without filters to debug
-                                vector_search_logger.info("[similarity_search] Trying search without filters for debugging...")
+                                logger.debug("[similarity_search] Trying search without filters for debugging...")
                                 debug_payload = {
                                     "query_vector": query_vector,
                                     "columns": columns,
@@ -695,9 +780,9 @@ class DatabricksVectorIndexRepository:
                                     if debug_response.status == 200:
                                         debug_results = await debug_response.json()
                                         debug_data = debug_results.get('result', {}).get('data_array', [])
-                                        vector_search_logger.info(f"[similarity_search] Debug search without filters returned {len(debug_data)} results")
+                                        logger.debug(f"[similarity_search] Debug search without filters returned {len(debug_data)} results")
                         else:
-                            vector_search_logger.info(f"[similarity_search] Returned {len(results.get('result', {}).get('data_array', []))} results")
+                            logger.debug(f"[similarity_search] Returned {len(results.get('result', {}).get('data_array', []))} results")
                         
                         return {
                             "success": True,

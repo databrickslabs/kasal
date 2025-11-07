@@ -18,7 +18,7 @@ from src.core.logger import LoggerManager
 from src.models.execution_status import ExecutionStatus
 from src.schemas.execution import CrewConfig
 from src.repositories.execution_repository import ExecutionRepository
-from src.repositories.flow_repository import SyncFlowRepository, get_sync_flow_repository
+# Sync flow repository removed - use async FlowRepository instead
 from src.engines.factory import EngineFactory
 from src.engines.crewai.crewai_engine_service import CrewAIEngineService
 from src.services.execution_status_service import ExecutionStatusService
@@ -65,7 +65,8 @@ class CrewAIExecutionService:
         self,
         execution_id: str,
         config: CrewConfig,
-        group_context: GroupContext = None
+        group_context: GroupContext = None,
+        session = None
     ) -> Dict[str, Any]:
         """
         Prepare and run a crew execution.
@@ -121,6 +122,12 @@ class CrewAIExecutionService:
                             # Add the ID to the config if not present
                             if 'id' not in agent_config:
                                 agent_config['id'] = agent_id
+                            
+                            # Log if knowledge_sources are present
+                            if 'knowledge_sources' in agent_config:
+                                crew_logger.info(f"Agent {agent_id} has {len(agent_config.get('knowledge_sources', []))} knowledge_sources from YAML")
+                                for idx, source in enumerate(agent_config.get('knowledge_sources', [])):
+                                    crew_logger.info(f"  Knowledge source {idx}: {source}")
                             
                             # Try to fetch the agent from database to get tool_configs
                             # First try by name/role since YAML keys might not match database IDs
@@ -271,19 +278,48 @@ class CrewAIExecutionService:
             inputs_with_run_name = config.inputs or {}
             if run_name:
                 inputs_with_run_name["run_name"] = run_name
-            
+
+            # Extract process type and manager_llm from inputs for crew configuration
+            process_type = inputs_with_run_name.get("process", "sequential")
+            manager_llm = inputs_with_run_name.get("manager_llm")
+
+            # Log the process type being used
+            crew_logger.info(f"Execution {execution_id} using process type: {process_type}")
+
+            # Build crew configuration with process type
+            # IMPORTANT: Use static "Default Crew" when run_name is None to ensure consistent crew_id
+            # The crew_id hash includes agent_roles, task_names, model, group_id - so uniqueness is preserved
+            crew_config_dict = {
+                "name": run_name or "Default Crew",
+                "model": config.model,
+                "process": process_type,  # Add process type to crew config
+                "planning": config.planning,
+                "reasoning": config.reasoning if hasattr(config, 'reasoning') else False
+            }
+
+            # Add manager_llm if hierarchical process
+            if process_type == "hierarchical" and manager_llm:
+                crew_config_dict["manager_llm"] = manager_llm
+                crew_logger.info(f"Configuring hierarchical process with manager_llm: {manager_llm}")
+
+            # Add planning_llm if specified
+            if inputs_with_run_name.get("planning_llm"):
+                crew_config_dict["planning_llm"] = inputs_with_run_name["planning_llm"]
+
+            # Add reasoning_llm if specified
+            if inputs_with_run_name.get("reasoning_llm"):
+                crew_config_dict["reasoning_llm"] = inputs_with_run_name["reasoning_llm"]
+
             execution_config = {
                 "agents": agents_list,
                 "tasks": tasks_list,
                 "inputs": inputs_with_run_name,
                 "planning": config.planning,
+                "reasoning": config.reasoning if hasattr(config, 'reasoning') else False,
                 "model": config.model,
                 "run_name": run_name,
                 "execution_id": execution_id,
-                "crew": {
-                    "name": run_name or f"Scheduled Crew {execution_id[:8]}",
-                    "model": config.model
-                }
+                "crew": crew_config_dict
             }
             
             # Add group_id to config if group_context is provided
@@ -292,7 +328,7 @@ class CrewAIExecutionService:
             
             # Run the crew via the engine - this starts the execution but doesn't wait for it to complete
             # The engine will update the status to COMPLETED or FAILED when done
-            result = await engine.run_execution(execution_id, execution_config, group_context)
+            result = await engine.run_execution(execution_id, execution_config, group_context, session)
             
             # Return the execution ID - do NOT update status to COMPLETED here
             # as the execution is running asynchronously and will be updated by the engine
@@ -329,7 +365,7 @@ class CrewAIExecutionService:
             
         return engine
     
-    async def run_crew_execution(self, execution_id: str, config: CrewConfig, group_context: GroupContext = None) -> Dict[str, Any]:
+    async def run_crew_execution(self, execution_id: str, config: CrewConfig, group_context: GroupContext = None, session = None) -> Dict[str, Any]:
         """
         Run a crew execution with the provided configuration.
         
@@ -347,7 +383,8 @@ class CrewAIExecutionService:
         task = asyncio.create_task(self.prepare_and_run_crew(
             execution_id=execution_id,
             config=config,
-            group_context=group_context
+            group_context=group_context,
+            session=session
         ))
         
         # Store task reference to prevent garbage collection
@@ -542,29 +579,33 @@ class CrewAIExecutionService:
             if flow_id and (not nodes or not isinstance(nodes, list)):
                 crew_logger.info(f"No nodes provided but flow_id exists: {flow_id}. Loading flow data from repository")
                 try:
-                    # Get repository instance through factory function - no need to manage session directly
-                    flow_repository = get_sync_flow_repository()
-                    
-                    # Find flow by ID
-                    flow = flow_repository.find_by_id(flow_id)
-                    if not flow:
-                        crew_logger.error(f"Flow with ID {flow_id} not found in repository")
-                        return {
-                            "success": False,
-                            "error": f"Flow with ID {flow_id} not found",
-                            "job_id": job_id
-                        }
-                    
-                    # Add flow data to execution config
-                    if flow.nodes:
-                        execution_config['nodes'] = flow.nodes
-                        crew_logger.info(f"Loaded {len(flow.nodes)} nodes from repository for flow {flow_id}")
-                    if flow.edges:
-                        execution_config['edges'] = flow.edges
-                        crew_logger.info(f"Loaded {len(flow.edges)} edges from repository for flow {flow_id}")
-                    if flow.flow_config:
-                        execution_config['flow_config'] = flow.flow_config
-                        crew_logger.info(f"Loaded flow_config from repository for flow {flow_id}")
+                    # Get repository instance through async factory function with session
+                    from src.db.session import async_session_factory
+                    from src.repositories.flow_repository import FlowRepository
+
+                    async with async_session_factory() as db:
+                        flow_repository = FlowRepository(db)
+
+                        # Find flow by ID using async method
+                        flow = await flow_repository.get(flow_id)
+                        if not flow:
+                            crew_logger.error(f"Flow with ID {flow_id} not found in repository")
+                            return {
+                                "success": False,
+                                "error": f"Flow with ID {flow_id} not found",
+                                "job_id": job_id
+                            }
+
+                        # Add flow data to execution config
+                        if flow.nodes:
+                            execution_config['nodes'] = flow.nodes
+                            crew_logger.info(f"Loaded {len(flow.nodes)} nodes from repository for flow {flow_id}")
+                        if flow.edges:
+                            execution_config['edges'] = flow.edges
+                            crew_logger.info(f"Loaded {len(flow.edges)} edges from repository for flow {flow_id}")
+                        if flow.flow_config:
+                            execution_config['flow_config'] = flow.flow_config
+                            crew_logger.info(f"Loaded flow_config from repository for flow {flow_id}")
                 except Exception as e:
                     crew_logger.error(f"Error loading flow data from repository: {str(e)}", exc_info=True)
                     return {

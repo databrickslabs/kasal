@@ -13,6 +13,8 @@ interface WorkflowPanelsProps {
   isDarkMode: boolean;
   nodes: Node[];
   edges: Edge[];
+  setNodes: (nodes: Node[] | ((nodes: Node[]) => Node[])) => void;
+  setEdges: (edges: Edge[] | ((edges: Edge[]) => Edge[])) => void;
   onNodesChange: (changes: NodeChange[]) => void;
   onEdgesChange: (changes: EdgeChange[]) => void;
   onConnect: (connection: Connection) => void;
@@ -21,6 +23,8 @@ interface WorkflowPanelsProps {
   onCrewFlowInit: (instance: ReactFlowInstance) => void;
   onFlowFlowInit: (instance: ReactFlowInstance) => void;
   onPanelDragStart: (e: React.MouseEvent) => void;
+  // FitView handler
+  handleUIAwareFitView: () => void;
   // Runtime features props
   planningEnabled: boolean;
   setPlanningEnabled: (enabled: boolean) => void;
@@ -38,6 +42,8 @@ interface WorkflowPanelsProps {
   setIsAgentDialogOpen: (open: boolean) => void;
   setIsTaskDialogOpen: (open: boolean) => void;
   setIsFlowDialogOpen: (open: boolean) => void;
+  onOpenTutorial?: () => void;
+  onOpenConfiguration?: () => void;
 }
 
 const WorkflowPanels: React.FC<WorkflowPanelsProps> = ({
@@ -48,6 +54,8 @@ const WorkflowPanels: React.FC<WorkflowPanelsProps> = ({
   isDarkMode,
   nodes,
   edges,
+  setNodes,
+  setEdges,
   onNodesChange,
   onEdgesChange,
   onConnect,
@@ -56,6 +64,7 @@ const WorkflowPanels: React.FC<WorkflowPanelsProps> = ({
   onCrewFlowInit,
   onFlowFlowInit,
   onPanelDragStart,
+  handleUIAwareFitView,
   planningEnabled,
   setPlanningEnabled,
   reasoningEnabled,
@@ -69,7 +78,9 @@ const WorkflowPanels: React.FC<WorkflowPanelsProps> = ({
   isChatOpen,
   setIsAgentDialogOpen,
   setIsTaskDialogOpen,
-  setIsFlowDialogOpen
+  setIsFlowDialogOpen,
+  onOpenTutorial,
+  onOpenConfiguration
 }) => {
   const { crewAIFlowEnabled } = useFlowConfigStore();
   if (areFlowsVisible && crewAIFlowEnabled) {
@@ -101,12 +112,15 @@ const WorkflowPanels: React.FC<WorkflowPanelsProps> = ({
           <CrewCanvas
             nodes={nodes}
             edges={edges}
+            setNodes={setNodes}
+            setEdges={setEdges}
             onNodesChange={onNodesChange}
             onEdgesChange={onEdgesChange}
             onConnect={onConnect}
             onSelectionChange={onSelectionChange}
             onPaneContextMenu={onPaneContextMenu}
             onInit={onCrewFlowInit}
+            handleUIAwareFitView={handleUIAwareFitView}
             planningEnabled={planningEnabled}
             setPlanningEnabled={setPlanningEnabled}
             reasoningEnabled={reasoningEnabled}
@@ -122,6 +136,8 @@ const WorkflowPanels: React.FC<WorkflowPanelsProps> = ({
             setIsTaskDialogOpen={setIsTaskDialogOpen}
             setIsFlowDialogOpen={setIsFlowDialogOpen}
             showRunHistory={showRunHistory}
+            onOpenTutorial={onOpenTutorial}
+            onOpenConfiguration={onOpenConfiguration}
           />
         </Box>
         
@@ -211,12 +227,15 @@ const WorkflowPanels: React.FC<WorkflowPanelsProps> = ({
         <CrewCanvas
           nodes={nodes}
           edges={edges}
+          setNodes={setNodes}
+          setEdges={setEdges}
           onNodesChange={onNodesChange}
           onEdgesChange={onEdgesChange}
           onConnect={onConnect}
           onSelectionChange={onSelectionChange}
           onPaneContextMenu={onPaneContextMenu}
           onInit={onCrewFlowInit}
+          handleUIAwareFitView={handleUIAwareFitView}
           planningEnabled={planningEnabled}
           setPlanningEnabled={setPlanningEnabled}
           reasoningEnabled={reasoningEnabled}
@@ -232,6 +251,8 @@ const WorkflowPanels: React.FC<WorkflowPanelsProps> = ({
           setIsTaskDialogOpen={setIsTaskDialogOpen}
           setIsFlowDialogOpen={setIsFlowDialogOpen}
           showRunHistory={showRunHistory}
+          onOpenTutorial={onOpenTutorial}
+          onOpenConfiguration={onOpenConfiguration}
         />
       </Box>
     </Box>

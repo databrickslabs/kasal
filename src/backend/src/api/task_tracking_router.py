@@ -2,6 +2,7 @@ from typing import Annotated, List, Dict, Any
 import logging
 
 from fastapi import APIRouter, Depends, HTTPException, status, Query, Path
+from src.core.dependencies import GroupContextDep
 
 from src.services.task_tracking_service import TaskTrackingService, get_task_tracking_service
 from src.schemas.task_tracking import (
@@ -25,7 +26,8 @@ logger = logging.getLogger(__name__)
 @router.get("/status/{job_id}", response_model=JobExecutionStatusResponse)
 async def get_job_status(
     job_id: str,
-    service: Annotated[TaskTrackingService, Depends(get_task_tracking_service)]
+    service: Annotated[TaskTrackingService, Depends(get_task_tracking_service)],
+    group_context: GroupContextDep
 ) -> JobExecutionStatusResponse:
     """
     Get the status of a job execution.
@@ -47,7 +49,8 @@ async def get_job_status(
 
 @router.get("/tasks", response_model=List[TaskStatusResponse])
 async def get_all_tasks(
-    service: Annotated[TaskTrackingService, Depends(get_task_tracking_service)]
+    service: Annotated[TaskTrackingService, Depends(get_task_tracking_service)],
+    group_context: GroupContextDep
 ) -> List[TaskStatusResponse]:
     """
     Get all task statuses.
@@ -67,7 +70,8 @@ async def get_all_tasks(
 @router.post("/tasks", response_model=TaskStatusResponse)
 async def create_task(
     task: TaskStatusCreate,
-    service: Annotated[TaskTrackingService, Depends(get_task_tracking_service)]
+    service: Annotated[TaskTrackingService, Depends(get_task_tracking_service)],
+    group_context: GroupContextDep
 ) -> TaskStatusResponse:
     """
     Create a new task status.
@@ -91,7 +95,8 @@ async def create_task(
 async def update_task(
     task_id: int,
     task: TaskStatusUpdate,
-    service: Annotated[TaskTrackingService, Depends(get_task_tracking_service)]
+    service: Annotated[TaskTrackingService, Depends(get_task_tracking_service)],
+    group_context: GroupContextDep
 ) -> TaskStatusResponse:
     """
     Update a task status.

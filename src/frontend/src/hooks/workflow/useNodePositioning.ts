@@ -1,4 +1,4 @@
-import { useCallback, useRef, useEffect } from 'react';
+import { useRef, useEffect } from 'react';
 import { Node, ReactFlowInstance } from 'reactflow';
 
 interface UseNodePositioningProps {

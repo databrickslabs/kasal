@@ -77,11 +77,6 @@ const AgentGenerationDialog: React.FC<AgentGenerationDialogProps> = ({
   }, [localTools]);
 
   // Only log for debugging, remove in production
-  useEffect(() => {
-    if (process.env.NODE_ENV === 'development') {
-      console.log("localTools updated in AgentGenerationDialog:", localTools);
-    }
-  }, [localTools]);
 
   useEffect(() => {
     if (open) {

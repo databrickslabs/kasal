@@ -8,7 +8,7 @@ from typing import Dict, Any, Optional, Union
 from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel
 
-from src.core.dependencies import get_db
+from src.core.dependencies import get_db, GroupContextDep
 from src.engines.crewai.crewai_flow_service import CrewAIFlowService
 
 # Configure logger
@@ -30,7 +30,8 @@ class FlowExecutionRequest(BaseModel):
 
 @router.post("", status_code=status.HTTP_202_ACCEPTED)
 async def execute_flow(
-    request: FlowExecutionRequest
+    request: FlowExecutionRequest,
+    group_context: GroupContextDep
 ):
     """
     Start a flow execution asynchronously.
@@ -71,7 +72,8 @@ async def execute_flow(
 
 @router.get("/{execution_id}")
 async def get_flow_execution(
-    execution_id: int
+    execution_id: int,
+    group_context: GroupContextDep
 ):
     """
     Get details of a flow execution.
@@ -108,7 +110,8 @@ async def get_flow_execution(
 
 @router.get("/by-flow/{flow_id}")
 async def get_flow_executions_by_flow(
-    flow_id: str
+    flow_id: str,
+    group_context: GroupContextDep
 ):
     """
     Get all executions for a specific flow.

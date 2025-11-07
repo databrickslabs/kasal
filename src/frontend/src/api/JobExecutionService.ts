@@ -149,6 +149,7 @@ export class JobExecutionService {
           if (node.type === 'agentNode') {
             const agentData = node.data;
             console.log('Agent node data:', JSON.stringify(agentData, null, 2));
+            console.log(`[DEBUG] Node ${node.id} knowledge_sources:`, agentData.knowledge_sources);
             const agentName = `agent_${node.id}`;
             
             // Create the agent configuration by copying all relevant fields from the node data
@@ -177,8 +178,10 @@ export class JobExecutionService {
               reasoning: agentData.reasoning,
               max_reasoning_attempts: agentData.max_reasoning_attempts,
               embedder_config: agentData.embedder_config,
-              knowledge_sources: agentData.knowledge_sources,
+              knowledge_sources: agentData.knowledge_sources || [],
             };
+            
+            console.log(`[DEBUG] AgentConfig for ${agentName} knowledge_sources:`, agentConfig.knowledge_sources);
             
             // Apply model-specific configurations from ModelService
             if (agentData.llm && models[agentData.llm]) {
@@ -206,12 +209,20 @@ export class JobExecutionService {
             config.agents_yaml[agentName] = agentConfig;
           } else if (node.type === 'taskNode') {
             const taskData = node.data as Task;
-            const taskName = `task_${node.id}`;
+            // Avoid double prefix - check if node.id already starts with "task-" or "task_"
+            const taskName = node.id.startsWith('task-') || node.id.startsWith('task_') 
+              ? node.id.replace('task-', 'task_')  // Normalize to use underscore
+              : `task_${node.id}`;
+            
+            // DEBUG: Log the task name generation
+            console.log(`[DEBUG JobExecutionService] Task node.id: "${node.id}" -> taskName: "${taskName}"`);
             
             // Ensure we always have a default output file path, even if null in config
             const defaultOutputFile = `output/${tempJobId}_${node.id}.md`;
             
             const taskConfig: TaskYaml = {
+              // Store the original frontend task ID (just the UUID part)
+              id: node.id.startsWith('task-') ? node.id.substring(5) : node.id,
               description: taskData.description,
               expected_output: taskData.expected_output,
               tools: Array.isArray(taskData.tools) ? taskData.tools : [],
@@ -298,15 +309,22 @@ export class JobExecutionService {
           
           if (sourceNode?.type === 'agentNode' && targetNode?.type === 'taskNode') {
             const agentName = `agent_${edge.source}`;
-            const taskName = `task_${edge.target}`;
+            // Avoid double prefix - check if edge.target already starts with "task-" or "task_"
+            const taskName = edge.target.startsWith('task-') || edge.target.startsWith('task_') 
+              ? edge.target.replace('task-', 'task_')  // Normalize to use underscore
+              : `task_${edge.target}`;
             
             if (config.tasks_yaml[taskName]) {
               config.tasks_yaml[taskName].agent = agentName;
             }
           } else if (sourceNode?.type === 'taskNode' && targetNode?.type === 'taskNode') {
-            // Handle task dependencies
-            const dependencyTaskName = `task_${edge.source}`;
-            const dependentTaskName = `task_${edge.target}`;
+            // Handle task dependencies - avoid double prefix
+            const dependencyTaskName = edge.source.startsWith('task-') || edge.source.startsWith('task_')
+              ? edge.source.replace('task-', 'task_')  // Normalize to use underscore
+              : `task_${edge.source}`;
+            const dependentTaskName = edge.target.startsWith('task-') || edge.target.startsWith('task_')
+              ? edge.target.replace('task-', 'task_')  // Normalize to use underscore
+              : `task_${edge.target}`;
             
             if (config.tasks_yaml[dependentTaskName]) {
               // Add the dependency task name to the context array
@@ -320,7 +338,10 @@ export class JobExecutionService {
         nodes.forEach(node => {
           if (node.type === 'taskNode') {
             const taskData = node.data as Task;
-            const taskName = `task_${node.id}`;
+            // Avoid double prefix - check if node.id already starts with "task-" or "task_"
+            const taskName = node.id.startsWith('task-') || node.id.startsWith('task_') 
+              ? node.id.replace('task-', 'task_')  // Normalize to use underscore
+              : `task_${node.id}`;
             
             // If task has an agent_id but no incoming edge from an agent node, create the connection
             if (taskData.agent_id) {
@@ -396,6 +417,24 @@ export class JobExecutionService {
         // For crew executions, show the full config
         console.log('Sending crew job to server:', JSON.stringify(config, null, 2));
       }
+      
+      // Comprehensive logging to debug knowledge_sources
+      console.log('[JobExecutionService] === SENDING CONFIG TO BACKEND ===');
+      console.log('[JobExecutionService] Full config:', JSON.stringify(config, null, 2));
+      console.log('[JobExecutionService] agents_yaml keys:', Object.keys(config.agents_yaml));
+      
+      // Log each agent's knowledge_sources
+      Object.entries(config.agents_yaml).forEach(([agentId, agentData]: [string, AgentYaml]) => {
+        console.log(`[JobExecutionService] Agent ${agentId}:`);
+        console.log(`  - Has knowledge_sources field: ${'knowledge_sources' in agentData}`);
+        console.log(`  - knowledge_sources value:`, agentData.knowledge_sources);
+        console.log(`  - knowledge_sources length:`, agentData.knowledge_sources?.length || 0);
+        if (agentData.knowledge_sources && agentData.knowledge_sources.length > 0) {
+          (agentData.knowledge_sources as unknown[] || []).forEach((ks: unknown, idx: number) => {
+            console.log(`  - knowledge_source[${idx}]:`, ks);
+          });
+        }
+      });
       
       const response = await apiClient.post('/executions', config);
       return response.data as JobResponse;

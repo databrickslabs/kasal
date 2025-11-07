@@ -215,25 +215,33 @@ class TestSyncApiKeyUtils:
         """Test sync Databricks token retrieval with environment variable set."""
         mock_db = Mock(spec=Session)
         expected_token = "dapi-test-token"
-        
-        with patch('src.utils.api_key_utils.ApiKeysService.setup_provider_api_key_sync') as mock_service, \
-             patch.dict(os.environ, {'DATABRICKS_TOKEN': expected_token}):
-            mock_service.return_value = True
-            
-            result = get_databricks_personal_access_token(mock_db)
-            
-            assert result == expected_token
-            mock_service.assert_called_once_with(mock_db, "DATABRICKS_TOKEN")
+
+        # Mock the auth context to return the token
+        mock_auth = Mock()
+        mock_auth.token = expected_token
+
+        with patch('src.utils.databricks_auth.get_auth_context') as mock_get_auth:
+            # Mock asyncio.run to return the mock auth
+            mock_get_auth.return_value = mock_auth
+
+            # Need to mock asyncio.run since it's called inside the function
+            with patch('asyncio.run', return_value=mock_auth):
+                result = get_databricks_personal_access_token(mock_db)
+
+                assert result == expected_token
     
     def test_get_databricks_personal_access_token_empty(self):
         """Test sync Databricks token retrieval with no environment variable."""
         mock_db = Mock(spec=Session)
-        
-        with patch('src.utils.api_key_utils.ApiKeysService.setup_provider_api_key_sync') as mock_service, \
+
+        # Mock the auth context to return None (no token)
+        with patch('src.utils.databricks_auth.get_auth_context') as mock_get_auth, \
+             patch('asyncio.run') as mock_run, \
+             patch('src.utils.api_key_utils.ApiKeysService.setup_provider_api_key_sync') as mock_service, \
              patch.dict(os.environ, {}, clear=True):
-            mock_service.return_value = False
-            
+            mock_run.return_value = None  # No auth context
+            mock_service.return_value = False  # No token in DB
+
             result = get_databricks_personal_access_token(mock_db)
-            
+
             assert result == ""
-            mock_service.assert_called_once_with(mock_db, "DATABRICKS_TOKEN")

@@ -4,18 +4,19 @@ API router for group management.
 Provides endpoints for manual group creation and user assignment.
 This is the admin interface for the simple multi-group foundation.
 """
-from typing import List, Optional, Dict, Any
+from typing import List, Optional, Dict, Any, Annotated
 from fastapi import APIRouter, Depends, HTTPException, status
-from sqlalchemy.ext.asyncio import AsyncSession
 from pydantic import BaseModel
 
 from src.core.dependencies import SessionDep, GroupContextDep
-from src.dependencies.admin_auth import AdminUserDep, AdminUserPrivilegesDep
+from src.core.permissions import check_role_in_context
+from src.dependencies.admin_auth import AdminUserDep, AuthenticatedUserDep
 from src.services.group_service import GroupService
 from src.models.group import Group, GroupUser
 from src.models.user import User
 from src.schemas.group import (
     GroupResponse,
+    GroupWithRoleResponse,
     GroupCreateRequest,
     GroupUpdateRequest,
     GroupUserResponse,
@@ -28,8 +29,7 @@ from src.core.logger import LoggerManager
 class GroupContextResponse(BaseModel):
     """Response showing current group context for testing."""
     group_id: Optional[str] = None
-    group_email: Optional[str] = None  
-    email_domain: Optional[str] = None
+    group_email: Optional[str] = None
     user_id: Optional[str] = None
     access_token_present: bool = False
     message: str
@@ -42,11 +42,74 @@ router = APIRouter(
     responses={404: {"description": "Not found"}},
 )
 
+# Dependency to get GroupService with explicit SessionDep
+def get_group_service(session: SessionDep) -> GroupService:
+    """
+    Factory function for GroupService with explicit session dependency.
+
+    Args:
+        session: Database session from FastAPI DI
+
+    Returns:
+        GroupService instance with injected session
+    """
+    return GroupService(session)
+
+
+@router.get("/my-groups", response_model=List[GroupWithRoleResponse])
+async def list_my_groups(
+    service: Annotated[GroupService, Depends(get_group_service)],
+    current_user: AuthenticatedUserDep,
+    group_context: GroupContextDep,
+) -> List[GroupWithRoleResponse]:
+    """
+    List groups the current user belongs to with their role in each group.
+
+    This endpoint allows users to see all groups they are members of,
+    including their role in each group.
+    """
+    # Use injected service
+
+    try:
+        # Get user's groups with their roles
+        groups_with_roles = await service.get_user_groups_with_roles(current_user.id)
+
+        # Convert to response objects with user counts and roles
+        response_groups = []
+        for group, user_role in groups_with_roles:
+            # Get user count for this group
+            user_count = await service.get_group_user_count(group.id)
+
+            group_dict = {
+                'id': group.id,
+                'name': group.name,
+                'status': group.status,
+                'description': group.description,
+                'auto_created': group.auto_created,
+                'created_by_email': group.created_by_email,
+                'created_at': group.created_at,
+                'updated_at': group.updated_at,
+                'user_count': user_count,
+                'user_role': user_role
+            }
+            response_groups.append(GroupWithRoleResponse(**group_dict))
+
+        logger.info(f"User {current_user.email} retrieved {len(response_groups)} groups with roles")
+        return response_groups
+
+    except Exception as e:
+        logger.error(f"Error listing user groups with roles: {e}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Failed to list user groups"
+        )
+
 
 @router.get("/", response_model=List[GroupResponse])
 async def list_groups(
-    session: SessionDep,
+    service: Annotated[GroupService, Depends(get_group_service)],
     admin_user: AdminUserDep,
+    group_context: GroupContextDep,
     skip: int = 0,
     limit: int = 100
 ) -> List[GroupResponse]:
@@ -56,11 +119,11 @@ async def list_groups(
     Admin endpoint for viewing all groups in the system.
     Requires admin privileges.
     """
-    group_service = GroupService(session)
+    # Use injected service
     
     try:
         # Get groups with user counts
-        groups_with_counts = await group_service.list_groups(skip=skip, limit=limit)
+        groups_with_counts = await service.list_groups(skip=skip, limit=limit)
         
         # Convert to response objects
         response_groups = []
@@ -80,34 +143,40 @@ async def list_groups(
 @router.post("/", response_model=GroupResponse, status_code=status.HTTP_201_CREATED)
 async def create_group(
     group_data: GroupCreateRequest,
-    session: SessionDep,
-    admin_user: AdminUserDep
+    service: Annotated[GroupService, Depends(get_group_service)],
+    admin_user: AdminUserDep,
+    group_context: GroupContextDep
 ) -> GroupResponse:
     """
     Create a new group manually.
-    
+
     Admin endpoint for manual group creation with full control.
     Requires admin privileges.
     """
-    group_service = GroupService(session)
-    
+    # Check permissions - only admins can create groups
+    if not check_role_in_context(group_context, ["admin"]):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Only admins can create groups"
+        )
+
+    # Use injected service
+
     try:
         # Create group with admin context
-        group = await group_service.create_group(
+        group = await service.create_group(
             name=group_data.name,
-            email_domain=group_data.email_domain,
             description=group_data.description,
             created_by_email=admin_user.email
         )
-        
+
         # Get user count (will be 0 for new group)
-        user_count = await group_service.get_group_user_count(group.id)
-        
+        user_count = await service.get_group_user_count(group.id)
+
         # Convert Group object to dict for response
         group_dict = {
             'id': group.id,
             'name': group.name,
-            'email_domain': group.email_domain,
             'status': group.status,
             'description': group.description,
             'auto_created': group.auto_created,
@@ -136,25 +205,25 @@ async def create_group(
 @router.get("/{group_id}", response_model=GroupResponse)
 async def get_group(
     group_id: str,
-    session: SessionDep,
-    admin_user: AdminUserDep
+    service: Annotated[GroupService, Depends(get_group_service)],
+    admin_user: AdminUserDep,
+    group_context: GroupContextDep
 ) -> GroupResponse:
     """Get a specific group by ID. Requires admin privileges."""
-    group_service = GroupService(session)
+    # Use injected service
     
     try:
-        group = await group_service.get_group_by_id(group_id)
+        group = await service.get_group_by_id(group_id)
         if not group:
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND,
                 detail=f"Group {group_id} not found"
             )
         
-        user_count = await group_service.get_group_user_count(group.id)
+        user_count = await service.get_group_user_count(group.id)
         group_dict = {
             'id': group.id,
             'name': group.name,
-            'email_domain': group.email_domain,
             'status': group.status,
             'description': group.description,
             'auto_created': group.auto_created,
@@ -180,23 +249,30 @@ async def get_group(
 async def update_group(
     group_id: str,
     group_data: GroupUpdateRequest,
-    session: SessionDep,
-    admin_user: AdminUserDep
+    service: Annotated[GroupService, Depends(get_group_service)],
+    admin_user: AdminUserDep,
+    group_context: GroupContextDep
 ) -> GroupResponse:
     """Update a group. Requires admin privileges."""
-    group_service = GroupService(session)
-    
+    # Check permissions - only admins can update groups
+    if not check_role_in_context(group_context, ["admin"]):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Only admins can update groups"
+        )
+
+    # Use injected service
+
     try:
-        group = await group_service.update_group(
+        group = await service.update_group(
             group_id=group_id,
             **group_data.model_dump(exclude_unset=True)
         )
         
-        user_count = await group_service.get_group_user_count(group.id)
+        user_count = await service.get_group_user_count(group.id)
         group_dict = {
             'id': group.id,
             'name': group.name,
-            'email_domain': group.email_domain,
             'status': group.status,
             'description': group.description,
             'auto_created': group.auto_created,
@@ -225,26 +301,36 @@ async def update_group(
 @router.delete("/{group_id}", status_code=status.HTTP_204_NO_CONTENT)
 async def delete_group(
     group_id: str,
-    session: SessionDep,
-    admin_user: AdminUserDep
+    service: Annotated[GroupService, Depends(get_group_service)],
+    admin_user: AdminUserDep,
+    group_context: GroupContextDep
 ):
     """
     Delete a group and all associated data.
-    
+
     Warning: This permanently removes the group and all associated:
     - User assignments
     - Execution history
     - All related data
-    
+
     This action cannot be undone.
     Requires admin privileges.
     """
-    group_service = GroupService(session)
-    
+    # Check permissions - only admins can delete groups
+    if not check_role_in_context(group_context, ["admin"]):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Only admins can delete groups"
+        )
+
+    # Use injected service
+
     try:
-        await group_service.delete_group(group_id)
+        await service.delete_group(group_id)
         logger.info(f"Deleted group {group_id} by {admin_user.email}")
-        
+        # Explicitly return None for 204 response to ensure proper session handling
+        return None
+
     except ValueError as e:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
@@ -261,36 +347,62 @@ async def delete_group(
 @router.get("/{group_id}/users", response_model=List[GroupUserResponse])
 async def list_group_users(
     group_id: str,
-    session: SessionDep,
-    admin_user: AdminUserDep,
+    service: Annotated[GroupService, Depends(get_group_service)],
+    current_user: AuthenticatedUserDep,
+    group_context: GroupContextDep,
     skip: int = 0,
     limit: int = 100
 ) -> List[GroupUserResponse]:
-    """List all users in a group. Requires admin privileges."""
-    group_service = GroupService(session)
-    
+    """
+    List all users in a group.
+
+    Security requirements:
+    - System admins can view users in any workspace
+    - Regular users must be a workspace admin of the specific group they're querying
+    """
+    # Use injected service
+
     try:
         # Verify group exists
-        group = await group_service.get_group_by_id(group_id)
+        group = await service.get_group_by_id(group_id)
         if not group:
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND,
                 detail=f"Group {group_id} not found"
             )
-        
-        group_users_with_details = await group_service.list_group_users(
+
+        # Check if user is a system admin (can view any workspace)
+        is_system_admin = getattr(current_user, 'is_system_admin', False)
+
+        if not is_system_admin:
+            # For non-system admins, check if they're a workspace admin of this specific group
+            user_group_membership = await service.get_user_group_membership(current_user.id, group_id)
+            if not user_group_membership:
+                raise HTTPException(
+                    status_code=status.HTTP_403_FORBIDDEN,
+                    detail="You must be a member of this workspace to view its users"
+                )
+
+            # Check if user is a workspace admin of this specific group
+            if user_group_membership.role.lower() != "admin":
+                raise HTTPException(
+                    status_code=status.HTTP_403_FORBIDDEN,
+                    detail="Only workspace admins can view workspace users"
+                )
+
+        group_users_with_details = await service.list_group_users(
             group_id=group_id,
             skip=skip,
             limit=limit
         )
-        
-        # Construct responses 
+
+        # Construct responses
         responses = []
         for group_user_data in group_users_with_details:
             responses.append(GroupUserResponse(**group_user_data))
-        
+
         return responses
-        
+
     except HTTPException:
         raise
     except Exception as e:
@@ -305,8 +417,9 @@ async def list_group_users(
 async def assign_user_to_group(
     group_id: str,
     user_data: GroupUserCreateRequest,
-    session: SessionDep,
-    admin_user: AdminUserDep
+    service: Annotated[GroupService, Depends(get_group_service)],
+    admin_user: AdminUserDep,
+    group_context: GroupContextDep
 ) -> GroupUserResponse:
     """
     Assign a user to a group manually.
@@ -314,11 +427,18 @@ async def assign_user_to_group(
     Admin endpoint for manual user assignment with role control.
     Requires admin privileges.
     """
-    group_service = GroupService(session)
-    
+    # Check permissions - only admins can assign users to groups
+    if not check_role_in_context(group_context, ["admin"]):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Only admins can assign users to groups"
+        )
+
+    # Use injected service
+
     try:
         # Verify group exists
-        group = await group_service.get_group_by_id(group_id)
+        group = await service.get_group_by_id(group_id)
         if not group:
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND,
@@ -326,7 +446,7 @@ async def assign_user_to_group(
             )
         
         # Create or update user assignment
-        group_user_data = await group_service.assign_user_to_group(
+        group_user_data = await service.assign_user_to_group(
             group_id=group_id,
             user_email=user_data.user_email,
             role=user_data.role,
@@ -356,14 +476,22 @@ async def update_group_user(
     group_id: str,
     user_id: str,
     user_data: GroupUserUpdateRequest,
-    session: SessionDep,
-    admin_user: AdminUserDep
+    service: Annotated[GroupService, Depends(get_group_service)],
+    admin_user: AdminUserDep,
+    group_context: GroupContextDep
 ) -> GroupUserResponse:
     """Update a user's role or status in a group. Requires admin privileges."""
-    group_service = GroupService(session)
-    
+    # Check permissions - only admins can update group users
+    if not check_role_in_context(group_context, ["admin"]):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Only admins can update group users"
+        )
+
+    # Use injected service
+
     try:
-        group_user = await group_service.update_group_user(
+        group_user = await service.update_group_user(
             group_id=group_id,
             user_id=user_id,
             **user_data.model_dump(exclude_unset=True)
@@ -372,8 +500,8 @@ async def update_group_user(
         # Get email for response
         from sqlalchemy import select
         user_stmt = select(User).where(User.id == user_id)
-        result = await session.execute(user_stmt)
-        user = result.scalar_one_or_none()
+        result = await service.session.execute(user_stmt)
+        user = result.scalar_one_or_none()  # scalar_one_or_none() is synchronous on result
         email = user.email if user else f"{user_id}@databricks.com"
         
         response_data = {
@@ -409,20 +537,30 @@ async def update_group_user(
 async def remove_user_from_group(
     group_id: str,
     user_id: str,
-    session: SessionDep,
-    admin_user: AdminUserDep
+    service: Annotated[GroupService, Depends(get_group_service)],
+    admin_user: AdminUserDep,
+    group_context: GroupContextDep
 ):
     """Remove a user from a group. Requires admin privileges."""
-    group_service = GroupService(session)
-    
+    # Check permissions - only admins can remove users from groups
+    if not check_role_in_context(group_context, ["admin"]):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Only admins can remove users from groups"
+        )
+
+    # Use injected service
+
     try:
-        await group_service.remove_user_from_group(
+        await service.remove_user_from_group(
             group_id=group_id,
             user_id=user_id
         )
-        
+
         logger.info(f"Removed user {user_id} from group {group_id} by {admin_user.email}")
-        
+        # Explicitly return None for 204 response to ensure proper session handling
+        return None
+
     except ValueError as e:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
@@ -438,8 +576,9 @@ async def remove_user_from_group(
 
 @router.get("/stats", response_model=GroupStatsResponse)
 async def get_group_stats(
-    session: SessionDep,
-    admin_user: AdminUserDep
+    service: Annotated[GroupService, Depends(get_group_service)],
+    admin_user: AdminUserDep,
+    group_context: GroupContextDep
 ) -> GroupStatsResponse:
     """
     Get group statistics.
@@ -447,10 +586,10 @@ async def get_group_stats(
     Admin endpoint for viewing system-wide group statistics.
     Requires admin privileges.
     """
-    group_service = GroupService(session)
+    # Use injected service
     
     try:
-        stats = await group_service.get_group_stats()
+        stats = await service.get_group_stats()
         return GroupStatsResponse(**stats)
         
     except Exception as e:
@@ -474,7 +613,6 @@ async def get_group_context_debug(
     return GroupContextResponse(
         group_id=group_context.primary_group_id,
         group_email=group_context.group_email,
-        email_domain=group_context.email_domain,
         user_id=group_context.user_id,
         access_token_present=bool(group_context.access_token),
         message=f"Group context extracted successfully for {group_context.group_email or 'anonymous user'}"

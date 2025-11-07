@@ -20,6 +20,7 @@ import SettingsIcon from '@mui/icons-material/Settings';
 
 // Components
 import _SaveCrew from '../Crew/SaveCrew';
+import { hasCrewContent } from '../Chat/utils/chatHelpers';
 
 interface WorkflowToolbarProps {
   selectedModel: string;
@@ -82,7 +83,9 @@ const WorkflowToolbar: React.FC<WorkflowToolbarProps> = ({
     setShowSuccess,
     setErrorMessage,
   } = useCrewExecutionStore();
-  
+
+  const canRunCrew = React.useMemo(() => hasCrewContent(nodes), [nodes]);
+
   const handleMenuClose = useCallback(() => {
     setAnchorEl(null);
   }, []);
@@ -233,13 +236,12 @@ const WorkflowToolbar: React.FC<WorkflowToolbarProps> = ({
         <Box sx={{ height: 24, mx: 1, borderLeft: '1px solid rgba(0, 0, 0, 0.12)' }} />
 
         <div>
-          <Tooltip title={t('nemo.buttons.execute')} disableHoverListener={open}>
-            <span>
               <IconButton
                 onClick={handleExecuteClick}
-                disabled={isExecuting}
+                disabled={isExecuting || !canRunCrew}
                 size="small"
-                sx={{ 
+                data-tour="execute-button"
+                sx={{
                   border: '1px solid #2E3B55',
                   borderRadius: 1,
                   p: 1,
@@ -258,9 +260,7 @@ const WorkflowToolbar: React.FC<WorkflowToolbarProps> = ({
                   </Box>
                 )}
               </IconButton>
-            </span>
-          </Tooltip>
-          
+
           <Menu
             id="execution-menu"
             anchorEl={anchorEl}
@@ -285,7 +285,7 @@ const WorkflowToolbar: React.FC<WorkflowToolbarProps> = ({
               p: 1,
               '&:hover': { backgroundColor: 'action.hover' }
             }}
-            data-tour="load-crew"
+            data-tour="open-workflow"
           >
             <MenuBookIcon sx={{ fontSize: 20 }} />
           </IconButton>
@@ -302,7 +302,7 @@ const WorkflowToolbar: React.FC<WorkflowToolbarProps> = ({
                 p: 1,
                 '&:hover': { backgroundColor: 'action.hover' }
               }}
-              data-tour="save-crew"
+              data-tour="save-button"
               onClick={() => {
                 // Trigger the save crew dialog via an event
                 const event = new CustomEvent('openSaveCrewDialog');

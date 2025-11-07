@@ -34,41 +34,40 @@ class TraceManager:
         from src.services.trace_queue import get_trace_queue
         from src.services.execution_trace_service import ExecutionTraceService
         from src.services.execution_status_service import ExecutionStatusService
-        from src.services.execution_history_service import get_execution_history_service
+        from src.services.execution_history_service import ExecutionHistoryService
+        from src.db.database_router import get_smart_db_session
         from queue import Empty  # Import the Empty exception from queue module
-        
+
         try:
             logger.info("[TraceManager._trace_writer_loop] Writer task started.")
-            
+
             # Get trace queue
             queue = get_trace_queue()
             logger.debug(f"[TraceManager._trace_writer_loop] Queue retrieved. Initial approximate size: {queue.qsize()}")
-            
-            # Get service instance
-            execution_history_service = get_execution_history_service()
-            
+
             batch_count = 0
             total_trace_count = 0
             empty_count = 0  # Count consecutive empty queue occurrences
-            
+
             # Keep track of jobs we've confirmed exist
             confirmed_jobs = set()
-            
+
             while not cls._shutdown_event.is_set():
                 # Create a small batch of traces to process together
                 batch = []
                 batch_target_size = 10  # Process up to this many at once
-                
+
                 try:
                     # Try to collect a batch of traces
                     for _ in range(batch_target_size):
                         try:
                             # Log queue status periodically
                             if _ == 0:
-                                logger.debug(f"[TraceManager._trace_writer_loop] Waiting for traces... Queue size: ~{queue.qsize()}")
-                            
+                                logger.debug(f"[TRACE_DEBUG] Checking queue... Queue size: ~{queue.qsize()}")
+
                             # Non-blocking get with timeout
                             trace_data = queue.get(block=True, timeout=0.1)
+                            logger.debug(f"[TRACE_DEBUG] Got trace from queue: type={trace_data.get('event_type') if trace_data else 'None'}")
                             
                             # Check if this is the shutdown signal (None)
                             if trace_data is None:
@@ -111,9 +110,11 @@ class TraceManager:
                                 
                                 # If not confirmed, check the database
                                 if not job_exists:
-                                    # Check if job exists in executionhistory using the service
-                                    execution = await execution_history_service.get_execution_by_job_id(job_id)
-                                    
+                                    # Check if job exists in executionhistory using the service with managed session
+                                    async for session in get_smart_db_session():
+                                        execution_history_service = ExecutionHistoryService(session)
+                                        execution = await execution_history_service.get_execution_by_job_id(job_id)
+
                                     if execution:
                                         # Job exists, add to confirmed set
                                         confirmed_jobs.add(job_id)
@@ -147,34 +148,116 @@ class TraceManager:
                                 
                                 # Only proceed if job exists
                                 if job_exists:
+                                    # Broadcast task status events via WebSocket for real-time updates
+                                    if event_type in ["TASK_STARTED", "TASK_COMPLETED", "TASK_FAILED"]:
+                                        from src.services.execution_logs_service import execution_logs_service
+                                        import json
+                                        
+                                        task_status_msg = json.dumps({
+                                            "type": "task_status_update",
+                                            "event_type": event_type,
+                                            "task_id": trace_data.get("task_id"),
+                                            "task_name": trace_data.get("event_context"),
+                                            "timestamp": trace_data.get("created_at", datetime.now().isoformat()) if isinstance(trace_data.get("created_at"), str) else datetime.now().isoformat(),
+                                            "output": trace_data.get("output")
+                                        })
+                                        
+                                        # Extract group context if available
+                                        group_context = trace_data.get("group_context")
+                                        
+                                        # Broadcast the task status update
+                                        await execution_logs_service.broadcast_to_execution(
+                                            job_id,
+                                            task_status_msg,
+                                            group_context
+                                        )
+                                        logger.debug(f"[TraceManager._trace_writer_loop] Broadcast task status update for {event_type} - task: {trace_data.get('event_context')}")
+                                    
                                     # FILTER: Store important events in execution_trace
                                     # Include agent_execution, tool_usage, crew_started, crew_completed, task_started, task_completed
                                     important_event_types = [
-                                        "agent_execution", "tool_usage", "crew_started", 
-                                        "crew_completed", "task_started", "task_completed", "llm_call"
+                                        "agent_execution", "tool_usage", "tool_error",
+                                        "crew_started", "crew_completed",
+                                        "task_started", "task_completed", "task_failed",
+                                        "llm_call", "llm_guardrail",
+                                        "memory_write", "memory_retrieval",
+                                        "memory_write_started", "memory_retrieval_started",
+                                        "knowledge_retrieval", "knowledge_retrieval_started",
+                                        "agent_reasoning", "agent_reasoning_error"
                                     ]
-                                    
+
+                                    # Debug-only events that should be suppressed when debug tracing is disabled
+                                    debug_only_event_types = {
+                                        "memory_write_started", "memory_retrieval_started",
+                                        "memory_write", "memory_retrieval",
+                                        "knowledge_retrieval_started", "knowledge_retrieval",
+                                        "agent_reasoning", "agent_reasoning_error",
+                                        "llm_guardrail",
+                                    }
+
                                     if event_type in important_event_types:
+                                        # Respect engine debug tracing config for verbose events
+                                        try:
+                                            if not hasattr(TraceManager, "_debug_tracing_enabled_cache"):
+                                                TraceManager._debug_tracing_enabled_cache = None
+                                            if TraceManager._debug_tracing_enabled_cache is None:
+                                                from src.services.engine_config_service import EngineConfigService
+                                                from src.db.session import async_session_factory
+                                                async with async_session_factory() as cfg_session:
+                                                    cfg_service = EngineConfigService(cfg_session)
+                                                    TraceManager._debug_tracing_enabled_cache = await cfg_service.get_crewai_debug_tracing()
+                                            if (event_type in debug_only_event_types) and (TraceManager._debug_tracing_enabled_cache is False):
+                                                logger.debug(f"[TraceManager._trace_writer_loop] {trace_info} Debug tracing disabled - skipping {event_type}")
+                                                continue
+                                        except Exception as cfg_err:
+                                            logger.debug(f"[TraceManager._trace_writer_loop] Could not read debug tracing flag: {cfg_err}. Defaulting to enabled.")
+
                                         # Prepare trace data in the format expected by ExecutionTraceService
+                                        # Extract output content from the nested structure
+                                        output_data = trace_data.get("output", {})
+                                        if isinstance(output_data, dict):
+                                            output_content = output_data.get("content")
+                                            if output_content is None:
+                                                # No 'content' field - serialize the entire dict to JSON for visibility
+                                                try:
+                                                    import json
+                                                    output_content = json.dumps(output_data, ensure_ascii=False)
+                                                except Exception:
+                                                    output_content = str(output_data)
+                                        else:
+                                            output_content = str(output_data) if output_data else ""
+
+                                        # If no explicit trace_metadata, reuse the structured output_data
+                                        trace_metadata = trace_data.get("trace_metadata", trace_data.get("extra_data"))
+                                        if trace_metadata is None and isinstance(output_data, dict):
+                                            trace_metadata = output_data
+
                                         trace_dict = {
                                             "job_id": job_id,
                                             "event_source": trace_data.get("event_source", event_type),  # Use event_type as fallback
                                             "event_context": trace_data.get("event_context", ""),
                                             "event_type": event_type,
-                                            "output": trace_data.get("output_content", ""),
-                                            "trace_metadata": trace_data.get("extra_data", {})
+                                            "output": output_content,
+                                            "trace_metadata": trace_metadata or {}
                                         }
-                                        
+
                                         # Add group context if available in trace data
                                         if "group_id" in trace_data:
                                             trace_dict["group_id"] = trace_data["group_id"]
                                         if "group_email" in trace_data:
                                             trace_dict["group_email"] = trace_data["group_email"]
-                                        
+
                                         try:
-                                            # Use the ExecutionTraceService to create the trace
-                                            await ExecutionTraceService.create_trace(trace_dict)
+                                            # Create ExecutionTraceService with session and use it to create the trace
+                                            logger.debug(f"[TRACE_DEBUG] About to write trace to DB: job_id={job_id}, event_type={event_type}")
+                                            async for session in get_smart_db_session():
+                                                trace_service = ExecutionTraceService(session)
+                                                await trace_service.create_trace(trace_dict)
+                                            logger.debug(f"[TRACE_DEBUG] Successfully wrote trace to DB")
                                             logger.info(f"[TraceManager._trace_writer_loop] {trace_info} Successfully stored {event_type} trace")
+                                        except ValueError as e:
+                                            # This is expected when job doesn't exist - not a failure
+                                            logger.debug(f"[TraceManager._trace_writer_loop] {trace_info} Trace skipped (job doesn't exist): {e}")
                                         except Exception as e:
                                             logger.error(f"[TraceManager._trace_writer_loop] {trace_info} Failed to store trace: {e}")
                                             failures += 1
@@ -215,6 +298,7 @@ class TraceManager:
     @classmethod
     async def ensure_writer_started(cls):
         """Starts the writer task if it hasn't been started yet."""
+        logger.debug("[TRACE_DEBUG] ensure_writer_started called")
         async with cls._lock:
             if not cls._writer_started:
                 if cls._trace_writer_task is None or cls._trace_writer_task.done():

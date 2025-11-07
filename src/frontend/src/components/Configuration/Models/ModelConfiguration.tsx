@@ -42,7 +42,7 @@ import PowerSettingsNewIcon from '@mui/icons-material/PowerSettingsNew';
 import PowerOffIcon from '@mui/icons-material/PowerOff';
 import { useTranslation } from 'react-i18next';
 import { ModelService } from '../../../api/ModelService';
-import { ModelConfig } from '../../../types/models';
+import { ModelConfig, Models } from '../../../types/models';
 import { useModelConfig } from '../../../hooks/global/useModelConfig';
 import { useSnackbar } from 'notistack';
 
@@ -54,10 +54,10 @@ interface ModelEditDialogProps {
   isNew?: boolean;
 }
 
-const ModelEditDialog: React.FC<ModelEditDialogProps> = ({ 
-  open, 
-  onClose, 
-  model, 
+const ModelEditDialog: React.FC<ModelEditDialogProps> = ({
+  open,
+  onClose,
+  model,
   onSave,
   isNew = false
 }) => {
@@ -90,7 +90,7 @@ const ModelEditDialog: React.FC<ModelEditDialogProps> = ({
     e: React.ChangeEvent<HTMLInputElement>
   ) => {
     let value: string | number | boolean = e.target.value;
-    
+
     // Convert numeric fields
     if (field === 'temperature' && value !== '') {
       value = parseFloat(value as string);
@@ -158,17 +158,17 @@ const ModelEditDialog: React.FC<ModelEditDialogProps> = ({
   };
 
   return (
-    <Dialog 
-      open={open} 
-      onClose={onClose} 
-      maxWidth="md" 
+    <Dialog
+      open={open}
+      onClose={onClose}
+      maxWidth="md"
       fullWidth
-      PaperProps={{ 
-        sx: { 
+      PaperProps={{
+        sx: {
           overflowY: 'visible',
           borderRadius: 2,
           boxShadow: '0 8px 32px rgba(0,0,0,0.12)'
-        } 
+        }
       }}
     >
       <DialogTitle sx={{
@@ -178,15 +178,15 @@ const ModelEditDialog: React.FC<ModelEditDialogProps> = ({
       }}>
         <Box sx={{ display: 'flex', alignItems: 'center' }}>
           <ModelIcon sx={{ mr: 1.5, color: 'primary.main', fontSize: '1.5rem' }} />
-          {isNew 
+          {isNew
             ? <Typography variant="h5">{t('configuration.models.add', { defaultValue: 'Add New Model' })}</Typography>
             : <Typography variant="h5">{t('configuration.models.edit', { defaultValue: 'Edit Model' })}</Typography>}
         </Box>
-        <IconButton 
-          onClick={onClose} 
-          sx={{ 
-            position: 'absolute', 
-            right: 16, 
+        <IconButton
+          onClick={onClose}
+          sx={{
+            position: 'absolute',
+            right: 16,
             top: 16,
             color: 'text.secondary',
             '&:hover': {
@@ -209,14 +209,14 @@ const ModelEditDialog: React.FC<ModelEditDialogProps> = ({
             disabled={!isNew}
             error={!!errors.key}
             size="medium"
-            sx={{ 
+            sx={{
               '& .MuiOutlinedInput-root': {
                 borderRadius: 1.5,
               }
             }}
             helperText={errors.key || t('configuration.models.keyHelp', { defaultValue: 'Unique identifier for this model' })}
           />
-          
+
           <TextField
             label={t('configuration.models.name', { defaultValue: 'Model Name' })}
             value={editedModel.name || ''}
@@ -225,7 +225,7 @@ const ModelEditDialog: React.FC<ModelEditDialogProps> = ({
             required
             error={!!errors.name}
             size="medium"
-            sx={{ 
+            sx={{
               '& .MuiOutlinedInput-root': {
                 borderRadius: 1.5,
               }
@@ -233,7 +233,7 @@ const ModelEditDialog: React.FC<ModelEditDialogProps> = ({
             helperText={errors.name || t('configuration.models.nameHelp', { defaultValue: 'Full name of the model (e.g., "gpt-4-turbo-preview")' })}
           />
 
-          <FormControl fullWidth size="medium" sx={{ 
+          <FormControl fullWidth size="medium" sx={{
             '& .MuiOutlinedInput-root': {
               borderRadius: 1.5,
             }
@@ -274,7 +274,7 @@ const ModelEditDialog: React.FC<ModelEditDialogProps> = ({
             inputProps={{ step: 0.1, min: 0, max: 2 }}
             error={!!errors.temperature}
             size="medium"
-            sx={{ 
+            sx={{
               '& .MuiOutlinedInput-root': {
                 borderRadius: 1.5,
               }
@@ -291,7 +291,7 @@ const ModelEditDialog: React.FC<ModelEditDialogProps> = ({
             inputProps={{ min: 1 }}
             error={!!errors.context_window}
             size="medium"
-            sx={{ 
+            sx={{
               '& .MuiOutlinedInput-root': {
                 borderRadius: 1.5,
               }
@@ -308,7 +308,7 @@ const ModelEditDialog: React.FC<ModelEditDialogProps> = ({
             inputProps={{ min: 1 }}
             error={!!errors.max_output_tokens}
             size="medium"
-            sx={{ 
+            sx={{
               '& .MuiOutlinedInput-root': {
                 borderRadius: 1.5,
               }
@@ -316,7 +316,7 @@ const ModelEditDialog: React.FC<ModelEditDialogProps> = ({
             helperText={errors.max_output_tokens || t('configuration.models.maxOutputTokensHelp', { defaultValue: 'Maximum tokens to generate' })}
           />
 
-          <FormControlLabel 
+          <FormControlLabel
             sx={{ mt: 1 }}
             control={
               <Switch
@@ -333,9 +333,9 @@ const ModelEditDialog: React.FC<ModelEditDialogProps> = ({
         <Button onClick={onClose}>
           {t('common.cancel', { defaultValue: 'Cancel' })}
         </Button>
-        <Button 
-          onClick={handleSave} 
-          variant="contained" 
+        <Button
+          onClick={handleSave}
+          variant="contained"
           startIcon={<SaveIcon />}
           disabled={Object.keys(errors).length > 0}
           sx={{ px: 3 }}
@@ -354,7 +354,7 @@ const ConfirmDeleteDialog: React.FC<{
   onConfirm: () => void;
 }> = ({ open, modelKey, onClose, onConfirm }) => {
   const { t } = useTranslation();
-  
+
   return (
     <Dialog
       open={open}
@@ -367,9 +367,9 @@ const ConfirmDeleteDialog: React.FC<{
       </DialogTitle>
       <DialogContent>
         <DialogContentText id="alert-dialog-description">
-          {t('configuration.models.confirmDeleteMessage', { 
+          {t('configuration.models.confirmDeleteMessage', {
             defaultValue: 'Are you sure you want to delete the model {{modelKey}}? This action cannot be undone.',
-            modelKey 
+            modelKey
           })}
         </DialogContentText>
       </DialogContent>
@@ -385,8 +385,9 @@ const ConfirmDeleteDialog: React.FC<{
   );
 };
 
-const ModelConfiguration: React.FC = () => {
+const ModelConfiguration: React.FC<{ mode?: 'system' | 'workspace' | 'auto' }> = ({ mode = 'auto' }) => {
   const { t } = useTranslation();
+  const isSystemView = mode === 'system';
   const {
     models,
     currentEditModel,
@@ -404,17 +405,59 @@ const ModelConfiguration: React.FC = () => {
     setSaving,
     setSearchTerm,
     setError,
+    incrementRefreshKey,
   } = useModelConfig();
   const { enqueueSnackbar } = useSnackbar();
   const [modelToDelete, setModelToDelete] = React.useState<string | null>(null);
+
+  const [providerFilter, setProviderFilter] = React.useState<string>('all');
+  const uniqueProviders = React.useMemo(() => {
+    const set = new Set<string>();
+    Object.values(models).forEach(m => { if (m.provider) set.add(String(m.provider)); });
+    return Array.from(set).sort();
+  }, [models]);
+
+  // Persist provider filter selection for Global view
+  useEffect(() => {
+    if (isSystemView) {
+      const saved = localStorage.getItem('models_global_providerFilter');
+      if (saved) setProviderFilter(saved);
+    }
+  }, [isSystemView]);
+
+  useEffect(() => {
+    if (isSystemView) {
+      localStorage.setItem('models_global_providerFilter', providerFilter);
+    }
+  }, [isSystemView, providerFilter]);
 
   useEffect(() => {
     const fetchModels = async () => {
       try {
         setLoading(true);
         const modelService = ModelService.getInstance();
-        const fetchedModels = await modelService.getModels(true);
-        setModels(fetchedModels);
+        if (isSystemView) {
+          const fetchedModels = await modelService.getGlobalModels();
+          setModels(fetchedModels);
+        } else {
+          // Workspace view: only show models that are enabled globally
+          const [workspaceModels, globalModels] = await Promise.all([
+            modelService.getModels(true),
+            modelService.getGlobalModels(),
+          ]);
+
+          const allowedKeys = new Set(
+            Object.entries(globalModels)
+              .filter(([_, m]) => m.enabled)
+              .map(([k]) => k)
+          );
+
+          const filtered: Models = {};
+          for (const [k, m] of Object.entries(workspaceModels)) {
+            if (allowedKeys.has(k)) filtered[k] = m;
+          }
+          setModels(filtered);
+        }
       } catch (err) {
         setError(err instanceof Error ? err.message : 'Failed to fetch models');
       } finally {
@@ -423,13 +466,13 @@ const ModelConfiguration: React.FC = () => {
     };
 
     fetchModels();
-  }, [setLoading, setModels, setError]);
+  }, [setLoading, setModels, setError, isSystemView]);
 
   const handleSaveModel = async (key: string, model: ModelConfig) => {
     try {
       setSaving(true);
       const modelService = ModelService.getInstance();
-      
+
       if (isNewModel) {
         // For new models, use POST directly via the service's createModel method
         await modelService.createModel(key, model);
@@ -437,11 +480,16 @@ const ModelConfiguration: React.FC = () => {
         // For existing models, use the existing saveModels method
         await modelService.saveModels({ [key]: model });
       }
-      
-      const updatedModels = await modelService.getModels(true);
+
+      const updatedModels = isSystemView
+        ? await modelService.getGlobalModels()
+        : await modelService.getModels(true);
       setModels(updatedModels);
       setCurrentEditModel(null);
       setEditDialogOpen(false);
+
+      // Notify other components that models have changed
+      incrementRefreshKey();
     } catch (err) {
       console.error('Error saving model:', err);
       setError(err instanceof Error ? err.message : 'Failed to save model');
@@ -465,27 +513,32 @@ const ModelConfiguration: React.FC = () => {
   const handleDeleteModel = async (key: string) => {
     try {
       setSaving(true);
-      
+
       // Use ModelService as the proper service layer
       const modelService = ModelService.getInstance();
-      const updatedModels = await modelService.deleteModel(key);
-      
-      // Apply the optimistic update from the service
-      setModels(updatedModels);
-      
+      await modelService.deleteModel(key);
+
+      // Refresh from global models after deletion (system view only)
+      const refreshed = await modelService.getGlobalModels();
+      setModels(refreshed);
+
       // Show success message
       enqueueSnackbar(
         t('configuration.models.modelDeleted', { defaultValue: 'Model deleted successfully' }),
         { variant: 'success' }
       );
-      
+
+      // Notify other components that models have changed
+      incrementRefreshKey();
+
       // Schedule a background refresh after a delay to ensure consistency
       setTimeout(() => {
         console.log('[ModelConfiguration] Running background refresh after deletion');
-        modelService.getModels(true)
+        modelService.getGlobalModels()
           .then(refreshedModels => {
             console.log('[ModelConfiguration] Background refresh complete, updating models');
             setModels(refreshedModels);
+            incrementRefreshKey();
           })
           .catch(err => {
             console.warn('[ModelConfiguration] Background refresh failed:', err);
@@ -494,7 +547,7 @@ const ModelConfiguration: React.FC = () => {
     } catch (err) {
       console.error('Error deleting model:', err);
       setError(err instanceof Error ? err.message : 'Failed to delete model');
-      
+
       enqueueSnackbar(
         t('configuration.models.deleteFailed', { defaultValue: 'Failed to delete model' }),
         { variant: 'error' }
@@ -508,26 +561,41 @@ const ModelConfiguration: React.FC = () => {
     try {
       setSaving(true);
       const modelService = ModelService.getInstance();
-      
-      // Use the proper toggle API instead of the general update
-      await modelService.enableModel(key, enabled);
-      
-      // Refresh the models list
-      const updatedModels = await modelService.getModels(true);
-      setModels(updatedModels);
-      
-      // Success notification
+
+      if (isSystemView) {
+        await modelService.enableGlobalModel(key, enabled);
+        const updatedModels = await modelService.getGlobalModels();
+        setModels(updatedModels);
+      } else {
+        await modelService.enableModel(key, enabled);
+        const [updatedModels, globalModels] = await Promise.all([
+          modelService.getModels(true),
+          modelService.getGlobalModels(),
+        ]);
+        const allowedKeys = new Set(
+          Object.entries(globalModels)
+            .filter(([_, m]) => m.enabled)
+            .map(([k]) => k)
+        );
+        const filtered: Models = {};
+        for (const [k, m] of Object.entries(updatedModels)) {
+          if (allowedKeys.has(k)) filtered[k] = m;
+        }
+        setModels(filtered);
+      }
+
       enqueueSnackbar(
-        enabled 
+        enabled
           ? t('configuration.models.modelEnabled', { defaultValue: 'Model enabled successfully' })
           : t('configuration.models.modelDisabled', { defaultValue: 'Model disabled successfully' }),
         { variant: 'success' }
       );
+
+      // Notify other components that models have changed
+      incrementRefreshKey();
     } catch (err) {
       console.error(`Error toggling model ${key}:`, err);
       setError(err instanceof Error ? err.message : 'Failed to update model status');
-      
-      // Error notification
       enqueueSnackbar(
         t('configuration.models.toggleFailed', { defaultValue: 'Failed to toggle model status' }),
         { variant: 'error' }
@@ -544,16 +612,19 @@ const ModelConfiguration: React.FC = () => {
       const updatedModels = await modelService.enableAllModels();
       setModels(updatedModels);
       setError(null);
-      
+
       // Show success feedback to the user
       enqueueSnackbar(
         t('configuration.models.allModelsEnabled', { defaultValue: 'All models have been enabled' }),
         { variant: 'success' }
       );
+
+      // Notify other components that models have changed
+      incrementRefreshKey();
     } catch (err) {
       console.error('Error enabling all models:', err);
       setError(err instanceof Error ? err.message : 'Failed to enable all models');
-      
+
       // Show error feedback
       enqueueSnackbar(
         t('configuration.models.enableAllFailed', { defaultValue: 'Failed to enable all models' }),
@@ -571,16 +642,19 @@ const ModelConfiguration: React.FC = () => {
       const updatedModels = await modelService.disableAllModels();
       setModels(updatedModels);
       setError(null);
-      
+
       // Show success feedback to the user
       enqueueSnackbar(
         t('configuration.models.allModelsDisabled', { defaultValue: 'All models have been disabled' }),
         { variant: 'success' }
       );
+
+      // Notify other components that models have changed
+      incrementRefreshKey();
     } catch (err) {
       console.error('Error disabling all models:', err);
       setError(err instanceof Error ? err.message : 'Failed to disable all models');
-      
+
       // Show error feedback
       enqueueSnackbar(
         t('configuration.models.disableAllFailed', { defaultValue: 'Failed to disable all models' }),
@@ -604,6 +678,9 @@ const ModelConfiguration: React.FC = () => {
       key.toLowerCase().includes(searchTerm.toLowerCase()) ||
       model.name.toLowerCase().includes(searchTerm.toLowerCase())
     )
+    .filter(([_, model]) =>
+      !isSystemView || providerFilter === 'all' || (model.provider || '') === providerFilter
+    )
     .sort((a, b) => a[1].name.localeCompare(b[1].name)); // Sort alphabetically by model name
 
   if (loading) {
@@ -619,16 +696,20 @@ const ModelConfiguration: React.FC = () => {
       <Stack spacing={3}>
         <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
           <Typography variant="h4" component="h1">
-            {t('configuration.models.title', { defaultValue: 'Model Configuration' })}
+            {isSystemView
+              ? t('configuration.models.globalTitle', { defaultValue: 'Global Models (System Admin)' })
+              : t('configuration.models.workspaceTitle', { defaultValue: 'Workspace Models' })}
           </Typography>
-          <Button
-            variant="contained"
-            startIcon={<AddIcon />}
-            onClick={handleAddModel}
-            disabled={saving}
-          >
-            {t('configuration.models.add', { defaultValue: 'Add Model' })}
-          </Button>
+          {isSystemView && (
+            <Button
+              variant="contained"
+              startIcon={<AddIcon />}
+              onClick={handleAddModel}
+              disabled={saving}
+            >
+              {t('configuration.models.add', { defaultValue: 'Add Model' })}
+            </Button>
+          )}
         </Box>
 
         {error && (
@@ -638,42 +719,76 @@ const ModelConfiguration: React.FC = () => {
         )}
 
         <Paper sx={{ p: 2 }}>
-          <TextField
-            fullWidth
-            variant="outlined"
-            placeholder={t('configuration.models.search', { defaultValue: 'Search models...' })}
-            value={searchTerm}
-            onChange={(e: React.ChangeEvent<HTMLInputElement>) => setSearchTerm(e.target.value)}
-            InputProps={{
-              startAdornment: (
-                <InputAdornment position="start">
-                  <SearchIcon />
-                </InputAdornment>
-              ),
-            }}
-          />
+          <Stack direction={{ xs: 'column', sm: 'row' }} spacing={2} alignItems={{ xs: 'stretch', sm: 'center' }}>
+            <TextField
+              fullWidth
+              variant="outlined"
+              placeholder={t('configuration.models.search', { defaultValue: 'Search models...' })}
+              value={searchTerm}
+              onChange={(e: React.ChangeEvent<HTMLInputElement>) => setSearchTerm(e.target.value)}
+              InputProps={{
+                startAdornment: (
+                  <InputAdornment position="start">
+                    <SearchIcon />
+                  </InputAdornment>
+                ),
+              }}
+            />
+
+            {isSystemView && (
+              <>
+                <FormControl sx={{ minWidth: 220 }} size="small">
+                  <InputLabel>{t('configuration.models.provider', { defaultValue: 'Provider' })}</InputLabel>
+                  <Select
+                    label={t('configuration.models.provider', { defaultValue: 'Provider' })}
+                    value={providerFilter}
+                    onChange={(e: SelectChangeEvent<string>) => setProviderFilter(e.target.value)}
+                  >
+                    <MenuItem value="all">{t('common.all', { defaultValue: 'All' })}</MenuItem>
+                    {uniqueProviders.map((p) => (
+                      <MenuItem key={p} value={p}>{p}</MenuItem>
+                    ))}
+                  </Select>
+                </FormControl>
+
+                <Button
+                  variant="text"
+                  size="small"
+                  onClick={() => {
+                    setSearchTerm('');
+                    setProviderFilter('all');
+                  }}
+                  sx={{ whiteSpace: 'nowrap' }}
+                >
+                  {t('common.clearFilters', { defaultValue: 'Clear filters' })}
+                </Button>
+              </>
+            )}
+          </Stack>
         </Paper>
 
-        <Box sx={{ display: 'flex', justifyContent: 'flex-end', mt: 2 }}>
-          <ButtonGroup variant="outlined" size="small">
-            <Button 
-              startIcon={<PowerSettingsNewIcon />}
-              onClick={handleEnableAllModels}
-              disabled={saving}
-              color="success"
-            >
-              {t('configuration.models.enableAll')}
-            </Button>
-            <Button 
-              startIcon={<PowerOffIcon />}
-              onClick={handleDisableAllModels}
-              disabled={saving}
-              color="error"
-            >
-              {t('configuration.models.disableAll')}
-            </Button>
-          </ButtonGroup>
-        </Box>
+        {isSystemView && (
+          <Box sx={{ display: 'flex', justifyContent: 'flex-end', mt: 2 }}>
+            <ButtonGroup variant="outlined" size="small">
+              <Button
+                startIcon={<PowerSettingsNewIcon />}
+                onClick={handleEnableAllModels}
+                disabled={saving}
+                color="success"
+              >
+                {t('configuration.models.enableAll')}
+              </Button>
+              <Button
+                startIcon={<PowerOffIcon />}
+                onClick={handleDisableAllModels}
+                disabled={saving}
+                color="error"
+              >
+                {t('configuration.models.disableAll')}
+              </Button>
+            </ButtonGroup>
+          </Box>
+        )}
 
         <TableContainer component={Paper}>
           <Table>
@@ -705,24 +820,30 @@ const ModelConfiguration: React.FC = () => {
                     />
                   </TableCell>
                   <TableCell>
-                    <Stack direction="row" spacing={1}>
-                      <Tooltip title={t('common.edit', { defaultValue: 'Edit' })}>
-                        <IconButton
-                          onClick={() => handleEditModel({ ...model, key })}
-                          disabled={saving}
-                        >
-                          <EditIcon />
-                        </IconButton>
-                      </Tooltip>
-                      <Tooltip title={t('common.delete', { defaultValue: 'Delete' })}>
-                        <IconButton
-                          onClick={() => handleConfirmDeleteOpen(key)}
-                          disabled={saving}
-                        >
-                          <CloseIcon />
-                        </IconButton>
-                      </Tooltip>
-                    </Stack>
+                    {isSystemView ? (
+                      <Stack direction="row" spacing={1}>
+                        <Tooltip title={t('common.edit', { defaultValue: 'Edit' })}>
+                          <IconButton
+                            onClick={() => handleEditModel({ ...model, key })}
+                            disabled={saving}
+                          >
+                            <EditIcon />
+                          </IconButton>
+                        </Tooltip>
+                        <Tooltip title={t('common.delete', { defaultValue: 'Delete' })}>
+                          <IconButton
+                            onClick={() => handleConfirmDeleteOpen(key)}
+                            disabled={saving}
+                          >
+                            <CloseIcon />
+                          </IconButton>
+                        </Tooltip>
+                      </Stack>
+                    ) : (
+                      <Typography variant="body2" color="text.secondary">
+                        {t('configuration.models.workspaceActionsHelp', { defaultValue: 'Enable/disable only'})}
+                      </Typography>
+                    )}
                   </TableCell>
                 </TableRow>
               ))}
@@ -755,4 +876,4 @@ const ModelConfiguration: React.FC = () => {
   );
 };
 
-export default ModelConfiguration; 
+export default ModelConfiguration;

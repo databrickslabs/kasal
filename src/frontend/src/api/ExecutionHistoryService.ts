@@ -42,15 +42,27 @@ export async function calculateDurationFromTraces(run: Run): Promise<string> {
     }
     
     // Sort traces by timestamp
-    const traces = response.data.traces.sort((a, b) => 
-      new Date(a.created_at || '').getTime() - 
+    const traces = response.data.traces.sort((a, b) =>
+      new Date(a.created_at || '').getTime() -
       new Date(b.created_at || '').getTime()
     );
-    
-    // Calculate duration from first to last trace
+
+    // Calculate duration from first trace to crew completion (not last trace)
     const firstTrace = traces[0];
-    const lastTrace = traces[traces.length - 1];
-    
+
+    // Find the crew_completed or execution_completed event to use as end time
+    // This prevents duration from growing as post-completion traces are added
+    const crewCompletedEvent = traces
+      .slice()
+      .reverse()
+      .find(t =>
+        t.event_type === 'crew_completed' ||
+        t.event_type === 'execution_completed'
+      );
+
+    // Use crew completion event if found, otherwise use last trace (for running jobs)
+    const lastTrace = crewCompletedEvent || traces[traces.length - 1];
+
     const startTime = new Date(firstTrace.created_at);
     const endTime = new Date(lastTrace.created_at);
     
@@ -354,10 +366,15 @@ export class RunService {
       run_name: name || `Run ${jobId}`,
       agents_yaml,
       tasks_yaml,
+      group_id: executionItem.group_id as string | undefined,  // CRITICAL: Extract group_id for security filtering
       group_email: executionItem.group_email as string | undefined,
       inputs,
       result: executionItem.result as Record<string, OutputDataType> | undefined,
       error: executionItem.error as string | undefined,
+      // MLflow integration fields
+      mlflow_trace_id: executionItem.mlflow_trace_id as string | undefined,
+      mlflow_experiment_name: executionItem.mlflow_experiment_name as string | undefined,
+      mlflow_evaluation_run_id: executionItem.mlflow_evaluation_run_id as string | undefined,
     };
   }
 
@@ -417,45 +434,45 @@ export class RunService {
         if (limit) params.append('limit', limit.toString());
         if (offset) params.append('offset', offset.toString());
         if (updated_since) params.append('updated_since', updated_since);
-        
+
         try {
-          // Using the correct endpoint
+          // Use the standard executions endpoint which respects group context from headers
           const response = await apiClient.get(`/executions?${params.toString()}`);
-          
+
           // API is available if we got here
           this.apiAvailable = true;
-          
+
           // Convert the backend format to the frontend format
           const responseData = response.data;
-          const runs: Run[] = Array.isArray(responseData) 
+          const runs: Run[] = Array.isArray(responseData)
             ? responseData.map(item => this.convertToRun(item))
             : [];
-          
+
           const result = {
             runs,
             total: runs.length,
             limit: limit || 50,
             offset: offset || 0
           };
-          
+
           // Update the cache
           this.runsCache = {
             data: result,
             timestamp: now
           };
-          
+
           return result;
         } catch (error) {
           // Only set apiAvailable to false on 404, not on server errors
-          if (error && typeof error === 'object' && 'response' in error && 
-              error.response && typeof error.response === 'object' && 
+          if (error && typeof error === 'object' && 'response' in error &&
+              error.response && typeof error.response === 'object' &&
               'status' in error.response && error.response.status === 404) {
             this.apiAvailable = false;
           }
           // Fall through to return empty response
         }
       }
-      
+
       // Return empty response if API not available or call failed
       const emptyResponse = {
         runs: [],
@@ -463,7 +480,7 @@ export class RunService {
         limit: limit || 50,
         offset: offset || 0
       };
-      
+
       return emptyResponse;
     } catch (error) {
       return {

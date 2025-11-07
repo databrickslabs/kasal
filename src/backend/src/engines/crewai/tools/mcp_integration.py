@@ -38,7 +38,8 @@ class MCPIntegration:
     async def resolve_effective_mcp_servers(
         explicit_servers: List[str],
         mcp_service,
-        include_global: bool = True
+        include_global: bool = True,
+        group_id: Optional[str] = None
     ) -> List[Dict[str, Any]]:
         """
         Resolve effective MCP servers combining global and explicit selections.
@@ -52,35 +53,50 @@ class MCPIntegration:
             List of effective MCP server configurations (deduplicated)
         """
         try:
-            effective_servers = []
-            server_names = set()
-            
+            effective_servers: List[Dict[str, Any]] = []
+            by_name: Dict[str, Dict[str, Any]] = {}
+
             # 1. Add global servers first (if enabled)
             if include_global:
                 global_response = await mcp_service.get_global_servers()
                 for server in global_response.servers:
-                    if server.name not in server_names:
-                        effective_servers.append(server.model_dump())
-                        server_names.add(server.name)
-                        
+                    payload = server.model_dump()
+                    name = payload.get('name')
+                    if name is None:
+                        continue
+                    # Insert if not present
+                    if name not in by_name:
+                        by_name[name] = payload
+                    else:
+                        # Prefer group-scoped over base if we already have it
+                        existing = by_name[name]
+                        if (existing.get('group_id') is None) and (payload.get('group_id') == group_id):
+                            by_name[name] = payload
                 logger.info(f"Added {len(global_response.servers)} global MCP servers")
-            
-            # 2. Add explicit servers (deduplicated)
+
+            # 2. Add explicit servers (group-aware, deduplicated)
             if explicit_servers:
-                explicit_server_configs = await mcp_service.get_servers_by_names(explicit_servers)
+                explicit_server_configs = await mcp_service.get_servers_by_names_group_aware(explicit_servers, group_id)
                 for server in explicit_server_configs:
-                    if server.name not in server_names:
-                        effective_servers.append(server.model_dump())
-                        server_names.add(server.name)
-                        
+                    payload = server.model_dump()
+                    name = payload.get('name')
+                    if name is None:
+                        continue
+                    if name not in by_name:
+                        by_name[name] = payload
+                    else:
+                        # Prefer group-scoped over base
+                        existing = by_name[name]
+                        if (existing.get('group_id') is None) and (payload.get('group_id') == group_id):
+                            by_name[name] = payload
                 logger.info(f"Added {len(explicit_server_configs)} explicit MCP servers")
-            
-            # 3. Log final effective servers
+
+            # 3. Finalize list
+            effective_servers = list(by_name.values())
             server_list = [server['name'] for server in effective_servers]
             logger.info(f"Effective MCP servers: {server_list}")
-            
             return effective_servers
-            
+
         except Exception as e:
             logger.error(f"Error resolving effective MCP servers: {str(e)}")
             return []
@@ -135,7 +151,8 @@ class MCPIntegration:
     async def create_mcp_tools_for_agent(
         agent_config: Dict[str, Any],
         agent_key: str,
-        mcp_service
+        mcp_service,
+        config: Optional[Dict[str, Any]] = None
     ) -> List[Any]:
         """
         Create MCP tools for a specific agent based on their configuration.
@@ -158,9 +175,9 @@ class MCPIntegration:
             
             # Resolve effective servers (global + explicit)
             effective_servers = await MCPIntegration.resolve_effective_mcp_servers(
-                explicit_servers, mcp_service, include_global=True
+                explicit_servers, mcp_service, include_global=True, group_id=(config.get('group_id') if isinstance(config, dict) else None)
             )
-            
+
             if not effective_servers:
                 logger.info(f"No effective MCP servers for agent {agent_key}")
                 return []
@@ -189,7 +206,8 @@ class MCPIntegration:
     async def create_mcp_tools_for_task(
         task_config: Dict[str, Any],
         task_key: str,
-        mcp_service
+        mcp_service,
+        config: Optional[Dict[str, Any]] = None
     ) -> List[Any]:
         """
         Create MCP tools for a specific task based on their configuration.
@@ -212,9 +230,9 @@ class MCPIntegration:
             
             # For tasks, we include both global and explicit servers
             effective_servers = await MCPIntegration.resolve_effective_mcp_servers(
-                explicit_servers, mcp_service, include_global=True
+                explicit_servers, mcp_service, include_global=True, group_id=(config.get('group_id') if isinstance(config, dict) else None)
             )
-            
+
             if not effective_servers:
                 logger.info(f"No effective MCP servers for task {task_key}")
                 return []

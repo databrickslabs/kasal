@@ -9,11 +9,11 @@ import logging
 import uuid
 from typing import Dict, List, Optional, Any, Union
 from datetime import datetime
-from sqlalchemy.orm import Session
+from sqlalchemy.ext.asyncio import AsyncSession
 from fastapi import HTTPException, status
 
 from src.core.logger import LoggerManager
-from src.db.session import SessionLocal
+# SessionLocal removed - use async_session_factory instead
 from src.engines.crewai.flow.flow_runner_service import FlowRunnerService, BackendFlow
 
 # Initialize logger
@@ -22,7 +22,7 @@ logger = LoggerManager.get_instance().crew
 class CrewAIFlowService:
     """Service for interfacing with the CrewAI Flow Runner"""
     
-    def __init__(self, session: Optional[Session] = None):
+    def __init__(self, session: Optional[AsyncSession] = None):
         """
         Initialize the service with an optional database session.
         
@@ -42,10 +42,10 @@ class CrewAIFlowService:
         if self.session:
             return FlowRunnerService(self.session)
         
-        # Otherwise, create a new session
-        new_session = SessionLocal()
-        # This session will be closed by the FlowRunnerService
-        return FlowRunnerService(new_session)
+        # Cannot create sync session - need async refactoring
+        # For now, return service without session
+        logger.warning("FlowRunnerService created without session - needs async refactoring")
+        return FlowRunnerService(None)
     
     async def run_flow(self, 
                       flow_id: Optional[Union[uuid.UUID, str]] = None, 

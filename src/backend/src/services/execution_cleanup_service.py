@@ -44,7 +44,8 @@ class ExecutionCleanupService:
                 stale_jobs, _ = await repo.get_execution_history(
                     limit=1000,
                     offset=0,
-                    status_filter=active_statuses
+                    status_filter=active_statuses,
+                    system_level=True  # System-level cleanup needs access to all executions
                 )
             
             # Process jobs outside the session context to avoid nested sessions
@@ -97,7 +98,8 @@ class ExecutionCleanupService:
                 stale_jobs, _ = await repo.get_execution_history(
                     limit=1000,
                     offset=0,
-                    status_filter=active_statuses
+                    status_filter=active_statuses,
+                    system_level=True  # System-level cleanup needs access to all executions
                 )
                 
                 # Extract job IDs before closing the session

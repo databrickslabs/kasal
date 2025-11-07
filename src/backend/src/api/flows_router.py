@@ -4,7 +4,7 @@ import uuid
 
 from fastapi import APIRouter, Depends, HTTPException, Path, Query, status
 
-from src.core.dependencies import SessionDep
+from src.core.dependencies import SessionDep, GroupContextDep
 from src.schemas.flow import FlowCreate, FlowUpdate, FlowResponse
 from src.services.flow_service import FlowService
 
@@ -24,18 +24,20 @@ def get_flow_service(session: SessionDep) -> FlowService:
 @router.get("", response_model=List[FlowResponse])
 async def get_all_flows(
     service: Annotated[FlowService, Depends(get_flow_service)],
+    group_context: GroupContextDep,
 ):
     """
-    Retrieve all flows.
+    Retrieve all flows for the current group.
     
     Args:
         service: Flow service injected by dependency
+        group_context: Group context from headers
         
     Returns:
-        List of flows
+        List of flows for the current group
     """
     try:
-        flows = await service.get_all_flows()
+        flows = await service.get_all_flows_for_group(group_context)
         return [
             FlowResponse(
                 id=flow.id,
@@ -58,22 +60,24 @@ async def get_all_flows(
 async def get_flow(
     flow_id: Annotated[uuid.UUID, Path(title="The ID of the flow to get")],
     service: Annotated[FlowService, Depends(get_flow_service)],
+    group_context: GroupContextDep,
 ):
     """
-    Get a specific flow by ID.
+    Get a specific flow by ID with group isolation.
     
     Args:
         flow_id: UUID of the flow to get
         service: Flow service injected by dependency
+        group_context: Group context from headers
         
     Returns:
-        Flow if found
+        Flow if found and belongs to user's group
         
     Raises:
-        HTTPException: If flow not found
+        HTTPException: If flow not found or not authorized
     """
     try:
-        flow = await service.get_flow(flow_id)
+        flow = await service.get_flow_with_group_check(flow_id, group_context)
         return FlowResponse(
             id=flow.id,
             name=flow.name,
@@ -95,19 +99,21 @@ async def get_flow(
 async def create_flow(
     flow_in: FlowCreate,
     service: Annotated[FlowService, Depends(get_flow_service)],
+    group_context: GroupContextDep,
 ):
     """
-    Create a new flow.
+    Create a new flow with group isolation.
     
     Args:
         flow_in: Flow data for creation
         service: Flow service injected by dependency
+        group_context: Group context from headers
         
     Returns:
         Created flow
     """
     try:
-        flow = await service.create_flow(flow_in)
+        flow = await service.create_flow_with_group(flow_in, group_context)
         return FlowResponse(
             id=flow.id,
             name=flow.name,
@@ -127,6 +133,7 @@ async def create_flow(
 async def debug_flow_data(
     flow_in: FlowCreate,
     service: Annotated[FlowService, Depends(get_flow_service)],
+    group_context: GroupContextDep,
 ):
     """
     Debug endpoint to validate flow data without saving.
@@ -134,6 +141,7 @@ async def debug_flow_data(
     Args:
         flow_in: Flow data to validate
         service: Flow service injected by dependency
+        group_context: Group context from headers
         
     Returns:
         Validation result
@@ -146,23 +154,25 @@ async def update_flow(
     flow_id: Annotated[uuid.UUID, Path(title="The ID of the flow to update")],
     flow_in: FlowUpdate,
     service: Annotated[FlowService, Depends(get_flow_service)],
+    group_context: GroupContextDep,
 ):
     """
-    Update a flow.
+    Update a flow with group isolation.
     
     Args:
         flow_id: UUID of the flow to update
         flow_in: Flow data for update
         service: Flow service injected by dependency
+        group_context: Group context from headers
         
     Returns:
         Updated flow
         
     Raises:
-        HTTPException: If flow not found
+        HTTPException: If flow not found or not authorized
     """
     try:
-        flow = await service.update_flow(flow_id, flow_in)
+        flow = await service.update_flow_with_group_check(flow_id, flow_in, group_context)
         return FlowResponse(
             id=flow.id,
             name=flow.name,
@@ -184,27 +194,29 @@ async def update_flow(
 async def delete_flow(
     flow_id: Annotated[uuid.UUID, Path(title="The ID of the flow to delete")],
     service: Annotated[FlowService, Depends(get_flow_service)],
+    group_context: GroupContextDep,
     force: Annotated[bool, Query(title="Force delete and remove associated executions")] = False,
 ):
     """
-    Delete a flow.
+    Delete a flow with group isolation.
     
     Args:
         flow_id: UUID of the flow to delete
         service: Flow service injected by dependency
+        group_context: Group context from headers
         force: Parameter is kept for backward compatibility but ignored, force delete is always used
         
     Returns:
         Success message
         
     Raises:
-        HTTPException: If flow not found
+        HTTPException: If flow not found or not authorized
     """
     logger.info(f"Force deleting flow {flow_id} with its executions")
     
     try:
         # Always use force delete to avoid foreign key constraint issues
-        result = await service.force_delete_flow_with_executions(flow_id)
+        result = await service.force_delete_flow_with_executions_with_group_check(flow_id, group_context)
         
         # Log success and return response
         logger.info(f"Successfully deleted flow {flow_id}")
@@ -224,18 +236,20 @@ async def delete_flow(
 @router.delete("", status_code=status.HTTP_200_OK)
 async def delete_all_flows(
     service: Annotated[FlowService, Depends(get_flow_service)],
+    group_context: GroupContextDep,
 ):
     """
-    Delete all flows.
+    Delete all flows for the current group.
     
     Args:
         service: Flow service injected by dependency
+        group_context: Group context from headers
         
     Returns:
         Success message
     """
     try:
-        await service.delete_all_flows()
+        await service.delete_all_flows_for_group(group_context)
         return {"status": "success", "message": "All flows deleted successfully"}
     except Exception as e:
         logger.error(f"Error deleting all flows: {e}")

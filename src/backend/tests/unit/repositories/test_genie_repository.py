@@ -107,12 +107,17 @@ class TestGenieRepository:
         
         assert headers == expected_headers
 
-    @patch('src.repositories.genie_repository.get_databricks_auth_headers')
+    @patch('src.utils.databricks_auth.get_auth_context')
     @pytest.mark.asyncio
     async def test_get_spaces_success(self, mock_auth, repository):
         """Test successful get_spaces call"""
-        # Setup mock auth to return valid headers
-        mock_auth.return_value = ({"Authorization": "Bearer test-token"}, None)
+        # Setup mock auth to return AuthContext with valid token
+        from src.utils.databricks_auth import AuthContext
+        mock_auth_ctx = Mock(spec=AuthContext)
+        mock_auth_ctx.token = "test-token"
+        mock_auth_ctx.workspace_url = "https://test-workspace.cloud.databricks.com"
+        mock_auth_ctx.get_headers.return_value = {"Authorization": "Bearer test-token"}
+        mock_auth.return_value = mock_auth_ctx
         
         # Setup mock response
         mock_spaces_data = {
@@ -148,12 +153,17 @@ class TestGenieRepository:
         assert "/api/2.0/genie/spaces" in call_args[0][0]
         assert call_args[1]["params"]["page_size"] == 50
 
-    @patch('src.repositories.genie_repository.get_databricks_auth_headers')
+    @patch('src.utils.databricks_auth.get_auth_context')
     @pytest.mark.asyncio
     async def test_get_spaces_with_pagination(self, mock_auth, repository):
         """Test get_spaces with pagination parameters"""
-        # Setup mock auth
-        mock_auth.return_value = ({"Authorization": "Bearer test-token"}, None)
+        # Setup mock auth to return AuthContext
+        from src.utils.databricks_auth import AuthContext
+        mock_auth_ctx = AsyncMock(spec=AuthContext)
+        mock_auth_ctx.token = "test-token"
+        mock_auth_ctx.workspace_url = "https://test-workspace.cloud.databricks.com"
+        mock_auth_ctx.get_headers.return_value = {"Authorization": "Bearer test-token"}
+        mock_auth.return_value = mock_auth_ctx
         
         # Mock the session to prevent real HTTP calls
         mock_response = Mock()
@@ -183,12 +193,17 @@ class TestGenieRepository:
         # }
         # )
 
-    @patch('src.repositories.genie_repository.get_databricks_auth_headers')
+    @patch('src.utils.databricks_auth.get_auth_context')
     @pytest.mark.asyncio
     async def test_search_spaces_success(self, mock_auth, repository):
         """Test successful search_spaces call using get_spaces with search_query"""
-        # Setup mock auth
-        mock_auth.return_value = ({"Authorization": "Bearer test-token"}, None)
+        # Setup mock auth to return AuthContext
+        from src.utils.databricks_auth import AuthContext
+        mock_auth_ctx = AsyncMock(spec=AuthContext)
+        mock_auth_ctx.token = "test-token"
+        mock_auth_ctx.workspace_url = "https://test-workspace.cloud.databricks.com"
+        mock_auth_ctx.get_headers.return_value = {"Authorization": "Bearer test-token"}
+        mock_auth.return_value = mock_auth_ctx
         
         mock_spaces_data = {
             "spaces": [
@@ -227,12 +242,17 @@ class TestGenieRepository:
         # }
         # )
 
-    @patch('src.repositories.genie_repository.get_databricks_auth_headers')
+    @patch('src.utils.databricks_auth.get_auth_context')
     @pytest.mark.asyncio
     async def test_search_spaces_with_all_params(self, mock_auth, repository):
         """Test search_spaces with all parameters"""
-        # Setup mock auth
-        mock_auth.return_value = ({"Authorization": "Bearer test-token"}, None)
+        # Setup mock auth to return AuthContext
+        from src.utils.databricks_auth import AuthContext
+        mock_auth_ctx = AsyncMock(spec=AuthContext)
+        mock_auth_ctx.token = "test-token"
+        mock_auth_ctx.workspace_url = "https://test-workspace.cloud.databricks.com"
+        mock_auth_ctx.get_headers.return_value = {"Authorization": "Bearer test-token"}
+        mock_auth.return_value = mock_auth_ctx
         
         mock_spaces_data = {"spaces": [], "next_page_token": None, "total_fetched": 0}
         
@@ -264,12 +284,17 @@ class TestGenieRepository:
         # )
 
     #     @patch('httpx.AsyncClient.post')  # TODO: Fix - implementation uses requests not httpx
-    @patch('src.repositories.genie_repository.get_databricks_auth_headers')
+    @patch('src.utils.databricks_auth.get_auth_context')
     @pytest.mark.asyncio
     async def test_start_conversation_success(self, mock_auth, repository):
         """Test successful start_conversation call"""
-        # Setup mock auth
-        mock_auth.return_value = ({"Authorization": "Bearer test-token"}, None)
+        # Setup mock auth to return AuthContext
+        from src.utils.databricks_auth import AuthContext
+        mock_auth_ctx = AsyncMock(spec=AuthContext)
+        mock_auth_ctx.token = "test-token"
+        mock_auth_ctx.workspace_url = "https://test-workspace.cloud.databricks.com"
+        mock_auth_ctx.get_headers.return_value = {"Authorization": "Bearer test-token"}
+        mock_auth.return_value = mock_auth_ctx
         mock_response_data = {
             "conversation_id": "conv-123",
             "message_id": "msg-456"
@@ -309,12 +334,17 @@ class TestGenieRepository:
         # )
 
     #     @patch('httpx.AsyncClient.post')  # TODO: Fix - implementation uses requests not httpx
-    @patch('src.repositories.genie_repository.get_databricks_auth_headers')
+    @patch('src.utils.databricks_auth.get_auth_context')
     @pytest.mark.asyncio
     async def test_send_message_success(self, mock_auth, repository):
         """Test successful send_message call"""
-        # Setup mock auth
-        mock_auth.return_value = ({"Authorization": "Bearer test-token"}, None)
+        # Setup mock auth to return AuthContext
+        from src.utils.databricks_auth import AuthContext
+        mock_auth_ctx = AsyncMock(spec=AuthContext)
+        mock_auth_ctx.token = "test-token"
+        mock_auth_ctx.workspace_url = "https://test-workspace.cloud.databricks.com"
+        mock_auth_ctx.get_headers.return_value = {"Authorization": "Bearer test-token"}
+        mock_auth.return_value = mock_auth_ctx
         
         # Setup mock response data
         mock_response_data = {
@@ -359,12 +389,17 @@ class TestGenieRepository:
         # )
 
     #     @patch('httpx.AsyncClient.get')  # TODO: Fix - implementation uses requests not httpx
-    @patch('src.repositories.genie_repository.get_databricks_auth_headers')
+    @patch('src.utils.databricks_auth.get_auth_context')
     @pytest.mark.asyncio
     async def test_get_message_status_success(self, mock_auth, repository):
         """Test successful get_message_status call"""
-        # Setup mock auth
-        mock_auth.return_value = ({"Authorization": "Bearer test-token"}, None)
+        # Setup mock auth to return AuthContext
+        from src.utils.databricks_auth import AuthContext
+        mock_auth_ctx = AsyncMock(spec=AuthContext)
+        mock_auth_ctx.token = "test-token"
+        mock_auth_ctx.workspace_url = "https://test-workspace.cloud.databricks.com"
+        mock_auth_ctx.get_headers.return_value = {"Authorization": "Bearer test-token"}
+        mock_auth.return_value = mock_auth_ctx
         
         # Setup mock response data
         mock_response_data = {
@@ -399,12 +434,17 @@ class TestGenieRepository:
         # )
 
     #     @patch('httpx.AsyncClient.get')  # TODO: Fix - implementation uses requests not httpx
-    @patch('src.repositories.genie_repository.get_databricks_auth_headers')
+    @patch('src.utils.databricks_auth.get_auth_context')
     @pytest.mark.asyncio
     async def test_get_query_result_success(self, mock_auth, repository):
         """Test successful get_query_result call"""
-        # Setup mock auth
-        mock_auth.return_value = ({"Authorization": "Bearer test-token"}, None)
+        # Setup mock auth to return AuthContext
+        from src.utils.databricks_auth import AuthContext
+        mock_auth_ctx = AsyncMock(spec=AuthContext)
+        mock_auth_ctx.token = "test-token"
+        mock_auth_ctx.workspace_url = "https://test-workspace.cloud.databricks.com"
+        mock_auth_ctx.get_headers.return_value = {"Authorization": "Bearer test-token"}
+        mock_auth.return_value = mock_auth_ctx
         
         # Setup mock response data matching what the implementation expects
         mock_response_data = {
@@ -451,12 +491,17 @@ class TestGenieRepository:
         assert "/api/2.0/genie/spaces/space1/conversations/conv-123/messages/msg-456/query-result" in call_args[0][0]
 
     #     @patch('httpx.AsyncClient.post')  # TODO: Fix - implementation uses requests not httpx
-    @patch('src.repositories.genie_repository.get_databricks_auth_headers')
+    @patch('src.utils.databricks_auth.get_auth_context')
     @pytest.mark.asyncio
     async def test_execute_query_success(self, mock_auth, repository):
         """Test successful execute_query call (send_message -> get_message_status -> get_query_result)"""
-        # Setup mock auth
-        mock_auth.return_value = ({"Authorization": "Bearer test-token"}, None)
+        # Setup mock auth to return AuthContext
+        from src.utils.databricks_auth import AuthContext
+        mock_auth_ctx = AsyncMock(spec=AuthContext)
+        mock_auth_ctx.token = "test-token"
+        mock_auth_ctx.workspace_url = "https://test-workspace.cloud.databricks.com"
+        mock_auth_ctx.get_headers.return_value = {"Authorization": "Bearer test-token"}
+        mock_auth.return_value = mock_auth_ctx
         
         # We need to mock the internal methods that execute_query calls
         from src.schemas.genie import GenieSendMessageResponse, GenieMessageStatus, GenieQueryStatus
@@ -551,12 +596,17 @@ class TestGenieRepository:
         result = await repository.get_spaces()
         assert result.spaces == []
 
-    @patch('src.repositories.genie_repository.get_databricks_auth_headers')
+    @patch('src.utils.databricks_auth.get_auth_context')
     @pytest.mark.asyncio
     async def test_get_spaces_empty_response(self, mock_auth, repository):
         """Test get_spaces with empty spaces list"""
-        # Setup mock auth
-        mock_auth.return_value = ({"Authorization": "Bearer test-token"}, None)
+        # Setup mock auth to return AuthContext
+        from src.utils.databricks_auth import AuthContext
+        mock_auth_ctx = AsyncMock(spec=AuthContext)
+        mock_auth_ctx.token = "test-token"
+        mock_auth_ctx.workspace_url = "https://test-workspace.cloud.databricks.com"
+        mock_auth_ctx.get_headers.return_value = {"Authorization": "Bearer test-token"}
+        mock_auth.return_value = mock_auth_ctx
         
         # Mock the session to prevent real HTTP calls
         mock_response = Mock()
@@ -593,12 +643,17 @@ class TestGenieRepository:
         assert search_url == "https://test-workspace.cloud.databricks.com/api/2.0/genie/spaces/search"
         assert conversations_url == "https://test-workspace.cloud.databricks.com/api/2.0/genie/conversations"
 
-    @patch('src.repositories.genie_repository.get_databricks_auth_headers')
+    @patch('src.utils.databricks_auth.get_auth_context')
     @pytest.mark.asyncio
     async def test_search_spaces_no_query(self, mock_auth, repository):
         """Test search_spaces with empty query"""
-        # Setup mock auth
-        mock_auth.return_value = ({"Authorization": "Bearer test-token"}, None)
+        # Setup mock auth to return AuthContext
+        from src.utils.databricks_auth import AuthContext
+        mock_auth_ctx = AsyncMock(spec=AuthContext)
+        mock_auth_ctx.token = "test-token"
+        mock_auth_ctx.workspace_url = "https://test-workspace.cloud.databricks.com"
+        mock_auth_ctx.get_headers.return_value = {"Authorization": "Bearer test-token"}
+        mock_auth.return_value = mock_auth_ctx
         
         # Mock the session to prevent real HTTP calls
         mock_response = Mock()
@@ -645,12 +700,17 @@ class TestGenieRepository:
         assert result.spaces == []
         assert result.total_fetched is None
 
-    @patch('src.repositories.genie_repository.get_databricks_auth_headers')
+    @patch('src.utils.databricks_auth.get_auth_context')
     @pytest.mark.asyncio
     async def test_get_spaces_malformed_response(self, mock_auth, repository):
         """Test handling of malformed response structure"""
-        # Setup mock auth
-        mock_auth.return_value = ({"Authorization": "Bearer test-token"}, None)
+        # Setup mock auth to return AuthContext
+        from src.utils.databricks_auth import AuthContext
+        mock_auth_ctx = AsyncMock(spec=AuthContext)
+        mock_auth_ctx.token = "test-token"
+        mock_auth_ctx.workspace_url = "https://test-workspace.cloud.databricks.com"
+        mock_auth_ctx.get_headers.return_value = {"Authorization": "Bearer test-token"}
+        mock_auth.return_value = mock_auth_ctx
         
         # Mock the session to prevent real HTTP calls
         mock_response = Mock()
@@ -683,12 +743,17 @@ class TestGenieRepository:
         assert headers1["Authorization"] == "Bearer test-token"
         assert headers1["Content-Type"] == "application/json"
 
-    @patch('src.repositories.genie_repository.get_databricks_auth_headers')
+    @patch('src.utils.databricks_auth.get_auth_context')
     @pytest.mark.asyncio
     async def test_get_spaces_error_handling(self, mock_auth, repository):
         """Test error handling in get_spaces"""
-        # Setup mock auth
-        mock_auth.return_value = ({"Authorization": "Bearer test-token"}, None)
+        # Setup mock auth to return AuthContext
+        from src.utils.databricks_auth import AuthContext
+        mock_auth_ctx = AsyncMock(spec=AuthContext)
+        mock_auth_ctx.token = "test-token"
+        mock_auth_ctx.workspace_url = "https://test-workspace.cloud.databricks.com"
+        mock_auth_ctx.get_headers.return_value = {"Authorization": "Bearer test-token"}
+        mock_auth.return_value = mock_auth_ctx
         
         # Mock the session to raise an error
         mock_response = Mock()
@@ -702,12 +767,17 @@ class TestGenieRepository:
         assert result.spaces == []
         assert result.total_fetched is None
 
-    @patch('src.repositories.genie_repository.get_databricks_auth_headers')
+    @patch('src.utils.databricks_auth.get_auth_context')
     @pytest.mark.asyncio
     async def test_start_conversation_error_handling(self, mock_auth, repository):
         """Test error handling in start_conversation"""
-        # Setup mock auth
-        mock_auth.return_value = ({"Authorization": "Bearer test-token"}, None)
+        # Setup mock auth to return AuthContext
+        from src.utils.databricks_auth import AuthContext
+        mock_auth_ctx = AsyncMock(spec=AuthContext)
+        mock_auth_ctx.token = "test-token"
+        mock_auth_ctx.workspace_url = "https://test-workspace.cloud.databricks.com"
+        mock_auth_ctx.get_headers.return_value = {"Authorization": "Bearer test-token"}
+        mock_auth.return_value = mock_auth_ctx
         
         # Mock the session to raise an error
         mock_response = Mock()
@@ -725,12 +795,17 @@ class TestGenieRepository:
         # Repository returns None on error
         assert result is None
 
-    @patch('src.repositories.genie_repository.get_databricks_auth_headers')
+    @patch('src.utils.databricks_auth.get_auth_context')
     @pytest.mark.asyncio
     async def test_send_message_error_handling(self, mock_auth, repository):
         """Test error handling in send_message"""
-        # Setup mock auth
-        mock_auth.return_value = ({"Authorization": "Bearer test-token"}, None)
+        # Setup mock auth to return AuthContext
+        from src.utils.databricks_auth import AuthContext
+        mock_auth_ctx = AsyncMock(spec=AuthContext)
+        mock_auth_ctx.token = "test-token"
+        mock_auth_ctx.workspace_url = "https://test-workspace.cloud.databricks.com"
+        mock_auth_ctx.get_headers.return_value = {"Authorization": "Bearer test-token"}
+        mock_auth.return_value = mock_auth_ctx
         
         # Mock the session to raise an error
         mock_response = Mock()
@@ -749,12 +824,17 @@ class TestGenieRepository:
         # Repository returns None on error
         assert result is None
 
-    @patch('src.repositories.genie_repository.get_databricks_auth_headers')
+    @patch('src.utils.databricks_auth.get_auth_context')
     @pytest.mark.asyncio
     async def test_execute_query_error_handling(self, mock_auth, repository):
         """Test error handling in execute_query"""
-        # Setup mock auth
-        mock_auth.return_value = ({"Authorization": "Bearer test-token"}, None)
+        # Setup mock auth to return AuthContext
+        from src.utils.databricks_auth import AuthContext
+        mock_auth_ctx = AsyncMock(spec=AuthContext)
+        mock_auth_ctx.token = "test-token"
+        mock_auth_ctx.workspace_url = "https://test-workspace.cloud.databricks.com"
+        mock_auth_ctx.get_headers.return_value = {"Authorization": "Bearer test-token"}
+        mock_auth.return_value = mock_auth_ctx
         
         # Mock the session to raise an error on first call
         mock_response = Mock()
