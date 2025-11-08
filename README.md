@@ -1,5 +1,4 @@
-![Kasal Logo](./src/frontend/public/kasal-icon-32.png)
-# Kasal
+<h1><img src="./src/frontend/public/kasal-icon-32.png" alt="Kasal Logo" style="vertical-align: middle; height: 1.2em; margin-right: 10px;"/> Kasal</h1>
 **Build intelligent AI agent workflows with visual simplicity and enterprise power.**
 
 [![YouTube Video](https://img.youtube.com/vi/0d5e5rSe5JI/0.jpg)](https://www.youtube.com/watch?v=0d5e5rSe5JI)
