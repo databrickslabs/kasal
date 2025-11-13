@@ -139,6 +139,10 @@ class MCPAdapter:
                 logger.debug(f"No properties in schema for {tool_name}")
                 return parameters
 
+            logger.info(f"Converting parameters for {tool_name}")
+            logger.info(f"  Input parameters: {parameters}")
+            logger.info(f"  Expected schema properties: {list(properties.keys())}")
+
             converted = {}
 
             for param_name, param_value in parameters.items():
@@ -177,8 +181,12 @@ class MCPAdapter:
                             import json
                             try:
                                 converted[param_name] = json.loads(param_value)
-                            except json.JSONDecodeError:
-                                converted[param_name] = param_value
+                            except json.JSONDecodeError as e:
+                                logger.warning(
+                                    f"Failed to parse array parameter {param_name}='{param_value}' as JSON: {e}. Skipping parameter."
+                                )
+                                # Skip parameter - don't send invalid data to MCP server
+                                continue
                         else:
                             converted[param_name] = param_value
                     elif param_type == 'object':
@@ -187,8 +195,12 @@ class MCPAdapter:
                             import json
                             try:
                                 converted[param_name] = json.loads(param_value)
-                            except json.JSONDecodeError:
-                                converted[param_name] = param_value
+                            except json.JSONDecodeError as e:
+                                logger.warning(
+                                    f"Failed to parse object parameter {param_name}='{param_value}' as JSON: {e}. Skipping parameter."
+                                )
+                                # Skip parameter - don't send invalid data to MCP server
+                                continue
                         else:
                             converted[param_name] = param_value
                     else:
@@ -210,7 +222,11 @@ class MCPAdapter:
                     # Skip parameters that fail conversion
                     continue
 
-            logger.info(f"Converted parameters for {tool_name}: {parameters} -> {converted}")
+            # Log the conversion results
+            skipped_params = set(parameters.keys()) - set(converted.keys()) - {None, '', 'null'}
+            if skipped_params:
+                logger.warning(f"Skipped parameters for {tool_name}: {skipped_params}")
+            logger.info(f"Final converted parameters for {tool_name}: {converted}")
             return converted
 
         except Exception as e:
