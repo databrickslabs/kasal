@@ -25,31 +25,33 @@ class FlowExecutionRequest(BaseModel):
     """Request model for flow execution"""
     flow_id: Union[str, int, uuid.UUID]
     job_id: str
+    run_name: Optional[str] = None
     config: Optional[Dict[str, Any]] = None
 
 
 @router.post("", status_code=status.HTTP_202_ACCEPTED)
 async def execute_flow(
     request: FlowExecutionRequest,
-    group_context: GroupContextDep
+    group_context: GroupContextDep,
+    db=Depends(get_db)
 ):
     """
     Start a flow execution asynchronously.
-    
+
     Args:
         request: Flow execution request details
-        
+
     Returns:
         Flow execution details
     """
     try:
-        # Use the CrewAIFlowService instead of FlowRunnerService
-        # This service will handle its own session management
-        service = CrewAIFlowService()
+        # Use the CrewAIFlowService with database session
+        service = CrewAIFlowService(db)
         
         result = await service.run_flow(
             flow_id=request.flow_id,
             job_id=request.job_id,
+            run_name=request.run_name,
             config=request.config
         )
         
@@ -73,20 +75,21 @@ async def execute_flow(
 @router.get("/{execution_id}")
 async def get_flow_execution(
     execution_id: int,
-    group_context: GroupContextDep
+    group_context: GroupContextDep,
+    db=Depends(get_db)
 ):
     """
     Get details of a flow execution.
-    
+
     Args:
         execution_id: ID of the flow execution
-        
+
     Returns:
         Flow execution details
     """
     try:
-        # Use the CrewAIFlowService
-        service = CrewAIFlowService()
+        # Use the CrewAIFlowService with database session
+        service = CrewAIFlowService(db)
         
         result = await service.get_flow_execution(execution_id)
         
@@ -111,20 +114,21 @@ async def get_flow_execution(
 @router.get("/by-flow/{flow_id}")
 async def get_flow_executions_by_flow(
     flow_id: str,
-    group_context: GroupContextDep
+    group_context: GroupContextDep,
+    db=Depends(get_db)
 ):
     """
     Get all executions for a specific flow.
-    
+
     Args:
         flow_id: ID of the flow
-        
+
     Returns:
         List of flow executions
     """
     try:
-        # Use the CrewAIFlowService
-        service = CrewAIFlowService()
+        # Use the CrewAIFlowService with database session
+        service = CrewAIFlowService(db)
         
         result = await service.get_flow_executions_by_flow(flow_id)
         

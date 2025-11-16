@@ -21,6 +21,19 @@ def get_flow_service(session: SessionDep) -> FlowService:
     return FlowService(session)
 
 
+def clean_null_values(obj: Any) -> Any:
+    """
+    Recursively remove all None/null values from dictionaries and lists.
+    This cleans up the JSON response to avoid sending unnecessary null fields.
+    """
+    if isinstance(obj, dict):
+        return {k: clean_null_values(v) for k, v in obj.items() if v is not None}
+    elif isinstance(obj, list):
+        return [clean_null_values(item) for item in obj]
+    else:
+        return obj
+
+
 @router.get("", response_model=List[FlowResponse])
 async def get_all_flows(
     service: Annotated[FlowService, Depends(get_flow_service)],
@@ -43,8 +56,8 @@ async def get_all_flows(
                 id=flow.id,
                 name=flow.name,
                 crew_id=flow.crew_id,
-                nodes=flow.nodes or [],
-                edges=flow.edges or [],
+                nodes=clean_null_values(flow.nodes) or [],
+                edges=clean_null_values(flow.edges) or [],
                 flow_config=flow.flow_config or {},
                 created_at=flow.created_at.isoformat(),
                 updated_at=flow.updated_at.isoformat()
@@ -82,8 +95,8 @@ async def get_flow(
             id=flow.id,
             name=flow.name,
             crew_id=flow.crew_id,
-            nodes=flow.nodes or [],
-            edges=flow.edges or [],
+            nodes=clean_null_values(flow.nodes) or [],
+            edges=clean_null_values(flow.edges) or [],
             flow_config=flow.flow_config or {},
             created_at=flow.created_at.isoformat(),
             updated_at=flow.updated_at.isoformat()
@@ -118,8 +131,8 @@ async def create_flow(
             id=flow.id,
             name=flow.name,
             crew_id=flow.crew_id,
-            nodes=flow.nodes or [],
-            edges=flow.edges or [],
+            nodes=clean_null_values(flow.nodes) or [],
+            edges=clean_null_values(flow.edges) or [],
             flow_config=flow.flow_config or {},
             created_at=flow.created_at.isoformat(),
             updated_at=flow.updated_at.isoformat()
@@ -177,8 +190,8 @@ async def update_flow(
             id=flow.id,
             name=flow.name,
             crew_id=flow.crew_id,
-            nodes=flow.nodes or [],
-            edges=flow.edges or [],
+            nodes=clean_null_values(flow.nodes) or [],
+            edges=clean_null_values(flow.edges) or [],
             flow_config=flow.flow_config or {},
             created_at=flow.created_at.isoformat(),
             updated_at=flow.updated_at.isoformat()
