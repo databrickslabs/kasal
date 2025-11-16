@@ -32,6 +32,11 @@ export function useExecutionHistoryResize(
   const handleHistoryResizeEnd = React.useCallback(() => {
     setIsResizingHistory(false);
     setHasManuallyResized(true); // User has manually resized, stop auto-adjusting
+
+    // Trigger viewport recalculation after resize
+    window.dispatchEvent(new CustomEvent('recalculateNodePositions', {
+      detail: { reason: 'execution-history-resize' }
+    }));
   }, [setHasManuallyResized]);
 
   React.useEffect(() => {

@@ -12,10 +12,14 @@ export interface TabData {
   isDirty: boolean; // Track if tab has unsaved changes
   createdAt: Date;
   lastModified: Date;
+  group_id: string; // Workspace/group this tab belongs to
   // Crew metadata
   savedCrewId?: string; // ID of the saved crew
   savedCrewName?: string; // Name of the saved crew
   lastSavedAt?: Date; // When the crew was last saved
+  // Flow metadata
+  savedFlowId?: string; // ID of the saved flow
+  savedFlowName?: string; // Name of the saved flow
   // Chat session
   chatSessionId?: string; // ID of the chat session for this tab
   // Execution status
@@ -26,7 +30,7 @@ export interface TabData {
 interface TabManagerState {
   tabs: TabData[];
   activeTabId: string | null;
-  
+
   // Actions
   createTab: (name?: string) => string;
   closeTab: (tabId: string) => void;
@@ -40,10 +44,16 @@ interface TabManagerState {
   getActiveTab: () => TabData | null;
   getTab: (tabId: string) => TabData | null;
   clearAllTabs: () => void;
+  // Group/workspace filtering
+  getTabsForCurrentGroup: () => TabData[];
+  switchToGroup: (groupId: string) => void;
   // New methods for crew management
   updateTabCrewInfo: (tabId: string, crewId: string, crewName: string) => void;
   clearTabCrewInfo: (tabId: string) => void;
   isTabSaved: (tabId: string) => boolean;
+  // New methods for flow management
+  updateTabFlowInfo: (tabId: string, flowId: string, flowName: string) => void;
+  clearTabFlowInfo: (tabId: string) => void;
   // New methods for execution status
   updateTabExecutionStatus: (tabId: string, status: 'running' | 'completed' | 'failed') => void;
   clearTabExecutionStatus: (tabId: string) => void;
@@ -117,8 +127,13 @@ export const useTabManagerStore = create<TabManagerState>()(
 
       createTab: (name?: string) => {
         const newTabId = uuidv4();
-        const tabName = name || `Canvas ${get().tabs.length + 1}`;
-        
+        // Get current group ID from localStorage
+        const currentGroupId = localStorage.getItem('selectedGroupId') || '';
+
+        // Count tabs for this group only
+        const groupTabs = get().tabs.filter(tab => tab.group_id === currentGroupId);
+        const tabName = name || `Canvas ${groupTabs.length + 1}`;
+
         const newTab: TabData = {
           id: newTabId,
           name: tabName,
@@ -128,6 +143,7 @@ export const useTabManagerStore = create<TabManagerState>()(
           isDirty: false,
           createdAt: new Date(),
           lastModified: new Date(),
+          group_id: currentGroupId,
           chatSessionId: uuidv4() // Generate unique chat session for each tab
         };
 
@@ -141,7 +157,7 @@ export const useTabManagerStore = create<TabManagerState>()(
 
         // Dispatch event to clear the canvas immediately
         setTimeout(() => {
-          window.dispatchEvent(new CustomEvent('clearCanvas', { 
+          window.dispatchEvent(new CustomEvent('clearCanvas', {
             detail: { tabId: newTabId }
           }));
         }, 0);
@@ -307,6 +323,7 @@ export const useTabManagerStore = create<TabManagerState>()(
           isDirty: true,
           createdAt: new Date(),
           lastModified: new Date(),
+          group_id: sourceTab.group_id, // Preserve the group association
           // Don't copy crew info for duplicated tabs
           savedCrewId: undefined,
           savedCrewName: undefined,
@@ -391,6 +408,37 @@ export const useTabManagerStore = create<TabManagerState>()(
         return tab ? !tab.isDirty && !!tab.savedCrewId : false;
       },
 
+      // New methods for flow management
+      updateTabFlowInfo: (tabId: string, flowId: string, flowName: string) => {
+        set(state => ({
+          tabs: state.tabs.map(tab =>
+            tab.id === tabId
+              ? {
+                  ...tab,
+                  savedFlowId: flowId,
+                  savedFlowName: flowName,
+                  lastSavedAt: new Date(),
+                  isDirty: false
+                }
+              : tab
+          )
+        }));
+      },
+
+      clearTabFlowInfo: (tabId: string) => {
+        set(state => ({
+          tabs: state.tabs.map(tab =>
+            tab.id === tabId
+              ? {
+                  ...tab,
+                  savedFlowId: undefined,
+                  savedFlowName: undefined
+                }
+              : tab
+          )
+        }));
+      },
+
       // New methods for execution status
       updateTabExecutionStatus: (tabId: string, status: 'running' | 'completed' | 'failed') => {
         set(state => ({
@@ -410,14 +458,41 @@ export const useTabManagerStore = create<TabManagerState>()(
         set(state => ({
           tabs: state.tabs.map(tab =>
             tab.id === tabId
-              ? { 
-                  ...tab, 
+              ? {
+                  ...tab,
                   executionStatus: undefined,
                   lastExecutionTime: undefined
                 }
               : tab
           )
         }));
+      },
+
+      // Group/workspace filtering methods
+      getTabsForCurrentGroup: () => {
+        const currentGroupId = localStorage.getItem('selectedGroupId') || '';
+        return get().tabs.filter(tab => tab.group_id === currentGroupId);
+      },
+
+      switchToGroup: (groupId: string) => {
+        // Get tabs for the new group
+        const groupTabs = get().tabs.filter(tab => tab.group_id === groupId);
+
+        // If there are tabs for this group, activate the first one
+        if (groupTabs.length > 0) {
+          const firstTab = groupTabs[0];
+          set(state => ({
+            tabs: state.tabs.map(tab => ({
+              ...tab,
+              isActive: tab.id === firstTab.id && tab.group_id === groupId
+            })),
+            activeTabId: firstTab.id
+          }));
+        } else {
+          // No tabs for this group, create a new one
+          const newTabId = get().createTab();
+          set({ activeTabId: newTabId });
+        }
       }
     }),
     {
@@ -436,13 +511,18 @@ export const useTabManagerStore = create<TabManagerState>()(
       }),
       onRehydrateStorage: () => (state) => {
         if (state) {
+          // Get current group ID for migration
+          const currentGroupId = localStorage.getItem('selectedGroupId') || '';
+
           // Deserialize dates and ensure proper object structure
           state.tabs = state.tabs.map(tab => ({
             ...tab,
             createdAt: new Date(tab.createdAt),
             lastModified: new Date(tab.lastModified),
             lastSavedAt: tab.lastSavedAt ? new Date(tab.lastSavedAt) : undefined,
-            lastExecutionTime: tab.lastExecutionTime ? new Date(tab.lastExecutionTime) : undefined
+            lastExecutionTime: tab.lastExecutionTime ? new Date(tab.lastExecutionTime) : undefined,
+            // Migration: Add group_id to existing tabs that don't have it
+            group_id: tab.group_id || currentGroupId
           }));
         }
       }
