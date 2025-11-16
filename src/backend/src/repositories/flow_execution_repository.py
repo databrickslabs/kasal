@@ -4,7 +4,7 @@ Repository for flow execution and flow node execution operations.
 import logging
 import uuid
 from typing import List, Optional, Dict, Any, Union
-from datetime import datetime, UTC
+from datetime import datetime
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import Session
 from sqlalchemy import select, update
@@ -30,14 +30,14 @@ class FlowExecutionRepository:
     async def create(self, flow_execution_data: FlowExecutionCreate) -> FlowExecution:
         """
         Create a new flow execution record.
-        
+
         Args:
             flow_execution_data: Data for the new flow execution
-            
+
         Returns:
             The created flow execution record
         """
-        now = datetime.now(UTC)
+        now = datetime.utcnow()
         execution = FlowExecution(
             flow_id=flow_execution_data.flow_id,
             job_id=flow_execution_data.job_id,
@@ -115,7 +115,7 @@ class FlowExecutionRepository:
         Returns:
             The updated flow execution record or None if not found
         """
-        now = datetime.now(UTC)
+        now = datetime.utcnow()
         update_data = {"updated_at": now}
         
         if execution_data.status is not None:
@@ -176,7 +176,7 @@ class FlowNodeExecutionRepository:
         Returns:
             The created flow node execution record
         """
-        now = datetime.now(UTC)
+        now = datetime.utcnow()
         node_execution = FlowNodeExecution(
             flow_execution_id=node_execution_data.flow_execution_id,
             node_id=node_execution_data.node_id,
@@ -233,7 +233,7 @@ class FlowNodeExecutionRepository:
         Returns:
             The updated flow node execution record or None if not found
         """
-        now = datetime.now(UTC)
+        now = datetime.utcnow()
         update_data = {"updated_at": now}
         
         if node_execution_data.status is not None:
@@ -284,7 +284,7 @@ class SyncFlowExecutionRepository:
         Returns:
             The created flow execution record
         """
-        now = datetime.now(UTC)
+        now = datetime.utcnow()
         execution = FlowExecution(
             flow_id=flow_execution_data.flow_id,
             job_id=flow_execution_data.job_id,
@@ -360,7 +360,7 @@ class SyncFlowExecutionRepository:
         if not execution:
             return None
             
-        now = datetime.now(UTC)
+        now = datetime.utcnow()
         execution.updated_at = now
         
         if execution_data.status is not None:
@@ -400,7 +400,7 @@ class SyncFlowNodeExecutionRepository:
         Returns:
             The created flow node execution record
         """
-        now = datetime.now(UTC)
+        now = datetime.utcnow()
         node_execution = FlowNodeExecution(
             flow_execution_id=node_execution_data.flow_execution_id,
             node_id=node_execution_data.node_id,
@@ -457,7 +457,7 @@ class SyncFlowNodeExecutionRepository:
         if not node_execution:
             return None
             
-        now = datetime.now(UTC)
+        now = datetime.utcnow()
         node_execution.updated_at = now
         
         if node_execution_data.status is not None:

@@ -635,36 +635,57 @@ class CrewAIExecutionService:
             # Add group context to config if provided
             if group_context:
                 execution_config['group_context'] = group_context
-            
-            # Create a flow service instance
-            flow_service = CrewAIFlowService()
-            
-            # Run the flow
-            try:
-                # Call the flow service to run the flow
-                result = await flow_service.run_flow(
-                    flow_id=flow_id,
-                    job_id=job_id,
-                    config=execution_config
-                )
-                
-                crew_logger.info(f"Flow execution started successfully: {result}")
-                return result
-            except Exception as e:
-                crew_logger.error(f"Error running flow execution: {e}", exc_info=True)
-                # Update status to FAILED
-                await ExecutionStatusService.update_status(
-                    job_id=job_id,
-                    status=ExecutionStatus.FAILED.value,
-                    message=f"Flow execution failed: {str(e)}"
-                )
-                return {
-                    "success": False,
-                    "error": str(e),
-                    "job_id": job_id
-                }
+                execution_config['group_id'] = group_context.primary_group_id  # For background task API key loading
+
+            # Create a database session for flow execution
+            from src.db.session import async_session_factory
+            async with async_session_factory() as session:
+                # Create a flow service instance with session
+                flow_service = CrewAIFlowService(session)
+
+                # Set group context in UserContext for API key loading
+                if group_context:
+                    from src.utils.user_context import UserContext
+                    UserContext.set_group_context(group_context)
+                    crew_logger.info(f"Set group context for flow execution: group_id={group_context.primary_group_id}")
+
+                # Run the flow
+                try:
+                    # Extract user token from group context for OBO authentication
+                    user_token = group_context.access_token if group_context else None
+
+                    # Use flow logger for flow execution
+                    flow_logger = LoggerManager.get_instance().flow
+
+                    # Call the flow service to run the flow with process isolation
+                    flow_logger.info(f"Starting flow execution for job_id: {job_id}")
+                    result = await flow_service.run_flow(
+                        flow_id=flow_id,
+                        job_id=job_id,
+                        config=execution_config,
+                        group_context=group_context,
+                        user_token=user_token
+                    )
+
+                    flow_logger.info(f"Flow execution started successfully (process isolated): {result}")
+                    return result
+                except Exception as e:
+                    flow_logger.error(f"Error running flow execution: {e}", exc_info=True)
+                    # Update status to FAILED - reuse the existing session
+                    await ExecutionStatusService.update_status(
+                        job_id=job_id,
+                        status=ExecutionStatus.FAILED.value,
+                        message=f"Flow execution failed: {str(e)}",
+                        session=session
+                    )
+                    return {
+                        "success": False,
+                        "error": str(e),
+                        "job_id": job_id
+                    }
         except Exception as e:
-            crew_logger.error(f"Unexpected error in run_flow_execution: {e}", exc_info=True)
+            flow_logger = LoggerManager.get_instance().flow
+            flow_logger.error(f"Unexpected error in run_flow_execution: {e}", exc_info=True)
             await ExecutionStatusService.update_status(
                 job_id=job_id,
                 status=ExecutionStatus.FAILED.value,
@@ -687,16 +708,19 @@ class CrewAIExecutionService:
             Dictionary with execution details
         """
         crew_logger.info(f"Getting flow execution {execution_id}")
-        
-        # Create a flow service instance
-        flow_service = CrewAIFlowService()
-        
-        # Get the execution details
-        try:
-            return await flow_service.get_flow_execution(execution_id)
-        except Exception as e:
-            crew_logger.error(f"Error getting flow execution: {e}", exc_info=True)
-            raise
+
+        # Create a database session for flow execution retrieval
+        from src.db.session import async_session_factory
+        async with async_session_factory() as session:
+            # Create a flow service instance with session
+            flow_service = CrewAIFlowService(session)
+
+            # Get the execution details
+            try:
+                return await flow_service.get_flow_execution(execution_id)
+            except Exception as e:
+                crew_logger.error(f"Error getting flow execution: {e}", exc_info=True)
+                raise
     
     async def get_flow_executions_by_flow(self, flow_id: str) -> Dict[str, Any]:
         """
@@ -709,14 +733,17 @@ class CrewAIExecutionService:
             Dictionary with list of executions
         """
         crew_logger.info(f"Getting executions for flow {flow_id}")
-        
-        # Create a flow service instance
-        flow_service = CrewAIFlowService()
-        
-        # Get the executions
-        try:
-            return await flow_service.get_flow_executions_by_flow(flow_id)
-        except Exception as e:
-            crew_logger.error(f"Error getting flow executions: {e}", exc_info=True)
-            raise
+
+        # Create a database session for flow executions retrieval
+        from src.db.session import async_session_factory
+        async with async_session_factory() as session:
+            # Create a flow service instance with session
+            flow_service = CrewAIFlowService(session)
+
+            # Get the executions
+            try:
+                return await flow_service.get_flow_executions_by_flow(flow_id)
+            except Exception as e:
+                crew_logger.error(f"Error getting flow executions: {e}", exc_info=True)
+                raise
     
