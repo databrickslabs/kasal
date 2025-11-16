@@ -549,8 +549,8 @@ const CrewDialog: React.FC<CrewDialogProps> = ({ open, onClose, onCrewSelect }):
                     <DownloadIcon />
                   </IconButton>
                 </Tooltip>
-                <Tooltip title="Import Plan">
-                  <IconButton 
+                <Tooltip title="Import Crew">
+                  <IconButton
                     onClick={handleImportMenuClick}
                     sx={{
                       '&:hover': {

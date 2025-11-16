@@ -24,7 +24,6 @@ import CloseIcon from '@mui/icons-material/Close';
 import RefreshIcon from '@mui/icons-material/Refresh';
 import KeyboardArrowDownIcon from '@mui/icons-material/KeyboardArrowDown';
 import ChevronLeftIcon from '@mui/icons-material/ChevronLeft';
-import PlayArrowIcon from '@mui/icons-material/PlayArrow';
 import SwapHorizIcon from '@mui/icons-material/SwapHoriz';
 
 import DispatcherService, { DispatchResult, ConfigureCrewResult } from '../../api/DispatcherService';
@@ -728,28 +727,7 @@ const WorkflowChat: React.FC<WorkflowChatProps> = ({
     try {
       // Add placeholders based on intent keywords so users see progress immediately
       if (wantsCrewOrPlan) {
-        cleanupProgress = addTempProgress('\u23f3 Generating plan/crew…');
-        // staged progress updates while waiting for dispatcher
-        const progressCleanups: Array<() => void> = [];
-        const timers: number[] = [];
-        // Keep initial cleanup too
-        const initialCleanup = cleanupProgress;
-        if (initialCleanup) progressCleanups.push(initialCleanup);
-        const addStage = (delay: number, text: string) => {
-          const t = window.setTimeout(() => {
-            const c = addTempProgress(text);
-            progressCleanups.push(c);
-          }, delay);
-          timers.push(t);
-        };
-        addStage(1000, '🧠 Analyzing request…');
-        addStage(3000, '🤖 Drafting agent…');
-        addStage(4500, '📝 Drafting task…');
-        // redefine cleanup to clear timers and remove staged messages
-        cleanupProgress = () => {
-          timers.forEach((t) => window.clearTimeout(t));
-          progressCleanups.forEach((fn) => fn());
-        };
+        cleanupProgress = addTempProgress('Generating crew with agents and tasks...');
 
         const now = Date.now();
         const tempAgentId = `agent-temp-${now}`;
@@ -798,7 +776,7 @@ const WorkflowChat: React.FC<WorkflowChatProps> = ({
           setNodes((cur) => (cur as FlowNode[]).filter((n) => n.id !== tempAgentId && n.id !== tempTaskId));
         };
       } else if (wantsAgent) {
-        cleanupProgress = addTempProgress('\u23f3 Creating agent…');
+        cleanupProgress = addTempProgress('Creating agent...');
         const now = Date.now();
         const tempAgentId = `agent-temp-${now}`;
         setNodes((cur) => {
@@ -815,7 +793,7 @@ const WorkflowChat: React.FC<WorkflowChatProps> = ({
           setNodes((cur) => (cur as FlowNode[]).filter((n) => n.id !== tempAgentId));
         };
       } else if (wantsTask) {
-        cleanupProgress = addTempProgress('\u23f3 Creating task\u2026');
+        cleanupProgress = addTempProgress('Creating task...');
         const now = Date.now();
         const tempTaskId = `task-temp-${now}`;
         setNodes((cur) => {
@@ -1015,8 +993,7 @@ const WorkflowChat: React.FC<WorkflowChatProps> = ({
     }
   };
   const isSendMode = inputValue.trim().length > 0;
-  const canRunCrew = hasCrewContent(nodes);
-  const isActionDisabled = isLoading || !!executingJobId || (!isSendMode && !canRunCrew);
+  const isActionDisabled = isLoading || !!executingJobId || !isSendMode;
 
 
 
@@ -1363,11 +1340,7 @@ const WorkflowChat: React.FC<WorkflowChatProps> = ({
             sx={{
               '& .MuiOutlinedInput-root': {
                 paddingRight: '120px',
-                borderColor: hasCrewContent(nodes) ? 'primary.main' : undefined,
                 borderRadius: 1,
-                '&:hover': {
-                  borderColor: hasCrewContent(nodes) ? 'primary.main' : undefined,
-                },
               },
             }}
             InputProps={{
@@ -1704,7 +1677,7 @@ const WorkflowChat: React.FC<WorkflowChatProps> = ({
           {/* Send button */}
               <IconButton
                 color="primary"
-                onClick={isSendMode ? handleSendMessage : () => { if (canRunCrew && onExecuteCrew) onExecuteCrew(); }}
+                onClick={handleSendMessage}
                 disabled={isActionDisabled}
                 sx={{
                   position: 'absolute',
@@ -1728,7 +1701,7 @@ const WorkflowChat: React.FC<WorkflowChatProps> = ({
                 {isLoading || executingJobId ? (
                   <CircularProgress size={16} sx={{ color: 'inherit' }} />
                 ) : (
-                  isSendMode ? <ArrowUpwardIcon sx={{ fontSize: 16 }} /> : <PlayArrowIcon sx={{ fontSize: 16 }} />
+                  <ArrowUpwardIcon sx={{ fontSize: 16 }} />
                 )}
               </IconButton>
         </Box>
