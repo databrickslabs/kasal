@@ -14,8 +14,8 @@ interface NodeData {
 }
 
 interface CrewConfig {
-  agents_yaml: Record<string, AgentYaml>;
-  tasks_yaml: Record<string, TaskYaml>;
+  agents_yaml: Record<string, AgentYaml>;  // For flows: empty {} - loaded from database using crew IDs from nodes
+  tasks_yaml: Record<string, TaskYaml>;    // For flows: empty {} - loaded from database using crew IDs from nodes
   inputs: Record<string, unknown>;
   planning?: boolean;
   reasoning?: boolean;
@@ -23,7 +23,7 @@ interface CrewConfig {
   execution_type?: string;
   schema_detection_enabled?: boolean;
   nodes?: { id: string; type: string; position: { x: number; y: number }; data: NodeData }[];
-  edges?: { id: string; source: string; target: string; sourceHandle?: string; targetHandle?: string }[];
+  edges?: { id: string; source: string; target: string; sourceHandle?: string; targetHandle?: string; data?: Record<string, unknown> }[];
   flow_id?: string;
   flow_config?: Record<string, unknown>;
 }
@@ -59,9 +59,10 @@ export class JobExecutionService {
       console.log(`[JobExecutionService] Executing job of type: ${executionType}`);
       
       // Create a base config with common properties
+      // Note: For flows, agents_yaml and tasks_yaml are loaded from database using crew IDs from nodes
       const config: CrewConfig = {
-        agents_yaml: {},
-        tasks_yaml: {},
+        agents_yaml: {},  // Empty for flows - loaded from database using crew IDs
+        tasks_yaml: {},   // Empty for flows - loaded from database using crew IDs
         inputs: additionalInputs,
         planning,
         reasoning,
@@ -73,13 +74,9 @@ export class JobExecutionService {
       // If executing a flow, prepare flow-specific configuration
       if (executionType === 'flow') {
         console.log(`[JobExecutionService] Preparing flow execution configuration`);
-        
-        // Find flow nodes
-        const flowNodes = nodes.filter(node => 
-          node.type === 'flowNode' || 
-          node.type === 'crewNode' || 
-          (node.type && node.type.toLowerCase().includes('flow'))
-        );
+
+        // Find flow nodes (crewNode type)
+        const flowNodes = nodes.filter(node => node.type === 'crewNode');
         
         if (flowNodes.length > 0) {
           console.log(`[JobExecutionService] Found ${flowNodes.length} flow nodes for execution`);
@@ -98,26 +95,55 @@ export class JobExecutionService {
           }));
           
           // Map the edges to match the expected format
+          // CRITICAL: Include the data field which contains listenToTaskIds and targetTaskIds
           config.edges = edges.map(edge => ({
             id: edge.id,
             source: edge.source,
             target: edge.target,
             sourceHandle: edge.sourceHandle || undefined,
-            targetHandle: edge.targetHandle || undefined
+            targetHandle: edge.targetHandle || undefined,
+            data: edge.data || {} // Include edge data with listenToTaskIds/targetTaskIds
           }));
           
+          // Build starting points array - nodes with no incoming edges
+          const nodeIds = new Set(nodes.map(n => n.id));
+          const targetNodeIds = new Set(edges.map(e => e.target));
+          const startingNodeIds = Array.from(nodeIds).filter(id => !targetNodeIds.has(id));
+
+          console.log(`[JobExecutionService] Identified ${startingNodeIds.length} starting nodes:`, startingNodeIds);
+
+          // Build starting points configuration
+          const startingPoints = startingNodeIds.map(nodeId => {
+            const node = nodes.find(n => n.id === nodeId);
+            return {
+              nodeId,
+              nodeType: node?.type || 'unknown',
+              nodeData: node?.data || {}
+            };
+          });
+
+          // Build or update flow_config with starting points
+          const builtFlowConfig = {
+            ...(flowConfig || {}),
+            startingPoints,
+            nodes: config.nodes,
+            edges: config.edges
+          };
+
           if (flowConfig && flowConfig.id) {
             console.log(`[JobExecutionService] Found flow configuration with ID: ${flowConfig.id}`);
-            
-            // Include flow ID in the configuration
-            config.flow_id = flowConfig.id;
-            
-            // Add flow configuration to the config if available
-            if (flowConfig) {
-              config.flow_config = flowConfig;
-            }
+
+            // DO NOT include flow_id in the configuration - execute as ad-hoc flow
+            // This allows flows to run without being saved in the database
+            // config.flow_id = flowConfig.id;
+
+            // Add flow configuration to the config with starting points
+            config.flow_config = builtFlowConfig;
           } else {
             console.log('[JobExecutionService] No flow ID found in configuration, creating dynamic flow');
+
+            // Still include the flow_config with starting points
+            config.flow_config = builtFlowConfig;
           }
           
           // Include execution type and model

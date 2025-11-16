@@ -227,14 +227,21 @@ export class FlowService {
       };
 
       // Ensure nodes and edges are properly formatted
+      // CRITICAL: Preserve ALL node properties to maintain visual state and custom data
       const nodes = flow.nodes.map(node => {
         flowLogger.debug('Processing node:', node.id);
         return {
           id: node.id,
           type: node.type,
           position: node.position || { x: 0, y: 0 },
+          // Preserve additional top-level properties like width, height, style if they exist
+          ...(node.width !== undefined && { width: node.width }),
+          ...(node.height !== undefined && { height: node.height }),
+          ...(node.style && { style: node.style }),
+          ...(node.className && { className: node.className }),
+          ...(node.dragging !== undefined && { dragging: node.dragging }),
           data: {
-            ...node.data,
+            ...node.data,  // Preserve ALL data properties (allTasks, selectedTasks, order, flowConfig, etc.)
             label: node.data?.label || node.id
           }
         };
@@ -246,7 +253,17 @@ export class FlowService {
           id: edge.id,
           source: edge.source,
           target: edge.target,
-          type: edge.type || 'default'
+          type: edge.type || 'default',
+          // Preserve style and other edge properties
+          ...(edge.style && { style: edge.style }),
+          ...(edge.animated !== undefined && { animated: edge.animated }),
+          ...(edge.label && { label: edge.label }),
+          ...(edge.labelStyle && { labelStyle: edge.labelStyle }),
+          ...(edge.labelBgStyle && { labelBgStyle: edge.labelBgStyle }),
+          ...(edge.className && { className: edge.className }),
+          data: edge.data || {},  // Preserve ALL edge data (configured, listenToTaskIds, targetTaskIds, logicType, routerConfig, etc.)
+          sourceHandle: edge.sourceHandle,
+          targetHandle: edge.targetHandle
         };
       });
       
@@ -382,9 +399,46 @@ export class FlowService {
             isStartPoint: true
           }))
       } : {};
-      
+
+      // Process nodes and edges if provided
+      // CRITICAL: Preserve ALL node properties to maintain visual state and custom data
+      const nodes = flow.nodes ? flow.nodes.map(node => ({
+        id: node.id,
+        type: node.type,
+        position: node.position || { x: 0, y: 0 },
+        // Preserve additional top-level properties like width, height, style if they exist
+        ...(node.width !== undefined && { width: node.width }),
+        ...(node.height !== undefined && { height: node.height }),
+        ...(node.style && { style: node.style }),
+        ...(node.className && { className: node.className }),
+        ...(node.dragging !== undefined && { dragging: node.dragging }),
+        data: {
+          ...node.data,  // Preserve ALL data properties (allTasks, selectedTasks, order, flowConfig, etc.)
+          label: node.data?.label || node.id
+        }
+      })) : undefined;
+
+      const edges = flow.edges ? flow.edges.map(edge => ({
+        id: edge.id,
+        source: edge.source,
+        target: edge.target,
+        type: edge.type || 'default',
+        // Preserve style and other edge properties
+        ...(edge.style && { style: edge.style }),
+        ...(edge.animated !== undefined && { animated: edge.animated }),
+        ...(edge.label && { label: edge.label }),
+        ...(edge.labelStyle && { labelStyle: edge.labelStyle }),
+        ...(edge.labelBgStyle && { labelBgStyle: edge.labelBgStyle }),
+        ...(edge.className && { className: edge.className }),
+        data: edge.data || {},  // Preserve ALL edge data (configured, listenToTaskIds, targetTaskIds, logicType, routerConfig, etc.)
+        sourceHandle: edge.sourceHandle,
+        targetHandle: edge.targetHandle
+      })) : undefined;
+
       const data = {
         name: flow.name,
+        ...(nodes ? { nodes } : {}),
+        ...(edges ? { edges } : {}),
         flow_config
       };
       
