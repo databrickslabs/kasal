@@ -8,9 +8,11 @@ import { useFlowConfigStore } from '../../store/flowConfig';
 interface WorkflowPanelsProps {
   areFlowsVisible: boolean;
   showRunHistory: boolean;
+  executionHistoryHeight?: number;
   panelPosition: number;
   isDraggingPanel: boolean;
   isDarkMode: boolean;
+  // Crew canvas state (from tabs)
   nodes: Node[];
   edges: Edge[];
   setNodes: (nodes: Node[] | ((nodes: Node[]) => Node[])) => void;
@@ -18,6 +20,13 @@ interface WorkflowPanelsProps {
   onNodesChange: (changes: NodeChange[]) => void;
   onEdgesChange: (changes: EdgeChange[]) => void;
   onConnect: (connection: Connection) => void;
+  // CRITICAL: Flow canvas state (independent from tabs)
+  flowNodes: Node[];
+  flowEdges: Edge[];
+  onFlowNodesChange: (changes: NodeChange[]) => void;
+  onFlowEdgesChange: (changes: EdgeChange[]) => void;
+  onFlowConnect: (connection: Connection) => void;
+  // Common handlers
   onSelectionChange: (params: OnSelectionChangeParams) => void;
   onPaneContextMenu: (event: React.MouseEvent) => void;
   onCrewFlowInit: (instance: ReactFlowInstance) => void;
@@ -41,17 +50,22 @@ interface WorkflowPanelsProps {
   isChatOpen: boolean;
   setIsAgentDialogOpen: (open: boolean) => void;
   setIsTaskDialogOpen: (open: boolean) => void;
-  setIsFlowDialogOpen: (open: boolean) => void;
+  setIsCrewDialogOpen: (open: boolean) => void;
   onOpenTutorial?: () => void;
   onOpenConfiguration?: () => void;
+  // Play button handlers
+  onPlayPlan?: () => void;
+  onPlayFlow?: () => void;
 }
 
 const WorkflowPanels: React.FC<WorkflowPanelsProps> = ({
   areFlowsVisible,
   showRunHistory,
+  executionHistoryHeight = 0,
   panelPosition,
   isDraggingPanel,
   isDarkMode,
+  // Crew canvas state
   nodes,
   edges,
   setNodes,
@@ -59,6 +73,13 @@ const WorkflowPanels: React.FC<WorkflowPanelsProps> = ({
   onNodesChange,
   onEdgesChange,
   onConnect,
+  // Flow canvas state
+  flowNodes,
+  flowEdges,
+  onFlowNodesChange,
+  onFlowEdgesChange,
+  onFlowConnect,
+  // Common handlers
   onSelectionChange,
   onPaneContextMenu,
   onCrewFlowInit,
@@ -78,124 +99,49 @@ const WorkflowPanels: React.FC<WorkflowPanelsProps> = ({
   isChatOpen,
   setIsAgentDialogOpen,
   setIsTaskDialogOpen,
-  setIsFlowDialogOpen,
+  setIsCrewDialogOpen,
   onOpenTutorial,
-  onOpenConfiguration
+  onOpenConfiguration,
+  onPlayPlan,
+  onPlayFlow
 }) => {
   const { crewAIFlowEnabled } = useFlowConfigStore();
   if (areFlowsVisible && crewAIFlowEnabled) {
+      // Show ONLY FlowCanvas when flows are visible
       return (
-    <Box sx={{ 
+    <Box sx={{
       height: '100%', // Take full height of parent
-      position: 'relative', 
+      position: 'relative',
       mt: 0, // No margin top since TabBar is above
       mb: 0, // Remove bottom margin
         borderBottom: '1px solid',
         borderColor: isDarkMode ? 'rgba(255,255,255,0.1)' : 'rgba(0,0,0,0.1)',
-        display: 'grid',
-        gridTemplateColumns: `${panelPosition}% ${100 - panelPosition}%`,
+        display: 'block',
         overflow: 'hidden', // Prevent any content from overflowing
         width: '100%',
-        maxWidth: '100%',
-        transition: isDraggingPanel ? 'none' : 'grid-template-columns 0.3s ease-in-out'
+        maxWidth: '100%'
       }}>
-        {/* Main crew canvas (always visible) */}
-        <Box 
-          sx={{ 
-            position: 'relative',
-            width: '100%',
-            height: '100%',
-            borderRight: `1px solid ${isDarkMode ? 'rgba(255,255,255,0.1)' : 'rgba(0,0,0,0.1)'}`
-          }}
-          data-crew-container
-        >
-          <CrewCanvas
-            nodes={nodes}
-            edges={edges}
-            setNodes={setNodes}
-            setEdges={setEdges}
-            onNodesChange={onNodesChange}
-            onEdgesChange={onEdgesChange}
-            onConnect={onConnect}
-            onSelectionChange={onSelectionChange}
-            onPaneContextMenu={onPaneContextMenu}
-            onInit={onCrewFlowInit}
-            handleUIAwareFitView={handleUIAwareFitView}
-            planningEnabled={planningEnabled}
-            setPlanningEnabled={setPlanningEnabled}
-            reasoningEnabled={reasoningEnabled}
-            setReasoningEnabled={setReasoningEnabled}
-            schemaDetectionEnabled={schemaDetectionEnabled}
-            setSchemaDetectionEnabled={setSchemaDetectionEnabled}
-            selectedModel={selectedModel}
-            setSelectedModel={setSelectedModel}
-            onOpenLogsDialog={onOpenLogsDialog}
-            onToggleChat={onToggleChat}
-            isChatOpen={isChatOpen}
-            setIsAgentDialogOpen={setIsAgentDialogOpen}
-            setIsTaskDialogOpen={setIsTaskDialogOpen}
-            setIsFlowDialogOpen={setIsFlowDialogOpen}
-            showRunHistory={showRunHistory}
-            onOpenTutorial={onOpenTutorial}
-            onOpenConfiguration={onOpenConfiguration}
-          />
-        </Box>
-        
-        {/* Draggable divider when both panels are visible */}
+        {/* Flow canvas - Full width view */}
         <Box
           sx={{
-            position: 'absolute',
-            top: 0,
-            left: `${panelPosition}%`,
-            width: '8px',
-            height: '100%',
-            transform: 'translateX(-50%)',
-            cursor: 'col-resize',
-            zIndex: 100,
-            background: isDarkMode ? 'rgba(255,255,255,0.05)' : 'rgba(0,0,0,0.05)',
-            '&::after': {
-              content: '""',
-              position: 'absolute',
-              top: 0,
-              left: '50%',
-              width: '2px',
-              height: '100%',
-              transform: 'translateX(-50%)',
-              backgroundColor: isDarkMode ? 'rgba(255,255,255,0.2)' : 'rgba(0,0,0,0.15)',
-            },
-            '&:hover': {
-              background: isDarkMode ? 'rgba(255,255,255,0.1)' : 'rgba(0,0,0,0.08)',
-              '&::after': {
-                backgroundColor: isDarkMode ? 'rgba(255,255,255,0.4)' : 'rgba(0,0,0,0.3)',
-              }
-            },
-            '&:active': {
-              background: isDarkMode ? 'rgba(255,255,255,0.15)' : 'rgba(0,0,0,0.12)',
-              '&::after': {
-                backgroundColor: isDarkMode ? 'rgba(255,255,255,0.5)' : 'rgba(0,0,0,0.4)',
-              }
-            }
-          }}
-          onMouseDown={onPanelDragStart}
-        />
-        
-        {/* Flow canvas */}
-        <Box 
-          sx={{ 
             position: 'relative',
             width: '100%',
             height: '100%',
+            minHeight: 0,
+            overflow: 'hidden',
           }}
         >
           <FlowCanvas
-            nodes={nodes}
-            edges={edges}
-            onNodesChange={onNodesChange}
-            onEdgesChange={onEdgesChange}
-            onConnect={onConnect}
+            nodes={flowNodes}
+            edges={flowEdges}
+            onNodesChange={onFlowNodesChange}
+            onEdgesChange={onFlowEdgesChange}
+            onConnect={onFlowConnect}
             onSelectionChange={onSelectionChange}
             onPaneContextMenu={onPaneContextMenu}
             onInit={onFlowFlowInit}
+            showRunHistory={showRunHistory}
+            executionHistoryHeight={executionHistoryHeight}
           />
         </Box>
       </Box>
@@ -249,10 +195,12 @@ const WorkflowPanels: React.FC<WorkflowPanelsProps> = ({
           isChatOpen={isChatOpen}
           setIsAgentDialogOpen={setIsAgentDialogOpen}
           setIsTaskDialogOpen={setIsTaskDialogOpen}
-          setIsFlowDialogOpen={setIsFlowDialogOpen}
+          setIsCrewDialogOpen={setIsCrewDialogOpen}
           showRunHistory={showRunHistory}
           onOpenTutorial={onOpenTutorial}
           onOpenConfiguration={onOpenConfiguration}
+          onPlayPlan={onPlayPlan}
+          onPlayFlow={onPlayFlow}
         />
       </Box>
     </Box>

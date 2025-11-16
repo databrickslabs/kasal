@@ -84,13 +84,16 @@ interface CrewCanvasProps {
   isChatOpen: boolean;
   setIsAgentDialogOpen: (open: boolean) => void;
   setIsTaskDialogOpen: (open: boolean) => void;
-  setIsFlowDialogOpen: (open: boolean) => void;
+  setIsCrewDialogOpen: (open: boolean) => void;
   // Execution history visibility
   showRunHistory?: boolean;
   executionHistoryHeight?: number;
   // Tutorial and configuration
   onOpenTutorial?: () => void;
   onOpenConfiguration?: () => void;
+  // Play button handlers
+  onPlayPlan?: () => void;
+  onPlayFlow?: () => void;
 }
 
 
@@ -119,11 +122,13 @@ const CrewCanvas: React.FC<CrewCanvasProps> = ({
   isChatOpen,
   setIsAgentDialogOpen,
   setIsTaskDialogOpen,
-  setIsFlowDialogOpen,
+  setIsCrewDialogOpen,
   showRunHistory,
   executionHistoryHeight = 200,
   onOpenTutorial: _onOpenTutorial,
-  onOpenConfiguration: _onOpenConfiguration
+  onOpenConfiguration: _onOpenConfiguration,
+  onPlayPlan,
+  onPlayFlow
 }) => {
 
   const [isRendering, setIsRendering] = useState(true);
@@ -489,7 +494,7 @@ const CrewCanvas: React.FC<CrewCanvasProps> = ({
           });
         }
       });
-      
+
       // Convert map back to array
       const uniqueEdges = Array.from(edgeMap.values());
 
@@ -728,9 +733,9 @@ const CrewCanvas: React.FC<CrewCanvasProps> = ({
           nodesConnectable={true}
           elementsSelectable={true}
           edgesFocusable={false}
-          selectNodesOnDrag={true}
-          selectionOnDrag={true}
-          panOnDrag={[1, 2]}
+          selectNodesOnDrag={false}
+          selectionOnDrag={false}
+          panOnDrag={true}
           translateExtent={[[-10000, -10000], [10000, 10000]]}
           nodeExtent={[[-10000, -10000], [10000, 10000]]}
           snapToGrid={false}
@@ -762,9 +767,14 @@ const CrewCanvas: React.FC<CrewCanvasProps> = ({
             isChatOpen={isChatOpen}
             setIsAgentDialogOpen={setIsAgentDialogOpen}
             setIsTaskDialogOpen={setIsTaskDialogOpen}
-            setIsFlowDialogOpen={setIsFlowDialogOpen}
+            setIsCrewDialogOpen={setIsCrewDialogOpen}
             showRunHistory={showRunHistory}
             executionHistoryHeight={executionHistoryHeight}
+            hasCrewNodes={nodes.some(node => node.type === 'agentNode' || node.type === 'taskNode' || node.type === 'managerNode')}
+            hasFlowNodes={nodes.some(node => node.type === 'crewNode')}
+            edges={edges}
+            onPlayPlan={onPlayPlan}
+            onPlayFlow={onPlayFlow}
           />
 
         </ReactFlow>
