@@ -877,17 +877,22 @@ class LLMManager:
         Create a CrewAI LLM instance for the specified model.
         If MLflow is enabled for the current workspace (group), wrap with MLflow tracking.
         """
-        # Get standard LLM configuration
-        llm = await LLMManager.configure_crewai_llm(model_name, temperature)
+        # CRITICAL: Get group_id from UserContext FIRST for multi-tenant isolation
+        from src.utils.user_context import UserContext
+        group_ctx = UserContext.get_group_context()
+        group_id = getattr(group_ctx, "primary_group_id", None) if group_ctx else None
+
+        if not group_id:
+            logger.error("No group_id found in UserContext for LLM creation")
+            raise ValueError("group_id is REQUIRED for get_llm (multi-tenant isolation)")
+
+        # Get standard LLM configuration with group_id
+        llm = await LLMManager.configure_crewai_llm(model_name, group_id, temperature)
 
         # Determine if MLflow is enabled for this group
         try:
-            from src.utils.user_context import UserContext
             from src.db.session import async_session_factory
             from src.services.mlflow_service import MLflowService
-
-            group_ctx = UserContext.get_group_context()
-            group_id = getattr(group_ctx, "primary_group_id", None) if group_ctx else None
 
             enabled = False
             async with async_session_factory() as db:
