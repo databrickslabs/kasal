@@ -234,8 +234,12 @@ export const useWorkflowStore = create<WorkflowState>()(
           // Get current layout orientation
           const currentLayout = useUILayoutStore.getState().layoutOrientation || 'horizontal';
 
+          // Determine edge type: use 'crewEdge' for crew-to-crew connections
+          const isCrewConnection = source.includes('crew-') && target.includes('crew-');
+          const edgeType = isCrewConnection ? 'crewEdge' : 'default';
+
           // Create edge with layout-aware configuration
-          const newEdge = createEdge(connection, 'default', undefined, {}, currentLayout);
+          const newEdge = createEdge(connection, edgeType, undefined, {}, currentLayout);
 
           return {
             edges: [...state.edges, newEdge]

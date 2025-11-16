@@ -160,15 +160,74 @@ export const useFlowManager = ({ showErrorMessage }: UseFlowManagerProps) => {
         return;
       }
 
-      // Enforce horizontal connectors for Agent -> Task edges: agent right -> task left
-      let enforcedParams = params;
-      if (sourceNode.type === 'agentNode' && targetNode.type === 'taskNode') {
-        enforcedParams = { ...params, sourceHandle: 'right', targetHandle: 'left' };
-      }
+      // Find existing edges to the same target (ONLY edges going TO this specific target)
+      const existingEdgesToTarget = edges.filter(e => e.target === params.target);
 
-      storeAddEdge(enforcedParams);
+      if (existingEdgesToTarget.length > 0) {
+        // There are existing edges to this target
+        // NEW APPROACH: Create individual edges for each source, but mark them as part of a merged group
+
+        // Type assertion: we know target is not null because of the check at the start of onConnect
+        const targetNodeId = params.target as string;
+
+        // Collect all sources (existing + new)
+        const allSources = [...existingEdgesToTarget.map(e => e.source), params.source];
+        const uniqueSources = Array.from(new Set(allSources));
+
+        // Get target handle
+        const targetHandleId = params.targetHandle || existingEdgesToTarget[0]?.targetHandle || 'top';
+
+        // Generate a stable group ID for this merge (sorted for consistency)
+        const sortedSources = [...uniqueSources].sort();
+        const mergeGroupId = `merge-group-${sortedSources.join('-')}-${targetNodeId}`;
+
+        // Get shared data from first existing edge
+        const sharedData = existingEdgesToTarget[0]?.data || {};
+
+        // Remove ALL existing edges to this target
+        const edgesNotGoingToTarget = edges.filter(e => e.target !== targetNodeId);
+
+        // Create individual edges for each source
+        const newMergedEdges: Edge[] = uniqueSources.map((sourceId, index) => {
+          // Find the handle for this source
+          const existingEdge = existingEdgesToTarget.find(e => e.source === sourceId);
+          const sourceHandle = existingEdge?.sourceHandle ||
+                              (sourceId === params.source ? params.sourceHandle : null) ||
+                              'bottom';
+
+          // Only the last edge in the group should show indicators
+          const isLastInGroup = index === uniqueSources.length - 1;
+
+          return {
+            id: `${mergeGroupId}-${sourceId}`,
+            source: sourceId,
+            target: targetNodeId,
+            sourceHandle,
+            targetHandle: targetHandleId,
+            type: 'crewEdge',
+            data: {
+              ...sharedData,
+              mergeGroupId, // Mark this edge as part of a merged group
+              isMerged: true,
+              mergeGroupSize: uniqueSources.length, // How many edges in this group
+              isLastInGroup // Flag to indicate this edge should show indicators
+            }
+          };
+        });
+
+        // Replace with new individual edges
+        setEdges([...edgesNotGoingToTarget, ...newMergedEdges]);
+      } else {
+        // No existing edges to this target, create a normal edge
+        let enforcedParams = params;
+        if (sourceNode.type === 'agentNode' && targetNode.type === 'taskNode') {
+          enforcedParams = { ...params, sourceHandle: 'right', targetHandle: 'left' };
+        }
+
+        storeAddEdge(enforcedParams);
+      }
     }
-  }, [nodes, storeAddEdge, t, showErrorMessage]);
+  }, [nodes, edges, setEdges, storeAddEdge, t, showErrorMessage]);
 
   // Handler for context menu on edges
   const handleEdgeContextMenu = useCallback((event: React.MouseEvent, edge: Edge) => {
