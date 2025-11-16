@@ -13,4 +13,5 @@ export interface CrewFlowSelectionDialogProps {
   onTaskSelect?: (tasks: Task[]) => void;
   initialTab?: number;
   showOnlyTab?: number; // If set, only show this specific tab (0=Plans, 1=Agents, 2=Tasks, 3=Flows)
+  hideFlowsTab?: boolean; // If true, hide the Flows tab from the catalog
 } 
