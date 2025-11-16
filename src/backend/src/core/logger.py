@@ -28,6 +28,7 @@ class LoggerManager:
     def __init__(self):
         if not self._initialized:
             self._crew_logger = None
+            self._flow_logger = None
             self._system_logger = None
             self._llm_logger = None
             self._scheduler_logger = None
@@ -73,6 +74,10 @@ class LoggerManager:
         formatters = {
             'crew': logging.Formatter(
                 '[CREW] %(asctime)s - %(levelname)s - %(message)s',
+                datefmt='%Y-%m-%d %H:%M:%S'
+            ),
+            'flow': logging.Formatter(
+                '[FLOW] %(asctime)s - %(levelname)s - %(message)s',
                 datefmt='%Y-%m-%d %H:%M:%S'
             ),
             'system': logging.Formatter(
@@ -141,6 +146,7 @@ class LoggerManager:
         
         # Initialize each logger
         self._crew_logger = self._setup_logger('crew', formatters['crew'])
+        self._flow_logger = self._setup_logger('flow', formatters['flow'])
         self._system_logger = self._setup_logger('system', formatters['system'], suppress_stdout=True)
         self._llm_logger = self._setup_logger('llm', formatters['llm'], suppress_stdout=True)
         self._scheduler_logger = self._setup_logger('scheduler', formatters['scheduler'])
@@ -414,6 +420,13 @@ class LoggerManager:
         if not self._crew_logger:
             self.initialize()
         return self._crew_logger
+
+    @property
+    def flow(self) -> logging.Logger:
+        """Get the flow-specific logger."""
+        if not self._flow_logger:
+            self.initialize()
+        return self._flow_logger
     
     @property
     def system(self) -> logging.Logger:
