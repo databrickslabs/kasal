@@ -12,7 +12,7 @@ from src.core.logger import LoggerManager
 from src.engines.crewai.tools.tool_factory import ToolFactory
 
 # Initialize logger
-logger = LoggerManager.get_instance().crew
+logger = LoggerManager.get_instance().flow
 
 class AgentConfig:
     """
@@ -20,15 +20,16 @@ class AgentConfig:
     """
     
     @staticmethod
-    async def configure_agent_and_tools(agent_data, flow_data=None, repositories=None):
+    async def configure_agent_and_tools(agent_data, flow_data=None, repositories=None, group_context=None):
         """
         Configure an agent with its associated tools.
-        
+
         Args:
             agent_data: Agent data from the database
             flow_data: Flow data for context (optional)
             repositories: Dictionary of repositories (optional)
-            
+            group_context: Group context for multi-tenant isolation (optional)
+
         Returns:
             Agent: A properly configured CrewAI Agent instance
         """
@@ -63,7 +64,7 @@ class AgentConfig:
                 tools = await AgentConfig._get_tools_from_flow_nodes(agent_data, flow_data, tool_factory)
             
             # Get LLM for the agent
-            llm = await AgentConfig._get_agent_llm(agent_data)
+            llm = await AgentConfig._get_agent_llm(agent_data, group_context)
             
             # Create the agent with all configurations
             agent_kwargs = AgentConfig._prepare_agent_kwargs(agent_data, tools, llm)
@@ -157,10 +158,19 @@ class AgentConfig:
         return tools
     
     @staticmethod
-    async def _get_agent_llm(agent_data):
+    async def _get_agent_llm(agent_data, group_context=None):
         """Get an LLM instance for the agent"""
         llm = None
-        
+
+        # Set the group context for UserContext if provided
+        if group_context:
+            try:
+                from src.utils.user_context import UserContext
+                UserContext.set_group_context(group_context)
+                logger.debug(f"Set group context for agent LLM configuration")
+            except Exception as e:
+                logger.warning(f"Could not set group context: {e}")
+
         try:
             # Check if agent has a specific LLM configuration
             if hasattr(agent_data, 'llm') and agent_data.llm:

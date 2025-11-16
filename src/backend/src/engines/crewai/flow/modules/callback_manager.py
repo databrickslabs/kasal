@@ -37,7 +37,7 @@ from src.core.logger import LoggerManager
 from crewai.events import crewai_event_bus
 
 # Initialize logger
-logger = LoggerManager.get_instance().crew
+logger = LoggerManager.get_instance().flow
 
 class CallbackManager:
     """Centralized manager for CrewAI flow execution callbacks.
@@ -117,7 +117,7 @@ class CallbackManager:
             # Create streaming callback for job output
             try:
                 from src.engines.crewai.callbacks.streaming_callbacks import JobOutputCallback
-                streaming_cb = JobOutputCallback(job_id=job_id, guardrail_max_retries=3, group_context=group_context)
+                streaming_cb = JobOutputCallback(job_id=job_id, max_retries=3, group_context=group_context)
                 logger.info(f"Created JobOutputCallback for job {job_id}")
                 handlers.append(streaming_cb)
                 callbacks_dict['streaming'] = streaming_cb
@@ -223,7 +223,9 @@ class CallbackManager:
                     except Exception as e:
                         logger.warning(f"Error directly registering {listener_type} listener: {e}", exc_info=True)
                 else:
-                    logger.warning(f"Listener {listener_type} has no setup_listeners method, might not be properly registered")
+                    # Some callbacks like EventStreamingCallback and JobOutputCallback self-register
+                    # via decorators or CrewAI's callback system, so no explicit registration is needed
+                    logger.debug(f"Listener {listener_type} uses self-registration (decorators or CrewAI callback system)")
                 
                 # Ensure all event methods are properly connected for this listener
                 if hasattr(listener, 'connect_events') and callable(listener.connect_events):
