@@ -42,6 +42,7 @@ from src.models.execution_status import ExecutionStatus
 # Import helper modules
 from src.engines.crewai.trace_management import TraceManager
 from src.engines.crewai.execution_runner import run_crew, run_crew_in_process, update_execution_status_with_retry
+from src.engines.crewai.flow.flow_execution_runner import run_flow_in_process
 from src.engines.crewai.config_adapter import normalize_config, normalize_flow_config
 from src.engines.crewai.crew_preparation import CrewPreparation
 from src.engines.crewai.flow_preparation import FlowPreparation
@@ -515,117 +516,87 @@ class CrewAIEngineService(BaseEngineService):
             logger.error(f"Error cancelling execution {execution_id}: {str(e)}")
             return False 
 
-    async def run_flow(self, execution_id: str, flow_config: Dict[str, Any], group_context: GroupContext = None) -> str:
+    async def run_flow(self, execution_id: str, flow_config: Dict[str, Any], group_context: GroupContext = None, user_token: str = None) -> str:
         """
-        Run a CrewAI flow with the given configuration.
-        
+        Run a CrewAI flow with the given configuration using process isolation.
+
         Args:
             execution_id: Unique ID for this flow execution
             flow_config: Configuration for the flow
             group_context: Group context for multi-tenant isolation
-            
+            user_token: User access token for OAuth authentication
+
         Returns:
             Execution ID
         """
+        # Use flow-specific logger for flow execution
+        from src.core.logger import LoggerManager
+        flow_logger = LoggerManager.get_instance().flow
+
         try:
             # Normalize flow config
             flow_config = normalize_flow_config(flow_config)
-            
-            # Add group context to flow config so it can be passed to callbacks
-            if group_context:
-                flow_config['group_context'] = group_context
-            
+
+            # Add group_id to config if we have group_context
+            if group_context and group_context.primary_group_id:
+                flow_config["group_id"] = group_context.primary_group_id
+                flow_logger.info(f"[CrewAIEngineService] Added group_id to flow config: {group_context.primary_group_id}")
+
             # Setup output directory
             output_dir = self._setup_output_directory(execution_id)
             flow_config['output_dir'] = output_dir
-            
+
             # Ensure writer is started before running execution
             await TraceManager.ensure_writer_started()
-            
-            logger.info(f"[CrewAIEngineService] Starting run_flow for ID: {execution_id}")
-            await self._update_execution_status(
-                execution_id, 
-                ExecutionStatus.PREPARING.value,
-                "Preparing CrewAI flow"
-            )
-            
-            try:
-                # Create services using the passed session
-                from src.services.tool_service import ToolService
-                from src.services.api_keys_service import ApiKeysService
 
-                # Extract group_id for API keys service
-                group_id = group_context.primary_group_id if group_context else None
+            flow_logger.info(f"[CrewAIEngineService] Starting run_flow for ID: {execution_id} (process-based)")
+            flow_logger.info(f"[CrewAIEngineService] Flow config has {len(flow_config.get('nodes', []))} nodes and {len(flow_config.get('edges', []))} edges")
 
-                # Use the passed session for services
-                if session:
-                    # Create services directly with session
-                    tool_service = ToolService(session)
-                    api_keys_service = ApiKeysService(session, group_id=group_id)
-                else:
-                    # Fallback: create a new session if none provided
-                    from src.db.session import async_session_factory
-                    async with async_session_factory() as db_session:
-                        tool_service = ToolService(db_session)
-                        api_keys_service = ApiKeysService(db_session, group_id=group_id)
+            # Status is already RUNNING from creation, no need to update
+            flow_logger.info(f"[CrewAIEngineService] Execution {execution_id} ready to start flow (status already RUNNING)")
 
-                # Create a tool factory instance with API keys service
-                tool_factory = await ToolFactory.create(flow_config, api_keys_service)
-                logger.info(f"[CrewAIEngineService] Created ToolFactory for flow {execution_id}")
+            # Use process-based execution for true termination capability
+            flow_logger.info(f"[CrewAIEngineService] Starting process-based flow execution for {execution_id}")
 
-                # Use the FlowPreparation class for flow setup
-                from pathlib import Path
-                output_path = Path(flow_config.get('output_dir', '/tmp'))
-                flow_preparation = FlowPreparation(flow_config, output_path)
+            # Create a task for process-based flow execution with exception handler
+            async def run_with_exception_handler():
                 try:
-                    prepared_flow = flow_preparation.prepare()
-                    flow = prepared_flow.get('flow')  # Extract the flow from prepared components
-                except Exception as prep_error:
-                    logger.error(f"[CrewAIEngineService] Flow preparation failed: {prep_error}")
-                    prepared_flow = None
-
-                if not prepared_flow:
-                    logger.error(f"[CrewAIEngineService] Failed to prepare flow for {execution_id}")
-                    await self._update_execution_status(
-                        execution_id,
-                        ExecutionStatus.FAILED.value,
-                        "Failed to prepare flow"
+                    flow_logger.info(f"[CrewAIEngineService] About to call run_flow_in_process for {execution_id}")
+                    await run_flow_in_process(
+                        execution_id=execution_id,
+                        config=flow_config,
+                        running_jobs=self._running_jobs,
+                        group_context=group_context,
+                        user_token=user_token
                     )
-                    return execution_id
+                    flow_logger.info(f"[CrewAIEngineService] run_flow_in_process completed for {execution_id}")
+                except Exception as e:
+                    flow_logger.error(f"[CrewAIEngineService] CRITICAL: Exception in run_flow_in_process for {execution_id}: {e}", exc_info=True)
+                    # Write to file as backup
+                    import traceback
+                    with open(f'/tmp/flow_task_error_{execution_id[:8]}.log', 'w') as f:
+                        f.write(f"Exception in flow background task: {e}\n")
+                        f.write(traceback.format_exc())
 
-                # Flow was already extracted from prepared_flow above
+            execution_task = asyncio.create_task(run_with_exception_handler())
 
-                # Store flow configuration and instance in running jobs
-                self._running_jobs[execution_id] = {
-                    "type": "flow",
-                    "config": flow_config,
-                    "flow": flow,
-                    "start_time": datetime.now(UTC)
-                }
+            flow_logger.info(f"[CrewAIEngineService] Created flow execution task for {execution_id}")
 
-                # Update status to RUNNING
-                await self._update_execution_status(
-                    execution_id,
-                    ExecutionStatus.RUNNING.value,
-                    "Flow execution started"
-                )
+            # Store job info (no flow object since it runs in a separate process)
+            self._running_jobs[execution_id] = {
+                "task": execution_task,
+                "flow": None,  # Flow runs in separate process
+                "start_time": datetime.now(),
+                "config": flow_config,
+                "execution_mode": "process"  # Mark this as process-based
+            }
 
-                # Execute the flow asynchronously
-                asyncio.create_task(self._execute_flow(execution_id, flow))
+            flow_logger.info(f"[CrewAIEngineService] Stored job info for {execution_id} in running_jobs")
 
-                return execution_id
-                    
-            except Exception as e:
-                logger.error(f"[CrewAIEngineService] Error running flow execution {execution_id}: {str(e)}", exc_info=True)
-                await self._update_execution_status(
-                    execution_id,
-                    ExecutionStatus.FAILED.value,
-                    f"Failed during flow preparation/launch: {str(e)}"
-                )
-                raise
-                
+            return execution_id
+
         except Exception as e:
-            logger.error(f"[CrewAIEngineService] Error in run_flow for {execution_id}: {str(e)}", exc_info=True)
+            flow_logger.error(f"[CrewAIEngineService] Error in run_flow for {execution_id}: {str(e)}", exc_info=True)
             await self._update_execution_status(
                 execution_id,
                 ExecutionStatus.FAILED.value,

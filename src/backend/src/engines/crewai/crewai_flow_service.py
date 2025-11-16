@@ -16,8 +16,8 @@ from src.core.logger import LoggerManager
 # SessionLocal removed - use async_session_factory instead
 from src.engines.crewai.flow.flow_runner_service import FlowRunnerService, BackendFlow
 
-# Initialize logger
-logger = LoggerManager.get_instance().crew
+# Initialize flow-specific logger
+logger = LoggerManager.get_instance().flow
 
 class CrewAIFlowService:
     """Service for interfacing with the CrewAI Flow Runner"""
@@ -47,42 +47,98 @@ class CrewAIFlowService:
         logger.warning("FlowRunnerService created without session - needs async refactoring")
         return FlowRunnerService(None)
     
-    async def run_flow(self, 
-                      flow_id: Optional[Union[uuid.UUID, str]] = None, 
+    async def run_flow(self,
+                      flow_id: Optional[Union[uuid.UUID, str]] = None,
                       job_id: str = None,
-                      config: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+                      run_name: Optional[str] = None,
+                      config: Optional[Dict[str, Any]] = None,
+                      group_context = None,
+                      user_token: Optional[str] = None) -> Dict[str, Any]:
         """
-        Execute a flow based on the provided parameters.
-        
+        Execute a flow based on the provided parameters using process isolation.
+
         Args:
             flow_id: Optional ID of flow to execute
             job_id: Job ID for tracking execution
+            run_name: Optional descriptive name for the execution
             config: Configuration parameters
-            
+            group_context: Group context for multi-tenant isolation
+            user_token: User access token for OAuth authentication
+
         Returns:
             Dictionary with execution result
         """
-        logger.info(f"CrewAIFlowService.run_flow called with flow_id={flow_id}, job_id={job_id}")
-        
+        logger.info("="*100)
+        logger.info("CREWAI FLOW SERVICE - RECEIVED REQUEST (PROCESS ISOLATION)")
+        logger.info(f"  flow_id: {flow_id}")
+        logger.info(f"  job_id: {job_id}")
+        logger.info(f"  run_name: {run_name}")
+        logger.info(f"  group_context: {group_context}")
+        logger.info(f"  user_token: {'<present>' if user_token else '<not provided>'}")
+        if config:
+            logger.info(f"  config keys: {list(config.keys())}")
+            logger.info(f"  config.nodes: {len(config.get('nodes', []))} nodes")
+            logger.info(f"  config.edges: {len(config.get('edges', []))} edges")
+            if 'flow_config' in config:
+                flow_config = config.get('flow_config', {})
+                logger.info(f"  flow_config.startingPoints: {len(flow_config.get('startingPoints', []))}")
+                logger.info(f"  flow_config.listeners: {len(flow_config.get('listeners', []))}")
+        logger.info("="*100)
+
         try:
             # Create a UUID for job_id if not provided
             if not job_id:
                 job_id = str(uuid.uuid4())
                 logger.info(f"Generated job_id: {job_id}")
-            
-            # Get the FlowRunnerService
-            flow_runner = self._get_flow_runner()
-            
-            # Call the run_flow method on the runner service
-            result = await flow_runner.run_flow(
-                flow_id=flow_id,
-                job_id=job_id,
-                config=config or {}
+
+            # Get the CrewAI engine
+            from src.engines.engine_factory import EngineFactory
+            engine = await EngineFactory.get_engine(
+                engine_type="crewai",
+                db=None,  # No session needed for cached instance
+                init_params={}  # Will initialize if not cached
             )
-            
-            logger.info(f"Flow execution started successfully: {result}")
-            return result
-            
+
+            if not engine:
+                raise ValueError("Failed to get CrewAI engine")
+
+            # Prepare flow config for engine
+            flow_config = {
+                'flow_id': str(flow_id) if flow_id else None,
+                'run_name': run_name,
+                'nodes': config.get('nodes', []) if config else [],
+                'edges': config.get('edges', []) if config else [],
+                'flow_config': config.get('flow_config', {}) if config else {},
+                'inputs': config.get('inputs', {}) if config else {},
+                'model': config.get('model') if config else None,
+                'planning': config.get('planning') if config else None
+            }
+
+            # Add group_context to config if provided
+            if group_context:
+                flow_config['group_context'] = group_context
+                if hasattr(group_context, 'primary_group_id'):
+                    flow_config['group_id'] = group_context.primary_group_id
+
+            logger.info(f"[CrewAIFlowService] Calling engine.run_flow() for {job_id}")
+
+            # Call the engine's run_flow method with process isolation
+            execution_id = await engine.run_flow(
+                execution_id=job_id,
+                flow_config=flow_config,
+                group_context=group_context,
+                user_token=user_token
+            )
+
+            logger.info(f"[CrewAIFlowService] Engine.run_flow() returned execution_id: {execution_id}")
+
+            return {
+                "success": True,
+                "execution_id": execution_id,
+                "job_id": job_id,
+                "message": "Flow execution started in isolated process"
+            }
+
         except Exception as e:
             error_msg = f"Error executing flow: {str(e)}"
             logger.error(error_msg, exc_info=True)
