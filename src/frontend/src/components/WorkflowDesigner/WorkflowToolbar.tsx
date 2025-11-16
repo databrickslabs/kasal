@@ -17,6 +17,7 @@ import AutoFixHighIcon from '@mui/icons-material/AutoFixHigh';
 import MenuBookIcon from '@mui/icons-material/MenuBook';
 import _SaveIcon from '@mui/icons-material/Save';
 import SettingsIcon from '@mui/icons-material/Settings';
+import AccountTreeIcon from '@mui/icons-material/AccountTree';
 
 // Components
 import _SaveCrew from '../Crew/SaveCrew';
@@ -43,6 +44,7 @@ interface WorkflowToolbarProps {
   nodes: Node[];
   edges: Edge[];
   saveCrewRef: React.RefObject<HTMLButtonElement>;
+  saveFlowRef: React.RefObject<HTMLButtonElement>;
 }
 
 const WorkflowToolbar: React.FC<WorkflowToolbarProps> = ({
@@ -65,7 +67,8 @@ const WorkflowToolbar: React.FC<WorkflowToolbarProps> = ({
   isRunning,
   nodes,
   edges,
-  saveCrewRef
+  saveCrewRef,
+  saveFlowRef
 }) => {
   const { t } = useTranslation();
   const [anchorEl, setAnchorEl] = useState<null | HTMLElement>(null);
@@ -86,6 +89,16 @@ const WorkflowToolbar: React.FC<WorkflowToolbarProps> = ({
 
   const canRunCrew = React.useMemo(() => hasCrewContent(nodes), [nodes]);
 
+  // Check if all edges are configured for flow execution
+  const canRunFlow = React.useMemo(() => {
+    if (edges.length === 0) return true; // No edges means simple flow
+    return edges.every(edge => {
+      const hasSourceTasks = edge.data?.listenToTaskIds && edge.data.listenToTaskIds.length > 0;
+      const hasTargetTasks = edge.data?.targetTaskIds && edge.data.targetTaskIds.length > 0;
+      return hasSourceTasks && hasTargetTasks;
+    });
+  }, [edges]);
+
   const handleMenuClose = useCallback(() => {
     setAnchorEl(null);
   }, []);
@@ -102,12 +115,33 @@ const WorkflowToolbar: React.FC<WorkflowToolbarProps> = ({
   
   const handleExecuteFlow = useCallback(async () => {
     handleMenuClose();
-    
+
     try {
       // Check if there are nodes on the canvas first
       if (nodes.length === 0) {
         console.error('[WorkflowToolbar] Cannot execute flow: No nodes on canvas');
         setErrorMessage('Cannot execute flow: No nodes on canvas');
+        setShowError(true);
+        return;
+      }
+
+      // CRITICAL: Validate all edges are properly configured before execution
+      const unconfiguredEdges = edges.filter(edge => {
+        const hasSourceTasks = edge.data?.listenToTaskIds && edge.data.listenToTaskIds.length > 0;
+        const hasTargetTasks = edge.data?.targetTaskIds && edge.data.targetTaskIds.length > 0;
+        return !hasSourceTasks || !hasTargetTasks;
+      });
+
+      if (unconfiguredEdges.length > 0) {
+        const edgeDescriptions = unconfiguredEdges.map((edge, index) => {
+          const sourceNode = nodes.find(n => n.id === edge.source);
+          const targetNode = nodes.find(n => n.id === edge.target);
+          return `${index + 1}. ${sourceNode?.data?.crewName || 'Unknown'} → ${targetNode?.data?.crewName || 'Unknown'}`;
+        }).join('\n');
+
+        const errorMsg = `Cannot execute flow: ${unconfiguredEdges.length} connection(s) not configured.\n\nPlease configure these connections by clicking on them and selecting tasks:\n${edgeDescriptions}`;
+        console.error('[WorkflowToolbar]', errorMsg);
+        setErrorMessage(errorMsg);
         setShowError(true);
         return;
       }
@@ -118,9 +152,10 @@ const WorkflowToolbar: React.FC<WorkflowToolbarProps> = ({
         acc[type] = (acc[type] || 0) + 1;
         return acc;
       }, {} as Record<string, number>);
-      
+
       console.log('[WorkflowToolbar] Node types on canvas before execution:', nodeTypes);
-      
+      console.log('[WorkflowToolbar] All edges validated successfully');
+
       // Execute the flow
       console.log('[WorkflowToolbar] Executing flow with nodes:', nodes.length, 'edges:', edges.length);
       await executeFlow(nodes, edges);
@@ -271,7 +306,25 @@ const WorkflowToolbar: React.FC<WorkflowToolbarProps> = ({
             }}
           >
             <MenuItem onClick={handleExecuteCrew}>Execute Crew</MenuItem>
-            <MenuItem onClick={handleExecuteFlow}>Execute Flow</MenuItem>
+            <Tooltip
+              title={!canRunFlow ? "Some connections are not configured. Click on orange connections to configure them." : ""}
+              placement="right"
+            >
+              <span>
+                <MenuItem
+                  onClick={handleExecuteFlow}
+                  disabled={!canRunFlow}
+                  sx={{
+                    '&.Mui-disabled': {
+                      opacity: 0.5,
+                      pointerEvents: 'auto', // Allow tooltip on disabled item
+                    }
+                  }}
+                >
+                  Execute Flow
+                </MenuItem>
+              </span>
+            </Tooltip>
           </Menu>
         </div>
 
@@ -310,6 +363,29 @@ const WorkflowToolbar: React.FC<WorkflowToolbarProps> = ({
               }}
             >
               <_SaveIcon sx={{ fontSize: 20 }} />
+            </IconButton>
+          </span>
+        </Tooltip>
+
+        <Tooltip title={t('nemo.buttons.saveFlow') || 'Save Flow'}>
+          <span>
+            <IconButton
+              ref={saveFlowRef}
+              size="small"
+              sx={{
+                border: '1px solid rgba(0, 0, 0, 0.12)',
+                borderRadius: 1,
+                p: 1,
+                '&:hover': { backgroundColor: 'action.hover' }
+              }}
+              data-tour="save-flow-button"
+              onClick={() => {
+                // Trigger the save flow dialog via an event
+                const event = new CustomEvent('openSaveFlowDialog');
+                window.dispatchEvent(event);
+              }}
+            >
+              <AccountTreeIcon sx={{ fontSize: 20 }} />
             </IconButton>
           </span>
         </Tooltip>

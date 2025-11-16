@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import {
   Box,
   Tab,
@@ -32,11 +32,11 @@ import {
   ArrowDropDown as ArrowDropDownIcon,
   Clear as ClearAllIcon,
   Group as GroupIcon,
-  Assignment as AssignmentIcon
+  Assignment as AssignmentIcon,
+  AccountTree as FlowIcon
 } from '@mui/icons-material';
 import { useTabManagerStore } from '../../store/tabManager';
 import { useThemeManager } from '../../hooks/workflow/useThemeManager';
-import GroupSelector from '../Common/GroupSelector';
 
 interface TabBarProps {
   onRunTab?: (tabId: string) => void;
@@ -46,16 +46,18 @@ interface TabBarProps {
   onLoadAgents?: () => void;
   onLoadTasks?: () => void;
   disabled?: boolean;
+  hideTabsAndButtons?: boolean; // Hide tabs and add button, show only workspace selector
 }
 
-const TabBar: React.FC<TabBarProps> = ({ 
-  onRunTab, 
-  isRunning = false, 
+const TabBar: React.FC<TabBarProps> = ({
+  onRunTab,
+  isRunning = false,
   runningTabId = null,
   onLoadCrew,
   onLoadAgents,
   onLoadTasks,
-  disabled = false
+  disabled = false,
+  hideTabsAndButtons = false
 }) => {
   const { isDarkMode } = useThemeManager();
   const {
@@ -67,9 +69,26 @@ const TabBar: React.FC<TabBarProps> = ({
     updateTabName,
     duplicateTab,
     clearAllTabs,
-    clearTabExecutionStatus
+    clearTabExecutionStatus,
+    getTabsForCurrentGroup,
+    switchToGroup
   } = useTabManagerStore();
 
+  // Get only tabs for the current workspace/group
+  const visibleTabs = getTabsForCurrentGroup();
+
+  // Listen for group/workspace changes
+  useEffect(() => {
+    const handleGroupChange = (event: CustomEvent) => {
+      const { groupId } = event.detail;
+      switchToGroup(groupId);
+    };
+
+    window.addEventListener('group-changed', handleGroupChange as EventListener);
+    return () => {
+      window.removeEventListener('group-changed', handleGroupChange as EventListener);
+    };
+  }, [switchToGroup]);
 
   const [contextMenu, setContextMenu] = useState<{
     mouseX: number;
@@ -306,13 +325,26 @@ const TabBar: React.FC<TabBarProps> = ({
   const handleSaveTab = (tabId: string) => {
     // Set the active tab before saving
     setActiveTab(tabId);
-    
+
     // Trigger save crew dialog
     setTimeout(() => {
       const event = new CustomEvent('openSaveCrewDialog');
       window.dispatchEvent(event);
     }, 100);
-    
+
+    handleContextMenuClose();
+  };
+
+  const handleSaveFlowTab = (tabId: string) => {
+    // Set the active tab before saving
+    setActiveTab(tabId);
+
+    // Trigger save flow dialog
+    setTimeout(() => {
+      const event = new CustomEvent('openSaveFlowDialog');
+      window.dispatchEvent(event);
+    }, 100);
+
     handleContextMenuClose();
   };
 
@@ -367,187 +399,176 @@ const TabBar: React.FC<TabBarProps> = ({
           overflow: 'hidden'  // Prevent overflow from causing layout shifts
         }}
       >
-        <Box sx={{ display: 'flex', alignItems: 'center', flex: 1 }}>
-          <Tabs
-            value={activeTabId || false}
-            onChange={handleTabChange}
-            variant="scrollable"
-            scrollButtons="auto"
-            sx={{
-              minWidth: 0, // Allow tabs to shrink
-              opacity: disabled ? 0.6 : 1,
-              pointerEvents: disabled ? 'none' : 'auto',
-              '& .MuiTab-root': {
-                minHeight: '40px',
-                textTransform: 'none',
-                fontSize: '0.875rem',
-                fontWeight: 500,
-                padding: '8px 12px',
-                minWidth: 'auto',
-                maxWidth: '200px',
-                cursor: disabled ? 'not-allowed' : 'pointer',
-                '&.Mui-selected': {
-                  color: isDarkMode ? '#90caf9' : '#1976d2',
-                }
-              },
-              '& .MuiTabs-indicator': {
-                backgroundColor: isDarkMode ? '#90caf9' : '#1976d2',
-              }
-            }}
-          >
-            {tabs.map((tab) => (
-              <Tab
-                key={tab.id}
-                value={tab.id}
-                onContextMenu={(e) => handleContextMenu(e, tab.id)}
-                label={
-                  <Box sx={{ 
-                    display: 'flex', 
-                    alignItems: 'center', 
-                    gap: 1,
-                    maxWidth: '180px'
-                  }}>
-                    <Typography
-                      variant="body2"
-                      sx={{
-                        overflow: 'hidden',
-                        textOverflow: 'ellipsis',
-                        whiteSpace: 'nowrap',
-                        flex: 1
-                      }}
-                    >
-                      {tab.name}
-                    </Typography>
-                    
-                    {/* Show indicators */}
-                    <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5 }}>
-                      {tab.isDirty && (
-                        <Tooltip title="Unsaved changes">
-                          <Box
-                            sx={{
-                              width: 6,
-                              height: 6,
-                              borderRadius: '50%',
-                              backgroundColor: isDarkMode ? '#ff9800' : '#f57c00'
-                            }}
-                          />
-                        </Tooltip>
-                      )}
-                      
-                      {tab.savedCrewId && !tab.isDirty && (
-                        <Tooltip title={`Saved as: ${tab.savedCrewName}`}>
-                          <SaveIcon sx={{ fontSize: 12, color: 'success.main' }} />
-                        </Tooltip>
-                      )}
-                      
-                      {(runningTabId === tab.id && isRunning) || tab.executionStatus === 'running' ? (
-                        <Chip
-                          size="small"
-                          label="Running"
-                          color="success"
-                          sx={{ 
-                            height: 16, 
-                            fontSize: '0.6rem',
-                            '& .MuiChip-label': { px: 0.5 }
-                          }}
-                        />
-                      ) : null}
-                      
-                      {tab.executionStatus === 'completed' && (
-                        <Tooltip title={tab.lastExecutionTime ? `Completed at ${new Date(tab.lastExecutionTime).toLocaleTimeString()}` : 'Completed'}>
-                          <Chip
-                            size="small"
-                            label="Completed"
-                            color="success"
-                            variant="outlined"
-                            sx={{ 
-                              height: 16, 
-                              fontSize: '0.6rem',
-                              '& .MuiChip-label': { px: 0.5 }
-                            }}
-                          />
-                        </Tooltip>
-                      )}
-                      
-                      {tab.executionStatus === 'failed' && (
-                        <Tooltip title={tab.lastExecutionTime ? `Failed at ${new Date(tab.lastExecutionTime).toLocaleTimeString()}` : 'Failed'}>
-                          <Chip
-                            size="small"
-                            label="Failed"
-                            color="error"
-                            variant="outlined"
-                            sx={{ 
-                              height: 16, 
-                              fontSize: '0.6rem',
-                              '& .MuiChip-label': { px: 0.5 }
-                            }}
-                          />
-                        </Tooltip>
-                      )}
-                      
-                      {tabs.length > 1 && (
-                        <IconButton
-                          size="small"
-                          onClick={(e) => handleCloseTab(tab.id, e)}
-                          sx={{
-                            width: 16,
-                            height: 16,
-                            padding: 0,
-                            '&:hover': {
-                              backgroundColor: isDarkMode ? 'rgba(255,255,255,0.1)' : 'rgba(0,0,0,0.1)'
-                            }
-                          }}
-                        >
-                          <CloseIcon sx={{ fontSize: 12 }} />
-                        </IconButton>
-                      )}
-                    </Box>
-                  </Box>
-                }
-              />
-            ))}
-          </Tabs>
-
-          <Tooltip title={disabled ? "Tab operations disabled during processing" : "New Tab Options"}>
-            <span>
-              <IconButton
-                onClick={handleNewTabMenuOpen}
-                disabled={disabled}
-                size="small"
-                sx={{
-                  marginLeft: 1,
-                  padding: '6px',
-                  color: isDarkMode ? 'rgba(255,255,255,0.7)' : 'rgba(0,0,0,0.6)',
-                  '&:hover': {
-                    backgroundColor: isDarkMode ? 'rgba(255,255,255,0.1)' : 'rgba(0,0,0,0.1)',
-                    color: isDarkMode ? 'rgba(255,255,255,0.9)' : 'rgba(0,0,0,0.8)'
-                  },
-                  '&.Mui-disabled': {
-                    color: isDarkMode ? 'rgba(255,255,255,0.3)' : 'rgba(0,0,0,0.3)',
+        {!hideTabsAndButtons && (
+          <Box sx={{ display: 'flex', alignItems: 'center', flex: 1 }}>
+            <Tabs
+              value={activeTabId || false}
+              onChange={handleTabChange}
+              variant="scrollable"
+              scrollButtons="auto"
+              sx={{
+                minWidth: 0, // Allow tabs to shrink
+                opacity: disabled ? 0.6 : 1,
+                pointerEvents: disabled ? 'none' : 'auto',
+                '& .MuiTab-root': {
+                  minHeight: '40px',
+                  textTransform: 'none',
+                  fontSize: '0.875rem',
+                  fontWeight: 500,
+                  padding: '8px 12px',
+                  minWidth: 'auto',
+                  maxWidth: '200px',
+                  cursor: disabled ? 'not-allowed' : 'pointer',
+                  '&.Mui-selected': {
+                    color: isDarkMode ? '#90caf9' : '#1976d2',
                   }
-                }}
-              >
-                <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5 }}>
-                  <AddIcon sx={{ fontSize: 18 }} />
-                  <ArrowDropDownIcon sx={{ fontSize: 14 }} />
-                </Box>
-              </IconButton>
-            </span>
-          </Tooltip>
-        </Box>
+                },
+                '& .MuiTabs-indicator': {
+                  backgroundColor: isDarkMode ? '#90caf9' : '#1976d2',
+                }
+              }}
+            >
+              {visibleTabs.map((tab) => (
+                <Tab
+                  key={tab.id}
+                  value={tab.id}
+                  onContextMenu={(e) => handleContextMenu(e, tab.id)}
+                  label={
+                    <Box sx={{
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: 1,
+                      maxWidth: '180px'
+                    }}>
+                      <Typography
+                        variant="body2"
+                        sx={{
+                          overflow: 'hidden',
+                          textOverflow: 'ellipsis',
+                          whiteSpace: 'nowrap',
+                          flex: 1
+                        }}
+                      >
+                        {tab.name}
+                      </Typography>
 
-        {/* Workspace Selector - positioned on the right */}
-        <Box sx={{
-          display: 'flex',
-          alignItems: 'center',
-          pl: 0.25,
-          pr: 0.75,  // Add more padding on the right to align with sidebar separator
-          flexShrink: 0,  // Prevent the box from shrinking
-          width: 'auto',
-          transition: 'none'  // Disable any transitions that might cause flickering
-        }}>
-          <GroupSelector />
-        </Box>
+                      {/* Show indicators */}
+                      <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5 }}>
+                        {tab.isDirty && (
+                          <Tooltip title="Unsaved changes">
+                            <Box
+                              sx={{
+                                width: 6,
+                                height: 6,
+                                borderRadius: '50%',
+                                backgroundColor: isDarkMode ? '#ff9800' : '#f57c00'
+                              }}
+                            />
+                          </Tooltip>
+                        )}
+
+                        {tab.savedCrewId && !tab.isDirty && (
+                          <Tooltip title={`Saved as: ${tab.savedCrewName}`}>
+                            <SaveIcon sx={{ fontSize: 12, color: 'success.main' }} />
+                          </Tooltip>
+                        )}
+
+                        {(runningTabId === tab.id && isRunning) || tab.executionStatus === 'running' ? (
+                          <Chip
+                            size="small"
+                            label="Running"
+                            color="success"
+                            sx={{
+                              height: 16,
+                              fontSize: '0.6rem',
+                              '& .MuiChip-label': { px: 0.5 }
+                            }}
+                          />
+                        ) : null}
+
+                        {tab.executionStatus === 'completed' && (
+                          <Tooltip title={tab.lastExecutionTime ? `Completed at ${new Date(tab.lastExecutionTime).toLocaleTimeString()}` : 'Completed'}>
+                            <Chip
+                              size="small"
+                              label="Completed"
+                              color="success"
+                              variant="outlined"
+                              sx={{
+                                height: 16,
+                                fontSize: '0.6rem',
+                                '& .MuiChip-label': { px: 0.5 }
+                              }}
+                            />
+                          </Tooltip>
+                        )}
+
+                        {tab.executionStatus === 'failed' && (
+                          <Tooltip title={tab.lastExecutionTime ? `Failed at ${new Date(tab.lastExecutionTime).toLocaleTimeString()}` : 'Failed'}>
+                            <Chip
+                              size="small"
+                              label="Failed"
+                              color="error"
+                              variant="outlined"
+                              sx={{
+                                height: 16,
+                                fontSize: '0.6rem',
+                                '& .MuiChip-label': { px: 0.5 }
+                              }}
+                            />
+                          </Tooltip>
+                        )}
+
+                        {tabs.length > 1 && (
+                          <IconButton
+                            size="small"
+                            onClick={(e) => handleCloseTab(tab.id, e)}
+                            sx={{
+                              width: 16,
+                              height: 16,
+                              padding: 0,
+                              '&:hover': {
+                                backgroundColor: isDarkMode ? 'rgba(255,255,255,0.1)' : 'rgba(0,0,0,0.1)'
+                              }
+                            }}
+                          >
+                            <CloseIcon sx={{ fontSize: 12 }} />
+                          </IconButton>
+                        )}
+                      </Box>
+                    </Box>
+                  }
+                />
+              ))}
+            </Tabs>
+
+            <Tooltip title={disabled ? "Tab operations disabled during processing" : "New Tab Options"}>
+              <span>
+                <IconButton
+                  onClick={handleNewTabMenuOpen}
+                  disabled={disabled}
+                  size="small"
+                  sx={{
+                    marginLeft: 1,
+                    padding: '6px',
+                    color: isDarkMode ? 'rgba(255,255,255,0.7)' : 'rgba(0,0,0,0.6)',
+                    '&:hover': {
+                      backgroundColor: isDarkMode ? 'rgba(255,255,255,0.1)' : 'rgba(0,0,0,0.1)',
+                      color: isDarkMode ? 'rgba(255,255,255,0.9)' : 'rgba(0,0,0,0.8)'
+                    },
+                    '&.Mui-disabled': {
+                      color: isDarkMode ? 'rgba(255,255,255,0.3)' : 'rgba(0,0,0,0.3)',
+                    }
+                  }}
+                >
+                  <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5 }}>
+                    <AddIcon sx={{ fontSize: 18 }} />
+                    <ArrowDropDownIcon sx={{ fontSize: 14 }} />
+                  </Box>
+                </IconButton>
+              </span>
+            </Tooltip>
+          </Box>
+        )}
       </Box>
 
       {/* New Tab Menu */}
@@ -625,7 +646,11 @@ const TabBar: React.FC<TabBarProps> = ({
           <SaveIcon sx={{ mr: 1, fontSize: 18 }} />
           Save Crew
         </MenuItem>
-        <MenuItem 
+        <MenuItem onClick={() => handleSaveFlowTab(contextMenu?.tabId || '')}>
+          <FlowIcon sx={{ mr: 1, fontSize: 18 }} />
+          Save Flow
+        </MenuItem>
+        <MenuItem
           onClick={() => handleRunTab(contextMenu?.tabId || '')}
           disabled={isRunning}
         >
