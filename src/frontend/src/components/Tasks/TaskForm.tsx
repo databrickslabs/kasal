@@ -889,7 +889,9 @@ const TaskForm: React.FC<TaskFormProps> = ({ initialData, onCancel, onTaskSaved,
                           setSelectedMcpServers(newServers);
                           setToolConfigs(prev => ({
                             ...prev,
-                            MCP_SERVERS: newServers
+                            MCP_SERVERS: {
+                              servers: newServers
+                            }
                           }));
                         }}
                         sx={{
@@ -912,10 +914,12 @@ const TaskForm: React.FC<TaskFormProps> = ({ initialData, onCancel, onTaskSaved,
                 onChange={(servers) => {
                   const serverArray = Array.isArray(servers) ? servers : (servers ? [servers] : []);
                   setSelectedMcpServers(serverArray);
-                  // Update tool configs when MCP servers change
+                  // Update tool configs when MCP servers change - use consistent format
                   setToolConfigs(prev => ({
                     ...prev,
-                    MCP_SERVERS: serverArray
+                    MCP_SERVERS: {
+                      servers: serverArray
+                    }
                   }));
                 }}
                 label="MCP Servers"

@@ -46,6 +46,7 @@ class NodeData(BaseModel):
     goal: Optional[str] = None
     backstory: Optional[str] = None
     tools: List[Any] = Field(default_factory=list)
+    tool_configs: Optional[Dict[str, Any]] = None  # Tool-specific configuration overrides (e.g., MCP_SERVERS, GenieTool)
     agentId: Optional[str] = None
     taskId: Optional[str] = None
     llm: Optional[str] = None
