@@ -85,6 +85,7 @@ class TestFlowExecutionRouter:
         mock_service.run_flow.assert_called_once_with(
             flow_id=flow_id,
             job_id="job-123",
+            run_name=None,
             config={"param1": "value1"}
         )
 

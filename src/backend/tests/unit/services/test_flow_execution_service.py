@@ -150,11 +150,11 @@ class TestFlowExecutionService:
 
         with patch.object(flow_execution_service.flow_execution_repo, 'create',
                          new_callable=AsyncMock) as mock_create, \
-             patch('src.services.flow_execution_service.FlowRepository') as MockFlowRepo:
+             patch('src.repositories.flow_repository.FlowRepository') as MockFlowRepo:
 
             mock_flow_repo = MagicMock()
+            mock_flow_repo.get = AsyncMock(return_value=mock_flow)
             MockFlowRepo.return_value = mock_flow_repo
-            mock_flow_repo.find_by_id.return_value = mock_flow
             mock_create.return_value = mock_flow_execution
 
             result = await flow_execution_service.create_execution(
@@ -204,7 +204,7 @@ class TestFlowExecutionService:
         """Test successful execution retrieval."""
         execution_id = 1
 
-        with patch.object(flow_execution_service.flow_execution_repo, 'get_by_id',
+        with patch.object(flow_execution_service.flow_execution_repo, 'get',
                          new_callable=AsyncMock) as mock_get:
             mock_get.return_value = mock_flow_execution
 
@@ -218,7 +218,7 @@ class TestFlowExecutionService:
         """Test execution retrieval when not found."""
         execution_id = 999
 
-        with patch.object(flow_execution_service.flow_execution_repo, 'get_by_id',
+        with patch.object(flow_execution_service.flow_execution_repo, 'get',
                          new_callable=AsyncMock) as mock_get:
             mock_get.return_value = None
 
