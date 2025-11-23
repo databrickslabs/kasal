@@ -88,7 +88,8 @@ export function useUIFitView(params: {
     currentUIState.screenHeight = window.innerHeight;
 
     layoutManager.updateUIState(currentUIState);
-    const canvasArea = layoutManager.getAvailableCanvasArea('flow');
+    // Get available canvas area (calculated internally)
+    layoutManager.getAvailableCanvasArea('flow');
 
     // Calculate padding based on execution history visibility
     const basePadding = 0.2;

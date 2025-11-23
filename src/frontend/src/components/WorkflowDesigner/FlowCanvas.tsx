@@ -287,7 +287,7 @@ const FlowCanvas: React.FC<FlowCanvasProps> = ({
           // Place new node below with spacing
           newPosition = {
             x: bottomNode.position.x, // Same X as previous node
-            y: bottomNode.position.y + 130 // 80 (node height) + 50 (spacing)
+            y: bottomNode.position.y + 160 // 80 (node height) + 80 (spacing)
           };
         }
       } else {
@@ -302,7 +302,7 @@ const FlowCanvas: React.FC<FlowCanvasProps> = ({
           );
           // Place new node to the right with spacing
           newPosition = {
-            x: rightmostNode.position.x + 190, // 140 (node width) + 50 (spacing)
+            x: rightmostNode.position.x + 220, // 140 (node width) + 80 (spacing)
             y: rightmostNode.position.y // Same Y as previous node
           };
         }

@@ -870,10 +870,10 @@ const WorkflowDesigner: React.FC<WorkflowDesignerProps> = (): JSX.Element => {
     openFlowDialog: _openFlowDialog
   } = useFlowSelectionDialogHandler();
 
-  // Use event bindings
+  // Use event bindings (includes both run execution and crew selection handlers)
   const {
     handleRunClickWrapper: _handleRunClickWrapper,
-    handleCrewSelectWrapper
+    handleCrewSelectWrapper: _handleCrewSelectWrapper
   } = useEventBindings(
     // Cast the handleRunClick to match the expected signature
     (executionType?: 'flow' | 'crew') =>
@@ -1478,7 +1478,7 @@ const WorkflowDesigner: React.FC<WorkflowDesignerProps> = (): JSX.Element => {
             setCrewFlowDialogInitialTab(0); // Reset to default tab
             setCrewFlowDialogShowOnlyTab(undefined); // Reset to show all tabs
           }}
-          onCrewSelect={handleCrewSelectWrapper}
+          onCrewSelect={_handleCrewSelectWrapper}
           onFlowSelect={handleFlowSelect}
           onAgentSelect={handleAgentSelect}
           onTaskSelect={handleTaskSelect}
@@ -1491,7 +1491,7 @@ const WorkflowDesigner: React.FC<WorkflowDesignerProps> = (): JSX.Element => {
         <CrewFlowSelectionDialog
           open={isFlowDialogOpen}
           onClose={() => setIsFlowDialogOpen(false)}
-          onCrewSelect={handleCrewSelectWrapper}
+          onCrewSelect={_handleCrewSelectWrapper}
           onFlowSelect={handleFlowSelect}
           onAgentSelect={handleAgentSelect}
           onTaskSelect={handleTaskSelect}
