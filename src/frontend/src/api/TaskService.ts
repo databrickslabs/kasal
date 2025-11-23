@@ -62,9 +62,9 @@ export class TaskService {
       // Extract assigned_agent if it exists in the incoming task object
       const taskWithAgent = task as TaskWithAssignedAgent;
       const assignedAgent = taskWithAgent.assigned_agent;
-      
 
-      
+
+
       // Validate and format the task data
       const taskData = {
         ...task,
@@ -72,7 +72,7 @@ export class TaskService {
         description: task.description?.trim(),
         expected_output: task.expected_output?.trim(),
         tools: task.tools || [],
-        tool_configs: task.tool_configs || {},  // Include tool_configs
+        ...(task.tool_configs ? { tool_configs: task.tool_configs } : {}),  // Include tool_configs only if present
         agent_id: task.agent_id || "",
         async_execution: task.async_execution !== undefined ? Boolean(task.async_execution) : false,
         markdown: task.markdown !== undefined ? Boolean(task.markdown) : Boolean(task.config?.markdown),
@@ -140,7 +140,7 @@ export class TaskService {
       if (task.tool_configs) {
         console.log('TaskService - Updating task with tool_configs:', task.tool_configs);
       }
-      
+
       // Validate and format the task data
       const taskData = {
         ...task,
@@ -148,7 +148,7 @@ export class TaskService {
         description: task.description?.trim(),
         expected_output: task.expected_output?.trim(),
         tools: task.tools || [],
-        tool_configs: task.tool_configs || {},  // Include tool_configs
+        ...(task.tool_configs ? { tool_configs: task.tool_configs } : {}),  // Include tool_configs only if present
         agent_id: task.agent_id || "",
         async_execution: task.async_execution !== undefined ? Boolean(task.async_execution) : false,
         markdown: task.markdown !== undefined ? Boolean(task.markdown) : Boolean(task.config?.markdown),

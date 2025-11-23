@@ -6,6 +6,7 @@ import { Task } from '../types/task';
 import { JobResult } from '../types/common';
 import { ModelService } from './ModelService';
 import { Models } from '../types/models';
+import { buildFlowConfiguration } from '../utils/flowConfigBuilder';
 
 interface NodeData {
   label?: string;
@@ -77,14 +78,10 @@ export class JobExecutionService {
 
         // Find flow nodes (crewNode type)
         const flowNodes = nodes.filter(node => node.type === 'crewNode');
-        
+
         if (flowNodes.length > 0) {
           console.log(`[JobExecutionService] Found ${flowNodes.length} flow nodes for execution`);
-          
-          // Extract flow configuration from the first flow node if available
-          const firstFlowNode = flowNodes[0];
-          const flowConfig = firstFlowNode.data?.flowConfig;
-          
+
           // Always include nodes and edges in the config for flow execution
           // Map the nodes to match the expected format
           config.nodes = nodes.map(node => ({
@@ -93,7 +90,7 @@ export class JobExecutionService {
             position: node.position || { x: 0, y: 0 },
             data: node.data || {}
           }));
-          
+
           // Map the edges to match the expected format
           // CRITICAL: Include the data field which contains listenToTaskIds and targetTaskIds
           config.edges = edges.map(edge => ({
@@ -104,47 +101,23 @@ export class JobExecutionService {
             targetHandle: edge.targetHandle || undefined,
             data: edge.data || {} // Include edge data with listenToTaskIds/targetTaskIds
           }));
-          
-          // Build starting points array - nodes with no incoming edges
-          const nodeIds = new Set(nodes.map(n => n.id));
-          const targetNodeIds = new Set(edges.map(e => e.target));
-          const startingNodeIds = Array.from(nodeIds).filter(id => !targetNodeIds.has(id));
 
-          console.log(`[JobExecutionService] Identified ${startingNodeIds.length} starting nodes:`, startingNodeIds);
+          // Build flow configuration with listeners, actions, and starting points
+          // This ensures flows execute correctly even when not saved
+          const builtFlowConfig = buildFlowConfiguration(nodes, edges, 'Dynamic Flow');
 
-          // Build starting points configuration
-          const startingPoints = startingNodeIds.map(nodeId => {
-            const node = nodes.find(n => n.id === nodeId);
-            return {
-              nodeId,
-              nodeType: node?.type || 'unknown',
-              nodeData: node?.data || {}
-            };
+          console.log(`[JobExecutionService] Built flow config with:`, {
+            listeners: builtFlowConfig.listeners.length,
+            actions: builtFlowConfig.actions.length,
+            startingPoints: builtFlowConfig.startingPoints.length
           });
 
-          // Build or update flow_config with starting points
-          const builtFlowConfig = {
-            ...(flowConfig || {}),
-            startingPoints,
+          // Add the complete flow configuration
+          config.flow_config = {
+            ...builtFlowConfig,
             nodes: config.nodes,
             edges: config.edges
           };
-
-          if (flowConfig && flowConfig.id) {
-            console.log(`[JobExecutionService] Found flow configuration with ID: ${flowConfig.id}`);
-
-            // DO NOT include flow_id in the configuration - execute as ad-hoc flow
-            // This allows flows to run without being saved in the database
-            // config.flow_id = flowConfig.id;
-
-            // Add flow configuration to the config with starting points
-            config.flow_config = builtFlowConfig;
-          } else {
-            console.log('[JobExecutionService] No flow ID found in configuration, creating dynamic flow');
-
-            // Still include the flow_config with starting points
-            config.flow_config = builtFlowConfig;
-          }
           
           // Include execution type and model
           config.execution_type = 'flow';
@@ -184,6 +157,7 @@ export class JobExecutionService {
               goal: agentData.goal || '',
               backstory: agentData.backstory || '',
               tools: Array.isArray(agentData.tools) ? agentData.tools : [],
+              tool_configs: agentData.tool_configs,  // Include tool_configs for MCP server configuration
               llm: agentData.llm,
               function_calling_llm: agentData.function_calling_llm,
               max_iter: agentData.max_iter,
@@ -252,6 +226,7 @@ export class JobExecutionService {
               description: taskData.description,
               expected_output: taskData.expected_output,
               tools: Array.isArray(taskData.tools) ? taskData.tools : [],
+              tool_configs: taskData.tool_configs,  // Include tool_configs for MCP server configuration
               context: [],
               agent: null,
               async_execution: Boolean(taskData.async_execution),
