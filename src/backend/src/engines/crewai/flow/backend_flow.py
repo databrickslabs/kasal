@@ -208,8 +208,12 @@ class BackendFlow:
 
     def _init_callbacks(self):
         """
-        Initialize all necessary callbacks for flow execution.
-        Uses the CallbackManager module.
+        Initialize callbacks for flow execution.
+
+        Note: For flows, we don't use JobOutputCallback (async) like regular crews.
+        Instead, we rely on:
+        1. AgentTraceEventListener for execution traces (set up in subprocess)
+        2. Synchronous step_callback and task_callback set on each Crew instance
         """
         # Set group context in UserContext for multi-tenant isolation
         group_context = self._config.get('group_context')
@@ -221,11 +225,16 @@ class BackendFlow:
             except Exception as e:
                 logger.warning(f"Could not set group context in _init_callbacks: {e}")
 
-        self._config['callbacks'] = CallbackManager.init_callbacks(
-            job_id=self._job_id,
-            config=self._config,
-            group_context=group_context
-        )
+        # For flows, we only need minimal callback setup with job_id
+        # The actual logging/tracing is handled by:
+        # 1. TraceManager + AgentTraceEventListener (initialized in subprocess)
+        # 2. Synchronous callbacks set on each Crew instance in flow methods
+        self._config['callbacks'] = {
+            'handlers': [],  # No async handlers for flows
+            'job_id': self._job_id,  # Pass job_id directly for sync callbacks
+            'start_trace_writer': True  # Signal to start trace writer in subprocess
+        }
+        logger.info(f"Initialized flow callbacks with job_id={self._job_id} (using event listeners and sync crew callbacks)")
 
     async def kickoff_async(self) -> Dict[str, Any]:
         """
@@ -429,7 +438,7 @@ class BackendFlow:
             for attr_name in dir(crewai_flow):
                 if callable(getattr(crewai_flow, attr_name)):
                     all_methods.append(attr_name)
-                    if attr_name.startswith('start_flow_'):
+                    if attr_name.startswith('starting_point_'):
                         start_methods.append(attr_name)
 
             logger.info(f"Flow instance type: {type(crewai_flow)}")

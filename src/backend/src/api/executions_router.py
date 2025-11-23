@@ -19,9 +19,9 @@ from src.core.dependencies import GroupContextDep, SessionDep
 from src.core.permissions import check_role_in_context
 from src.models.execution_history import ExecutionHistory
 from src.schemas.execution import (
-    CrewConfig, 
-    ExecutionStatus, 
-    ExecutionResponse, 
+    CrewConfig,
+    ExecutionStatus,
+    ExecutionResponse,
     ExecutionCreateResponse,
     ExecutionNameGenerationRequest,
     ExecutionNameGenerationResponse,
@@ -31,6 +31,7 @@ from src.schemas.execution import (
 )
 from src.services.execution_service import ExecutionService
 from src.services.flow_service import FlowService
+from src.engines.crewai.config_adapter import get_execution_logger
 
 # Get logger from the centralized logging system
 logger = LoggerManager.get_instance().crew
@@ -73,43 +74,46 @@ async def create_execution(
     Returns:
         Dict with execution_id, status, and run_name
     """
+    # Get appropriate logger based on config type (flow vs crew)
+    exec_logger = get_execution_logger(config.model_dump() if hasattr(config, 'model_dump') else {})
+
     try:
         # Process flow_id if present
         if hasattr(config, 'flow_id') and config.flow_id:
-            logger.info(f"Executing flow with ID: {config.flow_id}")
+            exec_logger.info(f"Executing flow with ID: {config.flow_id}")
             
             # Convert string to UUID if necessary
             if isinstance(config.flow_id, str):
                 try:
                     # Validate that it's a proper UUID
                     config.flow_id = uuid.UUID(config.flow_id)
-                    logger.info(f"Converted flow_id to UUID: {config.flow_id}")
+                    exec_logger.info(f"Converted flow_id to UUID: {config.flow_id}")
                 except ValueError:
-                    logger.error(f"Invalid flow_id format: {config.flow_id}")
+                    exec_logger.error(f"Invalid flow_id format: {config.flow_id}")
                     raise ValueError(f"Invalid flow_id format: {config.flow_id}. Must be a valid UUID.")
-            
+
             # Verify the flow exists in database
             flow_service = FlowService(service.session)
             try:
                 flow = await flow_service.get_flow(config.flow_id)
-                logger.info(f"Found flow in database: {flow.name} ({flow.id})")
+                exec_logger.info(f"Found flow in database: {flow.name} ({flow.id})")
             except HTTPException as he:
                 if he.status_code == 404:
-                    logger.error(f"Flow with ID {config.flow_id} not found")
+                    exec_logger.error(f"Flow with ID {config.flow_id} not found")
                     raise ValueError(f"Flow with ID {config.flow_id} not found")
                 raise
-        
+
         # Log the incoming config to debug knowledge_sources
-        logger.info(f"[create_execution] Received config with agents_yaml: {hasattr(config, 'agents_yaml')}")
+        exec_logger.info(f"[create_execution] Received config with agents_yaml: {hasattr(config, 'agents_yaml')}")
         if hasattr(config, 'agents_yaml') and config.agents_yaml:
-            logger.info(f"[create_execution] agents_yaml has {len(config.agents_yaml)} agents")
+            exec_logger.info(f"[create_execution] agents_yaml has {len(config.agents_yaml)} agents")
             for agent_id, agent_data in config.agents_yaml.items():
-                logger.info(f"[create_execution] Agent {agent_id} keys: {list(agent_data.keys())}")
+                exec_logger.info(f"[create_execution] Agent {agent_id} keys: {list(agent_data.keys())}")
                 if 'knowledge_sources' in agent_data:
                     ks = agent_data['knowledge_sources']
-                    logger.info(f"[create_execution] Agent {agent_id} has {len(ks)} knowledge_sources: {ks}")
+                    exec_logger.info(f"[create_execution] Agent {agent_id} has {len(ks)} knowledge_sources: {ks}")
                 else:
-                    logger.warning(f"[create_execution] Agent {agent_id} has NO knowledge_sources")
+                    exec_logger.warning(f"[create_execution] Agent {agent_id} has NO knowledge_sources")
         
         # Use the injected service
         # Delegate all business logic to the service

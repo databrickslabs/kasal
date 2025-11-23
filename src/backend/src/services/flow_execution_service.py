@@ -277,10 +277,7 @@ class FlowExecutionService:
             error=error
         )
 
-        # Set completed_at if status is terminal
-        if status in [FlowExecutionStatus.COMPLETED, FlowExecutionStatus.FAILED]:
-            update_data.completed_at = datetime.utcnow()
-
+        # Note: completed_at is set automatically by the repository for terminal statuses
         node_execution = await self.node_execution_repo.update(node_execution_id, update_data)
         logger.info(f"Updated node execution {node_execution_id} to status {status}")
 

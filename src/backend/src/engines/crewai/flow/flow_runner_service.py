@@ -26,6 +26,7 @@ from src.repositories.flow_repository import FlowRepository
 from src.repositories.task_repository import TaskRepository
 from src.repositories.agent_repository import AgentRepository
 from src.repositories.tool_repository import ToolRepository
+from src.repositories.crew_repository import CrewRepository
 from src.core.logger import LoggerManager
 from src.db.session import async_session_factory
 from src.services.api_keys_service import ApiKeysService
@@ -45,6 +46,7 @@ class FlowRunnerService:
         self.task_repo = TaskRepository(db)
         self.agent_repo = AgentRepository(db)
         self.tool_repo = ToolRepository(db)
+        self.crew_repo = CrewRepository(db)
     
     async def create_flow_execution(self, flow_id: Union[uuid.UUID, str], job_id: str, config: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
         """
@@ -304,12 +306,14 @@ class FlowRunnerService:
                 from src.repositories.task_repository import TaskRepository
                 from src.repositories.agent_repository import AgentRepository
                 from src.repositories.tool_repository import ToolRepository
+                from src.repositories.crew_repository import CrewRepository
 
                 # Initialize repositories for loading crew data from database
                 flow_repo = FlowRepository(session)
                 task_repo = TaskRepository(session)
                 agent_repo = AgentRepository(session)
                 tool_repo = ToolRepository(session)
+                crew_repo = CrewRepository(session)
 
                 # Initialize BackendFlow with the job_id (no flow_id for dynamic flows)
                 backend_flow = BackendFlow(job_id=job_id, flow_id=None)
@@ -317,7 +321,8 @@ class FlowRunnerService:
                     'flow': flow_repo,
                     'task': task_repo,
                     'agent': agent_repo,
-                    'tool': tool_repo
+                    'tool': tool_repo,
+                    'crew': crew_repo
                 }
 
                 # CRITICAL: For dynamic flows, we need to populate _flow_data from config
@@ -326,59 +331,14 @@ class FlowRunnerService:
                     logger.info(f"Updating flow config with provided configuration")
                     backend_flow.config.update(config)
 
-                    # Construct flow_data from the config for dynamic flows
-                    # CRITICAL: Build listeners from edges for proper flow execution
+                    # Use the flow_config built by the frontend (buildFlowConfiguration utility)
+                    # This contains listeners, actions, and startingPoints in the NEW simple format
                     flow_config = config.get('flow_config', {})
                     nodes = config.get('nodes', [])
                     edges = config.get('edges', [])
 
-                    # Build listeners from edges (nodes that have incoming edges)
-                    # ALWAYS use edges as source of truth, ignore flow_config.listeners if present
-                    if edges:
-                        listeners = []
-                        target_nodes = {}  # Map of target_node_id -> list of source edges
-
-                        for edge in edges:
-                            target_id = edge.get('target')
-                            if target_id not in target_nodes:
-                                target_nodes[target_id] = []
-                            target_nodes[target_id].append(edge)
-
-                        # Create listener configuration for each target node
-                        for target_id, incoming_edges in target_nodes.items():
-                            target_node = next((n for n in nodes if n['id'] == target_id), None)
-                            if target_node:
-                                # Get source node IDs that this node listens to
-                                source_ids = [edge.get('source') for edge in incoming_edges]
-
-                                # Extract listenToTaskIds and targetTaskIds from edge data
-                                # These are needed by FlowBuilder to create proper @listen decorators
-                                listen_to_task_ids = []
-                                target_task_ids = []
-                                for edge in incoming_edges:
-                                    edge_data = edge.get('data', {})
-                                    if 'listenToTaskIds' in edge_data:
-                                        listen_to_task_ids.extend(edge_data['listenToTaskIds'])
-                                    if 'targetTaskIds' in edge_data:
-                                        target_task_ids.extend(edge_data['targetTaskIds'])
-
-                                # Extract tasks from nodeData - FlowBuilder expects this field
-                                node_data = target_node.get('data', {})
-                                all_tasks_in_node = node_data.get('allTasks', [])
-
-                                listeners.append({
-                                    'nodeId': target_id,
-                                    'nodeType': target_node.get('type', 'unknown'),
-                                    'nodeData': node_data,
-                                    'listenTo': source_ids,  # Which nodes to listen to
-                                    'listenToTaskIds': listen_to_task_ids,  # Which tasks to listen to (for @listen decorator)
-                                    'targetTaskIds': target_task_ids,  # Which tasks in this node will execute
-                                    'edges': incoming_edges,  # Full edge data
-                                    'tasks': all_tasks_in_node  # CRITICAL: Tasks for this listener (FlowBuilder expects this)
-                                })
-
-                        flow_config['listeners'] = listeners
-                        logger.info(f"Built {len(listeners)} listeners from {len(edges)} edges")
+                    logger.info(f"Using flow_config from frontend with {len(flow_config.get('listeners', []))} listeners, "
+                              f"{len(flow_config.get('actions', []))} actions, and {len(flow_config.get('startingPoints', []))} starting points")
 
                     backend_flow._flow_data = {
                         'id': None,
@@ -553,6 +513,7 @@ class FlowRunnerService:
             task_repo = TaskRepository(session)
             agent_repo = AgentRepository(session)
             tool_repo = ToolRepository(session)
+            crew_repo = CrewRepository(session)
 
             # Convert string to UUID if needed
             if isinstance(flow_id, str):
@@ -615,7 +576,8 @@ class FlowRunnerService:
                     'flow': flow_repo,
                     'task': task_repo,
                     'agent': agent_repo,
-                    'tool': tool_repo
+                    'tool': tool_repo,
+                    'crew': crew_repo
                 }
 
                 # Log what we have in the config BEFORE loading from database

@@ -134,6 +134,10 @@ def run_flow_in_process(
 
     # Mark that we're in subprocess mode for logging purposes
     os.environ['FLOW_SUBPROCESS_MODE'] = 'true'
+    # CRITICAL: Set CREW_SUBPROCESS_MODE for AgentTraceEventListener to write directly to DB
+    os.environ['CREW_SUBPROCESS_MODE'] = 'true'
+    # Set debug tracing flag (default to true for comprehensive logging)
+    os.environ['CREWAI_DEBUG_TRACING'] = 'true'
 
     # Ensure DATABASE_TYPE is set correctly in subprocess
     if 'DATABASE_TYPE' not in os.environ:
@@ -282,6 +286,65 @@ def run_flow_in_process(
                     async_logger.error(f"[FLOW_SUBPROCESS] ✗ UserContext verification failed: {verify}")
             except Exception as e:
                 async_logger.error(f"[FLOW_SUBPROCESS] Failed to initialize UserContext: {e}")
+
+        # Initialize TraceManager and event listeners in subprocess (CRITICAL for execution_logs and execution_trace)
+        try:
+            async_logger.info(f"[FLOW_SUBPROCESS] Initializing TraceManager and event listeners for {execution_id}")
+
+            # Create new event loop for async initialization
+            init_loop = asyncio.new_event_loop()
+            asyncio.set_event_loop(init_loop)
+
+            async def initialize_tracing():
+                try:
+                    from src.engines.crewai.trace_management import TraceManager
+                    from src.engines.crewai.callbacks.logging_callbacks import (
+                        AgentTraceEventListener,
+                        TaskCompletionEventListener
+                    )
+                    from crewai.events import crewai_event_bus
+
+                    # Start trace and logs writers
+                    await TraceManager.ensure_writer_started()
+                    async_logger.info(f"[FLOW_SUBPROCESS] TraceManager writer started for {execution_id}")
+
+                    # Create and register event listeners
+                    # Read debug tracing flag from environment variable
+                    debug_tracing_enabled = os.environ.get('CREWAI_DEBUG_TRACING', 'true').lower() == 'true'
+                    async_logger.info(f"[FLOW_SUBPROCESS] Debug tracing flag from environment: {debug_tracing_enabled}")
+
+                    trace_listener = AgentTraceEventListener(
+                        job_id=execution_id,
+                        group_context=group_context,
+                        debug_tracing=debug_tracing_enabled
+                    )
+                    trace_listener.setup_listeners(crewai_event_bus)
+                    async_logger.info(f"[FLOW_SUBPROCESS] AgentTraceEventListener registered for {execution_id} (debug_tracing={debug_tracing_enabled})")
+
+                    # Log that subprocess mode is enabled for direct DB writes
+                    async_logger.info(f"[FLOW_SUBPROCESS] CREW_SUBPROCESS_MODE={os.environ.get('CREW_SUBPROCESS_MODE')} - Direct DB writes enabled")
+
+                    # Create task completion listener
+                    task_listener = TaskCompletionEventListener(
+                        job_id=execution_id,
+                        group_context=group_context
+                    )
+                    task_listener.setup_listeners(crewai_event_bus)
+                    async_logger.info(f"[FLOW_SUBPROCESS] TaskCompletionEventListener registered for {execution_id}")
+
+                except Exception as listener_error:
+                    async_logger.error(f"[FLOW_SUBPROCESS] Failed to initialize event listeners: {listener_error}", exc_info=True)
+                    raise
+
+            # Run initialization in the init loop
+            init_loop.run_until_complete(initialize_tracing())
+            init_loop.close()
+
+            async_logger.info(f"[FLOW_SUBPROCESS] Successfully initialized tracing and event listeners")
+
+        except Exception as trace_init_error:
+            async_logger.error(f"[FLOW_SUBPROCESS] Failed to initialize TraceManager: {trace_init_error}", exc_info=True)
+            # Continue execution even if trace initialization fails
 
         # Run the flow execution asynchronously
         async def run_async_flow():
@@ -621,6 +684,10 @@ class ProcessFlowExecutor:
         try:
             result = await future
 
+            # Process logs from flow.log file and write to database
+            # This reads the flow.log file after execution to capture ALL logs
+            await self._process_log_queue(log_queue, execution_id, group_context)
+
             # Update metrics
             if result.get('status') == 'COMPLETED':
                 self._metrics['completed_executions'] += 1
@@ -740,6 +807,103 @@ class ProcessFlowExecutor:
             # Clean up tracking
             self._running_processes.pop(execution_id, None)
             self._running_futures.pop(execution_id, None)
+
+    async def _process_log_queue(self, log_queue, execution_id: str, group_context=None):
+        """
+        Process logs from flow.log file and write them to the execution_logs table.
+
+        This method reads the flow.log file, extracts logs for the specific execution,
+        and writes them to the database for persistent storage and later retrieval.
+
+        Args:
+            log_queue: Not used anymore, kept for compatibility
+            execution_id: The execution ID for logging
+            group_context: Optional group context for multi-tenant isolation
+        """
+        logger.info(f"[ProcessFlowExecutor] Processing logs from flow.log for {execution_id}")
+
+        try:
+            import os
+            import json
+            from datetime import datetime, timezone
+            from sqlalchemy.ext.asyncio import create_async_engine
+            from sqlalchemy import text
+            from src.config.settings import settings
+
+            # Get the flow.log path
+            log_dir = os.environ.get('LOG_DIR')
+            if not log_dir:
+                import pathlib
+                backend_root = pathlib.Path(__file__).parent.parent.parent
+                log_dir = backend_root / 'logs'
+
+            flow_log_path = os.path.join(log_dir, 'flow.log')
+
+            if not os.path.exists(flow_log_path):
+                logger.warning(f"flow.log file not found at {flow_log_path}")
+                return
+
+            # Extract logs for our execution ID
+            logs_to_write = []
+            exec_id_short = execution_id[:8]  # Use short ID for matching
+
+            # First, add a header log entry to mark the start
+            logs_to_write.append({
+                'execution_id': execution_id,
+                'content': f'[EXECUTION_START] ========== Execution {execution_id} Started ==========',
+                'timestamp': datetime.utcnow(),  # Use timezone-naive UTC datetime for database consistency
+                'group_id': getattr(group_context, 'primary_group_id', None) if group_context else None,
+                'group_email': getattr(group_context, 'group_email', None) if group_context else None
+            })
+
+            # Read flow.log and extract relevant logs
+            with open(flow_log_path, 'r') as f:
+                for line in f:
+                    if exec_id_short in line:
+                        # This log belongs to our execution
+                        logs_to_write.append({
+                            'execution_id': execution_id,
+                            'content': line.strip(),
+                            'timestamp': datetime.utcnow(),  # Use timezone-naive UTC datetime for database consistency
+                            'group_id': getattr(group_context, 'primary_group_id', None) if group_context else None,
+                            'group_email': getattr(group_context, 'group_email', None) if group_context else None
+                        })
+
+            if len(logs_to_write) <= 1:  # Only has header
+                logger.info(f"No logs found for execution {exec_id_short} in flow.log")
+                # Still write the header log
+            else:
+                logger.info(f"Found {len(logs_to_write)-1} logs for execution {exec_id_short} in flow.log")
+
+            # Build database URL
+            if settings.DATABASE_TYPE == 'sqlite':
+                db_url = f'sqlite+aiosqlite:///{settings.SQLITE_DB_PATH}'
+                logger.info(f"[ProcessFlowExecutor] Using SQLite database: {settings.SQLITE_DB_PATH}")
+            else:
+                postgres_user = settings.POSTGRES_USER or 'postgres'
+                postgres_password = settings.POSTGRES_PASSWORD or 'postgres'
+                postgres_server = settings.POSTGRES_SERVER or 'localhost'
+                postgres_port = settings.POSTGRES_PORT or '5432'
+                postgres_db = settings.POSTGRES_DB or 'kasal'
+                db_url = f'postgresql+asyncpg://{postgres_user}:{postgres_password}@{postgres_server}:{postgres_port}/{postgres_db}'
+                logger.info(f"[ProcessFlowExecutor] Using PostgreSQL database: {postgres_server}:{postgres_port}/{postgres_db}")
+
+            # Write logs to database
+            engine = create_async_engine(db_url)
+            async with engine.begin() as conn:
+                for log_data in logs_to_write:
+                    await conn.execute(text("""
+                        INSERT INTO execution_logs (execution_id, content, timestamp, group_id, group_email)
+                        VALUES (:execution_id, :content, :timestamp, :group_id, :group_email)
+                    """), log_data)
+
+            await engine.dispose()
+            logger.info(f"[ProcessFlowExecutor] Successfully wrote {len(logs_to_write)} logs to execution_logs table")
+
+        except Exception as e:
+            import traceback
+            logger.error(f"[ProcessFlowExecutor] Error processing logs from flow.log: {e}")
+            logger.error(f"[ProcessFlowExecutor] Full traceback:\n{traceback.format_exc()}")
 
     def get_execution_info(self, execution_id: str) -> Optional[Dict[str, Any]]:
         """Get information about a running execution."""

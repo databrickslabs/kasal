@@ -57,17 +57,22 @@ class FlowExecutionRepository:
     async def get(self, execution_id: int) -> Optional[FlowExecution]:
         """
         Get a flow execution by ID.
-        
+
         Args:
             execution_id: ID of the flow execution to retrieve
-            
+
         Returns:
             The flow execution record or None if not found
         """
         query = select(FlowExecution).where(FlowExecution.id == execution_id)
         result = await self.session.execute(query)
         return result.scalars().first()
-    
+
+    # Alias for backward compatibility with service layer
+    async def get_by_id(self, execution_id: int) -> Optional[FlowExecution]:
+        """Alias for get() method."""
+        return await self.get(execution_id)
+
     async def get_by_job_id(self, job_id: str) -> Optional[FlowExecution]:
         """
         Get a flow execution by job ID.
@@ -150,13 +155,34 @@ class FlowExecutionRepository:
     async def get_all(self) -> List[FlowExecution]:
         """
         Get all flow executions.
-        
+
         Returns:
             List of all flow execution records
         """
         query = select(FlowExecution)
         result = await self.session.execute(query)
         return list(result.scalars().all())
+
+    async def delete(self, execution_id: int) -> bool:
+        """
+        Delete a flow execution by ID.
+
+        Args:
+            execution_id: ID of the flow execution to delete
+
+        Returns:
+            True if deleted, False if not found
+        """
+        from sqlalchemy import delete as sql_delete
+
+        stmt = sql_delete(FlowExecution).where(FlowExecution.id == execution_id)
+        result = await self.session.execute(stmt)
+        await self.session.commit()
+
+        deleted = result.rowcount > 0
+        if deleted:
+            logger.info(f"Deleted flow execution {execution_id}")
+        return deleted
 
 
 class FlowNodeExecutionRepository:
@@ -262,9 +288,36 @@ class FlowNodeExecutionRepository:
         updated = result.scalars().first()
         if updated:
             logger.info(f"Updated node execution {node_execution_id} with status {node_execution_data.status}")
-        
+
         return updated
-        
+
+    # Alias for backward compatibility with service layer
+    async def get_by_flow_execution_id(self, flow_execution_id: int) -> List[FlowNodeExecution]:
+        """Alias for get_by_flow_execution() method."""
+        return await self.get_by_flow_execution(flow_execution_id)
+
+    async def delete(self, node_execution_id: int) -> bool:
+        """
+        Delete a flow node execution by ID.
+
+        Args:
+            node_execution_id: ID of the node execution to delete
+
+        Returns:
+            True if deleted, False if not found
+        """
+        from sqlalchemy import delete as sql_delete
+
+        stmt = sql_delete(FlowNodeExecution).where(FlowNodeExecution.id == node_execution_id)
+        result = await self.session.execute(stmt)
+        await self.session.commit()
+
+        deleted = result.rowcount > 0
+        if deleted:
+            logger.info(f"Deleted node execution {node_execution_id}")
+        return deleted
+
+
 # Synchronous versions for use with the crew execution code
 
 class SyncFlowExecutionRepository:

@@ -704,8 +704,11 @@ class ExecutionService:
         execution_type = config.execution_type if hasattr(config, 'execution_type') and config.execution_type else "crew"
         if execution_type.lower() == "flow":
             logger = LoggerManager.get_instance().flow
+            # Also update exec_logger for backward compatibility with existing code
+            exec_logger = LoggerManager.get_instance().flow
         else:
             logger = crew_logger
+            exec_logger = crew_logger
 
         logger.debug("[ExecutionService.create_execution] Received request to create execution.")
 
