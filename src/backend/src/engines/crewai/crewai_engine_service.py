@@ -145,16 +145,29 @@ class CrewAIEngineService(BaseEngineService):
         try:
             # Set up CrewAI library logging via our centralized logger
             from src.engines.crewai.crew_logger import crew_logger
-            
+
+            # Choose logger based on execution type if provided
+            execution_type = kwargs.get("execution_type", "crew")
+            if execution_type and execution_type.lower() == "flow":
+                init_logger = LoggerManager.get_instance().flow
+            else:
+                init_logger = logger
+
             # Additional initialization if needed
             llm_provider = kwargs.get("llm_provider", "openai")
             model = kwargs.get("model", "gpt-4o")
-            logger.info(f"Initializing CrewAI engine with {llm_provider} using model {model}")
-            
+            init_logger.info(f"Initializing CrewAI engine with {llm_provider} using model {model}")
+
             return True
-            
+
         except Exception as e:
-            logger.error(f"Failed to initialize CrewAI engine: {str(e)}")
+            # Use appropriate logger for error too
+            execution_type = kwargs.get("execution_type", "crew")
+            if execution_type and execution_type.lower() == "flow":
+                error_logger = LoggerManager.get_instance().flow
+            else:
+                error_logger = logger
+            error_logger.error(f"Failed to initialize CrewAI engine: {str(e)}")
             return False
     
     async def run_execution(self, execution_id: str, execution_config: Dict[str, Any], group_context: GroupContext = None, session = None) -> str:
@@ -343,33 +356,37 @@ class CrewAIEngineService(BaseEngineService):
             logger.error(f"Error running execution {execution_id}: {str(e)}", exc_info=True)
             raise
     
-    def _setup_output_directory(self, execution_id: Optional[str] = None) -> str:
+    def _setup_output_directory(self, execution_id: Optional[str] = None, execution_logger=None) -> str:
         """
         Set up output directory for workflow execution
-        
+
         Args:
             execution_id: Optional execution ID for the workflow
-            
+            execution_logger: Optional logger to use (defaults to module logger)
+
         Returns:
             str: Path to output directory
         """
+        # Use provided logger or fall back to module-level logger
+        log = execution_logger or logger
+
         try:
             # Create base output directory
             from pathlib import Path
             base_dir = Path(os.getcwd()) / "tmp" / "crew_outputs"
             base_dir.mkdir(parents=True, exist_ok=True)
-            
+
             # Create execution-specific directory if ID provided
             if execution_id:
                 output_dir = base_dir / execution_id
                 output_dir.mkdir(exist_ok=True)
-                logger.info(f"Created output directory: {output_dir}")
+                log.info(f"Created output directory: {output_dir}")
                 return str(output_dir)
-            
+
             return str(base_dir)
-            
+
         except Exception as e:
-            logger.error(f"Error setting up output directory: {str(e)}")
+            log.error(f"Error setting up output directory: {str(e)}")
             return os.path.join(os.getcwd(), "tmp", "crew_outputs")
     
     async def _update_execution_status(self, 
@@ -543,7 +560,7 @@ class CrewAIEngineService(BaseEngineService):
                 flow_logger.info(f"[CrewAIEngineService] Added group_id to flow config: {group_context.primary_group_id}")
 
             # Setup output directory
-            output_dir = self._setup_output_directory(execution_id)
+            output_dir = self._setup_output_directory(execution_id, execution_logger=flow_logger)
             flow_config['output_dir'] = output_dir
 
             # Ensure writer is started before running execution

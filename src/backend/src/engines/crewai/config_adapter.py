@@ -11,6 +11,30 @@ from src.schemas.execution import CrewConfig
 from src.engines.crewai.helpers.conversion_helpers import extract_crew_yaml_data
 from src.core.logger import LoggerManager
 
+
+def get_execution_logger(config: dict = None):
+    """
+    Get the appropriate logger based on whether this is a flow or crew execution.
+
+    Args:
+        config: Optional execution configuration dict
+
+    Returns:
+        Flow logger if config indicates a flow execution, crew logger otherwise
+    """
+    logger_manager = LoggerManager.get_instance()
+
+    # If no config provided, default to crew logger
+    if not config:
+        return logger_manager.crew
+
+    # Check if this is a flow execution (has nodes, edges, and flow_config)
+    is_flow = 'flow_config' in config and 'nodes' in config and 'edges' in config
+
+    return logger_manager.flow if is_flow else logger_manager.crew
+
+
+# Default logger for backward compatibility (will be crew logger)
 logger = LoggerManager.get_instance().crew
 
 def adapt_config(config: CrewConfig) -> Dict[str, Any]:
@@ -143,7 +167,8 @@ def normalize_flow_config(config: Dict[str, Any]) -> Dict[str, Any]:
     Returns:
         Normalized flow configuration dictionary (or passthrough for dynamic flows)
     """
-    logger = LoggerManager.get_instance().crew
+    # Use dynamic logger based on config type (flow vs crew)
+    logger = get_execution_logger(config)
 
     # Check if this is a dynamic flow configuration (nodes/edges/flow_config)
     # Dynamic flows are built from the visual flow canvas and don't have pre-defined agents/tasks

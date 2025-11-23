@@ -190,6 +190,13 @@ DEFAULT_MODELS = {
         "context_window": 1000000,
         "max_output_tokens": 65536
     },
+    "databricks-gemini-3-pro": {
+        "name": "databricks-gemini-3-pro",
+        "temperature": 0.7,
+        "provider": "databricks",
+        "context_window": 1000000,
+        "max_output_tokens": 65536
+    },
     "databricks-qwen3-next-80b-a3b-instruct": {
         "name": "databricks-qwen3-next-80b-a3b-instruct",
         "temperature": 0.7,

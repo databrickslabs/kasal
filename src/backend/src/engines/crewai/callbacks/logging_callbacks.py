@@ -156,6 +156,19 @@ except ImportError:
     LLM_GUARDRAIL_EVENTS_AVAILABLE = False
     logger.info("LLM Guardrail events not available in this CrewAI version")
 
+# Flow Events - For flow execution tracking
+try:
+    from crewai.events.types.flow_events import (
+        FlowStartedEvent,
+        FlowFinishedEvent,
+        FlowCreatedEvent,
+    )
+    FLOW_EVENTS_AVAILABLE = True
+    logger.info("Flow events loaded successfully from CrewAI 0.177")
+except ImportError:
+    FLOW_EVENTS_AVAILABLE = False
+    logger.info("Flow events not available in this CrewAI version")
+
 # Import events that we know exist in our version
 from crewai.events import (
     AgentExecutionCompletedEvent,
@@ -526,6 +539,8 @@ class AgentTraceEventListener(BaseEventListener):
             - AgentExecutionCompletedEvent: Main agent execution handler
             - CrewKickoffStartedEvent: Crew initialization
             - CrewKickoffCompletedEvent: Crew completion with metrics
+            - FlowStartedEvent: Flow execution initialization
+            - FlowFinishedEvent: Flow execution completion
             - Memory/Knowledge events: If available in CrewAI version
             - Tool events: If available (usage start/finish/error)
             - LLM streaming: Always registered for real-time output
@@ -648,22 +663,31 @@ class AgentTraceEventListener(BaseEventListener):
             try:
                 crew_name = event.crew_name if hasattr(event, 'crew_name') else "crew"
                 inputs = event.inputs if hasattr(event, 'inputs') else {}
-                
+
                 logger.info(f"{log_prefix} Event: CrewKickoffStarted | Crew: {crew_name}")
-                
+
                 # Reset registries for this job
                 AgentTraceEventListener._task_registry[self.job_id] = {}
                 AgentTraceEventListener._task_start_times[self.job_id] = {}
-                
-                # Create trace for crew start
-                self._enqueue_trace(
-                    event_source="crew",
-                    event_context=crew_name,
-                    event_type="crew_started",
-                    output_content=f"Crew '{crew_name}' execution started",
-                    extra_data={"inputs": inputs} if inputs else None
-                )
-                
+
+                # Only create crew-level trace if NOT in flow mode
+                # In flow mode, flow_started event provides the top-level context
+                import os
+                is_flow_mode = os.environ.get('FLOW_SUBPROCESS_MODE', 'false').lower() == 'true'
+
+                if not is_flow_mode:
+                    # Create trace for crew start (standalone crew execution)
+                    self._enqueue_trace(
+                        event_source="crew",
+                        event_context=crew_name,
+                        event_type="crew_started",
+                        output_content=f"Crew '{crew_name}' execution started",
+                        extra_data={"inputs": inputs} if inputs else None
+                    )
+                else:
+                    # In flow mode, just log but don't create top-level trace
+                    logger.debug(f"{log_prefix} Suppressing crew_started trace in flow mode for crew: {crew_name}")
+
             except Exception as e:
                 logger.error(f"{log_prefix} Error in on_crew_kickoff_started: {e}", exc_info=True)
         
@@ -674,19 +698,19 @@ class AgentTraceEventListener(BaseEventListener):
                 crew_name = event.crew_name if hasattr(event, 'crew_name') else "crew"
                 output_content = str(event.output) if hasattr(event, 'output') else "Crew completed"
                 total_tokens = event.total_tokens if hasattr(event, 'total_tokens') else None
-                
+
                 logger.info(f"{log_prefix} Event: CrewKickoffCompleted | Crew: {crew_name}")
-                
+
                 # Create extra data with completion statistics
                 extra_data = {}
                 if total_tokens is not None:
                     extra_data['total_tokens'] = total_tokens
-                
+
                 # Calculate execution time
                 if self._init_time:
                     execution_time = (datetime.now(timezone.utc) - self._init_time).total_seconds()
                     extra_data['execution_time_seconds'] = execution_time
-                
+
                 # Log total tokens and execution time
                 if extra_data:
                     logger.info(f"{log_prefix} Crew Completed - Total Tokens: {extra_data.get('total_tokens', 'N/A')}, Execution Time: {extra_data.get('execution_time_seconds', 'N/A')} seconds")
@@ -696,19 +720,80 @@ class AgentTraceEventListener(BaseEventListener):
                         content=f"📊 Crew Statistics: Total Tokens: {extra_data.get('total_tokens', 'N/A')}, Execution Time: {extra_data.get('execution_time_seconds', 'N/A')} seconds",
                         group_context=self.group_context
                     )
-                
-                # Create trace for crew completion
-                self._enqueue_trace(
-                    event_source="crew",
-                    event_context=crew_name,
-                    event_type="crew_completed",
-                    output_content=output_content,
-                    extra_data=extra_data if extra_data else None
-                )
-                
+
+                # Only create crew-level trace if NOT in flow mode
+                # In flow mode, flow_completed event provides the top-level context
+                import os
+                is_flow_mode = os.environ.get('FLOW_SUBPROCESS_MODE', 'false').lower() == 'true'
+
+                if not is_flow_mode:
+                    # Create trace for crew completion (standalone crew execution)
+                    self._enqueue_trace(
+                        event_source="crew",
+                        event_context=crew_name,
+                        event_type="crew_completed",
+                        output_content=output_content,
+                        extra_data=extra_data if extra_data else None
+                    )
+                else:
+                    # In flow mode, just log but don't create top-level trace
+                    logger.debug(f"{log_prefix} Suppressing crew_completed trace in flow mode for crew: {crew_name}")
+
             except Exception as e:
                 logger.error(f"{log_prefix} Error in on_crew_kickoff_completed: {e}", exc_info=True)
-        
+
+        # Register flow event handlers if available
+        if FLOW_EVENTS_AVAILABLE:
+            @crewai_event_bus.on(FlowStartedEvent)
+            def on_flow_started(source, event):
+                """Handle flow start events."""
+                try:
+                    flow_name = event.flow_name if hasattr(event, 'flow_name') else "flow"
+                    inputs = event.inputs if hasattr(event, 'inputs') else {}
+
+                    logger.info(f"{log_prefix} Event: FlowStarted | Flow: {flow_name}")
+
+                    # Create trace for flow start
+                    self._enqueue_trace(
+                        event_source="flow",
+                        event_context=flow_name,
+                        event_type="flow_started",
+                        output_content=f"Flow '{flow_name}' execution started",
+                        extra_data={"inputs": inputs} if inputs else None
+                    )
+
+                except Exception as e:
+                    logger.error(f"{log_prefix} Error in on_flow_started: {e}", exc_info=True)
+
+            @crewai_event_bus.on(FlowFinishedEvent)
+            def on_flow_finished(source, event):
+                """Handle flow completion events."""
+                try:
+                    flow_name = event.flow_name if hasattr(event, 'flow_name') else "flow"
+                    result = event.result if hasattr(event, 'result') else None
+                    output_content = str(result) if result else "Flow completed"
+
+                    logger.info(f"{log_prefix} Event: FlowFinished | Flow: {flow_name}")
+
+                    # Calculate execution time
+                    extra_data = {}
+                    if self._init_time:
+                        execution_time = (datetime.now(timezone.utc) - self._init_time).total_seconds()
+                        extra_data['execution_time_seconds'] = execution_time
+                        logger.info(f"{log_prefix} Flow Completed - Execution Time: {execution_time} seconds")
+
+                    # Create trace for flow completion
+                    self._enqueue_trace(
+                        event_source="flow",
+                        event_context=flow_name,
+                        event_type="flow_completed",
+                        output_content=output_content,
+                        extra_data=extra_data if extra_data else None
+                    )
+
+                except Exception as e:
+                    logger.error(f"{log_prefix} Error in on_flow_finished: {e}", exc_info=True)
+
         # Register memory and knowledge event handlers if available
         if MEMORY_EVENTS_AVAILABLE:
             @crewai_event_bus.on(MemorySaveStartedEvent)
