@@ -45,6 +45,7 @@ class Task(Base):
     human_input = Column(Boolean, default=False)
     converter_cls = Column(String)
     guardrail = Column(String, nullable=True)  # Code-based guardrail (function name)
+    llm_guardrail = Column(JSON, nullable=True)  # LLM-based guardrail configuration
 
     # Metadata
     created_at = Column(DateTime, default=datetime.utcnow)
@@ -113,6 +114,14 @@ class Task(Base):
             self.guardrail = self.config['guardrail']
         elif self.guardrail and (not self.config.get('guardrail')):
             self.config['guardrail'] = self.guardrail
+
+        # Synchronize llm_guardrail field (LLM-based guardrail)
+        # Handle both setting and clearing of llm_guardrail
+        if self.config and 'llm_guardrail' in self.config:
+            # If llm_guardrail is explicitly in config (even if null), use that value
+            self.llm_guardrail = self.config['llm_guardrail']
+        elif self.llm_guardrail and (not self.config.get('llm_guardrail')):
+            self.config['llm_guardrail'] = self.llm_guardrail
 
         # Ensure condition is properly structured in config if present
         if condition is not None:

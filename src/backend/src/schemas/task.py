@@ -1,7 +1,8 @@
+import json
 from datetime import datetime
 from typing import List, Optional, Dict, Any, Union
 
-from pydantic import BaseModel, Field, ConfigDict
+from pydantic import BaseModel, Field, ConfigDict, field_validator
 
 
 class ConditionConfig(BaseModel):
@@ -9,6 +10,19 @@ class ConditionConfig(BaseModel):
     type: str
     parameters: Dict[str, Any] = Field(default_factory=dict)
     dependent_task: Optional[str] = None
+
+
+class LLMGuardrailConfig(BaseModel):
+    """Schema for LLM guardrail configuration.
+
+    LLM guardrails use an AI model to validate task outputs against custom criteria.
+    This is the OSS-compatible guardrail using crewai.tasks.llm_guardrail.LLMGuardrail.
+    """
+    description: str = Field(..., description="Validation criteria description")
+    llm_model: Optional[str] = Field(
+        default="databricks-claude-sonnet-4-5",
+        description="LLM model to use for validation"
+    )
 
 
 class TaskConfig(BaseModel):
@@ -27,7 +41,8 @@ class TaskConfig(BaseModel):
     callback_config: Optional[Dict[str, Any]] = None
     human_input: Optional[bool] = None
     condition: Optional[ConditionConfig] = None
-    guardrail: Optional[str] = None
+    guardrail: Optional[str] = None  # Code-based guardrail (function name)
+    llm_guardrail: Optional[LLMGuardrailConfig] = None  # LLM-based guardrail configuration
     markdown: Optional[bool] = None
 
 
@@ -52,7 +67,8 @@ class TaskBase(BaseModel):
     callback_config: Optional[Dict[str, Any]] = None
     human_input: bool = False
     converter_cls: Optional[str] = None
-    guardrail: Optional[str] = None
+    guardrail: Optional[str] = None  # Code-based guardrail (function name)
+    llm_guardrail: Optional[LLMGuardrailConfig] = None  # LLM-based guardrail configuration
 
 
 # Properties to receive on task creation
@@ -82,7 +98,8 @@ class TaskUpdate(BaseModel):
     callback_config: Optional[Dict[str, Any]] = None
     human_input: Optional[bool] = None
     converter_cls: Optional[str] = None
-    guardrail: Optional[str] = None
+    guardrail: Optional[str] = None  # Code-based guardrail (function name)
+    llm_guardrail: Optional[LLMGuardrailConfig] = None  # LLM-based guardrail configuration
 
 
 # Properties shared by models stored in DB
@@ -93,6 +110,17 @@ class TaskInDBBase(TaskBase):
     updated_at: datetime
 
     model_config = ConfigDict(from_attributes=True)
+
+    @field_validator('llm_guardrail', mode='before')
+    @classmethod
+    def parse_llm_guardrail(cls, v):
+        """Parse llm_guardrail if it's a JSON string from database."""
+        if isinstance(v, str):
+            try:
+                return json.loads(v)
+            except (json.JSONDecodeError, TypeError):
+                return None
+        return v
 
 
 # Properties to return to client
