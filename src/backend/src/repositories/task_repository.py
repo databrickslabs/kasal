@@ -77,26 +77,30 @@ class TaskRepository(BaseRepository[Task]):
                 # If guardrail is in config, sync to root
                 if 'guardrail' in obj_in['config'] and obj_in['config']['guardrail']:
                     obj_in['guardrail'] = obj_in['config']['guardrail']
-            
+
+                # If llm_guardrail is in config, sync to root (including null to clear it)
+                if 'llm_guardrail' in obj_in['config']:
+                    obj_in['llm_guardrail'] = obj_in['config']['llm_guardrail']
+
             # Vice versa: if fields are at root level, ensure they're in config too
             if 'config' not in obj_in:
                 obj_in['config'] = {}
-                
+
             if 'output_pydantic' in obj_in and obj_in['output_pydantic']:
                 if 'config' not in obj_in:
                     obj_in['config'] = {}
                 obj_in['config']['output_pydantic'] = obj_in['output_pydantic']
-                
+
             if 'output_json' in obj_in and obj_in['output_json']:
                 if 'config' not in obj_in:
                     obj_in['config'] = {}
                 obj_in['config']['output_json'] = obj_in['output_json']
-                
+
             if 'output_file' in obj_in and obj_in['output_file']:
                 if 'config' not in obj_in:
                     obj_in['config'] = {}
                 obj_in['config']['output_file'] = obj_in['output_file']
-                
+
             if 'callback' in obj_in and obj_in['callback']:
                 if 'config' not in obj_in:
                     obj_in['config'] = {}
@@ -106,17 +110,23 @@ class TaskRepository(BaseRepository[Task]):
                 if 'config' not in obj_in:
                     obj_in['config'] = {}
                 obj_in['config']['guardrail'] = obj_in['guardrail']
-                
+
+            # Sync llm_guardrail from root to config (including null to clear it)
+            if 'llm_guardrail' in obj_in:
+                if 'config' not in obj_in:
+                    obj_in['config'] = {}
+                obj_in['config']['llm_guardrail'] = obj_in['llm_guardrail']
+
             if 'markdown' in obj_in and obj_in['markdown'] is not None:
                 if 'config' not in obj_in:
                     obj_in['config'] = {}
                 obj_in['config']['markdown'] = obj_in['markdown']
-            
+
             # Also sync markdown from config to root if present
             if 'config' in obj_in and obj_in['config'] is not None:
                 if 'markdown' in obj_in['config'] and obj_in['config']['markdown'] is not None:
                     obj_in['markdown'] = obj_in['config']['markdown']
-            
+
             db_obj = self.model(**obj_in)
             self.session.add(db_obj)
             await self.session.flush()
@@ -161,46 +171,56 @@ class TaskRepository(BaseRepository[Task]):
                 # If guardrail is in config, sync to root
                 if 'guardrail' in obj_in['config'] and obj_in['config']['guardrail']:
                     obj_in['guardrail'] = obj_in['config']['guardrail']
-            
+
+                # If llm_guardrail is in config, sync to root (including null to clear it)
+                if 'llm_guardrail' in obj_in['config']:
+                    obj_in['llm_guardrail'] = obj_in['config']['llm_guardrail']
+
             # Vice versa: if fields are at root level, ensure they're in config too
             if 'config' not in obj_in:
                 obj_in['config'] = {}
-                
+
             if 'output_pydantic' in obj_in and obj_in['output_pydantic']:
                 if 'config' not in obj_in:
                     obj_in['config'] = {}
                 obj_in['config']['output_pydantic'] = obj_in['output_pydantic']
-                
+
             if 'output_json' in obj_in and obj_in['output_json']:
                 if 'config' not in obj_in:
                     obj_in['config'] = {}
                 obj_in['config']['output_json'] = obj_in['output_json']
-                
+
             if 'output_file' in obj_in and obj_in['output_file']:
                 if 'config' not in obj_in:
                     obj_in['config'] = {}
                 obj_in['config']['output_file'] = obj_in['output_file']
-                
+
             if 'callback' in obj_in and obj_in['callback']:
                 if 'config' not in obj_in:
                     obj_in['config'] = {}
                 obj_in['config']['callback'] = obj_in['callback']
-                
+
             if 'guardrail' in obj_in and obj_in['guardrail']:
                 if 'config' not in obj_in:
                     obj_in['config'] = {}
                 obj_in['config']['guardrail'] = obj_in['guardrail']
-                
+
+            # Sync llm_guardrail from root to config (including null to clear it)
+            if 'llm_guardrail' in obj_in:
+                if 'config' not in obj_in:
+                    obj_in['config'] = {}
+                obj_in['config']['llm_guardrail'] = obj_in['llm_guardrail']
+
             if 'markdown' in obj_in and obj_in['markdown'] is not None:
                 if 'config' not in obj_in:
                     obj_in['config'] = {}
                 obj_in['config']['markdown'] = obj_in['markdown']
-            
+
             # Also sync markdown from config to root if present
             if 'config' in obj_in and obj_in['config'] is not None:
                 if 'markdown' in obj_in['config'] and obj_in['config']['markdown'] is not None:
                     obj_in['markdown'] = obj_in['config']['markdown']
-            
+
             db_obj = await self.get(id)
             if db_obj:
                 # Debug logging for tool_configs
