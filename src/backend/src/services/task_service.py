@@ -145,21 +145,29 @@ class TaskService(BaseService[Task, TaskCreate]):
         
         # Exclude unset fields (None) from update
         update_data = obj_in.model_dump(exclude_none=True)
-        
+
+        # Special handling for llm_guardrail - explicitly include null to allow clearing
+        # Check if the field was explicitly set in the input (even to null)
+        if hasattr(obj_in, 'llm_guardrail'):
+            # Get the raw input data to check if llm_guardrail was explicitly sent
+            raw_data = obj_in.model_dump(exclude_unset=True)
+            if 'llm_guardrail' in raw_data:
+                update_data['llm_guardrail'] = obj_in.llm_guardrail
+
         # Log if tool_configs is in update_data
         if 'tool_configs' in update_data:
             logger.info(f"TaskService: update_data contains tool_configs: {update_data.get('tool_configs')}")
-        
+
         if not update_data:
             # No fields to update
             return await self.get(id)
-        
+
         # Convert empty agent_id to None for PostgreSQL compatibility
         if "agent_id" in update_data and update_data["agent_id"] == "":
             update_data["agent_id"] = None
-        
+
         return await self.repository.update(id, update_data)
-    
+
     async def update_with_group_check(self, id: str, obj_in: TaskUpdate, group_context: GroupContext) -> Optional[Task]:
         """
         Update a task with partial data and group verification.
@@ -185,19 +193,27 @@ class TaskService(BaseService[Task, TaskCreate]):
         
         # Exclude unset fields (None) from update
         update_data = obj_in.model_dump(exclude_none=True)
-        
+
+        # Special handling for llm_guardrail - explicitly include null to allow clearing
+        # Check if the field was explicitly set in the input (even to null)
+        if hasattr(obj_in, 'llm_guardrail'):
+            # Get the raw input data to check if llm_guardrail was explicitly sent
+            raw_data = obj_in.model_dump(exclude_unset=True)
+            if 'llm_guardrail' in raw_data:
+                update_data['llm_guardrail'] = obj_in.llm_guardrail
+
         # Log if tool_configs is in update_data
         if 'tool_configs' in update_data:
             logger.info(f"TaskService: update_data contains tool_configs: {update_data.get('tool_configs')}")
-        
+
         if not update_data:
             # No fields to update
             return task
-        
+
         # Convert empty agent_id to None for PostgreSQL compatibility
         if "agent_id" in update_data and update_data["agent_id"] == "":
             update_data["agent_id"] = None
-        
+
         return await self.repository.update(id, update_data)
     
     async def update_full(self, id: str, obj_in: Dict[str, Any]) -> Optional[Task]:
