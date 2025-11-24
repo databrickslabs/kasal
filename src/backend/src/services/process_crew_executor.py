@@ -263,6 +263,44 @@ def run_crew_in_process(
             _kasal_builtins.input = _kasal_noinput
         except Exception:
             pass
+
+        # CRITICAL: Patch CrewAI's LLM_CONTEXT_WINDOW_SIZES BEFORE importing Crew
+        # This is necessary because CrewAI has hardcoded context window sizes and
+        # doesn't know about Databricks models. Without this patch, it falls back to
+        # DEFAULT_CONTEXT_WINDOW_SIZE (8192 tokens), causing respect_context_window
+        # to not trigger summarization when needed. This leads to empty responses from
+        # models like Qwen that silently fail when context is too large.
+        try:
+            from crewai.llm import LLM_CONTEXT_WINDOW_SIZES
+            from src.seeds.model_configs import MODEL_CONFIGS
+
+            for model_name, config in MODEL_CONFIGS.items():
+                if config.get('provider') == 'databricks':
+                    full_model_name = f"databricks/{model_name}"
+                    context_window = config.get('context_window', 128000)
+                    LLM_CONTEXT_WINDOW_SIZES[full_model_name] = context_window
+            print(f"[SUBPROCESS] Registered Databricks models with CrewAI context window sizes", file=sys.stderr)
+        except Exception as reg_err:
+            print(f"[SUBPROCESS] Warning: Could not register Databricks models: {reg_err}", file=sys.stderr)
+
+        # CRITICAL: Patch CrewAI's CONTEXT_LIMIT_ERRORS to recognize Databricks error messages
+        # Databricks returns "exceeds maximum allowed content length" which is not in CrewAI's
+        # default error patterns. Without this patch, CrewAI won't trigger summarization
+        # when Databricks returns a context length error.
+        try:
+            from crewai.utilities.exceptions import context_window_exceeding_exception
+            databricks_error_patterns = [
+                "exceeds maximum allowed content length",  # Databricks specific
+                "maximum allowed content length",  # Alternative pattern
+                "requestsize",  # Part of Databricks error format
+            ]
+            for pattern in databricks_error_patterns:
+                if pattern not in context_window_exceeding_exception.CONTEXT_LIMIT_ERRORS:
+                    context_window_exceeding_exception.CONTEXT_LIMIT_ERRORS.append(pattern)
+            print(f"[SUBPROCESS] Registered Databricks error patterns for context limit detection", file=sys.stderr)
+        except Exception as err_reg:
+            print(f"[SUBPROCESS] Warning: Could not register Databricks error patterns: {err_reg}", file=sys.stderr)
+
         from crewai import Crew
 
         # Configure subprocess logging with execution ID
@@ -630,9 +668,13 @@ def run_crew_in_process(
 
                             @wraps(original_completion)
                             def tracked_completion(*args, **kwargs):
-                                # Log before LLM call
+                                import time as _llm_time
+
+                                # Log before LLM call with timestamp
                                 model = kwargs.get('model', 'unknown')
-                                async_logger.info(f"[SUBPROCESS] 🤖 LiteLLM call intercepted - Model: {model}")
+                                llm_start_time = _llm_time.time()
+                                async_logger.info(f"[SUBPROCESS] 🤖 LiteLLM call START - Model: {model}")
+
                                 # Best-effort: log last active trace id before call
                                 try:
                                     import mlflow as _ml_pre
@@ -643,19 +685,38 @@ def run_crew_in_process(
                                     async_logger.info(f"[SUBPROCESS] - Could not get last active trace id (pre-call): {_e_pre}")
 
                                 # Manual nested span as a fallback in case autologging misses it
+                                result = None
+                                llm_error = None
                                 try:
-                                    import mlflow as _ml
-                                    span_name = f"litellm.completion:{model}"
-                                    with _ml.start_span(name=span_name) as _span:
-                                        try:
-                                            _span.set_attribute("model", model)
-                                            _span.set_attribute("mlflow_span_fallback", True)
-                                        except Exception:
-                                            pass
-                                        result = original_completion(*args, **kwargs)
-                                except Exception as _span_err:
-                                    async_logger.warning(f"[SUBPROCESS] Fallback MLflow span failed: {_span_err}")
-                                    result = original_completion(*args, **kwargs)
+                                    try:
+                                        import mlflow as _ml
+                                        span_name = f"litellm.completion:{model}"
+                                        with _ml.start_span(name=span_name) as _span:
+                                            try:
+                                                _span.set_attribute("model", model)
+                                                _span.set_attribute("mlflow_span_fallback", True)
+                                            except Exception:
+                                                pass
+                                            result = original_completion(*args, **kwargs)
+                                    except Exception as _span_err:
+                                        # MLflow span failed, try without span
+                                        if "mlflow" in str(_span_err).lower() or "span" in str(_span_err).lower():
+                                            async_logger.warning(f"[SUBPROCESS] Fallback MLflow span failed: {_span_err}")
+                                            result = original_completion(*args, **kwargs)
+                                        else:
+                                            # This is an actual LLM error, re-raise
+                                            raise
+                                except Exception as _llm_err:
+                                    # Capture LLM error for logging
+                                    llm_error = _llm_err
+                                    # Calculate duration even for errors
+                                    llm_duration = _llm_time.time() - llm_start_time
+                                    async_logger.error(f"[SUBPROCESS] ❌ LiteLLM call FAILED - Model: {model}, Duration: {llm_duration:.2f}s, Error: {str(_llm_err)[:500]}")
+                                    # Re-raise so CrewAI can handle it
+                                    raise
+
+                                # Calculate LLM call duration (for successful calls)
+                                llm_duration = _llm_time.time() - llm_start_time
 
                                 # Best-effort: log last active trace id after call
                                 try:
@@ -666,8 +727,39 @@ def run_crew_in_process(
                                 except Exception as _e_post:
                                     async_logger.info(f"[SUBPROCESS] - Could not get last active trace id (post-call): {_e_post}")
 
-                                # Log after LLM call
-                                async_logger.info(f"[SUBPROCESS] ✅ LiteLLM call completed - Model: {model}")
+                                # Log detailed response information for debugging
+                                try:
+                                    if result is None:
+                                        async_logger.error(f"[SUBPROCESS] ⚠️ LLM Response is None - Model: {model}, Duration: {llm_duration:.2f}s")
+                                    else:
+                                        # Check if result has choices
+                                        choices = getattr(result, 'choices', None)
+                                        if choices is None:
+                                            async_logger.error(f"[SUBPROCESS] ⚠️ LLM Response has no 'choices' - Model: {model}, Duration: {llm_duration:.2f}s, Response type: {type(result)}, Response: {str(result)[:500]}")
+                                        elif len(choices) == 0:
+                                            async_logger.error(f"[SUBPROCESS] ⚠️ LLM Response 'choices' is empty - Model: {model}, Duration: {llm_duration:.2f}s, Response: {str(result)[:500]}")
+                                        else:
+                                            # Check the actual content
+                                            first_choice = choices[0]
+                                            message = getattr(first_choice, 'message', None)
+                                            if message is None:
+                                                async_logger.error(f"[SUBPROCESS] ⚠️ LLM Response choice has no 'message' - Model: {model}, Duration: {llm_duration:.2f}s, Choice: {str(first_choice)[:500]}")
+                                            else:
+                                                content = getattr(message, 'content', None)
+                                                if content is None or content == '':
+                                                    # Log the full message for debugging
+                                                    async_logger.error(f"[SUBPROCESS] ⚠️ LLM Response content is None/empty - Model: {model}, Duration: {llm_duration:.2f}s, Message: {str(message)[:500]}")
+                                                    # Check for reasoning content (some models use this)
+                                                    reasoning = getattr(message, 'reasoning_content', None)
+                                                    if reasoning:
+                                                        async_logger.info(f"[SUBPROCESS] 💡 LLM has reasoning_content: {str(reasoning)[:200]}...")
+                                                else:
+                                                    async_logger.info(f"[SUBPROCESS] ✅ LLM Response OK - Model: {model}, Content length: {len(content)}, Duration: {llm_duration:.2f}s")
+                                except Exception as log_err:
+                                    async_logger.warning(f"[SUBPROCESS] Could not log response details: {log_err}")
+
+                                # Log after LLM call with duration
+                                async_logger.info(f"[SUBPROCESS] ✅ LiteLLM call COMPLETED - Model: {model}, Duration: {llm_duration:.2f}s")
                                 return result
 
                             # Replace litellm.completion with our tracked version
