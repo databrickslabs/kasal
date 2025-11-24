@@ -94,6 +94,7 @@ const TaskForm: React.FC<TaskFormProps> = ({ initialData, onCancel, onTaskSaved,
       callback_config: null,
       human_input: false,
       guardrail: null,
+      llm_guardrail: null,
       markdown: false
     } : {
       cache_response: initialData.config.cache_response ?? false,
@@ -111,6 +112,7 @@ const TaskForm: React.FC<TaskFormProps> = ({ initialData, onCancel, onTaskSaved,
       human_input: initialData.config.human_input ?? false,
       condition: initialData.config.condition,
       guardrail: initialData.config.guardrail ?? null,
+      llm_guardrail: initialData.config.llm_guardrail ?? null,
       markdown: initialData.config.markdown ?? false
     }
   });
@@ -371,6 +373,8 @@ const TaskForm: React.FC<TaskFormProps> = ({ initialData, onCancel, onTaskSaved,
           tool_configs: Object.keys(updatedToolConfigs).length > 0 ? updatedToolConfigs : undefined,
           // Ensure top-level markdown is synchronized with config.markdown
           markdown: formData.config.markdown ?? formData.markdown,
+          // Sync llm_guardrail to top-level for database persistence
+          llm_guardrail: formData.config.llm_guardrail ?? null,
           config: {
             ...formData.config,
             condition: formData.config.condition === 'is_data_missing' ? 'is_data_missing' : undefined,
@@ -379,7 +383,9 @@ const TaskForm: React.FC<TaskFormProps> = ({ initialData, onCancel, onTaskSaved,
             // Ensure output_pydantic is properly set in config
             output_pydantic: formData.config.output_pydantic,
             // Ensure config.markdown is synchronized with top-level markdown
-            markdown: formData.config.markdown ?? formData.markdown
+            markdown: formData.config.markdown ?? formData.markdown,
+            // Ensure llm_guardrail is properly set in config
+            llm_guardrail: formData.config.llm_guardrail ?? null
           }
         };
 
@@ -969,6 +975,7 @@ const TaskForm: React.FC<TaskFormProps> = ({ initialData, onCancel, onTaskSaved,
                     timeout: formData.config?.timeout || null,
                     condition: formData.config?.condition,
                     guardrail: formData.config?.guardrail || null,
+                    llm_guardrail: formData.config?.llm_guardrail || null,
                     markdown: formData.config?.markdown || false
                   }}
                   onConfigChange={handleAdvancedConfigChange}
