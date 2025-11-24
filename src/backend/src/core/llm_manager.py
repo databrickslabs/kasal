@@ -48,6 +48,30 @@ embedding_logger = LoggerManager.get_instance().documentation_embedding
 # Note: With litellm 1.75.8+, GPT-5 is natively supported
 litellm.drop_params = True
 logger.info("Set litellm.drop_params=True to handle unsupported parameters gracefully")
+
+# Register Databricks model context windows with CrewAI
+# This is CRITICAL for CrewAI's respect_context_window to work correctly.
+# CrewAI has a hardcoded LLM_CONTEXT_WINDOW_SIZES dictionary that it uses to determine
+# when to trigger automatic summarization. Without entries for Databricks models,
+# it falls back to DEFAULT_CONTEXT_WINDOW_SIZE (8192 tokens) which is incorrect.
+# This causes CrewAI to not summarize when needed, leading to empty responses from
+# models like Qwen that silently fail when context is too large.
+try:
+    from crewai.llm import LLM_CONTEXT_WINDOW_SIZES
+    from src.seeds.model_configs import MODEL_CONFIGS
+
+    registered_count = 0
+    for model_name, config in MODEL_CONFIGS.items():
+        if config.get('provider') == 'databricks':
+            full_model_name = f"databricks/{model_name}"
+            context_window = config.get('context_window', 128000)
+            LLM_CONTEXT_WINDOW_SIZES[full_model_name] = context_window
+            registered_count += 1
+            logger.debug(f"Registered {full_model_name} with context_window={context_window} in CrewAI")
+
+    logger.info(f"Registered {registered_count} Databricks models with CrewAI for context window management")
+except Exception as reg_err:
+    logger.warning(f"Could not register Databricks models with CrewAI: {reg_err}")
 # Check if handlers already exist to avoid duplicates
 if not logger.handlers:
     file_handler = logging.FileHandler(log_file_path)

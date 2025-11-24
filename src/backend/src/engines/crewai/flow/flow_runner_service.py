@@ -1005,6 +1005,11 @@ class FlowRunnerService:
                                             "backstory": agent_obj.backstory,
                                             "verbose": True,
                                             "allow_delegation": agent_obj.allow_delegation,
+                                            "use_system_prompt": True,
+                                            # CRITICAL: Enable respect_context_window to auto-summarize when context exceeds limits
+                                            # Without this, some LLM providers (Qwen, DeepSeek, Mistral) return empty responses
+                                            # instead of throwing errors when context is too large
+                                            "respect_context_window": True,
                                             "tools": tools
                                         }
                                         

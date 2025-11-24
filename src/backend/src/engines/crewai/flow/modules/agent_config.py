@@ -272,6 +272,11 @@ class AgentConfig:
             "backstory": agent_data.backstory,
             "verbose": True,
             "allow_delegation": getattr(agent_data, 'allow_delegation', False),
+            "use_system_prompt": True,
+            # CRITICAL: Enable respect_context_window to auto-summarize when context exceeds limits
+            # Without this, some LLM providers (Qwen, DeepSeek, Mistral) return empty responses
+            # instead of throwing errors when context is too large
+            "respect_context_window": True,
             "config": {}  # Always ensure there's an empty dict for config
         }
         
