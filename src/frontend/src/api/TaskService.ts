@@ -93,11 +93,12 @@ export class TaskService {
           human_input: Boolean(task.config?.human_input),
           condition: task.config?.condition || undefined,
           guardrail: task.config?.guardrail || undefined,
+          llm_guardrail: task.config?.llm_guardrail ?? null,
           markdown: Boolean(task.config?.markdown)
-        }
+        },
+        // Also include llm_guardrail at top level for database sync
+        llm_guardrail: task.config?.llm_guardrail ?? null
       };
-
-
 
       // Add assigned_agent to the final taskData if it exists
       const finalTaskData: TaskWithAssignedAgent = assignedAgent ? { 
@@ -169,8 +170,11 @@ export class TaskService {
           human_input: Boolean(task.config?.human_input),
           condition: task.config?.condition || undefined,
           guardrail: task.config?.guardrail || undefined,
+          llm_guardrail: task.config?.llm_guardrail ?? null,
           markdown: Boolean(task.config?.markdown)
-        }
+        },
+        // Also include llm_guardrail at top level for database sync
+        llm_guardrail: task.config?.llm_guardrail ?? null
       };
 
       console.log('TaskService - Formatted update data:', {

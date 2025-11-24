@@ -25,6 +25,7 @@ export const convertToServiceTask = (task: InterfaceTask): ServiceTask => ({
     callback: null,
     human_input: false,
     guardrail: null,
+    llm_guardrail: null,
     markdown: false
   }
 });
@@ -53,6 +54,7 @@ export const convertToInterfaceTask = (task: ServiceTask): InterfaceTask => ({
     callback: task.config?.callback ? String(task.config.callback) : null,
     human_input: Boolean(task.config?.human_input),
     guardrail: task.config?.guardrail ? String(task.config.guardrail) : null,
+    llm_guardrail: task.config?.llm_guardrail ?? null,
     markdown: Boolean(task.config?.markdown)
   }
 }); 

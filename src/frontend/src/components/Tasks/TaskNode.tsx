@@ -17,6 +17,8 @@ import { useTabDirtyState } from '../../hooks/workflow/useTabDirtyState';
 import { useTaskExecutionStore } from '../../store/taskExecutionStore';
 import { useUILayoutStore } from '../../store/uiLayout';
 
+import { type LLMGuardrailConfig } from '../../types/task';
+
 export interface TaskNodeData {
   label?: string;
   name?: string;
@@ -40,6 +42,7 @@ export interface TaskNodeData {
     human_input?: boolean;
     condition?: string;
     guardrail?: string;
+    llm_guardrail?: LLMGuardrailConfig | null;
     markdown?: boolean;
   };
   description?: string;
@@ -74,6 +77,7 @@ interface TaskNodeProps {
       human_input?: boolean;
       condition?: string;
       guardrail?: string | null;
+      llm_guardrail?: LLMGuardrailConfig | null;
       markdown?: boolean;
     };
   };
@@ -446,6 +450,8 @@ const TaskNode: React.FC<TaskNodeProps> = ({ data, id }) => {
         condition: data.config?.condition,
         // Use undefined instead of null for guardrail if it's not present
         guardrail: data.config?.guardrail || undefined,
+        // Include llm_guardrail for LLM-based validation
+        llm_guardrail: data.config?.llm_guardrail || null,
         markdown: data.config?.markdown || false
       }
     };
@@ -707,6 +713,8 @@ const TaskNode: React.FC<TaskNodeProps> = ({ data, id }) => {
                           output_file: savedTask.config?.output_file || null,
                           callback: savedTask.config?.callback || null,
                           guardrail: savedTask.config?.guardrail || undefined,
+                          // Include llm_guardrail for LLM-based validation
+                          llm_guardrail: savedTask.config?.llm_guardrail || null,
                           // Force markdown to be included in config - use the same value as top-level
                           markdown: savedTask.markdown !== undefined ? savedTask.markdown : (savedTask.config?.markdown || false)
                         }

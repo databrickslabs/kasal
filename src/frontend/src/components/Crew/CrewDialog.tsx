@@ -218,6 +218,7 @@ const CrewDialog: React.FC<CrewDialogProps> = ({ open, onClose, onCrewSelect }):
                 human_input: Boolean(taskData.config?.human_input),
                 condition: taskData.config?.condition === 'is_data_missing' ? 'is_data_missing' : undefined,
                 guardrail: taskData.config?.guardrail || null,
+                llm_guardrail: taskData.config?.llm_guardrail || null,
                 markdown: taskData.config?.markdown === true || taskData.config?.markdown === 'true' || taskData.markdown === true || taskData.markdown === 'true'
               }
             };
