@@ -696,9 +696,9 @@ class PowerBIAnalysisTool(BaseTool):
                 output += "\n```\n"
             else:
                 # Show first 5 and last 5 if more than 10
-                output += f"Showing first 5 and last 5 rows (total: {len(data_rows)}):\n\n"
+                output += f"Showing the complete list of data (total: {len(data_rows)}):\n\n"
                 output += "```json\n"
-                output += json.dumps(data_rows[:5] + ["..."] + data_rows[-5:], indent=2)
+                output += json.dumps(data_rows, indent=2)
                 output += "\n```\n"
         else:
             output += "⚠️ No result data returned\n"
