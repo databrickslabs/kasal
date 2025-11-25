@@ -16,11 +16,11 @@ class DatabricksConfig(Base):
     schema = Column(String, nullable=False)
     is_active = Column(Boolean, default=True)  # To track the currently active configuration
     is_enabled = Column(Boolean, default=True)  # To enable/disable Databricks integration
-    apps_enabled = Column(Boolean, default=False)  # To enable/disable Databricks apps
-    encrypted_personal_access_token = Column(String, nullable=True)  # Encrypted personal access token for apps
+    encrypted_personal_access_token = Column(String, nullable=True)  # Encrypted personal access token
 
     # MLflow configuration
     mlflow_enabled = Column(Boolean, default=False)  # Enable/disable MLflow tracking for this workspace
+    mlflow_experiment_name = Column(String, nullable=True, default="kasal-crew-execution-traces")  # MLflow experiment name
     evaluation_enabled = Column(Boolean, default=False)  # Enable/disable MLflow evaluation for this workspace
     evaluation_judge_model = Column(String, nullable=True)  # Databricks judge endpoint route, e.g., "databricks:/<endpoint>"
 

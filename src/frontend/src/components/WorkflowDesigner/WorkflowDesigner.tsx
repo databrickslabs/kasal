@@ -6,6 +6,10 @@ import {
   OnSelectionChangeParams as _OnSelectionChangeParams,
   ReactFlowInstance as _ReactFlowInstance,
   Connection as _Connection,
+  NodeChange,
+  EdgeChange,
+  applyNodeChanges,
+  applyEdgeChanges,
 } from 'reactflow';
 import 'reactflow/dist/style.css';
 import { Box, Snackbar, Alert, Dialog, DialogContent, Menu, Button, DialogTitle, IconButton, Typography } from '@mui/material';
@@ -15,7 +19,6 @@ import { useErrorManager } from '../../hooks/workflow/useErrorManager';
 import { useFlowManager } from '../../hooks/workflow/useFlowManager';
 import { useCrewExecutionStore } from '../../store/crewExecution';
 import { useTabManagerStore } from '../../store/tabManager';
-import { useFlowConfigStore } from '../../store/flowConfig';
 import { useTabSync } from '../../hooks/workflow/useTabSync';
 import { useRunStatusStore } from '../../store/runStatus';
 import { useChatPanelResize } from '../../hooks/workflow/useChatPanelResize';
@@ -25,19 +28,18 @@ import { v4 as _uuidv4 } from 'uuid';
 import { FlowService as _FlowService } from '../../api/FlowService';
 import { useAPIKeysStore as _useAPIKeysStore } from '../../store/apiKeys';
 import { FlowFormData as _FlowFormData, FlowConfiguration as _FlowConfiguration } from '../../types/flow';
-import { ConnectionAgent, ConnectionTask } from '../../types/connection';
 import { createEdge as _createEdge } from '../../utils/edgeUtils';
 import { handleNodesGenerated } from '../Chat/utils/chatHelpers';
 import CloseIcon from '@mui/icons-material/Close';
 
 // Component Imports
-import { RightPanelToggle } from './WorkflowToolbarStyle';
 import { InputVariablesDialog } from '../Jobs/InputVariablesDialog';
 import WorkflowPanels from './WorkflowPanels';
 import TabBar from './TabBar';
 import ChatPanel from '../Chat/ChatPanel';
 import RightSidebar from './RightSidebar';
 import LeftSidebar from './LeftSidebar';
+import GroupSelector from '../Common/GroupSelector';
 import { useUILayoutStore } from '../../store/uiLayout';
 import { useUIFitView } from '../../hooks/workflow/useUIFitView';
 import { useWorkflowLayoutEvents } from '../../hooks/workflow/useWorkflowLayoutEvents';
@@ -58,9 +60,9 @@ import { executionLogService } from '../../api/ExecutionLogs';
 import type { LogEntry } from '../../api/ExecutionLogs';
 import Configuration from '../Configuration/Configuration';
 import ToolForm from '../Tools/ToolForm';
-import { AddFlowDialog } from '../Flow';
 import { CrewFlowSelectionDialog } from '../Crew/CrewFlowDialog';
 import SaveCrew from '../Crew/SaveCrew';
+import SaveFlow from '../Flow/SaveFlow';
 
 // Services & Utilities
 import { useAgentManager } from '../../hooks/workflow/useAgentManager';
@@ -77,7 +79,6 @@ import {
   useSelectionChangeHandler,
   useFlowSelectHandler,
   useCrewFlowDialogHandler,
-  useFlowDialogHandler,
   useFlowSelectionDialogHandler,
   useEventBindings
 } from './WorkflowEventHandlers';
@@ -115,13 +116,10 @@ const WorkflowDesigner: React.FC<WorkflowDesignerProps> = (): JSX.Element => {
     updateTabExecutionStatus
   } = useTabManagerStore();
 
-  // Use flow configuration store
-  const { crewAIFlowEnabled } = useFlowConfigStore();
-
   // Use run status store for fallback job monitoring
   const { runHistory, startPolling: startRunStatusPolling, stopPolling: stopRunStatusPolling } = useRunStatusStore();
 
-  // Use flow store for node/edge management
+  // Use flow store for node/edge management (crew canvas)
   const {
     nodes,
     edges,
@@ -135,6 +133,100 @@ const WorkflowDesigner: React.FC<WorkflowDesignerProps> = (): JSX.Element => {
     setSelectedEdges,
     manuallyPositionedNodes
   } = useFlowManager({ showErrorMessage });
+
+  // CRITICAL: Separate state for Flow Canvas (completely independent from crew tabs)
+  const [flowNodes, setFlowNodes] = useState<_Node[]>([]);
+  const [flowEdges, setFlowEdges] = useState<_Edge[]>([]);
+
+  // Flow canvas change handlers
+  const onFlowNodesChange = useCallback((changes: NodeChange[]) => {
+    setFlowNodes(nds => applyNodeChanges(changes, nds));
+  }, []);
+
+  const onFlowEdgesChange = useCallback((changes: EdgeChange[]) => {
+    setFlowEdges(eds => applyEdgeChanges(changes, eds));
+  }, []);
+
+  const onFlowConnect = useCallback((connection: _Connection) => {
+    if (!connection.source || !connection.target) return;
+
+    // Find existing edges to the same target (convergent edges)
+    const existingEdgesToTarget = flowEdges.filter(e => e.target === connection.target);
+
+    if (existingEdgesToTarget.length > 0) {
+      // Multiple edges converging to same target - merge them visually
+      const targetNodeId = connection.target as string;
+
+      // Collect all sources (existing + new)
+      const allSources = [...existingEdgesToTarget.map(e => e.source), connection.source];
+      const uniqueSources = Array.from(new Set(allSources));
+
+      // Get target handle (use from connection or first existing edge)
+      const targetHandleId = connection.targetHandle || existingEdgesToTarget[0]?.targetHandle || 'top';
+
+      // Generate a stable group ID for this merge (sorted for consistency)
+      const sortedSources = [...uniqueSources].sort();
+      const mergeGroupId = `merge-group-${sortedSources.join('-')}-${targetNodeId}`;
+
+      // Get shared data from first existing edge (if any)
+      const sharedData = existingEdgesToTarget[0]?.data || {};
+
+      // Remove ALL existing edges to this target
+      const edgesNotGoingToTarget = flowEdges.filter(e => e.target !== targetNodeId);
+
+      // Create individual edges for each source with merge metadata
+      const newMergedEdges: _Edge[] = uniqueSources.map((sourceId, index) => {
+        // Find the handle for this source
+        const existingEdge = existingEdgesToTarget.find(e => e.source === sourceId);
+        const sourceHandle = existingEdge?.sourceHandle ||
+                            (sourceId === connection.source ? connection.sourceHandle : null) ||
+                            'bottom';
+
+        // Only the last edge in the group should show indicators (arrow, warning, labels)
+        const isLastInGroup = index === uniqueSources.length - 1;
+
+        return {
+          id: `${mergeGroupId}-${sourceId}`,
+          source: sourceId,
+          target: targetNodeId,
+          sourceHandle,
+          targetHandle: targetHandleId,
+          type: 'crewEdge',
+          animated: true,
+          style: { stroke: '#ff9800', strokeWidth: 2 }, // Orange for unconfigured
+          data: {
+            ...sharedData,
+            listenToTaskIds: sharedData.listenToTaskIds || [],
+            targetTaskIds: sharedData.targetTaskIds || [],
+            mergeGroupId, // Mark this edge as part of a merged group
+            isMerged: true,
+            mergeGroupSize: uniqueSources.length, // How many edges in this group
+            isLastInGroup // Flag to indicate this edge should show indicators
+          }
+        };
+      });
+
+      // Replace with new merged edges
+      setFlowEdges([...edgesNotGoingToTarget, ...newMergedEdges]);
+    } else {
+      // No existing edges to this target, create a normal edge
+      const edge: _Edge = {
+        id: `${connection.source}-${connection.target}`,
+        source: connection.source,
+        target: connection.target,
+        sourceHandle: connection.sourceHandle || 'bottom',
+        targetHandle: connection.targetHandle || 'top',
+        type: 'crewEdge',
+        animated: true,
+        style: { stroke: '#ff9800', strokeWidth: 2 }, // Orange for unconfigured
+        data: {
+          listenToTaskIds: [],
+          targetTaskIds: []
+        }
+      };
+      setFlowEdges(eds => [...eds, edge]);
+    }
+  }, [flowEdges]);
 
   // Use tab sync to keep tabs and flow manager in sync
   const { activeTabId: _activeTabId } = useTabSync({ nodes, edges, setNodes, setEdges });
@@ -243,6 +335,13 @@ const WorkflowDesigner: React.FC<WorkflowDesignerProps> = (): JSX.Element => {
     const handleOpenExecutionHistory = () => {
       if (!showRunHistory) {
         setExecutionHistoryVisible(true);
+
+        // Trigger viewport recalculation after execution history opens
+        setTimeout(() => {
+          window.dispatchEvent(new CustomEvent('recalculateNodePositions', {
+            detail: { reason: 'execution-history-resize' }
+          }));
+        }, 200);
       }
     };
 
@@ -253,12 +352,25 @@ const WorkflowDesigner: React.FC<WorkflowDesignerProps> = (): JSX.Element => {
 
   }, [showRunHistory, setExecutionHistoryVisible]);
 
+  // Add event listener to open flow panel when a flow is loaded from catalog
+  React.useEffect(() => {
+    const handleOpenFlowPanel = () => {
+      if (!areFlowsVisible) {
+        setUIStoreAreFlowsVisible(true);
+      }
+    };
+
+    window.addEventListener('openFlowPanel', handleOpenFlowPanel);
+    return () => {
+      window.removeEventListener('openFlowPanel', handleOpenFlowPanel);
+    };
+
+  }, [areFlowsVisible, setUIStoreAreFlowsVisible]);
+
   // Use the dialog manager
   const dialogManager = useDialogManager(hasSeenTutorial, setHasSeenTutorial);
 
 
-  // Connection generation state
-  const [isGeneratingConnections, setIsGeneratingConnections] = React.useState(false);
   const [isChatProcessing, setIsChatProcessing] = React.useState(false);
   const [hasManuallyResized, setHasManuallyResized] = React.useState(false);
   const [executionCount, setExecutionCount] = React.useState(0);
@@ -311,6 +423,13 @@ const WorkflowDesigner: React.FC<WorkflowDesignerProps> = (): JSX.Element => {
         const visibleRows = Math.min(executionCount, maxRows);
         setExecutionHistoryHeight(baseHeight + (visibleRows * rowHeight));
       }
+
+      // Trigger viewport recalculation after height adjustment
+      setTimeout(() => {
+        window.dispatchEvent(new CustomEvent('recalculateNodePositions', {
+          detail: { reason: 'execution-history-resize' }
+        }));
+      }, 100);
     }
   }, [executionCount, hasManuallyResized, showRunHistory, setExecutionHistoryHeight]);
 
@@ -728,8 +847,8 @@ const WorkflowDesigner: React.FC<WorkflowDesignerProps> = (): JSX.Element => {
   // Use selection change handler
   const onSelectionChange = useSelectionChangeHandler(setSelectedEdges);
 
-  // Use flow selection handler
-  const handleFlowSelect = useFlowSelectHandler(setNodes, setEdges);
+  // Use flow selection handler - CRITICAL: Use flow state, not crew state
+  const handleFlowSelect = useFlowSelectHandler(setFlowNodes, setFlowEdges);
 
   // Use flow add handler
 
@@ -751,13 +870,10 @@ const WorkflowDesigner: React.FC<WorkflowDesignerProps> = (): JSX.Element => {
     openFlowDialog: _openFlowDialog
   } = useFlowSelectionDialogHandler();
 
-  // Use flow dialog handler
-  const handleFlowDialogAction = useFlowDialogHandler(setNodes, setEdges, showErrorMessage);
-
-  // Use event bindings
+  // Use event bindings (includes both run execution and crew selection handlers)
   const {
     handleRunClickWrapper: _handleRunClickWrapper,
-    handleCrewSelectWrapper
+    handleCrewSelectWrapper: _handleCrewSelectWrapper
   } = useEventBindings(
     // Cast the handleRunClick to match the expected signature
     (executionType?: 'flow' | 'crew') =>
@@ -766,8 +882,9 @@ const WorkflowDesigner: React.FC<WorkflowDesignerProps> = (): JSX.Element => {
     setEdges
   );
 
-  // Add a ref for the SaveCrew dialog
+  // Add refs for the Save dialogs
   const saveCrewRef = useRef<HTMLButtonElement>(null);
+  const saveFlowRef = useRef<HTMLButtonElement>(null);
 
   // Handle tools change
   const handleToolsChange = (toolIds: string[]) => {
@@ -882,6 +999,11 @@ const WorkflowDesigner: React.FC<WorkflowDesignerProps> = (): JSX.Element => {
     edges,
     setNodes,
     setEdges,
+    flowNodes,
+    flowEdges,
+    setFlowNodes,
+    setFlowEdges,
+    areFlowsVisible,
     crewFlowInstanceRef,
     flowFlowInstanceRef,
     handleUIAwareFitView,
@@ -933,7 +1055,8 @@ const WorkflowDesigner: React.FC<WorkflowDesignerProps> = (): JSX.Element => {
             setCrewFlowDialogShowOnlyTab(2); // Only show Tasks tab
             setIsCrewFlowDialogOpen(true);
           }}
-          disabled={isChatProcessing || isGeneratingConnections || !!runningTabId}
+          disabled={isChatProcessing || !!runningTabId}
+          hideTabsAndButtons={areFlowsVisible}
         />
 
         <Box sx={{
@@ -944,8 +1067,8 @@ const WorkflowDesigner: React.FC<WorkflowDesignerProps> = (): JSX.Element => {
           position: 'relative',
           marginLeft: `${leftSidebarBaseWidth}px` // Push entire content area to the right of LeftSidebar
         }}>
-          {/* Chat Panel on Left (when positioned left) */}
-          {showChatPanel && chatPanelSide === 'left' && (
+          {/* Chat Panel on Left (when positioned left) - Hidden when flow panel is visible */}
+          {showChatPanel && chatPanelSide === 'left' && !areFlowsVisible && (
             <Box
               onMouseEnter={() => {
                 window.postMessage({ type: 'chat-hover-state', isHovering: true }, '*');
@@ -1053,10 +1176,12 @@ const WorkflowDesigner: React.FC<WorkflowDesignerProps> = (): JSX.Element => {
           }}>
             <WorkflowPanels
               areFlowsVisible={areFlowsVisible}
-              showRunHistory={false}
+              showRunHistory={showRunHistory}
+              executionHistoryHeight={executionHistoryHeight}
               panelPosition={panelPosition}
               isDraggingPanel={isDraggingPanel}
               isDarkMode={isDarkMode}
+              // Crew canvas state
               nodes={nodes}
               edges={edges}
               setNodes={setNodes}
@@ -1064,6 +1189,13 @@ const WorkflowDesigner: React.FC<WorkflowDesignerProps> = (): JSX.Element => {
               onNodesChange={onNodesChange}
               onEdgesChange={onEdgesChange}
               onConnect={onConnect}
+              // Flow canvas state (independent)
+              flowNodes={flowNodes}
+              flowEdges={flowEdges}
+              onFlowNodesChange={onFlowNodesChange}
+              onFlowEdgesChange={onFlowEdgesChange}
+              onFlowConnect={onFlowConnect}
+              // Common handlers
               onSelectionChange={onSelectionChange}
               onPaneContextMenu={handlePaneContextMenu}
               onCrewFlowInit={handleCrewFlowInit}
@@ -1082,12 +1214,30 @@ const WorkflowDesigner: React.FC<WorkflowDesignerProps> = (): JSX.Element => {
               isChatOpen={showChatPanel}
               setIsAgentDialogOpen={() => openAgentDialog(true)}
               setIsTaskDialogOpen={() => openTaskDialog(true)}
-              setIsFlowDialogOpen={dialogManager.setIsFlowDialogOpen}
+              setIsCrewDialogOpen={() => {
+                setCrewFlowDialogInitialTab(0);
+                setCrewFlowDialogShowOnlyTab(undefined);
+                setIsCrewFlowDialogOpen(true);
+              }}
               onOpenTutorial={() => {
 
                 dialogManager.setIsTutorialOpen(true);
               }}
               onOpenConfiguration={() => dialogManager.setIsConfigurationDialogOpen(true)}
+              onPlayPlan={() => {
+                console.log('[WorkflowDesigner] onPlayPlan called, calling handleRunClick("crew")');
+                handleRunClick('crew');
+              }}
+              onPlayFlow={() => {
+                console.log('[WorkflowDesigner] onPlayFlow called from WorkflowPanels');
+                // CRITICAL: Sync flow state to execution store before running
+                setCrewExecutionNodes(flowNodes);
+                setCrewExecutionEdges(flowEdges);
+                setTimeout(() => {
+                  console.log('[WorkflowDesigner] Calling handleRunClick("flow") with flowNodes/flowEdges');
+                  handleRunClick('flow');
+                }, 100);
+              }}
               onPanelDragStart={e => {
                 e.preventDefault();
 
@@ -1133,8 +1283,8 @@ const WorkflowDesigner: React.FC<WorkflowDesignerProps> = (): JSX.Element => {
               }}
             />
 
-            {/* Chat Panel on Right (when positioned right) */}
-            {showChatPanel && chatPanelSide === 'right' && (
+            {/* Chat Panel on Right (when positioned right) - Hidden when flow panel is visible */}
+            {showChatPanel && chatPanelSide === 'right' && !areFlowsVisible && (
               <Box
                 onMouseEnter={() => {
                   window.postMessage({ type: 'chat-hover-state', isHovering: true }, '*');
@@ -1236,18 +1386,6 @@ const WorkflowDesigner: React.FC<WorkflowDesignerProps> = (): JSX.Element => {
           </Box>
         </Box>
 
-        {/* Toggle buttons for panels - shown in both layouts */}
-        {crewAIFlowEnabled && (
-          <RightPanelToggle
-            isVisible={areFlowsVisible}
-            togglePanel={toggleFlowsVisibility}
-            position="right"
-            tooltip={areFlowsVisible ? "Hide Flows Panel" : "Show Flows Panel"}
-          />
-        )}
-
-
-
 
         {/* Jobs Panel with Run History and Kasal - Overlay on canvas */}
         {showRunHistory && (
@@ -1340,23 +1478,25 @@ const WorkflowDesigner: React.FC<WorkflowDesignerProps> = (): JSX.Element => {
             setCrewFlowDialogInitialTab(0); // Reset to default tab
             setCrewFlowDialogShowOnlyTab(undefined); // Reset to show all tabs
           }}
-          onCrewSelect={handleCrewSelectWrapper}
+          onCrewSelect={_handleCrewSelectWrapper}
           onFlowSelect={handleFlowSelect}
           onAgentSelect={handleAgentSelect}
           onTaskSelect={handleTaskSelect}
           initialTab={crewFlowDialogInitialTab}
           showOnlyTab={crewFlowDialogShowOnlyTab}
+          hideFlowsTab={!areFlowsVisible}
         />
 
         {/* Flow Selection Dialog */}
         <CrewFlowSelectionDialog
           open={isFlowDialogOpen}
           onClose={() => setIsFlowDialogOpen(false)}
-          onCrewSelect={handleCrewSelectWrapper}
+          onCrewSelect={_handleCrewSelectWrapper}
           onFlowSelect={handleFlowSelect}
           onAgentSelect={handleAgentSelect}
           onTaskSelect={handleTaskSelect}
           initialTab={1} // Set to Flows tab
+          hideFlowsTab={!areFlowsVisible}
         />
 
         <ScheduleDialog
@@ -1441,12 +1581,7 @@ const WorkflowDesigner: React.FC<WorkflowDesignerProps> = (): JSX.Element => {
           </DialogContent>
         </Dialog>
 
-        {/* Add FlowDialog */}
-        <AddFlowDialog
-          open={dialogManager.isFlowDialogOpen}
-          onClose={() => dialogManager.setIsFlowDialogOpen(false)}
-          onAddCrews={handleFlowDialogAction}
-        />
+        {/* Flow creation is now handled via the FlowCanvas palette */}
 
         {/* Input Variables Dialog */}
         <InputVariablesDialog
@@ -1496,6 +1631,16 @@ const WorkflowDesigner: React.FC<WorkflowDesignerProps> = (): JSX.Element => {
           />
         )}
 
+        {/* Add SaveFlow component */}
+        {/* CRITICAL: Use flowNodes/flowEdges for Flow canvas, NOT crew canvas nodes */}
+        {flowNodes.length > 0 && (
+          <SaveFlow
+            nodes={flowNodes}
+            edges={flowEdges}
+            trigger={<Button style={{ display: 'none' }} ref={saveFlowRef}>Save Flow</Button>}
+          />
+        )}
+
         {/* Execution Logs Dialog */}
         <ShowLogs
           open={showExecutionLogsDialog}
@@ -1518,14 +1663,23 @@ const WorkflowDesigner: React.FC<WorkflowDesignerProps> = (): JSX.Element => {
           isChatOpen={showChatPanel}
           setIsAgentDialogOpen={() => openAgentDialog(true)}
           setIsTaskDialogOpen={() => openTaskDialog(true)}
-          setIsFlowDialogOpen={dialogManager.setIsFlowDialogOpen}
           setIsCrewDialogOpen={() => {
-            setCrewFlowDialogInitialTab(0);
-            setCrewFlowDialogShowOnlyTab(undefined); // Show all tabs for catalog
+            // Context-aware catalog: Show only Flows tab when on Flow Canvas
+            if (areFlowsVisible) {
+              setCrewFlowDialogInitialTab(3); // Flows tab
+              setCrewFlowDialogShowOnlyTab(3); // Show only Flows tab
+            } else {
+              setCrewFlowDialogInitialTab(0); // Crews tab
+              setCrewFlowDialogShowOnlyTab(undefined); // Show all tabs
+            }
             setIsCrewFlowDialogOpen(true);
           }}
           onSaveCrewClick={() => {
             const event = new CustomEvent('openSaveCrewDialog');
+            window.dispatchEvent(event);
+          }}
+          onSaveFlowClick={() => {
+            const event = new CustomEvent('openSaveFlowDialog');
             window.dispatchEvent(event);
           }}
           showRunHistory={showRunHistory}
@@ -1535,165 +1689,52 @@ const WorkflowDesigner: React.FC<WorkflowDesignerProps> = (): JSX.Element => {
             dialogManager.setScheduleDialogOpen(true);
           }}
           onToggleExecutionHistory={toggleExecutionHistory}
+          areFlowsVisible={areFlowsVisible}
+          toggleFlowsVisibility={toggleFlowsVisibility}
+          hasCrewNodes={nodes.some(node => node.type === 'agentNode' || node.type === 'taskNode' || node.type === 'managerNode')}
+          hasFlowNodes={flowNodes.some(node => node.type === 'crewNode')}
+          edges={flowEdges}
+          onPlayPlan={() => {
+            console.log('[WorkflowDesigner] RightSidebar onPlayPlan called, calling handleRunClick("crew")');
+            handleRunClick('crew');
+          }}
+          onPlayFlow={() => {
+            console.log('[WorkflowDesigner] RightSidebar onPlayFlow called');
+            console.log('[WorkflowDesigner] flowNodes:', flowNodes);
+            console.log('[WorkflowDesigner] flowEdges:', flowEdges);
+            // CRITICAL: Sync flow state to execution store before running
+            setCrewExecutionNodes(flowNodes);
+            setCrewExecutionEdges(flowEdges);
+            // Small delay to ensure state is updated
+            setTimeout(() => {
+              console.log('[WorkflowDesigner] Calling handleRunClick("flow") with flowNodes count:', flowNodes.length);
+              handleRunClick('flow');
+            }, 100);
+          }}
         />
 
         {/* Left Sidebar */}
         <LeftSidebar
           onClearCanvas={() => {
-            setNodes([]);
-            setEdges([]);
-          }}
-          isGeneratingConnections={isGeneratingConnections}
-          onGenerateConnections={async () => {
-            // Implementation for generating connections using ConnectionService
-            setIsGeneratingConnections(true);
-            try {
-              // Import required services
-              const { ConnectionService } = await import('../../api/ConnectionService');
-
-              // Debug: Log all nodes to see their structure
-              console.log('All nodes:', nodes);
-              console.log('Node types found:', nodes.map(node => ({ id: node.id, type: node.type, data: node.data })));
-
-              // Extract agent nodes from the current nodes
-              const agentNodes = nodes.filter(node => node.type === 'agentNode');
-              const taskNodes = nodes.filter(node => node.type === 'taskNode');
-
-              console.log('Filtered agent nodes:', agentNodes);
-              console.log('Filtered task nodes:', taskNodes);
-
-              if (agentNodes.length === 0) {
-                showErrorMessage('No agents found. Please add at least one agent to generate connections.');
-                return;
-              }
-
-              if (taskNodes.length === 0) {
-                showErrorMessage('No tasks found. Please add at least one task to generate connections.');
-                return;
-              }
-
-              // Convert agent nodes to ConnectionAgent format
-              const agents: ConnectionAgent[] = agentNodes.map(node => ({
-                name: node.data.label || node.data.name || `Agent ${node.id}`,
-                role: node.data.role || 'Assistant',
-                goal: node.data.goal || 'Complete assigned tasks effectively',
-                backstory: node.data.backstory || 'A dedicated AI agent designed to help with various tasks',
-                tools: node.data.tools || []
-              }));
-
-              // Convert task nodes to ConnectionTask format
-              const tasks: ConnectionTask[] = taskNodes.map(node => ({
-                name: node.data.label || node.data.name || `Task ${node.id}`,
-                description: node.data.description || node.data.label || `Task ${node.id}`,
-                expected_output: node.data.expected_output || 'Complete the task successfully',
-                agent_id: node.data.agent_id || '',
-                tools: node.data.tools || [],
-                async_execution: node.data.async_execution || false,
-                human_input: node.data.config?.human_input || false,
-                markdown: node.data.config?.markdown || false,
-                context: {
-                  type: 'general',
-                  priority: node.data.config?.priority === 1 ? 'high' :
-                           node.data.config?.priority === 2 ? 'medium' : 'low',
-                  complexity: 'medium',
-                  required_skills: [],
-                  metadata: {}
-                }
-              }));
-
-              // Use Databricks Llama 70b model (try simpler format)
-              const model = 'llama-3.1-70b-instruct';
-
-              console.log('Generating connections with:', { agents, tasks, model });
-
-              // Call the ConnectionService to generate intelligent connections
-              const response = await ConnectionService.generateConnections(agents, tasks, model);
-
-              console.log('Connection generation response:', response);
-
-              // Create edges based on the AI-generated assignments
-              const newEdges: _Edge[] = [];
-
-              response.assignments.forEach(assignment => {
-                const agentNode = agentNodes.find(node =>
-                  (node.data.label || node.data.name) === assignment.agent_name
-                );
-
-                if (agentNode) {
-                  assignment.tasks.forEach(taskAssignment => {
-                    const taskNode = taskNodes.find(node =>
-                      (node.data.label || node.data.name) === taskAssignment.task_name
-                    );
-
-                    if (taskNode) {
-                      const edgeId = `${agentNode.id}-${taskNode.id}`;
-                      newEdges.push({
-                        id: edgeId,
-                        source: agentNode.id,
-                        target: taskNode.id,
-                        type: 'default',
-                        data: {
-                          reasoning: taskAssignment.reasoning
-                        }
-                      });
-                    }
-                  });
-                }
-              });
-
-              // Add dependency edges based on AI-generated dependencies
-              response.dependencies?.forEach(dependency => {
-                const dependentTask = taskNodes.find(node =>
-                  (node.data.label || node.data.name) === dependency.task_name
-                );
-
-                if (dependentTask && dependency.depends_on) {
-                  dependency.depends_on.forEach(requiredTaskName => {
-                    const requiredTask = taskNodes.find(node =>
-                      (node.data.label || node.data.name) === requiredTaskName
-                    );
-
-                    if (requiredTask) {
-                      const edgeId = `dep-${requiredTask.id}-${dependentTask.id}`;
-                      newEdges.push({
-                        id: edgeId,
-                        source: requiredTask.id,
-                        target: dependentTask.id,
-                        type: 'default',
-                        style: { stroke: '#ff6b6b', strokeDasharray: '5,5' },
-                        data: {
-                          reasoning: dependency.reasoning,
-                          isDependency: true
-                        }
-                      });
-                    }
-                  });
-                }
-              });
-
-              // Update the edges in the flow
-              if (newEdges.length > 0) {
-                setEdges(newEdges);
-                console.log(`Generated ${newEdges.length} connections based on CrewAI best practices`);
-              } else {
-                showErrorMessage('No connections could be generated. Please check that agent and task names are properly set.');
-              }
-
-            } catch (error) {
-              console.error('Error generating connections:', error);
-              showErrorMessage(`Failed to generate connections: ${error instanceof Error ? error.message : 'Unknown error'}`);
-            } finally {
-              setIsGeneratingConnections(false);
+            // Context-aware: clear flow canvas or crew canvas based on which is visible
+            if (areFlowsVisible) {
+              setFlowNodes([]);
+              setFlowEdges([]);
+            } else {
+              setNodes([]);
+              setEdges([]);
             }
           }}
           onZoomIn={() => {
-            const reactFlowInstance = crewFlowInstanceRef.current || flowFlowInstanceRef.current;
+            // Context-aware: zoom the visible canvas
+            const reactFlowInstance = areFlowsVisible ? flowFlowInstanceRef.current : crewFlowInstanceRef.current;
             if (reactFlowInstance) {
               reactFlowInstance.zoomIn({ duration: 200 });
             }
           }}
           onZoomOut={() => {
-            const reactFlowInstance = crewFlowInstanceRef.current || flowFlowInstanceRef.current;
+            // Context-aware: zoom the visible canvas
+            const reactFlowInstance = areFlowsVisible ? flowFlowInstanceRef.current : crewFlowInstanceRef.current;
             if (reactFlowInstance) {
               reactFlowInstance.zoomOut({ duration: 200 });
             }
@@ -1721,7 +1762,22 @@ const WorkflowDesigner: React.FC<WorkflowDesignerProps> = (): JSX.Element => {
             console.log('[WorkflowDesigner] Opening tutorial from LeftSidebar');
             dialogManager.setIsTutorialOpen(true);
           }}
+          hideRuntimeFilters={areFlowsVisible}
         />
+
+        {/* Workspace Selector - Upper Right Corner */}
+        <Box
+          sx={{
+            position: 'fixed',
+            top: '12px',
+            right: '20px', // Positioned closer to the right edge
+            zIndex: 1002, // Above everything else
+            display: 'flex',
+            alignItems: 'center'
+          }}
+        >
+          <GroupSelector />
+        </Box>
 
       </Box>
     </div>

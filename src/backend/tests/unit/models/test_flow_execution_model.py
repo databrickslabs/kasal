@@ -238,16 +238,16 @@ class TestFlowExecution:
         """Test that columns have correct data types and constraints."""
         # Act
         columns = FlowExecution.__table__.columns
-        
+
         # Assert
         # Primary key
         assert columns['id'].primary_key is True
         assert "INTEGER" in str(columns['id'].type)
-        
-        # Foreign key
-        assert columns['flow_id'].nullable is False
+
+        # flow_id is nullable (optional reference to saved flow)
+        assert columns['flow_id'].nullable is True
         assert "UUID" in str(columns['flow_id'].type)
-        
+
         # Required fields
         assert columns['job_id'].nullable is False
         assert columns['job_id'].unique is True

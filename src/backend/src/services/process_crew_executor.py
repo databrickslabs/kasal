@@ -263,6 +263,44 @@ def run_crew_in_process(
             _kasal_builtins.input = _kasal_noinput
         except Exception:
             pass
+
+        # CRITICAL: Patch CrewAI's LLM_CONTEXT_WINDOW_SIZES BEFORE importing Crew
+        # This is necessary because CrewAI has hardcoded context window sizes and
+        # doesn't know about Databricks models. Without this patch, it falls back to
+        # DEFAULT_CONTEXT_WINDOW_SIZE (8192 tokens), causing respect_context_window
+        # to not trigger summarization when needed. This leads to empty responses from
+        # models like Qwen that silently fail when context is too large.
+        try:
+            from crewai.llm import LLM_CONTEXT_WINDOW_SIZES
+            from src.seeds.model_configs import MODEL_CONFIGS
+
+            for model_name, config in MODEL_CONFIGS.items():
+                if config.get('provider') == 'databricks':
+                    full_model_name = f"databricks/{model_name}"
+                    context_window = config.get('context_window', 128000)
+                    LLM_CONTEXT_WINDOW_SIZES[full_model_name] = context_window
+            print(f"[SUBPROCESS] Registered Databricks models with CrewAI context window sizes", file=sys.stderr)
+        except Exception as reg_err:
+            print(f"[SUBPROCESS] Warning: Could not register Databricks models: {reg_err}", file=sys.stderr)
+
+        # CRITICAL: Patch CrewAI's CONTEXT_LIMIT_ERRORS to recognize Databricks error messages
+        # Databricks returns "exceeds maximum allowed content length" which is not in CrewAI's
+        # default error patterns. Without this patch, CrewAI won't trigger summarization
+        # when Databricks returns a context length error.
+        try:
+            from crewai.utilities.exceptions import context_window_exceeding_exception
+            databricks_error_patterns = [
+                "exceeds maximum allowed content length",  # Databricks specific
+                "maximum allowed content length",  # Alternative pattern
+                "requestsize",  # Part of Databricks error format
+            ]
+            for pattern in databricks_error_patterns:
+                if pattern not in context_window_exceeding_exception.CONTEXT_LIMIT_ERRORS:
+                    context_window_exceeding_exception.CONTEXT_LIMIT_ERRORS.append(pattern)
+            print(f"[SUBPROCESS] Registered Databricks error patterns for context limit detection", file=sys.stderr)
+        except Exception as err_reg:
+            print(f"[SUBPROCESS] Warning: Could not register Databricks error patterns: {err_reg}", file=sys.stderr)
+
         from crewai import Crew
 
         # Configure subprocess logging with execution ID
@@ -277,7 +315,7 @@ def run_crew_in_process(
         # Now safely access the config
         if isinstance(crew_config, dict):
             try:
-                subprocess_logger.info(f"[JOB_CONFIGURATION] Crew: {crew_config.get('name', 'Unnamed')} v{crew_config.get('version', '1.0')}")
+                subprocess_logger.info(f"[JOB_CONFIGURATION] Crew: {crew_config.get('run_name', 'Unnamed')} v{crew_config.get('version', '1.0')}")
                 subprocess_logger.info(f"[JOB_CONFIGURATION] Agents: {len(crew_config.get('agents', []))}")
                 subprocess_logger.info(f"[JOB_CONFIGURATION] Tasks: {len(crew_config.get('tasks', []))}")
                 # Log full config for debugging
@@ -305,6 +343,47 @@ def run_crew_in_process(
         print(f"[SUBPROCESS DEBUG] Starting prepare_and_run for {execution_id}", file=sys.stderr)
 
         # Subprocess logger is now configured
+
+        # SECURITY: Set up UserContext with group_id for multi-tenant isolation in subprocess
+        # This is CRITICAL because the subprocess doesn't have request context
+        if crew_config and isinstance(crew_config, dict) and 'group_id' in crew_config:
+            try:
+                from src.utils.user_context import UserContext, GroupContext
+
+                group_id = crew_config['group_id']
+                subprocess_logger.info(f"[SUBPROCESS] Setting up UserContext with group_id={group_id}")
+
+                # Create a GroupContext for the subprocess
+                group_context_obj = GroupContext(
+                    group_ids=[group_id],
+                    group_email=crew_config.get('group_email', f"{group_id}@subprocess"),
+                    access_token=crew_config.get('user_token')  # Optional OBO token
+                )
+
+                # Set it in UserContext so LLMManager can access it
+                UserContext.set_group_context(group_context_obj)
+
+                # CRITICAL: Also set user_token separately for OBO authentication
+                # LLMManager.get_user_token() reads from this separate context variable
+                user_token = crew_config.get('user_token')
+                if user_token:
+                    UserContext.set_user_token(user_token)
+                    subprocess_logger.info(f"[SUBPROCESS] ✓ UserContext initialized with group_id={group_id} and OBO token")
+                else:
+                    subprocess_logger.info(f"[SUBPROCESS] ✓ UserContext initialized with group_id={group_id} (no OBO token)")
+
+                # Verify it was set correctly
+                verify_context = UserContext.get_group_context()
+                if verify_context and verify_context.primary_group_id == group_id:
+                    subprocess_logger.info(f"[SUBPROCESS] ✓ UserContext verification successful: {verify_context.primary_group_id}")
+                else:
+                    subprocess_logger.error(f"[SUBPROCESS] ✗ UserContext verification FAILED: got {verify_context}")
+                    subprocess_logger.error(f"[SUBPROCESS] This indicates a ContextVar issue in subprocess")
+            except Exception as e:
+                subprocess_logger.error(f"[SUBPROCESS] Failed to set up UserContext: {e}")
+                subprocess_logger.error(f"[SUBPROCESS] This will cause multi-tenant isolation failures!")
+        else:
+            subprocess_logger.error("[SUBPROCESS] SECURITY: No group_id in crew_config - multi-tenant isolation will fail")
 
         # Rebuild the crew from config using async context
         # We need to run the async crew preparation in the subprocess
@@ -336,6 +415,41 @@ def run_crew_in_process(
             import logging
             async_logger = logging.getLogger('crew')
 
+            # SECURITY: Re-initialize UserContext in async context for multi-tenant isolation
+            # ContextVars can sometimes not propagate properly across sync/async boundaries
+            if crew_config and isinstance(crew_config, dict) and 'group_id' in crew_config:
+                try:
+                    from src.utils.user_context import UserContext, GroupContext
+
+                    group_id = crew_config['group_id']
+                    async_logger.info(f"[ASYNC] Re-initializing UserContext with group_id={group_id}")
+
+                    # Re-create GroupContext in async context
+                    group_context_obj = GroupContext(
+                        group_ids=[group_id],
+                        group_email=crew_config.get('group_email', f"{group_id}@subprocess"),
+                        access_token=crew_config.get('user_token')
+                    )
+
+                    # Set it in UserContext
+                    UserContext.set_group_context(group_context_obj)
+
+                    # CRITICAL: Also set user_token separately for OBO authentication
+                    # LLMManager.get_user_token() reads from this separate context variable
+                    user_token = crew_config.get('user_token')
+                    if user_token:
+                        UserContext.set_user_token(user_token)
+                        async_logger.info(f"[ASYNC] ✓ UserContext set with OBO token")
+
+                    # Verify
+                    verify = UserContext.get_group_context()
+                    if verify and verify.primary_group_id == group_id:
+                        async_logger.info(f"[ASYNC] ✓ UserContext verified: {group_id}")
+                    else:
+                        async_logger.error(f"[ASYNC] ✗ UserContext verification failed: {verify}")
+                except Exception as e:
+                    async_logger.error(f"[ASYNC] Failed to initialize UserContext: {e}")
+
             # Always load Databricks config for the current group to determine MLflow status
             db_config = None
             try:
@@ -345,16 +459,20 @@ def run_crew_in_process(
                     current_group_id = getattr(group_context, 'primary_group_id', None) if group_context else None
                     databricks_service = DatabricksService(session, group_id=current_group_id)
                     db_config = await databricks_service.get_databricks_config()
+                    print(f"[DEBUG_MLFLOW_SUBPROCESS] db_config loaded: mlflow_enabled={getattr(db_config, 'mlflow_enabled', None) if db_config else 'NO_CONFIG'}")
 
-                    # Ensure DATABRICKS_HOST is available in subprocess
-                    if 'DATABRICKS_HOST' not in os.environ:
-                        from src.config.settings import settings
-                        if hasattr(settings, 'DATABRICKS_HOST') and settings.DATABRICKS_HOST:
-                            os.environ['DATABRICKS_HOST'] = settings.DATABRICKS_HOST
-                            async_logger.info(f"[SUBPROCESS] Set DATABRICKS_HOST from settings: {settings.DATABRICKS_HOST}")
-                        elif db_config and getattr(db_config, 'workspace_url', None):
-                            os.environ['DATABRICKS_HOST'] = db_config.workspace_url
-                            async_logger.info(f"[SUBPROCESS] Set DATABRICKS_HOST from database: {db_config.workspace_url}")
+                    # Ensure DATABRICKS_HOST is available in subprocess via unified auth
+                    try:
+                        from src.utils.databricks_auth import get_auth_context
+                        auth = await get_auth_context()
+                        if auth and auth.workspace_url:
+                            if 'DATABRICKS_HOST' not in os.environ:
+                                os.environ['DATABRICKS_HOST'] = auth.workspace_url
+                                async_logger.info(f"[SUBPROCESS] Set DATABRICKS_HOST from unified {auth.auth_method} auth: {auth.workspace_url}")
+                        else:
+                            async_logger.warning("[SUBPROCESS] No workspace URL available from unified auth")
+                    except Exception as e:
+                        async_logger.warning(f"[SUBPROCESS] Failed to get unified auth for DATABRICKS_HOST: {e}")
             except Exception as e:
                 async_logger.warning(f"[SUBPROCESS] Could not load Databricks config / host: {e}")
 
@@ -367,8 +485,9 @@ def run_crew_in_process(
             except Exception:
                 enabled_for_workspace = False
 
+            print(f"[DEBUG_MLFLOW_SUBPROCESS] enabled_for_workspace={enabled_for_workspace}")
 
-                mlflow_tracing_ready = False
+            mlflow_tracing_ready = False
 
             if not enabled_for_workspace:
                 async_logger.info(f"[SUBPROCESS] MLflow is disabled for this workspace; skipping configuration")
@@ -389,22 +508,31 @@ def run_crew_in_process(
                     except Exception as _otel_err:
                         async_logger.info(f"[SUBPROCESS] Could not adjust OTEL_SDK_DISABLED: {_otel_err}")
 
-                    # Import and configure MLflow using existing Databricks authentication
-                    from src.utils.databricks_auth import setup_environment_variables
+                    # Import and configure MLflow using unified Databricks authentication
+                    from src.utils.databricks_auth import get_auth_context
+                    from src.utils.user_context import UserContext
                     import mlflow
+                    import os
 
-                    # Setup Databricks authentication in subprocess (prefer OBO user token)
-                    user_token = getattr(group_context, 'access_token', None) if group_context else None
-                    if setup_environment_variables(user_token):
-                        async_logger.info(f"[SUBPROCESS] Databricks authentication successful (OBO={bool(user_token)})")
-                        if user_token:
-                            async_logger.info("[SUBPROCESS] Using OBO user token for Databricks auth")
-                        else:
-                            async_logger.info("[SUBPROCESS] Using PAT fallback (ApiKeysService/env) for Databricks auth")
+                    # CRITICAL FIX: Set UserContext with group_context in subprocess
+                    # UserContext doesn't transfer across process boundaries (contextvars are process-local)
+                    # Without this, get_auth_context() cannot find group_id for PAT lookup
+                    if group_context:
+                        try:
+                            UserContext.set_group_context(group_context)
+                            async_logger.info(f"[SUBPROCESS] Set UserContext with group_id: {group_context.primary_group_id}")
+                        except Exception as ctx_err:
+                            async_logger.warning(f"[SUBPROCESS] Could not set UserContext: {ctx_err}")
 
-
-
-
+                    # Setup Databricks authentication in subprocess using service-level credentials
+                    # MLflow uses service-level auth (NO OBO) to avoid race conditions
+                    # Pass user_token=None to skip OBO and use PAT/SPN
+                    auth = await get_auth_context(user_token=None)
+                    if auth:
+                        # Set environment variables for MLflow (ONLY library that requires env vars)
+                        os.environ["DATABRICKS_HOST"] = auth.workspace_url
+                        os.environ["DATABRICKS_TOKEN"] = auth.token
+                        async_logger.info(f"[SUBPROCESS] MLflow configured with {auth.auth_method} authentication")
 
                         """
 
@@ -424,16 +552,37 @@ def run_crew_in_process(
 
                         """
 
-
                         # Configure MLflow tracking URI and experiment
+                        # Authentication was already set up above (lines 490-495)
                         mlflow.set_tracking_uri("databricks")
 
-                        # Set experiment - try the main experiment first
+                        # Get experiment name from Databricks config via service
+                        experiment_name = "/Shared/kasal-crew-execution-traces"  # Default fallback
                         try:
-                            experiment = mlflow.set_experiment("/Shared/kasal-crew-execution-traces")
-                            async_logger.info(f"[SUBPROCESS] MLflow experiment set: /Shared/kasal-crew-execution-traces (ID: {experiment.experiment_id})")
+                            from src.services.databricks_service import DatabricksService
+                            from src.db.session import async_session_factory
+
+                            # Create a session for database access in subprocess
+                            async with async_session_factory() as session:
+                                databricks_service = DatabricksService(session=session, group_id=(getattr(group_context, "primary_group_id", None) if group_context else None))
+                                db_config = await databricks_service.get_databricks_config()
+                                if db_config and db_config.mlflow_experiment_name:
+                                    # Ensure experiment name starts with /Shared/ for proper organization
+                                    if not db_config.mlflow_experiment_name.startswith("/"):
+                                        experiment_name = f"/Shared/{db_config.mlflow_experiment_name}"
+                                    else:
+                                        experiment_name = db_config.mlflow_experiment_name
+                                    async_logger.info(f"[SUBPROCESS] Using MLflow experiment name from config: {experiment_name}")
+                        except Exception as config_err:
+                            async_logger.info(f"[SUBPROCESS] Could not fetch MLflow experiment name from config: {config_err}, using default: {experiment_name}")
+
+                        # Set experiment - try the configured experiment first
+                        try:
+                            experiment = mlflow.set_experiment(experiment_name)
+                            async_logger.info(f"[SUBPROCESS] MLflow experiment set: {experiment_name} (ID: {experiment.experiment_id})")
                         except Exception as exp_error:
                             # Fallback to a simpler experiment name
+                            async_logger.warning(f"[SUBPROCESS] Could not set experiment {experiment_name}: {exp_error}")
                             try:
                                 experiment = mlflow.set_experiment("/Shared/crew-traces")
                                 async_logger.info(f"[SUBPROCESS] MLflow fallback experiment set: /Shared/crew-traces (ID: {experiment.experiment_id})")
@@ -471,7 +620,7 @@ def run_crew_in_process(
 
                         # Configure autologs via tracing service (preserve current behavior)
                         try:
-                            from src.services.tracing.crewai_tracing import enable_autologs as _enable_autologs
+                            from src.engines.crewai.mlflow_integration import enable_autologs as _enable_autologs
                             _enable_autologs(
                                 global_autolog=True,
                                 global_log_traces=True,
@@ -484,10 +633,11 @@ def run_crew_in_process(
 
                         # Enable async logging for better performance and reliability
                         try:
+                            async_logger.info(f"[SUBPROCESS] [DEBUG] About to enable MLflow async logging")
                             mlflow.config.enable_async_logging()
-                            async_logger.info(f"[SUBPROCESS] MLflow async logging enabled")
-                        except Exception as _:
-                            async_logger.info(f"[SUBPROCESS] MLflow async logging not available in this environment")
+                            async_logger.info(f"[SUBPROCESS] [DEBUG] MLflow async logging enabled successfully")
+                        except Exception as async_log_err:
+                            async_logger.info(f"[SUBPROCESS] [DEBUG] MLflow async logging not available: {async_log_err}")
 
                         # Log MLflow state before autolog
                         async_logger.info(f"[SUBPROCESS] MLflow tracking URI: {mlflow.get_tracking_uri()}")
@@ -518,9 +668,13 @@ def run_crew_in_process(
 
                             @wraps(original_completion)
                             def tracked_completion(*args, **kwargs):
-                                # Log before LLM call
+                                import time as _llm_time
+
+                                # Log before LLM call with timestamp
                                 model = kwargs.get('model', 'unknown')
-                                async_logger.info(f"[SUBPROCESS] 🤖 LiteLLM call intercepted - Model: {model}")
+                                llm_start_time = _llm_time.time()
+                                async_logger.info(f"[SUBPROCESS] 🤖 LiteLLM call START - Model: {model}")
+
                                 # Best-effort: log last active trace id before call
                                 try:
                                     import mlflow as _ml_pre
@@ -531,19 +685,38 @@ def run_crew_in_process(
                                     async_logger.info(f"[SUBPROCESS] - Could not get last active trace id (pre-call): {_e_pre}")
 
                                 # Manual nested span as a fallback in case autologging misses it
+                                result = None
+                                llm_error = None
                                 try:
-                                    import mlflow as _ml
-                                    span_name = f"litellm.completion:{model}"
-                                    with _ml.start_span(name=span_name) as _span:
-                                        try:
-                                            _span.set_attribute("model", model)
-                                            _span.set_attribute("mlflow_span_fallback", True)
-                                        except Exception:
-                                            pass
-                                        result = original_completion(*args, **kwargs)
-                                except Exception as _span_err:
-                                    async_logger.warning(f"[SUBPROCESS] Fallback MLflow span failed: {_span_err}")
-                                    result = original_completion(*args, **kwargs)
+                                    try:
+                                        import mlflow as _ml
+                                        span_name = f"litellm.completion:{model}"
+                                        with _ml.start_span(name=span_name) as _span:
+                                            try:
+                                                _span.set_attribute("model", model)
+                                                _span.set_attribute("mlflow_span_fallback", True)
+                                            except Exception:
+                                                pass
+                                            result = original_completion(*args, **kwargs)
+                                    except Exception as _span_err:
+                                        # MLflow span failed, try without span
+                                        if "mlflow" in str(_span_err).lower() or "span" in str(_span_err).lower():
+                                            async_logger.warning(f"[SUBPROCESS] Fallback MLflow span failed: {_span_err}")
+                                            result = original_completion(*args, **kwargs)
+                                        else:
+                                            # This is an actual LLM error, re-raise
+                                            raise
+                                except Exception as _llm_err:
+                                    # Capture LLM error for logging
+                                    llm_error = _llm_err
+                                    # Calculate duration even for errors
+                                    llm_duration = _llm_time.time() - llm_start_time
+                                    async_logger.error(f"[SUBPROCESS] ❌ LiteLLM call FAILED - Model: {model}, Duration: {llm_duration:.2f}s, Error: {str(_llm_err)[:500]}")
+                                    # Re-raise so CrewAI can handle it
+                                    raise
+
+                                # Calculate LLM call duration (for successful calls)
+                                llm_duration = _llm_time.time() - llm_start_time
 
                                 # Best-effort: log last active trace id after call
                                 try:
@@ -554,8 +727,39 @@ def run_crew_in_process(
                                 except Exception as _e_post:
                                     async_logger.info(f"[SUBPROCESS] - Could not get last active trace id (post-call): {_e_post}")
 
-                                # Log after LLM call
-                                async_logger.info(f"[SUBPROCESS] ✅ LiteLLM call completed - Model: {model}")
+                                # Log detailed response information for debugging
+                                try:
+                                    if result is None:
+                                        async_logger.error(f"[SUBPROCESS] ⚠️ LLM Response is None - Model: {model}, Duration: {llm_duration:.2f}s")
+                                    else:
+                                        # Check if result has choices
+                                        choices = getattr(result, 'choices', None)
+                                        if choices is None:
+                                            async_logger.error(f"[SUBPROCESS] ⚠️ LLM Response has no 'choices' - Model: {model}, Duration: {llm_duration:.2f}s, Response type: {type(result)}, Response: {str(result)[:500]}")
+                                        elif len(choices) == 0:
+                                            async_logger.error(f"[SUBPROCESS] ⚠️ LLM Response 'choices' is empty - Model: {model}, Duration: {llm_duration:.2f}s, Response: {str(result)[:500]}")
+                                        else:
+                                            # Check the actual content
+                                            first_choice = choices[0]
+                                            message = getattr(first_choice, 'message', None)
+                                            if message is None:
+                                                async_logger.error(f"[SUBPROCESS] ⚠️ LLM Response choice has no 'message' - Model: {model}, Duration: {llm_duration:.2f}s, Choice: {str(first_choice)[:500]}")
+                                            else:
+                                                content = getattr(message, 'content', None)
+                                                if content is None or content == '':
+                                                    # Log the full message for debugging
+                                                    async_logger.error(f"[SUBPROCESS] ⚠️ LLM Response content is None/empty - Model: {model}, Duration: {llm_duration:.2f}s, Message: {str(message)[:500]}")
+                                                    # Check for reasoning content (some models use this)
+                                                    reasoning = getattr(message, 'reasoning_content', None)
+                                                    if reasoning:
+                                                        async_logger.info(f"[SUBPROCESS] 💡 LLM has reasoning_content: {str(reasoning)[:200]}...")
+                                                else:
+                                                    async_logger.info(f"[SUBPROCESS] ✅ LLM Response OK - Model: {model}, Content length: {len(content)}, Duration: {llm_duration:.2f}s")
+                                except Exception as log_err:
+                                    async_logger.warning(f"[SUBPROCESS] Could not log response details: {log_err}")
+
+                                # Log after LLM call with duration
+                                async_logger.info(f"[SUBPROCESS] ✅ LiteLLM call COMPLETED - Model: {model}, Duration: {llm_duration:.2f}s")
                                 return result
 
                             # Replace litellm.completion with our tracked version
@@ -567,7 +771,7 @@ def run_crew_in_process(
 
                         async_logger.info(f"[SUBPROCESS] MLflow configuration completed successfully")
                     else:
-                        async_logger.warning(f"[SUBPROCESS] Databricks authentication failed - MLflow traces may not work")
+                        async_logger.warning("[SUBPROCESS] No Databricks authentication available for MLflow")
 
                 except Exception as mlflow_error:
                     async_logger.error(f"[SUBPROCESS] MLflow configuration failed: {mlflow_error}")
@@ -576,22 +780,41 @@ def run_crew_in_process(
             # Create services using session factory
             from src.db.session import async_session_factory
             async with async_session_factory() as session:
-                # Create services with the session
+                # Extract group_id first for service initialization
+                group_id = None
+                try:
+                    if group_context and getattr(group_context, 'primary_group_id', None):
+                        group_id = getattr(group_context, 'primary_group_id')
+                        async_logger.info(f"[SUBPROCESS] Using group_id for services: {group_id}")
+                except Exception as e:
+                    async_logger.warning(f"[SUBPROCESS] Could not extract group_id: {e}")
+
+                # Create services with the session and group_id
                 from src.services.tool_service import ToolService
                 from src.services.api_keys_service import ApiKeysService
                 tool_service = ToolService(session)
-                api_keys_service = ApiKeysService(session)
+                api_keys_service = ApiKeysService(session, group_id=group_id)
 
                 # Ensure group_id is present in config for group-aware tool loading
                 try:
-                    if isinstance(crew_config, dict) and group_context and getattr(group_context, 'primary_group_id', None):
-                        crew_config.setdefault('group_id', getattr(group_context, 'primary_group_id'))
+                    if isinstance(crew_config, dict) and group_id:
+                        crew_config.setdefault('group_id', group_id)
                         async_logger.info(f"[SUBPROCESS] Injected group_id into crew_config: {crew_config.get('group_id')}")
                 except Exception as e:
                     async_logger.warning(f"[SUBPROCESS] Could not inject group_id into crew_config: {e}")
 
-                # Create a tool factory instance
-                tool_factory = await ToolFactory.create(crew_config, api_keys_service, None)
+                # Extract user_token from crew_config for OBO authentication
+                # The user_token is passed from the parent process via crew_config
+                user_token = None
+                if isinstance(crew_config, dict):
+                    user_token = crew_config.get('user_token') or crew_config.get('access_token')
+                    if user_token:
+                        async_logger.info(f"[SUBPROCESS] Found user_token in crew_config for OBO authentication: {user_token[:10]}...")
+                    else:
+                        async_logger.warning("[SUBPROCESS] No user_token found in crew_config - tools requiring OBO will fall back to PAT/SPN auth")
+
+                # Create a tool factory instance with user_token
+                tool_factory = await ToolFactory.create(crew_config, api_keys_service, user_token)
 
                 # Log the JobConfiguration BEFORE crew preparation to ensure it's captured
                 import json
@@ -608,7 +831,12 @@ def run_crew_in_process(
                     ks = agent_cfg.get('knowledge_sources', [])
                     async_logger.info(f"[DEBUG] Agent {agent_id} has {len(ks)} knowledge_sources: {ks}")
 
-                crew_preparation = CrewPreparation(crew_config, tool_service, tool_factory, None)
+                # CRITICAL: Pass user_token from crew_config for OBO authentication
+                # This is needed for Databricks memory upserts to authenticate properly
+                user_token_for_crew = crew_config.get('user_token')
+                async_logger.info(f"[DEBUG] Creating CrewPreparation with user_token: {bool(user_token_for_crew)}")
+
+                crew_preparation = CrewPreparation(crew_config, tool_service, tool_factory, user_token_for_crew)
                 if not await crew_preparation.prepare():
                     raise RuntimeError(f"Failed to prepare crew for {execution_id}")
 
@@ -619,7 +847,7 @@ def run_crew_in_process(
                 if isinstance(crew_config, dict):
                     try:
                         async_logger.info(f"[JOB_CONFIGURATION] Starting execution for job {execution_id}")
-                        async_logger.info(f"[JOB_CONFIGURATION] Crew Name: {crew_config.get('name', 'Unnamed')}")
+                        async_logger.info(f"[JOB_CONFIGURATION] Crew Name: {crew_config.get('run_name', 'Unnamed')}")
                         async_logger.info(f"[JOB_CONFIGURATION] Version: {crew_config.get('version', '1.0')}")
 
                         # Log agents configuration
@@ -793,7 +1021,7 @@ def run_crew_in_process(
                     try:
                         config_summary = {
                             "execution_id": execution_id,
-                            "crew_name": crew_config.get('name', 'Unnamed'),
+                            "crew_name": crew_config.get('run_name', 'Unnamed'),
                             "crew_version": crew_config.get('version', '1.0'),
                             "process_type": crew_config.get('process', 'sequential'),
                             "agent_count": len(crew_config.get('agents', [])),
@@ -870,7 +1098,7 @@ def run_crew_in_process(
                 # Execute the crew synchronously (CrewAI's kickoff is sync)
                 async_logger.info(f"🚀 Starting crew execution for {execution_id}")
                 async_logger.info(f"Process ID: {os.getpid()}")
-                async_logger.info(f"Crew: {crew_config.get('name', 'Unnamed')} v{crew_config.get('version', '1.0')}")
+                async_logger.info(f"Crew: {crew_config.get('run_name', 'Unnamed')} v{crew_config.get('version', '1.0')}")
                 async_logger.info(f"Agents: {len(crew_config.get('agents', []))}, Tasks: {len(crew_config.get('tasks', []))}")
 
                 # Log MLflow state before crew execution (only if enabled and available)
@@ -917,14 +1145,21 @@ def run_crew_in_process(
                     try:
                         import mlflow
 
-                        # Create a comprehensive root trace that will contain all nested operations
-                        trace_name = f"crew_kickoff:{crew_config.get('name', 'Unnamed')}"
-
                         # Prepare trace inputs and metadata
                         trace_inputs = {}
                         if inputs:
                             trace_inputs.update(inputs)
-                        trace_inputs["run_name"] = crew_config.get('name', 'Unnamed')
+
+                        # Get run_name with fallback chain: crew_config > inputs > execution_id
+                        run_name = (
+                            crew_config.get('run_name') or
+                            (inputs.get('run_name') if inputs else None) or
+                            crew_config.get('execution_id', 'Unnamed')
+                        )
+
+                        # Create a comprehensive root trace that will contain all nested operations
+                        trace_name = f"crew_kickoff:{run_name}"
+                        trace_inputs["run_name"] = run_name
                         trace_inputs["crew_version"] = crew_config.get('version', '1.0')
                         trace_inputs["agent_count"] = len(crew_config.get('agents', []))
                         trace_inputs["task_count"] = len(crew_config.get('tasks', []))
@@ -932,12 +1167,12 @@ def run_crew_in_process(
                         # Start a root trace using the tracing service
                         async_logger.info(f"[SUBPROCESS] Starting unified MLflow root trace: {trace_name}")
                         async_logger.info(f"[SUBPROCESS] Trace inputs: {list(trace_inputs.keys())}")
-                        from src.services.tracing.crewai_tracing import start_root_trace as _start_root_trace  # corrected import path
+                        from src.services.mlflow_tracing_service import start_root_trace as _start_root_trace
                         with _start_root_trace(trace_name, trace_inputs) as root_trace:
                             # Set additional trace attributes for better organization
                             try:
                                 if hasattr(root_trace, 'set_attribute'):
-                                    root_trace.set_attribute("crew.name", crew_config.get('name', 'Unnamed'))
+                                    root_trace.set_attribute("crew.name", crew_config.get('run_name', 'Unnamed'))
                                     root_trace.set_attribute("crew.version", crew_config.get('version', '1.0'))
                                     root_trace.set_attribute("crew.process_type", crew_config.get('process', 'sequential'))
                                     root_trace.set_attribute("crew.agent_count", len(crew_config.get('agents', [])))
@@ -947,45 +1182,45 @@ def run_crew_in_process(
                             except Exception as attr_e:
                                 async_logger.debug(f"[SUBPROCESS] Could not set trace attributes: {attr_e}")
 
-                                async_logger.info(f"[SUBPROCESS] Root trace context active - all subsequent operations will nest under it")
-                                async_logger.info(f"[SUBPROCESS] About to call crew.kickoff() - LiteLLM and CrewAI autolog will nest under root trace")
+                            async_logger.info(f"[SUBPROCESS] Root trace context active - all subsequent operations will nest under it")
+                            async_logger.info(f"[SUBPROCESS] About to call crew.kickoff() - LiteLLM and CrewAI autolog will nest under root trace")
 
-                                # Execute crew within the active root trace context
-                                if inputs:
-                                    result = crew.kickoff(inputs=inputs)
-                                else:
-                                    result = crew.kickoff()
+                            # Execute crew within the active root trace context
+                            if inputs:
+                                result = crew.kickoff(inputs=inputs)
+                            else:
+                                result = crew.kickoff()
 
-                                # Set trace outputs
-                                try:
-                                    if hasattr(root_trace, 'set_outputs'):
-                                        trace_outputs = {}
-                                        if hasattr(result, 'raw'):
-                                            trace_outputs["raw"] = result.raw
-                                        if hasattr(result, 'pydantic'):
-                                            trace_outputs["pydantic"] = result.pydantic
-                                        if hasattr(result, 'json_dict'):
-                                            trace_outputs["json_dict"] = result.json_dict
-                                        if hasattr(result, 'tasks_output'):
-                                            trace_outputs["tasks_output"] = [
-                                                {
-                                                    "description": task.description if hasattr(task, 'description') else str(task),
-                                                    "name": task.name if hasattr(task, 'name') else "Unknown",
-                                                    "output": task.raw if hasattr(task, 'raw') else str(task)
-                                                }
-                                                for task in (result.tasks_output if hasattr(result, 'tasks_output') else [])
-                                            ]
-                                        if hasattr(result, 'token_usage'):
-                                            trace_outputs["token_usage"] = result.token_usage
+                            # Set trace outputs
+                            try:
+                                if hasattr(root_trace, 'set_outputs'):
+                                    trace_outputs = {}
+                                    if hasattr(result, 'raw'):
+                                        trace_outputs["raw"] = result.raw
+                                    if hasattr(result, 'pydantic'):
+                                        trace_outputs["pydantic"] = result.pydantic
+                                    if hasattr(result, 'json_dict'):
+                                        trace_outputs["json_dict"] = result.json_dict
+                                    if hasattr(result, 'tasks_output'):
+                                        trace_outputs["tasks_output"] = [
+                                            {
+                                                "description": task.description if hasattr(task, 'description') else str(task),
+                                                "name": task.name if hasattr(task, 'name') else "Unknown",
+                                                "output": task.raw if hasattr(task, 'raw') else str(task)
+                                            }
+                                            for task in (result.tasks_output if hasattr(result, 'tasks_output') else [])
+                                        ]
+                                    if hasattr(result, 'token_usage'):
+                                        trace_outputs["token_usage"] = result.token_usage
 
-                                        root_trace.set_outputs(trace_outputs)
-                                except Exception as output_e:
-                                    async_logger.debug(f"[SUBPROCESS] Could not set trace outputs: {output_e}")
+                                    root_trace.set_outputs(trace_outputs)
+                            except Exception as output_e:
+                                async_logger.debug(f"[SUBPROCESS] Could not set trace outputs: {output_e}")
 
-                                executed_with_span = True
-                                async_logger.info(f"[SUBPROCESS] Crew execution completed within unified trace")
+                            executed_with_span = True
+                            async_logger.info(f"[SUBPROCESS] Crew execution completed within unified trace")
 
-                            async_logger.info(f"[SUBPROCESS] Unified MLflow root trace completed: {trace_name}")
+                        async_logger.info(f"[SUBPROCESS] Unified MLflow root trace completed: {trace_name}")
 
 
                     except Exception as e:
@@ -995,12 +1230,26 @@ def run_crew_in_process(
                 # Fallback execution if unified trace wasn't created
                 if not executed_with_span:
                     async_logger.info(f"[SUBPROCESS] Executing crew without unified trace - autolog may create separate traces")
+
+                    # CRITICAL: Disable MLflow autolog hooks before crew.kickoff()
+                    # These hooks cause deadlocks in subprocess when trying to trace to Databricks
+                    if enabled_for_workspace:
+                        try:
+                            mlflow.litellm.autolog(disable=True)
+                            async_logger.info("[SUBPROCESS] Disabled MLflow LiteLLM autolog (prevents subprocess deadlock)")
+                        except Exception as autolog_err:
+                            async_logger.warning(f"[SUBPROCESS] Could not disable LiteLLM autolog: {autolog_err}")
+
                     if inputs:
                         async_logger.info(f"Inputs provided: {list(inputs.keys())}")
+                        async_logger.info(f"[SUBPROCESS] ABOUT TO CALL crew.kickoff() - if hang occurs, it's in CrewAI kickoff")
                         result = crew.kickoff(inputs=inputs)
+                        async_logger.info(f"[SUBPROCESS] crew.kickoff() COMPLETED successfully")
                     else:
                         async_logger.info("No inputs provided")
+                        async_logger.info(f"[SUBPROCESS] ABOUT TO CALL crew.kickoff() - if hang occurs, it's in CrewAI kickoff")
                         result = crew.kickoff()
+                        async_logger.info(f"[SUBPROCESS] crew.kickoff() COMPLETED successfully")
 
                 async_logger.info(f"✅ Crew execution completed successfully")
 
@@ -1030,14 +1279,20 @@ def run_crew_in_process(
                             if last_trace_id:
                                 async_logger.info(f"[SUBPROCESS] - Last active trace id: {last_trace_id}")
 
-                                # Store the trace ID in the execution history for later evaluation use
-                                experiment_name = os.getenv("MLFLOW_CREW_TRACES_EXPERIMENT", "/Shared/kasal-crew-execution-traces")
+                                # Use the experiment name that was already set earlier
+                                # (stored in 'experiment' variable from MLflow setup)
+                                experiment_name = "/Shared/kasal-crew-execution-traces"  # Default fallback
+                                if 'experiment' in locals() and experiment is not None:
+                                    try:
+                                        experiment_name = experiment.name
+                                        async_logger.info(f"[SUBPROCESS] Using experiment name from active experiment: {experiment_name}")
+                                    except Exception as e:
+                                        async_logger.info(f"[SUBPROCESS] Could not get experiment name from experiment object: {e}, using default")
+
                                 # Update execution history with the last active trace id via tracing service
                                 try:
-                                    from src.services.tracing.crewai_tracing import (
-                                        get_last_active_trace_id as _get_last_id,
-                                        update_execution_trace_id as _update_trace,
-                                    )
+                                    from src.services.mlflow_tracing_service import get_last_active_trace_id as _get_last_id
+                                    from src.engines.crewai.mlflow_integration import update_execution_trace_id as _update_trace
                                     last_trace_id = _get_last_id()
                                     if last_trace_id:
                                         await _update_trace(
@@ -1058,10 +1313,12 @@ def run_crew_in_process(
 
                 # Flush and stop tracing writers via tracing service
                 try:
-                    from src.services.tracing.crewai_tracing import flush_and_stop_writers as _flush_stop
+                    async_logger.info(f"[SUBPROCESS] [DEBUG] About to flush and stop MLflow writers")
+                    from src.engines.crewai.mlflow_integration import flush_and_stop_writers as _flush_stop
                     await _flush_stop(async_logger)
+                    async_logger.info(f"[SUBPROCESS] [DEBUG] MLflow flush and stop completed successfully")
                 except Exception as _flush_err:
-                    async_logger.warning(f"[SUBPROCESS] Error during trace flush/stop: {_flush_err}")
+                    async_logger.warning(f"[SUBPROCESS] [DEBUG] Error during trace flush/stop: {_flush_err}")
 
                 return result
 
@@ -1189,7 +1446,7 @@ def run_crew_in_process(
 
         # Clean up database connections and engines via tracing service utility
         try:
-            from src.services.tracing.crewai_tracing import cleanup_async_db_connections as _cleanup_db
+            from src.services.mlflow_tracing_service import cleanup_async_db_connections as _cleanup_db
             _cleanup_db()
         except Exception as db_cleanup_error:
             logger.debug(f"Database cleanup note: {db_cleanup_error}")
@@ -1372,6 +1629,7 @@ class ProcessCrewExecutor:
             Dictionary with execution results
         """
         logger.info(f"[ProcessCrewExecutor] run_crew_isolated called for {execution_id}")
+        logger.info(f"[DEBUG_MLFLOW] crew_config keys: {list(crew_config.keys()) if isinstance(crew_config, dict) else 'not-dict'}")
 
         self._metrics['total_executions'] += 1
         self._metrics['active_executions'] += 1
@@ -1412,6 +1670,29 @@ class ProcessCrewExecutor:
         # - execution_trace: Taps into CrewAI event bus for structured events
         # - execution_logs: Captures raw subprocess logs (crew.log, stdout)
         # DO NOT mix their implementations!
+
+        # Pass group_context data to crew_config for subprocess execution
+        # SECURITY: group_id is REQUIRED for multi-tenant isolation in subprocess
+        # The authentication priority chain (OBO → PAT → SPN) is handled by databricks_auth.py
+        if group_context:
+            if isinstance(crew_config, dict):
+                # Add group_id for multi-tenant isolation (REQUIRED)
+                if hasattr(group_context, 'primary_group_id') and group_context.primary_group_id:
+                    crew_config['group_id'] = group_context.primary_group_id
+                    logger.info(f"[ProcessCrewExecutor] Added group_id to crew_config: {group_context.primary_group_id}")
+                else:
+                    logger.error("[ProcessCrewExecutor] SECURITY: No group_id in group_context - multi-tenant isolation may fail")
+
+                # Add user_token for OBO authentication (optional, used by databricks_auth.py)
+                if hasattr(group_context, 'access_token') and group_context.access_token:
+                    crew_config['user_token'] = group_context.access_token
+                    logger.info(f"[ProcessCrewExecutor] Added user_token to crew_config for OBO authentication")
+                else:
+                    logger.info("[ProcessCrewExecutor] No user_token - databricks_auth.py will use PAT or SPN fallback")
+            else:
+                logger.warning("[ProcessCrewExecutor] Cannot add user_token/group_id to crew_config - not a dict")
+        else:
+            logger.error("[ProcessCrewExecutor] SECURITY: No group_context provided - multi-tenant isolation will fail")
 
         # Create a direct Process instead of using ProcessPoolExecutor
         # This gives us full control over the process lifecycle
@@ -1640,6 +1921,7 @@ class ProcessCrewExecutor:
             execution_id: The execution ID for logging
             group_context: Optional group context for multi-tenant isolation
         """
+        logger.info(f"[ProcessCrewExecutor] [DEBUG] Starting _process_log_queue for {execution_id}")
         logger.info(f"[ProcessCrewExecutor] Processing logs from crew.log for {execution_id}")
 
         try:
@@ -1698,6 +1980,7 @@ class ProcessCrewExecutor:
             # Build database URL
             if settings.DATABASE_TYPE == 'sqlite':
                 db_url = f'sqlite+aiosqlite:///{settings.SQLITE_DB_PATH}'
+                logger.info(f"[ProcessCrewExecutor] [DEBUG] Using SQLite database: {settings.SQLITE_DB_PATH}")
             else:
                 postgres_user = settings.POSTGRES_USER or 'postgres'
                 postgres_password = settings.POSTGRES_PASSWORD or 'postgres'
@@ -1705,9 +1988,12 @@ class ProcessCrewExecutor:
                 postgres_port = settings.POSTGRES_PORT or '5432'
                 postgres_db = settings.POSTGRES_DB or 'kasal'
                 db_url = f'postgresql+asyncpg://{postgres_user}:{postgres_password}@{postgres_server}:{postgres_port}/{postgres_db}'
+                logger.info(f"[ProcessCrewExecutor] [DEBUG] Using PostgreSQL database: {postgres_server}:{postgres_port}/{postgres_db}")
 
             # Write logs to database
+            logger.info(f"[ProcessCrewExecutor] [DEBUG] About to create async engine for database connection")
             engine = create_async_engine(db_url)
+            logger.info(f"[ProcessCrewExecutor] [DEBUG] Async engine created successfully")
             async with engine.begin() as conn:
                 for log_data in logs_to_write:
                     await conn.execute(text("""
@@ -1715,10 +2001,16 @@ class ProcessCrewExecutor:
                         VALUES (:execution_id, :content, :timestamp, :group_id, :group_email)
                     """), log_data)
 
+            logger.info(f"[ProcessCrewExecutor] [DEBUG] About to dispose async engine")
             await engine.dispose()
+            logger.info(f"[ProcessCrewExecutor] [DEBUG] Async engine disposed successfully")
             logger.info(f"[ProcessCrewExecutor] Successfully wrote {len(logs_to_write)} logs to execution_logs table")
 
         except Exception as e:
+            import traceback
+            logger.error(f"[ProcessCrewExecutor] [DEBUG] Error processing logs from crew.log: {e}")
+            logger.error(f"[ProcessCrewExecutor] [DEBUG] Error type: {type(e).__name__}")
+            logger.error(f"[ProcessCrewExecutor] [DEBUG] Full traceback:\n{traceback.format_exc()}")
             logger.error(f"[ProcessCrewExecutor] Error processing logs from crew.log: {e}")
 
     async def terminate_execution(self, execution_id: str) -> bool:

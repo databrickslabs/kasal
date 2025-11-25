@@ -162,13 +162,17 @@ class CrewAIExecutionService:
                                     crew_logger.info(f"Found agent {agent_id} in database")
                                     crew_logger.info(f"Agent has tool_configs attribute: {hasattr(db_agent, 'tool_configs')}")
                                     if hasattr(db_agent, 'tool_configs'):
-                                        crew_logger.info(f"Agent tool_configs value: {db_agent.tool_configs}")
-                                        # Add tool_configs from database to the agent config
-                                        agent_config['tool_configs'] = db_agent.tool_configs or {}
-                                        crew_logger.info(f"Added tool_configs from database for agent {agent_id}: {agent_config['tool_configs']}")
+                                        crew_logger.info(f"Agent tool_configs value from DB: {db_agent.tool_configs}")
+                                        # Prefer YAML tool_configs if present and non-empty, otherwise use database
+                                        if 'tool_configs' not in agent_config or not agent_config.get('tool_configs'):
+                                            agent_config['tool_configs'] = db_agent.tool_configs or {}
+                                            crew_logger.info(f"Using tool_configs from database for agent {agent_id}: {agent_config['tool_configs']}")
+                                        else:
+                                            crew_logger.info(f"Keeping tool_configs from YAML for agent {agent_id}: {agent_config['tool_configs']}")
                                     else:
                                         crew_logger.warning(f"Agent {agent_id} does not have tool_configs attribute")
-                                        agent_config['tool_configs'] = {}
+                                        if 'tool_configs' not in agent_config:
+                                            agent_config['tool_configs'] = {}
                                 else:
                                     crew_logger.warning(f"Agent {agent_id} not found in database")
                             except Exception as e:
@@ -239,13 +243,27 @@ class CrewAIExecutionService:
                                     crew_logger.info(f"Found task {task_id} in database")
                                     crew_logger.info(f"Task has tool_configs attribute: {hasattr(db_task, 'tool_configs')}")
                                     if hasattr(db_task, 'tool_configs'):
-                                        crew_logger.info(f"Task tool_configs value: {db_task.tool_configs}")
-                                        # Add tool_configs from database to the task config
-                                        task_config['tool_configs'] = db_task.tool_configs or {}
-                                        crew_logger.info(f"Added tool_configs from database for task {task_id}: {task_config['tool_configs']}")
+                                        crew_logger.info(f"Task tool_configs value from DB: {db_task.tool_configs}")
+                                        # Prefer YAML tool_configs if present and non-empty, otherwise use database
+                                        if 'tool_configs' not in task_config or not task_config.get('tool_configs'):
+                                            task_config['tool_configs'] = db_task.tool_configs or {}
+                                            crew_logger.info(f"Using tool_configs from database for task {task_id}: {task_config['tool_configs']}")
+                                        else:
+                                            crew_logger.info(f"Keeping tool_configs from YAML for task {task_id}: {task_config['tool_configs']}")
                                     else:
                                         crew_logger.warning(f"Task {task_id} does not have tool_configs attribute")
-                                        task_config['tool_configs'] = {}
+                                        if 'tool_configs' not in task_config:
+                                            task_config['tool_configs'] = {}
+
+                                    # Also fetch llm_guardrail from database if present
+                                    if hasattr(db_task, 'llm_guardrail') and db_task.llm_guardrail:
+                                        task_config['llm_guardrail'] = db_task.llm_guardrail
+                                        crew_logger.info(f"Added llm_guardrail from database for task {task_id}: {db_task.llm_guardrail}")
+                                    # Also check config field for llm_guardrail
+                                    elif hasattr(db_task, 'config') and db_task.config:
+                                        if 'llm_guardrail' in db_task.config and db_task.config['llm_guardrail']:
+                                            task_config['llm_guardrail'] = db_task.config['llm_guardrail']
+                                            crew_logger.info(f"Added llm_guardrail from config for task {task_id}: {db_task.config['llm_guardrail']}")
                                 else:
                                     crew_logger.warning(f"Task {task_id} not found in database")
                             except Exception as e:
@@ -287,8 +305,10 @@ class CrewAIExecutionService:
             crew_logger.info(f"Execution {execution_id} using process type: {process_type}")
 
             # Build crew configuration with process type
+            # IMPORTANT: Use static "Default Crew" when run_name is None to ensure consistent crew_id
+            # The crew_id hash includes agent_roles, task_names, model, group_id - so uniqueness is preserved
             crew_config_dict = {
-                "name": run_name or f"Scheduled Crew {execution_id[:8]}",
+                "name": run_name or "Default Crew",
                 "model": config.model,
                 "process": process_type,  # Add process type to crew config
                 "planning": config.planning,
@@ -558,16 +578,19 @@ class CrewAIExecutionService:
             job_id: Optional job ID for tracking the execution
             config: Optional configuration parameters
             group_context: Group context for multi-tenant isolation
-            
+
         Returns:
             Dictionary with execution result
         """
-        crew_logger.info(f"Running flow execution with flow_id={flow_id}, job_id={job_id}")
-        
+        # Use flow logger from LoggerManager for flow execution
+        flow_logger = LoggerManager.get_instance().flow
+
+        flow_logger.info(f"Running flow execution with flow_id={flow_id}, job_id={job_id}")
+
         # If no job_id is provided, generate a random UUID
         if not job_id:
             job_id = str(uuid.uuid4())
-            crew_logger.info(f"Generated random job_id: {job_id}")
+            flow_logger.info(f"Generated random job_id: {job_id}")
         
         try:
             # Initialize configuration
@@ -575,7 +598,7 @@ class CrewAIExecutionService:
             
             # If flow_id is provided but no nodes/edges, load flow data from repository
             if flow_id and (not nodes or not isinstance(nodes, list)):
-                crew_logger.info(f"No nodes provided but flow_id exists: {flow_id}. Loading flow data from repository")
+                flow_logger.info(f"No nodes provided but flow_id exists: {flow_id}. Loading flow data from repository")
                 try:
                     # Get repository instance through async factory function with session
                     from src.db.session import async_session_factory
@@ -614,12 +637,12 @@ class CrewAIExecutionService:
             
             # If nodes are provided directly, add them to the config
             if nodes:
-                crew_logger.info(f"Adding {len(nodes)} nodes to execution config")
+                flow_logger.info(f"Adding {len(nodes)} nodes to execution config")
                 execution_config['nodes'] = nodes
                 execution_config['edges'] = edges or []
             elif not flow_id:
                 # Neither flow_id nor nodes provided - can't proceed
-                crew_logger.error("No flow_id or nodes provided, cannot execute flow")
+                flow_logger.error("No flow_id or nodes provided, cannot execute flow")
                 return {
                     "success": False,
                     "error": "Either flow_id or nodes must be provided for flow execution",
@@ -633,36 +656,57 @@ class CrewAIExecutionService:
             # Add group context to config if provided
             if group_context:
                 execution_config['group_context'] = group_context
-            
-            # Create a flow service instance
-            flow_service = CrewAIFlowService()
-            
-            # Run the flow
-            try:
-                # Call the flow service to run the flow
-                result = await flow_service.run_flow(
-                    flow_id=flow_id,
-                    job_id=job_id,
-                    config=execution_config
-                )
-                
-                crew_logger.info(f"Flow execution started successfully: {result}")
-                return result
-            except Exception as e:
-                crew_logger.error(f"Error running flow execution: {e}", exc_info=True)
-                # Update status to FAILED
-                await ExecutionStatusService.update_status(
-                    job_id=job_id,
-                    status=ExecutionStatus.FAILED.value,
-                    message=f"Flow execution failed: {str(e)}"
-                )
-                return {
-                    "success": False,
-                    "error": str(e),
-                    "job_id": job_id
-                }
+                execution_config['group_id'] = group_context.primary_group_id  # For background task API key loading
+
+            # Create a database session for flow execution
+            from src.db.session import async_session_factory
+            async with async_session_factory() as session:
+                # Create a flow service instance with session
+                flow_service = CrewAIFlowService(session)
+
+                # Set group context in UserContext for API key loading
+                if group_context:
+                    from src.utils.user_context import UserContext
+                    UserContext.set_group_context(group_context)
+                    flow_logger.info(f"Set group context for flow execution: group_id={group_context.primary_group_id}")
+
+                # Run the flow
+                try:
+                    # Extract user token from group context for OBO authentication
+                    user_token = group_context.access_token if group_context else None
+
+                    # Use flow logger for flow execution
+                    flow_logger = LoggerManager.get_instance().flow
+
+                    # Call the flow service to run the flow with process isolation
+                    flow_logger.info(f"Starting flow execution for job_id: {job_id}")
+                    result = await flow_service.run_flow(
+                        flow_id=flow_id,
+                        job_id=job_id,
+                        config=execution_config,
+                        group_context=group_context,
+                        user_token=user_token
+                    )
+
+                    flow_logger.info(f"Flow execution started successfully (process isolated): {result}")
+                    return result
+                except Exception as e:
+                    flow_logger.error(f"Error running flow execution: {e}", exc_info=True)
+                    # Update status to FAILED - reuse the existing session
+                    await ExecutionStatusService.update_status(
+                        job_id=job_id,
+                        status=ExecutionStatus.FAILED.value,
+                        message=f"Flow execution failed: {str(e)}",
+                        session=session
+                    )
+                    return {
+                        "success": False,
+                        "error": str(e),
+                        "job_id": job_id
+                    }
         except Exception as e:
-            crew_logger.error(f"Unexpected error in run_flow_execution: {e}", exc_info=True)
+            flow_logger = LoggerManager.get_instance().flow
+            flow_logger.error(f"Unexpected error in run_flow_execution: {e}", exc_info=True)
             await ExecutionStatusService.update_status(
                 job_id=job_id,
                 status=ExecutionStatus.FAILED.value,
@@ -685,16 +729,19 @@ class CrewAIExecutionService:
             Dictionary with execution details
         """
         crew_logger.info(f"Getting flow execution {execution_id}")
-        
-        # Create a flow service instance
-        flow_service = CrewAIFlowService()
-        
-        # Get the execution details
-        try:
-            return await flow_service.get_flow_execution(execution_id)
-        except Exception as e:
-            crew_logger.error(f"Error getting flow execution: {e}", exc_info=True)
-            raise
+
+        # Create a database session for flow execution retrieval
+        from src.db.session import async_session_factory
+        async with async_session_factory() as session:
+            # Create a flow service instance with session
+            flow_service = CrewAIFlowService(session)
+
+            # Get the execution details
+            try:
+                return await flow_service.get_flow_execution(execution_id)
+            except Exception as e:
+                crew_logger.error(f"Error getting flow execution: {e}", exc_info=True)
+                raise
     
     async def get_flow_executions_by_flow(self, flow_id: str) -> Dict[str, Any]:
         """
@@ -707,14 +754,17 @@ class CrewAIExecutionService:
             Dictionary with list of executions
         """
         crew_logger.info(f"Getting executions for flow {flow_id}")
-        
-        # Create a flow service instance
-        flow_service = CrewAIFlowService()
-        
-        # Get the executions
-        try:
-            return await flow_service.get_flow_executions_by_flow(flow_id)
-        except Exception as e:
-            crew_logger.error(f"Error getting flow executions: {e}", exc_info=True)
-            raise
+
+        # Create a database session for flow executions retrieval
+        from src.db.session import async_session_factory
+        async with async_session_factory() as session:
+            # Create a flow service instance with session
+            flow_service = CrewAIFlowService(session)
+
+            # Get the executions
+            try:
+                return await flow_service.get_flow_executions_by_flow(flow_id)
+            except Exception as e:
+                crew_logger.error(f"Error getting flow executions: {e}", exc_info=True)
+                raise
     

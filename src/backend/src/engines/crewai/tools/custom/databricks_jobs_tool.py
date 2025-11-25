@@ -176,29 +176,32 @@ class DatabricksJobsTool(BaseTool):
     _token: str = PrivateAttr(default=None)
     _action_limits: Dict[str, Optional[int]] = PrivateAttr(default=None)
     _action_usage_counts: Dict[str, int] = PrivateAttr(default_factory=dict)
-    
+    _group_id: Optional[str] = PrivateAttr(default=None)  # SECURITY: Multi-tenant isolation
+
     def __init__(
         self,
         databricks_host: Optional[str] = None,
         tool_config: Optional[dict] = None,
         token_required: bool = True,
         action_limits: Optional[Dict[str, Optional[int]]] = None,
+        group_id: Optional[str] = None,  # SECURITY: Required for multi-tenant isolation
         **kwargs: Any,
     ) -> None:
         """
         Initialize the DatabricksJobsTool.
-        
+
         Args:
             databricks_host (Optional[str]): Databricks workspace host URL.
-            tool_config (Optional[dict]): Tool configuration with auth details.
+            tool_config (Optional[dict]): Tool configuration with auth details and group_id.
             token_required (bool): Whether authentication token is required.
             action_limits (Optional[Dict[str, Optional[int]]]): Per-action usage limits.
                 Example: {'run': 2, 'create': 1, 'list': None} where None means unlimited.
                 If not provided, uses DEFAULT_ACTION_LIMITS.
+            group_id (Optional[str]): Group ID for multi-tenant isolation (SECURITY).
             **kwargs: Additional keyword arguments passed to BaseTool.
         """
         super().__init__(**kwargs)
-        
+
         # Initialize action limits and usage counts
         if action_limits is None:
             self._action_limits = self.DEFAULT_ACTION_LIMITS.copy()
@@ -206,12 +209,16 @@ class DatabricksJobsTool(BaseTool):
             # Merge provided limits with defaults
             self._action_limits = self.DEFAULT_ACTION_LIMITS.copy()
             self._action_limits.update(action_limits)
-        
+
         # Initialize usage counts for all actions
         self._action_usage_counts = {action: 0 for action in self._action_limits.keys()}
-        
+
         if tool_config is None:
             tool_config = {}
+
+        # SECURITY: Store group_id for multi-tenant isolation
+        # Try to get from parameter first, then from tool_config
+        self._group_id = group_id or tool_config.get('group_id')
         
         
         # Initialize databricks_host from parameter if provided
@@ -274,16 +281,23 @@ class DatabricksJobsTool(BaseTool):
         # Try to get authentication if token not already set
         if not self._token:
             try:
-                # Try to get authentication through enhanced auth system
-                from src.utils.databricks_auth import is_databricks_apps_environment
-                if is_databricks_apps_environment():
-                    logger.info("Detected Databricks Apps environment")
-                if not self._token:
-                    # First try: environment variables for PAT (explicit user-config should win over DB/service)
-                    logger.info("Checking environment variables for Databricks token...")
-                    self._token = os.getenv("DATABRICKS_TOKEN") or os.getenv("DATABRICKS_API_KEY")
-                    if self._token:
-                        logger.info("✅ Using DATABRICKS token from environment")
+                # Use unified authentication system
+                logger.info("Getting authentication from unified auth system...")
+                from src.utils.databricks_auth import get_auth_context
+                import asyncio
+                loop = asyncio.new_event_loop()
+                try:
+                    asyncio.set_event_loop(loop)
+                    auth = loop.run_until_complete(get_auth_context(user_token=user_token))
+                    if auth:
+                        self._token = auth.token
+                        if not self._host:
+                            self._host = auth.workspace_url.rstrip('/')
+                        logger.info(f"✅ Using unified auth: {auth.auth_method}")
+                finally:
+                    loop.close()
+            except Exception as e:
+                logger.warning(f"Unified auth failed: {e}")
 
                 if not self._token:
                     # Next try: API Keys Service
@@ -303,10 +317,10 @@ class DatabricksJobsTool(BaseTool):
 
                         async def get_databricks_token():
                             async with UnitOfWork() as uow:
-                                # Try both possible key names
-                                token = await ApiKeysService.get_provider_api_key("databricks") or \
-                                       await ApiKeysService.get_provider_api_key("DATABRICKS_API_KEY") or \
-                                       await ApiKeysService.get_provider_api_key("DATABRICKS_TOKEN")
+                                # SECURITY: Try both possible key names with group_id for multi-tenant isolation
+                                token = await ApiKeysService.get_provider_api_key("databricks", group_id=self._group_id) or \
+                                       await ApiKeysService.get_provider_api_key("DATABRICKS_API_KEY", group_id=self._group_id) or \
+                                       await ApiKeysService.get_provider_api_key("DATABRICKS_TOKEN", group_id=self._group_id)
                                 return token
 
                         if loop.is_running():
@@ -323,12 +337,6 @@ class DatabricksJobsTool(BaseTool):
                             
             except ImportError as e:
                 logger.debug(f"Enhanced auth not available: {e}")
-                # Fall back to environment variables first, then API Keys Service
-                if not self._token:
-                    logger.info("Checking environment variables for Databricks token (fallback path)...")
-                    self._token = os.getenv("DATABRICKS_TOKEN") or os.getenv("DATABRICKS_API_KEY")
-                    if self._token:
-                        logger.info("✅ Using DATABRICKS token from environment (fallback)")
 
                 if not self._token:
                     logger.info("Trying API Keys Service without enhanced auth...")
@@ -347,9 +355,10 @@ class DatabricksJobsTool(BaseTool):
 
                         async def get_databricks_token():
                             async with UnitOfWork() as uow:
-                                token = await ApiKeysService.get_provider_api_key("databricks") or \
-                                       await ApiKeysService.get_provider_api_key("DATABRICKS_API_KEY") or \
-                                       await ApiKeysService.get_provider_api_key("DATABRICKS_TOKEN")
+                                # SECURITY: Try with group_id for multi-tenant isolation
+                                token = await ApiKeysService.get_provider_api_key("databricks", group_id=self._group_id) or \
+                                       await ApiKeysService.get_provider_api_key("DATABRICKS_API_KEY", group_id=self._group_id) or \
+                                       await ApiKeysService.get_provider_api_key("DATABRICKS_TOKEN", group_id=self._group_id)
                                 return token
 
                         if not loop.is_running():
@@ -364,10 +373,10 @@ class DatabricksJobsTool(BaseTool):
                 if not self._token:
                     logger.error("❌ No authentication available: no user token, no API key in service, no environment variables")
         
-        # Set fallback values from environment if not set from config
+        # Set default host if still not set
         if not self._host:
-            self._host = os.getenv("DATABRICKS_HOST", "your-workspace.cloud.databricks.com")
-            logger.info(f"Using host from environment or default: {self._host}")
+            self._host = "your-workspace.cloud.databricks.com"
+            logger.info(f"Using default host: {self._host}")
         
         # Check authentication requirements
         if token_required and not self._token:
@@ -450,9 +459,10 @@ class DatabricksJobsTool(BaseTool):
                 from src.services.api_keys_service import ApiKeysService
                 
                 async with UnitOfWork() as uow:
-                    runtime_token = await ApiKeysService.get_provider_api_key("databricks") or \
-                                   await ApiKeysService.get_provider_api_key("DATABRICKS_API_KEY") or \
-                                   await ApiKeysService.get_provider_api_key("DATABRICKS_TOKEN")
+                    # SECURITY: Runtime retrieval with group_id for multi-tenant isolation
+                    runtime_token = await ApiKeysService.get_provider_api_key("databricks", group_id=self._group_id) or \
+                                   await ApiKeysService.get_provider_api_key("DATABRICKS_API_KEY", group_id=self._group_id) or \
+                                   await ApiKeysService.get_provider_api_key("DATABRICKS_TOKEN", group_id=self._group_id)
                     
                 if runtime_token:
                     logger.info("✅ Successfully retrieved token from API Keys Service at runtime")

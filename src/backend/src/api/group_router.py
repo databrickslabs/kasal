@@ -348,14 +348,20 @@ async def delete_group(
 async def list_group_users(
     group_id: str,
     service: Annotated[GroupService, Depends(get_group_service)],
-    admin_user: AdminUserDep,
+    current_user: AuthenticatedUserDep,
     group_context: GroupContextDep,
     skip: int = 0,
     limit: int = 100
 ) -> List[GroupUserResponse]:
-    """List all users in a group. Requires admin privileges."""
+    """
+    List all users in a group.
+
+    Security requirements:
+    - System admins can view users in any workspace
+    - Regular users must be a workspace admin of the specific group they're querying
+    """
     # Use injected service
-    
+
     try:
         # Verify group exists
         group = await service.get_group_by_id(group_id)
@@ -364,20 +370,39 @@ async def list_group_users(
                 status_code=status.HTTP_404_NOT_FOUND,
                 detail=f"Group {group_id} not found"
             )
-        
+
+        # Check if user is a system admin (can view any workspace)
+        is_system_admin = getattr(current_user, 'is_system_admin', False)
+
+        if not is_system_admin:
+            # For non-system admins, check if they're a workspace admin of this specific group
+            user_group_membership = await service.get_user_group_membership(current_user.id, group_id)
+            if not user_group_membership:
+                raise HTTPException(
+                    status_code=status.HTTP_403_FORBIDDEN,
+                    detail="You must be a member of this workspace to view its users"
+                )
+
+            # Check if user is a workspace admin of this specific group
+            if user_group_membership.role.lower() != "admin":
+                raise HTTPException(
+                    status_code=status.HTTP_403_FORBIDDEN,
+                    detail="Only workspace admins can view workspace users"
+                )
+
         group_users_with_details = await service.list_group_users(
             group_id=group_id,
             skip=skip,
             limit=limit
         )
-        
-        # Construct responses 
+
+        # Construct responses
         responses = []
         for group_user_data in group_users_with_details:
             responses.append(GroupUserResponse(**group_user_data))
-        
+
         return responses
-        
+
     except HTTPException:
         raise
     except Exception as e:

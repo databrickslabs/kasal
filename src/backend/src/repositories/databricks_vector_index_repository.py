@@ -19,7 +19,7 @@ from src.schemas.databricks_vector_index import (
     IndexState,
     IndexType
 )
-from src.repositories.databricks_auth_helper import DatabricksAuthHelper
+from src.utils.databricks_auth import get_auth_context
 
 logger = LoggerManager.get_instance().databricks_vector_search
 
@@ -38,14 +38,20 @@ class DatabricksVectorIndexRepository:
         if workspace_url:
             self.workspace_url = workspace_url.rstrip('/')
         else:
-            # Try to get from environment variable
-            env_url = os.getenv('DATABRICKS_HOST', '').rstrip('/')
-            if env_url:
-                self.workspace_url = env_url
-                logger.info(f"Using DATABRICKS_HOST from environment: {self.workspace_url}")
-            else:
+            # Get from unified authentication
+            try:
+                from src.utils.databricks_auth import get_auth_context
+                import asyncio
+                auth = asyncio.run(get_auth_context())
+                if auth:
+                    self.workspace_url = auth.workspace_url.rstrip('/')
+                    logger.debug(f"Using workspace URL from unified {auth.auth_method} auth: {self.workspace_url}")
+                else:
+                    self.workspace_url = ""
+                    logger.warning("No Databricks workspace URL available from unified auth")
+            except Exception as e:
                 self.workspace_url = ""
-                logger.warning("No Databricks workspace URL configured. Set DATABRICKS_HOST environment variable.")
+                logger.warning(f"Failed to get workspace URL from unified auth: {e}")
     
     async def _get_auth_token(self, user_token: Optional[str] = None) -> str:
         """
@@ -65,10 +71,11 @@ class DatabricksVectorIndexRepository:
         Raises:
             Exception: If no authentication token can be obtained
         """
-        return await DatabricksAuthHelper.get_auth_token(
-            workspace_url=self.workspace_url,
-            user_token=user_token
-        )
+        # Use unified authentication system
+        auth = await get_auth_context(user_token=user_token)
+        if not auth:
+            raise Exception("Failed to get authentication context")
+        return auth.token
     
     
     async def create_index(
@@ -739,11 +746,7 @@ class DatabricksVectorIndexRepository:
             }
             
             # Log search parameters for debugging
-            logger.debug(f"[similarity_search] Index: {index_name}")
-            logger.debug(f"[similarity_search] Query vector dimension: {len(query_vector)}")
-            logger.debug(f"[similarity_search] Requested columns: {columns[:5]}..." if len(columns) > 5 else f"[similarity_search] Requested columns: {columns}")
-            logger.debug(f"[similarity_search] Num results requested: {num_results}")
-            logger.debug(f"[similarity_search] Filters: {filters}")
+            logger.debug(f"[similarity_search] Index: {index_name}, filters: {filters}, num_results: {num_results}")
             
             # Prepare the payload
             payload = {
@@ -752,7 +755,7 @@ class DatabricksVectorIndexRepository:
                 "num_results": num_results
             }
             if filters:
-                payload["filters"] = filters
+                payload["filters_json"] = json.dumps(filters)
             
             # Make the REST API call
             async with aiohttp.ClientSession() as session:

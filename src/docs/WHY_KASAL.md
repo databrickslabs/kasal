@@ -22,6 +22,49 @@ Transform your Databricks environment into an AI orchestration powerhouse. Build
 - **Extensible AI Engine**: CrewAI integration today, engine abstraction for future engines.
 - **Governance & Security**: Group-aware multi-tenant model, API keys, permissions, and auditability.
 
+## Components at a glance
+A quick tour of the building blocks—what each part does and why it matters.
+
+### Frontend (React SPA)
+- **What it does**: Visual designer for agents, tasks, and flows; live monitoring UI.
+- **Why it matters**: Non-technical users can build and operate AI workflows without touching code.
+
+### API (FastAPI)
+- **What it does**: Validates requests, exposes REST endpoints, and routes calls to services.
+- **Why it matters**: Clear, versioned contracts between UI/automation and backend logic.
+
+### Services (Business Logic)
+- **What it does**: Implements orchestration, validation, scheduling, and domain logic.
+- **Why it matters**: Keeps HTTP thin and domain logic testable and reusable.
+
+### Repositories (Data Access)
+- **What it does**: Encapsulates SQL and external I/O (Databricks APIs, Vector Search, MLflow).
+- **Why it matters**: Swappable persistence and integrations without leaking into services.
+
+### Engines (CrewAI Orchestration)
+- **What it does**: Prepares crews, runs executions, handles callbacks/guardrails, manages memory.
+- **Why it matters**: Pluggable execution engine today (CrewAI) and extensible for future engines.
+
+### Data & Storage
+- **What it does**: Async SQLAlchemy sessions, models/schemas, vector indexes, volumes.
+- **Why it matters**: Reliable persistence with optional vector search and document storage.
+
+### Scheduler & Background Jobs
+- **What it does**: Recurring runs, long tasks, and background queues (e.g., embedding batching).
+- **Why it matters**: Production-ready operations beyond single request/response.
+
+### Observability
+- **What it does**: Structured logs, execution logs, traces, history, health checks.
+- **Why it matters**: Debug fast, audit runs, and understand system behavior end-to-end.
+
+### Security & Governance
+- **What it does**: Group-aware multi-tenancy, JWT/Databricks headers, centralized permissions.
+- **Why it matters**: Safely share across teams while isolating data and enforcing roles.
+
+### Databricks Integrations
+- **What it does**: OAuth, Secrets, SQL Warehouses, Unity Catalog, Volumes, Vector Search, MLflow.
+- **Why it matters**: Build where your data and models already live with first-class support.
+
 ---
 
 ## What Makes Kasal Different

@@ -170,3 +170,7 @@ src/backend/app.db*
 chromadb-*.lock
 router_layer
 service_layer
+
+# MLflow
+mlruns/
+.mlruns/

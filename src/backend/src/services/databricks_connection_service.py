@@ -7,7 +7,7 @@ from typing import Dict, Any, Optional, Tuple
 import os
 
 from src.schemas.memory_backend import DatabricksMemoryConfig
-from src.repositories.databricks_auth_helper import DatabricksAuthHelper
+from src.utils.databricks_auth import get_auth_context
 from src.repositories.databricks_vector_endpoint_repository import DatabricksVectorEndpointRepository
 from src.repositories.databricks_vector_index_repository import DatabricksVectorIndexRepository
 from src.core.logger import LoggerManager
@@ -142,20 +142,14 @@ class DatabricksConnectionService:
         Returns:
             Tuple of (auth_token, auth_method_used)
         """
-        # Use auth helper to get token with proper authentication hierarchy
+        # Use unified authentication system
         try:
-            token = await DatabricksAuthHelper.get_auth_token(
-                workspace_url,
-                user_token
-            )
-            
-            if user_token:
-                return token, "OBO Authentication"
-            elif token:
-                # Could be from DB or environment
-                return token, "PAT Authentication"
-            else:
+            auth = await get_auth_context(user_token=user_token)
+            if not auth:
                 raise ValueError("No authentication token available")
+
+            # Return token and auth method description
+            return auth.token, auth.auth_method
         except Exception as e:
             logger.error(f"Failed to get authentication token: {e}")
             raise ValueError(f"All authentication methods failed: {e}")

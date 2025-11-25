@@ -2,7 +2,10 @@
 Genie Repository Layer
 
 Handles all communication with Databricks Genie API.
-Implements authentication hierarchy: OBO -> PAT from DB -> PAT from environment.
+Uses unified authentication from get_auth_context() which implements:
+  1. OBO (On-Behalf-Of) with user token
+  2. PAT from database with group_id filtering
+  3. Service Principal OAuth (SPN)
 """
 
 import asyncio
@@ -33,14 +36,7 @@ from src.schemas.genie import (
     GenieExecutionResponse,
     GenieAuthConfig
 )
-from src.utils.databricks_auth import (
-    get_databricks_auth_headers,
-    is_databricks_apps_environment,
-    extract_user_token_from_request
-)
-from src.core.unit_of_work import UnitOfWork
-from src.repositories.api_key_repository import ApiKeyRepository
-from src.utils.encryption_utils import EncryptionUtils
+from src.utils.databricks_auth import get_auth_context
 
 logger = logging.getLogger(__name__)
 
@@ -113,11 +109,13 @@ class GenieRepository:
             logger.info(f"Using host from config: {self._host}")
             return self._host
         
-        # Check environment
-        databricks_host = os.getenv("DATABRICKS_HOST")
-        
-        # If not in environment and in Databricks Apps, try SDK Config
-        if not databricks_host and is_databricks_apps_environment():
+        # Use unified auth to get host
+        from src.utils.databricks_auth import get_auth_context
+        auth = await get_auth_context()
+        databricks_host = auth.workspace_url if auth else None
+
+        # If not available from auth context, try SDK Config
+        if not databricks_host:
             try:
                 from databricks.sdk.config import Config
                 sdk_config = Config()
@@ -152,66 +150,29 @@ class GenieRepository:
     
     async def _get_auth_headers(self) -> Tuple[Optional[Dict[str, str]], Optional[str]]:
         """
-        Get authentication headers following the hierarchy:
-        1. OBO (On-Behalf-Of) authentication using user token
-        2. PAT from database
-        3. PAT from environment variables
-        
+        Get authentication headers using unified authentication.
+        Delegates all authentication logic to get_auth_context().
+
         Returns:
             Tuple of (headers dict, error message)
         """
-        headers = {"Content-Type": "application/json"}
-        
         try:
-            # Priority 1: OBO authentication with user token
-            if self.auth_config.use_obo and self.auth_config.user_token:
-                logger.info("Attempting OBO authentication with user token")
-                auth_headers, error = await get_databricks_auth_headers(
-                    user_token=self.auth_config.user_token
-                )
-                if auth_headers and not error:
-                    headers.update(auth_headers)
-                    logger.info("Successfully using OBO authentication")
-                    return headers, None
-                else:
-                    logger.warning(f"OBO authentication failed: {error}")
-            
-            # Priority 2: PAT from database
-            try:
-                async with UnitOfWork() as uow:
-                    api_key_repo = ApiKeyRepository(uow.session)
-                    databricks_key = await api_key_repo.get_api_key_by_service("DATABRICKS")
-                    
-                    if databricks_key and databricks_key.api_key:
-                        decrypted_key = EncryptionUtils.decrypt_if_needed(databricks_key.api_key)
-                        if decrypted_key:
-                            headers["Authorization"] = f"Bearer {decrypted_key}"
-                            logger.info("Using PAT from database")
-                            return headers, None
-            except Exception as e:
-                logger.debug(f"Could not get PAT from database: {e}")
-            
-            # Priority 3: PAT from environment variables
-            pat_token = (
-                self.auth_config.pat_token or
-                os.getenv("DATABRICKS_TOKEN") or
-                os.getenv("DATABRICKS_API_KEY")
-            )
-            
-            if pat_token:
-                headers["Authorization"] = f"Bearer {pat_token}"
-                logger.info("Using PAT from environment")
-                return headers, None
-            
-            # Fallback: Try generic databricks_auth which has its own hierarchy
-            auth_headers, error = await get_databricks_auth_headers()
-            if auth_headers and not error:
-                headers.update(auth_headers)
-                logger.info("Using authentication from databricks_auth utility")
-                return headers, None
-            
-            return None, "No authentication method available"
-            
+            from src.utils.databricks_auth import get_auth_context
+
+            # Extract user token if available (for OBO)
+            user_token = None
+            if self.auth_config and self.auth_config.use_obo and self.auth_config.user_token:
+                user_token = self.auth_config.user_token
+
+            # Get unified auth context (handles OBO → PAT with group_id → SPN)
+            auth = await get_auth_context(user_token=user_token)
+
+            if not auth:
+                return None, "No authentication method available"
+
+            # Return headers from auth context
+            return auth.get_headers(), None
+
         except Exception as e:
             logger.error(f"Error getting auth headers: {e}")
             return None, str(e)

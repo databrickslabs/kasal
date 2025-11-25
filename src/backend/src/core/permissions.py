@@ -188,6 +188,27 @@ def check_role_in_context(group_context: GroupContext, allowed_roles: List[str])
     return effective_role.lower() in [role.lower() for role in allowed_roles]
 
 
+def is_system_admin(group_context: GroupContext) -> bool:
+    """
+    Check if the user is a system administrator.
+    System administrators have full access to all workspaces and system-level operations.
+
+    Args:
+        group_context: The group context containing user info
+
+    Returns:
+        True if the user is a system administrator, False otherwise
+    """
+    if not group_context:
+        return False
+
+    # Check if user is a system admin
+    if hasattr(group_context, 'current_user') and group_context.current_user:
+        return getattr(group_context.current_user, 'is_system_admin', False)
+
+    return False
+
+
 def is_workspace_admin(group_context: GroupContext) -> bool:
     """
     Check if the user is an admin of their current workspace.

@@ -6,6 +6,7 @@ import { Task } from '../types/task';
 import { JobResult } from '../types/common';
 import { ModelService } from './ModelService';
 import { Models } from '../types/models';
+import { buildFlowConfiguration } from '../utils/flowConfigBuilder';
 
 interface NodeData {
   label?: string;
@@ -14,8 +15,8 @@ interface NodeData {
 }
 
 interface CrewConfig {
-  agents_yaml: Record<string, AgentYaml>;
-  tasks_yaml: Record<string, TaskYaml>;
+  agents_yaml: Record<string, AgentYaml>;  // For flows: empty {} - loaded from database using crew IDs from nodes
+  tasks_yaml: Record<string, TaskYaml>;    // For flows: empty {} - loaded from database using crew IDs from nodes
   inputs: Record<string, unknown>;
   planning?: boolean;
   reasoning?: boolean;
@@ -23,7 +24,7 @@ interface CrewConfig {
   execution_type?: string;
   schema_detection_enabled?: boolean;
   nodes?: { id: string; type: string; position: { x: number; y: number }; data: NodeData }[];
-  edges?: { id: string; source: string; target: string; sourceHandle?: string; targetHandle?: string }[];
+  edges?: { id: string; source: string; target: string; sourceHandle?: string; targetHandle?: string; data?: Record<string, unknown> }[];
   flow_id?: string;
   flow_config?: Record<string, unknown>;
 }
@@ -59,9 +60,10 @@ export class JobExecutionService {
       console.log(`[JobExecutionService] Executing job of type: ${executionType}`);
       
       // Create a base config with common properties
+      // Note: For flows, agents_yaml and tasks_yaml are loaded from database using crew IDs from nodes
       const config: CrewConfig = {
-        agents_yaml: {},
-        tasks_yaml: {},
+        agents_yaml: {},  // Empty for flows - loaded from database using crew IDs
+        tasks_yaml: {},   // Empty for flows - loaded from database using crew IDs
         inputs: additionalInputs,
         planning,
         reasoning,
@@ -73,21 +75,13 @@ export class JobExecutionService {
       // If executing a flow, prepare flow-specific configuration
       if (executionType === 'flow') {
         console.log(`[JobExecutionService] Preparing flow execution configuration`);
-        
-        // Find flow nodes
-        const flowNodes = nodes.filter(node => 
-          node.type === 'flowNode' || 
-          node.type === 'crewNode' || 
-          (node.type && node.type.toLowerCase().includes('flow'))
-        );
-        
+
+        // Find flow nodes (crewNode type)
+        const flowNodes = nodes.filter(node => node.type === 'crewNode');
+
         if (flowNodes.length > 0) {
           console.log(`[JobExecutionService] Found ${flowNodes.length} flow nodes for execution`);
-          
-          // Extract flow configuration from the first flow node if available
-          const firstFlowNode = flowNodes[0];
-          const flowConfig = firstFlowNode.data?.flowConfig;
-          
+
           // Always include nodes and edges in the config for flow execution
           // Map the nodes to match the expected format
           config.nodes = nodes.map(node => ({
@@ -96,29 +90,34 @@ export class JobExecutionService {
             position: node.position || { x: 0, y: 0 },
             data: node.data || {}
           }));
-          
+
           // Map the edges to match the expected format
+          // CRITICAL: Include the data field which contains listenToTaskIds and targetTaskIds
           config.edges = edges.map(edge => ({
             id: edge.id,
             source: edge.source,
             target: edge.target,
             sourceHandle: edge.sourceHandle || undefined,
-            targetHandle: edge.targetHandle || undefined
+            targetHandle: edge.targetHandle || undefined,
+            data: edge.data || {} // Include edge data with listenToTaskIds/targetTaskIds
           }));
-          
-          if (flowConfig && flowConfig.id) {
-            console.log(`[JobExecutionService] Found flow configuration with ID: ${flowConfig.id}`);
-            
-            // Include flow ID in the configuration
-            config.flow_id = flowConfig.id;
-            
-            // Add flow configuration to the config if available
-            if (flowConfig) {
-              config.flow_config = flowConfig;
-            }
-          } else {
-            console.log('[JobExecutionService] No flow ID found in configuration, creating dynamic flow');
-          }
+
+          // Build flow configuration with listeners, actions, and starting points
+          // This ensures flows execute correctly even when not saved
+          const builtFlowConfig = buildFlowConfiguration(nodes, edges, 'Dynamic Flow');
+
+          console.log(`[JobExecutionService] Built flow config with:`, {
+            listeners: builtFlowConfig.listeners.length,
+            actions: builtFlowConfig.actions.length,
+            startingPoints: builtFlowConfig.startingPoints.length
+          });
+
+          // Add the complete flow configuration
+          config.flow_config = {
+            ...builtFlowConfig,
+            nodes: config.nodes,
+            edges: config.edges
+          };
           
           // Include execution type and model
           config.execution_type = 'flow';
@@ -158,6 +157,7 @@ export class JobExecutionService {
               goal: agentData.goal || '',
               backstory: agentData.backstory || '',
               tools: Array.isArray(agentData.tools) ? agentData.tools : [],
+              tool_configs: agentData.tool_configs,  // Include tool_configs for MCP server configuration
               llm: agentData.llm,
               function_calling_llm: agentData.function_calling_llm,
               max_iter: agentData.max_iter,
@@ -226,6 +226,7 @@ export class JobExecutionService {
               description: taskData.description,
               expected_output: taskData.expected_output,
               tools: Array.isArray(taskData.tools) ? taskData.tools : [],
+              tool_configs: taskData.tool_configs,  // Include tool_configs for MCP server configuration
               context: [],
               agent: null,
               async_execution: Boolean(taskData.async_execution),

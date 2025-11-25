@@ -51,6 +51,7 @@ interface KnowledgeFileUploadProps {
   groupId: string;
   onFilesUploaded?: (files: UploadedFile[]) => void;
   onAgentsUpdated?: (updatedAgents: Agent[]) => void; // Callback to update canvas nodes
+  onTasksUpdated?: (uploadedFilePath: string) => void; // Callback to update task nodes with file path
   disabled?: boolean;
   compact?: boolean;
   availableAgents?: Agent[]; // Agents currently on the canvas
@@ -63,6 +64,7 @@ export const KnowledgeFileUpload: React.FC<KnowledgeFileUploadProps> = ({
   groupId: _groupId,
   onFilesUploaded,
   onAgentsUpdated,
+  onTasksUpdated,
   disabled = false,
   compact = false,
   availableAgents: providedAgents,
@@ -237,7 +239,14 @@ export const KnowledgeFileUpload: React.FC<KnowledgeFileUploadProps> = ({
           filename: file.name
         });
 
-        // If agents are selected, update their knowledge sources and tools
+        // NEW BEHAVIOR: Update task nodes with the uploaded file path
+        // This allows tasks to use DatabricksKnowledgeSearchTool with the file
+        if (response.data && response.data.path && onTasksUpdated) {
+          console.log('[DEBUG] Notifying parent to update task nodes with file path:', response.data.path);
+          onTasksUpdated(response.data.path);
+        }
+
+        // LEGACY: If agents are selected, update their knowledge sources and tools
         if (selectedAgents.length > 0 && response.data) {
           await updateAgentKnowledgeSources(response.data);
         }

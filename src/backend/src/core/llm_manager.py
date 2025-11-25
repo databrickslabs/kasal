@@ -48,6 +48,30 @@ embedding_logger = LoggerManager.get_instance().documentation_embedding
 # Note: With litellm 1.75.8+, GPT-5 is natively supported
 litellm.drop_params = True
 logger.info("Set litellm.drop_params=True to handle unsupported parameters gracefully")
+
+# Register Databricks model context windows with CrewAI
+# This is CRITICAL for CrewAI's respect_context_window to work correctly.
+# CrewAI has a hardcoded LLM_CONTEXT_WINDOW_SIZES dictionary that it uses to determine
+# when to trigger automatic summarization. Without entries for Databricks models,
+# it falls back to DEFAULT_CONTEXT_WINDOW_SIZE (8192 tokens) which is incorrect.
+# This causes CrewAI to not summarize when needed, leading to empty responses from
+# models like Qwen that silently fail when context is too large.
+try:
+    from crewai.llm import LLM_CONTEXT_WINDOW_SIZES
+    from src.seeds.model_configs import MODEL_CONFIGS
+
+    registered_count = 0
+    for model_name, config in MODEL_CONFIGS.items():
+        if config.get('provider') == 'databricks':
+            full_model_name = f"databricks/{model_name}"
+            context_window = config.get('context_window', 128000)
+            LLM_CONTEXT_WINDOW_SIZES[full_model_name] = context_window
+            registered_count += 1
+            logger.debug(f"Registered {full_model_name} with context_window={context_window} in CrewAI")
+
+    logger.info(f"Registered {registered_count} Databricks models with CrewAI for context window management")
+except Exception as reg_err:
+    logger.warning(f"Could not register Databricks models with CrewAI: {reg_err}")
 # Check if handlers already exist to avoid duplicates
 if not logger.handlers:
     file_handler = logging.FileHandler(log_file_path)
@@ -277,7 +301,16 @@ _mlflow_configured = False
 _use_mlflow = False
 
 def _configure_databricks_mlflow():
-    """Configure MLflow using existing Databricks authentication system"""
+    """
+    Configure MLflow using unified Databricks authentication.
+
+    MLflow is configured ONCE at application startup with service-level credentials.
+    MLflow does NOT support OBO (On-Behalf-Of) authentication because it uses
+    environment variables which are process-wide and would cause race conditions.
+
+    This is acceptable because MLflow is for observability/tracking, not user-specific
+    data access operations.
+    """
     global _mlflow_configured
 
     if _mlflow_configured is True:
@@ -285,67 +318,86 @@ def _configure_databricks_mlflow():
 
     try:
         import mlflow
-        from src.utils.databricks_auth import setup_environment_variables
+        import asyncio
+        from src.utils.databricks_auth import get_auth_context
 
-        # Use existing authentication system - this sets DATABRICKS_HOST and DATABRICKS_TOKEN
-        # using the same OBO/PAT logic as other Databricks services
-        if setup_environment_variables():
-            workspace_host = os.getenv("DATABRICKS_HOST", "")
-            if workspace_host:
-                # MLflow will automatically use DATABRICKS_HOST and DATABRICKS_TOKEN environment variables
-                tracking_uri = "databricks"  # Simple form - uses environment variables
-                mlflow.set_tracking_uri(tracking_uri)
-
-                # Set up experiment for LLM operations
-                experiment_name = os.getenv("MLFLOW_EXPERIMENT_NAME", "/Shared/kasal-llm-operations")
-                try:
-                    exp = mlflow.set_experiment(experiment_name)
-                    logger.info(f"MLflow experiment set to: {experiment_name} (ID: {getattr(exp, 'experiment_id', 'unknown')})")
-                    # Explicitly configure MLflow 3.x tracing destination and enable it
-                    tracing_ok = False
-                    try:
-                        from mlflow.tracing.destination import Databricks as _Dest
-                        mlflow.tracing.set_destination(_Dest(experiment_id=str(getattr(exp, "experiment_id", ""))))
-                        mlflow.tracing.enable()
-                        logger.info("MLflow tracing destination set and tracing enabled")
-                        tracing_ok = True
-                    except Exception as te:
-                        logger.warning(f"Could not configure MLflow tracing destination: {te}")
-                        tracing_ok = False
-                except Exception as e:
-                    logger.warning(f"Could not set MLflow experiment '{experiment_name}': {e}")
-                    # Continue with default experiment
-                    tracing_ok = False
-
-                # Enable comprehensive MLflow autolog for both LiteLLM and CrewAI
-                # This dual approach ensures maximum coverage of LLM calls
-
-                # 1. Enable LiteLLM autolog (captures underlying LLM calls)
-                try:
-                    mlflow.litellm.autolog(log_traces=tracing_ok)
-                    logger.info(f"✅ MLflow LiteLLM autolog enabled (log_traces={tracing_ok})")
-                except Exception as e:
-                    logger.warning(f"Failed to enable MLflow LiteLLM autolog: {e}")
-
-                # 2. Enable CrewAI autolog (captures CrewAI workflow structure)
-                try:
-                    mlflow.crewai.autolog()
-                    logger.info("✅ MLflow CrewAI autolog enabled")
-                except AttributeError:
-                    logger.warning("⚠️ MLflow CrewAI autolog not available (older MLflow version or integration issues)")
-                except Exception as e:
-                    logger.warning(f"⚠️ Failed to enable CrewAI autolog: {e}")
-
-                # Note: CrewAI uses LiteLLM internally, so LiteLLM autolog should capture
-                # the underlying calls even when using CrewAI's LLM wrapper
-
-                _mlflow_configured = True
-                logger.info(f"Databricks MLflow configured successfully using existing authentication")
-
+        # Get service-level authentication context (NO OBO - PAT/SPN only)
+        # This is configured ONCE at startup to avoid race conditions
+        # Pass user_token=None to skip OBO and use PAT/SPN
+        try:
+            loop = asyncio.get_event_loop()
+            if loop.is_running():
+                # Already in async context, need to run in executor
+                import concurrent.futures
+                with concurrent.futures.ThreadPoolExecutor() as executor:
+                    future = executor.submit(asyncio.run, get_auth_context(user_token=None))
+                    auth = future.result()
             else:
-                logger.info("No Databricks workspace available for MLflow")
+                # Not in event loop, can use asyncio.run
+                auth = asyncio.run(get_auth_context(user_token=None))
+        except RuntimeError:
+            # No event loop, use asyncio.run
+            auth = asyncio.run(get_auth_context(user_token=None))
+
+        if auth and auth.workspace_url:
+            # Set environment variables ONCE at startup for MLflow
+            # MLflow ONLY supports environment variable authentication
+            os.environ["DATABRICKS_HOST"] = auth.workspace_url
+            os.environ["DATABRICKS_TOKEN"] = auth.token
+            logger.info(f"MLflow configured with {auth.auth_method} authentication")
+
+            # MLflow will automatically use DATABRICKS_HOST and DATABRICKS_TOKEN environment variables
+            tracking_uri = "databricks"  # Simple form - uses environment variables
+            mlflow.set_tracking_uri(tracking_uri)
+
+            # Set up experiment for LLM operations
+            experiment_name = os.getenv("MLFLOW_EXPERIMENT_NAME", "/Shared/kasal-llm-operations")
+            try:
+                exp = mlflow.set_experiment(experiment_name)
+                logger.info(f"MLflow experiment set to: {experiment_name} (ID: {getattr(exp, 'experiment_id', 'unknown')})")
+                # Explicitly configure MLflow 3.x tracing destination and enable it
+                tracing_ok = False
+                try:
+                    from mlflow.tracing.destination import Databricks as _Dest
+                    mlflow.tracing.set_destination(_Dest(experiment_id=str(getattr(exp, "experiment_id", ""))))
+                    mlflow.tracing.enable()
+                    logger.info("MLflow tracing destination set and tracing enabled")
+                    tracing_ok = True
+                except Exception as te:
+                    logger.warning(f"Could not configure MLflow tracing destination: {te}")
+                    tracing_ok = False
+            except Exception as e:
+                logger.warning(f"Could not set MLflow experiment '{experiment_name}': {e}")
+                # Continue with default experiment
+                tracing_ok = False
+
+            # Enable comprehensive MLflow autolog for both LiteLLM and CrewAI
+            # This dual approach ensures maximum coverage of LLM calls
+
+            # 1. Enable LiteLLM autolog (captures underlying LLM calls)
+            try:
+                mlflow.litellm.autolog(log_traces=tracing_ok)
+                logger.info(f"✅ MLflow LiteLLM autolog enabled (log_traces={tracing_ok})")
+            except Exception as e:
+                logger.warning(f"Failed to enable MLflow LiteLLM autolog: {e}")
+
+            # 2. Enable CrewAI autolog (captures CrewAI workflow structure)
+            try:
+                mlflow.crewai.autolog()
+                logger.info("✅ MLflow CrewAI autolog enabled")
+            except AttributeError:
+                logger.warning("⚠️ MLflow CrewAI autolog not available (older MLflow version or integration issues)")
+            except Exception as e:
+                logger.warning(f"⚠️ Failed to enable CrewAI autolog: {e}")
+
+            # Note: CrewAI uses LiteLLM internally, so LiteLLM autolog should capture
+            # the underlying calls even when using CrewAI's LLM wrapper
+
+            _mlflow_configured = True
+            logger.info(f"Databricks MLflow configured successfully with {auth.auth_method} authentication")
+
         else:
-            logger.info("Databricks authentication not available for MLflow")
+            logger.info("No Databricks workspace available for MLflow")
 
     except ImportError:
         logger.info("MLflow not available - install with 'pip install mlflow' for Databricks observability")
@@ -466,23 +518,56 @@ __all__ = ['LLMManager', 'DatabricksGPTOSSHandler', 'DatabricksGPTOSSLLM', 'MLfl
 
 class LLMManager:
     """Manager for LLM configurations and interactions."""
-    
+
     # Circuit breaker for embeddings to prevent repeated failures
     _embedding_failures = {}  # Track failures by provider
     _embedding_failure_threshold = 3  # Number of failures before circuit opens
     _circuit_reset_time = 300  # Reset circuit after 5 minutes
-    
+
+    @staticmethod
+    def _get_group_id_from_context(required: bool = True) -> Optional[str]:
+        """
+        Get group_id from UserContext for multi-tenant isolation.
+
+        Args:
+            required: If True, raises ValueError when group_id is not available.
+                     If False, returns None when group_id is not available.
+
+        Returns:
+            group_id string if available, None if not available and not required
+
+        Raises:
+            ValueError: If group_id is not available and required=True
+        """
+        from src.utils.user_context import UserContext
+        try:
+            group_context = UserContext.get_group_context()
+            if group_context and hasattr(group_context, 'primary_group_id'):
+                group_id = group_context.primary_group_id
+                if group_id:
+                    return group_id
+        except Exception as e:
+            logger.warning(f"Could not get group_id from UserContext: {e}")
+
+        # If group_id is required, raise error
+        if required:
+            logger.error("Cannot retrieve API keys: no group_id available (multi-tenant isolation required)")
+            raise ValueError("group_id is required for API key operations (multi-tenant isolation)")
+
+        # Otherwise return None
+        return None
+
     @staticmethod
     async def configure_litellm(model: str) -> Dict[str, Any]:
         """
         Configure litellm for the specified model.
-        
+
         Args:
             model: Model identifier to configure
-            
+
         Returns:
             Dict[str, Any]: Model configuration parameters for litellm
-            
+
         Raises:
             ValueError: If model configuration is not found
             Exception: For other configuration errors
@@ -490,8 +575,13 @@ class LLMManager:
         # Get model configuration from database using ModelConfigService
         from src.db.session import async_session_factory
 
+        # Try to get group_id for multi-tenant isolation (optional at this stage)
+        # For Databricks with OBO, group_id is not needed
+        # For other providers, group_id will be required when fetching API keys
+        group_id = LLMManager._get_group_id_from_context(required=False)
+
         async with async_session_factory() as session:
-            model_config_service = ModelConfigService(session)
+            model_config_service = ModelConfigService(session, group_id=group_id)
             model_config_dict = await model_config_service.get_model_config(model)
             
         # Check if model configuration was found
@@ -524,14 +614,16 @@ class LLMManager:
         if timeout_value == 300:
             logger.info(f"Using extended timeout of {timeout_value}s for GPT-5 model in litellm: {model_name}")
         
-        # Get API key for the provider using ApiKeysService
+        # Get API key for the provider using ApiKeysService with group_id
+        # SECURITY: group_id is REQUIRED for these providers (multi-tenant isolation)
         if provider in [ModelProvider.OPENAI, ModelProvider.ANTHROPIC, ModelProvider.DEEPSEEK]:
-            # Get API key using the provider name
-            api_key = await ApiKeysService.get_provider_api_key(provider)
+            group_id = LLMManager._get_group_id_from_context(required=True)
+            assert group_id is not None, "group_id should not be None when required=True"
+            api_key = await ApiKeysService.get_provider_api_key(provider, group_id=group_id)
             if api_key:
                 model_params["api_key"] = api_key
             else:
-                logger.warning(f"No API key found for provider: {provider}")
+                logger.warning(f"No API key found for provider: {provider} with group_id: {group_id}")
         
         # Handle provider-specific configurations
         if provider == ModelProvider.DEEPSEEK:
@@ -547,74 +639,39 @@ class LLMManager:
             prefixed_model = f"ollama/{normalized_model_name}"
             model_params["model"] = prefixed_model
         elif provider == ModelProvider.DATABRICKS:
-            # Use enhanced Databricks authentication system
-            try:
-                from src.utils.databricks_auth import is_databricks_apps_environment, setup_environment_variables
-                
-                # Check if running in Databricks Apps environment
-                if is_databricks_apps_environment():
-                    logger.info("Using Databricks Apps OAuth authentication for model service")
-                    # Environment variables will be set up automatically by the enhanced auth system
-                    setup_environment_variables()
-                    # Don't set api_key - let OAuth handle authentication
-                else:
-                    # Only use API key service when NOT in Databricks Apps context
-                    token = await ApiKeysService.get_api_key_value(key_name="DATABRICKS_TOKEN")
-                    if not token:
-                        token = await ApiKeysService.get_api_key_value(key_name="DATABRICKS_API_KEY")
-                    
-                    if token:
-                        model_params["api_key"] = token
-                        # Set environment variables to prevent reading from .databrickscfg
-                        os.environ["DATABRICKS_TOKEN"] = token
-                    else:
-                        logger.warning("No Databricks token found and not in Databricks Apps environment")
-                        
-            except ImportError:
-                logger.warning("Enhanced Databricks auth not available, using legacy PAT authentication")
-                # Fallback to legacy PAT authentication
-                token = await ApiKeysService.get_api_key_value(key_name="DATABRICKS_TOKEN")
-                if not token:
-                    token = await ApiKeysService.get_api_key_value(key_name="DATABRICKS_API_KEY")
-                
-                if token:
-                    model_params["api_key"] = token
-                    os.environ["DATABRICKS_TOKEN"] = token
-                
-            # Get workspace URL from environment first, then database configuration
-            workspace_url = os.getenv("DATABRICKS_HOST", "")
-            if workspace_url:
-                # Use centralized URL utility for consistent handling
-                model_params["api_base"] = DatabricksURLUtils.construct_serving_endpoints_url(workspace_url)
-                logger.info(f"Using Databricks workspace URL from environment: {workspace_url}")
-            else:
-                # Fallback to database configuration or endpoint env var
-                model_params["api_base"] = os.getenv("DATABRICKS_ENDPOINT", "")
-                if not model_params["api_base"]:
-                    from src.services.databricks_service import DatabricksService
-                    from src.db.session import async_session_factory
-                    try:
-                        async with async_session_factory() as session:
-                            databricks_service = DatabricksService(session)
-                            config = await databricks_service.get_databricks_config()
-                            if config and config.workspace_url:
-                                workspace_url = config.workspace_url
-                                # Use centralized URL utility for consistent handling
-                                model_params["api_base"] = DatabricksURLUtils.construct_serving_endpoints_url(workspace_url)
-                                logger.info(f"Using workspace URL from database: {workspace_url}")
-                            else:
-                                # Try to get from enhanced auth system
-                                try:
-                                    from src.utils.databricks_auth import _databricks_auth
-                                    if hasattr(_databricks_auth, '_workspace_host') and _databricks_auth._workspace_host:
-                                        workspace_url = _databricks_auth._workspace_host
-                                        # Use centralized URL utility for consistent handling
-                                        model_params["api_base"] = DatabricksURLUtils.construct_serving_endpoints_url(workspace_url)
-                                        logger.info(f"Using workspace URL from enhanced auth: {workspace_url}")
-                                except Exception as e:
-                                    logger.debug(f"Could not get workspace URL from enhanced auth: {e}")
-                    except Exception as e:
-                        logger.error(f"Error getting Databricks workspace URL: {e}")
+            # Use unified Databricks authentication system
+            # Authentication priority: OBO → PAT → SPN
+            # - OBO: Uses user token (no group_id needed)
+            # - PAT: Falls back to API Keys Service (requires group_id)
+            # - SPN: Falls back to Service Principal (no group_id needed)
+            from src.utils.databricks_auth import get_auth_context
+            from src.utils.user_context import UserContext
+
+            # Get user token from context for OBO authentication
+            user_token = UserContext.get_user_token()
+            logger.info(f"Databricks authentication: user_token={'present' if user_token else 'not present'}")
+
+            # Get authentication context (OBO → PAT from database with group_id → SPN from environment)
+            # Note: get_auth_context() will handle group_id internally for PAT fallback
+            auth = await get_auth_context(user_token=user_token)
+            if not auth:
+                # SECURITY: MUST have authentication from databricks_auth
+                # No fallbacks to environment variables or other sources allowed
+                error_msg = (
+                    "Databricks authentication failed. All authentication methods exhausted:\n"
+                    "  1. OBO (On-Behalf-Of) - No user token provided or token invalid\n"
+                    "  2. PAT (Personal Access Token) - Not found in database with group_id\n"
+                    "  3. SPN (Service Principal) - DATABRICKS_CLIENT_ID/CLIENT_SECRET not configured\n"
+                    "Configure at least one authentication method to proceed."
+                )
+                logger.error(error_msg)
+                raise ValueError(error_msg)
+
+            # Pass authentication directly to litellm (thread-safe)
+            model_params["api_key"] = auth.token
+            litellm_params = auth.get_litellm_params()
+            model_params["api_base"] = litellm_params["api_base"]
+            logger.info(f"Using Databricks {auth.auth_method} authentication for liteLLM")
             
             # For Databricks with LiteLLM, we need the databricks/ prefix for provider identification
             if not model_params["model"].startswith("databricks/"):
@@ -623,23 +680,26 @@ class LLMManager:
             # Debug logging
             logger.info(f"Databricks model params: model={model_params.get('model')}, api_base={model_params.get('api_base')}, has_api_key={bool(model_params.get('api_key'))}")
         elif provider == ModelProvider.GEMINI:
-            # For Gemini, get the API key
-            api_key = await ApiKeysService.get_provider_api_key(provider)
+            # For Gemini, get the API key with group_id
+            # SECURITY: group_id is REQUIRED for multi-tenant isolation
+            group_id = LLMManager._get_group_id_from_context(required=True)
+            assert group_id is not None, "group_id should not be None when required=True"
+            api_key = await ApiKeysService.get_provider_api_key(provider, group_id=group_id)
             # Set in environment variables for better compatibility with various libraries
             if api_key:
                 model_params["api_key"] = api_key
                 os.environ["GEMINI_API_KEY"] = api_key
                 os.environ["GOOGLE_API_KEY"] = api_key
-                
-                # Set configuration for better tool/function handling with Instructor
-                os.environ["INSTRUCTOR_MODEL_NAME"] = "gemini"
-                
-                # Configure compatibility mode for Pydantic schema conversion
-                if "LITELLM_GEMINI_PYDANTIC_COMPAT" not in os.environ:
-                    os.environ["LITELLM_GEMINI_PYDANTIC_COMPAT"] = "true"
             else:
-                logger.warning(f"No API key found for provider: {provider}")
-                
+                logger.warning(f"No API key found for Gemini with group_id: {group_id}")
+
+            # Set configuration for better tool/function handling with Instructor
+            os.environ["INSTRUCTOR_MODEL_NAME"] = "gemini"
+
+            # Configure compatibility mode for Pydantic schema conversion
+            if "LITELLM_GEMINI_PYDANTIC_COMPAT" not in os.environ:
+                os.environ["LITELLM_GEMINI_PYDANTIC_COMPAT"] = "true"
+
             # Configure the model with the proper prefix for direct Google AI API
             # NOT using Vertex AI which requires application default credentials
             model_params["model"] = f"gemini/{model_name}"
@@ -647,24 +707,31 @@ class LLMManager:
         return model_params
 
     @staticmethod
-    async def configure_crewai_llm(model_name: str, temperature: Optional[float] = None) -> LLM:
+    async def configure_crewai_llm(model_name: str, group_id: str, temperature: Optional[float] = None) -> LLM:
         """
         Create and configure a CrewAI LLM instance with the correct provider prefix.
-        
+
         Args:
             model_name: The model identifier to configure
-            
+            group_id: Group ID for multi-tenant isolation (REQUIRED)
+            temperature: Optional temperature override
+
         Returns:
             LLM: Configured CrewAI LLM instance
-            
+
         Raises:
-            ValueError: If model configuration is not found
+            ValueError: If model configuration is not found or group_id is not provided
             Exception: For other configuration errors
         """
+        # SECURITY: Validate group_id is provided
+        if not group_id:
+            raise ValueError("group_id is REQUIRED for configure_crewai_llm (multi-tenant isolation)")
+
         # Get model configuration using ModelConfigService
         from src.db.session import async_session_factory
+
         async with async_session_factory() as session:
-            model_config_service = ModelConfigService(session)
+            model_config_service = ModelConfigService(session, group_id=group_id)
             model_config_dict = await model_config_service.get_model_config(model_name)
         
         # Check if model configuration was found
@@ -682,16 +749,17 @@ class LLMManager:
         api_base = None
         
         # Set the correct provider prefix based on provider
+        # Note: group_id is already passed as parameter to this function
         if provider == ModelProvider.DEEPSEEK:
-            api_key = await ApiKeysService.get_provider_api_key(provider)
+            api_key = await ApiKeysService.get_provider_api_key(provider, group_id=group_id)
             api_base = os.getenv("DEEPSEEK_ENDPOINT", "https://api.deepseek.com")
             prefixed_model = f"deepseek/{model_name_value}"
         elif provider == ModelProvider.OPENAI:
-            api_key = await ApiKeysService.get_provider_api_key(provider)
+            api_key = await ApiKeysService.get_provider_api_key(provider, group_id=group_id)
             # OpenAI doesn't need a prefix
             prefixed_model = model_name_value
         elif provider == ModelProvider.ANTHROPIC:
-            api_key = await ApiKeysService.get_provider_api_key(provider)
+            api_key = await ApiKeysService.get_provider_api_key(provider, group_id=group_id)
             prefixed_model = f"anthropic/{model_name_value}"
         elif provider == ModelProvider.OLLAMA:
             api_base = os.getenv("OLLAMA_API_BASE", "http://localhost:11434")
@@ -701,49 +769,30 @@ class LLMManager:
                 normalized_model_name = normalized_model_name.replace("-", ":")
             prefixed_model = f"ollama/{normalized_model_name}"
         elif provider == ModelProvider.DATABRICKS:
-            # Use enhanced Databricks authentication for CrewAI LLM
+            # Use unified Databricks authentication for CrewAI LLM (thread-safe)
             try:
-                from src.utils.databricks_auth import is_databricks_apps_environment, setup_environment_variables
-                
-                # Check if running in Databricks Apps environment
-                if is_databricks_apps_environment():
-                    logger.info("Using Databricks Apps OAuth authentication for CrewAI LLM")
-                    # Setup environment variables for LiteLLM compatibility
-                    setup_environment_variables()
-                    api_key = None  # OAuth will be handled by environment variables
+                from src.utils.databricks_auth import get_auth_context
+                from src.utils.user_context import UserContext
+
+                # Get user token from context for OBO authentication
+                user_token = UserContext.get_user_token()
+
+                # Get authentication context (OBO → PAT → Service Principal)
+                auth = await get_auth_context(user_token=user_token)
+                if auth:
+                    # Pass authentication directly to CrewAI LLM (thread-safe)
+                    api_key = auth.token
+                    litellm_params = auth.get_litellm_params()
+                    api_base = litellm_params["api_base"]
+                    logger.info(f"Using Databricks {auth.auth_method} authentication for CrewAI LLM")
                 else:
-                    # Only use API key service when NOT in Databricks Apps context
-                    api_key = await ApiKeysService.get_provider_api_key("DATABRICKS")
-                    
+                    logger.warning("No Databricks authentication available for CrewAI LLM")
+                    api_key = None
+
             except ImportError:
-                logger.warning("Enhanced Databricks auth not available for CrewAI LLM, using legacy PAT")
-                api_key = await ApiKeysService.get_provider_api_key("DATABRICKS")
-                
-            # Get workspace URL from environment first, then database
-            workspace_url = os.getenv("DATABRICKS_HOST", "")
-            if workspace_url:
-                # Use centralized URL utility for consistent handling
-                api_base = DatabricksURLUtils.construct_serving_endpoints_url(workspace_url)
-                logger.info(f"Using Databricks workspace URL from environment for CrewAI: {workspace_url}")
-            else:
-                # Fallback to DATABRICKS_ENDPOINT or database
-                api_base = os.getenv("DATABRICKS_ENDPOINT", "")
-                
-                # Try to get workspace URL from database if not set
-                if not api_base:
-                    try:
-                        from src.services.databricks_service import DatabricksService
-                        from src.db.session import async_session_factory
-                        async with async_session_factory() as session:
-                            databricks_service = DatabricksService(session)
-                            config = await databricks_service.get_databricks_config()
-                            if config and config.workspace_url:
-                                workspace_url = config.workspace_url
-                                # Use centralized URL utility for consistent handling
-                                api_base = DatabricksURLUtils.construct_serving_endpoints_url(workspace_url)
-                                logger.info(f"Using workspace URL from database for CrewAI: {workspace_url}")
-                    except Exception as e:
-                        logger.error(f"Error getting Databricks workspace URL for CrewAI: {e}")
+                # SECURITY: databricks_auth module is required - no fallback allowed
+                logger.error("Unified Databricks auth module not available for CrewAI LLM")
+                raise ImportError("databricks_auth module is required for Databricks authentication")
             
             prefixed_model = f"databricks/{model_name_value}"
             
@@ -781,11 +830,14 @@ class LLMManager:
             else:
                 return LLM(**llm_params)
         elif provider == ModelProvider.GEMINI:
-            api_key = await ApiKeysService.get_provider_api_key(provider)
+            # SECURITY: Use group_id parameter for multi-tenant isolation
+            api_key = await ApiKeysService.get_provider_api_key(provider, group_id=group_id)
             # Set in environment variables for better compatibility with various libraries
             if api_key:
                 os.environ["GEMINI_API_KEY"] = api_key
                 os.environ["GOOGLE_API_KEY"] = api_key
+            else:
+                logger.warning(f"No API key found for Gemini with group_id: {group_id}")
                 
                 # Set configuration for better tool/function handling with Instructor
                 os.environ["INSTRUCTOR_MODEL_NAME"] = "gemini"
@@ -849,17 +901,22 @@ class LLMManager:
         Create a CrewAI LLM instance for the specified model.
         If MLflow is enabled for the current workspace (group), wrap with MLflow tracking.
         """
-        # Get standard LLM configuration
-        llm = await LLMManager.configure_crewai_llm(model_name, temperature)
+        # CRITICAL: Get group_id from UserContext FIRST for multi-tenant isolation
+        from src.utils.user_context import UserContext
+        group_ctx = UserContext.get_group_context()
+        group_id = getattr(group_ctx, "primary_group_id", None) if group_ctx else None
+
+        if not group_id:
+            logger.error("No group_id found in UserContext for LLM creation")
+            raise ValueError("group_id is REQUIRED for get_llm (multi-tenant isolation)")
+
+        # Get standard LLM configuration with group_id
+        llm = await LLMManager.configure_crewai_llm(model_name, group_id, temperature)
 
         # Determine if MLflow is enabled for this group
         try:
-            from src.core.user_context import UserContext
             from src.db.session import async_session_factory
             from src.services.mlflow_service import MLflowService
-
-            group_ctx = UserContext.get_group_context()
-            group_id = getattr(group_ctx, "primary_group_id", None) if group_ctx else None
 
             enabled = False
             async with async_session_factory() as db:
@@ -923,87 +980,36 @@ class LLMManager:
             
             # Handle different embedding providers
             if provider == 'databricks' or 'databricks' in embedding_model:
-                # Use enhanced Databricks authentication for embeddings - follow GenieTool pattern
+                # Use unified Databricks authentication for embeddings
                 try:
-                    from src.utils.databricks_auth import is_databricks_apps_environment, get_databricks_auth_headers
-                    
-                    # First try: OBO authentication if available
-                    embedding_logger.info("Attempting enhanced Databricks authentication for embeddings")
-                    headers_result, error = await get_databricks_auth_headers()
-                    if headers_result and not error:
-                        embedding_logger.info("Using enhanced Databricks authentication (OAuth/OBO) for embeddings")
-                        headers = headers_result
-                        api_key = None  # OAuth handled by headers
-                    else:
-                        logger.info(f"Enhanced auth failed ({error}), falling back to API key service")
-                        # Second try: API key from service
-                        api_key = await ApiKeysService.get_provider_api_key("DATABRICKS")
-                        if api_key:
-                            embedding_logger.info("Using API key from service for embeddings")
-                            headers = None
+                    from src.utils.databricks_auth import get_auth_context
+                    from src.utils.user_context import UserContext
+
+                    # Get user token from context for OBO authentication
+                    user_token = UserContext.get_user_token()
+
+                    # Use unified authentication (OBO → OAuth → PAT)
+                    embedding_logger.info("Attempting unified Databricks authentication for embeddings")
+                    auth = await get_auth_context(user_token=user_token)
+                    if auth:
+                        embedding_logger.info(f"Using Databricks {auth.auth_method} authentication for embeddings")
+                        # For OAuth/OBO, use headers approach
+                        if auth.auth_method in ["OBO", "OAuth"]:
+                            headers = auth.get_headers()
+                            api_key = None
                         else:
-                            # Third try: Client credentials from environment
-                            client_id = os.getenv("DATABRICKS_CLIENT_ID")
-                            client_secret = os.getenv("DATABRICKS_CLIENT_SECRET")
-                            if client_id and client_secret:
-                                embedding_logger.info("Using client credentials for embeddings")
-                                # Let the enhanced auth handle client credentials
-                                headers_result, error = await get_databricks_auth_headers()
-                                if headers_result and not error:
-                                    headers = headers_result
-                                    api_key = None
-                                else:
-                                    # Fourth try: Environment variable DATABRICKS_TOKEN
-                                    api_key = os.getenv("DATABRICKS_TOKEN") or os.getenv("DATABRICKS_API_KEY")
-                                    if api_key:
-                                        embedding_logger.info("Using DATABRICKS_TOKEN from environment for embeddings")
-                                        headers = None
-                                    else:
-                                        logger.error("No Databricks authentication method available")
-                                        return None
-                            else:
-                                # Fourth try: Environment variable DATABRICKS_TOKEN
-                                api_key = os.getenv("DATABRICKS_TOKEN") or os.getenv("DATABRICKS_API_KEY")
-                                if api_key:
-                                    embedding_logger.info("Using DATABRICKS_TOKEN from environment for embeddings")
-                                    headers = None
-                                else:
-                                    logger.error("No Databricks authentication method available")
-                                    return None
-                        
+                            # For PAT, use API key approach
+                            api_key = auth.token
+                            headers = None
+                        api_base = DatabricksURLUtils.construct_serving_endpoints_url(auth.workspace_url)
+                    else:
+                        embedding_logger.warning("No Databricks authentication available for embeddings")
+                        return None
+
                 except ImportError:
-                    embedding_logger.warning("Enhanced Databricks auth not available for embeddings, using fallback methods")
-                    # Try API key service first
-                    api_key = await ApiKeysService.get_provider_api_key("DATABRICKS")
-                    if not api_key:
-                        # Fall back to environment variable
-                        api_key = os.getenv("DATABRICKS_TOKEN") or os.getenv("DATABRICKS_API_KEY")
-                        if api_key:
-                            embedding_logger.info("Using DATABRICKS_TOKEN from environment for embeddings (no enhanced auth)")
-                    headers = None
-                
-                # Get workspace URL from environment first, then database
-                workspace_url = os.getenv("DATABRICKS_HOST", "")
-                if workspace_url:
-                    # Use centralized URL utility for consistent handling
-                    api_base = DatabricksURLUtils.construct_serving_endpoints_url(workspace_url)
-                    embedding_logger.info(f"Using Databricks workspace URL from environment for embeddings: {workspace_url}")
-                else:
-                    # Fallback to database configuration
-                    api_base = None
-                    from src.services.databricks_service import DatabricksService
-                    from src.db.session import async_session_factory
-                    try:
-                        async with async_session_factory() as session:
-                            databricks_service = DatabricksService(session)
-                            config = await databricks_service.get_databricks_config()
-                            if config and config.workspace_url:
-                                workspace_url = config.workspace_url
-                                # Use centralized URL utility for consistent handling
-                                api_base = DatabricksURLUtils.construct_serving_endpoints_url(workspace_url)
-                                embedding_logger.info(f"Using workspace URL from database for embeddings: {workspace_url}")
-                    except Exception as e:
-                        embedding_logger.error(f"Error getting Databricks workspace URL for embeddings: {e}")
+                    # SECURITY: databricks_auth module is required - no fallback allowed
+                    embedding_logger.error("Unified Databricks auth module not available for embeddings")
+                    raise ImportError("databricks_auth module is required for Databricks authentication")
                 
                 # Check if we have either OAuth headers or API key + base URL
                 if not ((headers and api_base) or (api_key and api_base)):
@@ -1111,7 +1117,8 @@ class LLMManager:
                 
             elif provider == 'google':
                 # Use Google AI for embeddings
-                api_key = await ApiKeysService.get_provider_api_key(ModelProvider.GEMINI)
+                group_id = LLMManager._get_group_id_from_context()
+                api_key = await ApiKeysService.get_provider_api_key(ModelProvider.GEMINI, group_id=group_id)
                 
                 if not api_key:
                     embedding_logger.warning("No Google API key found for creating embeddings")
@@ -1130,10 +1137,11 @@ class LLMManager:
                 
             else:
                 # Default to OpenAI for embeddings
-                api_key = await ApiKeysService.get_provider_api_key(ModelProvider.OPENAI)
-                
+                group_id = LLMManager._get_group_id_from_context()
+                api_key = await ApiKeysService.get_provider_api_key(ModelProvider.OPENAI, group_id=group_id)
+
                 if not api_key:
-                    embedding_logger.warning("No OpenAI API key found for creating embeddings")
+                    embedding_logger.warning(f"No OpenAI API key found for creating embeddings with group_id: {group_id}")
                     return None
                     
                 # Create the embedding using litellm

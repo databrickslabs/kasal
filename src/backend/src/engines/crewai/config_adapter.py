@@ -11,6 +11,30 @@ from src.schemas.execution import CrewConfig
 from src.engines.crewai.helpers.conversion_helpers import extract_crew_yaml_data
 from src.core.logger import LoggerManager
 
+
+def get_execution_logger(config: dict = None):
+    """
+    Get the appropriate logger based on whether this is a flow or crew execution.
+
+    Args:
+        config: Optional execution configuration dict
+
+    Returns:
+        Flow logger if config indicates a flow execution, crew logger otherwise
+    """
+    logger_manager = LoggerManager.get_instance()
+
+    # If no config provided, default to crew logger
+    if not config:
+        return logger_manager.crew
+
+    # Check if this is a flow execution (has nodes, edges, and flow_config)
+    is_flow = 'flow_config' in config and 'nodes' in config and 'edges' in config
+
+    return logger_manager.flow if is_flow else logger_manager.crew
+
+
+# Default logger for backward compatibility (will be crew logger)
 logger = LoggerManager.get_instance().crew
 
 def adapt_config(config: CrewConfig) -> Dict[str, Any]:
@@ -132,16 +156,39 @@ def normalize_config(execution_config: Dict[str, Any]) -> Dict[str, Any]:
 def normalize_flow_config(config: Dict[str, Any]) -> Dict[str, Any]:
     """
     Normalize a flow configuration to the expected format.
-    
+
+    Handles two types of configurations:
+    1. Traditional: Pre-defined agents, tasks, and flow structure
+    2. Dynamic: nodes/edges/flow_config from visual flow canvas
+
     Args:
         config: Raw flow configuration dictionary
-        
+
     Returns:
-        Normalized flow configuration dictionary
+        Normalized flow configuration dictionary (or passthrough for dynamic flows)
     """
+    # Use dynamic logger based on config type (flow vs crew)
+    logger = get_execution_logger(config)
+
+    # Check if this is a dynamic flow configuration (nodes/edges/flow_config)
+    # Dynamic flows are built from the visual flow canvas and don't have pre-defined agents/tasks
+    is_dynamic_flow = 'flow_config' in config and 'nodes' in config and 'edges' in config
+
+    if is_dynamic_flow:
+        logger.info("[normalize_flow_config] Detected dynamic flow config with nodes/edges/flow_config")
+        logger.info(f"[normalize_flow_config] Config has {len(config.get('nodes', []))} nodes and {len(config.get('edges', []))} edges")
+        logger.info(f"[normalize_flow_config] flow_config keys: {list(config.get('flow_config', {}).keys())}")
+
+        # For dynamic flows, we pass the config through without normalization
+        # The FlowBuilder will handle building the flow from nodes/edges/flow_config directly
+        # We just need to ensure the structure is preserved
+        return config
+
+    # Traditional flow config with pre-defined agents, tasks, and flow
+    logger.info("[normalize_flow_config] Processing traditional flow config with agents/tasks/flow")
     normalized = {}
-    
-    # Validate required sections
+
+    # Validate required sections for traditional flows
     required_sections = ['agents', 'tasks', 'flow']
     for section in required_sections:
         if section not in config:

@@ -36,8 +36,8 @@ class Settings(BaseSettings):
     SYNC_DATABASE_URI: Optional[str] = None
     
     # Database file path for SQLite
-    SQLITE_DB_PATH: str = os.getenv("SQLITE_DB_PATH", "./app.db")
-    DB_FILE_PATH: str = os.getenv("DB_FILE_PATH", "sqlite.db")
+    SQLITE_DB_PATH: Optional[str] = os.getenv("SQLITE_DB_PATH", "./app.db")
+    DB_FILE_PATH: Optional[str] = os.getenv("DB_FILE_PATH", "sqlite.db")
 
     @field_validator("DATABASE_URI", mode="before")
     def assemble_db_connection(cls, v: Optional[str], info) -> Any:

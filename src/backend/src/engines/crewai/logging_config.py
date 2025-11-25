@@ -19,7 +19,17 @@ _execution_context = threading.local()
 class ExecutionContextFormatter(logging.Formatter):
     """
     Custom formatter that adds execution ID to log messages.
+    Preserves the prefix from the original format string.
     """
+
+    def __init__(self, fmt=None, datefmt=None, style='%'):
+        super().__init__(fmt, datefmt, style)
+        # Extract prefix from original format (e.g., "[FLOW]" or "[CREW]")
+        self._original_fmt = fmt or '[CREW] %(asctime)s - %(levelname)s - %(message)s'
+        # Extract the prefix by finding the pattern [SOMETHING]
+        import re
+        match = re.match(r'(\[[\w]+\])', self._original_fmt)
+        self._prefix = match.group(1) if match else '[CREW]'
 
     def format(self, record):
         # Get execution ID from thread-local storage
@@ -31,11 +41,11 @@ class ExecutionContextFormatter(logging.Formatter):
         else:
             record.exec_id = ""
 
-        # Use the original format with execution ID
+        # Use the original format with execution ID, preserving the prefix
         if record.exec_id:
-            self._style._fmt = f'[CREW]%(exec_id)s %(asctime)s - %(levelname)s - %(message)s'
+            self._style._fmt = f'{self._prefix}%(exec_id)s %(asctime)s - %(levelname)s - %(message)s'
         else:
-            self._style._fmt = '[CREW] %(asctime)s - %(levelname)s - %(message)s'
+            self._style._fmt = f'{self._prefix} %(asctime)s - %(levelname)s - %(message)s'
 
         return super().format(record)
 
@@ -391,17 +401,18 @@ def execution_logging_context(execution_id: str):
         clear_execution_context()
 
 
-def configure_subprocess_logging(execution_id: str):
+def configure_subprocess_logging(execution_id: str, process_type: str = "crew"):
     """
-    Configure logging for a subprocess running a crew execution.
+    Configure logging for a subprocess running a crew or flow execution.
 
     This function:
     1. Redirects stdout/stderr to prevent terminal output
-    2. Configures all loggers to write to crew.log with execution ID
+    2. Configures all loggers to write to crew.log or flow.log with execution ID
     3. Suppresses verbose output from CrewAI and dependencies
 
     Args:
         execution_id: The execution ID to include in logs
+        process_type: Type of process ("crew" or "flow") - defaults to "crew" for backward compatibility
     """
     import os  # Import at the top of the function
 
@@ -419,8 +430,8 @@ def configure_subprocess_logging(execution_id: str):
     root_logger.setLevel(logging.WARNING)
 
     # Suppress specific noisy loggers using centralized logger configuration
+    # NOTE: 'crewai' is configured separately below to write to flow.log/crew.log
     for logger_name in [
-        'crewai',
         'openai',
         'httpx',
         'httpcore',
@@ -455,67 +466,86 @@ def configure_subprocess_logging(execution_id: str):
     logger_manager = LoggerManager.get_instance(log_dir)
     logger_manager.initialize()
 
-    # Get crew logger and ensure it has the file handler
-    crew_logger = logger_manager.crew
+    # Get the appropriate logger based on process_type
+    if process_type.lower() == "flow":
+        exec_logger = logger_manager.flow
+        log_prefix = "[FLOW]"
+        log_filename = "flow.log"
+    else:
+        exec_logger = logger_manager.crew
+        log_prefix = "[CREW]"
+        log_filename = "crew.log"
 
-    # Remove console handlers but keep file handlers
-    crew_logger.handlers = [h for h in crew_logger.handlers
-                            if not isinstance(h, logging.StreamHandler)]
+    # IMPORTANT: Clear any existing level configuration
+    # The logger might have been pre-configured with WARNING level
+    exec_logger.setLevel(logging.NOTSET)  # Clear first
+    exec_logger.setLevel(logging.INFO)     # Then set to INFO
+
+    # Remove only console (non-file) StreamHandlers, keep FileHandlers
+    exec_logger.handlers = [h for h in exec_logger.handlers
+                            if not isinstance(h, logging.StreamHandler) or isinstance(h, logging.FileHandler)]
 
     # IMPORTANT: If no file handlers exist, create one
-    crew_log_path = os.path.join(log_dir, 'crew.log')
+    log_path = os.path.join(log_dir, log_filename)
 
-    # Check if we already have a file handler for crew.log
-    has_file_handler = False
-    for handler in crew_logger.handlers:
+    # Check if we already have a file handler for the log file
+    # CRITICAL: Update formatter for ALL file handlers to use correct prefix
+    file_handler = None
+    for handler in exec_logger.handlers:
         if isinstance(handler, logging.FileHandler):
-            has_file_handler = True
-            # Update formatter with execution context
+            file_handler = handler
+            # ALWAYS update formatter with correct prefix for this process type
             handler.setFormatter(ExecutionContextFormatter(
-                fmt='[CREW] %(asctime)s - %(levelname)s - %(message)s',
+                fmt=f'{log_prefix} %(asctime)s - %(levelname)s - %(message)s',
                 datefmt='%Y-%m-%d %H:%M:%S'
             ))
 
     # If no file handler exists, create one
-    if not has_file_handler:
-        file_handler = logging.FileHandler(crew_log_path)
+    if not file_handler:
+        file_handler = logging.FileHandler(log_path)
         file_handler.setFormatter(ExecutionContextFormatter(
-            fmt='[CREW] %(asctime)s - %(levelname)s - %(message)s',
+            fmt=f'{log_prefix} %(asctime)s - %(levelname)s - %(message)s',
             datefmt='%Y-%m-%d %H:%M:%S'
         ))
-        crew_logger.addHandler(file_handler)
+        exec_logger.addHandler(file_handler)
 
     # Check if debug logging is enabled via environment variables
     import os
 
-    # Support both old KASAL_DEBUG_TRACES and new KASAL_LOG_CREW
+    # Determine which environment variable to check based on process_type
+    env_var_name = f'KASAL_LOG_{process_type.upper()}'
+
+    # Support both old KASAL_DEBUG_TRACES and new KASAL_LOG_CREW/KASAL_LOG_FLOW
     debug_enabled = (
         os.environ.get('KASAL_DEBUG_TRACES', '').lower() in ['true', '1', 'yes'] or
         os.environ.get('KASAL_DEBUG_ALL', '').lower() in ['true', '1', 'yes'] or
-        os.environ.get('KASAL_LOG_CREW', '').upper() == 'DEBUG'
+        os.environ.get(env_var_name, '').upper() == 'DEBUG'
     )
 
     # Determine log level from environment
-    crew_log_level = os.environ.get('KASAL_LOG_CREW', '').upper()
-    if crew_log_level == 'DEBUG':
+    process_log_level = os.environ.get(env_var_name, '').upper()
+    if process_log_level == 'DEBUG':
         log_level = logging.DEBUG
-    elif crew_log_level == 'INFO':
+    elif process_log_level == 'INFO':
         log_level = logging.INFO
-    elif crew_log_level == 'WARNING':
+    elif process_log_level == 'WARNING':
         log_level = logging.WARNING
-    elif crew_log_level == 'ERROR':
+    elif process_log_level == 'ERROR':
         log_level = logging.ERROR
-    elif crew_log_level == 'CRITICAL':
+    elif process_log_level == 'CRITICAL':
         log_level = logging.CRITICAL
-    elif crew_log_level == 'OFF':
+    elif process_log_level == 'OFF':
         log_level = logging.CRITICAL + 1
     elif debug_enabled:
         log_level = logging.DEBUG
     else:
         # Fall back to global KASAL_LOG_LEVEL or INFO
-        global_level = os.environ.get('KASAL_LOG_LEVEL', 'INFO').upper()
+        # CRITICAL: Default to INFO for subprocess execution logging
+        global_level = os.environ.get('KASAL_LOG_LEVEL', '').upper()
         if global_level == 'DEBUG':
             log_level = logging.DEBUG
+        elif global_level == 'INFO':
+            log_level = logging.INFO
         elif global_level == 'WARNING':
             log_level = logging.WARNING
         elif global_level == 'ERROR':
@@ -525,16 +555,18 @@ def configure_subprocess_logging(execution_id: str):
         elif global_level == 'OFF':
             log_level = logging.CRITICAL + 1
         else:
+            # No environment variables set - default to INFO for subprocess logging
             log_level = logging.INFO
 
-    # Set the crew logger level
-    crew_logger.setLevel(log_level)
+    # Set the logger level
+    exec_logger.setLevel(log_level)
 
     if log_level == logging.DEBUG:
-        crew_logger.info("[TRACE_DEBUG] Debug logging enabled for crew execution")
+        exec_logger.info(f"[TRACE_DEBUG] Debug logging enabled for {process_type} execution")
 
     # Apply file handler to all relevant loggers
     for logger_name in [
+        'crewai',  # CrewAI framework logs (crew kickoff, task execution, etc.)
         'src.engines.crewai.callbacks.logging_callbacks',
         'src.engines.crewai.callbacks.execution_callback',
         'src.engines.crewai.trace_management',
@@ -551,14 +583,14 @@ def configure_subprocess_logging(execution_id: str):
         module_logger.setLevel(log_level)
         module_logger.propagate = False
 
-    # Capture MLflow errors (suppress warnings) in crew.log explicitly
+    # Capture MLflow errors (suppress warnings) explicitly
     mlflow_logger = get_logger('mlflow')
     mlflow_logger.handlers = []
     mlflow_logger.addHandler(file_handler)
     mlflow_logger.setLevel(logging.ERROR)
     mlflow_logger.propagate = False
 
-    return crew_logger
+    return exec_logger
 
 
 def suppress_stdout_stderr():

@@ -185,6 +185,10 @@ export const useCrewExecutionStore = create<CrewExecutionState>((set, get) => ({
 
   // Execution methods
   executeCrew: async (nodes, edges) => {
+    console.log('[CrewExecution] ========== executeCrew CALLED ==========');
+    console.log('[CrewExecution] executeCrew - nodes:', nodes);
+    console.log('[CrewExecution] executeCrew - edges:', edges);
+
     const { selectedModel, planningEnabled, planningLLM, reasoningEnabled, reasoningLLM, schemaDetectionEnabled, inputVariables, processType, managerLLM } = get();
     set({ isExecuting: true });
 
@@ -342,6 +346,10 @@ export const useCrewExecutionStore = create<CrewExecutionState>((set, get) => ({
   },
 
   executeFlow: async (nodes, edges) => {
+    console.log('[CrewExecution] ========== executeFlow CALLED ==========');
+    console.log('[CrewExecution] executeFlow - nodes:', nodes);
+    console.log('[CrewExecution] executeFlow - edges:', edges);
+
     const { selectedModel, planningEnabled, planningLLM, reasoningEnabled, reasoningLLM, schemaDetectionEnabled } = get();
     set({ isExecuting: true });
 
@@ -354,17 +362,12 @@ export const useCrewExecutionStore = create<CrewExecutionState>((set, get) => ({
       }, {});
       
       console.log('[FlowExecution] Node types on canvas:', nodeTypes);
-      
-      // Check for flow nodes with expanded criteria to include crewNode
-      // Since we now know the canvas uses crewNode type for flows
-      const hasFlowNodes = nodes.some(node => 
-        node.type === 'flowNode' || 
-        node.type === 'crewNode' ||  // Accept crewNode as a valid flow node
-        (node.type && node.type.toLowerCase().includes('flow'))
-      );
+
+      // Check for flow nodes (crewNode type)
+      const hasFlowNodes = nodes.some(node => node.type === 'crewNode');
 
       if (!hasFlowNodes) {
-        throw new Error('Flow execution requires at least one flow node on the canvas');
+        throw new Error('Flow execution requires at least one crew node on the canvas');
       }
 
       // Consider all node types as potential flow nodes for execution
@@ -470,18 +473,14 @@ export const useCrewExecutionStore = create<CrewExecutionState>((set, get) => ({
       // Determine execution type based on node types
       const hasAgentNodes = nodes.some(node => node.type === 'agentNode');
       const hasTaskNodes = nodes.some(node => node.type === 'taskNode');
-      const hasFlowNodes = nodes.some(node =>
-        node.type === 'flowNode' ||
-        node.type === 'crewNode' ||
-        (node.type && node.type.toLowerCase().includes('flow'))
-      );
+      const hasFlowNodes = nodes.some(node => node.type === 'crewNode');
 
       let executionType: 'crew' | 'flow' = 'crew';
 
       if (hasFlowNodes) {
         executionType = 'flow';
       } else if (!hasAgentNodes || !hasTaskNodes) {
-        throw new Error('Tab execution requires at least one agent and one task node for crew execution, or flow nodes for flow execution');
+        throw new Error('Tab execution requires at least one agent and one task node for crew execution, or crew nodes for flow execution');
       }
 
       // Force refresh agents from database to get latest tools and knowledge_sources
@@ -594,14 +593,17 @@ export const useCrewExecutionStore = create<CrewExecutionState>((set, get) => ({
 
   handleRunClick: async (type) => {
     const state = get();
-    
+
     console.log('[CrewExecution] handleRunClick called with type:', type);
     console.log('[CrewExecution] Current nodes:', state.nodes);
-    
+
     // Check if we need to show input variables dialog
+    // Only check for variables in the nodes relevant to the execution type
     const variablePattern = /\{([^}]+)\}/g;
     const hasVariables = state.nodes.some(node => {
-      if (node.type === 'agentNode' || node.type === 'taskNode') {
+      // For crew execution, check agent and task nodes
+      // For flow execution, we don't check for input variables (flows use crew configurations)
+      if (type === 'crew' && (node.type === 'agentNode' || node.type === 'taskNode')) {
         const data = node.data as Record<string, unknown>;
         const fieldsToCheck = [
           data.role,
@@ -611,10 +613,10 @@ export const useCrewExecutionStore = create<CrewExecutionState>((set, get) => ({
           data.expected_output,
           data.label
         ];
-        
+
         console.log('[CrewExecution] Checking node:', node.id, 'type:', node.type);
         console.log('[CrewExecution] Node data:', data);
-        
+
         const hasVar = fieldsToCheck.some(field => {
           if (field && typeof field === 'string') {
             console.log('[CrewExecution] Checking field:', field);
@@ -628,11 +630,11 @@ export const useCrewExecutionStore = create<CrewExecutionState>((set, get) => ({
           }
           return false;
         });
-        
+
         if (hasVar) {
           console.log('[CrewExecution] Node has variables:', node.id);
         }
-        
+
         return hasVar;
       }
       return false;
@@ -656,12 +658,14 @@ export const useCrewExecutionStore = create<CrewExecutionState>((set, get) => ({
           if (type === 'crew') {
             await state.executeCrew(state.nodes, state.edges);
           } else {
+            // Auto-open execution history for flow runs
+            window.dispatchEvent(new CustomEvent('openExecutionHistory'));
             await state.executeFlow(state.nodes, state.edges);
           }
         } catch (error) {
-          set({ 
+          set({
             errorMessage: error instanceof Error ? error.message : 'Failed to execute',
-            showError: true 
+            showError: true
           });
         } finally {
           set({ isExecuting: false });
@@ -672,15 +676,20 @@ export const useCrewExecutionStore = create<CrewExecutionState>((set, get) => ({
       set({ isExecuting: true });
 
       try {
+        console.log('[CrewExecution] Type check - type:', type, 'comparison result:', type === 'crew');
         if (type === 'crew') {
+          console.log('[CrewExecution] Executing CREW path');
           await state.executeCrew(state.nodes, state.edges);
         } else {
+          console.log('[CrewExecution] Executing FLOW path');
+          // Auto-open execution history for flow runs
+          window.dispatchEvent(new CustomEvent('openExecutionHistory'));
           await state.executeFlow(state.nodes, state.edges);
         }
       } catch (error) {
-        set({ 
+        set({
           errorMessage: error instanceof Error ? error.message : 'Failed to execute',
-          showError: true 
+          showError: true
         });
       } finally {
         set({ isExecuting: false });

@@ -13,7 +13,7 @@ from crewai import Task
 from src.engines.crewai.tools.tool_factory import ToolFactory
 
 # Initialize logger
-logger = LoggerManager.get_instance().crew
+logger = LoggerManager.get_instance().flow
 
 class TaskConfig:
     """

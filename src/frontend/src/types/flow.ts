@@ -114,6 +114,19 @@ export interface StartingPoint {
   crewName: string;
 }
 
+export interface RouterTaskConfig {
+  id: string;
+  crewId: string;
+}
+
+export interface Router {
+  name: string;
+  listenTo: string;  // Method name to listen to
+  conditionField: string;  // Field to evaluate for routing
+  routes: Record<string, RouterTaskConfig[]>;  // Route name -> array of task configs
+  condition?: string;  // Python condition expression for routing
+}
+
 export interface FlowConfiguration {
   id: string;
   name: string;
@@ -123,6 +136,7 @@ export interface FlowConfiguration {
   listeners: Listener[];
   actions: Action[];
   startingPoints: StartingPoint[];
+  routers?: Router[];  // Router configurations for conditional routing
 }
 
 export interface CrewResponse {

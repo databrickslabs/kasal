@@ -319,7 +319,6 @@ class TestSeedsFinal:
 
         # Test specific tools exist
         assert 70 in tool_ids  # DatabricksJobsTool
-        assert 67 in tool_ids  # DatabricksCustomTool
         assert 35 in tool_ids  # GenieTool
         assert 31 in tool_ids  # PerplexityTool
 

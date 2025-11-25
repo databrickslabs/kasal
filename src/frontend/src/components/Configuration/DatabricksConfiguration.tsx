@@ -44,10 +44,10 @@ const DatabricksConfiguration: React.FC<DatabricksConfigurationProps> = ({ onSav
     schema: '',
 
     enabled: false,
-    apps_enabled: false,
 
     // MLflow configuration
     mlflow_enabled: false,
+    mlflow_experiment_name: 'kasal-crew-execution-traces',
     evaluation_enabled: false,
     evaluation_judge_model: '',
 
@@ -73,6 +73,7 @@ const DatabricksConfiguration: React.FC<DatabricksConfigurationProps> = ({ onSav
   const [checkingConnection, setCheckingConnection] = useState(false);
   const [isMemoryBackendConfigured, setIsMemoryBackendConfigured] = useState<boolean>(false);
   const [memoryBackendType, setMemoryBackendType] = useState<MemoryBackendType | null>(null);
+  const [workspaceUrlFromBackend, setWorkspaceUrlFromBackend] = useState<string>('');
 
   // Function to check memory backend configuration for knowledge sources
   const checkMemoryBackendConfig = async () => {
@@ -101,6 +102,17 @@ const DatabricksConfiguration: React.FC<DatabricksConfigurationProps> = ({ onSav
     const loadConfig = async () => {
       try {
         const databricksService = DatabricksService.getInstance();
+
+        // Fetch workspace URL from backend environment
+        try {
+          const envInfo = await databricksService.getDatabricksEnvironment();
+          if (envInfo.databricks_host) {
+            setWorkspaceUrlFromBackend(envInfo.databricks_host);
+          }
+        } catch (error) {
+          console.error('Error fetching Databricks environment:', error);
+        }
+
         const savedConfig = await databricksService.getDatabricksConfig();
         if (savedConfig) {
           setConfig(savedConfig);
@@ -147,13 +159,12 @@ const DatabricksConfiguration: React.FC<DatabricksConfigurationProps> = ({ onSav
   }, []);
 
   const handleSaveConfig = async () => {
-    // If Databricks is enabled but apps are disabled, validate all required fields
-    if (config.enabled && !config.apps_enabled) {
+    // If Databricks is enabled, validate all required fields
+    if (config.enabled) {
       const requiredFields = {
         'Warehouse ID': config.warehouse_id?.trim(),
         'Catalog': config.catalog?.trim(),
         'Schema': config.schema?.trim(),
-
       };
 
       const emptyFields = Object.entries(requiredFields)
@@ -173,7 +184,12 @@ const DatabricksConfiguration: React.FC<DatabricksConfigurationProps> = ({ onSav
     setLoading(true);
     try {
       const databricksService = DatabricksService.getInstance();
-      const savedConfig = await databricksService.setDatabricksConfig(config);
+      // Ensure workspace_url from backend environment is included in the config
+      const configToSave = {
+        ...config,
+        workspace_url: workspaceUrlFromBackend || config.workspace_url
+      };
+      const savedConfig = await databricksService.setDatabricksConfig(configToSave);
       setConfig(savedConfig);
 
       // Sync DatabricksKnowledgeSearchTool enabled state with knowledge_volume_enabled
@@ -267,12 +283,6 @@ const DatabricksConfiguration: React.FC<DatabricksConfigurationProps> = ({ onSav
     }
   };
 
-  const handleAppsToggle = (event: React.ChangeEvent<HTMLInputElement>) => {
-    setConfig(prev => ({
-      ...prev,
-      apps_enabled: event.target.checked
-    }));
-  };
 
   const handleMlflowToggle = async (event: React.ChangeEvent<HTMLInputElement>) => {
     const newEnabled = event.target.checked;
@@ -370,28 +380,6 @@ const DatabricksConfiguration: React.FC<DatabricksConfigurationProps> = ({ onSav
       )}
 
       <Stack spacing={2} sx={{ mb: 3 }}>
-        <Box sx={{
-          display: 'flex',
-          alignItems: 'center',
-          justifyContent: 'space-between',
-          mb: 1
-        }}>
-          <Typography variant="subtitle2" color="text.secondary">
-            {t('configuration.databricks.apps.title', { defaultValue: 'Databricks Apps Integration' })}
-          </Typography>
-          <FormControlLabel
-            control={
-              <Switch
-                checked={config.apps_enabled}
-                onChange={handleAppsToggle}
-                color="primary"
-                disabled={!config.enabled}
-              />
-            }
-            label={config.apps_enabled ? t('common.enabled') : t('common.disabled')}
-          />
-        </Box>
-
         <Divider sx={{ my: 2 }} />
 
         {/* MLflow Tracking Section */}
@@ -412,6 +400,19 @@ const DatabricksConfiguration: React.FC<DatabricksConfigurationProps> = ({ onSav
           />
         </Box>
 
+        {/* MLflow Experiment Name */}
+        {config.mlflow_enabled && (
+          <TextField
+            label={t('configuration.databricks.mlflow.experimentName', { defaultValue: 'MLflow Experiment Name' })}
+            value={config.mlflow_experiment_name || 'kasal-crew-execution-traces'}
+            onChange={handleInputChange('mlflow_experiment_name')}
+            fullWidth
+            disabled={loading || !config.enabled || !config.mlflow_enabled}
+            size="small"
+            placeholder="kasal-crew-execution-traces"
+            helperText={t('configuration.databricks.mlflow.experimentNameHelp', { defaultValue: 'Name of the MLflow experiment for crew execution traces' })}
+          />
+        )}
 
         {/* MLflow Evaluation Section */}
         {config.mlflow_enabled && (
@@ -453,12 +454,14 @@ const DatabricksConfiguration: React.FC<DatabricksConfigurationProps> = ({ onSav
 
         <TextField
           label={t('configuration.databricks.workspaceUrl')}
-          value={config.workspace_url}
+          value={workspaceUrlFromBackend || config.workspace_url}
           onChange={handleInputChange('workspace_url')}
           fullWidth
-          disabled={loading || !config.enabled || config.apps_enabled}
+          disabled={true}
           size="small"
-          helperText={config.apps_enabled ? t('configuration.databricks.workspaceUrl.disabled', { defaultValue: 'Not required when using Databricks Apps' }) : ''}
+          helperText={t('configuration.databricks.workspaceUrl.info', {
+            defaultValue: 'Workspace URL is automatically configured from backend (DATABRICKS_HOST environment variable)'
+          })}
         />
 
         <TextField
@@ -466,8 +469,9 @@ const DatabricksConfiguration: React.FC<DatabricksConfigurationProps> = ({ onSav
           value={config.warehouse_id}
           onChange={handleInputChange('warehouse_id')}
           fullWidth
-          disabled={loading || !config.enabled || config.apps_enabled}
+          disabled={loading || !config.enabled}
           size="small"
+          required
         />
 
         <TextField
@@ -475,8 +479,9 @@ const DatabricksConfiguration: React.FC<DatabricksConfigurationProps> = ({ onSav
           value={config.catalog}
           onChange={handleInputChange('catalog')}
           fullWidth
-          disabled={loading || !config.enabled || config.apps_enabled}
+          disabled={loading || !config.enabled}
           size="small"
+          required
         />
 
         <TextField
@@ -484,8 +489,9 @@ const DatabricksConfiguration: React.FC<DatabricksConfigurationProps> = ({ onSav
           value={config.schema}
           onChange={handleInputChange('schema')}
           fullWidth
-          disabled={loading || !config.enabled || config.apps_enabled}
+          disabled={loading || !config.enabled}
           size="small"
+          required
         />
 
 

@@ -299,15 +299,15 @@ const ShowTraceTimeline: React.FC<ShowTraceProps> = ({
     const globalEnd = new Date(sorted[sorted.length - 1].created_at);
     const totalDuration = globalEnd.getTime() - globalStart.getTime();
 
-    // Separate global events
+    // Separate global events - support both crew and flow events
     const globalEvents = {
       start: sorted.filter(t =>
-        t.event_source === 'crew' &&
-        (t.event_type === 'crew_started' || t.event_type === 'execution_started')
+        ((t.event_source === 'crew' && (t.event_type === 'crew_started' || t.event_type === 'execution_started')) ||
+         (t.event_source === 'flow' && t.event_type === 'flow_started'))
       ),
       end: sorted.filter(t =>
-        t.event_source === 'crew' &&
-        (t.event_type === 'crew_completed' || t.event_type === 'execution_completed')
+        ((t.event_source === 'crew' && (t.event_type === 'crew_completed' || t.event_type === 'execution_completed')) ||
+         (t.event_source === 'flow' && t.event_type === 'flow_completed'))
       )
     };
 
@@ -347,8 +347,9 @@ const ShowTraceTimeline: React.FC<ShowTraceProps> = ({
 
     // Second pass: group traces by agent
     sorted.forEach(trace => {
-      // Skip global events, task orchestration events, and task events for agent grouping
+      // Skip global events (crew/flow), task orchestration events, and task events for agent grouping
       if (trace.event_source === 'crew' ||
+          trace.event_source === 'flow' ||
           trace.event_source === 'task' ||
           trace.event_source === 'Task Orchestrator' ||
           trace.event_context === 'task_management') {
@@ -919,37 +920,43 @@ const ShowTraceTimeline: React.FC<ShowTraceProps> = ({
     setExpandedTasks(newExpanded);
   };
 
-  const getEventIcon = (type: string) => {
+  const getEventIcon = (type: string): JSX.Element => {
+    const iconProps = { fontSize: 'small' as const, sx: { fontSize: 16 } };
+
     switch (type) {
       case 'tool':
       case 'tool_result':
       case 'tool_usage':
-        return '🔧';
+        return <TerminalIcon {...iconProps} color="action" />;
       case 'llm':
-        return '🤖';
+        return <PlayCircleIcon {...iconProps} color="primary" />;
       case 'agent_start':
       case 'task_start':
       case 'started':
-        return '▶️';
+        return <PlayArrowIcon {...iconProps} color="primary" />;
       case 'agent_complete':
       case 'task_complete':
       case 'completed':
-        return '✅';
+        return <CheckCircleIcon {...iconProps} color="success" />;
       case 'agent_output':
       case 'agent_execution':
-        return '📝';
+        return <PreviewIcon {...iconProps} color="action" />;
       case 'agent_processing':
-        return '⚙️';
+        return <RefreshIcon {...iconProps} color="action" />;
       case 'memory_operation':
-        return '💾';
+        return <AccessTimeIcon {...iconProps} color="action" />;
       case 'knowledge_operation':
-        return '📚';
+        return <TimelineIcon {...iconProps} color="action" />;
       case 'crew_started':
-        return '🚀';
+        return <PlayCircleIcon {...iconProps} color="primary" />;
       case 'crew_completed':
-        return '🏁';
+        return <CheckCircleIcon {...iconProps} color="success" />;
+      case 'flow_started':
+        return <PlayCircleIcon {...iconProps} color="primary" />;
+      case 'flow_completed':
+        return <CheckCircleIcon {...iconProps} color="success" />;
       default:
-        return '•';
+        return <span style={{ fontSize: 16 }}>•</span>;
     }
   };
 
@@ -1261,9 +1268,9 @@ const ShowTraceTimeline: React.FC<ShowTraceProps> = ({
                                       {processedTraces.globalStart &&
                                         formatTimeDelta(processedTraces.globalStart, event.timestamp)}
                                     </Typography>
-                                    <Typography variant="body2" sx={{ minWidth: 20 }}>
+                                    <Box sx={{ minWidth: 20, display: 'flex', alignItems: 'center' }}>
                                       {getEventIcon(event.type)}
-                                    </Typography>
+                                    </Box>
                                     <Typography
                                       variant="body2"
                                       sx={{

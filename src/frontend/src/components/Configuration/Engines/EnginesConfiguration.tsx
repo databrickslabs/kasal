@@ -23,7 +23,12 @@ import { EngineConfigService } from '../../../api/EngineConfigService';
 import { useCrewExecutionStore } from '../../../store/crewExecution';
 
 const EnginesConfiguration: React.FC = () => {
-  const { crewAIFlowEnabled, setCrewAIFlowEnabled } = useFlowConfigStore();
+  const {
+    crewAIFlowEnabled,
+    setCrewAIFlowEnabled,
+    useVisualFlowEditor,
+    setUseVisualFlowEditor
+  } = useFlowConfigStore();
   const { inputMode, setInputMode } = useCrewExecutionStore();
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -181,6 +186,30 @@ const EnginesConfiguration: React.FC = () => {
                 <li>Add Flow button</li>
               </ul>
             </Alert>
+          )}
+
+          {crewAIFlowEnabled && (
+            <Box sx={{ ml: 4, mt: 2 }}>
+              <FormControlLabel
+                control={
+                  <Switch
+                    checked={useVisualFlowEditor}
+                    onChange={(e) => setUseVisualFlowEditor(e.target.checked)}
+                    color="primary"
+                  />
+                }
+                label={
+                  <Box>
+                    <Typography variant="body2" fontWeight="medium">
+                      Use Visual Flow Editor (New)
+                    </Typography>
+                    <Typography variant="caption" color="text.secondary">
+                      Drag and drop crews to build flows visually instead of using the step-by-step wizard
+                    </Typography>
+                  </Box>
+                }
+              />
+            </Box>
           )}
 
           <Box>

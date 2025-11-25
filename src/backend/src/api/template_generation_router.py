@@ -18,7 +18,10 @@ from src.services.template_generation_service import TemplateGenerationService
 logger = logging.getLogger(__name__)
 
 # Dependency to get TemplateGenerationService
-def get_template_generation_service(session: SessionDep) -> TemplateGenerationService:
+def get_template_generation_service(
+    session: SessionDep,
+    group_context: GroupContextDep
+) -> TemplateGenerationService:
     """
     Dependency provider for TemplateGenerationService.
 
@@ -27,11 +30,21 @@ def get_template_generation_service(session: SessionDep) -> TemplateGenerationSe
 
     Args:
         session: Database session from FastAPI DI (from core.dependencies)
+        group_context: Group context for multi-tenant isolation (REQUIRED for security)
 
     Returns:
-        TemplateGenerationService instance with session
+        TemplateGenerationService instance with session and group_id
+
+    Raises:
+        ValueError: If group_context is None or has no primary_group_id
     """
-    return TemplateGenerationService(session)
+    # SECURITY: group_id is REQUIRED for TemplateGenerationService
+    if not group_context or not group_context.primary_group_id:
+        raise ValueError(
+            "SECURITY: group_id is REQUIRED for TemplateGenerationService. "
+            "All API key operations must be scoped to a group for multi-tenant isolation."
+        )
+    return TemplateGenerationService(session, group_id=group_context.primary_group_id)
 
 # Type alias for cleaner function signatures
 TemplateGenerationServiceDep = Annotated[TemplateGenerationService, Depends(get_template_generation_service)]

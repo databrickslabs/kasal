@@ -51,7 +51,6 @@ class TestToolFactory:
         assert "Vision Tool" in tool_factory._tool_implementations
 
         # Test custom tools are mapped
-        assert "DatabricksCustomTool" in tool_factory._tool_implementations
         assert "DatabricksJobsTool" in tool_factory._tool_implementations
         assert "GenieTool" in tool_factory._tool_implementations
 
@@ -605,57 +604,6 @@ class TestToolFactory:
                 result_as_answer=False
             )
 
-    def test_create_tool_databricks_custom(self, tool_factory):
-        """Test creating DatabricksCustomTool."""
-        mock_tool = MagicMock()
-        mock_tool.title = "DatabricksCustomTool"
-        mock_tool.config = {
-            "catalog": "test_catalog",
-            "schema": "test_schema",
-            "warehouse_id": "test_warehouse"
-        }
-
-        # Mock DatabricksCustomTool
-        mock_databricks_class = MagicMock()
-        mock_instance = MagicMock()
-        mock_databricks_class.return_value = mock_instance
-        tool_factory._tool_implementations["DatabricksCustomTool"] = mock_databricks_class
-
-        # Mock environment variable and DatabricksService to prevent real URLs
-        with patch.object(tool_factory, 'get_tool_info', return_value=mock_tool), \
-             patch.dict('os.environ', {'DATABRICKS_HOST': ''}, clear=False), \
-             patch('src.services.databricks_service.DatabricksService.from_unit_of_work', new_callable=AsyncMock) as mock_service_factory, \
-             patch('src.core.unit_of_work.UnitOfWork'):
-
-            # Mock the DatabricksService to return None for workspace URL
-            mock_service = MagicMock()
-            mock_service.get_databricks_config = AsyncMock(return_value=None)
-            mock_service_factory.return_value = mock_service
-
-            result = tool_factory.create_tool("DatabricksCustomTool")
-
-            assert result == mock_instance
-            # Check that the call was made with the expected arguments
-            call_args = mock_databricks_class.call_args
-            assert call_args is not None
-
-            # Check the arguments individually
-            kwargs = call_args.kwargs
-            assert kwargs['default_catalog'] == "test_catalog"
-            assert kwargs['default_schema'] == "test_schema"
-            assert kwargs['default_warehouse_id'] == "test_warehouse"
-            assert kwargs['user_token'] is None
-            assert kwargs['result_as_answer'] is False
-
-            # Check databricks_host - it should be None or empty
-            assert kwargs['databricks_host'] in (None, '')
-
-            # Check tool_config contains the expected values
-            tool_config = kwargs['tool_config']
-            assert tool_config['catalog'] == "test_catalog"
-            assert tool_config['schema'] == "test_schema"
-            assert tool_config['warehouse_id'] == "test_warehouse"
-
     def test_create_tool_databricks_jobs(self, tool_factory):
         """Test creating DatabricksJobsTool."""
         mock_tool = MagicMock()
@@ -901,25 +849,6 @@ class TestToolFactory:
             assert result == mock_instance
             # Should have used ThreadPoolExecutor due to running loop
             mock_executor.submit.assert_called_once()
-
-    def test_create_tool_pythonpptx(self, tool_factory):
-        """Test creating PythonPPTXTool."""
-        mock_tool = MagicMock()
-        mock_tool.title = "PythonPPTXTool"
-        mock_tool.config = {"template_path": "/path/to/template.pptx"}
-
-        with patch.object(tool_factory, 'get_tool_info', return_value=mock_tool):
-            # Check if PythonPPTXTool is available
-            if tool_factory._tool_implementations.get("PythonPPTXTool") is None:
-                # If not available, skip the test
-                pytest.skip("PythonPPTXTool not available due to import errors")
-
-            result = tool_factory.create_tool("PythonPPTXTool")
-
-            # Should return a PythonPPTXTool instance
-            assert result is not None
-            # Check that it's actually a PythonPPTXTool instance (or mock)
-            assert hasattr(result, 'name') or isinstance(result, MagicMock)
 
     def test_create_tool_serper_dev_from_environment(self, tool_factory):
         """Test creating SerperDevTool with API key from environment."""

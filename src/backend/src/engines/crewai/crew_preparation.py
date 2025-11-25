@@ -7,6 +7,7 @@ This module handles the preparation and configuration of CrewAI agents and tasks
 from typing import Dict, Any, List, Optional
 import logging
 import re
+import os
 from datetime import datetime
 from crewai import Agent, Crew, Task, Process
 from src.core.logger import LoggerManager
@@ -15,6 +16,12 @@ from src.engines.crewai.helpers.agent_helpers import create_agent
 from src.schemas.memory_backend import MemoryBackendConfig, MemoryBackendType
 from src.engines.crewai.memory.memory_backend_factory import MemoryBackendFactory
 from src.utils.databricks_url_utils import DatabricksURLUtils
+# Import new service classes
+from src.engines.crewai.services.crew_memory_service import CrewMemoryService
+from src.engines.crewai.config.embedder_config_builder import EmbedderConfigBuilder
+from src.engines.crewai.config.manager_config_builder import ManagerConfigBuilder
+from src.engines.crewai.config.crew_config_builder import CrewConfigBuilder
+
 
 
 logger = LoggerManager.get_instance().crew
@@ -92,7 +99,8 @@ class CrewPreparation:
         self.tool_service = tool_service
         self.tool_factory = tool_factory
         self.user_token = user_token  # Store user token for OBO auth
-        self._original_storage_dir = None  # To store original CREWAI_STORAGE_DIR
+        self.custom_embedder = None
+        self.embedder_config = None
 
         # Log the configuration to debug memory backend
         logger.info(f"[CrewPreparation.__init__] Config keys: {list(config.keys())}")
@@ -162,7 +170,11 @@ class CrewPreparation:
                 TaskEvaluator._original_evaluate = TaskEvaluator.evaluate
 
             # Create the fallback LLM instance
-            fallback_llm = await LLMManager.configure_crewai_llm("databricks-llama-4-maverick")
+            # SECURITY: Pass group_id for multi-tenant isolation
+            group_id = self.config.get('group_id') if self.config else None
+            if not group_id:
+                raise ValueError("group_id is REQUIRED for LLM configuration")
+            fallback_llm = await LLMManager.configure_crewai_llm("databricks-llama-4-maverick", group_id)
 
             # Ensure fallback LLM has all necessary attributes
             if not hasattr(fallback_llm, 'function_calling_llm'):
@@ -364,57 +376,8 @@ class CrewPreparation:
                     logger.error(f"Failed to create agent: {agent_name}")
                     return False
 
-                # Handle knowledge sources after agent creation to avoid serialization issues
-                if 'knowledge_sources' in agent_config and agent_config['knowledge_sources']:
-                    try:
-                        from src.engines.crewai.knowledge.knowledge_factory import KnowledgeSourceFactory
-
-                        # Get execution_id and group_id from config
-                        execution_id = self.config.get('execution_id', self.config.get('crew_id', 'default'))
-                        group_id = self.config.get('group_id', 'default')
-
-                        # Get embedder config from agent or crew
-                        embedder_config = None
-                        if 'embedder_config' in agent_config:
-                            embedder_config = agent_config['embedder_config']
-                            logger.info(f"Using embedder config from agent: {embedder_config}")
-                        elif hasattr(self, 'embedder_config'):
-                            embedder_config = self.embedder_config
-                            logger.info(f"Using embedder config from crew: {embedder_config}")
-
-                        # CRITICAL FIX: Clean the agent_id to remove prefixes before passing to knowledge sources
-                        # This prevents the agent_agent-UUID format in the vector index
-                        clean_agent_id = agent_id
-                        if agent_id:
-                            # Strip any agent_ or agent- prefixes to get the clean UUID
-                            if agent_id.startswith('agent_'):
-                                clean_agent_id = agent_id[6:]  # Remove 'agent_' prefix
-                            if clean_agent_id.startswith('agent-'):
-                                clean_agent_id = clean_agent_id[6:]  # Remove 'agent-' prefix
-
-                        logger.info(f"[CREW] Agent ID cleanup: original='{agent_id}', clean='{clean_agent_id}'")
-
-                        # Create knowledge sources from configuration with agent access control
-                        knowledge_sources = KnowledgeSourceFactory.create_knowledge_sources(
-                            agent_config['knowledge_sources'],
-                            execution_id=execution_id,
-                            group_id=group_id,
-                            embedder_config=embedder_config,
-                            agent_id=clean_agent_id  # Pass the clean Kasal Agent UUID for access control
-                        )
-
-                        if knowledge_sources:
-                            # Set knowledge_sources directly on the agent
-                            agent.knowledge_sources = knowledge_sources
-                            logger.info(f"Added {len(knowledge_sources)} knowledge sources to agent {agent_name}")
-
-                            # NOTE: We'll call add() on each knowledge source AFTER set_knowledge() is called
-                            # This ensures the knowledge is properly initialized before processing
-                            for ks in knowledge_sources:
-                                if hasattr(ks, 'collection_name'):
-                                    logger.info(f"  - Collection: {ks.collection_name} (will be processed after crew initialization)")
-                    except Exception as e:
-                        logger.error(f"Error adding knowledge sources to agent {agent_name}: {e}", exc_info=True)
+                # NOTE: knowledge_sources handling removed - we now use DatabricksKnowledgeSearchTool directly
+                # The tool is configured via agent.tools, not agent.knowledge_sources
 
                 # Store the agent with the agent_name as key
                 self.agents[agent_name] = agent
@@ -552,17 +515,19 @@ class CrewPreparation:
                     task_config.pop("context")
 
                 # Get the async execution setting
+                # Tasks with async_execution=True will run in parallel (if they have no context dependencies)
+                # CrewAI validation requires that a crew ends with at most one async task
+                # We handle this by auto-creating a completion task after the loop if needed
                 is_async = task_config.get('async_execution', False)
 
-                # Store original setting for later adjustment
                 if is_async:
-                    # Save that this task wanted to be async for logging
+                    # Mark that this task wants async execution for later processing
                     task_config['_wanted_async'] = True
-                    if i < total_tasks - 1:
-                        # Only the last task can be async in CrewAI, force others to be sync
-                        logger.warning(f"Task '{task_name}' was set to async but isn't the last task. Only the last task can be async in CrewAI. Setting to synchronous.")
-                        task_config['async_execution'] = False
-                        is_async = False
+                    has_context = '_context_refs' in task_config or task_config.get('context')
+                    if has_context:
+                        logger.info(f"Task '{task_name}' has async_execution=True with context - will wait for dependencies")
+                    else:
+                        logger.info(f"Task '{task_name}' has async_execution=True - will run in parallel")
 
                 logger.info(f"Task '{task_name}' async_execution setting: {is_async}")
 
@@ -612,6 +577,55 @@ class CrewPreparation:
                     else:
                         logger.warning(f"No context tasks could be resolved for task {task_id}")
 
+            # Handle parallel execution for multiple async tasks
+            # CrewAI validation: "A crew must end with at most one async task"
+            # Solution: Keep ALL async tasks as async (they run in parallel), add a minimal
+            # completion task with context=[all_async_tasks] to satisfy CrewAI validation
+            #
+            # IMPORTANT: Tasks with async_execution=True must NOT have context set,
+            # otherwise they will wait for that context and not run in parallel!
+            if self.tasks:
+                async_tasks = [t for t in self.tasks if getattr(t, 'async_execution', False)]
+
+                if len(async_tasks) > 1:
+                    logger.info(f"Found {len(async_tasks)} async tasks - configuring for parallel execution")
+
+                    # Remove any context from async tasks so they can run truly in parallel
+                    for async_task in async_tasks:
+                        if getattr(async_task, 'context', None):
+                            logger.info(f"Removing context from async task to enable parallel execution")
+                            async_task.context = None
+
+                    # Add a minimal completion task that waits for all async tasks
+                    # This satisfies CrewAI's validation while enabling true parallel execution
+                    from crewai import Task as CrewAITask
+
+                    # Use the last async task's agent for the completion task
+                    completion_agent = async_tasks[-1].agent
+
+                    # Create a minimal completion task
+                    completion_task = CrewAITask(
+                        description="Return the combined outputs from the parallel tasks.",
+                        expected_output="The outputs from all parallel tasks.",
+                        agent=completion_agent,
+                        context=async_tasks,  # Wait for ALL async tasks to complete
+                        async_execution=False  # Sync task to satisfy CrewAI validation
+                    )
+
+                    # Add completion task to the crew's task list
+                    self.tasks.append(completion_task)
+
+                    # Log the parallel execution setup
+                    parallel_descriptions = [
+                        getattr(t, 'description', 'unknown')[:40] + '...'
+                        if len(getattr(t, 'description', '')) > 40
+                        else getattr(t, 'description', 'unknown')
+                        for t in async_tasks
+                    ]
+
+                    logger.info(f"  {len(async_tasks)} tasks will run in PARALLEL: {parallel_descriptions}")
+                    logger.info(f"  Added completion task to collect results and satisfy CrewAI validation")
+
             return True
         except Exception as e:
             handle_crew_error(e, "Error creating tasks")
@@ -619,512 +633,53 @@ class CrewPreparation:
 
     async def _create_crew(self) -> bool:
         """
-        Create the crew with all prepared agents and tasks
+        Create the crew with all prepared agents and tasks.
+        Refactored to use specialized service classes.
 
         Returns:
             bool: True if crew was created successfully
         """
         try:
-            # Get crew configuration
-            crew_config = self.config.get('crew', {})
+            # Initialize builders and services
+            config_builder = CrewConfigBuilder(self.config)
+            memory_service = CrewMemoryService(self.config, self.user_token)
+            embedder_builder = EmbedderConfigBuilder(self.config, self.user_token)
+            manager_builder = ManagerConfigBuilder(
+                self.config,
+                self.tool_service,
+                self.tool_factory,
+                self.user_token
+            )
 
-            # Check if all agents have memory disabled BEFORE setting crew memory default
-            # This ensures crew memory respects individual agent settings
-            agents_with_memory_enabled = []
-            agents_with_memory_disabled = []
+            # 1. Determine crew memory and process type
+            default_crew_memory = config_builder.determine_crew_memory_setting()
+            process_type = config_builder.determine_process_type()
 
-            for agent_config in self.config.get('agents', []):
-                agent_name = agent_config.get('name', agent_config.get('role', 'Unknown'))
-                # Check if memory is explicitly set in agent config
-                if 'memory' in agent_config:
-                    if agent_config['memory'] is False:
-                        agents_with_memory_disabled.append(agent_name)
-                        logger.info(f"Agent '{agent_name}' has memory explicitly disabled")
-                    else:
-                        agents_with_memory_enabled.append(agent_name)
-                        logger.info(f"Agent '{agent_name}' has memory enabled")
-                else:
-                    # If memory is not specified, it defaults to True in the agent
-                    agents_with_memory_enabled.append(agent_name)
-                    logger.info(f"Agent '{agent_name}' has memory enabled (default)")
+            # 2. Build base crew kwargs
+            crew_kwargs = config_builder.build_base_crew_kwargs(
+                agents=list(self.agents.values()),
+                tasks=self.tasks,
+                process_type=process_type,
+                default_crew_memory=default_crew_memory
+            )
 
-            # Determine default crew memory based on agent settings
-            # If ALL agents have memory disabled, disable crew memory
-            # Otherwise, use the crew_config setting or default to True
-            if agents_with_memory_disabled and not agents_with_memory_enabled:
-                # All agents have memory disabled
-                default_crew_memory = False
-                logger.info("All agents have memory disabled - setting crew memory to False")
-            else:
-                # At least one agent has memory enabled (or uses default)
-                # Use crew_config setting if available, otherwise True
-                default_crew_memory = crew_config.get('memory', True)
-                if agents_with_memory_enabled:
-                    logger.info(f"At least one agent has memory enabled - using crew memory setting: {default_crew_memory}")
-                else:
-                    logger.info(f"No agent memory settings found - using crew memory default: {default_crew_memory}")
+            # 3. Configure manager (hierarchical/sequential)
+            crew_kwargs = await manager_builder.configure_manager(crew_kwargs, process_type)
 
-            # Create the crew directly instead of calling an external function
-            # Handle process type properly - convert string to Process enum if needed
-            process_type = crew_config.get('process', 'sequential')
-            if isinstance(process_type, str):
-                if process_type.lower() == 'hierarchical':
-                    process_type = Process.hierarchical
-                    logger.info("Using hierarchical process for crew")
-                else:
-                    process_type = Process.sequential
-                    logger.info("Using sequential process for crew")
+            # 4. Configure embedder
+            crew_kwargs, custom_embedder, embedder_config = await embedder_builder.configure_embedder(crew_kwargs)
+            self.custom_embedder = custom_embedder
+            self.embedder_config = embedder_config
 
-            crew_kwargs = {
-                'agents': list(self.agents.values()),
-                'tasks': self.tasks,
-                'process': process_type,
-                'verbose': True,
-                'memory': default_crew_memory,
-                'tracing': False  # Explicitly disable CrewAI cloud tracing
-            }
+            # 5. Fetch and setup memory backend
+            should_disable_memory = not crew_kwargs.get('memory', True)
 
-            # Set default LLM for crew manager using the submitted model
-            try:
-                import os
-                from src.utils.databricks_auth import is_databricks_apps_environment
-                from src.core.llm_manager import LLMManager
-
-                # In Databricks Apps environment, handle OpenAI API key properly
-                if is_databricks_apps_environment():
-                    logger.info("Databricks Apps environment detected - skipping API key requirement")
-                    # Note: OpenAI API key handling is done later before crew creation
-
-                # Get the model from the execution config or crew config
-                requested_model = self.config.get('model') or crew_config.get('model')
-
-                # Handle hierarchical process configuration
-                if process_type == Process.hierarchical:
-                    # Check for manager_agent first, then manager_llm
-                    if 'manager_agent' in crew_config and crew_config['manager_agent']:
-                        # Create a manager agent from configuration
-                        manager_config = crew_config['manager_agent']
-                        if isinstance(manager_config, dict):
-                            logger.info("Creating custom manager agent from configuration")
-                            manager_agent = await create_agent(
-                                agent_config=manager_config,
-                                llm=await LLMManager.get_llm(requested_model) if requested_model else None,
-                                tool_service=self.tool_service,
-                                tool_factory=self.tool_factory,
-                                user_token=self.user_token
-                            )
-                            crew_kwargs['manager_agent'] = manager_agent
-                            logger.info("Set custom manager agent for hierarchical process")
-                    elif 'manager_llm' not in crew_config:
-                        # Set manager_llm if not already specified and no manager_agent
-                        logger.info("Hierarchical process detected - setting manager_llm")
-                        if requested_model:
-                            try:
-                                manager_llm = await LLMManager.get_llm(requested_model)
-                                crew_kwargs['manager_llm'] = manager_llm
-                                logger.info(f"Set manager LLM for hierarchical process: {requested_model}")
-                            except Exception as llm_error:
-                                logger.warning(f"Could not create manager LLM: {llm_error}")
-                                # Use default if available
-                                if is_databricks_apps_environment():
-                                    fallback_llm = await LLMManager.get_llm("databricks-llama-4-maverick")
-                                    crew_kwargs['manager_llm'] = fallback_llm
-                        else:
-                            logger.warning("Hierarchical process requires manager_llm or manager_agent")
-                    else:
-                        # manager_llm already in crew_config
-                        provided_manager_llm = crew_config['manager_llm']
-
-                        # Check if it's a string that needs conversion to LLM object
-                        if isinstance(provided_manager_llm, str):
-                            logger.info(f"Converting manager_llm string '{provided_manager_llm}' to LLM object")
-                            try:
-                                # Use LLMManager to create the LLM object with proper prefix
-                                crew_kwargs['manager_llm'] = await LLMManager.get_llm(provided_manager_llm)
-                                logger.info(f"Successfully converted manager_llm '{provided_manager_llm}' to LLM object")
-                            except Exception as llm_error:
-                                logger.error(f"Failed to convert manager_llm string to LLM object: {llm_error}")
-                                # Try with databricks/ prefix if it's a Databricks model
-                                if 'databricks' in provided_manager_llm.lower() and not provided_manager_llm.startswith('databricks/'):
-                                    prefixed_model = f"databricks/{provided_manager_llm}"
-                                    logger.info(f"Retrying with databricks/ prefix: {prefixed_model}")
-                                    try:
-                                        crew_kwargs['manager_llm'] = await LLMManager.get_llm(prefixed_model)
-                                        logger.info(f"Successfully created manager_llm with prefix: {prefixed_model}")
-                                    except Exception as retry_error:
-                                        logger.error(f"Failed to create manager_llm even with prefix: {retry_error}")
-                                        # Fall back to default
-                                        if is_databricks_apps_environment():
-                                            fallback_llm = await LLMManager.get_llm("databricks-llama-4-maverick")
-                                            crew_kwargs['manager_llm'] = fallback_llm
-                                            logger.info("Using fallback Databricks model for manager_llm")
-                                        else:
-                                            raise
-                                else:
-                                    raise
-                        else:
-                            # It's already an LLM object, use as-is
-                            crew_kwargs['manager_llm'] = provided_manager_llm
-                            logger.info("Using provided manager_llm object for hierarchical process")
-                elif 'manager_llm' not in crew_config and process_type != Process.hierarchical:
-                    # Sequential process - manager_llm not needed but can be set for planning
-                    if requested_model:
-                        logger.info(f"Using submitted model for planning: {requested_model}")
-                        try:
-                            planning_llm = await LLMManager.get_llm(requested_model)
-                            # For sequential process, manager_llm is used for planning if enabled
-                            if crew_config.get('planning', False):
-                                crew_kwargs['manager_llm'] = planning_llm
-                                logger.info(f"Set planning LLM to: {requested_model}")
-                        except Exception as llm_error:
-                            logger.warning(f"Could not create LLM for model {requested_model}: {llm_error}")
-                            # Fall back to environment-appropriate default
-                            if is_databricks_apps_environment():
-                                logger.info("Falling back to Databricks model in Apps environment")
-                                fallback_llm = await LLMManager.get_llm("databricks-llama-4-maverick")
-                                if crew_config.get('planning', False):
-                                    crew_kwargs['manager_llm'] = fallback_llm
-                    elif is_databricks_apps_environment():
-                        logger.info("No model specified - using Databricks default in Apps environment")
-                        default_llm = await LLMManager.get_llm("databricks-llama-4-maverick")
-                        if crew_config.get('planning', False):
-                            crew_kwargs['manager_llm'] = default_llm
-                    else:
-                        logger.info("No model specified - will use CrewAI defaults")
-
-            except ImportError:
-                logger.warning("Enhanced Databricks auth not available for crew preparation")
-            except Exception as e:
-                logger.warning(f"Error configuring crew manager LLM: {e}")
-                # Continue without setting manager_llm - CrewAI will handle defaults
-
-            # Configure embedder for memory using CrewAI's native configuration
-            embedder_config = None
-            for agent_config in self.config.get('agents', []):
-                if 'embedder_config' in agent_config and agent_config['embedder_config']:
-                    # Validate the embedder config has required fields
-                    ec = agent_config['embedder_config']
-                    if isinstance(ec, dict) and 'provider' in ec:
-                        embedder_config = ec
-                        logger.info(f"Found valid embedder configuration: {embedder_config}")
-                        break
-                    else:
-                        logger.warning(f"Found invalid embedder config (missing provider): {ec}")
-
-            # Always default to Databricks if no valid embedder config found
-            # This ensures Databricks is used unless explicitly configured otherwise
-            if not embedder_config:
-                embedder_config = {
-                    'provider': 'databricks',
-                    'config': {'model': 'databricks-gte-large-en'}
-                }
-                logger.info("No valid embedder config found, using default Databricks configuration")
-
-            # Use CrewAI's native embedder configuration
-            if embedder_config:
-                provider = embedder_config.get('provider', 'openai')
-                config = embedder_config.get('config', {})
-
-                if provider == 'databricks':
-                    # For Databricks, create a custom embedding function using enhanced auth
-                    try:
-                        from src.utils.databricks_auth import is_databricks_apps_environment, get_databricks_auth_headers
-                        from src.services.api_keys_service import ApiKeysService
-
-                        # Use enhanced Databricks authentication
-                        databricks_key = None
-                        auth_headers = None
-
-                        if is_databricks_apps_environment():
-                            logger.info("Using Databricks Apps OAuth for embeddings in crew")
-                            logger.info(f"User token available: {bool(self.user_token)}, token length: {len(self.user_token) if self.user_token else 0}")
-                            # Get OAuth headers for embeddings - pass user_token for OBO authentication
-                            auth_headers, error = await get_databricks_auth_headers(user_token=self.user_token)
-                            if error:
-                                logger.error(f"Failed to get OAuth headers for embeddings: {error}")
-                                logger.error(f"User token was: {'provided' if self.user_token else 'None/empty'}")
-                        else:
-                            logger.info("Using enhanced Databricks auth for embeddings in local environment")
-                            # Use enhanced auth system for local development too - pass user_token if available
-                            auth_headers, error = await get_databricks_auth_headers(user_token=self.user_token)
-                            if error:
-                                logger.warning(f"Enhanced auth failed, falling back to API key: {error}")
-                                # Fallback to API key if enhanced auth fails
-                                databricks_key = await ApiKeysService.get_provider_api_key("DATABRICKS")
-
-                        if databricks_key or auth_headers:
-                            import os
-                            from chromadb import EmbeddingFunction, Documents, Embeddings
-                            import litellm
-                            from typing import cast
-
-                            # Get Databricks endpoint - prioritize environment variable
-                            databricks_endpoint = os.getenv('DATABRICKS_HOST', '')
-
-                            # Use centralized URL utility to normalize the workspace URL
-                            if databricks_endpoint:
-                                databricks_endpoint = DatabricksURLUtils.normalize_workspace_url(databricks_endpoint)
-                                if databricks_endpoint:
-                                    logger.info(f"Using normalized Databricks endpoint: {databricks_endpoint}")
-
-                            if not databricks_endpoint:
-                                # Try DATABRICKS_ENDPOINT environment variable
-                                databricks_endpoint = os.getenv('DATABRICKS_ENDPOINT', '')
-                                if databricks_endpoint:
-                                    # Extract workspace URL from full endpoint if needed
-                                    databricks_endpoint = DatabricksURLUtils.extract_workspace_from_endpoint(databricks_endpoint)
-
-                            # If no endpoint from environment, get from database
-                            if not databricks_endpoint:
-                                try:
-                                    from src.services.databricks_service import DatabricksService
-                                    from src.db.session import async_session_factory
-                                    async with async_session_factory() as session:
-                                        databricks_service = DatabricksService(session)
-                                        db_config = await databricks_service.get_databricks_config()
-                                        if db_config and db_config.workspace_url:
-                                            # Normalize the workspace URL from database
-                                            databricks_endpoint = DatabricksURLUtils.normalize_workspace_url(db_config.workspace_url)
-                                            if databricks_endpoint:
-                                                logger.info(f"Using Databricks workspace URL from database: {databricks_endpoint}")
-                                except Exception as e:
-                                    logger.warning(f"Could not get Databricks workspace URL from database: {e}")
-
-                            model_name = config.get('model', 'databricks-gte-large-en')
-
-                            # Store the user token from the outer scope for use in the embedder
-                            crew_user_token = self.user_token
-
-                            # Create custom embedding function for Databricks
-                            class DatabricksEmbeddingFunction(EmbeddingFunction):
-                                def __init__(self, api_key: str = None, api_base: str = None, model: str = None, auth_headers: dict = None, user_token: str = None):
-                                    self.api_key = api_key
-                                    self.api_base = api_base
-                                    # Store the original model name without prefix manipulation
-                                    self.model = model
-                                    self.auth_headers = auth_headers
-                                    self.user_token = user_token  # Store user token for dynamic auth
-
-                                def __call__(self, input: Documents) -> Embeddings:
-                                    try:
-                                        # Always use direct HTTP request to avoid litellm/SDK authentication issues
-                                        import requests
-
-                                        # Construct the correct endpoint URL using centralized utility
-                                        # Extract workspace URL from api_base then build full invocation URL
-                                        workspace_url = DatabricksURLUtils.extract_workspace_from_endpoint(self.api_base)
-                                        endpoint_url = DatabricksURLUtils.construct_model_invocation_url(workspace_url, self.model)
-                                        if not endpoint_url:
-                                            raise Exception("Failed to construct valid endpoint URL")
-                                        logger.debug(f"Databricks embedding endpoint URL: {endpoint_url}")
-                                        payload = {"input": input if isinstance(input, list) else [input]}
-
-                                        # Prepare headers - prioritize user token for OBO auth
-                                        if self.user_token:
-                                            # Use OBO token directly for Databricks Apps
-                                            headers = {
-                                                "Authorization": f"Bearer {self.user_token}",
-                                                "Content-Type": "application/json"
-                                            }
-                                            logger.debug("Using OBO token for embeddings")
-                                        elif self.auth_headers:
-                                            # Use pre-fetched OAuth headers
-                                            headers = self.auth_headers
-                                        elif self.api_key:
-                                            # Use API key authentication
-                                            headers = {
-                                                "Authorization": f"Bearer {self.api_key}",
-                                                "Content-Type": "application/json"
-                                            }
-                                        else:
-                                            logger.error("No authentication method available for Databricks embeddings")
-                                            raise Exception("No authentication method available")
-
-                                        try:
-                                            response = requests.post(
-                                                endpoint_url,
-                                                headers=headers,
-                                                json=payload,
-                                                timeout=30
-                                            )
-                                            if response.status_code == 200:
-                                                result = response.json()
-                                                if 'data' in result and len(result['data']) > 0:
-                                                    embeddings = [item.get('embedding', item) for item in result['data']]
-                                                    return cast(Embeddings, embeddings)
-                                                else:
-                                                    raise Exception(f"Unexpected response format: {result}")
-                                            else:
-                                                error_text = response.text
-                                                raise Exception(f"Embedding API error {response.status_code}: {error_text}")
-                                        except requests.exceptions.RequestException as e:
-                                            logger.error(f"Request failed for Databricks embeddings: {e}")
-                                            raise e
-                                    except Exception as e:
-                                        logger.error(f"Error in Databricks embedding function: {e}")
-                                        raise e
-
-                            # Create the custom embedding function instance
-                            if not databricks_endpoint:
-                                logger.warning("No Databricks endpoint found for embeddings - embedding operations will fail")
-
-                            # Use centralized URL utility to construct the serving endpoints URL
-                            api_base_url = DatabricksURLUtils.construct_serving_endpoints_url(databricks_endpoint) if databricks_endpoint else ''
-                            logger.info(f"Databricks embedding api_base: {api_base_url}, model: {model_name}")
-
-                            databricks_embedder = DatabricksEmbeddingFunction(
-                                api_key=databricks_key,
-                                api_base=api_base_url,
-                                model=model_name,
-                                auth_headers=auth_headers,
-                                user_token=crew_user_token  # Pass user token for OBO auth
-                            )
-
-                            # Expose the custom embedder for internal use (knowledge sources, custom backends)
-                            # Do NOT pass a 'custom' embedder provider into Crew(**kwargs) — CrewAI validation rejects it.
-                            # We'll rely on CrewAI default embedder when using default memory backend, and use this
-                            # custom embedder only for our own Databricks backends and knowledge flows.
-                            logger.info("Configured Databricks embedder for internal use (not passing to Crew kwargs)")
-
-                            # Store embedder for knowledge sources and any other consumers
-                            self.custom_embedder = databricks_embedder
-                            self.embedder_config = {
-                                'provider': 'custom',
-                                'config': {
-                                    'embedder': databricks_embedder
-                                }
-                            }
-                        else:
-                            logger.warning("No Databricks API key found, falling back to default embedder")
-
-                    except Exception as e:
-                        logger.error(f"Error configuring Databricks embedder: {e}")
-
-                elif provider == 'openai':
-                    # Standard OpenAI configuration
-                    try:
-                        from src.services.api_keys_service import ApiKeysService
-
-                        # Get OpenAI credentials directly with async/await
-                        openai_key = await ApiKeysService.get_provider_api_key("OPENAI")
-
-                        if openai_key:
-                            crew_kwargs['embedder'] = {
-                                'provider': 'openai',
-                                'config': {
-                                    'api_key': openai_key,
-                                    'model': config.get('model', 'text-embedding-3-small')
-                                }
-                            }
-                            logger.info(f"Configured CrewAI embedder for OpenAI: {crew_kwargs['embedder']}")
-                    except Exception as e:
-                        logger.error(f"Error configuring OpenAI embedder: {e}")
-
-                elif provider == 'ollama':
-                    # Local Ollama configuration
-                    crew_kwargs['embedder'] = {
-                        'provider': 'ollama',
-                        'config': {
-                            'model': config.get('model', 'nomic-embed-text')
-                        }
-                    }
-                    logger.info(f"Configured CrewAI embedder for Ollama: {crew_kwargs['embedder']}")
-
-                elif provider == 'google':
-                    # Google AI configuration
-                    try:
-                        from src.services.api_keys_service import ApiKeysService
-                        from src.schemas.model_provider import ModelProvider
-
-                        # Get Google credentials directly with async/await
-                        google_key = await ApiKeysService.get_provider_api_key(ModelProvider.GEMINI)
-
-                        if google_key:
-                            crew_kwargs['embedder'] = {
-                                'provider': 'google',
-                                'config': {
-                                    'api_key': google_key,
-                                    'model': config.get('model', 'text-embedding-004')
-                                }
-                            }
-                            logger.info(f"Configured CrewAI embedder for Google: {crew_kwargs['embedder']}")
-                    except Exception as e:
-                        logger.error(f"Error configuring Google embedder: {e}")
-                elif provider != 'databricks':
-                    # Other providers (not databricks) - pass through config as-is
-                    crew_kwargs['embedder'] = embedder_config
-                    logger.info(f"Configured CrewAI embedder for {provider}: {crew_kwargs['embedder']}")
-
-                # Store embedder config for knowledge sources
-                # For Databricks, we already set embedder_config, for others use crew_kwargs
-                if provider != 'databricks':
-                    self.embedder_config = crew_kwargs.get('embedder')
-
-            logger.info(f"Final embedder configuration: {crew_kwargs.get('embedder', 'None (default)')}")
-
-            # Check if memory should be disabled for all agents in this crew
-            # This check has already been done when setting default_crew_memory above,
-            # but we still need to set the flag for later logic
-            should_disable_memory_for_crew = not crew_kwargs.get('memory', True)
-
-            if should_disable_memory_for_crew:
-                logger.info("Memory is disabled for this crew based on agent configurations")
-
-            # Always fetch memory backend configuration from database
-            # This ensures consistency regardless of whether the crew is executed via frontend or API
-            # The backend is the single source of truth for memory configuration
             memory_backend_config = None
-            if crew_kwargs.get('memory', False) and not should_disable_memory_for_crew:
-                try:
-                    from src.services.memory_backend_service import MemoryBackendService
-                    from src.db.session import async_session_factory
+            if crew_kwargs.get('memory', False) and not should_disable_memory:
+                memory_backend_config = await memory_service.fetch_memory_backend_config()
 
-                    # Create service with session
-                    async with async_session_factory() as session:
-                        service = MemoryBackendService(session)
-                        # Get the active memory backend configuration from database
-                        # This configuration is managed through the Memory Backend UI or API
-                        # and stored in the database, not passed from the frontend
-                        group_id = self.config.get('group_id')
-                        logger.info(f"Fetching memory backend config for group_id: {group_id}")
-                        active_config = await service.get_active_config(group_id)
-                        if active_config:
-                            logger.info(f"Found active config: backend_type={active_config.backend_type}, enable_short_term={active_config.enable_short_term}, enable_long_term={active_config.enable_long_term}, enable_entity={active_config.enable_entity}")
-
-                            # Check if this is a "Disabled Configuration" (all memory types disabled)
-                            # This is used to disable Databricks memory backend, not the default memory
-                            is_disabled_config = (
-                                not active_config.enable_short_term and
-                                not active_config.enable_long_term and
-                                not active_config.enable_entity
-                            )
-
-                            if is_disabled_config:
-                                logger.info("Found 'Disabled Configuration' - ignoring database config and using default memory")
-                                # Treat as if no config exists - use default memory
-                                memory_backend_config = None
-                            else:
-                                # Convert to dict format for processing
-                                # The configuration will be properly converted to MemoryBackendConfig below
-                                memory_backend_config = {
-                                    'backend_type': active_config.backend_type.value,
-                                    'databricks_config': active_config.databricks_config,
-                                    'enable_short_term': active_config.enable_short_term,
-                                    'enable_long_term': active_config.enable_long_term,
-                                    'enable_entity': active_config.enable_entity,
-                                    'enable_relationship_retrieval': active_config.enable_relationship_retrieval,
-                                }
-                                logger.info(f"Loaded memory backend config from database: {memory_backend_config['backend_type']}")
-                        else:
-                            logger.warning("No active memory backend configuration found in database")
-                            memory_backend_config = None
-                except Exception as e:
-                    logger.warning(f"Failed to load memory backend config from database: {e}")
-                    memory_backend_config = None
-
-            # If no memory backend config or disabled config, create default configuration
+            # If no config found, create default
             if not memory_backend_config and crew_kwargs.get('memory', False):
-                logger.info("No memory backend config or disabled config found - using default memory")
                 memory_backend_config = {
                     'backend_type': 'default',
                     'enable_short_term': True,
@@ -1134,506 +689,103 @@ class CrewPreparation:
                 }
                 logger.info("Created default memory backend configuration (ChromaDB + SQLite)")
 
-            logger.info(f"Memory backend config present: {bool(memory_backend_config)}, Memory enabled: {crew_kwargs.get('memory', False)}")
-            if memory_backend_config:
-                logger.info(f"Memory backend config details: {memory_backend_config}")
+            # 6. Generate crew ID and setup storage
+            crew_id = memory_service.generate_crew_id()
+            memory_service.setup_storage_directory(crew_id, memory_backend_config)
 
-            # Generate a deterministic crew ID based on the crew configuration
-            # This ensures the same crew configuration always gets the same ID
-            if self.config.get('crew_id'):
-                # Use provided crew_id if available
-                crew_id = self.config.get('crew_id')
-            else:
-                # Check if we have a database crew_id (from execution)
-                db_crew_id = self.config.get('database_crew_id')
-                if db_crew_id:
-                    # Use the database crew ID as the base for consistent memory
-                    crew_id = f"crew_db_{db_crew_id}"
-                    logger.info(f"Using database crew_id: {crew_id} for consistent memory across runs")
-                else:
-                    # Generate a hash-based crew_id from the crew's configuration
-                    import hashlib
-                    import json
-
-                    # Extract stable identifiers from agents and tasks
-                    agents = self.config.get('agents', [])
-                    tasks = self.config.get('tasks', [])
-
-                    # Create sorted lists of agent roles and task names for stable hashing
-                    agent_roles = sorted([agent.get('role', '') for agent in agents if isinstance(agent, dict)])
-                    task_names = sorted([task.get('name', task.get('description', '')[:50]) for task in tasks if isinstance(task, dict)])
-
-                    # Try to get run_name from config for stable identification
-                    run_name = self.config.get('run_name') or self.config.get('inputs', {}).get('run_name')
-
-                    # Get group_id for tenant isolation
-                    group_id = self.config.get('group_id')
-                    if not group_id:
-                        logger.warning("No group_id found in config - crew memory may not be properly isolated between tenants")
-
-                    # Create a stable identifier based on crew components
-                    crew_identifier = {
-                        'agent_roles': agent_roles,
-                        'task_names': task_names,
-                        'crew_name': self.config.get('name', self.config.get('crew', {}).get('name', 'unnamed_crew')),
-                        # Add the model to make crews with different models have different memories
-                        'model': self.config.get('model', 'default'),
-                        # Include run_name if available for better consistency
-                        'run_name': run_name,
-                        # IMPORTANT: Include group_id for tenant isolation - ensures different groups have separate memories
-                        'group_id': group_id or 'default'
-                    }
-
-                    # Create a hash of the crew configuration
-                    crew_hash = hashlib.md5(
-                        json.dumps(crew_identifier, sort_keys=True).encode()
-                    ).hexdigest()[:8]  # Use first 8 characters of hash
-
-                    # Include group_id in the crew_id string for proper extraction later
-                    # Format: {group_id}_crew_{hash}
-                    crew_id = f"{group_id or 'default'}_crew_{crew_hash}"
-                    logger.info(f"Generated deterministic crew_id: {crew_id} based on configuration: {crew_identifier}")
-                    logger.info(f"This crew_id will persist across runs with the same configuration, ensuring memory continuity")
-                    logger.info(f"Group isolation: crew_id includes group_id '{group_id or 'default'}' for tenant memory isolation")
-
-            # Set a custom storage directory for memory backends to ensure isolation
-            # This is important for both Databricks (dimension conflicts) and default (organization)
-            if memory_backend_config and memory_backend_config.get('backend_type') in ['databricks', 'default']:
-                import os
-                import shutil
-                from pathlib import Path
-
-                # Save the original value to restore later if needed
-                original_storage_dir = os.environ.get("CREWAI_STORAGE_DIR")
-
-                # Use a unique directory name based on backend type and crew_id
-                backend_type = memory_backend_config.get('backend_type')
-                if backend_type == 'databricks':
-                    storage_dirname = f"kasal_databricks_{crew_id}"
-                else:  # default
-                    storage_dirname = f"kasal_default_{crew_id}"
-                os.environ["CREWAI_STORAGE_DIR"] = storage_dirname
-                logger.info(f"Using custom storage directory for {backend_type}: {storage_dirname}")
-
-                # Clean up any existing storage directory to ensure fresh start
-                # This prevents dimension mismatch errors from old ChromaDB collections
-                from crewai.utilities.paths import db_storage_path
-                storage_path = Path(db_storage_path())
-                if storage_path.exists():
-                    logger.info(f"Cleaning up existing storage at: {storage_path}")
-                    try:
-                        shutil.rmtree(storage_path)
-                        logger.info("Successfully cleaned up existing storage")
-                    except Exception as e:
-                        logger.warning(f"Could not clean up storage: {e}")
-
-                # Store the original value to restore it later if needed
-                self._original_storage_dir = original_storage_dir
-
-            # Check if all memory types are disabled or if memory was disabled by agent analysis
-            if should_disable_memory_for_crew:
-                # Memory was already disabled by agent analysis
-                logger.info("Memory disabled by agent analysis - skipping all memory backend configuration")
+            # 7. Check if all memory types disabled
+            if config_builder.check_memory_disabled_by_backend_config(memory_backend_config):
                 crew_kwargs['memory'] = False
-                # Ensure no memory backends are configured
-                crew_kwargs.pop('short_term_memory', None)
-                crew_kwargs.pop('long_term_memory', None)
-                crew_kwargs.pop('entity_memory', None)
-            elif memory_backend_config:
-                all_disabled = (
-                    not memory_backend_config.get('enable_short_term', False) and
-                    not memory_backend_config.get('enable_long_term', False) and
-                    not memory_backend_config.get('enable_entity', False)
+                should_disable_memory = True
+                logger.info("Found 'Disabled Configuration' - ignoring database config and using default memory")
+
+            # 8. Configure memory components
+            if crew_kwargs.get('memory', False) and not should_disable_memory and memory_backend_config:
+                # Determine which embedder to use
+                embedder_for_backends = custom_embedder if memory_backend_config.get('backend_type') == 'databricks' else crew_kwargs.get('embedder')
+
+                # Create memory backends
+                memory_backends = await memory_service.create_memory_backends(
+                    memory_backend_config,
+                    crew_id,
+                    embedder_for_backends
                 )
-                if all_disabled:
-                    logger.info("All memory types are disabled in backend configuration, disabling crew memory")
-                    crew_kwargs['memory'] = False
-                    should_disable_memory_for_crew = True
-                    # Ensure no memory backends are configured
-                    crew_kwargs.pop('short_term_memory', None)
-                    crew_kwargs.pop('long_term_memory', None)
-                    crew_kwargs.pop('entity_memory', None)
-                else:
-                    # If any memory type is enabled, ensure crew memory is enabled
-                    logger.info("Memory types are enabled in backend configuration, enabling crew memory")
-                    crew_kwargs['memory'] = True
 
-            # Configure memory based on whether we have a backend configuration
-            # IMPORTANT: Only create memory backends if memory is truly enabled and not disabled by analysis
-            if crew_kwargs.get('memory', False) and not should_disable_memory_for_crew:
-                # Memory is enabled - check if we have a custom backend configuration
-                if memory_backend_config:
-                    logger.info(f"Found memory backend configuration from database: {memory_backend_config}")
-                    logger.info(f"Backend type: {memory_backend_config.get('backend_type')}")
+                # Configure CrewAI memory components
+                from src.schemas.memory_backend import MemoryBackendConfig as MemBackConfig
+                memory_config = MemBackConfig(**memory_backend_config)
 
-                    # The memory_backend_config at this point is always a dict from the database
-                    # Convert databricks_config dict to DatabricksMemoryConfig object if present
-                    if 'databricks_config' in memory_backend_config and isinstance(memory_backend_config['databricks_config'], dict):
-                        from src.schemas.memory_backend import DatabricksMemoryConfig
-                        memory_backend_config['databricks_config'] = DatabricksMemoryConfig(**memory_backend_config['databricks_config'])
+                crew_kwargs = memory_service.configure_crew_memory_components(
+                    crew_kwargs,
+                    memory_config,
+                    memory_backends,
+                    crew_id,
+                    custom_embedder
+                )
 
-                    # Create the MemoryBackendConfig object
-                    memory_config = MemoryBackendConfig(**memory_backend_config)
+            # 9. Add optional parameters
+            crew_kwargs = config_builder.add_optional_parameters(crew_kwargs)
+            crew_kwargs = await config_builder.add_llm_parameters(crew_kwargs)
 
-                    # Create memory backends
-                    logger.info(f"Creating memory backends for crew {crew_id} with backend type: {memory_config.backend_type}")
+            # 10. Handle memory disabling
+            if should_disable_memory:
+                crew_kwargs = config_builder.disable_memory_completely(crew_kwargs)
 
-                    # For Databricks backend, use the custom embedder if available
-                    embedder_for_backends = None
-                    if memory_config.backend_type == MemoryBackendType.DATABRICKS:
-                        # Use the custom Databricks embedder if it was created
-                        if hasattr(self, 'custom_embedder') and self.custom_embedder:
-                            embedder_for_backends = self.custom_embedder
-                            logger.info("Using custom Databricks embedder for memory backends")
-                        elif hasattr(self, 'embedder_config') and self.embedder_config:
-                            # Use the embedder config
-                            embedder_for_backends = self.embedder_config
-                            logger.info("Using embedder config for memory backends")
-                        else:
-                            logger.warning("No custom embedder available for Databricks memory backends")
-                    else:
-                        # For other backends, use the embedder from crew_kwargs
-                        embedder_for_backends = crew_kwargs.get('embedder')
-                        if embedder_for_backends:
-                            logger.info(f"Using crew embedder for memory backends: {embedder_for_backends.get('provider') if isinstance(embedder_for_backends, dict) else 'custom'}")
-
-                    memory_backends = await MemoryBackendFactory.create_memory_backends(
-                        config=memory_config,
-                        crew_id=crew_id,
-                        embedder=embedder_for_backends,
-                        user_token=self.user_token  # Pass user token for OBO authentication
-                    )
-                    logger.info(f"Created memory backends: {list(memory_backends.keys())}")
-
-                    # Configure CrewAI with memory backends
-                    if memory_backends or memory_config.backend_type == MemoryBackendType.DEFAULT:
-                        # Import CrewAI memory classes
-                        try:
-                            from crewai.memory import ShortTermMemory, LongTermMemory, EntityMemory
-                            from crewai.memory.storage.rag_storage import RAGStorage
-
-                            # Skip individual memory configuration for DEFAULT backend
-                            if memory_config.backend_type == MemoryBackendType.DEFAULT:
-                                # For default backend, we don't configure individual memory backends
-                                # CrewAI will handle this automatically when memory=True
-                                logger.info("Skipping individual memory configuration for DEFAULT backend")
-                                logger.info("CrewAI will automatically initialize memory with our embedder config")
-
-                            # Configure short-term memory for non-default backends
-                            elif 'short_term' in memory_backends and memory_config.enable_short_term:
-                                logger.info(f"Configuring custom short-term memory backend for type: {memory_config.backend_type}")
-                                # For Databricks, use the wrapper directly (it includes embedding functionality)
-                                if memory_config.backend_type == MemoryBackendType.DATABRICKS:
-                                    crew_kwargs['short_term_memory'] = ShortTermMemory(storage=memory_backends['short_term'])
-                                    logger.info(f"Successfully configured Databricks short-term memory with storage: {type(memory_backends['short_term'])}")
-                                else:
-                                    # For other backends, use RAGStorage
-                                    if crew_kwargs.get('embedder'):
-                                        rag_storage = RAGStorage(
-                                            type="short_term",
-                                            embedder_config=crew_kwargs.get('embedder')
-                                        )
-                                        crew_kwargs['short_term_memory'] = ShortTermMemory(storage=rag_storage)
-                                        logger.info("Successfully configured default short-term memory with RAGStorage")
-                                    else:
-                                        logger.warning("No embedder configured for custom short-term memory")
-
-                            # Configure long-term memory for non-default backends
-                            if memory_config.backend_type != MemoryBackendType.DEFAULT and 'long_term' in memory_backends and memory_config.enable_long_term:
-                                logger.info("Configuring custom long-term memory backend")
-                                # LongTermMemory uses a different storage pattern
-                                crew_kwargs['long_term_memory'] = LongTermMemory(storage=memory_backends['long_term'])
-                                logger.info("Successfully configured Databricks long-term memory")
-
-                            # Configure entity memory for non-default backends
-                            if memory_config.backend_type != MemoryBackendType.DEFAULT and 'entity' in memory_backends and memory_config.enable_entity:
-                                logger.info("Configuring custom entity memory backend")
-                                # For Databricks, use the wrapper directly
-                                if memory_config.backend_type == MemoryBackendType.DATABRICKS:
-                                    # Check if any agent is using a problematic model
-                                    needs_fallback = False
-                                    problematic_model = None
-
-                                    # Check agents for problematic models
-                                    for agent_config in self.config.get('agents', []):
-                                        agent_model = agent_config.get('llm')
-                                        if agent_model and self._needs_entity_extraction_fallback(agent_model):
-                                            needs_fallback = True
-                                            problematic_model = agent_model
-                                            break
-
-                                    # Also check crew-level model if no agent model found
-                                    if not needs_fallback:
-                                        crew_model = self.config.get('crew', {}).get('model') or self.config.get('model')
-                                        if crew_model and self._needs_entity_extraction_fallback(crew_model):
-                                            needs_fallback = True
-                                            problematic_model = crew_model
-
-                                    # Apply fallback patch if needed
-                                    if needs_fallback:
-                                        logger.info(f"Model {problematic_model} needs entity extraction fallback, applying patch for databricks-llama-4-maverick")
-                                        # Apply the entity extraction fallback patch
-                                        await self._apply_entity_extraction_fallback_patch()
-
-                                    # IMPORTANT: Pass the embedder config to prevent CrewAI from creating default RAGStorage
-                                    crew_kwargs['entity_memory'] = EntityMemory(
-                                        storage=memory_backends['entity'],
-                                        embedder_config=crew_kwargs.get('embedder')
-                                        # Removed crew=None to allow EntityMemory to connect to the crew for entity extraction
-                                    )
-                                    logger.info("Successfully configured Databricks entity memory with custom embedder")
-                                else:
-                                    # For other backends, use RAGStorage
-                                    if crew_kwargs.get('embedder'):
-                                        rag_storage = RAGStorage(
-                                            type="entities",
-                                            embedder_config=crew_kwargs.get('embedder')
-                                        )
-                                        crew_kwargs['entity_memory'] = EntityMemory(storage=rag_storage)
-                                        logger.info("Successfully configured default entity memory with RAGStorage")
-                                    else:
-                                        logger.warning("No embedder configured for custom entity memory")
-
-                            logger.info(f"Memory backend configuration completed for crew {crew_id}")
-
-                            # Handle DEFAULT backend type
-                            if memory_config.backend_type == MemoryBackendType.DEFAULT:
-                                # For default backend, we let CrewAI handle the memory initialization
-                                # with the embedder we've configured
-                                crew_kwargs['memory'] = True
-                                logger.info("Set memory=True for default backend to use CrewAI's built-in memory")
-                                logger.info("CrewAI will create ChromaDB collections for short-term/entity and SQLite for long-term")
-
-                            # IMPORTANT: Set memory=False when using Databricks to prevent any default RAGStorage creation
-                            elif memory_config.backend_type == MemoryBackendType.DATABRICKS:
-                                crew_kwargs['memory'] = False
-                                logger.info("Set memory=False for Databricks backend to prevent conflicts")
-
-                        except ImportError as e:
-                            logger.error(f"Failed to import CrewAI memory classes: {e}")
-                            logger.warning("Falling back to default memory implementation")
-                        except Exception as e:
-                            logger.error(f"Error configuring custom memory backends: {e}")
-                            logger.warning("Falling back to default memory implementation")
-                else:
-                    # No memory backend configuration found - use CrewAI default memory (ChromaDB + SQLite)
-                    logger.info("No memory backend configuration found in database")
-                    logger.info("Using CrewAI default memory implementation (ChromaDB + SQLite)")
-                    # Keep memory=True to let CrewAI initialize its default memory
-                    crew_kwargs['memory'] = True
-                    # Log the embedder that will be used by default memory
-                    if crew_kwargs.get('embedder'):
-                        logger.info(f"Default memory will use configured embedder: {crew_kwargs['embedder'].get('provider', 'unknown')}")
-                    else:
-                        logger.info("Default memory will use CrewAI's default embedder")
-
-            # Add optional parameters if they exist in config
-            if 'max_rpm' in self.config:
-                crew_kwargs['max_rpm'] = self.config['max_rpm']
-
-            if 'planning' in crew_config:
-                crew_kwargs['planning'] = crew_config['planning']
-
-            if 'planning_llm' in crew_config:
-                try:
-                    planning_llm = await LLMManager.get_llm(crew_config['planning_llm'])
-                    crew_kwargs['planning_llm'] = planning_llm
-                    logger.info(f"Set crew planning LLM to: {crew_config['planning_llm']}")
-                except Exception as llm_error:
-                    logger.warning(f"Could not create planning LLM for model {crew_config['planning_llm']}: {llm_error}")
-
-            if 'reasoning' in crew_config:
-                crew_kwargs['reasoning'] = crew_config['reasoning']
-
-            if 'reasoning_llm' in crew_config:
-                try:
-                    reasoning_llm = await LLMManager.get_llm(crew_config['reasoning_llm'])
-                    crew_kwargs['reasoning_llm'] = reasoning_llm
-                    logger.info(f"Set crew reasoning LLM to: {crew_config['reasoning_llm']}")
-                except Exception as llm_error:
-                    logger.warning(f"Could not create reasoning LLM for model {crew_config['reasoning_llm']}: {llm_error}")
-
-            # If memory was disabled by agent analysis, ensure no memory backends are present
-            if should_disable_memory_for_crew:
-                logger.info("=" * 80)
-                logger.info("MEMORY COMPLETELY DISABLED FOR THIS CREW")
-                logger.info("Reason: All agents are stateless and don't require memory")
-                logger.info("Performance benefit: No memory operations will be performed")
-                logger.info("=" * 80)
-                # Final check to ensure no memory components exist
-                crew_kwargs['memory'] = False
-                crew_kwargs.pop('short_term_memory', None)
-                crew_kwargs.pop('long_term_memory', None)
-                crew_kwargs.pop('entity_memory', None)
-                crew_kwargs.pop('embedder', None)  # Also remove embedder since it's not needed
-            # If we have custom memory backends configured, we should disable the default memory
-            # to prevent CrewAI from creating its own RAGStorage
-            elif 'short_term_memory' in crew_kwargs or 'long_term_memory' in crew_kwargs or 'entity_memory' in crew_kwargs:
-                logger.info("Custom memory backends configured, disabling default memory initialization")
-                # IMPORTANT: When using custom memory backends (especially Databricks with different embedding dimensions),
-                # we must set memory=False to prevent CrewAI from creating any default RAGStorage instances
-                # that might conflict with our custom embeddings
+            # 11. Check if custom memory backends override default
+            if 'short_term_memory' in crew_kwargs or 'long_term_memory' in crew_kwargs or 'entity_memory' in crew_kwargs:
                 if memory_backend_config and memory_backend_config.get('backend_type') == 'databricks':
                     crew_kwargs['memory'] = False
                     logger.info("Set memory=False to prevent CrewAI default memory initialization for Databricks backend")
 
-            # Log memory configuration before crew creation
-            logger.info("=== MEMORY CONFIGURATION BEFORE CREW CREATION ===")
-            logger.info(f"Memory enabled: {crew_kwargs.get('memory', False)}")
-            if memory_backend_config:
-                logger.info(f"Memory backend: {memory_backend_config.get('backend_type', 'unknown')}")
-            else:
-                logger.info("Memory backend: Default (ChromaDB + SQLite)")
-            logger.info(f"Short-term memory: {'custom configured' if 'short_term_memory' in crew_kwargs else 'default' if crew_kwargs.get('memory', False) else 'disabled'}")
-            logger.info(f"Long-term memory: {'custom configured' if 'long_term_memory' in crew_kwargs else 'default' if crew_kwargs.get('memory', False) else 'disabled'}")
-            logger.info(f"Entity memory: {'custom configured' if 'entity_memory' in crew_kwargs else 'default' if crew_kwargs.get('memory', False) else 'disabled'}")
-            logger.info(f"Embedder: {'configured' if 'embedder' in crew_kwargs else 'not configured'}")
-            # Banner: explicit memory backend summary for transparency
+            # 12. Log configuration
+            config_builder.log_memory_configuration(crew_kwargs, memory_backend_config)
+
+            # 13. Handle OpenAI API key
+            await self._handle_openai_api_key()
+
+            # 14. Create crew instance with error handling
+            # NOTE: knowledge_sources no longer used - we use DatabricksKnowledgeSearchTool instead
+            logger.info(f"Creating Crew with kwargs: {list(crew_kwargs.keys())}")
             try:
-                if memory_backend_config:
-                    backend_type = memory_backend_config.get('backend_type', 'unknown')
-                    if isinstance(backend_type, str):
-                        bt = backend_type.lower()
-                    else:
-                        bt = str(backend_type).lower()
-                    if bt == 'databricks':
-                        dbc = memory_backend_config.get('databricks_config')
-                        # Convert pydantic model to dict if needed
-                        if hasattr(dbc, 'dict') and callable(getattr(dbc, 'dict')):
-                            dbc = dbc.dict()
-                        logger.info("=" * 80)
-                        logger.info("MEMORY BACKEND: DATABRICKS VECTOR SEARCH")
-                        logger.info(f"Endpoint: {dbc.get('endpoint_name')} | Workspace: {dbc.get('workspace_url')}")
-                        logger.info(f"Indexes => short_term: {dbc.get('short_term_index')}, long_term: {dbc.get('long_term_index')}, entity: {dbc.get('entity_index')}")
-                        logger.info(f"Enabled => short_term: {memory_backend_config.get('enable_short_term')}, long_term: {memory_backend_config.get('enable_long_term')}, entity: {memory_backend_config.get('enable_entity')}")
-                        logger.info("=" * 80)
-                    else:
-                        logger.info("=" * 80)
-                        logger.info("MEMORY BACKEND: DEFAULT (ChromaDB + SQLite)")
-                        logger.info("CrewAI will manage local ChromaDB collections for short-term/entity and SQLite for long-term")
-                        logger.info("=" * 80)
-                else:
-                    logger.info("=" * 80)
-                    logger.info("MEMORY BACKEND: DEFAULT (ChromaDB + SQLite)")
-                    logger.info("CrewAI will manage local ChromaDB collections for short-term/entity and SQLite for long-term")
-                    logger.info("=" * 80)
-            except Exception as banner_err:
-                logger.debug(f"Could not print memory backend banner: {banner_err}")
-
-            if 'embedder' in crew_kwargs:
-                embedder_info = crew_kwargs['embedder']
-                if isinstance(embedder_info, dict):
-                    logger.info(f"Embedder provider: {embedder_info.get('provider', 'unknown')}")
-                else:
-                    # Direct embedder object (custom Databricks embedder)
-                    logger.info("Embedder provider: custom Databricks embedder")
-                    if hasattr(embedder_info, 'model'):
-                        logger.info(f"Custom embedder model: {embedder_info.model}")
-                        logger.info(f"Expected embedding dimension: 1024")
-            logger.info("================================================")
-
-            # Create the crew instance
-            # Handle OpenAI API key properly in Databricks Apps environment
-            try:
-                import os
-                from src.utils.databricks_auth import is_databricks_apps_environment
-                if is_databricks_apps_environment():
-                    # Check if OpenAI API key is configured in the database
-                    from src.services.api_keys_service import ApiKeysService
-                    try:
-                        openai_key = await ApiKeysService.get_provider_api_key("openai")
-                        if openai_key:
-                            # OpenAI key is configured, keep it for CrewAI to use
-                            os.environ["OPENAI_API_KEY"] = openai_key
-                            logger.info("OpenAI API key is configured, keeping it for CrewAI")
-                        else:
-                            # No OpenAI key configured, set dummy key to satisfy CrewAI validation
-                            # This won't be used since we explicitly set manager_llm and agent LLMs
-                            os.environ["OPENAI_API_KEY"] = "sk-dummy-databricks-apps-validation-key"
-                            logger.info("No OpenAI API key configured, set dummy key for CrewAI validation")
-                    except Exception as api_error:
-                        logger.warning(f"Error checking OpenAI API key configuration: {api_error}")
-                        # Fall back to removing the env var to prevent validation error
-                        os.environ.pop("OPENAI_API_KEY", None)
-            except Exception as e:
-                logger.warning(f"Error handling OpenAI API key for Databricks Apps: {e}")
-
-            # Add knowledge sources if available
-            try:
-                from src.services.databricks_knowledge_service import DatabricksKnowledgeService
-                from src.repositories.databricks_config_repository import DatabricksConfigRepository
-
-                # Get execution ID and group ID from config
-                execution_id = self.config.get('execution_id') or self.config.get('run_name', 'default')
-                group_id = self.config.get('group_id', 'default')
-
-                # Check if Databricks knowledge volume is enabled
-                from src.core.unit_of_work import SyncUnitOfWork
-                from src.repositories.databricks_config_repository import DatabricksConfigRepository
-                from src.db.session import async_session_factory
-
-                databricks_config = None
-                try:
-                    # Use async session for database access
-                    async with async_session_factory() as session:
-                        databricks_repo = DatabricksConfigRepository(session)
-                        databricks_config = await databricks_repo.get_active_config(group_id=group_id)
-                except Exception as db_error:
-                    logger.warning(f"Could not check Databricks config from database: {db_error}")
-                    # Continue without Databricks volume knowledge sources
-
-                if databricks_config and databricks_config.knowledge_volume_enabled:
-                    logger.info(f"Checking for knowledge sources for execution {execution_id}")
-
-                    # Create knowledge service
-                    knowledge_service = DatabricksKnowledgeService()
-
-                    # Get volume configuration
-                    volume_config = {
-                        'volume_path': databricks_config.knowledge_volume_path or 'main.default.knowledge',
-                        'workspace_url': databricks_config.workspace_url,
-                        'file_format': 'auto',
-                        'chunk_size': databricks_config.knowledge_chunk_size or 1000,
-                        'chunk_overlap': databricks_config.knowledge_chunk_overlap or 200,
-                    }
-
-                    # Create knowledge source
-                    knowledge_source = knowledge_service.create_knowledge_source(
-                        execution_id=execution_id,
-                        group_id=group_id,
-                        volume_config=volume_config
-                    )
-
-                    # Attach knowledge source to all agents instead of crew kwargs (Crew does not accept knowledge_sources kwarg)
-                    if knowledge_source:
-                        attached_count = 0
-                        for agent in self.agents.values():
-                            # Initialize or extend agent-level knowledge_sources list
-                            existing = getattr(agent, 'knowledge_sources', []) or []
-                            setattr(agent, 'knowledge_sources', [*existing, knowledge_source])
-                            attached_count += 1
-                        logger.info(f"Attached Databricks volume knowledge source to {attached_count} agent(s) for execution {execution_id}")
-
-            except Exception as e:
-                logger.warning(f"Could not load knowledge sources: {e}")
-                # Continue without knowledge sources - not critical for execution
-
-            # Log crew kwargs keys for diagnostics
-            try:
-                logger.info(f"Creating Crew with kwargs: {list(crew_kwargs.keys())}")
                 self.crew = Crew(**crew_kwargs)
-            except TypeError as te:
-                # Gracefully handle unexpected keyword arguments by retrying without them
-                msg = str(te)
-                if "unexpected keyword argument" in msg:
-                    m = re.search(r"unexpected keyword argument '([^']+)'", msg)
-                    bad_key = m.group(1) if m else None
-                    if bad_key and bad_key in crew_kwargs:
-                        logger.warning(f"Removing unsupported Crew kwarg '{bad_key}' and retrying")
-                        crew_kwargs.pop(bad_key, None)
-                        self.crew = Crew(**crew_kwargs)
-                    else:
-                        raise
+            except (TypeError, Exception) as e:
+                # Handle both TypeError and Pydantic ValidationError
+                error_msg = str(e)
+                logger.warning(f"Crew creation failed with error: {error_msg}")
+
+                # Try to extract the problematic field from the error message
+                if "unexpected keyword argument" in error_msg or "validation error" in error_msg.lower():
+                    # Common problematic fields that might not be supported in all CrewAI versions
+                    problematic_keys = ['tracing', 'embedder', 'reasoning_llm', 'planning_llm']
+
+                    # Try removing each problematic key one at a time
+                    for key in problematic_keys:
+                        if key in crew_kwargs:
+                            logger.warning(f"Removing potentially unsupported Crew kwarg '{key}' and retrying")
+                            crew_kwargs.pop(key, None)
+                            try:
+                                self.crew = Crew(**crew_kwargs)
+                                logger.info(f"Successfully created crew after removing '{key}'")
+                                break
+                            except Exception:
+                                continue
+
+                    if not self.crew:
+                        # If still failing, try with minimal kwargs
+                        logger.warning("Trying crew creation with minimal kwargs")
+                        minimal_kwargs = {
+                            'agents': crew_kwargs.get('agents', []),
+                            'tasks': crew_kwargs.get('tasks', []),
+                            'process': crew_kwargs.get('process'),
+                            'verbose': crew_kwargs.get('verbose', True),
+                            'memory': crew_kwargs.get('memory', False)
+                        }
+                        # For hierarchical process, manager_llm or manager_agent is required
+                        if 'manager_llm' in crew_kwargs:
+                            minimal_kwargs['manager_llm'] = crew_kwargs['manager_llm']
+                        elif 'manager_agent' in crew_kwargs:
+                            minimal_kwargs['manager_agent'] = crew_kwargs['manager_agent']
+                        self.crew = Crew(**minimal_kwargs)
                 else:
                     raise
 
@@ -1641,219 +793,59 @@ class CrewPreparation:
                 logger.error("Failed to create crew")
                 return False
 
-            # Set crew reference on memory wrappers for proper agent/LLM model attribution
-            try:
-                # Update long-term memory with crew reference for LLM model extraction
-                if hasattr(self.crew, '_long_term_memory') and self.crew._long_term_memory:
-                    long_term_storage = self.crew._long_term_memory.storage
-                    # Check if it's our custom wrapper
-                    if hasattr(long_term_storage, 'crew'):
-                        long_term_storage.crew = self.crew
-                        logger.info("Set crew reference for long-term memory to enable LLM model extraction")
-                    else:
-                        logger.debug("Long-term memory storage doesn't support crew reference (likely default storage)")
+            # 16. Set crew references and attach trace context
+            memory_service.set_crew_reference_on_memory(self.crew)
+            memory_service.attach_memory_trace_context(self.crew, memory_backend_config, crew_kwargs)
 
-                # Set agent context on entity memory wrapper for proper agent_id attribution
-                if hasattr(self.crew, '_entity_memory') and self.crew._entity_memory:
-                    entity_storage = self.crew._entity_memory.storage
-                    # Check if it's our custom wrapper that supports set_agent_context
-                    if hasattr(entity_storage, 'set_agent_context'):
-                        # Set the first agent as the default context for entity memory
-                        # This provides a fallback since CrewAI's entity memory doesn't pass agent in save()
-                        if self.crew.agents:
-                            first_agent = self.crew.agents[0]
-                            entity_storage.set_agent_context(first_agent)
-                            logger.info(f"Set agent context for entity memory: {getattr(first_agent, 'role', 'Unknown')}")
-                        else:
-                            logger.warning("No agents found in crew for entity memory context")
-                    else:
-                        logger.debug("Entity memory storage doesn't support set_agent_context (likely default storage)")
-
-                    # Also set crew reference for entity memory
-                    if hasattr(entity_storage, 'crew'):
-                        entity_storage.crew = self.crew
-                        logger.info("Set crew reference for entity memory")
-
-                # Update short-term memory with crew reference
-                if hasattr(self.crew, '_short_term_memory') and self.crew._short_term_memory:
-                    short_term_storage = self.crew._short_term_memory.storage
-                    if hasattr(short_term_storage, 'crew'):
-                        short_term_storage.crew = self.crew
-                        logger.info("Set crew reference for short-term memory")
-
-            except Exception as context_error:
-                logger.warning(f"Failed to set context on memory backends: {context_error}")
-
-            # Attach execution trace context to memory storages and enable default-memory tracing
-            try:
-                exec_id = self.config.get('execution_id') or self.config.get('run_name') or self.config.get('inputs', {}).get('run_name')
-                grp_id = self.config.get('group_id') or 'default'
-                trace_ctx = {
-                    'job_id': exec_id,
-                    'group_context': {'primary_group_id': grp_id},
-                    'execution_id': exec_id
-                }
-
-                def set_trace_ctx(mem_obj):
-                    try:
-                        if not mem_obj:
-                            return
-                        storage = getattr(mem_obj, 'storage', None)
-                        # Databricks wrappers/storage expose trace_context
-                        if storage is not None and hasattr(storage, 'trace_context'):
-                            setattr(storage, 'trace_context', trace_ctx)
-                        if hasattr(mem_obj, 'trace_context'):
-                            setattr(mem_obj, 'trace_context', trace_ctx)
-                    except Exception as _:
-                        pass
-
-                # Apply to all memory types present
-                set_trace_ctx(getattr(self.crew, '_short_term_memory', None))
-                set_trace_ctx(getattr(self.crew, '_long_term_memory', None))
-                set_trace_ctx(getattr(self.crew, '_entity_memory', None))
-
-                # For DEFAULT backend, monkeypatch save/search to emit traces
-                backend_type = (memory_backend_config or {}).get('backend_type') if isinstance(memory_backend_config, dict) else (memory_backend_config.backend_type.value if memory_backend_config else 'default')
-                is_default_backend = (not memory_backend_config) or (str(backend_type).lower() == 'default')
-
-                if is_default_backend and crew_kwargs.get('memory', False):
-                    from src.services.trace_queue import get_trace_queue
-
-                    def patch_memory(mem_attr_name: str):
-                        mem_obj = getattr(self.crew, mem_attr_name, None)
-                        if not mem_obj:
-                            return
-                        storage = getattr(mem_obj, 'storage', None)
-                        # Choose target for patching: prefer storage if it has callable methods
-                        target = storage or mem_obj
-                        # Determine memory type string
-                        mt = 'short_term' if 'short' in mem_attr_name else ('long_term' if 'long' in mem_attr_name else 'entity')
-
-                        # Patch save
-                        if hasattr(target, 'save') and callable(getattr(target, 'save')):
-                            original_save = target.save
-                            def traced_save(*args, **kwargs):
-                                result = original_save(*args, **kwargs)
-                                try:
-                                    q = get_trace_queue()
-                                    payload = {
-                                        'backend': 'default',
-                                        'memory_type': mt,
-                                    }
-                                    # Try to include small snippet if available
-                                    if args:
-                                        val = args[0]
-                                        if isinstance(val, str):
-                                            payload['value_snippet'] = (val[:200] + '...') if len(val) > 200 else val
-                                    q.put_nowait({
-                                        'job_id': exec_id,
-                                        'event_type': 'memory_write',
-                                        'event_source': f"Memory[{mt}:default]",
-                                        'event_context': 'chroma/sqlite',
-                                        'output': payload,
-                                        'group_context': {'primary_group_id': grp_id}
-                                    })
-                                except Exception:
-                                    pass
-                                return result
-                            try:
-                                setattr(target, 'save', traced_save)
-                            except Exception:
-                                pass
-
-                        # Patch search
-                        if hasattr(target, 'search') and callable(getattr(target, 'search')):
-                            original_search = target.search
-                            def traced_search(query, *args, **kwargs):
-                                results = original_search(query, *args, **kwargs)
-                                try:
-                                    q = get_trace_queue()
-                                    # Summarize results
-                                    def summarize(item):
-                                        text = None
-                                        if isinstance(item, dict):
-                                            text = item.get('content') or item.get('context')
-                                        if not text:
-                                            text = str(item)
-                                        return (text[:200] + '...') if isinstance(text, str) and len(text) > 200 else text
-                                    summary = []
-                                    try:
-                                        summary = [summarize(r) for r in (results or [])][:5]
-                                    except Exception:
-                                        summary = []
-                                    q.put_nowait({
-                                        'job_id': exec_id,
-                                        'event_type': 'memory_retrieval',
-                                        'event_source': f"Memory[{mt}:default]",
-                                        'event_context': 'chroma/sqlite',
-                                        'output': {'backend': 'default', 'memory_type': mt, 'query': query if isinstance(query, str) else '[embedding]', 'results': summary},
-                                        'group_context': {'primary_group_id': grp_id}
-                                    })
-                                except Exception:
-                                    pass
-                                return results
-                            try:
-                                setattr(target, 'search', traced_search)
-                            except Exception:
-                                pass
-
-                    patch_memory('_short_term_memory')
-                    patch_memory('_long_term_memory')
-                    patch_memory('_entity_memory')
-            except Exception as trace_ctx_err:
-                logger.debug(f"Could not attach memory trace context: {trace_ctx_err}")
-
-            # CRITICAL: Initialize knowledge for each agent after crew creation
-            # This converts knowledge_sources into the knowledge attribute
-            try:
-                logger.info("[CrewPreparation] Initializing knowledge for agents...")
-                for agent in self.crew.agents:
-                    if hasattr(agent, 'knowledge_sources') and agent.knowledge_sources:
-                        logger.info(f"[CrewPreparation] Agent {agent.role} has {len(agent.knowledge_sources)} knowledge sources")
-
-                        # Set the agent's crew reference first
-                        agent.crew = self.crew
-
-                        # Initialize the knowledge with the crew's embedder
-                        # This is what CrewAI does internally during kickoff
-                        if hasattr(agent, 'set_knowledge'):
-                            logger.info(f"[CrewPreparation] Calling set_knowledge() for agent {agent.role}")
-                            agent.set_knowledge(crew_embedder=crew_kwargs.get('embedder'))
-                            logger.info(f"[CrewPreparation] ✅ Knowledge initialized for agent {agent.role}")
-
-                            # Verify knowledge was set
-                            if hasattr(agent, 'knowledge') and agent.knowledge:
-                                logger.info(f"[CrewPreparation] Agent {agent.role} knowledge object created successfully")
-
-                                # CRITICAL: Now call add() on each knowledge source AFTER set_knowledge()
-                                # This ensures proper initialization before processing
-                                for ks in agent.knowledge_sources:
-                                    if hasattr(ks, 'add'):
-                                        logger.info(f"[CrewPreparation] Calling add() on knowledge source: {getattr(ks, 'collection_name', 'unknown')}")
-                                        try:
-                                            ks.add()  # This will prepare the knowledge source for retrieval
-                                            logger.info(f"[CrewPreparation] ✅ Successfully processed knowledge source")
-                                        except Exception as add_error:
-                                            logger.error(f"[CrewPreparation] ❌ Error processing knowledge source: {add_error}", exc_info=True)
-                                    else:
-                                        logger.warning(f"[CrewPreparation] Knowledge source does not have add() method")
-                            else:
-                                logger.warning(f"[CrewPreparation] Agent {agent.role} knowledge is still None after set_knowledge()")
-                        else:
-                            logger.warning(f"[CrewPreparation] Agent {agent.role} does not have set_knowledge() method")
-                    else:
-                        logger.info(f"[CrewPreparation] Agent {agent.role} has no knowledge sources")
-
-                logger.info("[CrewPreparation] Knowledge initialization completed for all agents")
-            except Exception as knowledge_error:
-                logger.error(f"[CrewPreparation] Error initializing agent knowledge: {knowledge_error}", exc_info=True)
-                # Don't fail the crew creation, but log the issue
+            # 17. Initialize knowledge for agents
+            await self._initialize_agent_knowledge(crew_kwargs)
 
             logger.info("Created crew successfully")
             return True
+
         except Exception as e:
             handle_crew_error(e, "Error creating crew")
             return False
+
+    async def _handle_openai_api_key(self) -> None:
+        """Handle OpenAI API key configuration"""
+        try:
+            from src.services.api_keys_service import ApiKeysService
+
+            # SECURITY: Get group_id from config for multi-tenant isolation
+            group_id = self.config.get('group_id')
+            openai_key = await ApiKeysService.get_provider_api_key("openai", group_id=group_id)
+            if openai_key:
+                os.environ["OPENAI_API_KEY"] = openai_key
+                logger.info("OpenAI API key is configured, keeping it for CrewAI")
+            else:
+                os.environ["OPENAI_API_KEY"] = "sk-dummy-validation-key"
+                logger.info("No OpenAI API key configured, set dummy key for CrewAI validation")
+        except Exception as e:
+            logger.warning(f"Error handling OpenAI API key: {e}")
+
+    async def _attach_knowledge_sources(self) -> None:
+        """
+        DEPRECATED: This method is deprecated and no longer functional.
+        
+        Knowledge sources should now be configured via:
+        1. Agent's knowledge_sources configuration (processed in _create_agents)
+        2. DatabricksKnowledgeSearchTool in agent's tools list
+        
+        This method is kept as a no-op to prevent breaking existing code paths.
+        """
+        logger.info("[DEPRECATED] _attach_knowledge_sources called - this method is deprecated")
+        logger.info("Knowledge sources should be configured via agent.knowledge_sources or DatabricksKnowledgeSearchTool")
+        # No-op: Knowledge sources are now handled via the KnowledgeSourceFactory in _create_agents
+
+    async def _initialize_agent_knowledge(self, crew_kwargs: Dict[str, Any]) -> None:
+        """
+        DEPRECATED: This method is no longer needed.
+        Knowledge is now accessed via DatabricksKnowledgeSearchTool in agent's tools list.
+        Kept as no-op to prevent breaking existing code paths.
+        """
+        logger.info("[CrewPreparation] _initialize_agent_knowledge called (deprecated - no-op)")
+        logger.info("[CrewPreparation] Knowledge access is now via DatabricksKnowledgeSearchTool")
 
 
     async def execute(self) -> Dict[str, Any]:

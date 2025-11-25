@@ -94,6 +94,7 @@ const TaskForm: React.FC<TaskFormProps> = ({ initialData, onCancel, onTaskSaved,
       callback_config: null,
       human_input: false,
       guardrail: null,
+      llm_guardrail: null,
       markdown: false
     } : {
       cache_response: initialData.config.cache_response ?? false,
@@ -111,6 +112,7 @@ const TaskForm: React.FC<TaskFormProps> = ({ initialData, onCancel, onTaskSaved,
       human_input: initialData.config.human_input ?? false,
       condition: initialData.config.condition,
       guardrail: initialData.config.guardrail ?? null,
+      llm_guardrail: initialData.config.llm_guardrail ?? null,
       markdown: initialData.config.markdown ?? false
     }
   });
@@ -122,6 +124,7 @@ const TaskForm: React.FC<TaskFormProps> = ({ initialData, onCancel, onTaskSaved,
   const [selectedMcpServers, setSelectedMcpServers] = useState<string[]>([]);
   const [toolConfigs, setToolConfigs] = useState<Record<string, unknown>>(initialData?.tool_configs || {});
   const [showBestPractices, setShowBestPractices] = useState(false);
+  const [workspaceUrlFromBackend, setWorkspaceUrlFromBackend] = useState<string>('');
 
   useEffect(() => {
     if (initialData?.tools) {
@@ -181,6 +184,23 @@ const TaskForm: React.FC<TaskFormProps> = ({ initialData, onCancel, onTaskSaved,
     };
 
     void fetchTasks();
+  }, []);
+
+  useEffect(() => {
+    // Fetch workspace URL from backend environment
+    const fetchWorkspaceUrl = async () => {
+      try {
+        const databricksService = DatabricksService.getInstance();
+        const envInfo = await databricksService.getDatabricksEnvironment();
+        if (envInfo.databricks_host) {
+          setWorkspaceUrlFromBackend(envInfo.databricks_host);
+        }
+      } catch (error) {
+        console.error('Error fetching Databricks environment:', error);
+      }
+    };
+
+    void fetchWorkspaceUrl();
   }, []);
 
 
@@ -353,6 +373,8 @@ const TaskForm: React.FC<TaskFormProps> = ({ initialData, onCancel, onTaskSaved,
           tool_configs: Object.keys(updatedToolConfigs).length > 0 ? updatedToolConfigs : undefined,
           // Ensure top-level markdown is synchronized with config.markdown
           markdown: formData.config.markdown ?? formData.markdown,
+          // Sync llm_guardrail to top-level for database persistence
+          llm_guardrail: formData.config.llm_guardrail ?? null,
           config: {
             ...formData.config,
             condition: formData.config.condition === 'is_data_missing' ? 'is_data_missing' : undefined,
@@ -361,7 +383,9 @@ const TaskForm: React.FC<TaskFormProps> = ({ initialData, onCancel, onTaskSaved,
             // Ensure output_pydantic is properly set in config
             output_pydantic: formData.config.output_pydantic,
             // Ensure config.markdown is synchronized with top-level markdown
-            markdown: formData.config.markdown ?? formData.markdown
+            markdown: formData.config.markdown ?? formData.markdown,
+            // Ensure llm_guardrail is properly set in config
+            llm_guardrail: formData.config.llm_guardrail ?? null
           }
         };
 
@@ -447,11 +471,14 @@ const TaskForm: React.FC<TaskFormProps> = ({ initialData, onCancel, onTaskSaved,
       const config = await databricksService.getDatabricksConfig();
       console.log('Databricks config:', config);
 
-      if (config && config.workspace_url) {
+      // Use workspaceUrlFromBackend if available, otherwise fall back to config.workspace_url
+      const workspaceUrlSource = workspaceUrlFromBackend || config?.workspace_url;
+
+      if (workspaceUrlSource) {
         // Ensure the URL has https:// and remove trailing slash if present
-        let workspaceUrl = config.workspace_url.startsWith('https://')
-          ? config.workspace_url
-          : `https://${config.workspace_url}`;
+        let workspaceUrl = workspaceUrlSource.startsWith('https://')
+          ? workspaceUrlSource
+          : `https://${workspaceUrlSource}`;
 
         // Remove trailing slash to avoid double slashes
         workspaceUrl = workspaceUrl.replace(/\/$/, '');
@@ -868,7 +895,9 @@ const TaskForm: React.FC<TaskFormProps> = ({ initialData, onCancel, onTaskSaved,
                           setSelectedMcpServers(newServers);
                           setToolConfigs(prev => ({
                             ...prev,
-                            MCP_SERVERS: newServers
+                            MCP_SERVERS: {
+                              servers: newServers
+                            }
                           }));
                         }}
                         sx={{
@@ -891,10 +920,12 @@ const TaskForm: React.FC<TaskFormProps> = ({ initialData, onCancel, onTaskSaved,
                 onChange={(servers) => {
                   const serverArray = Array.isArray(servers) ? servers : (servers ? [servers] : []);
                   setSelectedMcpServers(serverArray);
-                  // Update tool configs when MCP servers change
+                  // Update tool configs when MCP servers change - use consistent format
                   setToolConfigs(prev => ({
                     ...prev,
-                    MCP_SERVERS: serverArray
+                    MCP_SERVERS: {
+                      servers: serverArray
+                    }
                   }));
                 }}
                 label="MCP Servers"
@@ -944,6 +975,7 @@ const TaskForm: React.FC<TaskFormProps> = ({ initialData, onCancel, onTaskSaved,
                     timeout: formData.config?.timeout || null,
                     condition: formData.config?.condition,
                     guardrail: formData.config?.guardrail || null,
+                    llm_guardrail: formData.config?.llm_guardrail || null,
                     markdown: formData.config?.markdown || false
                   }}
                   onConfigChange={handleAdvancedConfigChange}

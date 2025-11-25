@@ -1,6 +1,7 @@
 import { useCallback, useState, useEffect, useRef } from 'react';
-import { Node, Edge, OnSelectionChangeParams, ReactFlowInstance, Connection } from 'reactflow';
+import { Node, Edge, OnSelectionChangeParams, ReactFlowInstance } from 'reactflow';
 import { FlowConfiguration, FlowFormData } from '../../types/flow';
+import { CrewTask } from '../../types/crewPlan';
 import { v4 as uuidv4 } from 'uuid';
 import { createEdge } from '../../utils/edgeUtils';
 import { FlowService } from '../../api/FlowService';
@@ -73,119 +74,96 @@ export const useSelectionChangeHandler = (
   }, [setSelectedEdges]);
 };
 
-// Flow selection handler
+// Flow selection handler - loads flow into FlowCanvas (separate from crew tabs)
 export const useFlowSelectHandler = (
-  setNodes: React.Dispatch<React.SetStateAction<Node[]>>,
-  setEdges: React.Dispatch<React.SetStateAction<Edge[]>>
+  setFlowNodes: React.Dispatch<React.SetStateAction<Node[]>>,
+  setFlowEdges: React.Dispatch<React.SetStateAction<Edge[]>>
 ) => {
   return useCallback((flowNodes: Node[], flowEdges: Edge[], flowConfig?: FlowConfiguration) => {
-    // Delay processing to allow time for React to handle DOM updates
-    setTimeout(() => {
-      // Use a function to process nodes so we can handle them properly
-      const processNodes = () => {
-        // Create copies of nodes and edges with new IDs to prevent duplicates
-        const idMap = new Map<string, string>();
-        
-        const newNodes = flowNodes.map(node => {
-          const oldId = node.id;
-          const newId = uuidv4();
-          idMap.set(oldId, newId);
-          
-          return {
-            ...node,
-            id: newId,
-            position: {
-              x: node.position.x,
-              y: node.position.y
-            },
-            data: {
-              ...node.data
-            }
-          };
-        });
-        
-        // Create edges with updated source/target IDs
-        const newEdges: Edge[] = flowEdges.map(edge => {
-          const newSource = idMap.get(edge.source) || edge.source;
-          const newTarget = idMap.get(edge.target) || edge.target;
-          
-          const connection: Connection = {
-            source: newSource,
-            target: newTarget,
-            sourceHandle: null,
-            targetHandle: null
-          };
-          
-          return createEdge(connection, 'animated', true, { stroke: '#9c27b0' });
-        });
-        
-        // Add all nodes at once
-        if (newNodes.length > 0) {
-          setNodes(nodes => {
-            // Check if the new nodes would create duplicates with existing nodes
-            const existingLabels = new Set(nodes.map(n => n.data?.label));
-            
-            // Only add nodes that aren't duplicate labels or types
-            const filteredNewNodes = newNodes.filter(node => {
-              // Keep all nodes that aren't crew, agent, or task nodes
-              if (!node.type?.includes('crewNode') && 
-                  !node.type?.includes('agentNode') && 
-                  !node.type?.includes('taskNode')) {
-                return true;
-              }
-              
-              // For crew, agent, or task nodes, check for duplicates
-              return !existingLabels.has(node.data?.label);
-            });
-            
-            return [...nodes, ...filteredNewNodes];
-          });
+    console.log('WorkflowDesigner - Handling flow select (loading into FlowCanvas):', { flowNodes, flowEdges, flowConfig });
+
+    // Create copies of nodes and edges with new IDs to prevent duplicates
+    const idMap = new Map<string, string>();
+
+    const newNodes = flowNodes.map(node => {
+      const oldId = node.id;
+      const newId = uuidv4();
+      idMap.set(oldId, newId);
+
+      // Find tasks for this crew from flowConfig.listeners (fallback only)
+      let flowConfigTasks: CrewTask[] = [];
+      if (flowConfig?.listeners && node.data?.crewName) {
+        const listener = flowConfig.listeners.find(l => l.crewName === node.data.crewName);
+        if (listener && listener.tasks) {
+          flowConfigTasks = listener.tasks;
         }
-        
-        // Process additional flow config if provided
-        if (flowConfig) {
-          // Update listeners with IDs for the newly added nodes
-          if (flowConfig.listeners && flowConfig.listeners.length > 0) {
-            newNodes.forEach(node => {
-              if (node.data && node.data.listener) {
-                // Locate the corresponding listener in the flow config
-                const listenerFound = flowConfig.listeners?.find(l => 
-                  l.crewId === String(node.data.crewRef) &&
-                  l.tasks && 
-                  Array.isArray(l.tasks) && 
-                  l.tasks.some(t => node.data.listener.tasks.some((lt: { id: string }) => lt.id === t.id))
-                );
-                
-                if (listenerFound) {
-                  // Update listener tasks if needed
-                }
-              }
-            });
-          }
+      }
+
+      // Remove flow_id and flowId from node data to prevent referencing non-existent flows
+      const { flow_id, flowId: _oldFlowId, ...cleanNodeData } = node.data || {};
+
+      // CRITICAL: Preserve ALL node data properties from the saved node
+      // Only use flowConfigTasks as fallback if allTasks is not already in node data
+      const preservedAllTasks = cleanNodeData.allTasks || flowConfigTasks;
+
+      return {
+        ...node,  // Preserve all top-level node properties (style, width, height, etc.)
+        id: newId,
+        position: {
+          x: node.position.x,
+          y: node.position.y
+        },
+        data: {
+          ...cleanNodeData,  // Preserve ALL data properties (allTasks, selectedTasks, order, etc.)
+          allTasks: preservedAllTasks  // Use saved allTasks or fallback to flowConfig
         }
-        
-        // Add all edges at once
-        if (newEdges.length > 0) {
-          setEdges(edges => createUniqueEdges(newEdges, edges));
-        }
-        
-        // Trigger an event to fit view to nodes after a short delay
-        setTimeout(() => {
-          // First trigger fit view
-          window.dispatchEvent(new CustomEvent('fitViewToNodes'));
-          
-          // Then dispatch a notification event for the flow loaded
-          const flowName = flowConfig?.name || 'Flow';
-          window.dispatchEvent(new CustomEvent('showNotification', { 
-            detail: { message: `${flowName} loaded successfully` }
-          }));
-        }, 300);
       };
-      
-      // Allow the DOM to settle before adding new elements
-      processNodes();
-    }, 100);
-  }, [setNodes, setEdges]);
+    });
+
+    // Create edges with updated source/target IDs while preserving all edge data
+    const newEdges: Edge[] = flowEdges.map(edge => {
+      const newSource = idMap.get(edge.source) || edge.source;
+      const newTarget = idMap.get(edge.target) || edge.target;
+
+      // Remove flow_id and flowId from edge data to prevent referencing non-existent flows
+      const edgeData = edge.data || {};
+      const { flow_id, flowId: _oldFlowId, ...cleanEdgeData } = edgeData;
+
+      // Preserve all edge properties including data, sourceHandle, targetHandle
+      return {
+        ...edge,  // Preserve all original edge properties
+        id: edge.id || uuidv4(),
+        source: newSource,
+        target: newTarget,
+        type: edge.type || 'animated',
+        sourceHandle: edge.sourceHandle || null,
+        targetHandle: edge.targetHandle || null,
+        data: cleanEdgeData,  // Use cleaned edge data without flow references
+        style: { stroke: '#9c27b0' }
+      };
+    });
+
+    // CRITICAL: Set flow state directly (not crew state, not tabs)
+    setFlowNodes(newNodes);
+    setFlowEdges(newEdges);
+
+    console.log('Flow loaded into FlowCanvas:', { nodeCount: newNodes.length, edgeCount: newEdges.length });
+
+    // Trigger events after state update
+    setTimeout(() => {
+      // First trigger fit view
+      window.dispatchEvent(new CustomEvent('fitViewToNodes'));
+
+      // Then dispatch a notification event for the flow loaded
+      const flowName = flowConfig?.name || 'Flow';
+      window.dispatchEvent(new CustomEvent('showNotification', {
+        detail: { message: `${flowName} loaded successfully` }
+      }));
+
+      // Dispatch event to open the flow panel
+      window.dispatchEvent(new CustomEvent('openFlowPanel'));
+    }, 300);
+  }, [setFlowNodes, setFlowEdges]);
 };
 
 // Flow addition handler

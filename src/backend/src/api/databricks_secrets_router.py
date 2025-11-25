@@ -67,14 +67,17 @@ async def get_databricks_secrets(
         try:
             config = await service.databricks_service.get_databricks_config()
             if config and config.is_enabled and config.workspace_url and config.secret_scope:
-                # Use token from environment variable
-                token = os.getenv("DATABRICKS_TOKEN", "")
-                if token:
-                    # Get secrets list from Databricks
-                    databricks_results = await service.get_databricks_secrets(config.secret_scope)
-                    
-                    # Return the results directly
-                    return databricks_results
+                # Verify token is available via unified auth
+                try:
+                    from src.utils.databricks_auth import get_auth_context
+                    auth = await get_auth_context()
+                    if auth and auth.token:
+                        # Get secrets list from Databricks
+                        databricks_results = await service.get_databricks_secrets(config.secret_scope)
+                        # Return the results directly
+                        return databricks_results
+                except Exception as e:
+                    logger.warning(f"Failed to get unified auth for secrets: {e}")
         except Exception as e:
             logger.warning(f"Error getting Databricks secrets: {str(e)}")
             
@@ -266,16 +269,18 @@ async def create_databricks_secret_scope(
                 detail="Databricks not properly configured"
             )
             
-        token = os.getenv("DATABRICKS_TOKEN", "")
-        if not token:
+        # Get token from unified auth
+        from src.utils.databricks_auth import get_auth_context
+        auth = await get_auth_context()
+        if not auth or not auth.token:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
-                detail="DATABRICKS_TOKEN environment variable not set"
+                detail="No Databricks authentication available"
             )
-            
+
         success = await service.create_databricks_secret_scope(
             config.workspace_url,
-            token,
+            auth.token,
             config.secret_scope
         )
         
@@ -366,14 +371,17 @@ async def create_secret_scope_endpoint(
     """Legacy endpoint for creating a secret scope if it doesn't exist."""
     try:
         workspace_url, scope = await service.validate_databricks_config()
-        token = os.getenv("DATABRICKS_TOKEN", "")
-        if not token:
+
+        # Get token from unified auth
+        from src.utils.databricks_auth import get_auth_context
+        auth = await get_auth_context()
+        if not auth or not auth.token:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
-                detail="DATABRICKS_TOKEN environment variable not set"
+                detail="No Databricks authentication available"
             )
-        
-        success = await service.create_databricks_secret_scope(workspace_url, token, scope)
+
+        success = await service.create_databricks_secret_scope(workspace_url, auth.token, scope)
         if success:
             return {"status": "success", "message": f"Scope '{scope}' created or already exists"}
         else:
@@ -401,11 +409,10 @@ async def set_databricks_token(
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail="Databricks not properly configured"
             )
-        
-        # Set the token in the environment so it can be used
-        os.environ["DATABRICKS_TOKEN"] = request.token
-        
+
         # Store the token in Databricks scopes for later use
+        # NOTE: Do NOT set os.environ["DATABRICKS_TOKEN"] here as it causes race conditions
+        # Authentication should use get_auth_context() from databricks_auth.py instead
         success = await service.set_databricks_token(config.secret_scope, request.token)
         
         if success:

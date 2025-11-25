@@ -169,6 +169,48 @@ DEFAULT_MODELS = {
         "context_window": 200000,
         "max_output_tokens": 64000
     },
+    "databricks-claude-sonnet-4-5": {
+        "name": "databricks-claude-sonnet-4-5",
+        "temperature": 0.7,
+        "provider": "databricks",
+        "context_window": 200000,
+        "max_output_tokens": 64000
+    },
+    "databricks-gemini-2-5-flash": {
+        "name": "databricks-gemini-2-5-flash",
+        "temperature": 0.7,
+        "provider": "databricks",
+        "context_window": 1048576,
+        "max_output_tokens": 65536
+    },
+    "databricks-gemini-2-5-pro": {
+        "name": "databricks-gemini-2-5-pro",
+        "temperature": 0.7,
+        "provider": "databricks",
+        "context_window": 1000000,
+        "max_output_tokens": 65536
+    },
+    "databricks-gemini-3-pro": {
+        "name": "databricks-gemini-3-pro",
+        "temperature": 0.7,
+        "provider": "databricks",
+        "context_window": 1000000,
+        "max_output_tokens": 65536
+    },
+    "databricks-qwen3-next-80b-a3b-instruct": {
+        "name": "databricks-qwen3-next-80b-a3b-instruct",
+        "temperature": 0.7,
+        "provider": "databricks",
+        "context_window": 262144,
+        "max_output_tokens": 16384
+    },
+    "databricks-gemma-3-12b": {
+        "name": "databricks-gemma-3-12b",
+        "temperature": 0.7,
+        "provider": "databricks",
+        "context_window": 128000,
+        "max_output_tokens": 8192
+    },
     "claude-opus-4-20250514": {
         "name": "claude-opus-4-20250514",
         "temperature": 0.7,

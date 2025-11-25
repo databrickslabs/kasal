@@ -62,9 +62,9 @@ export class TaskService {
       // Extract assigned_agent if it exists in the incoming task object
       const taskWithAgent = task as TaskWithAssignedAgent;
       const assignedAgent = taskWithAgent.assigned_agent;
-      
 
-      
+
+
       // Validate and format the task data
       const taskData = {
         ...task,
@@ -72,7 +72,7 @@ export class TaskService {
         description: task.description?.trim(),
         expected_output: task.expected_output?.trim(),
         tools: task.tools || [],
-        tool_configs: task.tool_configs || {},  // Include tool_configs
+        ...(task.tool_configs ? { tool_configs: task.tool_configs } : {}),  // Include tool_configs only if present
         agent_id: task.agent_id || "",
         async_execution: task.async_execution !== undefined ? Boolean(task.async_execution) : false,
         markdown: task.markdown !== undefined ? Boolean(task.markdown) : Boolean(task.config?.markdown),
@@ -93,11 +93,12 @@ export class TaskService {
           human_input: Boolean(task.config?.human_input),
           condition: task.config?.condition || undefined,
           guardrail: task.config?.guardrail || undefined,
+          llm_guardrail: task.config?.llm_guardrail ?? null,
           markdown: Boolean(task.config?.markdown)
-        }
+        },
+        // Also include llm_guardrail at top level for database sync
+        llm_guardrail: task.config?.llm_guardrail ?? null
       };
-
-
 
       // Add assigned_agent to the final taskData if it exists
       const finalTaskData: TaskWithAssignedAgent = assignedAgent ? { 
@@ -140,7 +141,7 @@ export class TaskService {
       if (task.tool_configs) {
         console.log('TaskService - Updating task with tool_configs:', task.tool_configs);
       }
-      
+
       // Validate and format the task data
       const taskData = {
         ...task,
@@ -148,7 +149,7 @@ export class TaskService {
         description: task.description?.trim(),
         expected_output: task.expected_output?.trim(),
         tools: task.tools || [],
-        tool_configs: task.tool_configs || {},  // Include tool_configs
+        ...(task.tool_configs ? { tool_configs: task.tool_configs } : {}),  // Include tool_configs only if present
         agent_id: task.agent_id || "",
         async_execution: task.async_execution !== undefined ? Boolean(task.async_execution) : false,
         markdown: task.markdown !== undefined ? Boolean(task.markdown) : Boolean(task.config?.markdown),
@@ -169,8 +170,11 @@ export class TaskService {
           human_input: Boolean(task.config?.human_input),
           condition: task.config?.condition || undefined,
           guardrail: task.config?.guardrail || undefined,
+          llm_guardrail: task.config?.llm_guardrail ?? null,
           markdown: Boolean(task.config?.markdown)
-        }
+        },
+        // Also include llm_guardrail at top level for database sync
+        llm_guardrail: task.config?.llm_guardrail ?? null
       };
 
       console.log('TaskService - Formatted update data:', {

@@ -5,7 +5,6 @@ This adapter supports both SSE and Streamable MCP protocols using the official
 MCP client library with Databricks OAuth authentication.
 """
 
-import asyncio
 import logging
 from typing import Dict, Optional, Any, List
 
@@ -22,7 +21,7 @@ class MCPAdapter:
     def __init__(self, server_params: Dict[str, Any]):
         """
         Initialize the MCP adapter.
-        
+
         Args:
             server_params: Server configuration parameters
         """
@@ -31,8 +30,9 @@ class MCPAdapter:
         self.timeout_seconds = server_params.get('timeout_seconds', 30)
         self.max_retries = server_params.get('max_retries', 3)
         self.rate_limit = server_params.get('rate_limit', 60)
-        
+
         self._tools = []
+        self._tool_schemas = {}  # Store schemas for parameter type conversion
         self._initialized = False
         
     async def initialize(self):
@@ -103,6 +103,8 @@ class MCPAdapter:
                                 "adapter": self  # Store adapter reference for tool execution
                             }
                             tools_list.append(tool_wrapper)
+                            # Store schema for parameter type conversion
+                            self._tool_schemas[mcp_tool.name] = mcp_tool.inputSchema
                             logger.debug(f"Added tool: {mcp_tool.name}")
                     else:
                         logger.warning("No tools found in MCP server response")
@@ -112,34 +114,156 @@ class MCPAdapter:
         except Exception as e:
             logger.error(f"Error discovering tools with MCP client: {e}")
             return []
-    
+
+    def _convert_parameters(self, tool_name: str, parameters: Dict[str, Any]) -> Dict[str, Any]:
+        """
+        Convert parameter types according to the tool's input schema.
+
+        Args:
+            tool_name: Name of the tool
+            parameters: Raw parameters from CrewAI (often strings)
+
+        Returns:
+            Parameters with correct types for MCP server
+        """
+        try:
+            # Get the schema for this tool
+            schema = self._tool_schemas.get(tool_name)
+            if not schema:
+                logger.warning(f"No schema found for tool {tool_name}, using parameters as-is")
+                return parameters
+
+            # Get properties from schema
+            properties = schema.get('properties', {})
+            if not properties:
+                logger.debug(f"No properties in schema for {tool_name}")
+                return parameters
+
+            logger.info(f"Converting parameters for {tool_name}")
+            logger.info(f"  Input parameters: {parameters}")
+            logger.info(f"  Expected schema properties: {list(properties.keys())}")
+
+            converted = {}
+
+            for param_name, param_value in parameters.items():
+                # Skip None, null, empty strings
+                if param_value is None or param_value == '' or param_value == 'null':
+                    logger.debug(f"Skipping null/empty parameter: {param_name}")
+                    continue
+
+                # Get the property schema
+                prop_schema = properties.get(param_name, {})
+                param_type = prop_schema.get('type')
+
+                try:
+                    # Convert based on type
+                    if param_type == 'number':
+                        # Convert to float
+                        if isinstance(param_value, str):
+                            converted[param_name] = float(param_value)
+                        else:
+                            converted[param_name] = float(param_value)
+                    elif param_type == 'integer':
+                        # Convert to int
+                        if isinstance(param_value, str):
+                            converted[param_name] = int(param_value)
+                        else:
+                            converted[param_name] = int(param_value)
+                    elif param_type == 'boolean':
+                        # Convert to bool
+                        if isinstance(param_value, str):
+                            converted[param_name] = param_value.lower() in ('true', '1', 'yes')
+                        else:
+                            converted[param_name] = bool(param_value)
+                    elif param_type == 'array':
+                        # Keep arrays as-is, or parse JSON if string
+                        if isinstance(param_value, str):
+                            import json
+                            try:
+                                converted[param_name] = json.loads(param_value)
+                            except json.JSONDecodeError as e:
+                                logger.warning(
+                                    f"Failed to parse array parameter {param_name}='{param_value}' as JSON: {e}. Skipping parameter."
+                                )
+                                # Skip parameter - don't send invalid data to MCP server
+                                continue
+                        else:
+                            converted[param_name] = param_value
+                    elif param_type == 'object':
+                        # Keep objects as-is, or parse JSON if string
+                        if isinstance(param_value, str):
+                            import json
+                            try:
+                                converted[param_name] = json.loads(param_value)
+                            except json.JSONDecodeError as e:
+                                logger.warning(
+                                    f"Failed to parse object parameter {param_name}='{param_value}' as JSON: {e}. Skipping parameter."
+                                )
+                                # Skip parameter - don't send invalid data to MCP server
+                                continue
+                        else:
+                            converted[param_name] = param_value
+                    else:
+                        # For string or unknown types, keep as-is
+                        converted[param_name] = param_value
+
+                    # Validate enum if present
+                    if 'enum' in prop_schema:
+                        allowed_values = prop_schema['enum']
+                        if converted[param_name] not in allowed_values:
+                            logger.warning(
+                                f"Parameter {param_name}={converted[param_name]} not in allowed enum values: {allowed_values}"
+                            )
+                            # Remove invalid enum value
+                            del converted[param_name]
+
+                except (ValueError, TypeError) as e:
+                    logger.warning(f"Failed to convert parameter {param_name}={param_value} to {param_type}: {e}")
+                    # Skip parameters that fail conversion
+                    continue
+
+            # Log the conversion results
+            skipped_params = set(parameters.keys()) - set(converted.keys()) - {None, '', 'null'}
+            if skipped_params:
+                logger.warning(f"Skipped parameters for {tool_name}: {skipped_params}")
+            logger.info(f"Final converted parameters for {tool_name}: {converted}")
+            return converted
+
+        except Exception as e:
+            logger.error(f"Error converting parameters for {tool_name}: {e}")
+            # Return original parameters as fallback
+            return parameters
+
     async def execute_tool(self, tool_name: str, parameters: Dict[str, Any]) -> Any:
         """Execute a tool by creating a new MCP session (stateless approach)."""
         try:
+            # Convert parameters according to schema before execution
+            converted_params = self._convert_parameters(tool_name, parameters)
+
             # Get authentication headers
             headers = await self._get_authentication_headers()
             if not headers:
                 raise ValueError("No authentication headers available")
-                
+
             # Import MCP client dependencies
             from mcp.client.streamable_http import streamablehttp_client as connect
             from mcp import ClientSession
-            
+
             # Use only the Authorization header
             clean_headers = {"Authorization": headers["Authorization"]}
-            
+
             # Connect using MCP streamable HTTP client
             async with connect(self.server_url, headers=clean_headers) as (read_stream, write_stream, _):
                 logger.debug(f"Connected to MCP for tool execution: {tool_name}")
-                
+
                 # Create a session using the client streams
                 async with ClientSession(read_stream, write_stream) as session:
                     # Initialize the connection
                     await session.initialize()
-                    
-                    # Execute the tool
-                    logger.info(f"Executing MCP tool: {tool_name}")
-                    result = await session.call_tool(tool_name, parameters)
+
+                    # Execute the tool with converted parameters
+                    logger.info(f"Executing MCP tool: {tool_name} with parameters: {converted_params}")
+                    result = await session.call_tool(tool_name, converted_params)
                     logger.info(f"Tool {tool_name} executed successfully")
                     return result
                     

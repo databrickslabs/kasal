@@ -1,4 +1,4 @@
-import React, { useState, useMemo, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import {
   Box,
   IconButton,
@@ -7,7 +7,6 @@ import {
   Paper,
   useTheme,
   Typography,
-  alpha,
   Switch,
   FormControl,
   InputLabel,
@@ -22,8 +21,6 @@ import {
   ZoomIn as ZoomInIcon,
   ZoomOut as ZoomOutIcon,
   CenterFocusStrong as FitViewIcon,
-  AccountTree as GenerateConnectionsIcon,
-  Keyboard as KeyboardIcon,
   Tune as TuneIcon,
   SwapHoriz as SwapHorizIcon,
 
@@ -31,9 +28,6 @@ import {
   InfoOutlined as InfoOutlinedIcon,
   HelpOutline as HelpOutlineIcon,
 } from '@mui/icons-material';
-
-import { ShortcutConfig } from '../../types/shortcuts';
-import { useShortcutsStore } from '../../store/shortcuts';
 import { Models } from '../../types/models';
 import { ModelService } from '../../api/ModelService';
 import { useCrewExecutionStore } from '../../store/crewExecution';
@@ -55,12 +49,10 @@ const DEFAULT_FALLBACK_MODEL = {
 
 interface LeftSidebarProps {
   onClearCanvas: () => void;
-  onGenerateConnections: () => Promise<void>;
   onZoomIn: () => void;
   onZoomOut: () => void;
   onFitView: () => void;
   onToggleInteractivity: () => void;
-  isGeneratingConnections: boolean;
   // Runtime features props
   planningEnabled: boolean;
   setPlanningEnabled: (enabled: boolean) => void;
@@ -80,16 +72,16 @@ interface LeftSidebarProps {
   executionHistoryHeight?: number;
   // Tutorial dialog prop
   onOpenTutorial?: () => void;
+  // Hide runtime filters when on flow canvas
+  hideRuntimeFilters?: boolean;
 }
 
 const LeftSidebar: React.FC<LeftSidebarProps> = ({
   onClearCanvas,
-  onGenerateConnections,
   onZoomIn,
   onZoomOut,
   onFitView,
   onToggleInteractivity,
-  isGeneratingConnections,
   planningEnabled,
   setPlanningEnabled,
   reasoningEnabled,
@@ -102,7 +94,8 @@ const LeftSidebar: React.FC<LeftSidebarProps> = ({
   onOpenLogsDialog,
   showRunHistory,
   executionHistoryHeight = 200,
-  onOpenTutorial
+  onOpenTutorial,
+  hideRuntimeFilters = false
 }) => {
   const theme = useTheme();
   const [activeSection, setActiveSection] = useState<string | null>(null);
@@ -138,11 +131,6 @@ const LeftSidebar: React.FC<LeftSidebarProps> = ({
     processType: storeProcessType,
     managerLLM: storeManagerLLM,
   } = useCrewExecutionStore();
-
-
-
-  // Get active shortcuts from store
-  const { shortcuts } = useShortcutsStore();
 
   // Get user permissions
   const { userRole } = usePermissionStore();
@@ -221,53 +209,6 @@ const LeftSidebar: React.FC<LeftSidebarProps> = ({
     }
   }, [setProcessType, setStoreProcessType]);
 
-
-
-  // Group shortcuts by category, filtering out non-functional shortcuts
-  const groupedShortcuts = useMemo(() => {
-    // List of shortcuts that are defined but don't have working implementations or are removed
-    const nonFunctionalActions = new Set([
-      'undo',
-      'redo',
-      'selectAll',
-      'copy',
-      'paste',
-      'toggleFullscreen',
-      'openAgentDialog',
-      'openTaskDialog',
-      'openCrewPlanningDialog'
-    ]);
-
-    const result: Record<string, ShortcutConfig[]> = {
-      'Canvas': [],
-      'Creation': [],
-      'Execution': [],
-      'Management': []
-    };
-
-    shortcuts.forEach(shortcut => {
-      const action = shortcut.action;
-
-      // Skip shortcuts that don't have working implementations
-      if (nonFunctionalActions.has(action)) {
-        return;
-      }
-
-      if (action.includes('zoom') || action.includes('fit') || action.includes('clear') ||
-          action.includes('delete')) {
-        result['Canvas'].push(shortcut);
-      } else if (action.includes('open') || action.includes('generate')) {
-        result['Creation'].push(shortcut);
-      } else if (action.includes('execute')) {
-        result['Execution'].push(shortcut);
-      } else {
-        result['Management'].push(shortcut);
-      }
-    });
-
-    return result;
-  }, [shortcuts]);
-
   const sidebarItems = [
     {
       id: 'configuration',
@@ -284,8 +225,8 @@ const LeftSidebar: React.FC<LeftSidebarProps> = ({
       dataTour: 'help-button'
     },
 
-    // Only show runtime-features for non-operators
-    ...(!isOperator ? [{
+    // Only show runtime-features for non-operators AND when not on flow canvas
+    ...(!isOperator && !hideRuntimeFilters ? [{
       id: 'runtime-features',
       icon: <TuneIcon />,
       tooltip: 'Runtime Features',
@@ -385,8 +326,11 @@ const LeftSidebar: React.FC<LeftSidebarProps> = ({
             </Box>
           </Box>
 
-          {/* Planning Section */}
-          <Box sx={{ mb: 2 }}>
+          {/* Runtime Filters - Hidden when on flow canvas */}
+          {!hideRuntimeFilters && (
+            <>
+              {/* Planning Section */}
+              <Box sx={{ mb: 2 }}>
             <Box sx={{ display: 'flex', alignItems: 'center', mb: 1 }}>
               <Typography
                 variant="subtitle2"
@@ -574,106 +518,11 @@ const LeftSidebar: React.FC<LeftSidebarProps> = ({
               </Box>
             </Box>
           </Box>
+            </>
+          )}
         </Box>
       )
-    }] : []),
-    {
-      id: 'shortcuts',
-      icon: <KeyboardIcon />,
-      tooltip: 'Keyboard Shortcuts',
-      content: (
-        <Box
-          sx={{
-            maxHeight: showRunHistory ? `calc(100vh - 48px - ${executionHistoryHeight}px - 20px)` : 'calc(100vh - 48px - 20px)',
-            overflowY: 'auto',
-            p: 1,
-          }}
-        >
-          {Object.entries(groupedShortcuts).map(([category, shortcuts]) => {
-            if (shortcuts.length === 0) return null;
-
-            return (
-              <Box key={category} sx={{ mb: 2 }}>
-                <Typography
-                  variant="subtitle2"
-                  sx={{
-                    color: theme.palette.primary.main,
-                    mb: 1,
-                    fontWeight: 600,
-                    textTransform: 'uppercase',
-                    letterSpacing: '0.5px',
-                    fontSize: '0.7rem'
-                  }}
-                >
-                  {category}
-                </Typography>
-                <Divider sx={{ mb: 1 }} />
-
-                {shortcuts.map((shortcut, index) => (
-                  <Box
-                    key={`${shortcut.action}-${index}`}
-                    sx={{
-                      display: 'flex',
-                      flexDirection: 'column',
-                      gap: 0.5,
-                      mb: 1,
-                      py: 0.5,
-                      px: 0.5,
-                      borderRadius: 1,
-                      '&:hover': {
-                        backgroundColor: 'action.hover',
-                      },
-                    }}
-                  >
-                    <Typography
-                      variant="caption"
-                      sx={{
-                        color: 'text.primary',
-                        fontSize: '0.65rem',
-                        lineHeight: 1.2
-                      }}
-                    >
-                      {shortcut.description}
-                    </Typography>
-                    <Box
-                      sx={{
-                        display: 'flex',
-                        gap: 0.25,
-                        flexWrap: 'wrap'
-                      }}
-                    >
-                      {shortcut.keys.map((key: string, keyIndex: number) => (
-                        <Typography
-                          key={`${key}-${keyIndex}`}
-                          variant="caption"
-                          component="span"
-                          sx={{
-                            fontFamily: 'monospace',
-                            backgroundColor: alpha(theme.palette.primary.main, 0.1),
-                            color: theme.palette.primary.main,
-                            px: 0.4,
-                            py: 0.2,
-                            borderRadius: 0.5,
-                            fontWeight: 500,
-                            border: `1px solid ${alpha(theme.palette.primary.main, 0.2)}`,
-                            fontSize: '0.6rem',
-                            minWidth: '1rem',
-                            textAlign: 'center',
-                            display: 'inline-block'
-                          }}
-                        >
-                          {key === 'Control' ? 'Ctrl' : key === ' ' ? 'Space' : key}
-                        </Typography>
-                      ))}
-                    </Box>
-                  </Box>
-                ))}
-              </Box>
-            );
-          })}
-        </Box>
-      )
-    }
+    }] : [])
   ];
 
   // Separate help item to render it at the very bottom of the activity bar
@@ -729,7 +578,7 @@ const LeftSidebar: React.FC<LeftSidebarProps> = ({
               py: 1
             }}
           >
-            {topSidebarItems.map((item) => (
+            {topSidebarItems.map((item, index) => (
               <React.Fragment key={item.id}>
                 <Tooltip
                   title={
@@ -799,8 +648,8 @@ const LeftSidebar: React.FC<LeftSidebarProps> = ({
                     </IconButton>
                   </Badge>
                 </Tooltip>
-                {/* Insert action icons right after the Runtime Features */}
-                {item.id === 'runtime-features' && (
+                {/* Insert action icons after the last sidebar item */}
+                {index === topSidebarItems.length - 1 && (
                   <>
                     {/* Separator */}
                     <Box
@@ -911,27 +760,6 @@ const LeftSidebar: React.FC<LeftSidebarProps> = ({
                         <ZoomOutIcon fontSize="small" />
                       </IconButton>
                     </Tooltip>
-                    <Tooltip title="Generate Connections" placement="right">
-                      <IconButton
-                        onClick={onGenerateConnections}
-                        disabled={isGeneratingConnections}
-                        sx={{
-                          width: 40,
-                          height: 40,
-                          mb: 1,
-                          color: 'text.secondary',
-                          borderRadius: 0,
-                          transition: 'all 0.2s ease-in-out',
-                          '&:hover': {
-                            backgroundColor: 'action.hover',
-                            color: 'text.primary'
-                          }
-                        }}
-                      >
-                        <GenerateConnectionsIcon fontSize="small" />
-                      </IconButton>
-                    </Tooltip>
-
                   </>
                 )}
               </React.Fragment>

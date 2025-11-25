@@ -132,7 +132,7 @@ class TestRunCrew:
     async def test_run_crew_cleanup_operations(self, sample_crew, sample_running_jobs):
         """Test cleanup operations are performed."""
         execution_id = "test-exec-id"
-        
+
         with patch('src.services.execution_status_service.ExecutionStatusService') as mock_status_service, \
              patch('src.engines.crewai.crew_logger.crew_logger') as mock_crew_logger, \
              patch('src.engines.crewai.callbacks.streaming_callbacks.EventStreamingCallback') as mock_event_streaming, \
@@ -144,8 +144,7 @@ class TestRunCrew:
              patch('src.engines.crewai.trace_management.TraceManager.ensure_writer_started', new_callable=AsyncMock), \
              patch('src.engines.crewai.callbacks.logging_callbacks.AgentTraceEventListener'), \
              patch('src.engines.crewai.tools.mcp_handler.stop_all_adapters', new_callable=AsyncMock) as mock_stop_adapters, \
-             patch('src.engines.crewai.execution_runner.update_execution_status_with_retry', new_callable=AsyncMock) as mock_update_status, \
-             patch('src.utils.databricks_auth.is_databricks_apps_environment', return_value=False):
+             patch('src.engines.crewai.execution_runner.update_execution_status_with_retry', new_callable=AsyncMock) as mock_update_status:
             
             # Setup mocks
             mock_status_service.update_status = AsyncMock()
@@ -186,7 +185,7 @@ class TestRunCrew:
     async def test_run_crew_no_user_context(self, sample_crew, sample_running_jobs):
         """Test crew execution without user token or group context."""
         execution_id = "test-exec-id"
-        
+
         with patch('src.services.execution_status_service.ExecutionStatusService') as mock_status_service, \
              patch('src.engines.crewai.crew_logger.crew_logger') as mock_crew_logger, \
              patch('src.engines.crewai.callbacks.streaming_callbacks.EventStreamingCallback') as mock_event_streaming, \
@@ -198,8 +197,7 @@ class TestRunCrew:
              patch('src.engines.crewai.trace_management.TraceManager.ensure_writer_started', new_callable=AsyncMock), \
              patch('src.engines.crewai.callbacks.logging_callbacks.AgentTraceEventListener'), \
              patch('src.engines.crewai.tools.mcp_handler.stop_all_adapters', new_callable=AsyncMock) as mock_stop_adapters, \
-             patch('src.engines.crewai.execution_runner.update_execution_status_with_retry', new_callable=AsyncMock) as mock_update_status, \
-             patch('src.utils.databricks_auth.is_databricks_apps_environment', return_value=False):
+             patch('src.engines.crewai.execution_runner.update_execution_status_with_retry', new_callable=AsyncMock) as mock_update_status:
             
             # Setup mocks
             mock_status_service.update_status = AsyncMock()

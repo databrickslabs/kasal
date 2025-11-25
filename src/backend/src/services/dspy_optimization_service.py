@@ -312,10 +312,17 @@ class DSPyOptimizationService:
         if model_name.startswith("databricks-"):
             # Use OpenAI-compatible interface for Databricks
             import dspy
+            # Use unified authentication
+            from src.utils.databricks_auth import get_auth_context
+            import asyncio
+            auth = asyncio.run(get_auth_context())
+            api_base = auth.workspace_url + "/serving-endpoints" if auth else "https://example.databricks.com/serving-endpoints"
+            api_key = auth.token if auth else ""
+
             lm = dspy.LM(
                 model=f"openai/{model_name}",
-                api_base=os.getenv("DATABRICKS_HOST", "https://example.databricks.com") + "/serving-endpoints",
-                api_key=os.getenv("DATABRICKS_TOKEN", ""),
+                api_base=api_base,
+                api_key=api_key,
                 temperature=0.3
             )
         else:

@@ -309,7 +309,7 @@ async def create_task(
                         tool_override = task_tool_configs.get(tool_name, {})
                         
                         # Debug logging for tool configs
-                        if tool_name in ["GenieTool", "SerperDevTool"]:
+                        if tool_name in ["GenieTool", "SerperDevTool", "DatabricksKnowledgeSearchTool"]:
                             logger.info(f"Task {task_key} - {tool_name} task_tool_configs: {task_tool_configs}")
                             logger.info(f"Task {task_key} - {tool_name} tool_override: {tool_override}")
                         
@@ -349,7 +349,9 @@ async def create_task(
                                 }
                                 logger.info(f"Added tool instance {tool_name} to task {task_key} with details: {tool_info}")
                         else:
-                            logger.warning(f"Could not create tool instance for {tool_name}")
+                            logger.error(f"Could not create tool instance for {tool_name}")
+                            logger.error(f"Tool factory returned None - check tool factory logs for details")
+                            logger.error(f"Tool config: {tool_config}")
                     except Exception as e:
                         logger.error(f"Error creating tool {tool_name}: {str(e)}")
             else:
@@ -606,6 +608,58 @@ async def create_task(
         else:
             # Callback is already a function
             task_args['callback'] = existing_callback
+
+    # Handle LLM guardrail if present (takes priority over code-based guardrail if both exist)
+    # This uses CrewAI's OSS LLMGuardrail which validates task output using an LLM agent
+    if 'llm_guardrail' in task_config and task_config['llm_guardrail']:
+        llm_guardrail_config = task_config['llm_guardrail']
+        guardrail_logger.info(f"Task {task_key} has LLM guardrail configuration: {llm_guardrail_config}")
+
+        try:
+            from crewai.tasks.llm_guardrail import LLMGuardrail
+            from crewai import LLM
+
+            # Extract configuration - handle both dict and object
+            if isinstance(llm_guardrail_config, dict):
+                description = llm_guardrail_config.get('description', 'Validate the task output')
+                llm_model = llm_guardrail_config.get('llm_model', 'databricks-claude-sonnet-4-5')
+            else:
+                description = getattr(llm_guardrail_config, 'description', 'Validate the task output')
+                llm_model = getattr(llm_guardrail_config, 'llm_model', 'databricks-claude-sonnet-4-5')
+
+            # Ensure model has provider prefix for LiteLLM
+            # Databricks models need 'databricks/' prefix
+            if llm_model and not llm_model.startswith('databricks/'):
+                if llm_model.startswith('databricks-'):
+                    llm_model = f"databricks/{llm_model}"
+                    guardrail_logger.info(f"Added databricks/ prefix to model: {llm_model}")
+
+            # Create LLM instance for the guardrail
+            guardrail_llm = LLM(model=llm_model)
+
+            # Create LLMGuardrail (OSS-compatible, NOT HallucinationGuardrail)
+            llm_guardrail = LLMGuardrail(
+                description=description,
+                llm=guardrail_llm
+            )
+
+            # Set the LLM guardrail in task args
+            # This overrides any code-based guardrail if both are present
+            task_args['guardrail'] = llm_guardrail
+            guardrail_logger.info(f"Configured LLM guardrail for task {task_key} using model {llm_model}")
+            guardrail_logger.info(f"LLM guardrail description: {description}")
+
+            # Ensure retry_on_fail is enabled for guardrails
+            if not task_args.get('retry_on_fail'):
+                task_args['retry_on_fail'] = True
+                guardrail_logger.info(f"Enabled retry_on_fail for task {task_key} with LLM guardrail")
+
+        except ImportError as e:
+            guardrail_logger.error(f"Could not import LLMGuardrail for task {task_key}: {str(e)}")
+            guardrail_logger.error("Make sure crewai is installed with guardrail support")
+        except Exception as e:
+            guardrail_logger.error(f"Error configuring LLM guardrail for task {task_key}: {str(e)}")
+            guardrail_logger.error(f"Stack trace: {traceback.format_exc()}")
 
     # Add output file for tasks that need it
     if output_dir and task_config.get('output_file_enabled', False):

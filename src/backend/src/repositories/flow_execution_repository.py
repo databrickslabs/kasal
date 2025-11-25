@@ -4,7 +4,7 @@ Repository for flow execution and flow node execution operations.
 import logging
 import uuid
 from typing import List, Optional, Dict, Any, Union
-from datetime import datetime, UTC
+from datetime import datetime
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import Session
 from sqlalchemy import select, update
@@ -30,14 +30,14 @@ class FlowExecutionRepository:
     async def create(self, flow_execution_data: FlowExecutionCreate) -> FlowExecution:
         """
         Create a new flow execution record.
-        
+
         Args:
             flow_execution_data: Data for the new flow execution
-            
+
         Returns:
             The created flow execution record
         """
-        now = datetime.now(UTC)
+        now = datetime.utcnow()
         execution = FlowExecution(
             flow_id=flow_execution_data.flow_id,
             job_id=flow_execution_data.job_id,
@@ -57,17 +57,22 @@ class FlowExecutionRepository:
     async def get(self, execution_id: int) -> Optional[FlowExecution]:
         """
         Get a flow execution by ID.
-        
+
         Args:
             execution_id: ID of the flow execution to retrieve
-            
+
         Returns:
             The flow execution record or None if not found
         """
         query = select(FlowExecution).where(FlowExecution.id == execution_id)
         result = await self.session.execute(query)
         return result.scalars().first()
-    
+
+    # Alias for backward compatibility with service layer
+    async def get_by_id(self, execution_id: int) -> Optional[FlowExecution]:
+        """Alias for get() method."""
+        return await self.get(execution_id)
+
     async def get_by_job_id(self, job_id: str) -> Optional[FlowExecution]:
         """
         Get a flow execution by job ID.
@@ -115,7 +120,7 @@ class FlowExecutionRepository:
         Returns:
             The updated flow execution record or None if not found
         """
-        now = datetime.now(UTC)
+        now = datetime.utcnow()
         update_data = {"updated_at": now}
         
         if execution_data.status is not None:
@@ -150,13 +155,34 @@ class FlowExecutionRepository:
     async def get_all(self) -> List[FlowExecution]:
         """
         Get all flow executions.
-        
+
         Returns:
             List of all flow execution records
         """
         query = select(FlowExecution)
         result = await self.session.execute(query)
         return list(result.scalars().all())
+
+    async def delete(self, execution_id: int) -> bool:
+        """
+        Delete a flow execution by ID.
+
+        Args:
+            execution_id: ID of the flow execution to delete
+
+        Returns:
+            True if deleted, False if not found
+        """
+        from sqlalchemy import delete as sql_delete
+
+        stmt = sql_delete(FlowExecution).where(FlowExecution.id == execution_id)
+        result = await self.session.execute(stmt)
+        await self.session.commit()
+
+        deleted = result.rowcount > 0
+        if deleted:
+            logger.info(f"Deleted flow execution {execution_id}")
+        return deleted
 
 
 class FlowNodeExecutionRepository:
@@ -176,7 +202,7 @@ class FlowNodeExecutionRepository:
         Returns:
             The created flow node execution record
         """
-        now = datetime.now(UTC)
+        now = datetime.utcnow()
         node_execution = FlowNodeExecution(
             flow_execution_id=node_execution_data.flow_execution_id,
             node_id=node_execution_data.node_id,
@@ -233,7 +259,7 @@ class FlowNodeExecutionRepository:
         Returns:
             The updated flow node execution record or None if not found
         """
-        now = datetime.now(UTC)
+        now = datetime.utcnow()
         update_data = {"updated_at": now}
         
         if node_execution_data.status is not None:
@@ -262,9 +288,36 @@ class FlowNodeExecutionRepository:
         updated = result.scalars().first()
         if updated:
             logger.info(f"Updated node execution {node_execution_id} with status {node_execution_data.status}")
-        
+
         return updated
-        
+
+    # Alias for backward compatibility with service layer
+    async def get_by_flow_execution_id(self, flow_execution_id: int) -> List[FlowNodeExecution]:
+        """Alias for get_by_flow_execution() method."""
+        return await self.get_by_flow_execution(flow_execution_id)
+
+    async def delete(self, node_execution_id: int) -> bool:
+        """
+        Delete a flow node execution by ID.
+
+        Args:
+            node_execution_id: ID of the node execution to delete
+
+        Returns:
+            True if deleted, False if not found
+        """
+        from sqlalchemy import delete as sql_delete
+
+        stmt = sql_delete(FlowNodeExecution).where(FlowNodeExecution.id == node_execution_id)
+        result = await self.session.execute(stmt)
+        await self.session.commit()
+
+        deleted = result.rowcount > 0
+        if deleted:
+            logger.info(f"Deleted node execution {node_execution_id}")
+        return deleted
+
+
 # Synchronous versions for use with the crew execution code
 
 class SyncFlowExecutionRepository:
@@ -284,7 +337,7 @@ class SyncFlowExecutionRepository:
         Returns:
             The created flow execution record
         """
-        now = datetime.now(UTC)
+        now = datetime.utcnow()
         execution = FlowExecution(
             flow_id=flow_execution_data.flow_id,
             job_id=flow_execution_data.job_id,
@@ -360,7 +413,7 @@ class SyncFlowExecutionRepository:
         if not execution:
             return None
             
-        now = datetime.now(UTC)
+        now = datetime.utcnow()
         execution.updated_at = now
         
         if execution_data.status is not None:
@@ -400,7 +453,7 @@ class SyncFlowNodeExecutionRepository:
         Returns:
             The created flow node execution record
         """
-        now = datetime.now(UTC)
+        now = datetime.utcnow()
         node_execution = FlowNodeExecution(
             flow_execution_id=node_execution_data.flow_execution_id,
             node_id=node_execution_data.node_id,
@@ -457,7 +510,7 @@ class SyncFlowNodeExecutionRepository:
         if not node_execution:
             return None
             
-        now = datetime.now(UTC)
+        now = datetime.utcnow()
         node_execution.updated_at = now
         
         if node_execution_data.status is not None:

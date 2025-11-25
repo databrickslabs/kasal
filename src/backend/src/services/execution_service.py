@@ -320,8 +320,12 @@ class ExecutionService:
             Dictionary with execution result
         """
         # Create a dedicated logger for execution-specific logging
-        exec_logger = LoggerManager.get_instance().crew
-        
+        # Use flow logger for flow executions, crew logger for crew executions
+        if execution_type and execution_type.lower() == "flow":
+            exec_logger = LoggerManager.get_instance().flow
+        else:
+            exec_logger = LoggerManager.get_instance().crew
+
         exec_logger.info(f"[run_crew_execution] Starting {execution_type} execution for execution_id: {execution_id}")
         exec_logger.info(f"[run_crew_execution] Execution type: {execution_type}")
         exec_logger.info(f"[run_crew_execution] Config attributes: {dir(config)}")
@@ -382,14 +386,9 @@ class ExecutionService:
             elif execution_type.lower() == "crew":
                 exec_logger.debug(f"[run_crew_execution] This is a CREW execution - delegating to CrewAIExecutionService")
                 
-                # Set up Databricks configuration if needed for crew executions
-                if config.model and 'databricks' in config.model.lower():
-                    exec_logger.info(f"Setting up Databricks token for crew execution with model {config.model}")
-                    from src.services.databricks_service import DatabricksService
-                    setup_result = await DatabricksService.setup_token()
-                    if not setup_result:
-                        exec_logger.warning("Failed to set up Databricks token, crew execution may fail if it requires Databricks")
-                
+                # NOTE: Databricks authentication is now handled via get_auth_context() in databricks_auth.py
+                # No need to set up environment variables here - each component uses unified auth
+
                 exec_logger.debug(f"[run_crew_execution] Calling crew_execution_service.run_crew_execution for job_id: {execution_id}")
                 # This call should handle PREPARING/RUNNING updates internally
                 result = await crew_execution_service.run_crew_execution(
@@ -562,15 +561,9 @@ class ExecutionService:
         success = False
         
         try:
-            # Set up Databricks configuration if needed
-            # This is important for executions that might need to use Databricks services
-            if config.model and 'databricks' in config.model.lower():
-                exec_logger.info(f"Setting up Databricks token for execution with model {config.model}")
-                from src.services.databricks_service import DatabricksService
-                setup_result = DatabricksService.setup_token_sync()
-                if not setup_result:
-                    exec_logger.warning("Failed to set up Databricks token, execution may fail if it requires Databricks")
-            
+            # NOTE: Databricks authentication is now handled via get_auth_context() in databricks_auth.py
+            # No need to set up environment variables here - each component uses unified auth
+
             # Main execution logic would go here
             # For non-crew executions, such as flows
             if execution_type == "flow":
@@ -707,7 +700,17 @@ class ExecutionService:
             Dictionary with execution details
         """
         # Use consistent logger instance defined at the module level
-        crew_logger.debug("[ExecutionService.create_execution] Received request to create execution.")
+        # Choose logger based on execution type
+        execution_type = config.execution_type if hasattr(config, 'execution_type') and config.execution_type else "crew"
+        if execution_type.lower() == "flow":
+            logger = LoggerManager.get_instance().flow
+            # Also update exec_logger for backward compatibility with existing code
+            exec_logger = LoggerManager.get_instance().flow
+        else:
+            logger = crew_logger
+            exec_logger = crew_logger
+
+        logger.debug("[ExecutionService.create_execution] Received request to create execution.")
 
         try:
             # Check for running jobs to enforce single job execution constraint
@@ -724,7 +727,7 @@ class ExecutionService:
         try:
             # Generate a new execution ID
             execution_id = ExecutionService.create_execution_id()
-            crew_logger.debug(f"[ExecutionService.create_execution] Generated execution_id: {execution_id}")
+            logger.debug(f"[ExecutionService.create_execution] Generated execution_id: {execution_id}")
 
             # Generate a descriptive run name
             # Determine model safely
@@ -734,17 +737,29 @@ class ExecutionService:
             tasks_yaml = config.tasks_yaml if isinstance(config.tasks_yaml, dict) else {}
             
             # Log the agents_yaml to see if knowledge_sources are present
-            crew_logger.info(f"[ExecutionService.create_execution] Received agents_yaml with {len(agents_yaml)} agents")
+            logger.info(f"[ExecutionService.create_execution] Received agents_yaml with {len(agents_yaml)} agents")
             for agent_id, agent_config in agents_yaml.items():
-                crew_logger.info(f"[ExecutionService.create_execution] Agent {agent_id} keys: {list(agent_config.keys())}")
+                logger.info(f"[ExecutionService.create_execution] Agent {agent_id} keys: {list(agent_config.keys())}")
                 if "knowledge_sources" in agent_config:
                     knowledge_sources = agent_config.get("knowledge_sources", [])
-                    crew_logger.info(f"[ExecutionService.create_execution] Agent {agent_id} has {len(knowledge_sources)} knowledge_sources")
+                    logger.info(f"[ExecutionService.create_execution] Agent {agent_id} has {len(knowledge_sources)} knowledge_sources")
                     for idx, source in enumerate(knowledge_sources):
-                        crew_logger.info(f"[ExecutionService.create_execution] Agent {agent_id} knowledge_source[{idx}]: {source}")
+                        logger.info(f"[ExecutionService.create_execution] Agent {agent_id} knowledge_source[{idx}]: {source}")
                 else:
-                    crew_logger.warning(f"[ExecutionService.create_execution] Agent {agent_id} has NO knowledge_sources field")
-            
+                    logger.warning(f"[ExecutionService.create_execution] Agent {agent_id} has NO knowledge_sources field")
+
+            # Ensure GroupContext is available in UserContext for authentication
+            # This is critical for both OBO (user_token) and PAT (group_id) authentication
+            if group_context:
+                from src.utils.user_context import UserContext
+                UserContext.set_group_context(group_context)
+                logger.info(f"[ExecutionService.create_execution] Set GroupContext for execution name generation: primary_group_id={group_context.primary_group_id}, has_access_token={bool(group_context.access_token)}")
+
+                # Also set user_token if available for OBO authentication
+                if hasattr(group_context, 'access_token') and group_context.access_token:
+                    UserContext.set_user_token(group_context.access_token)
+                    logger.info("[ExecutionService.create_execution] Set user_token for OBO authentication")
+
             request = ExecutionNameGenerationRequest(
                 agents_yaml=agents_yaml,
                 tasks_yaml=tasks_yaml,
@@ -752,54 +767,64 @@ class ExecutionService:
             )
             response = await self.execution_name_service.generate_execution_name(request)
             run_name = response.name
-            crew_logger.debug(f"[ExecutionService.create_execution] Generated run_name: {run_name} for execution_id: {execution_id}")
-            
+            logger.debug(f"[ExecutionService.create_execution] Generated run_name: {run_name} for execution_id: {execution_id}")
+
             # Add run_name to config inputs for crew consistency
             if not config.inputs:
                 config.inputs = {}
             config.inputs["run_name"] = run_name
-            crew_logger.info(f"[ExecutionService.create_execution] Added run_name to config.inputs for consistent crew_id generation")
+            logger.info(f"[ExecutionService.create_execution] Added run_name to config.inputs for consistent crew_id generation")
 
             # Extract execution type and flow_id
-            execution_type = config.execution_type if config.execution_type else "crew"
+            # Note: execution_type is already captured above for logger selection
             flow_id = None
 
             if execution_type == "flow":
-                crew_logger.info(f"[ExecutionService.create_execution] Creating flow execution for execution_id: {execution_id}")
+                logger.info(f"[ExecutionService.create_execution] Creating flow execution for execution_id: {execution_id}")
                 
                 # Check if flow_id is directly available in config
                 if hasattr(config, 'flow_id') and config.flow_id:
                     flow_id = config.flow_id
-                    crew_logger.info(f"[ExecutionService.create_execution] Using flow_id from config: {flow_id}")
+                    logger.info(f"[ExecutionService.create_execution] Using flow_id from config: {flow_id}")
                 # Also try to get flow_id from inputs
                 elif config.inputs and "flow_id" in config.inputs:
                     flow_id = config.inputs.get("flow_id")
-                    crew_logger.info(f"[ExecutionService.create_execution] Using flow_id from inputs: {flow_id}")
+                    logger.info(f"[ExecutionService.create_execution] Using flow_id from inputs: {flow_id}")
                 
-                # If no flow_id is provided, find the most recent flow
+                # If no flow_id is provided, check if nodes/edges are provided for ad-hoc execution
+                # This allows "test before save" workflow from the canvas
                 if not flow_id:
-                    exec_logger.info(f"[ExecutionService.create_execution] No flow_id provided for execution_id: {execution_id}, trying to find most recent flow")
-                    try:
-                        # Use async query for the most recent flow from the database
-                        from src.db.session import async_session_factory
-                        from src.models.flow import Flow
-                        from sqlalchemy import select, desc
+                    # Check if nodes and edges are provided in config for ad-hoc execution
+                    has_nodes = hasattr(config, 'nodes') and config.nodes
+                    has_edges = hasattr(config, 'edges') and config.edges
 
-                        async with async_session_factory() as db:
-                            # Get the most recent flow using async query
-                            stmt = select(Flow).order_by(desc(Flow.created_at)).limit(1)
-                            result = await db.execute(stmt)
-                            most_recent_flow = result.scalars().first()
+                    if has_nodes and has_edges:
+                        # Ad-hoc flow execution with nodes/edges from canvas (no database save required)
+                        exec_logger.info(f"[ExecutionService.create_execution] No flow_id provided, but nodes ({len(config.nodes)}) and edges ({len(config.edges)}) present - allowing ad-hoc flow execution")
+                    else:
+                        # No flow_id and no nodes/edges, try to find the most recent flow from database
+                        exec_logger.info(f"[ExecutionService.create_execution] No flow_id or nodes/edges provided for execution_id: {execution_id}, trying to find most recent flow from database")
+                        try:
+                            # Use async query for the most recent flow from the database
+                            from src.db.session import async_session_factory
+                            from src.models.flow import Flow
+                            from sqlalchemy import select, desc
 
-                            if most_recent_flow:
-                                flow_id = most_recent_flow.id
-                                exec_logger.info(f"[ExecutionService.create_execution] Found most recent flow with ID {flow_id} for execution_id: {execution_id}")
-                            else:
-                                exec_logger.error(f"[ExecutionService.create_execution] No flows found in database for execution_id: {execution_id}")
-                                raise ValueError("No flow found in the database. Please create a flow first.")
-                    except Exception as e:
-                        exec_logger.error(f"[ExecutionService.create_execution] Error finding most recent flow: {str(e)}")
-                        raise ValueError(f"Error finding most recent flow: {str(e)}")
+                            async with async_session_factory() as db:
+                                # Get the most recent flow using async query
+                                stmt = select(Flow).order_by(desc(Flow.created_at)).limit(1)
+                                result = await db.execute(stmt)
+                                most_recent_flow = result.scalars().first()
+
+                                if most_recent_flow:
+                                    flow_id = most_recent_flow.id
+                                    exec_logger.info(f"[ExecutionService.create_execution] Found most recent flow with ID {flow_id} for execution_id: {execution_id}")
+                                else:
+                                    exec_logger.error(f"[ExecutionService.create_execution] No flows found in database for execution_id: {execution_id}")
+                                    raise ValueError("No flow found in the database. Please create a flow first, or provide nodes and edges for ad-hoc execution.")
+                        except Exception as e:
+                            exec_logger.error(f"[ExecutionService.create_execution] Error finding most recent flow: {str(e)}")
+                            raise ValueError(f"Error finding most recent flow: {str(e)}")
 
             # Create database entry
             inputs = {
@@ -817,21 +842,21 @@ class ExecutionService:
                 # Make sure we have nodes and edges for flow execution
                 if hasattr(config, 'nodes') and config.nodes:
                     inputs["nodes"] = config.nodes
-                    crew_logger.info(f"[ExecutionService.create_execution] Added {len(config.nodes)} nodes to flow execution")
+                    logger.info(f"[ExecutionService.create_execution] Added {len(config.nodes)} nodes to flow execution")
                 elif not flow_id:
                     # Only warn about missing nodes if we don't have a flow_id
-                    crew_logger.warning(f"[ExecutionService.create_execution] No nodes provided for flow execution {execution_id} and no flow_id present, this will cause an error")
+                    logger.warning(f"[ExecutionService.create_execution] No nodes provided for flow execution {execution_id} and no flow_id present, this will cause an error")
                 else:
-                    crew_logger.info(f"[ExecutionService.create_execution] No nodes provided for flow execution {execution_id}, but flow_id {flow_id} is present. Nodes will be loaded from the database.")
-                
+                    logger.info(f"[ExecutionService.create_execution] No nodes provided for flow execution {execution_id}, but flow_id {flow_id} is present. Nodes will be loaded from the database.")
+
                 if hasattr(config, 'edges') and config.edges:
                     inputs["edges"] = config.edges
-                    crew_logger.info(f"[ExecutionService.create_execution] Added {len(config.edges)} edges to flow execution")
-                
+                    logger.info(f"[ExecutionService.create_execution] Added {len(config.edges)} edges to flow execution")
+
                 # Add flow configuration if available
                 if hasattr(config, 'flow_config') and config.flow_config:
                     inputs["flow_config"] = config.flow_config
-                    crew_logger.info(f"[ExecutionService.create_execution] Added flow_config to flow execution")
+                    logger.info(f"[ExecutionService.create_execution] Added flow_config to flow execution")
 
             # Add flow_id to inputs if it exists
             if flow_id:
@@ -840,7 +865,7 @@ class ExecutionService:
                 if not config.inputs:
                     config.inputs = {}
                 config.inputs["flow_id"] = str(flow_id)
-                crew_logger.info(f"[ExecutionService.create_execution] Added flow_id {flow_id} to config.inputs")
+                logger.info(f"[ExecutionService.create_execution] Added flow_id {flow_id} to config.inputs")
 
             # Sanitize inputs to ensure all values are JSON serializable
             sanitized_inputs = ExecutionService.sanitize_for_database(inputs)
@@ -855,16 +880,16 @@ class ExecutionService:
                 "created_at": datetime.now()  # Remove timezone to match database column type
             }
 
-            crew_logger.debug(f"[ExecutionService.create_execution] Attempting to create DB record for execution_id: {execution_id} with status RUNNING")
-            
+            logger.debug(f"[ExecutionService.create_execution] Attempting to create DB record for execution_id: {execution_id} with status RUNNING")
+
             # Use ExecutionStatusService to create the execution
             from src.services.execution_status_service import ExecutionStatusService
             success = await ExecutionStatusService.create_execution(execution_data, group_context=group_context)
-            
+
             if not success:
                 raise ValueError(f"Failed to create execution record for {execution_id}")
 
-            crew_logger.info(f"[ExecutionService.create_execution] Successfully created DB record for execution_id: {execution_id} with status RUNNING")
+            logger.info(f"[ExecutionService.create_execution] Successfully created DB record for execution_id: {execution_id} with status RUNNING")
 
             # Add to in-memory storage with RUNNING status
             ExecutionService.add_execution_to_memory(
@@ -873,15 +898,15 @@ class ExecutionService:
                 run_name=run_name,
                 created_at=datetime.now()  # Remove timezone to match database column type
             )
-            crew_logger.debug(f"[ExecutionService.create_execution] Added execution_id: {execution_id} to in-memory store with status RUNNING")
+            logger.debug(f"[ExecutionService.create_execution] Added execution_id: {execution_id} to in-memory store with status RUNNING")
 
             # Start execution in background
-            crew_logger.info(f"[ExecutionService.create_execution] Preparing to launch background task for execution_id: {execution_id}...")
+            logger.info(f"[ExecutionService.create_execution] Preparing to launch background task for execution_id: {execution_id}...")
 
             if background_tasks:
                 async def run_execution_task():
-                    # Use a separate logger instance potentially if needed, or reuse crew_logger
-                    task_logger = LoggerManager.get_instance().crew 
+                    # Use context-aware logger based on execution type
+                    task_logger = LoggerManager.get_instance().flow if execution_type.lower() == "flow" else LoggerManager.get_instance().crew
                     task_logger.info(f"[run_execution_task] Background task started for execution_id: {execution_id}")
                     try:
                         task_logger.debug(f"[run_execution_task] Calling ExecutionService.run_crew_execution for execution_id: {execution_id}")
@@ -910,10 +935,10 @@ class ExecutionService:
                     task_logger.info(f"[run_execution_task] Background task finished for execution_id: {execution_id}")
 
                 background_tasks.add_task(run_execution_task)
-                crew_logger.info(f"[ExecutionService.create_execution] Added run_execution_task to FastAPI BackgroundTasks for execution_id: {execution_id}")
+                logger.info(f"[ExecutionService.create_execution] Added run_execution_task to FastAPI BackgroundTasks for execution_id: {execution_id}")
             else:
                 # Fallback using asyncio.create_task
-                crew_logger.warning(f"[ExecutionService.create_execution] FastAPI BackgroundTasks not available for {execution_id}, using asyncio.create_task.")
+                logger.warning(f"[ExecutionService.create_execution] FastAPI BackgroundTasks not available for {execution_id}, using asyncio.create_task.")
                 task = asyncio.create_task(ExecutionService._run_in_background(
                     execution_id=execution_id,
                     config=config,
@@ -924,10 +949,10 @@ class ExecutionService:
                 # Store the task reference so we can cancel it later
                 if execution_id in ExecutionService.executions:
                     ExecutionService.executions[execution_id]["task"] = task
-                    crew_logger.debug(f"[ExecutionService.create_execution] Stored asyncio task reference for {execution_id}")
-                crew_logger.info(f"[ExecutionService.create_execution] Launched _run_in_background task via asyncio for execution_id: {execution_id}")
+                    logger.debug(f"[ExecutionService.create_execution] Stored asyncio task reference for {execution_id}")
+                logger.info(f"[ExecutionService.create_execution] Launched _run_in_background task via asyncio for execution_id: {execution_id}")
 
-            crew_logger.info(f"[ExecutionService.create_execution] Execution {execution_id} launch initiated. Returning initial response.")
+            logger.info(f"[ExecutionService.create_execution] Execution {execution_id} launch initiated. Returning initial response.")
 
             # Return execution details immediately after DB creation and task launch
             from src.schemas.execution import ExecutionCreateResponse
@@ -938,7 +963,7 @@ class ExecutionService:
             ).model_dump() # Return as dict
 
         except Exception as e:
-            crew_logger.error(f"[ExecutionService.create_execution] Error during initial creation for execution: {str(e)}", exc_info=True)
+            logger.error(f"[ExecutionService.create_execution] Error during initial creation for execution: {str(e)}", exc_info=True)
             # Re-raise as HTTPException for the API boundary
             raise HTTPException(
                 status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,

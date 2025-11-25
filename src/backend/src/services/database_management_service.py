@@ -31,24 +31,16 @@ class DatabaseManagementService:
         # Store the injected session
         self.session = session
 
-        # Authentication strategy:
-        # - In Databricks Apps: Use OBO (On-Behalf-Of) authentication with user token
-        # - Outside Databricks Apps: Use PAT (Personal Access Token) authentication
-
-        is_databricks_apps = bool(os.getenv("DATABRICKS_APP_NAME"))
-
-        if is_databricks_apps:
-            # In Databricks Apps - use OBO authentication with user token
-            logger.info("Database Management: Running in Databricks Apps - using OBO authentication")
-            logger.info(f"Database Management: User token provided: {bool(user_token)}")
-            self.repository = repository or DatabaseBackupRepository(session=session, user_token=user_token)
-            self.user_token = user_token
+        # Authentication strategy: Always use OBO when user token is available
+        # Falls back to Service Principal or PAT if no user token provided
+        logger.info(f"Database Management: User token provided: {bool(user_token)}")
+        if user_token:
+            logger.info("Database Management: Using OBO authentication with user token")
         else:
-            # Outside Databricks Apps - use PAT authentication (no user token)
-            logger.info("Database Management: Not in Databricks Apps - using PAT authentication")
-            # Pass None as user_token to use PAT from environment or database
-            self.repository = repository or DatabaseBackupRepository(session=session, user_token=None)
-            self.user_token = None
+            logger.info("Database Management: No user token - will use Service Principal or PAT fallback")
+
+        self.repository = repository or DatabaseBackupRepository(session=session, user_token=user_token)
+        self.user_token = user_token
     
     async def export_to_volume(
         self,
@@ -153,9 +145,16 @@ class DatabaseManagementService:
                 return backup_result
             
             backup_size_mb = backup_result["backup_size"] / (1024 * 1024)  # Size in MB
-            
-            # Generate Databricks URL for the volume
-            workspace_url = os.environ.get("DATABRICKS_HOST", "").rstrip("/")
+
+            # Generate Databricks URL for the volume using unified auth
+            workspace_url = ""
+            try:
+                from src.utils.databricks_auth import get_auth_context
+                auth = await get_auth_context()
+                if auth and auth.workspace_url:
+                    workspace_url = auth.workspace_url.rstrip("/")
+            except Exception:
+                pass
             if not workspace_url:
                 workspace_url = "https://your-workspace.databricks.com"
             
@@ -323,9 +322,24 @@ class DatabaseManagementService:
             
             if not restore_result["success"]:
                 return restore_result
-            
+
+            # CRITICAL: Dispose pool after SQLite import to invalidate stale connections
+            # DO NOT close session here - it causes corruption when SQLite tries to write cleanup
+            # operations using the old file descriptor after the database file was replaced
+            # Let FastAPI's context manager close the session naturally after response is sent
+            if db_type == 'sqlite':
+                try:
+                    # Dispose the engine pool to mark it for disposal
+                    # This ensures subsequent requests get fresh connections to the new database file
+                    from src.db.session import engine
+                    await engine.dispose()
+                    logger.info("Database connection pool disposed - next requests will connect to new database file")
+                except Exception as dispose_error:
+                    logger.warning(f"Failed to dispose connection pool: {dispose_error}")
+                    # Continue anyway - import was successful
+
             logger.info(f"Database imported successfully from {catalog}.{schema}.{volume_name}/{backup_filename}")
-            
+
             result = {
                 "success": True,
                 "imported_from": f"/Volumes/{catalog}/{schema}/{volume_name}/{backup_filename}",
@@ -370,9 +384,17 @@ class DatabaseManagementService:
         try:
             # Use repository to list backups
             backups = await self.repository.list_backups(catalog, schema, volume_name)
-            
-            # Generate Databricks URLs for each backup
-            workspace_url = os.environ.get("DATABRICKS_HOST", "").rstrip("/")
+
+            # Generate Databricks URLs for each backup using unified auth
+            workspace_url = ""
+            try:
+                from src.utils.databricks_auth import get_auth_context
+                import asyncio
+                auth = asyncio.run(get_auth_context())
+                if auth and auth.workspace_url:
+                    workspace_url = auth.workspace_url.rstrip("/")
+            except Exception:
+                pass
             if not workspace_url:
                 workspace_url = "https://your-workspace.databricks.com"
             
@@ -424,15 +446,34 @@ class DatabaseManagementService:
                 # Use database_router's function which properly handles fallback DB
                 lakebase_config = await get_lakebase_config_from_db()
                 if lakebase_config:
-                    lakebase_enabled = lakebase_config.get("enabled", False)
+                    # Lakebase is only truly enabled if migration is completed
+                    # This matches the logic in database_router.is_lakebase_enabled()
+                    lakebase_enabled = (
+                        lakebase_config.get("enabled", False) and
+                        lakebase_config.get("endpoint") and
+                        lakebase_config.get("migration_completed", False)
+                    )
                     lakebase_instance = lakebase_config.get("instance_name")
             except Exception as e:
                 logger.warning(f"Could not check Lakebase status: {e}")
 
             db_type = DatabaseBackupRepository.get_database_type()
 
-            # Check Lakebase FIRST - if enabled, ignore underlying db_type
-            if lakebase_enabled:
+            # Check the actual session type to determine if we're really using Lakebase
+            # Even if Lakebase is configured, the session might be SQLite if connection failed
+            actual_session_db_type = 'unknown'
+            if self.session and self.session.bind:
+                db_url = str(self.session.bind.url)
+                if 'sqlite' in db_url.lower():
+                    actual_session_db_type = 'sqlite'
+                elif 'postgresql' in db_url.lower() or 'postgres' in db_url.lower():
+                    actual_session_db_type = 'postgres'
+
+            logger.debug(f"[SERVICE] lakebase_enabled={lakebase_enabled}, db_type={db_type}, actual_session_db_type={actual_session_db_type}")
+
+            # Check Lakebase FIRST - if enabled AND session is actually PostgreSQL
+            if lakebase_enabled and actual_session_db_type == 'postgres':
+                logger.debug(f"[SERVICE] Taking Lakebase path - passing session to repository")
                 # Use provided session or injected session for Lakebase
                 db_session = session if session else self.session
 
@@ -461,6 +502,7 @@ class DatabaseManagementService:
             elif db_type == 'sqlite':
                 # Get SQLite database path from settings, fallback to default
                 db_path = settings.SQLITE_DB_PATH
+
                 if not db_path:
                     db_path = "./app.db"  # Default SQLite path
 
@@ -545,11 +587,6 @@ class DatabaseManagementService:
             Permission status and environment info
         """
         try:
-            # Check if we're in a Databricks Apps environment
-            databricks_app_name = os.getenv("DATABRICKS_APP_NAME")
-            databricks_host = os.getenv("DATABRICKS_HOST")
-            is_databricks_apps = bool(databricks_app_name and databricks_host)
-
             # For now, always grant access to all users
             # TODO: In the future, check if user belongs to admin group
             has_permission = True
@@ -559,8 +596,6 @@ class DatabaseManagementService:
 
             return {
                 "has_permission": has_permission,
-                "is_databricks_apps": is_databricks_apps,
-                "databricks_app_name": databricks_app_name,
                 "user_email": user_email,
                 "reason": permission_reason
             }
@@ -570,8 +605,6 @@ class DatabaseManagementService:
             # Even on error, allow access for now
             return {
                 "has_permission": True,
-                "is_databricks_apps": False,
-                "databricks_app_name": None,
                 "user_email": user_email,
                 "reason": "Permission check failed - defaulting to allow access"
             }

@@ -83,6 +83,7 @@ const CrewFlowSelectionDialog: React.FC<CrewFlowSelectionDialogProps> = ({
   onTaskSelect,
   initialTab = 0,
   showOnlyTab,
+  hideFlowsTab = false,
 }): JSX.Element => {
   const [tabValue, setTabValue] = useState(initialTab);
   
@@ -327,6 +328,7 @@ const CrewFlowSelectionDialog: React.FC<CrewFlowSelectionDialogProps> = ({
                 human_input: Boolean(taskData.config?.human_input),
                 condition: taskData.config?.condition === 'is_data_missing' ? 'is_data_missing' : undefined,
                 guardrail: taskData.config?.guardrail || null,
+                llm_guardrail: taskData.config?.llm_guardrail || null,
                 markdown: taskData.config?.markdown === true || taskData.config?.markdown === 'true' || taskData.markdown === true || taskData.markdown === 'true'
               }
             };
@@ -798,21 +800,36 @@ const CrewFlowSelectionDialog: React.FC<CrewFlowSelectionDialogProps> = ({
 
   const handleBulkImport = async (event: ChangeEvent<HTMLInputElement>) => {
     if (!event.target.files || event.target.files.length === 0) return;
-    
+
     try {
       setLoading(true);
       setError(null);
       setImportSuccess(null);
-      
+
       const file = event.target.files[0];
       const fileContents = await file.text();
-      const bulkData = JSON.parse(fileContents);
-      
+      let bulkData = JSON.parse(fileContents);
+
+      // Auto-detect single crew object and wrap it
+      // A single crew has: name, nodes, edges, and optionally agent_ids/task_ids
+      const isSingleCrew = bulkData.name &&
+                          bulkData.nodes &&
+                          Array.isArray(bulkData.nodes) &&
+                          bulkData.edges &&
+                          Array.isArray(bulkData.edges) &&
+                          !bulkData.crews &&
+                          !bulkData.flows;
+
+      if (isSingleCrew) {
+        console.log('Detected single crew object, wrapping in crews array');
+        bulkData = { crews: [bulkData] };
+      }
+
       // Validate bulk data
       if (!bulkData.crews && !bulkData.flows && !bulkData.agents && !bulkData.tasks) {
         throw new Error('Invalid import data: no valid data found');
       }
-      
+
       let importedCrews = 0;
       let importedFlows = 0;
       let importedAgents = 0;
@@ -860,8 +877,8 @@ const CrewFlowSelectionDialog: React.FC<CrewFlowSelectionDialogProps> = ({
           }
         }
       }
-      
-      // Import crews (plans)
+
+      // Import crews
       if (Array.isArray(bulkData.crews)) {
         for (const c of bulkData.crews) {
           const normalized = c?.crew ?? c;
@@ -869,7 +886,7 @@ const CrewFlowSelectionDialog: React.FC<CrewFlowSelectionDialogProps> = ({
             || normalized.title
             || normalized.plan_name
             || normalized.workflow_name
-            || `Imported Plan ${new Date().toISOString().slice(0,19).replace('T',' ')}`;
+            || `Imported Crew ${new Date().toISOString().slice(0,19).replace('T',' ')}`;
           await CrewService.saveCrew({
             name,
             nodes: normalized.nodes || [],
@@ -885,7 +902,7 @@ const CrewFlowSelectionDialog: React.FC<CrewFlowSelectionDialogProps> = ({
           || normalized.title
           || normalized.plan_name
           || normalized.workflow_name
-          || `Imported Plan ${new Date().toISOString().slice(0,19).replace('T',' ')}`;
+          || `Imported Crew ${new Date().toISOString().slice(0,19).replace('T',' ')}`;
         await CrewService.saveCrew({
           name,
           nodes: normalized.nodes || [],
@@ -1154,7 +1171,7 @@ const CrewFlowSelectionDialog: React.FC<CrewFlowSelectionDialogProps> = ({
       >
         <DialogTitle sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
           <Box>
-            {showOnlyTab === 0 ? 'Load Existing Plans' :
+            {showOnlyTab === 0 ? 'Load Existing Crews' :
              showOnlyTab === 1 ? 'Load Existing Agents' :
              showOnlyTab === 2 ? 'Load Existing Tasks' :
              showOnlyTab === 3 ? 'Load Existing Flows' :
@@ -1181,10 +1198,10 @@ const CrewFlowSelectionDialog: React.FC<CrewFlowSelectionDialogProps> = ({
               // Show all tabs when opened from catalog
               <Box sx={{ borderBottom: 1, borderColor: 'divider', display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 2 }}>
                 <Tabs value={tabValue} onChange={handleTabChange} aria-label="catalog tabs">
-                  <Tab icon={<PersonIcon />} iconPosition="start" label="Plans" id="plan-tab-0" aria-controls="tabpanel-0" sx={{ textTransform: 'none' }} />
+                  <Tab icon={<PersonIcon />} iconPosition="start" label="Crews" id="crew-tab-0" aria-controls="tabpanel-0" sx={{ textTransform: 'none' }} />
                   <Tab icon={<GroupIcon />} iconPosition="start" label="Agents" id="agent-tab-1" aria-controls="tabpanel-1" sx={{ textTransform: 'none' }} />
                   <Tab icon={<AssignmentIcon />} iconPosition="start" label="Tasks" id="task-tab-2" aria-controls="tabpanel-2" sx={{ textTransform: 'none' }} />
-                  {crewAIFlowEnabled && (
+                  {crewAIFlowEnabled && !hideFlowsTab && (
                     <Tab icon={<AccountTreeIcon />} iconPosition="start" label="Flows" id="flow-tab-3" aria-controls="tabpanel-3" sx={{ textTransform: 'none' }} />
                   )}
                 </Tabs>
@@ -1196,6 +1213,16 @@ const CrewFlowSelectionDialog: React.FC<CrewFlowSelectionDialogProps> = ({
                     Export
                   </Button>
                 </Box>
+              </Box>
+            ) : showOnlyTab === 3 ? (
+              // Show import/export buttons when showing only Flows tab
+              <Box sx={{ borderBottom: 1, borderColor: 'divider', display: 'flex', alignItems: 'center', justifyContent: 'flex-end', gap: 1, py: 1 }}>
+                <Button startIcon={<FileUploadIcon />} variant="outlined" size="small" onClick={handleImportFlowClick}>
+                  Import Flow
+                </Button>
+                <Button startIcon={<DownloadIcon />} variant="outlined" size="small" onClick={handleExportAllFlows} disabled={flows.length === 0}>
+                  Export All Flows
+                </Button>
               </Box>
             ) : null}
 
@@ -1270,7 +1297,7 @@ const CrewFlowSelectionDialog: React.FC<CrewFlowSelectionDialogProps> = ({
               <TabPanel value={tabValue} index={0}>
                 {showOnlyTab === undefined && (
                   <Alert severity="info" sx={{ mb: 2 }}>
-                    Loading a plan will open it in a new tab
+                    Loading a crew will open it in a new tab
                   </Alert>
                 )}
               {loading ? (
@@ -1279,7 +1306,7 @@ const CrewFlowSelectionDialog: React.FC<CrewFlowSelectionDialogProps> = ({
                 </Box>
               ) : crews.length === 0 ? (
                 <Alert severity="info">
-                  No plans found. Create a plan by adding agents and tasks, then click Save Plan.
+                  No crews found. Create a crew by adding agents and tasks, then click Save Crew.
                 </Alert>
               ) : (
                 <Grid container spacing={2}>
@@ -1329,17 +1356,17 @@ const CrewFlowSelectionDialog: React.FC<CrewFlowSelectionDialogProps> = ({
                                 {crew.name}
                               </Typography>
                               <Box>
-                                <Tooltip title="Export Plan">
-                                  <IconButton 
-                                    size="small" 
+                                <Tooltip title="Export Crew">
+                                  <IconButton
+                                    size="small"
                                     onClick={(e) => handleExportCrew(e, crew)}
                                   >
                                     <DownloadIcon fontSize="small" />
                                   </IconButton>
                                 </Tooltip>
-                                <Tooltip title="Delete Plan">
-                                  <IconButton 
-                                    size="small" 
+                                <Tooltip title="Delete Crew">
+                                  <IconButton
+                                    size="small"
                                     onClick={(e) => handleDeleteCrew(e, crew.id)}
                                   >
                                     <DeleteIcon fontSize="small" />

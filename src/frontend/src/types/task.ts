@@ -1,3 +1,14 @@
+/**
+ * LLM Guardrail configuration for validating task outputs using an LLM agent.
+ * Uses CrewAI's OSS LLMGuardrail class.
+ */
+export interface LLMGuardrailConfig {
+  /** Validation criteria description that the LLM will use to validate task output */
+  description: string;
+  /** LLM model to use for validation (e.g., 'databricks-claude-sonnet-4-5') */
+  llm_model?: string;
+}
+
 export interface Task {
   id: string;
   name: string;
@@ -25,13 +36,15 @@ export interface Task {
     human_input: boolean;
     markdown: boolean;
     condition?: string;
-    guardrail?: string | null;
+    guardrail?: string | null;  // Code-based guardrail (function name)
+    llm_guardrail?: LLMGuardrailConfig | null;  // LLM-based guardrail configuration
   };
   created_at?: string;
   updated_at?: string;
   output?: string;
   callback?: string;
   converter_cls?: string;
+  llm_guardrail?: LLMGuardrailConfig | null;  // Top-level for sync with config
 }
 
 export interface TaskFormData extends Omit<Task, 'config' | 'context'> {
@@ -98,7 +111,8 @@ export interface AdvancedConfig {
   retry_on_fail: boolean;
   timeout: number | null;
   condition?: string;
-  guardrail?: string | null;
+  guardrail?: string | null;  // Code-based guardrail (function name)
+  llm_guardrail?: LLMGuardrailConfig | null;  // LLM-based guardrail configuration
 }
 
 export interface TaskAdvancedConfigProps {

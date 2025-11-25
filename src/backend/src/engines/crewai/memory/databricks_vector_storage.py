@@ -21,10 +21,10 @@ import base64
 import time
 import random
 from src.schemas.databricks_index_schemas import DatabricksIndexSchemas
-from src.repositories.databricks_auth_helper import DatabricksAuthHelper
+# DatabricksAuthHelper removed - now using unified auth via get_auth_context()
 from src.repositories.databricks_vector_index_repository import DatabricksVectorIndexRepository
 from src.core.logger import LoggerManager
-from src.utils.databricks_auth import get_databricks_auth_headers, is_databricks_apps_environment
+from src.utils.databricks_auth import get_databricks_auth_headers
 import asyncio
 
 logger = LoggerManager.get_instance().crew
@@ -56,12 +56,13 @@ class DatabricksVectorStorage:
         service_principal_client_secret: Optional[str] = None,
         embedding_dimension: int = 1024,
         user_token: Optional[str] = None,
+        group_id: Optional[str] = None,
         wait_for_index: bool = False,
         max_wait_seconds: int = 300
     ):
         """
         Initialize Databricks Vector Storage.
-        
+
         Args:
             endpoint_name: Name of the Databricks Vector Search endpoint
             index_name: Full name of the index (catalog.schema.table format)
@@ -74,6 +75,7 @@ class DatabricksVectorStorage:
             service_principal_client_secret: Optional service principal client secret
             embedding_dimension: Dimension of embeddings (default 1024 for databricks-gte-large-en)
             user_token: Optional user token for OBO authentication
+            group_id: Optional group ID for multi-tenant isolation (required for PAT authentication)
             wait_for_index: Whether to wait for index to be ready
             max_wait_seconds: Maximum time to wait for index
         """
@@ -83,6 +85,7 @@ class DatabricksVectorStorage:
         self.agent_id = agent_id or "default_agent"
         self.memory_type = memory_type
         self.embedding_dimension = embedding_dimension
+        self.group_id = group_id
 
         # Initialize memory logger based on type
         if memory_type == "short_term":
@@ -103,11 +106,24 @@ class DatabricksVectorStorage:
         self.trace_context: Optional[dict] = None
 
         # Store workspace URL and user token for repository
+        # Get workspace URL from unified auth if not provided
+        if not workspace_url:
+            try:
+                from src.utils.databricks_auth import get_auth_context
+                import asyncio
+                auth = asyncio.run(get_auth_context())
+                if auth:
+                    workspace_url = auth.workspace_url
+                    self.memory_logger.debug(f"Using unified {auth.auth_method} authentication for Vector Storage")
+            except Exception as e:
+                self.memory_logger.warning(f"Failed to get unified auth for Vector Storage: {e}")
+                workspace_url = ''
+
         self.workspace_url = workspace_url
         self.user_token = user_token
 
         # Initialize repository for clean architecture - this handles all operations
-        self.repository = DatabricksVectorIndexRepository(workspace_url or os.getenv('DATABRICKS_HOST', ''))
+        self.repository = DatabricksVectorIndexRepository(workspace_url)
         
         # IMPORTANT: Set USE_NULLPOOL environment variable to prevent asyncpg connection pool issues
         # This is needed because Databricks memory operations run async code in different event loops
@@ -359,6 +375,24 @@ class DatabricksVectorStorage:
                 self.memory_logger.error(f"Available fields: {list(record.keys())}")
                 raise ValueError("Record must have an embedding field")
             
+            # CRITICAL: Set UserContext with group_id before authentication
+            # This ensures PAT authentication can look up the token from the database
+            # even when contextvars don't propagate across async boundaries
+            if self.group_id:
+                try:
+                    from src.utils.user_context import UserContext, GroupContext
+                    group_context_obj = GroupContext(
+                        group_ids=[self.group_id],
+                        group_email=f"{self.group_id}@memory",
+                        access_token=self.user_token
+                    )
+                    UserContext.set_group_context(group_context_obj)
+                    if self.user_token:
+                        UserContext.set_user_token(self.user_token)
+                    self.memory_logger.debug(f"Set UserContext with group_id={self.group_id} for authentication")
+                except Exception as e:
+                    self.memory_logger.warning(f"Failed to set UserContext: {e}")
+
             # Check index status before upsert
             try:
                 index_info = await self.repository.get_index(
@@ -372,7 +406,7 @@ class DatabricksVectorStorage:
                         # Still try to upsert as it might work
             except Exception as check_error:
                 self.memory_logger.warning(f"Could not check index status: {check_error}")
-            
+
             # Upsert to Databricks Vector Search using repository
             result = await self.repository.upsert(
                 self.index_name,

@@ -404,6 +404,27 @@ function APIKeys(): JSX.Element {
           <Typography variant="h5">API Keys & Secrets</Typography>
         </Box>
 
+        {/* Shared Workspace Warning */}
+        {(() => {
+          const selectedGroupId = localStorage.getItem('selectedGroupId');
+          const isSharedWorkspace = selectedGroupId && !selectedGroupId.startsWith('user_');
+
+          if (isSharedWorkspace) {
+            return (
+              <Alert severity="warning" sx={{ mb: 2 }}>
+                <Typography variant="subtitle2" gutterBottom>
+                  <strong>⚠️ Shared Workspace Notice</strong>
+                </Typography>
+                <Typography variant="body2">
+                  You are currently in a shared workspace. API keys added here will be accessible to all members of this workspace.
+                  If you need private API keys, please switch to your personal workspace.
+                </Typography>
+              </Alert>
+            );
+          }
+          return null;
+        })()}
+
         <Tabs value={activeTab} onChange={handleTabChange} sx={{ mb: 2 }}>
           <Tab label="Model API Keys" />
           <Tab label="Local Keystore" />

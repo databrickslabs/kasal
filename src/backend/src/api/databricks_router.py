@@ -9,7 +9,6 @@ from src.services.databricks_service import DatabricksService
 from src.services.api_keys_service import ApiKeysService
 from src.core.dependencies import SessionDep, GroupContextDep
 from src.core.permissions import check_role_in_context, is_workspace_admin
-from src.utils.databricks_auth import is_databricks_apps_environment
 
 router = APIRouter(
     prefix="/databricks",
@@ -102,14 +101,22 @@ async def get_databricks_config(
 ):
     """
     Get current Databricks configuration.
-    
+    Only workspace admins can view Databricks configuration.
+
     Args:
         group_context: Group context for multi-tenant operations
         service: Databricks service
-        
+
     Returns:
         Current Databricks configuration
     """
+    # Check permissions - only workspace admins can view Databricks configuration
+    if not is_workspace_admin(group_context):
+        raise HTTPException(
+            status_code=403,
+            detail="Only workspace admins can view Databricks configuration"
+        )
+
     try:
         config = await service.get_databricks_config()
         if not config:
@@ -121,7 +128,6 @@ async def get_databricks_config(
                 catalog="",
                 schema="",
                 enabled=False,
-                apps_enabled=False,
                 # MLflow configuration defaults
                 mlflow_enabled=False,
                 evaluation_enabled=False,
@@ -151,14 +157,22 @@ async def check_personal_token_required(
 ):
     """
     Check if personal access token is required for Databricks.
-    
+    Only workspace admins can check personal token requirements.
+
     Args:
         group_context: Group context for multi-tenant operations
         service: Databricks service
-        
+
     Returns:
         Status indicating if personal token is required
     """
+    # Check permissions - only workspace admins can check token requirements
+    if not is_workspace_admin(group_context):
+        raise HTTPException(
+            status_code=403,
+            detail="Only workspace admins can check personal token requirements"
+        )
+
     try:
         return await service.check_personal_token_required()
     except Exception as e:
@@ -173,14 +187,22 @@ async def check_databricks_connection(
 ):
     """
     Check connection to Databricks.
-    
+    Only workspace admins can check Databricks connection status.
+
     Args:
         group_context: Group context for multi-tenant operations
         service: Databricks service
-        
+
     Returns:
         Connection status
     """
+    # Check permissions - only workspace admins can check connection status
+    if not is_workspace_admin(group_context):
+        raise HTTPException(
+            status_code=403,
+            detail="Only workspace admins can check Databricks connection status"
+        )
+
     try:
         return await service.check_databricks_connection()
     except Exception as e:
@@ -189,22 +211,45 @@ async def check_databricks_connection(
 
 
 @router.get("/environment", response_model=Dict)
-async def get_databricks_environment():
+async def get_databricks_environment(
+    group_context: GroupContextDep,
+):
     """
     Get information about the Databricks environment.
-    
+    Only workspace admins can view Databricks environment information.
+
+    Args:
+        group_context: Group context for multi-tenant operations
+
     Returns:
-        Dictionary containing environment information including whether we're in Databricks Apps
+        Dictionary containing environment information including workspace URL and authentication status
     """
+    # Check permissions - only workspace admins can view environment information
+    if not is_workspace_admin(group_context):
+        raise HTTPException(
+            status_code=403,
+            detail="Only workspace admins can view Databricks environment information"
+        )
+
     try:
-        is_apps = is_databricks_apps_environment()
+        # Get workspace URL directly from DatabricksAuth config
+        # This works even if full authentication isn't available
+        from src.utils.databricks_auth import _databricks_auth, get_auth_context
+
+        # Load config to get workspace URL from environment/database
+        await _databricks_auth._load_config()
+        databricks_host = _databricks_auth._workspace_host
+
+        # Try to get full auth context for additional info
+        auth = await get_auth_context()
+        auth_method = auth.auth_method if auth else None
+        user_identity = auth.user_identity if auth else None
+
         return {
-            "is_databricks_apps": is_apps,
-            "databricks_app_name": os.getenv("DATABRICKS_APP_NAME"),
-            "databricks_host": os.getenv("DATABRICKS_HOST"),
-            "workspace_id": os.getenv("DATABRICKS_WORKSPACE_ID"),
-            "has_oauth_credentials": bool(os.getenv("DATABRICKS_CLIENT_ID") and os.getenv("DATABRICKS_CLIENT_SECRET")),
-            "message": "Running in Databricks Apps environment" if is_apps else "Not running in Databricks Apps"
+            "databricks_host": databricks_host,
+            "auth_method": auth_method,
+            "user_identity": user_identity,
+            "authenticated": bool(auth)
         }
     except Exception as e:
         logger.error(f"Error getting Databricks environment info: {str(e)}")

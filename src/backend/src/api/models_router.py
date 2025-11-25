@@ -24,7 +24,10 @@ router = APIRouter(
 # Set up logging
 logger = logging.getLogger(__name__)
 
-async def get_model_config_service(session: SessionDep) -> ModelConfigService:
+async def get_model_config_service(
+    session: SessionDep,
+    group_context: GroupContextDep
+) -> ModelConfigService:
     """
     Dependency provider for ModelConfigService.
 
@@ -33,11 +36,21 @@ async def get_model_config_service(session: SessionDep) -> ModelConfigService:
 
     Args:
         session: Database session from FastAPI DI
+        group_context: Group context for multi-tenant isolation (REQUIRED for security)
 
     Returns:
-        ModelConfigService instance with session
+        ModelConfigService instance with session and group_id
+
+    Raises:
+        ValueError: If group_context is None or has no primary_group_id
     """
-    return ModelConfigService(session)
+    # SECURITY: group_id is REQUIRED for ModelConfigService
+    if not group_context or not group_context.primary_group_id:
+        raise ValueError(
+            "SECURITY: group_id is REQUIRED for ModelConfigService. "
+            "All API key operations must be scoped to a group for multi-tenant isolation."
+        )
+    return ModelConfigService(session, group_id=group_context.primary_group_id)
 
 
 # Type alias for cleaner function signatures
@@ -299,18 +312,27 @@ async def toggle_model(
 ):
     """
     Enable or disable a model configuration.
+    Only Admins can toggle model configurations.
 
     Args:
         model_key: Key of the model configuration to toggle
         toggle_data: Toggle data with enabled flag
         service: ModelConfig service injected by dependency
+        group_context: Group context for permissions
 
     Returns:
         Updated model configuration
 
     Raises:
-        HTTPException: If model not found
+        HTTPException: If model not found or user lacks permissions
     """
+    # Check permissions - only admins can toggle model configurations
+    if not check_role_in_context(group_context, ["admin"]):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Only admins can toggle model configurations"
+        )
+
     try:
         logger.info(f"API call: PATCH /models/{model_key}/toggle - Setting enabled={toggle_data.enabled}")
 

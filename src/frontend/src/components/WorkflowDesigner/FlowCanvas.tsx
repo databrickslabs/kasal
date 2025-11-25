@@ -13,10 +13,30 @@ import ReactFlow, {
   getConnectedEdges
 } from 'reactflow';
 import 'reactflow/dist/style.css';
-import { Box, Snackbar, Alert } from '@mui/material';
+import {
+  Box,
+  Snackbar,
+  Alert,
+  Paper,
+  Typography,
+  List,
+  ListItem,
+  ListItemButton,
+  ListItemText,
+  IconButton,
+  Tooltip,
+  Divider,
+  CircularProgress
+} from '@mui/material';
+import AddIcon from '@mui/icons-material/Add';
+import RefreshIcon from '@mui/icons-material/Refresh';
 import { useThemeManager } from '../../hooks/workflow/useThemeManager';
 import FlowCanvasControls from './FlowCanvasControls';
 import useShortcuts from '../../hooks/global/useShortcuts';
+import { CrewService } from '../../api/CrewService';
+import { CrewResponse } from '../../types/crews';
+import EdgeConfigDialog, { EdgeConfig } from '../Flow/EdgeConfigDialog';
+import { useUILayoutStore } from '../../store/uiLayout';
 
 // Node types
 import { CrewNode } from '../Flow';
@@ -44,30 +64,29 @@ interface FlowCanvasProps {
   onSelectionChange?: (params: OnSelectionChangeParams) => void;
   onPaneContextMenu?: (event: React.MouseEvent) => void;
   onInit?: (instance: ReactFlowInstance) => void;
+  showRunHistory?: boolean;
+  executionHistoryHeight?: number;
 }
 
 // Global error handler for ResizeObserver errors
-// This needs to be outside the component to ensure it's only added once
 if (typeof window !== 'undefined') {
   const errorHandler = (event: ErrorEvent) => {
     if (
-      event.message && 
-      (event.message.includes('ResizeObserver loop') || 
+      event.message &&
+      (event.message.includes('ResizeObserver loop') ||
        event.message.includes('ResizeObserver Loop'))
     ) {
       event.stopImmediatePropagation();
       event.preventDefault();
-
     }
   };
-  
+
   window.addEventListener('error', errorHandler);
   window.addEventListener('unhandledrejection', (event) => {
-    if (event.reason && event.reason.message && 
-        (event.reason.message.includes('ResizeObserver loop') || 
+    if (event.reason && event.reason.message &&
+        (event.reason.message.includes('ResizeObserver loop') ||
          event.reason.message.includes('ResizeObserver Loop'))) {
       event.preventDefault();
-
     }
   });
 }
@@ -80,7 +99,9 @@ const FlowCanvas: React.FC<FlowCanvasProps> = ({
   onConnect,
   onSelectionChange,
   onPaneContextMenu,
-  onInit
+  onInit,
+  showRunHistory = false,
+  executionHistoryHeight = 0
 }) => {
   const { isDarkMode } = useThemeManager();
   const [controlsVisible, _setControlsVisible] = useState(false);
@@ -88,26 +109,269 @@ const FlowCanvas: React.FC<FlowCanvasProps> = ({
   const containerRef = useRef<HTMLDivElement>(null);
 
   // Track render state to prevent unnecessary re-renders
-  const [isRendering, setIsRendering] = useState(true); // Start with true to show loading
+  const [isRendering, setIsRendering] = useState(true);
   const [isStable, setIsStable] = useState(false);
 
   // Add error boundary for catching ReactFlow errors
   const [hasError, setHasError] = useState(false);
-  
+
   // Add state for notifications
   const [showNotification, setShowNotification] = useState(false);
   const [notificationMessage, setNotificationMessage] = useState('');
-  
+
+  // Crew palette state
+  const [crews, setCrews] = useState<CrewResponse[]>([]);
+  const [loadingCrews, setLoadingCrews] = useState(false);
+  const [paletteVisible, setPaletteVisible] = useState(true);
+
+  // Edge configuration dialog state
+  const [isEdgeDialogOpen, setIsEdgeDialogOpen] = useState(false);
+  const [selectedEdge, setSelectedEdge] = useState<Edge | null>(null);
+  const [aggregatedSourceTasks, setAggregatedSourceTasks] = useState<Array<{ crewName: string; tasks: any[] }>>([]);
+
+  // Handle edge click for configuration
+  const handleEdgeClick = useCallback((event: React.MouseEvent, edge: Edge) => {
+    // Check if this edge is part of a merge group
+    const mergeGroupId = edge.data?.mergeGroupId;
+
+    // Aggregate tasks from all source nodes
+    const aggregated: Array<{ crewName: string; tasks: any[] }> = [];
+    const processedSources = new Set<string>(); // Track processed sources to avoid duplicates
+
+    if (mergeGroupId) {
+      // For merged edges, find ALL edges in the same merge group
+      const mergeGroupEdges = edges.filter(e => e.data?.mergeGroupId === mergeGroupId);
+
+      mergeGroupEdges.forEach(e => {
+        // Each edge has a single source
+        if (!processedSources.has(e.source)) {
+          processedSources.add(e.source);
+          const sourceNode = nodes.find(n => n.id === e.source);
+          if (sourceNode && sourceNode.data?.allTasks?.length > 0) {
+            aggregated.push({
+              crewName: sourceNode.data?.label || sourceNode.data?.crewName || 'Unknown Crew',
+              tasks: sourceNode.data.allTasks || []
+            });
+          }
+        }
+      });
+    } else {
+      // For non-merged edges, just use the single source
+      const sourceNode = nodes.find(n => n.id === edge.source);
+      if (sourceNode && sourceNode.data?.allTasks?.length > 0) {
+        aggregated.push({
+          crewName: sourceNode.data?.label || sourceNode.data?.crewName || 'Unknown Crew',
+          tasks: sourceNode.data.allTasks || []
+        });
+      }
+    }
+
+    setSelectedEdge(edge);
+    setAggregatedSourceTasks(aggregated);
+    setIsEdgeDialogOpen(true);
+  }, [edges, nodes]);
+
+  // Load crews on mount
+  useEffect(() => {
+    loadCrews();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  const loadCrews = async () => {
+    setLoadingCrews(true);
+    try {
+      const crewsData = await CrewService.getCrews();
+      setCrews(crewsData);
+    } catch (error) {
+      console.error('Error loading crews:', error);
+      showTemporaryNotification('Failed to load crews');
+    } finally {
+      setLoadingCrews(false);
+    }
+  };
+
   // Add function to show notification
   const showTemporaryNotification = useCallback((message: string) => {
     setNotificationMessage(message);
     setShowNotification(true);
-    
+
     // Auto-hide after 3 seconds
     setTimeout(() => {
       setShowNotification(false);
     }, 3000);
   }, []);
+
+  // Handle edge configuration save
+  const handleEdgeSave = useCallback((edgeId: string, config: EdgeConfig) => {
+    // Find the edge to update
+    const edgeIndex = edges.findIndex(e => e.id === edgeId);
+    if (edgeIndex !== -1) {
+      const currentEdge = edges[edgeIndex];
+
+      // Check if this edge is part of a merge group
+      const mergeGroupId = currentEdge.data?.mergeGroupId;
+
+      if (mergeGroupId) {
+        // Update ALL edges in the same merge group
+        const changes: EdgeChange[] = [];
+
+        edges.forEach((edge) => {
+          if (edge.data?.mergeGroupId === mergeGroupId) {
+            // Remove old edge
+            changes.push({ id: edge.id, type: 'remove' });
+
+            // Add updated edge with new config
+            const updatedEdge: Edge = {
+              ...edge,
+              data: { ...edge.data, ...config },
+              type: 'crewEdge'
+            };
+            changes.push({ item: updatedEdge, type: 'add' });
+          }
+        });
+
+        onEdgesChange(changes);
+        showTemporaryNotification(`Merged edges configured: ${config.logicType}`);
+      } else {
+        // Single edge - update only this one
+        const updatedEdge: Edge = {
+          ...currentEdge,
+          data: { ...currentEdge.data, ...config },
+          type: 'crewEdge' // Ensure it uses our custom edge type
+        };
+
+        // Update edge by removing old and adding updated version
+        const changes: EdgeChange[] = [
+          { id: edgeId, type: 'remove' },
+          { item: updatedEdge, type: 'add' }
+        ];
+
+        onEdgesChange(changes);
+        showTemporaryNotification(`Edge configured: ${config.logicType}`);
+      }
+    }
+  }, [edges, onEdgesChange, showTemporaryNotification]);
+
+  // Handle adding a crew to the canvas
+  const handleAddCrewToCanvas = useCallback(async (crew: CrewResponse) => {
+    try {
+      // Fetch full crew details to get nodes/tasks
+      const fullCrew = await CrewService.getCrew(crew.id);
+
+      // Get current layout orientation
+      const { layoutOrientation } = useUILayoutStore.getState();
+
+      // Get existing crew nodes to calculate next position
+      const existingCrewNodes = nodes.filter(n => n.type === 'crewNode');
+
+      // Calculate order for new node
+      const maxOrder = existingCrewNodes.reduce((max, node) => {
+        const nodeOrder = node.data?.order ?? 0;
+        return Math.max(max, nodeOrder);
+      }, 0);
+      const newOrder = maxOrder + 1;
+
+      // Calculate position based on layout orientation
+      let newPosition: { x: number; y: number };
+
+      if (layoutOrientation === 'vertical') {
+        // Vertical layout: add node below existing nodes
+        if (existingCrewNodes.length === 0) {
+          // First node
+          newPosition = { x: 150, y: 100 };
+        } else {
+          // Find the bottommost node
+          const bottomNode = existingCrewNodes.reduce((lowest, node) =>
+            node.position.y > lowest.position.y ? node : lowest
+          );
+          // Place new node below with spacing
+          newPosition = {
+            x: bottomNode.position.x, // Same X as previous node
+            y: bottomNode.position.y + 160 // 80 (node height) + 80 (spacing)
+          };
+        }
+      } else {
+        // Horizontal layout: add node to the right of existing nodes
+        if (existingCrewNodes.length === 0) {
+          // First node
+          newPosition = { x: 100, y: 150 };
+        } else {
+          // Find the rightmost node
+          const rightmostNode = existingCrewNodes.reduce((rightmost, node) =>
+            node.position.x > rightmost.position.x ? node : rightmost
+          );
+          // Place new node to the right with spacing
+          newPosition = {
+            x: rightmostNode.position.x + 220, // 140 (node width) + 80 (spacing)
+            y: rightmostNode.position.y // Same Y as previous node
+          };
+        }
+      }
+
+      // Map crew tasks to simple task objects for the dialog
+      // Extract from nodes array
+      const allTasks: Array<{id: string, name: string, description?: string}> = [];
+
+      if (fullCrew.nodes && Array.isArray(fullCrew.nodes)) {
+        const taskNodes = fullCrew.nodes.filter((node: any) =>
+          node.type === 'taskNode' && node.data
+        );
+
+        taskNodes.forEach((taskNode: any) => {
+          const taskId = taskNode.data.taskId || taskNode.id;
+          const taskName = taskNode.data.label || taskNode.data.name || 'Unnamed Task';
+          allTasks.push({
+            id: String(taskId),
+            name: String(taskName),
+            description: taskNode.data.description || taskNode.data.label
+          });
+        });
+      }
+
+      // Also check tasks array if present
+      if (fullCrew.tasks && Array.isArray(fullCrew.tasks)) {
+        fullCrew.tasks.forEach((taskNode: any) => {
+          const taskId = taskNode.data?.taskId || taskNode.id;
+          const taskName = taskNode.data?.label || taskNode.data?.name || 'Unnamed Task';
+          // Avoid duplicates
+          if (!allTasks.find(t => t.id === String(taskId))) {
+            allTasks.push({
+              id: String(taskId),
+              name: String(taskName),
+              description: taskNode.data?.description || taskNode.data?.label
+            });
+          }
+        });
+      }
+
+      // Create new crew node with proper data structure
+      const newNode: Node = {
+        id: `crew-${crew.id}-${Date.now()}`,
+        type: 'crewNode',
+        position: newPosition,
+        data: {
+          id: `crew-${crew.id}`,
+          label: crew.name,
+          crewName: crew.name,
+          crewId: crew.id,
+          selectedTasks: [],
+          allTasks: allTasks,  // Include all tasks from the crew
+          order: newOrder  // Track creation order for maintaining sequence during layout toggles
+        }
+      };
+
+      // Add node to canvas
+      onNodesChange([{
+        type: 'add',
+        item: newNode
+      }]);
+
+      showTemporaryNotification(`Added crew: ${crew.name} (${allTasks.length} tasks)`);
+    } catch (error) {
+      console.error('Error adding crew to canvas:', error);
+      showTemporaryNotification(`Failed to add crew: ${crew.name}`);
+    }
+  }, [nodes, onNodesChange, showTemporaryNotification]);
 
   // Define handleClearCanvas before it's used
   const handleClearCanvas = useCallback(() => {
@@ -115,34 +379,34 @@ const FlowCanvas: React.FC<FlowCanvasProps> = ({
     const flowNodeIds = nodes
       .filter(node => node.type === 'crewNode')
       .map(node => node.id);
-    
+
     // Create removal changes for all flow nodes
     if (flowNodeIds.length > 0) {
       const nodesToRemove = flowNodeIds.map(id => ({
         id,
         type: 'remove' as const,
       }));
-      
+
       // Apply the changes to remove all flow nodes
       onNodesChange(nodesToRemove);
     }
-    
+
     // Get all edges connected to flow nodes
     const edgesToRemove = edges
-      .filter(edge => 
-        flowNodeIds.includes(edge.source) || 
+      .filter(edge =>
+        flowNodeIds.includes(edge.source) ||
         flowNodeIds.includes(edge.target)
       )
       .map(edge => ({
         id: edge.id,
         type: 'remove' as const,
       }));
-    
+
     // Apply the changes to remove all related edges
     if (edgesToRemove.length > 0) {
       onEdgesChange(edgesToRemove);
     }
-    
+
     showTemporaryNotification(`Canvas cleared: removed ${flowNodeIds.length} nodes and ${edgesToRemove.length} edges`);
   }, [nodes, edges, onNodesChange, onEdgesChange, showTemporaryNotification]);
 
@@ -154,36 +418,36 @@ const FlowCanvas: React.FC<FlowCanvasProps> = ({
         id: node.id,
         type: 'remove' as const,
       }));
-      
+
       onNodesChange(nodesToRemove);
     }
-    
+
     // Find all edges connected to the nodes being deleted (including orphaned edges)
     const connectedEdges = selectedNodes.length > 0 ? getConnectedEdges(selectedNodes, edges) : [];
-    
+
     // Combine explicitly selected edges with edges connected to deleted nodes
     const allEdgesToDelete = new Set([
       ...selectedEdges.map(edge => edge.id),
       ...connectedEdges.map(edge => edge.id)
     ]);
-    
+
     // Remove all edges that need to be deleted
     if (allEdgesToDelete.size > 0) {
       const edgesToRemove = Array.from(allEdgesToDelete).map(edgeId => ({
         id: edgeId,
         type: 'remove' as const,
       }));
-      
+
       onEdgesChange(edgesToRemove);
     }
-    
+
     // Show success notification if something was deleted
     if (selectedNodes.length > 0 || allEdgesToDelete.size > 0) {
       showTemporaryNotification(`Deleted ${selectedNodes.length} nodes and ${allEdgesToDelete.size} edges`);
     }
   }, [onNodesChange, onEdgesChange, showTemporaryNotification, edges]);
 
-  // Initialize shortcuts - prefix with _ to indicate it's intentionally unused in the JSX
+  // Initialize shortcuts
   const { shortcuts: _shortcuts } = useShortcuts({
     flowInstance: reactFlowInstanceRef.current,
     onDeleteSelected: handleDeleteSelected,
@@ -195,31 +459,27 @@ const FlowCanvas: React.FC<FlowCanvasProps> = ({
       }
     },
     onOpenFlowDialog: () => {
-      // Dispatch an event to open the Flow selection dialog
-      const event = new CustomEvent('openFlowDialog');
-      window.dispatchEvent(event);
-      showTemporaryNotification('Opening Flow selection dialog (press lf)');
+      setPaletteVisible(!paletteVisible);
+      showTemporaryNotification(`Crew palette ${!paletteVisible ? 'shown' : 'hidden'}`);
     },
     disabled: isRendering || hasError,
-    instanceId: 'flow-canvas',  // Unique identifier for this instance
-    priority: 5  // Lower priority than crew canvas
+    instanceId: 'flow-canvas',
+    priority: 5
   });
 
-  // Filter to only show flow nodes - define this before using it
+  // Filter to only show flow nodes
   const flowNodes = React.useMemo(() => {
     try {
-      // Safely filter nodes to prevent rendering issues
       return nodes.filter(node => {
-        // Check for invalid nodes
         if (!node || typeof node !== 'object') return false;
-        
+
         const nodeName = node.data?.label?.toLowerCase() || '';
         const nodeType = node.type?.toLowerCase() || '';
-        
+
         return (
-          nodeName.includes('flow') || 
-          nodeType.includes('flow') || 
-          nodeType === 'crewnode' || 
+          nodeName.includes('flow') ||
+          nodeType.includes('flow') ||
+          nodeType === 'crewnode' ||
           (node.data && node.data.flowConfig)
         );
       });
@@ -228,7 +488,7 @@ const FlowCanvas: React.FC<FlowCanvasProps> = ({
       return [];
     }
   }, [nodes]);
-  
+
   // Auto-fit view only on initial load or significant changes
   const prevNodeCountRef = useRef(flowNodes.length);
   const hasInitialFitRef = useRef(false);
@@ -237,29 +497,23 @@ const FlowCanvas: React.FC<FlowCanvasProps> = ({
     const prevCount = prevNodeCountRef.current;
     const currentCount = flowNodes.length;
 
-    // Only fit view on initial load or when nodes are added/removed
     if (!isRendering && reactFlowInstanceRef.current && currentCount > 0) {
-      // Check if this is initial load or a significant change
       const shouldFitView = !hasInitialFitRef.current || Math.abs(currentCount - prevCount) > 0;
 
       if (shouldFitView) {
-        // Mark initial fit as done
         if (!hasInitialFitRef.current) {
           hasInitialFitRef.current = true;
         }
 
-        // Update the ref
         prevNodeCountRef.current = currentCount;
 
-        // Add a small delay to allow nodes to properly render
         const fitViewTimer = setTimeout(() => {
           if (reactFlowInstanceRef.current) {
-            // Use requestAnimationFrame to avoid ResizeObserver loops
             window.requestAnimationFrame(() => {
               reactFlowInstanceRef.current?.fitView({
                 padding: 0.2,
                 includeHiddenNodes: false,
-                duration: 800 // Smooth animation
+                duration: 800
               });
             });
           }
@@ -269,11 +523,10 @@ const FlowCanvas: React.FC<FlowCanvasProps> = ({
       }
     }
   }, [flowNodes.length, isRendering]);
-  
+
   // Ensure nodes have stable dimensions before rendering
   const nodeWithDimensions = React.useMemo(() => {
     return flowNodes.map(node => {
-      // If node doesn't have specified dimensions, add default ones
       if (!node.style || (!node.style.width && !node.style.height)) {
         return {
           ...node,
@@ -291,24 +544,22 @@ const FlowCanvas: React.FC<FlowCanvasProps> = ({
   // Use layout effect to stabilize initial render with staggered approach
   useLayoutEffect(() => {
     setIsRendering(true);
-    
-    // First phase - wait for DOM to be ready
+
     const initialTimer = setTimeout(() => {
       if (!isStable) {
         setIsStable(true);
       }
     }, 0);
-    
-    // Second phase - wait longer to ensure ResizeObserver has settled
+
     const renderTimer = setTimeout(() => {
       setIsRendering(false);
     }, 100);
-    
+
     return () => {
       clearTimeout(initialTimer);
       clearTimeout(renderTimer);
     };
-  }, [isStable, flowNodes.length]); // Re-run when node count changes
+  }, [isStable, flowNodes.length]);
 
   // Reset error state when nodes or edges change
   useEffect(() => {
@@ -319,207 +570,22 @@ const FlowCanvas: React.FC<FlowCanvasProps> = ({
 
   const handleInit = useCallback((instance: ReactFlowInstance) => {
     reactFlowInstanceRef.current = instance;
-    
-    // Delay fitting view to allow nodes to properly render
+
+    // Expose to window for debugging
+    if (typeof window !== 'undefined') {
+      (window as any).rfInstance = instance;
+    }
+
     setTimeout(() => {
-      if (instance) {
+      if (instance && flowNodes.length > 0) {
         try {
-          // Check for overlapping nodes and adjust their positions
-          if (flowNodes.length > 0) {
-            const nodePositions = new Map();
-            const updatedNodes: Node[] = [];
-            
-            // First pass: collect all node positions
-            flowNodes.forEach(node => {
-              const key = `${Math.round(node.position.x)},${Math.round(node.position.y)}`;
-              if (!nodePositions.has(key)) {
-                nodePositions.set(key, []);
-              }
-              nodePositions.get(key).push(node);
-            });
-            
-            // Second pass: adjust positions of overlapping nodes
-            let hasOverlappingNodes = false;
-            nodePositions.forEach((nodes, key) => {
-              if (nodes.length > 1) {
-                hasOverlappingNodes = true;
-                // We have overlapping nodes
-                console.log(`Found ${nodes.length} overlapping nodes at position ${key}`);
-                
-                nodes.forEach((node: Node, index: number) => {
-                  if (index === 0) {
-                    // Keep the first node at its original position
-                    updatedNodes.push(node);
-                  } else {
-                    // Adjust position for subsequent nodes
-                    // Place nodes in a grid pattern
-                    const columns = Math.ceil(Math.sqrt(nodes.length));
-                    const row = Math.floor(index / columns);
-                    const col = index % columns;
-                    
-                    // Calculate offset from original position
-                    const offsetX = col * 300;  // 300px horizontal spacing
-                    const offsetY = row * 200;  // 200px vertical spacing
-                    
-                    updatedNodes.push({
-                      ...node,
-                      position: {
-                        x: node.position.x + offsetX,
-                        y: node.position.y + offsetY
-                      }
-                    });
-                  }
-                });
-              } else {
-                // Not overlapping, keep as is
-                updatedNodes.push(nodes[0]);
-              }
-            });
-            
-            // Apply the updated positions if we found and fixed overlapping nodes
-            if (updatedNodes.length > 0 && hasOverlappingNodes) {
-              instance.setNodes(updatedNodes);
-              
-              // Check if we need to update edge types
-              const currentEdges = instance.getEdges();
-              const edgesNeedingUpdate = currentEdges.filter(edge => 
-                !edge.type || edge.type === 'default'
-              );
-              
-              if (edgesNeedingUpdate.length > 0) {
-                console.log(`Setting proper edge types for ${edgesNeedingUpdate.length} edges`);
-                const updatedEdges = currentEdges.map(edge => {
-                  if (!edge.type || edge.type === 'default') {
-                    return {
-                      ...edge,
-                      type: 'crewEdge',
-                      animated: true
-                    };
-                  }
-                  return edge;
-                });
-                
-                instance.setEdges(updatedEdges);
-              }
-              
-              // Check for missing edges between nodes that should be connected
-              const _allNodesById = new Map(updatedNodes.map(node => [node.id, node]));
-              const existingEdges = new Set(currentEdges.map(edge => `${edge.source}-${edge.target}`));
-              const missingEdges: Edge[] = [];
-              
-              // Check for flow configuration in node data to establish connections
-              updatedNodes.forEach((sourceNode: Node) => {
-                if (sourceNode.data?.flowConfig?.listeners) {
-                  const flowConfig = sourceNode.data.flowConfig;
-                  
-                  // For each listener, check if we need to create edges
-                  flowConfig.listeners.forEach((listener: {
-                    crewId?: number | string;
-                    listenToTaskIds?: string[];
-                    tasks?: Array<{ id: string; name: string; }>;
-                  }) => {
-                    if (listener.crewId) {
-                      // This listener belongs to a specific crew - find matching node
-                      const listenerSourceNodes = updatedNodes.filter((node: Node) => 
-                        node.data?.crewId === listener.crewId
-                      );
-                      
-                      // For each task this listener listens to, find target nodes
-                      if (listener.listenToTaskIds && listener.listenToTaskIds.length > 0) {
-                        listener.listenToTaskIds.forEach((taskId: string) => {
-                          // Extract crew ID from task ID if in format crewId:taskId
-                          let targetCrewId: string | null = null;
-                          if (taskId.includes(':')) {
-                            [targetCrewId] = taskId.split(':');
-                          }
-                          
-                          if (targetCrewId) {
-                            // Find target nodes for this crew
-                            const targetNodes = updatedNodes.filter((node: Node) => 
-                              node.data?.crewId === Number(targetCrewId) || 
-                              node.data?.crewId === targetCrewId
-                            );
-                            
-                            // Create edges from source to target if missing
-                            listenerSourceNodes.forEach((source: Node) => {
-                              targetNodes.forEach((target: Node) => {
-                                const edgeKey = `${source.id}-${target.id}`;
-                                if (!existingEdges.has(edgeKey) && source.id !== target.id) {
-                                  // Find task names for the edge label
-                                  const taskNames = listener.tasks && Array.isArray(listener.tasks) 
-                                    ? listener.tasks.map((task: { id: string; name: string; }) => task.name).join(', ')
-                                    : 'Task';
-                                    
-                                  // Determine the best handles to use based on relative positions
-                                  const sourceX = source.position.x;
-                                  const sourceY = source.position.y;
-                                  const targetX = target.position.x;
-                                  const targetY = target.position.y;
-                                  
-                                  let sourceHandle, targetHandle;
-                                  
-                                  // If target is to the right of source
-                                  if (targetX > sourceX + 200) {
-                                    sourceHandle = 'right';
-                                    targetHandle = 'left-target';
-                                  }
-                                  // If target is to the left of source
-                                  else if (targetX < sourceX - 200) {
-                                    sourceHandle = 'left';
-                                    targetHandle = 'right-target';
-                                  }
-                                  // If target is below source
-                                  else if (targetY > sourceY + 100) {
-                                    sourceHandle = 'bottom';
-                                    targetHandle = 'top-target';
-                                  }
-                                  // If target is above source
-                                  else {
-                                    sourceHandle = 'top';
-                                    targetHandle = 'bottom-target';
-                                  }
-                                  
-                                  missingEdges.push({
-                                    id: `edge-${source.id}-${target.id}-${Date.now()}`,
-                                    source: source.id,
-                                    target: target.id,
-                                    sourceHandle,
-                                    targetHandle,
-                                    type: 'crewEdge',
-                                    animated: true,
-                                    data: {
-                                      label: taskNames
-                                    }
-                                  });
-                                  
-                                  existingEdges.add(edgeKey);
-                                }
-                              });
-                            });
-                          }
-                        });
-                      }
-                    }
-                  });
-                }
-              });
-              
-              // Add missing edges if any were found
-              if (missingEdges.length > 0) {
-                console.log(`Adding ${missingEdges.length} missing edges between nodes`);
-                instance.setEdges([...currentEdges, ...missingEdges]);
-              }
-            }
-            
-            // Now fit view
-            instance.fitView({ padding: 0.2, includeHiddenNodes: false });
-          }
+          instance.fitView({ padding: 0.2, includeHiddenNodes: false });
         } catch (error) {
           console.warn('FlowCanvas fitView error:', error);
         }
       }
-    }, 200); // Longer delay to ensure nodes are stable
-    
+    }, 200);
+
     if (onInit) {
       onInit(instance);
     }
@@ -528,18 +594,24 @@ const FlowCanvas: React.FC<FlowCanvasProps> = ({
   // Filter edges that connect flow nodes
   const flowEdges = React.useMemo(() => {
     try {
-      // Build set of node IDs for faster lookup
       const flowNodeIds = new Set(flowNodes.map(node => node.id));
-      
-      // Filter edges that connect to flow nodes
-      return edges.filter(edge => 
-        edge && 
-        typeof edge === 'object' &&
-        edge.source && 
-        edge.target && 
-        flowNodeIds.has(edge.source) && 
-        flowNodeIds.has(edge.target)
-      );
+
+      return edges.filter(edge => {
+        if (!edge || typeof edge !== 'object' || !edge.source || !edge.target) {
+          return false;
+        }
+
+        // For merged edges, check if ALL sources exist in flowNodeIds
+        const isMergedEdge = edge.data?.isMerged && edge.data?.sources;
+        if (isMergedEdge) {
+          const sources = edge.data.sources as string[];
+          const allSourcesExist = sources.every(sourceId => flowNodeIds.has(sourceId));
+          return allSourcesExist && flowNodeIds.has(edge.target);
+        }
+
+        // For normal edges, check source and target
+        return flowNodeIds.has(edge.source) && flowNodeIds.has(edge.target);
+      });
     } catch (error) {
       console.error('Error filtering flow edges:', error);
       return [];
@@ -547,30 +619,23 @@ const FlowCanvas: React.FC<FlowCanvasProps> = ({
   }, [edges, flowNodes]);
 
   // Stable callback for node changes to prevent unnecessary renders
-  // This is used inside ReactFlow, so we don't need to prefix with _
   const handleNodesChange = useCallback((changes: NodeChange[]) => {
-    // Only apply changes to flow nodes
     const flowNodeIds = new Set(flowNodes.map(node => node.id));
-    
-    // Filter changes, checking each change type to access id safely
+
     const filteredChanges = changes.filter(change => {
-      // Different change types need different handling
       switch (change.type) {
         case 'position':
         case 'dimensions':
         case 'remove':
         case 'select':
-          // These types have an id field we can check directly
           return flowNodeIds.has(change.id);
         case 'add':
-          // For add changes, check data in the item
           return change.item && flowNodeIds.has(change.item.id);
         default:
-          // For unknown change types, include them by default
           return true;
       }
     });
-    
+
     if (filteredChanges.length > 0) {
       onNodesChange(filteredChanges);
     }
@@ -583,98 +648,189 @@ const FlowCanvas: React.FC<FlowCanvasProps> = ({
         showTemporaryNotification(event.detail.message);
       }
     };
-    
+
     window.addEventListener('showNotification', handleNotification as EventListener);
-    
+
     return () => {
       window.removeEventListener('showNotification', handleNotification as EventListener);
     };
   }, [showTemporaryNotification]);
 
   return (
-    <Box 
+    <Box
       ref={containerRef}
-      sx={{ 
-        width: '100%', 
+      sx={{
+        width: '100%',
         height: '100%',
+        minHeight: 0,
         display: 'flex',
-        flexDirection: 'column',
+        flexDirection: 'row',
         position: 'relative',
         backgroundColor: isDarkMode ? '#1a1a1a' : '#f5f5f5',
       }}
     >
-      {isRendering ? (
-        // Show loading or error state
-        <Box sx={{ 
-          display: 'flex', 
-          justifyContent: 'center', 
-          alignItems: 'center',
-          height: '100%',
-          color: 'text.secondary',
-          fontSize: '0.875rem'
-        }}>
-          {hasError ? 'Error rendering canvas' : 'Loading flow canvas...'}
-        </Box>
-      ) : (
-        <ReactFlow
-          nodes={nodeWithDimensions}
-          edges={flowEdges}
-          onNodesChange={handleNodesChange}
-          onEdgesChange={onEdgesChange}
-          onConnect={onConnect}
-          onInit={handleInit}
-          nodeTypes={nodeTypes}
-          edgeTypes={edgeTypes}
-          onSelectionChange={onSelectionChange}
-          onPaneContextMenu={onPaneContextMenu}
-          proOptions={{ hideAttribution: true }}
-          connectionMode={ConnectionMode.Loose}
-          snapToGrid={true}
-          minZoom={0.1}
-          maxZoom={4}
-          // Removed automatic fitView to prevent ResizeObserver loops
-          // fitView is handled manually in handleInit and via controls
-          style={{ background: isDarkMode ? '#1a1a1a' : '#f5f5f5' }}
+      {/* Crew Palette - Left Sidebar */}
+      {paletteVisible && (
+        <Paper
+          elevation={3}
+          sx={{
+            width: '250px',
+            height: showRunHistory ? `calc(100% - ${executionHistoryHeight}px)` : '100%',
+            borderRight: `1px solid ${isDarkMode ? 'rgba(255,255,255,0.1)' : 'rgba(0,0,0,0.1)'}`,
+            backgroundColor: isDarkMode ? '#2a2a2a' : '#ffffff',
+            display: 'flex',
+            flexDirection: 'column',
+            overflow: 'hidden'
+          }}
         >
-          <Background 
-            color={isDarkMode ? '#333' : '#aaa'} 
-            gap={16} 
-            size={1}
-            variant={BackgroundVariant.Dots}
-          />
-          {controlsVisible && <FlowCanvasControls onClearCanvas={handleClearCanvas} />}
-        </ReactFlow>
+          {/* Header */}
+          <Box sx={{ p: 2, borderBottom: `1px solid ${isDarkMode ? 'rgba(255,255,255,0.1)' : 'rgba(0,0,0,0.1)'}` }}>
+            <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 1 }}>
+              <Typography variant="h6" sx={{ fontSize: '1rem', fontWeight: 600 }}>
+                Available Crews
+              </Typography>
+              <Tooltip title="Refresh crews">
+                <IconButton size="small" onClick={loadCrews} disabled={loadingCrews}>
+                  <RefreshIcon fontSize="small" />
+                </IconButton>
+              </Tooltip>
+            </Box>
+            <Typography variant="caption" color="text.secondary">
+              Click to add to canvas
+            </Typography>
+          </Box>
+
+          {/* Crew List */}
+          <Box
+            sx={{
+              flex: 1,
+              minHeight: 0,
+              overflowY: 'auto',
+              overflowX: 'hidden'
+            }}
+            onWheel={(e) => {
+              e.stopPropagation();
+            }}
+            onMouseDown={(e) => {
+              e.stopPropagation();
+            }}
+          >
+            {loadingCrews ? (
+              <Box sx={{ display: 'flex', justifyContent: 'center', p: 3 }}>
+                <CircularProgress size={24} />
+              </Box>
+            ) : crews.length === 0 ? (
+              <Box sx={{ p: 2 }}>
+                <Typography variant="body2" color="text.secondary" align="center">
+                  No crews available
+                </Typography>
+              </Box>
+            ) : (
+              <List dense sx={{ p: 0 }}>
+                {crews.map((crew, index) => (
+                  <React.Fragment key={crew.id}>
+                    <ListItem disablePadding>
+                      <ListItemButton onClick={() => handleAddCrewToCanvas(crew)}>
+                        <IconButton size="small" sx={{ mr: 1, pointerEvents: 'none' }}>
+                          <AddIcon fontSize="small" />
+                        </IconButton>
+                        <ListItemText
+                          primary={crew.name}
+                          primaryTypographyProps={{ fontSize: '0.875rem' }}
+                        />
+                      </ListItemButton>
+                    </ListItem>
+                    {index < crews.length - 1 && <Divider />}
+                  </React.Fragment>
+                ))}
+              </List>
+            )}
+          </Box>
+        </Paper>
       )}
-      
-      {/* Add info about available shortcuts */}
-      <Box 
-        sx={{ 
-          position: 'absolute', 
-          bottom: 10, 
-          left: 10, 
-          fontSize: '0.75rem', 
-          color: 'text.secondary',
-          opacity: 0.7,
-          pointerEvents: 'none',
-        }}
-      >
-        Tip: Press &quot;del&quot; to delete selected items, dd to clear canvas
+
+      {/* Canvas Area */}
+      <Box sx={{ flex: 1, position: 'relative' }}>
+        {isRendering ? (
+          <Box sx={{
+            display: 'flex',
+            justifyContent: 'center',
+            alignItems: 'center',
+            height: '100%',
+            color: 'text.secondary',
+            fontSize: '0.875rem'
+          }}>
+            {hasError ? 'Error rendering canvas' : 'Loading flow canvas...'}
+          </Box>
+        ) : (
+          <ReactFlow
+            nodes={nodeWithDimensions}
+            edges={flowEdges}
+            onNodesChange={handleNodesChange}
+            onEdgesChange={onEdgesChange}
+            onConnect={onConnect}
+            onEdgeClick={handleEdgeClick}
+            onInit={handleInit}
+            nodeTypes={nodeTypes}
+            edgeTypes={edgeTypes}
+            onSelectionChange={onSelectionChange}
+            onPaneContextMenu={onPaneContextMenu}
+            proOptions={{ hideAttribution: true }}
+            connectionMode={ConnectionMode.Loose}
+            snapToGrid={true}
+            minZoom={0.1}
+            maxZoom={4}
+            style={{ background: isDarkMode ? '#1a1a1a' : '#f5f5f5' }}
+          >
+            <Background
+              color={isDarkMode ? '#333' : '#aaa'}
+              gap={16}
+              size={1}
+              variant={BackgroundVariant.Dots}
+            />
+            {controlsVisible && <FlowCanvasControls onClearCanvas={handleClearCanvas} />}
+          </ReactFlow>
+        )}
+
+        {/* Shortcuts info */}
+        <Box
+          sx={{
+            position: 'absolute',
+            bottom: 10,
+            left: 10,
+            fontSize: '0.75rem',
+            color: 'text.secondary',
+            opacity: 0.7,
+            pointerEvents: 'none',
+          }}
+        >
+          Tip: Press &quot;del&quot; to delete selected items, &quot;lf&quot; to toggle crew palette
+        </Box>
+
+        {/* Notification */}
+        <Snackbar
+          open={showNotification}
+          autoHideDuration={3000}
+          onClose={() => setShowNotification(false)}
+          anchorOrigin={{ vertical: 'bottom', horizontal: 'right' }}
+        >
+          <Alert severity="info" sx={{ width: '100%' }}>
+            {notificationMessage}
+          </Alert>
+        </Snackbar>
+
+        {/* Edge Configuration Dialog */}
+        <EdgeConfigDialog
+          open={isEdgeDialogOpen}
+          onClose={() => setIsEdgeDialogOpen(false)}
+          edge={selectedEdge}
+          nodes={nodes}
+          onSave={handleEdgeSave}
+          aggregatedSourceTasks={aggregatedSourceTasks}
+        />
       </Box>
-      
-      {/* Notification */}
-      <Snackbar
-        open={showNotification}
-        autoHideDuration={3000}
-        onClose={() => setShowNotification(false)}
-        anchorOrigin={{ vertical: 'bottom', horizontal: 'right' }}
-      >
-        <Alert severity="info" sx={{ width: '100%' }}>
-          {notificationMessage}
-        </Alert>
-      </Snackbar>
     </Box>
   );
 };
 
-// Wrap the component with memo for better performance
-export default memo(FlowCanvas); 
+export default memo(FlowCanvas);

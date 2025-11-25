@@ -3,6 +3,7 @@ from fastapi import APIRouter
 # Note: Memory management and database management routers removed per SDR request
 from src.api.agents_router import router as agents_router
 from src.api.crews_router import router as crews_router
+from src.api.crews_export_router import router as crews_export_router
 from src.api.databricks_router import router as databricks_router
 from src.api.databricks_knowledge_router import router as databricks_knowledge_router
 from src.api.powerbi_router import router as powerbi_router
@@ -53,6 +54,7 @@ api_router = APIRouter()
 # Include all the sub-routers
 api_router.include_router(agents_router)
 api_router.include_router(crews_router)
+api_router.include_router(crews_export_router)
 api_router.include_router(databricks_router)
 api_router.include_router(databricks_knowledge_router)
 api_router.include_router(powerbi_router)
@@ -102,6 +104,7 @@ __all__ = [
     "api_router",
     "agents_router",
     "crews_router",
+    "crews_export_router",
     "databricks_router",
     "databricks_knowledge_router",
     "powerbi_router",

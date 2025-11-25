@@ -8,10 +8,10 @@ export interface DatabricksConfig {
   schema: string;
 
   enabled: boolean;
-  apps_enabled: boolean;
 
   // MLflow configuration
   mlflow_enabled?: boolean;
+  mlflow_experiment_name?: string; // MLflow experiment name
   // MLflow Evaluation configuration
   evaluation_enabled?: boolean;
   evaluation_judge_model?: string; // Databricks judge endpoint route, e.g., "databricks:/<endpoint>"
@@ -37,6 +37,15 @@ export interface DatabricksConnectionStatus {
   status: string;
   message: string;
   connected: boolean;
+}
+
+export interface DatabricksEnvironment {
+  is_databricks_apps: boolean;
+  databricks_app_name: string | null;
+  databricks_host: string | null;
+  workspace_id: string | null;
+  has_oauth_credentials: boolean;
+  message: string;
 }
 
 export class DatabricksService {
@@ -99,6 +108,18 @@ export class DatabricksService {
     } catch (error) {
       if (error instanceof AxiosError) {
         throw new Error(error.response?.data?.detail || 'Failed to check Databricks connection');
+      }
+      throw new Error('Failed to connect to the server');
+    }
+  }
+
+  public async getDatabricksEnvironment(): Promise<DatabricksEnvironment> {
+    try {
+      const response = await apiClient.get<DatabricksEnvironment>(`/databricks/environment`);
+      return response.data;
+    } catch (error) {
+      if (error instanceof AxiosError) {
+        throw new Error(error.response?.data?.detail || 'Failed to get Databricks environment');
       }
       throw new Error('Failed to connect to the server');
     }

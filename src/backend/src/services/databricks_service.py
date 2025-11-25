@@ -60,8 +60,8 @@ class DatabricksService:
                 "schema": config_in.db_schema,
                 "is_active": True,
                 "is_enabled": config_in.enabled,
-                "apps_enabled": config_in.apps_enabled,
                 "mlflow_enabled": getattr(config_in, "mlflow_enabled", False),
+                "mlflow_experiment_name": getattr(config_in, "mlflow_experiment_name", "kasal-crew-execution-traces"),
                 "evaluation_enabled": getattr(config_in, "evaluation_enabled", False),
                 "evaluation_judge_model": getattr(config_in, "evaluation_judge_model", None),
                 "group_id": self.group_id,
@@ -91,8 +91,8 @@ class DatabricksService:
                     catalog=new_config.catalog,
                     schema=new_config.schema,
                     enabled=new_config.is_enabled,
-                    apps_enabled=new_config.apps_enabled,
                     mlflow_enabled=new_config.mlflow_enabled if hasattr(new_config, 'mlflow_enabled') else False,
+                    mlflow_experiment_name=new_config.mlflow_experiment_name if hasattr(new_config, 'mlflow_experiment_name') else "kasal-crew-execution-traces",
                     evaluation_enabled=new_config.evaluation_enabled if hasattr(new_config, 'evaluation_enabled') else False,
                     evaluation_judge_model=new_config.evaluation_judge_model if hasattr(new_config, 'evaluation_judge_model') else None,
                     # Volume configuration fields
@@ -132,9 +132,9 @@ class DatabricksService:
                 catalog=config.catalog,
                 schema=config.schema,
                 enabled=config.is_enabled,
-                apps_enabled=config.apps_enabled,
                 # MLflow configuration
                 mlflow_enabled=config.mlflow_enabled if hasattr(config, 'mlflow_enabled') else False,
+                mlflow_experiment_name=config.mlflow_experiment_name if hasattr(config, 'mlflow_experiment_name') else "kasal-crew-execution-traces",
                 evaluation_enabled=config.evaluation_enabled if hasattr(config, 'evaluation_enabled') else False,
                 evaluation_judge_model=config.evaluation_judge_model if hasattr(config, 'evaluation_judge_model') else None,
                 # Volume configuration fields
@@ -176,15 +176,8 @@ class DatabricksService:
                     "personal_token_required": False,
                     "message": "Databricks integration is disabled"
                 }
-            
-            # If apps are enabled, token is required
-            if config.apps_enabled:
-                return {
-                    "personal_token_required": True,
-                    "message": "Databricks is configured to use a personal access token"
-                }
-            
-            # Otherwise, check if all required fields are set
+
+            # Check if all required fields are set
             required_fields = ["warehouse_id", "catalog", "schema"]
             for field in required_fields:
                 value = getattr(config, field)
@@ -193,11 +186,11 @@ class DatabricksService:
                         "personal_token_required": True,
                         "message": f"Databricks configuration is missing {field}"
                     }
-            
-            # All required fields are set, token is not required
+
+            # All required fields are set, using unified authentication (OBO→PAT→SPN)
             return {
                 "personal_token_required": False,
-                "message": "Databricks is not configured to use a personal access token"
+                "message": "Databricks is configured with unified authentication (OBO→PAT→SPN)"
             }
         except Exception as e:
             logger.error(f"Error checking personal token requirement: {e}")
@@ -218,13 +211,13 @@ class DatabricksService:
             if not config:
                 return False, ""
                 
-            # Check if Databricks is enabled but Apps Integration is disabled
-            if hasattr(config, 'is_enabled') and config.is_enabled and hasattr(config, 'apps_enabled') and not config.apps_enabled:
-                # This is the case we're looking for
-                logger.info("Databricks is enabled but Apps Integration is disabled, using personal access token")
+            # Check if Databricks is enabled
+            if hasattr(config, 'is_enabled') and config.is_enabled:
+                logger.info("Databricks is enabled, checking for personal access token")
                 token = await self.secrets_service.get_personal_access_token()
-                return True, token
-                
+                if token:
+                    return True, token
+
             return False, ""
         except Exception as e:
             logger.error(f"Error checking Databricks apps configuration: {str(e)}")
@@ -233,14 +226,26 @@ class DatabricksService:
     @staticmethod
     def setup_endpoint(config) -> bool:
         """
+        DEPRECATED: Use get_auth_context() from databricks_auth.py instead.
+
+        This method sets process-wide environment variables which causes race conditions
+        in concurrent requests. Use get_auth_context() to get thread-safe AuthContext.
+
         Set up the DATABRICKS_ENDPOINT and DATABRICKS_API_BASE environment variables from the configuration.
-        
+
         Args:
             config: Databricks configuration object with workspace_url attribute
-            
+
         Returns:
             bool: True if successful, False otherwise
         """
+        import warnings
+        warnings.warn(
+            "setup_endpoint() is deprecated and will be removed. "
+            "Use get_auth_context() from databricks_auth.py instead for thread-safe authentication.",
+            DeprecationWarning,
+            stacklevel=2
+        )
         try:
             if config and hasattr(config, 'workspace_url') and config.workspace_url:
                 workspace_url = config.workspace_url.rstrip('/')
@@ -266,144 +271,6 @@ class DatabricksService:
             logger.error(f"Error setting up Databricks endpoint: {str(e)}")
             return False
 
-    @classmethod
-    async def setup_token(cls) -> bool:
-        """
-        Set up Databricks token from API key or personal access token.
-        
-        Returns:
-            bool: True if token was set up successfully, False otherwise
-        """
-        try:
-            # Get configuration
-            from src.repositories.databricks_config_repository import DatabricksConfigRepository
-            from src.db.session import async_session_factory
-            
-            # Create repository and secrets service instances
-            async with async_session_factory() as db:
-                repository = DatabricksConfigRepository(db)
-                # Create a temporary instance for the necessary methods
-                instance = cls(db)
-
-                # Get configuration
-                config = await repository.get_active_config()
-                
-                # Setup the endpoint URL
-                if config:
-                    cls.setup_endpoint(config)
-                
-                # Check configuration to see if personal token should be used
-                should_use_personal_token, personal_token = await instance.check_apps_configuration()
-                
-                if should_use_personal_token:
-                    if personal_token:
-                        # Set the environment variable
-                        os.environ["DATABRICKS_TOKEN"] = personal_token
-                        os.environ["DATABRICKS_API_KEY"] = personal_token  # Set both for compatibility
-                        logger.info("Successfully set DATABRICKS_TOKEN from personal access token")
-                        return True
-                    else:
-                        logger.warning("Personal access token needed but not found or empty")
-                
-                # If we get here, either we don't need a personal token or it wasn't found
-                # Follow authentication hierarchy: OBO -> API Keys Service -> Environment Variables
-
-                # 2. Try API keys service
-                if instance.secrets_service:
-                    logger.info("Trying to set up provider API key from API keys service")
-                    try:
-                        api_key = await instance.secrets_service.get_provider_api_key("databricks")
-                        if api_key:
-                            os.environ["DATABRICKS_TOKEN"] = api_key
-                            os.environ["DATABRICKS_API_KEY"] = api_key  # Set both for compatibility
-                            logger.info("Successfully set up DATABRICKS_TOKEN from provider API key")
-                            return True
-                    except Exception as e:
-                        logger.warning(f"API keys service failed: {e}")
-
-                    # Try other token types as fallback from API keys service
-                    try:
-                        tokens = await instance.secrets_service.get_all_databricks_tokens()
-                        if tokens:
-                            # Use the first valid token found
-                            os.environ["DATABRICKS_TOKEN"] = tokens[0]
-                            os.environ["DATABRICKS_API_KEY"] = tokens[0]  # Set both for compatibility
-                            logger.info(f"Successfully set DATABRICKS_TOKEN from API keys service fallback")
-                            return True
-                    except Exception as e:
-                        logger.warning(f"API keys service fallback failed: {e}")
-                else:
-                    logger.info("API keys service not initialized, skipping")
-
-                # 3. Try environment variables as last resort
-                logger.info("Trying environment variables as last resort")
-                env_token = os.environ.get("DATABRICKS_TOKEN") or os.environ.get("DATABRICKS_API_KEY")
-                if env_token:
-                    logger.info("Successfully using DATABRICKS_TOKEN from environment variables")
-                    return True
-
-                logger.warning("Failed to set up DATABRICKS_TOKEN - no token found in OBO, API keys service, or environment")
-                return False
-        except Exception as e:
-            logger.error(f"Error setting up Databricks token: {str(e)}")
-            return False
-
-    @classmethod
-    def setup_token_sync(cls) -> bool:
-        """
-        Synchronous version of setup_token method that can be called from synchronous code.
-        Uses create_and_run_loop to execute the async method.
-        
-        Returns:
-            bool: True if token was set up successfully, False otherwise
-        """
-        import asyncio
-        
-        try:
-            # Check if there's already a running event loop
-            try:
-                loop = asyncio.get_running_loop()
-                # If we're in an async context, we can't create a new loop
-                # Instead, we should schedule the coroutine on the existing loop
-                import concurrent.futures
-                import threading
-                
-                # Create a future to get the result
-                future = concurrent.futures.Future()
-                
-                def run_in_thread():
-                    # Create a new event loop in this thread
-                    new_loop = asyncio.new_event_loop()
-                    asyncio.set_event_loop(new_loop)
-                    try:
-                        result = new_loop.run_until_complete(cls.setup_token())
-                        future.set_result(result)
-                    except Exception as e:
-                        future.set_exception(e)
-                    finally:
-                        new_loop.close()
-                
-                # Run in a separate thread to avoid event loop conflicts
-                thread = threading.Thread(target=run_in_thread)
-                thread.start()
-                thread.join(timeout=5)  # Wait up to 5 seconds
-                
-                if future.done():
-                    return future.result()
-                else:
-                    logger.warning("setup_token_sync timed out")
-                    return False
-                    
-            except RuntimeError:
-                # No running loop, we can create one
-                from src.utils.asyncio_utils import create_and_run_loop
-                return create_and_run_loop(cls.setup_token())
-                
-        except Exception as e:
-            logger.error(f"Error in setup_token_sync: {str(e)}")
-            return False
-
-    
     @classmethod
     def from_session(cls, session, api_keys_service=None):
         """
@@ -452,44 +319,36 @@ class DatabricksService:
                 "message": "Databricks integration is disabled",
                 "connected": False
             }
-        
-        # If we have apps enabled, check if token is available
-        if config.apps_enabled:
-            # Check if we have a personal access token
-            token = await self.secrets_service.get_personal_access_token()
-            if token:
-                return {
-                    "status": "success",
-                    "message": "Databricks Apps integration is enabled with personal access token",
-                    "connected": True
-                }
-            else:
-                return {
-                    "status": "error",
-                    "message": "Databricks Apps integration is enabled but no personal access token found",
-                    "connected": False
-                }
-        
-        # For standard Databricks integration, check required fields
-        required_fields = ["workspace_url", "warehouse_id", "catalog", "schema"]
+
+        # Check required fields for Databricks integration
+        # workspace_url can fall back to DATABRICKS_HOST environment variable
+        required_fields = ["warehouse_id", "catalog", "schema"]
         missing_fields = []
-        
+
         for field in required_fields:
             value = getattr(config, field, None)
             if not value:
                 missing_fields.append(field)
-        
+
         if missing_fields:
             return {
                 "status": "error",
                 "message": f"Missing required fields: {', '.join(missing_fields)}",
                 "connected": False
             }
-        
+
         # All required fields are present, now test actual connection
         try:
-            # Prepare the workspace URL
-            workspace_url = config.workspace_url
+            # Prepare the workspace URL - fall back to environment variable if not in config
+            import os
+            workspace_url = config.workspace_url or os.getenv("DATABRICKS_HOST", "")
+
+            if not workspace_url:
+                return {
+                    "status": "error",
+                    "message": "workspace_url not configured and DATABRICKS_HOST environment variable not set",
+                    "connected": False
+                }
             if not workspace_url.startswith('https://'):
                 workspace_url = f"https://{workspace_url}"
             if workspace_url.endswith('/'):
@@ -498,50 +357,30 @@ class DatabricksService:
             # Try to list warehouses as a connection test
             test_url = f"{workspace_url}/api/2.0/sql/warehouses"
             
-            # Get authentication headers
-            headers = None
-            
-            # Check if we're using enhanced auth or PAT
+            # Get authentication using unified auth system
             try:
-                from src.utils.databricks_auth import get_databricks_auth_headers, is_databricks_apps_environment
-                
-                if is_databricks_apps_environment():
-                    # Use OAuth headers in Databricks Apps
-                    headers_result, error = await get_databricks_auth_headers()
-                    if error or not headers_result:
-                        return {
-                            "status": "error",
-                            "message": f"Failed to get OAuth authentication: {error or 'Unknown error'}",
-                            "connected": False
-                        }
-                    headers = headers_result
-                else:
-                    # Use PAT if available
-                    token = await self.secrets_service.get_personal_access_token()
-                    if not token:
-                        # Try to get from API keys
-                        from src.services.api_keys_service import ApiKeysService
-                        token = await ApiKeysService.get_provider_api_key("DATABRICKS")
-                    
-                    if token:
-                        headers = {
-                            "Authorization": f"Bearer {token}",
-                            "Content-Type": "application/json"
-                        }
-            except ImportError:
-                # Fallback to PAT only
-                token = await self.secrets_service.get_personal_access_token()
-                if not token:
-                    from src.services.api_keys_service import ApiKeysService
-                    token = await ApiKeysService.get_provider_api_key("DATABRICKS")
-                
-                if token:
-                    headers = {
-                        "Authorization": f"Bearer {token}",
-                        "Content-Type": "application/json"
+                from src.utils.databricks_auth import get_auth_context
+
+                # Use unified authentication system (supports OBO, OAuth, and PAT)
+                auth = await get_auth_context()
+                if not auth:
+                    return {
+                        "status": "error",
+                        "message": "No authentication credentials available",
+                        "connected": False
                     }
-            
-            if not headers:
+
+                headers = auth.get_headers()
+
+            except Exception as e:
+                logger.error(f"Failed to get authentication context: {e}")
+                return {
+                    "status": "error",
+                    "message": f"Authentication error: {str(e)}",
+                    "connected": False
+                }
+
+            if not headers or not auth:
                 return {
                     "status": "error",
                     "message": "No authentication credentials available (PAT or OAuth)",
@@ -557,7 +396,7 @@ class DatabricksService:
                     "message": "Successfully connected to Databricks",
                     "connected": True,
                     "config": {
-                        "workspace_url": config.workspace_url,
+                        "workspace_url": workspace_url,
                         "warehouse_id": config.warehouse_id,
                         "catalog": config.catalog,
                         "schema": config.schema
@@ -585,7 +424,7 @@ class DatabricksService:
         except requests.exceptions.ConnectionError:
             return {
                 "status": "error",
-                "message": f"Failed to connect to {config.workspace_url} - check workspace URL",
+                "message": f"Failed to connect to {workspace_url} - check workspace URL",
                 "connected": False
             }
         except requests.exceptions.Timeout:

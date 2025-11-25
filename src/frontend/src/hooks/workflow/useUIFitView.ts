@@ -76,26 +76,51 @@ export function useUIFitView(params: {
     );
   }, [nodes, crewFlowInstanceRef]);
 
+  // UI-aware fitView for flow canvas
+  const handleFlowUIAwareFitView = React.useCallback(() => {
+    if (!flowFlowInstanceRef.current) return;
+
+    const layoutManager = new CanvasLayoutManager();
+    const currentUIState = useUILayoutStore.getState().getUILayoutState();
+
+    // Update screen dimensions
+    currentUIState.screenWidth = window.innerWidth;
+    currentUIState.screenHeight = window.innerHeight;
+
+    layoutManager.updateUIState(currentUIState);
+    // Get available canvas area (calculated internally)
+    layoutManager.getAvailableCanvasArea('flow');
+
+    // Calculate padding based on execution history visibility
+    const basePadding = 0.2;
+    const executionHistoryPadding = currentUIState.executionHistoryVisible
+      ? currentUIState.executionHistoryHeight / currentUIState.screenHeight
+      : 0;
+
+    // Adjust padding to account for execution history from bottom
+    flowFlowInstanceRef.current.fitView({
+      padding: basePadding + executionHistoryPadding * 0.5,
+      includeHiddenNodes: false,
+      duration: 800,
+    });
+  }, [flowFlowInstanceRef]);
+
   // Internal fitView function to handle both canvas instances
   const handleFitViewToNodesInternal = React.useCallback(() => {
     // Use UI-aware fit view for crew canvas
     handleUIAwareFitView();
 
-    // Standard fit view for flow canvas
+    // Use UI-aware fit view for flow canvas
     if (flowFlowInstanceRef.current) {
       try {
         setTimeout(() => {
-          flowFlowInstanceRef.current?.fitView({
-            padding: 0.2,
-            includeHiddenNodes: false,
-            duration: 800,
-          });
+          handleFlowUIAwareFitView();
         }, 100);
       } catch {
         // ignore
       }
     }
-  }, [handleUIAwareFitView, flowFlowInstanceRef]);
+  }, [handleUIAwareFitView, handleFlowUIAwareFitView, flowFlowInstanceRef]);
 
   return { handleUIAwareFitView, handleFitViewToNodesInternal } as const;
 }

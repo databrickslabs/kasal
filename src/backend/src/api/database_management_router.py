@@ -30,20 +30,36 @@ logger = LoggerManager.get_instance().api
 
 def get_database_management_service(
     session: SessionDep,
-    raw_request: Request
+    group_context: GroupContextDep
 ) -> DatabaseManagementService:
     """
     Dependency factory for DatabaseManagementService.
-    Extracts user token from request and creates service with session.
+    Extracts user token from GroupContext for OBO authentication.
     """
-    from src.utils.databricks_auth import extract_user_token_from_request
-    user_token = extract_user_token_from_request(raw_request)
+    # Use token from GroupContext which properly extracts X-Forwarded-Access-Token
+    user_token = group_context.access_token if group_context else None
     # Service will create its own repository internally
     return DatabaseManagementService(session=session, user_token=user_token)
 
 
-# Type alias for the service dependency
+def get_lakebase_service(
+    session: LegacySessionDep,  # Always use fallback DB for Lakebase config operations
+    raw_request: Request,
+    group_context: GroupContextDep
+) -> LakebaseService:
+    """
+    Dependency factory for LakebaseService.
+    Extracts user token from request and creates service with session.
+    """
+    from src.utils.databricks_auth import extract_user_token_from_request
+    user_token = extract_user_token_from_request(raw_request)
+    user_email = group_context.group_email if group_context else None
+    return LakebaseService(session=session, user_token=user_token, user_email=user_email)
+
+
+# Type aliases for service dependencies
 DatabaseManagementServiceDep = Annotated[DatabaseManagementService, Depends(get_database_management_service)]
+LakebaseServiceDep = Annotated[LakebaseService, Depends(get_lakebase_service)]
 
 
 @router.post("/export", response_model=ExportResponse)
@@ -54,7 +70,7 @@ async def export_database(
 ) -> ExportResponse:
     """
     Export database to a Databricks volume.
-    Only Admins can export databases.
+    SECURITY: Only system admins can export the entire database.
 
     Args:
         request: Export request with catalog, schema, and volume name
@@ -64,17 +80,37 @@ async def export_database(
     Returns:
         Export result with Databricks URL for the backup
     """
-    # Check permissions - only admins can export databases
-    if not check_role_in_context(group_context, ["admin"]):
+    # SECURITY: Only system admins can export the entire database
+    # Workspace admins should NOT be able to export all tenants' data
+    is_system_admin = (
+        hasattr(group_context, 'current_user') and
+        group_context.current_user and
+        getattr(group_context.current_user, 'is_system_admin', False)
+    )
+
+    if not is_system_admin:
         raise HTTPException(
             status_code=403,
-            detail="Only admins can export databases"
+            detail="Only system administrators can export the database. This operation exports data from all workspaces."
         )
 
     try:
-        # Log authentication context
-        logger.info(f"Database export request - catalog: {request.catalog}, schema: {request.schema_name}, volume: {request.volume_name}")
-        logger.info(f"User token available: {bool(service.user_token)}, SPN configured: {bool(os.getenv('DATABRICKS_CLIENT_ID'))}")
+        # CRITICAL: Set UserContext so PAT lookup can find group_id
+        # The auth chain needs UserContext.get_group_context() to return the group_id
+        from src.utils.user_context import UserContext
+        UserContext.set_group_context(group_context)
+        logger.info(f"[EXPORT] Set UserContext with group_id: {group_context.primary_group_id if group_context else None}")
+
+        # Log authentication context with detailed debugging
+        logger.info(f"[EXPORT DEBUG] Database export request - catalog: {request.catalog}, schema: {request.schema_name}, volume: {request.volume_name}")
+        logger.info(f"[EXPORT DEBUG] User token available: {bool(service.user_token)}, SPN configured: {bool(os.getenv('DATABRICKS_CLIENT_ID'))}")
+
+        # Debug: Log token preview if available
+        if service.user_token:
+            token_preview = service.user_token[:20] + "..." if len(service.user_token) > 20 else "SHORT_TOKEN"
+            logger.info(f"[EXPORT DEBUG] User token preview: {token_preview}")
+        else:
+            logger.warning(f"[EXPORT DEBUG] No user token available - will use fallback authentication")
 
         # Use the injected service
         result = await service.export_to_volume(
@@ -104,7 +140,7 @@ async def import_database(
 ) -> ImportResponse:
     """
     Import database from a Databricks volume.
-    Only Admins can import databases.
+    SECURITY: Only system admins can import and overwrite the entire database.
 
     Args:
         request: Import request with catalog, schema, volume name, and backup filename
@@ -114,14 +150,27 @@ async def import_database(
     Returns:
         Import result with database statistics
     """
-    # Check permissions - only admins can import databases
-    if not check_role_in_context(group_context, ["admin"]):
+    # SECURITY: Only system admins can import the entire database
+    # Workspace admins should NOT be able to overwrite all tenants' data
+    is_system_admin = (
+        hasattr(group_context, 'current_user') and
+        group_context.current_user and
+        getattr(group_context.current_user, 'is_system_admin', False)
+    )
+
+    if not is_system_admin:
         raise HTTPException(
             status_code=403,
-            detail="Only admins can import databases"
+            detail="Only system administrators can import database backups. This operation replaces data from all workspaces."
         )
 
     try:
+        # CRITICAL: Set UserContext so PAT lookup can find group_id
+        # The auth chain needs UserContext.get_group_context() to return the group_id
+        from src.utils.user_context import UserContext
+        UserContext.set_group_context(group_context)
+        logger.info(f"[IMPORT] Set UserContext with group_id: {group_context.primary_group_id if group_context else None}")
+
         # Use the injected service
         result = await service.import_from_volume(
             catalog=request.catalog,
@@ -150,7 +199,8 @@ async def list_backups(
 ) -> ListBackupsResponse:
     """
     List all database backups in a Databricks volume.
-    
+    SECURITY: Only system admins can list database backups.
+
     Args:
         request: Request with catalog, schema, and volume name
         service: Database management service (injected)
@@ -159,6 +209,19 @@ async def list_backups(
     Returns:
         List of available backups with their Databricks URLs
     """
+    # SECURITY: Only system admins can list database backups
+    is_system_admin = (
+        hasattr(group_context, 'current_user') and
+        group_context.current_user and
+        getattr(group_context.current_user, 'is_system_admin', False)
+    )
+
+    if not is_system_admin:
+        raise HTTPException(
+            status_code=403,
+            detail="Only system administrators can list database backups."
+        )
+
     try:
         # Use the injected service
         result = await service.list_backups(
@@ -181,30 +244,23 @@ async def list_backups(
 
 @router.get("/info", response_model=DatabaseInfoResponse)
 async def get_database_info(
-    raw_request: Request,
+    service: DatabaseManagementServiceDep,
     group_context: GroupContextDep
 ) -> DatabaseInfoResponse:
     """
     Get information about the current database.
 
     Returns:
-        Database statistics and information about the SOURCE database (not Lakebase)
+        Database statistics and information about the active database (Lakebase if enabled, otherwise source database)
     """
     try:
-        # ALWAYS use fallback session to get info about source database
-        # Never route to Lakebase for database info endpoint
-        from src.db.session import async_session_factory
-        from src.utils.databricks_auth import extract_user_token_from_request
+        # Service handles all database routing and session management internally
+        result = await service.get_database_info()
 
-        async with async_session_factory() as session:
-            user_token = extract_user_token_from_request(raw_request)
-            service = DatabaseManagementService(session=session, user_token=user_token)
-            result = await service.get_database_info()
+        if not result["success"]:
+            raise HTTPException(status_code=500, detail=result.get("error", "Failed to get database info"))
 
-            if not result["success"]:
-                raise HTTPException(status_code=500, detail=result.get("error", "Failed to get database info"))
-
-            return DatabaseInfoResponse(**result)
+        return DatabaseInfoResponse(**result)
 
     except HTTPException:
         raise
@@ -225,8 +281,17 @@ async def debug_permissions(
         
         # Get environment info
         app_name = os.getenv("DATABRICKS_APP_NAME")
-        databricks_host = os.getenv("DATABRICKS_HOST")
-        
+
+        # Get databricks_host from unified auth
+        databricks_host = None
+        try:
+            from src.utils.databricks_auth import get_auth_context
+            auth = await get_auth_context()
+            if auth:
+                databricks_host = auth.workspace_url
+        except Exception:
+            pass
+
         if not all([app_name, databricks_host]):
             return {
                 "error": "Missing configuration",
@@ -353,7 +418,17 @@ async def debug_headers(
     # Check if there's an Authorization header
     auth_header = request.headers.get("authorization", "")
     has_bearer = auth_header.startswith("Bearer ") if auth_header else False
-    
+
+    # Get workspace URL from unified auth
+    databricks_host_unified = None
+    try:
+        from src.utils.databricks_auth import get_auth_context
+        auth = await get_auth_context()
+        if auth:
+            databricks_host_unified = auth.workspace_url
+    except Exception:
+        pass
+
     return {
         "all_headers": all_headers,
         "has_authorization_header": bool(auth_header),
@@ -362,7 +437,7 @@ async def debug_headers(
         "group_context_has_token": bool(group_context.access_token) if group_context else False,
         "environment": {
             "DATABRICKS_APP_NAME": os.getenv("DATABRICKS_APP_NAME"),
-            "DATABRICKS_HOST": os.getenv("DATABRICKS_HOST"),
+            "DATABRICKS_HOST": databricks_host_unified,
             "DATABRICKS_CLIENT_ID": "present" if os.getenv("DATABRICKS_CLIENT_ID") else "missing",
             "DATABRICKS_CLIENT_SECRET": "present" if os.getenv("DATABRICKS_CLIENT_SECRET") else "missing",
             "is_databricks_apps": bool(os.getenv("DATABRICKS_APP_NAME"))
@@ -424,8 +499,7 @@ async def check_database_management_permission(
 # Lakebase specific endpoints
 @router.get("/lakebase/config")
 async def get_lakebase_config(
-    session: LegacySessionDep,  # Always use fallback DB for config
-    group_context: GroupContextDep
+    service: LakebaseServiceDep
 ) -> Dict[str, Any]:
     """
     Get current Lakebase configuration.
@@ -434,13 +508,7 @@ async def get_lakebase_config(
         Lakebase configuration settings
     """
     try:
-        from src.utils.databricks_auth import extract_user_token_from_request
-        user_email = group_context.group_email if group_context else None
-
-        service = LakebaseService(session=session, user_email=user_email)
-        config = await service.get_config()
-        return config
-
+        return await service.get_config()
     except Exception as e:
         logger.error(f"Error getting Lakebase config: {e}")
         raise HTTPException(status_code=500, detail=str(e))
@@ -449,7 +517,7 @@ async def get_lakebase_config(
 @router.post("/lakebase/config")
 async def save_lakebase_config(
     config: Dict[str, Any],
-    group_context: GroupContextDep
+    service: LakebaseServiceDep
 ) -> Dict[str, Any]:
     """
     Save Lakebase configuration.
@@ -461,15 +529,7 @@ async def save_lakebase_config(
         Saved configuration
     """
     try:
-        # ALWAYS use fallback session factory for config operations
-        # Never route to Lakebase when saving Lakebase config itself
-        from src.db.session import async_session_factory
-        async with async_session_factory() as session:
-            user_email = group_context.group_email if group_context else None
-            service = LakebaseService(session=session, user_email=user_email)
-            saved_config = await service.save_config(config)
-            return saved_config
-
+        return await service.save_config(config)
     except Exception as e:
         logger.error(f"Error saving Lakebase config: {e}")
         raise HTTPException(status_code=500, detail=str(e))
@@ -478,9 +538,7 @@ async def save_lakebase_config(
 @router.post("/lakebase/create")
 async def create_lakebase_instance(
     request: Dict[str, Any],
-    session: SessionDep,
-    raw_request: Request,
-    group_context: GroupContextDep
+    service: LakebaseServiceDep
 ) -> Dict[str, Any]:
     """
     Create a new Lakebase instance and migrate existing data.
@@ -492,23 +550,12 @@ async def create_lakebase_instance(
         Instance details
     """
     try:
-        # Extract user token for authentication
-        from src.utils.databricks_auth import extract_user_token_from_request
-        user_token = extract_user_token_from_request(raw_request)
-        user_email = group_context.group_email if group_context else None
-
-        service = LakebaseService(session=session, user_token=user_token, user_email=user_email)
-
-        # Create instance and migrate data
-        instance = await service.create_instance(
+        return await service.create_instance(
             instance_name=request.get("instance_name", "kasal-lakebase"),
             capacity=request.get("capacity", "CU_1"),
             retention_days=request.get("retention_days", 14),
             node_count=request.get("node_count", 1)
         )
-
-        return instance
-
     except Exception as e:
         logger.error(f"Error creating Lakebase instance: {e}")
         raise HTTPException(status_code=500, detail=str(e))
@@ -517,12 +564,11 @@ async def create_lakebase_instance(
 @router.get("/lakebase/instance/{instance_name}")
 async def get_lakebase_instance(
     instance_name: str,
-    session: SessionDep,
-    raw_request: Request,
-    group_context: GroupContextDep
+    service: LakebaseServiceDep
 ) -> Dict[str, Any]:
     """
     Get Lakebase instance details.
+    Only works when Lakebase is configured and enabled.
 
     Args:
         instance_name: Name of the instance
@@ -531,19 +577,7 @@ async def get_lakebase_instance(
         Instance details
     """
     try:
-        # Extract user token for authentication
-        from src.utils.databricks_auth import extract_user_token_from_request
-        user_token = extract_user_token_from_request(raw_request)
-        user_email = group_context.group_email if group_context else None
-
-        service = LakebaseService(session=session, user_token=user_token, user_email=user_email)
-        instance = await service.get_instance(instance_name)
-
-        if not instance or instance.get("state") == "NOT_FOUND":
-            raise HTTPException(status_code=404, detail=f"Instance {instance_name} not found")
-
-        return instance
-
+        return await service.get_instance(instance_name)
     except HTTPException:
         raise
     except Exception as e:
@@ -553,28 +587,15 @@ async def get_lakebase_instance(
 
 @router.get("/lakebase/tables")
 async def check_lakebase_tables(
-    session: SessionDep,
-    config_session: LegacySessionDep,
-    raw_request: Request,
-    group_context: GroupContextDep
+    service: LakebaseServiceDep
 ):
     """
     Check what tables exist in the configured Lakebase instance.
     Returns detailed information about tables and their status.
+    Only works when Lakebase is configured and enabled.
     """
     try:
-        # Extract user token for authentication
-        from src.utils.databricks_auth import extract_user_token_from_request
-        user_token = extract_user_token_from_request(raw_request)
-
-        # Initialize service with user token
-        service = LakebaseService(user_token=user_token)
-
-        # Check tables
-        result = await service.check_lakebase_tables(config_session)
-
-        return result
-
+        return await service.check_lakebase_tables()
     except Exception as e:
         logger.error(f"Error checking Lakebase tables: {e}")
         raise HTTPException(
@@ -585,9 +606,7 @@ async def check_lakebase_tables(
 @router.post("/lakebase/migrate")
 async def migrate_to_lakebase(
     request: Dict[str, Any],
-    session: SessionDep,
-    raw_request: Request,
-    group_context: GroupContextDep
+    service: LakebaseServiceDep
 ) -> Dict[str, Any]:
     """
     Manually trigger migration to Lakebase.
@@ -599,14 +618,6 @@ async def migrate_to_lakebase(
         Migration result
     """
     try:
-        # Extract user token for authentication
-        from src.utils.databricks_auth import extract_user_token_from_request
-        user_token = extract_user_token_from_request(raw_request)
-        user_email = group_context.group_email if group_context else None
-
-        service = LakebaseService(session=session, user_token=user_token, user_email=user_email)
-
-        # Trigger migration
         instance_name = request.get("instance_name", "kasal-lakebase")
         endpoint = request.get("endpoint")
         recreate_schema = request.get("recreate_schema", False)
@@ -614,33 +625,7 @@ async def migrate_to_lakebase(
         if not endpoint:
             raise HTTPException(status_code=400, detail="Endpoint is required for migration")
 
-        logger.info(f"🚀 Migration to Lakebase requested by {user_email} (recreate_schema={recreate_schema})")
-
-        # Log to frontend-visible logger
-        logger.info("=" * 80)
-        logger.info("🚀 LAKEBASE MIGRATION STARTED")
-        logger.info(f"Instance: {instance_name}")
-        logger.info(f"Recreate Schema: {recreate_schema}")
-        logger.info("=" * 80)
-
-        result = await service.migrate_existing_data(instance_name, endpoint, recreate_schema=recreate_schema)
-
-        # Update configuration to mark migration as complete
-        config = await service.get_config()
-        config["migration_completed"] = result.get("success", False)
-        config["migration_status"] = "completed" if result.get("success") else "failed"
-        config["migration_result"] = result
-        await service.save_config(config)
-
-        # If migration succeeded, dispose existing connections to switch to Lakebase
-        if result.get("success", False):
-            from src.db.session import dispose_engines
-            await dispose_engines()
-            logger.info("🔄 Disposed existing database connections to switch to Lakebase")
-
-        logger.info("✅ Migration configuration saved. Next API calls will use Lakebase.")
-        return result
-
+        return await service.migrate_existing_data(instance_name, endpoint, recreate_schema=recreate_schema)
     except Exception as e:
         logger.error(f"Error migrating to Lakebase: {e}")
         raise HTTPException(status_code=500, detail=str(e))
@@ -755,9 +740,7 @@ async def migrate_to_lakebase_stream(
 @router.post("/lakebase/start")
 async def start_lakebase_instance(
     request: Dict[str, Any],
-    session: SessionDep,
-    raw_request: Request,
-    group_context: GroupContextDep
+    service: LakebaseServiceDep
 ) -> Dict[str, Any]:
     """
     Start a stopped Lakebase instance.
@@ -769,15 +752,11 @@ async def start_lakebase_instance(
         Instance status after start attempt
     """
     try:
-        from src.utils.databricks_auth import extract_user_token_from_request
+        instance_name = request.get("instance_name")
+        if not instance_name:
+            raise HTTPException(status_code=400, detail="instance_name is required")
 
-        user_token = extract_user_token_from_request(raw_request)
-
-        service = LakebaseService(session=session, user_token=user_token)
-        result = await service.start_instance(request.get("instance_name"))
-
-        return result
-
+        return await service.start_instance(instance_name)
     except Exception as e:
         logger.error(f"Error starting Lakebase instance: {e}")
         raise HTTPException(status_code=500, detail=str(e))
@@ -786,12 +765,11 @@ async def start_lakebase_instance(
 @router.get("/lakebase/test/{instance_name}")
 async def test_lakebase_connection_get(
     instance_name: str,
-    session: SessionDep,
-    raw_request: Request,
-    group_context: GroupContextDep
+    service: LakebaseServiceDep
 ) -> Dict[str, Any]:
     """
     Test connection to Lakebase instance (GET endpoint).
+    Only works when Lakebase is configured and enabled.
 
     Args:
         instance_name: Name of the Lakebase instance
@@ -800,16 +778,7 @@ async def test_lakebase_connection_get(
         Connection test result
     """
     try:
-        # Extract user token for authentication
-        from src.utils.databricks_auth import extract_user_token_from_request
-        user_token = extract_user_token_from_request(raw_request)
-        user_email = group_context.group_email if group_context else None
-
-        service = LakebaseService(session=session, user_token=user_token, user_email=user_email)
-        result = await service.test_connection(instance_name)
-
-        return result
-
+        return await service.test_connection(instance_name)
     except Exception as e:
         logger.error(f"Error testing Lakebase connection: {e}")
         raise HTTPException(status_code=500, detail=str(e))
@@ -817,43 +786,19 @@ async def test_lakebase_connection_get(
 
 @router.get("/lakebase/workspace-info")
 async def get_lakebase_workspace_info(
-    session: SessionDep,
-    raw_request: Request,
-    group_context: GroupContextDep
+    service: LakebaseServiceDep
 ) -> Dict[str, Any]:
     """
     Get Databricks workspace URL and organization ID for Lakebase links.
+    Only works when Lakebase is configured and enabled.
 
     Returns:
         Dictionary with workspace_url and organization_id
     """
     try:
-        # Extract user token for authentication
-        from src.utils.databricks_auth import extract_user_token_from_request
-        user_token = extract_user_token_from_request(raw_request)
-        user_email = group_context.group_email if group_context else None
-
-        service = LakebaseService(session=session, user_token=user_token, user_email=user_email)
-
-        # Get workspace client
-        w = await service.get_workspace_client()
-
-        # Get workspace ID (organization ID)
-        workspace_id = w.get_workspace_id()
-
-        # Get workspace URL from config
-        workspace_url = w.config.host
-
-        # Clean up the URL
-        if workspace_url.endswith('/'):
-            workspace_url = workspace_url[:-1]
-
-        return {
-            "success": True,
-            "workspace_url": workspace_url,
-            "organization_id": str(workspace_id)
-        }
-
+        return await service.get_workspace_info()
+    except HTTPException:
+        raise
     except Exception as e:
         logger.error(f"Error getting workspace info: {e}")
         raise HTTPException(status_code=500, detail=str(e))
@@ -862,8 +807,7 @@ async def get_lakebase_workspace_info(
 @router.post("/lakebase/enable")
 async def enable_lakebase_without_migration(
     request: Dict[str, Any],
-    session: LegacySessionDep,  # Always use fallback DB for config
-    group_context: GroupContextDep
+    service: LakebaseServiceDep
 ) -> Dict[str, Any]:
     """
     Enable Lakebase without performing data migration.
@@ -877,13 +821,6 @@ async def enable_lakebase_without_migration(
         Success status and message
     """
     try:
-        user_email = group_context.group_email if group_context else None
-        service = LakebaseService(session=session, user_email=user_email)
-
-        # Get current config
-        config = await service.get_config()
-
-        # Extract required parameters
         instance_name = request.get("instance_name")
         endpoint = request.get("endpoint")
 
@@ -893,26 +830,7 @@ async def enable_lakebase_without_migration(
                 detail="instance_name and endpoint are required to enable Lakebase"
             )
 
-        # Update config with instance details
-        config["instance_name"] = instance_name
-        config["endpoint"] = endpoint
-        config["enabled"] = True
-        config["migration_completed"] = True  # Mark as ready even without migration
-
-        # Save updated config
-        await service.save_config(config)
-
-        # Dispose existing database connections to force reconnection to Lakebase
-        from src.db.session import dispose_engines
-        await dispose_engines()
-        logger.info("Disposed existing database connections to switch to Lakebase")
-
-        return {
-            "success": True,
-            "message": "Lakebase enabled successfully. All connections switched to Lakebase.",
-            "config": config
-        }
-
+        return await service.enable_lakebase(instance_name, endpoint)
     except Exception as e:
         logger.error(f"Error enabling Lakebase: {e}")
         raise HTTPException(status_code=500, detail=str(e))
@@ -921,9 +839,7 @@ async def enable_lakebase_without_migration(
 @router.post("/lakebase/test-connection")
 async def test_lakebase_connection(
     request: Dict[str, Any],
-    session: SessionDep,
-    raw_request: Request,
-    group_context: GroupContextDep
+    service: LakebaseServiceDep
 ) -> Dict[str, Any]:
     """
     Test connection to Lakebase instance (POST endpoint).
@@ -935,16 +851,11 @@ async def test_lakebase_connection(
         Connection test result
     """
     try:
-        # Extract user token for authentication
-        from src.utils.databricks_auth import extract_user_token_from_request
-        user_token = extract_user_token_from_request(raw_request)
-        user_email = group_context.group_email if group_context else None
+        instance_name = request.get("instance_name")
+        if not instance_name:
+            raise HTTPException(status_code=400, detail="instance_name is required")
 
-        service = LakebaseService(session=session, user_token=user_token, user_email=user_email)
-        result = await service.test_connection(request.get("instance_name"))
-
-        return result
-
+        return await service.test_connection(instance_name)
     except Exception as e:
         logger.error(f"Error testing Lakebase connection: {e}")
         raise HTTPException(status_code=500, detail=str(e))

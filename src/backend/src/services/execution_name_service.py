@@ -19,16 +19,18 @@ logger = logging.getLogger(__name__)
 
 class ExecutionNameService:
     """Service for execution name generation operations."""
-    
-    def __init__(self, log_service: LLMLogService):
+
+    def __init__(self, log_service: LLMLogService, template_service):
         """
         Initialize the service.
-        
+
         Args:
             log_service: Service for logging LLM interactions
+            template_service: Service for template operations
         """
         self.log_service = log_service
-    
+        self.template_service = template_service
+
     @classmethod
     def create(cls, session) -> 'ExecutionNameService':
         """
@@ -43,8 +45,11 @@ class ExecutionNameService:
         Returns:
             An instance of ExecutionNameService with all required dependencies
         """
+        from src.services.template_service import TemplateService
+
         log_service = LLMLogService.create(session)
-        return cls(log_service=log_service)
+        template_service = TemplateService(session)
+        return cls(log_service=log_service, template_service=template_service)
     
     async def _log_llm_interaction(self, endpoint: str, prompt: str, response: str, model: str) -> None:
         """
@@ -82,7 +87,7 @@ class ExecutionNameService:
         try:
             # Get the template for name generation
             # This template already includes instructions to only return the name without explanations
-            system_message = await TemplateService.get_template_content("generate_job_name")
+            system_message = await self.template_service.get_template_content("generate_job_name")
 
             # Fallback if template is not found (shouldn't happen if seeds are run)
             if not system_message:
@@ -104,20 +109,39 @@ Tasks:
             ]
             
             # Configure litellm using the LLMManager
+            # LLMManager now handles authentication internally (OBO → PAT → SPN)
             model_params = await LLMManager.configure_litellm(request.model)
-            
+
             # Generate completion
+            # Note: Some models (like Gemini) may use reasoning_tokens internally before generating output.
+            # We set max_tokens=100 to safely accommodate both reasoning and completion tokens,
+            # ensuring we can generate a full 2-4 word name without hitting token limits.
+            # For models without reasoning tokens, we'll truncate to ensure concise names.
             import litellm
             response = await litellm.acompletion(
                 **model_params,
                 messages=messages,
                 temperature=0.7,
-                max_tokens=20
+                max_tokens=100  # Increased to prevent truncation of 2-4 word names
             )
-            
+
             # Extract and clean the name
             name = response["choices"][0]["message"]["content"].strip()
             name = name.replace('"', '').replace("'", "")
+
+            # Check if the model used reasoning tokens (e.g., Gemini models)
+            usage = response.get('usage', {})
+            reasoning_tokens = usage.get('reasoning_tokens', 0)
+
+            if reasoning_tokens == 0:
+                # Model didn't use reasoning tokens, so we should ensure the name is concise
+                # Truncate to first 4 words if longer (2-4 word requirement)
+                words = name.split()
+                if len(words) > 4:
+                    name = " ".join(words[:4])
+                    logger.info(f"Truncated name to 4 words (no reasoning tokens used): '{name}'")
+            else:
+                logger.info(f"Model used {reasoning_tokens} reasoning tokens, keeping full response: '{name}'")
             
             # Log the interaction
             try:

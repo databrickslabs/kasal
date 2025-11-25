@@ -86,7 +86,11 @@ async def create_agent(
                     temperature = agent_config['temperature'] / 100.0
                     logger.info(f"Using temperature override {temperature} for agent {agent_key}")
                 
-                llm = await LLMManager.configure_crewai_llm(model_name, temperature)
+                # SECURITY: Pass group_id for multi-tenant isolation
+                group_id_param = config.get('group_id') if config else None
+                if not group_id_param:
+                    raise ValueError("group_id is REQUIRED for LLM configuration")
+                llm = await LLMManager.configure_crewai_llm(model_name, group_id_param, temperature)
                 logger.info(f"Successfully configured LLM for agent {agent_key} using model: {model_name}")
             elif isinstance(agent_config['llm'], dict):
                 # If a dictionary is provided with LLM parameters, use crewai LLM directly
@@ -106,7 +110,11 @@ async def create_agent(
                         logger.info(f"Using temperature override {temperature} for agent {agent_key}")
                     
                     # Get properly configured LLM for the model
-                    configured_llm = await LLMManager.configure_crewai_llm(model_name, temperature)
+                    # SECURITY: Pass group_id for multi-tenant isolation
+                    group_id_param = config.get('group_id') if config else None
+                    if not group_id_param:
+                        raise ValueError("group_id is REQUIRED for LLM configuration")
+                    configured_llm = await LLMManager.configure_crewai_llm(model_name, group_id_param, temperature)
                     
                     # Extract the configured parameters
                     if hasattr(configured_llm, 'model'):
@@ -152,7 +160,11 @@ async def create_agent(
                 else:
                     # No model specified, use default with additional parameters
                     logger.warning(f"LLM config missing 'model', using default with additional parameters")
-                    default_llm = await LLMManager.configure_crewai_llm("gpt-4o")
+                    # SECURITY: Pass group_id for multi-tenant isolation
+                    group_id_param = config.get('group_id') if config else None
+                    if not group_id_param:
+                        raise ValueError("group_id is REQUIRED for LLM configuration")
+                    default_llm = await LLMManager.configure_crewai_llm("gpt-4o", group_id_param)
                     
                     # Extract and merge parameters
                     llm_kwargs = {}
@@ -186,7 +198,11 @@ async def create_agent(
         else:
             # Use default model
             logger.info(f"No LLM specified for agent {agent_key}, using default")
-            llm = await LLMManager.configure_crewai_llm("gpt-4o")
+            # SECURITY: Pass group_id for multi-tenant isolation
+            group_id_param = config.get('group_id') if config else None
+            if not group_id_param:
+                raise ValueError("group_id is REQUIRED for LLM configuration")
+            llm = await LLMManager.configure_crewai_llm("gpt-4o", group_id_param)
             
     except Exception as e:
         # Fallback to simple string if configuration fails
@@ -278,7 +294,10 @@ async def create_agent(
                             agent_tools.append(tool_instance)
                             logger.info(f"Added tool instance {tool_name} to agent {agent_key}")
                     else:
-                        logger.warning(f"Could not create tool instance for {tool_name}")
+                        logger.error(f"Could not create tool instance for {tool_name}")
+                        logger.error(f"Tool factory returned None - check tool factory logs for details")
+                        logger.error(f"Tool config: {tool_config}")
+                        logger.error(f"Tool override: {tool_override}")
             else:
                 # Without tool_factory, just append the tool names (this won't work for CrewAI)
                 agent_tools.extend([name for name in tool_names if name])

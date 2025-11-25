@@ -43,6 +43,10 @@ os.environ["SEED_DEBUG"] = "True"
 os.environ["OTEL_SDK_DISABLED"] = "true"
 os.environ["CREWAI_DISABLE_TELEMETRY"] = "true"
 
+# Prevent MLflow from creating local mlruns directories
+# This MUST be set before MLflow is imported anywhere to ensure Databricks backend is used
+os.environ["MLFLOW_TRACKING_URI"] = "databricks"
+
 # Set log directory environment variable
 log_path = os.path.join(os.path.abspath(os.path.dirname(os.path.dirname(__file__))), "logs")
 os.environ["LOG_DIR"] = log_path
@@ -74,11 +78,10 @@ async def lifespan(app: FastAPI):
     except Exception as _e:
         system_logger.warning(f"Failed to adjust module log levels: {_e}")
 
-
     # Validate and fix Databricks environment variables early in startup
     try:
         system_logger.info("Validating Databricks environment configuration...")
-        DatabricksURLUtils.validate_and_fix_environment()
+        await DatabricksURLUtils.validate_and_fix_environment()
     except Exception as e:
         system_logger.warning(f"Error validating Databricks environment: {e}")
 

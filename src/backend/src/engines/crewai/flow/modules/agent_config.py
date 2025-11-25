@@ -12,7 +12,7 @@ from src.core.logger import LoggerManager
 from src.engines.crewai.tools.tool_factory import ToolFactory
 
 # Initialize logger
-logger = LoggerManager.get_instance().crew
+logger = LoggerManager.get_instance().flow
 
 class AgentConfig:
     """
@@ -20,15 +20,17 @@ class AgentConfig:
     """
     
     @staticmethod
-    async def configure_agent_and_tools(agent_data, flow_data=None, repositories=None):
+    async def configure_agent_and_tools(agent_data, flow_data=None, repositories=None, group_context=None, crew_tool_configs=None):
         """
         Configure an agent with its associated tools.
-        
+
         Args:
             agent_data: Agent data from the database
             flow_data: Flow data for context (optional)
             repositories: Dictionary of repositories (optional)
-            
+            group_context: Group context for multi-tenant isolation (optional)
+            crew_tool_configs: Tool configs from crew node data to override agent_data.tool_configs (optional)
+
         Returns:
             Agent: A properly configured CrewAI Agent instance
         """
@@ -53,17 +55,66 @@ class AgentConfig:
             if hasattr(agent_data, 'tools') and agent_data.tools:
                 agent_tools = AgentConfig._normalize_tools_list(agent_data.tools)
                 logger.info(f"Found tools on agent {agent_data.name}: {agent_tools}")
-                
+
                 # Create tools from IDs
                 tools = await AgentConfig._create_tools_from_ids(agent_tools, tool_factory, f"agent {agent_data.name}")
-            
+
             # Check if we need to look for tools in flow nodes
             if len(tools) == 0 and flow_data and hasattr(flow_data, 'nodes'):
                 logger.info(f"No tools found directly on agent, checking flow nodes for agent {agent_data.name}")
                 tools = await AgentConfig._get_tools_from_flow_nodes(agent_data, flow_data, tool_factory)
+
+            # Use crew_tool_configs if provided, otherwise use agent_data.tool_configs
+            effective_tool_configs = crew_tool_configs if crew_tool_configs is not None else (agent_data.tool_configs if hasattr(agent_data, 'tool_configs') else None)
+
+            # Debug: Check tool_configs sources
+            logger.info(f"Agent {agent_data.name} - crew_tool_configs: {crew_tool_configs}")
+            logger.info(f"Agent {agent_data.name} - agent_data.tool_configs: {agent_data.tool_configs if hasattr(agent_data, 'tool_configs') else 'N/A'}")
+            logger.info(f"Agent {agent_data.name} - effective_tool_configs: {effective_tool_configs}")
+
+            # Add MCP tools from tool_configs (similar to agent_helpers.py)
+            if effective_tool_configs:
+                logger.info(f"Loading MCP tools from tool_configs for agent {agent_data.name}")
+                try:
+                    from src.db.session import async_session_factory
+                    from src.services.mcp_service import MCPService
+                    from src.engines.crewai.tools.mcp_integration import MCPIntegration
+
+                    # Build agent_config dict for MCP integration using effective_tool_configs
+                    agent_config = {
+                        'tool_configs': effective_tool_configs,
+                        'name': agent_data.name,
+                        'role': agent_data.role
+                    }
+
+                    # Add group_id if available from group_context or agent_data
+                    # group_context is a GroupContext object with group_ids list and primary_group_id
+                    if group_context:
+                        if hasattr(group_context, 'primary_group_id'):
+                            agent_config['group_id'] = group_context.primary_group_id
+                        elif hasattr(group_context, 'group_ids') and group_context.group_ids:
+                            agent_config['group_id'] = group_context.group_ids[0]
+                        else:
+                            # Fallback: might be a string already
+                            agent_config['group_id'] = group_context
+                    elif hasattr(agent_data, 'group_id') and agent_data.group_id:
+                        agent_config['group_id'] = agent_data.group_id
+
+                    async with async_session_factory() as session:
+                        mcp_service = MCPService(session)
+                        mcp_tools = await MCPIntegration.create_mcp_tools_for_agent(
+                            agent_config,
+                            f"agent_{agent_data.id}",
+                            mcp_service,
+                            agent_config
+                        )
+                        tools.extend(mcp_tools)
+                        logger.info(f"Added {len(mcp_tools)} MCP tools to agent {agent_data.name}")
+                except Exception as e:
+                    logger.error(f"Error loading MCP tools for agent {agent_data.name}: {e}", exc_info=True)
             
             # Get LLM for the agent
-            llm = await AgentConfig._get_agent_llm(agent_data)
+            llm = await AgentConfig._get_agent_llm(agent_data, group_context)
             
             # Create the agent with all configurations
             agent_kwargs = AgentConfig._prepare_agent_kwargs(agent_data, tools, llm)
@@ -157,10 +208,19 @@ class AgentConfig:
         return tools
     
     @staticmethod
-    async def _get_agent_llm(agent_data):
+    async def _get_agent_llm(agent_data, group_context=None):
         """Get an LLM instance for the agent"""
         llm = None
-        
+
+        # Set the group context for UserContext if provided
+        if group_context:
+            try:
+                from src.utils.user_context import UserContext
+                UserContext.set_group_context(group_context)
+                logger.debug(f"Set group context for agent LLM configuration")
+            except Exception as e:
+                logger.warning(f"Could not set group context: {e}")
+
         try:
             # Check if agent has a specific LLM configuration
             if hasattr(agent_data, 'llm') and agent_data.llm:
@@ -212,6 +272,11 @@ class AgentConfig:
             "backstory": agent_data.backstory,
             "verbose": True,
             "allow_delegation": getattr(agent_data, 'allow_delegation', False),
+            "use_system_prompt": True,
+            # CRITICAL: Enable respect_context_window to auto-summarize when context exceeds limits
+            # Without this, some LLM providers (Qwen, DeepSeek, Mistral) return empty responses
+            # instead of throwing errors when context is too large
+            "respect_context_window": True,
             "config": {}  # Always ensure there's an empty dict for config
         }
         

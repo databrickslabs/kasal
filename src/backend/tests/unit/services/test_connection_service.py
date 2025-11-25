@@ -336,18 +336,15 @@ class TestGenerateConnections:
         
         with patch('src.services.connection_service.TemplateService.get_template_content') as mock_template:
             mock_template.return_value = "System prompt"
-            
-            with patch('src.utils.databricks_auth.is_databricks_apps_environment') as mock_is_databricks:
-                mock_is_databricks.return_value = True
-                
-                with patch('src.services.connection_service.LLMManager.configure_litellm') as mock_configure:
-                    mock_configure.return_value = {"model": "databricks-llama-4-maverick"}
-                    
-                    with patch('src.services.connection_service.litellm.acompletion') as mock_completion:
-                        mock_completion.return_value = mock_response
-                        
-                        result = await connection_service.generate_connections(sample_connection_request)
-        
+
+            with patch('src.services.connection_service.LLMManager.configure_litellm') as mock_configure:
+                mock_configure.return_value = {"model": "databricks-llama-4-maverick"}
+
+                with patch('src.services.connection_service.litellm.acompletion') as mock_completion:
+                    mock_completion.return_value = mock_response
+
+                    result = await connection_service.generate_connections(sample_connection_request)
+
         assert isinstance(result, ConnectionResponse)
     
     @pytest.mark.asyncio

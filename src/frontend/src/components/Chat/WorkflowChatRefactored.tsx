@@ -24,7 +24,6 @@ import CloseIcon from '@mui/icons-material/Close';
 import RefreshIcon from '@mui/icons-material/Refresh';
 import KeyboardArrowDownIcon from '@mui/icons-material/KeyboardArrowDown';
 import ChevronLeftIcon from '@mui/icons-material/ChevronLeft';
-import PlayArrowIcon from '@mui/icons-material/PlayArrow';
 import SwapHorizIcon from '@mui/icons-material/SwapHoriz';
 
 import DispatcherService, { DispatchResult, ConfigureCrewResult } from '../../api/DispatcherService';
@@ -32,6 +31,7 @@ import { useWorkflowStore } from '../../store/workflow';
 import { useCrewExecutionStore } from '../../store/crewExecution';
 import { useChatMessagesStore } from '../../store/chatMessagesStore';
 import { useKnowledgeConfigStore } from '../../store/knowledgeConfigStore';
+import { useModelConfigStore } from '../../store/modelConfig';
 import { Node as FlowNode } from 'reactflow';
 import { ChatHistoryService } from '../../api/ChatHistoryService';
 import { ModelService } from '../../api/ModelService';
@@ -101,6 +101,9 @@ const WorkflowChat: React.FC<WorkflowChatProps> = ({
     isKnowledgeSourceEnabled,
     checkConfiguration,
   } = useKnowledgeConfigStore();
+
+  // Use Zustand store for model configuration
+  const { refreshKey } = useModelConfigStore();
 
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
@@ -299,7 +302,7 @@ const WorkflowChat: React.FC<WorkflowChatProps> = ({
     }
   }, [isVisible]);
 
-  // Fetch models when component mounts
+  // Fetch models when component mounts or when refreshKey changes
   useEffect(() => {
     const fetchModels = async () => {
       setIsLoadingModels(true);
@@ -323,7 +326,7 @@ const WorkflowChat: React.FC<WorkflowChatProps> = ({
       }
     };
     fetchModels();
-  }, []);
+  }, [refreshKey]);
 
   // Initialize knowledge configuration on mount
   useEffect(() => {
@@ -724,28 +727,7 @@ const WorkflowChat: React.FC<WorkflowChatProps> = ({
     try {
       // Add placeholders based on intent keywords so users see progress immediately
       if (wantsCrewOrPlan) {
-        cleanupProgress = addTempProgress('\u23f3 Generating plan/crew…');
-        // staged progress updates while waiting for dispatcher
-        const progressCleanups: Array<() => void> = [];
-        const timers: number[] = [];
-        // Keep initial cleanup too
-        const initialCleanup = cleanupProgress;
-        if (initialCleanup) progressCleanups.push(initialCleanup);
-        const addStage = (delay: number, text: string) => {
-          const t = window.setTimeout(() => {
-            const c = addTempProgress(text);
-            progressCleanups.push(c);
-          }, delay);
-          timers.push(t);
-        };
-        addStage(1000, '🧠 Analyzing request…');
-        addStage(3000, '🤖 Drafting agent…');
-        addStage(4500, '📝 Drafting task…');
-        // redefine cleanup to clear timers and remove staged messages
-        cleanupProgress = () => {
-          timers.forEach((t) => window.clearTimeout(t));
-          progressCleanups.forEach((fn) => fn());
-        };
+        cleanupProgress = addTempProgress('Generating crew with agents and tasks...');
 
         const now = Date.now();
         const tempAgentId = `agent-temp-${now}`;
@@ -794,7 +776,7 @@ const WorkflowChat: React.FC<WorkflowChatProps> = ({
           setNodes((cur) => (cur as FlowNode[]).filter((n) => n.id !== tempAgentId && n.id !== tempTaskId));
         };
       } else if (wantsAgent) {
-        cleanupProgress = addTempProgress('\u23f3 Creating agent…');
+        cleanupProgress = addTempProgress('Creating agent...');
         const now = Date.now();
         const tempAgentId = `agent-temp-${now}`;
         setNodes((cur) => {
@@ -811,7 +793,7 @@ const WorkflowChat: React.FC<WorkflowChatProps> = ({
           setNodes((cur) => (cur as FlowNode[]).filter((n) => n.id !== tempAgentId));
         };
       } else if (wantsTask) {
-        cleanupProgress = addTempProgress('\u23f3 Creating task\u2026');
+        cleanupProgress = addTempProgress('Creating task...');
         const now = Date.now();
         const tempTaskId = `task-temp-${now}`;
         setNodes((cur) => {
@@ -1011,8 +993,7 @@ const WorkflowChat: React.FC<WorkflowChatProps> = ({
     }
   };
   const isSendMode = inputValue.trim().length > 0;
-  const canRunCrew = hasCrewContent(nodes);
-  const isActionDisabled = isLoading || !!executingJobId || (!isSendMode && !canRunCrew);
+  const isActionDisabled = isLoading || !!executingJobId || !isSendMode;
 
 
 
@@ -1359,11 +1340,7 @@ const WorkflowChat: React.FC<WorkflowChatProps> = ({
             sx={{
               '& .MuiOutlinedInput-root': {
                 paddingRight: '120px',
-                borderColor: hasCrewContent(nodes) ? 'primary.main' : undefined,
                 borderRadius: 1,
-                '&:hover': {
-                  borderColor: hasCrewContent(nodes) ? 'primary.main' : undefined,
-                },
               },
             }}
             InputProps={{
@@ -1395,6 +1372,70 @@ const WorkflowChat: React.FC<WorkflowChatProps> = ({
                       }
                       onFilesUploaded={(files) => {
                         console.log('Knowledge files uploaded:', files);
+                      }}
+                      onTasksUpdated={async (uploadedFilePath) => {
+                        console.log('[WorkflowChat] Updating task nodes with file path:', uploadedFilePath);
+
+                        // Find the agent connected to tasks (for agent_id in tool_configs)
+                        const agentNode = nodes.find(n => n.type === 'agentNode');
+                        const agentId = agentNode?.data?.agentId || agentNode?.id;
+                        console.log('[WorkflowChat] Found agent for access control:', agentId);
+
+                        // Update all task nodes to include DatabricksKnowledgeSearchTool with file path in tool_configs
+                        const updatedNodes = nodes.map(node => {
+                          if (node.type === 'taskNode') {
+                            const currentTools = node.data.tools || [];
+                            const currentToolConfigs = node.data.tool_configs || {};
+
+                            // Add DatabricksKnowledgeSearchTool to tools array if not present
+                            const hasKnowledgeTool = currentTools.includes('DatabricksKnowledgeSearchTool') ||
+                                                      currentTools.includes('36');
+                            const updatedTools = hasKnowledgeTool ? currentTools : [...currentTools, 'DatabricksKnowledgeSearchTool'];
+
+                            // Add file path AND agent_id to tool_configs for DatabricksKnowledgeSearchTool
+                            const existingFilePaths = currentToolConfigs.DatabricksKnowledgeSearchTool?.file_paths || [];
+                            const updatedToolConfigs = {
+                              ...currentToolConfigs,
+                              DatabricksKnowledgeSearchTool: {
+                                ...currentToolConfigs.DatabricksKnowledgeSearchTool,
+                                file_paths: existingFilePaths.includes(uploadedFilePath)
+                                  ? existingFilePaths
+                                  : [...existingFilePaths, uploadedFilePath],
+                                agent_id: agentId  // Add agent_id for access control filtering
+                              }
+                            };
+
+                            console.log(`[WorkflowChat] Updated task ${node.data.label}:`, {
+                              tools: updatedTools,
+                              tool_configs: updatedToolConfigs
+                            });
+
+                            // Update the task in the backend
+                            if (node.data.taskId) {
+                              import('../../api/TaskService').then(({ TaskService }) => {
+                                TaskService.updateTask(node.data.taskId, {
+                                  tools: updatedTools,
+                                  tool_configs: updatedToolConfigs
+                                }).catch(err => {
+                                  console.error(`Failed to update task ${node.data.taskId}:`, err);
+                                });
+                              });
+                            }
+
+                            return {
+                              ...node,
+                              data: {
+                                ...node.data,
+                                tools: updatedTools,
+                                tool_configs: updatedToolConfigs
+                              }
+                            };
+                          }
+                          return node;
+                        });
+
+                        setNodes(updatedNodes as FlowNode[]);
+                        console.log('[WorkflowChat] Task nodes updated successfully');
                       }}
                       onAgentsUpdated={(updatedAgents) => {
 
@@ -1514,18 +1555,26 @@ const WorkflowChat: React.FC<WorkflowChatProps> = ({
                       >
                         {(() => {
                           const modelName = models[selectedModel]?.name || selectedModel;
-                          if (modelName.includes('databricks-gpt-oss-120b')) return 'GPT OSS 120B';
-                          if (modelName.includes('databricks-gpt-oss-20b')) return 'GPT OSS 20B';
-                          if (modelName.includes('databricks-llama-4-maverick')) return 'Llama 4';
-                          if (modelName.includes('databricks-meta-llama-3-1-405b-instruct')) return 'Llama 3';
-                          if (modelName.includes('databricks-meta-llama-3-3-70b-instruct')) return 'Llama 3';
-                          if (modelName.includes('databricks-llama-70b')) return 'Llama 3 70B';
-                          if (modelName.includes('databricks-llama-405b')) return 'Llama 3 405B';
-                          if (modelName.includes('gpt-4')) return 'GPT-4';
-                          if (modelName.includes('gpt-3.5')) return 'GPT-3.5';
-                          if (modelName.includes('claude')) return 'Claude';
-                          if (modelName.length > 15) return modelName.substring(0, 15) + '...';
-                          return modelName;
+                          // Remove databricks- prefix for cleaner display
+                          const displayName = modelName.replace(/^databricks-/, '');
+
+                          // Special cases for better readability
+                          if (displayName.includes('gpt-oss-120b')) return 'GPT OSS 120B';
+                          if (displayName.includes('gpt-oss-20b')) return 'GPT OSS 20B';
+                          if (displayName.includes('llama-4-maverick')) return 'Llama 4';
+                          if (displayName.includes('meta-llama-3-1-405b')) return 'Llama 3.1 405B';
+                          if (displayName.includes('meta-llama-3-3-70b')) return 'Llama 3.3 70B';
+                          if (displayName.includes('gpt-5-mini')) return 'GPT-5 Mini';
+                          if (displayName.includes('gpt-5-nano')) return 'GPT-5 Nano';
+                          if (displayName.includes('gpt-5')) return 'GPT-5';
+                          if (displayName.includes('gemini-2-5-pro')) return 'Gemini 2.5 Pro';
+                          if (displayName.includes('gemini-2-5-flash')) return 'Gemini 2.5 Flash';
+                          if (displayName.includes('claude-sonnet-4-5')) return 'Claude 4.5';
+                          if (displayName.includes('claude-sonnet-4')) return 'Claude 4';
+                          if (displayName.includes('qwen3-next-80b')) return 'Qwen3 80B';
+                          if (displayName.includes('gemma-3-12b')) return 'Gemma 3 12B';
+                          if (displayName.length > 15) return displayName.substring(0, 15) + '...';
+                          return displayName;
                         })()}
                       </Typography>
                       <KeyboardArrowDownIcon sx={{ fontSize: 14 }} />
@@ -1581,7 +1630,28 @@ const WorkflowChat: React.FC<WorkflowChatProps> = ({
                         >
                           <Box sx={{ width: '100%' }}>
                             <Typography variant="body2" sx={{ fontSize: '0.813rem' }}>
-                              {model.name}
+                              {(() => {
+                                // Remove databricks- prefix for cleaner display
+                                const displayName = model.name.replace(/^databricks-/, '');
+
+                                // Special cases for better readability
+                                if (displayName.includes('gpt-oss-120b')) return 'GPT OSS 120B';
+                                if (displayName.includes('gpt-oss-20b')) return 'GPT OSS 20B';
+                                if (displayName.includes('llama-4-maverick')) return 'Llama 4';
+                                if (displayName.includes('meta-llama-3-1-405b')) return 'Llama 3.1 405B';
+                                if (displayName.includes('meta-llama-3-3-70b')) return 'Llama 3.3 70B';
+                                if (displayName.includes('gpt-5-mini')) return 'GPT-5 Mini';
+                                if (displayName.includes('gpt-5-nano')) return 'GPT-5 Nano';
+                                if (displayName.includes('gpt-5')) return 'GPT-5';
+                                if (displayName.includes('gemini-2-5-pro')) return 'Gemini 2.5 Pro';
+                                if (displayName.includes('gemini-2-5-flash')) return 'Gemini 2.5 Flash';
+                                if (displayName.includes('claude-sonnet-4-5')) return 'Claude Sonnet 4.5';
+                                if (displayName.includes('claude-3-7-sonnet')) return 'Claude 3.7 Sonnet';
+                                if (displayName.includes('claude-sonnet-4')) return 'Claude Sonnet 4';
+                                if (displayName.includes('qwen3-next-80b')) return 'Qwen3 Next 80B';
+                                if (displayName.includes('gemma-3-12b')) return 'Gemma 3 12B';
+                                return displayName;
+                              })()}
                             </Typography>
                             {model.provider && (
                               <Typography
@@ -1607,7 +1677,7 @@ const WorkflowChat: React.FC<WorkflowChatProps> = ({
           {/* Send button */}
               <IconButton
                 color="primary"
-                onClick={isSendMode ? handleSendMessage : () => { if (canRunCrew && onExecuteCrew) onExecuteCrew(); }}
+                onClick={handleSendMessage}
                 disabled={isActionDisabled}
                 sx={{
                   position: 'absolute',
@@ -1631,7 +1701,7 @@ const WorkflowChat: React.FC<WorkflowChatProps> = ({
                 {isLoading || executingJobId ? (
                   <CircularProgress size={16} sx={{ color: 'inherit' }} />
                 ) : (
-                  isSendMode ? <ArrowUpwardIcon sx={{ fontSize: 16 }} /> : <PlayArrowIcon sx={{ fontSize: 16 }} />
+                  <ArrowUpwardIcon sx={{ fontSize: 16 }} />
                 )}
               </IconButton>
         </Box>

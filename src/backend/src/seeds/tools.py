@@ -22,7 +22,6 @@ tools_data = [
     (31, "PerplexityTool", "A powerful search and question-answering tool that leverages the Perplexity AI platform to provide detailed, accurate answers to complex queries. It combines web search capabilities with advanced language processing to generate comprehensive responses with references and citations. Ideal for research tasks, fact-checking, gathering detailed information on specialized topics, and obtaining nuanced explanations of complex subjects.", "search"),
     (35, "GenieTool", "A sophisticated database querying tool that enables natural language access to database tables and content. It translates plain language questions into optimized database queries, allowing non-technical users to retrieve complex information from databases without SQL knowledge. Perfect for data analysis, business intelligence applications, and providing database access within conversational interfaces.", "database"),
     (36, "DatabricksKnowledgeSearchTool", "A powerful knowledge search tool that enables semantic search across documents uploaded to Databricks Vector Search. It provides RAG (Retrieval-Augmented Generation) capabilities by searching through indexed documents based on vector similarity. This tool allows agents to access and retrieve relevant information from uploaded knowledge files including PDFs, Word documents, text files, and other document formats. Essential for building context-aware AI applications with access to custom knowledge bases.", "search"),
-    (67, "DatabricksCustomTool", "An enhanced database tool for executing SQL queries against Databricks with full CRUD (Create, Read, Update, Delete) capabilities. It securely connects to Databricks workspaces and allows running SQL operations with proper authentication and configuration from the DatabricksService. Supports all SQL operations including SELECT, INSERT, UPDATE, DELETE, and CREATE statements, with operation-specific result formatting and comprehensive error handling.", "database"),
     (69, "MCPTool", "An advanced adapter for Model Context Protocol (MCP) servers that enables access to thousands of specialized tools from the MCP ecosystem. This tool establishes and manages connections with MCP servers through SSE (Server-Sent Events), providing seamless integration with community-built tool collections. Perfect for extending agent capabilities with domain-specific tools without requiring custom development or direct integration work.", "integration"),
     (70, "DatabricksJobsTool", "A comprehensive Databricks Jobs management tool using direct REST API calls for optimal performance. IMPORTANT WORKFLOW: Always use 'get_notebook' action FIRST to analyze job notebooks and understand required parameters before running any job with custom parameters. This ensures proper parameter construction and prevents job failures. Available actions: (1) 'list' - List all jobs in workspace with optional name/ID filtering, (2) 'list_my_jobs' - List only jobs created by current user, (3) 'get' - Get detailed job configuration and recent run history, (4) 'get_notebook' - Analyze notebook content to understand parameters, widgets, and logic (REQUIRED before running jobs with parameters), (5) 'run' - Trigger job execution with custom parameters (use dict for notebook/SQL tasks, list for Python tasks), (6) 'monitor' - Track real-time execution status and task progress, (7) 'create' - Create new jobs with custom configurations. The tool provides intelligent parameter analysis, suggesting proper parameter structures based on notebook patterns (search jobs, ETL jobs, etc.). Supports OAuth/OBO authentication, PAT tokens, and Databricks CLI profiles. All operations use direct REST API calls avoiding SDK overhead for faster execution. Essential for automating data pipelines, orchestrating workflows, and integrating Databricks jobs into AI agent systems.", "database"),
     (71, "PowerBIDAXTool", "Execute DAX queries directly against Power BI semantic models for fast, interactive business intelligence analysis. This tool provides immediate query execution with configurable semantic model and workspace targeting. Perfect for simple data retrieval, dashboard queries, and low-latency analytics. Supports dynamic DAX query construction and returns structured tabular results with execution metrics. Ideal for agents performing real-time Power BI data analysis and reporting tasks.", "database"),
@@ -68,18 +67,11 @@ def get_tool_configs():
             "result_as_answer": False
         },  # PerplexityTool
         "35": {
-            "result_as_answer": False
+            "result_as_answer": True
         },  # GenieTool
         "36": {
             "result_as_answer": False
         },  # DatabricksKnowledgeSearchTool
-        "67": {
-            "result_as_answer": False,
-            "DATABRICKS_HOST": "",  # Databricks workspace URL (e.g., "e2-demo-field-eng.cloud.databricks.com")
-            "catalog": None,  # Will use the configured default from DatabricksService
-            "schema": None,   # Will use the configured default from DatabricksService
-            "warehouse_id": None,  # Will use the configured default from DatabricksService
-        },   # DatabricksCustomTool
         "69": {
             "result_as_answer": False,
             "server_type": "sse",  # Type of MCP server: "sse" or "stdio"
