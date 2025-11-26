@@ -1,0 +1,151 @@
+{
+  "id": "42a83f99-c519-4377-b924-881d1ef78a67",
+  "name": "pbi_tool",
+  "agent_ids": [
+    "6f6081da-c3a6-448c-ab54-8ebeed3ea212"
+  ],
+  "task_ids": [
+    "2868464e-4f67-4776-be43-354303d51231"
+  ],
+  "nodes": [
+    {
+      "id": "task-2868464e-4f67-4776-be43-354303d51231",
+      "type": "taskNode",
+      "position": {
+        "x": 368,
+        "y": 68
+      },
+      "data": {
+        "label": "Run Job with Custom Parameters",
+        "role": null,
+        "goal": null,
+        "backstory": null,
+        "tools": [
+          "72"
+        ],
+        "tool_configs": null,
+        "agentId": null,
+        "taskId": "2868464e-4f67-4776-be43-354303d51231",
+        "llm": null,
+        "function_calling_llm": null,
+        "max_iter": null,
+        "max_rpm": null,
+        "max_execution_time": null,
+        "verbose": null,
+        "allow_delegation": null,
+        "cache": null,
+        "memory": true,
+        "embedder_config": null,
+        "system_template": null,
+        "prompt_template": null,
+        "response_template": null,
+        "allow_code_execution": null,
+        "code_execution_mode": null,
+        "max_retry_limit": null,
+        "use_system_prompt": null,
+        "respect_context_window": null,
+        "type": "task",
+        "description": "Execute job ID 365257288725339 ONE TIME. \n\nExecute the job with those parameters:\n- question: {question}\n- workspace_id: 'bcb084ed-aaa-bbb-ccc-ddd'\n- semantic_model_id: 'a17de62e-8dc0-4a8a-acaa-2a9954de8c75'\n- auth_method: 'service_principal'\n- tenant_id: '9f37a392-aaa-bbb-ccc-ddd'\n- client_id: '7b597aac-aaa-bbb-ccc-ddd'\n- client_secret: 'doM8Q~ddd~dd.3xcbiK'\n- sample_size: 100\n- metadata: 'json'\n- databricks_host: 'https://e2-<dbx-host>.databricks.com/'\n- databricks_token: 'dapia-xxxx'\n\nI don't want you to list or get the job; I want you to run it once; you are not allowed to run more than once. Use PowerBITool to execute this query.\n\nIMPORTANT: You will make sure that the action run will only trigger 1 time and not more.",
+        "expected_output": "A job execution result containing the result data from running job ID 365257288725339 with the custom parameters. The output will include any result_data and various other parameters.",
+        "icon": null,
+        "advanced_config": null,
+        "config": {
+          "cache_response": false,
+          "cache_ttl": 3600,
+          "retry_on_fail": true,
+          "max_retries": 3,
+          "timeout": null,
+          "priority": 1,
+          "error_handling": "default",
+          "output_file": null,
+          "output_json": null,
+          "output_pydantic": null,
+          "validation_function": null,
+          "callback_function": null,
+          "human_input": false,
+          "markdown": false
+        },
+        "context": [],
+        "async_execution": false,
+        "knowledge_sources": null,
+        "markdown": false
+      },
+      "width": null,
+      "height": null,
+      "selected": null,
+      "positionAbsolute": null,
+      "dragging": null,
+      "style": null
+    },
+    {
+      "id": "agent-6f6081da-c3a6-448c-ab54-8ebeed3ea212",
+      "type": "agentNode",
+      "position": {
+        "x": 68,
+        "y": 73
+      },
+      "data": {
+        "label": "PowerBI Job Orchestrator",
+        "role": "PowerBI Job Manager",
+        "goal": "Orchestrate and manage PowerBI jobs efficiently.\n\nYou will make sure that the action run will only trigger 1 time and not more.",
+        "backstory": "Experienced in managing and optimizing Databricks workflows for PowerBI, with expertise in job scheduling and execution.",
+        "tools": [
+          "72"
+        ],
+        "tool_configs": null,
+        "agentId": "6f6081da-c3a6-448c-ab54-8ebeed3ea212",
+        "taskId": null,
+        "llm": "databricks-llama-4-maverick",
+        "function_calling_llm": null,
+        "max_iter": 25,
+        "max_rpm": 1,
+        "max_execution_time": 300,
+        "verbose": false,
+        "allow_delegation": false,
+        "cache": true,
+        "memory": true,
+        "embedder_config": {
+          "provider": "databricks",
+          "config": {
+            "model": "databricks-gte-large-en"
+          }
+        },
+        "system_template": null,
+        "prompt_template": null,
+        "response_template": null,
+        "allow_code_execution": false,
+        "code_execution_mode": "safe",
+        "max_retry_limit": 3,
+        "use_system_prompt": true,
+        "respect_context_window": true,
+        "type": "agent",
+        "description": null,
+        "expected_output": null,
+        "icon": null,
+        "advanced_config": null,
+        "config": null,
+        "context": [],
+        "async_execution": false,
+        "knowledge_sources": [],
+        "markdown": false
+      },
+      "width": null,
+      "height": null,
+      "selected": null,
+      "positionAbsolute": null,
+      "dragging": null,
+      "style": null
+    }
+  ],
+  "edges": [
+    {
+      "source": "agent-6f6081da-c3a6-448c-ab54-8ebeed3ea212",
+      "target": "task-2868464e-4f67-4776-be43-354303d51231",
+      "id": "reactflow__edge-agent-2d21de66-438d-4a70-8be0-f16dd0a8d4aa-task-c2c71f3e-89e8-4786-84dd-fd0e2f063ad1-right-left",
+      "sourceHandle": null,
+      "targetHandle": null
+    }
+  ],
+  "created_at": "2025-11-26T08:21:41.264255",
+  "updated_at": "2025-11-26T08:21:41.264257"
+}
