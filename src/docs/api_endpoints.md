@@ -232,18 +232,6 @@ Authorization: Bearer <JWT_TOKEN>
 |--------|----------|-------------|
 | `POST` | `/powerbi/config` | Configure Power BI connection |
 | `GET` | `/powerbi/config` | Get Power BI configuration |
-| `POST` | `/powerbi/validate` | Validate Power BI credentials |
-| `GET` | `/powerbi/workspaces` | List available workspaces |
-| `GET` | `/powerbi/datasets` | List datasets in workspace |
-| `GET` | `/powerbi/datasets/{id}/info` | Get dataset metadata |
-
-### Power BI Analysis
-
-| Method | Endpoint | Description |
-|--------|----------|-------------|
-| `POST` | `/powerbi/query` | Execute DAX query |
-| `POST` | `/powerbi/analyze` | Run complex analysis via Databricks |
-| `GET` | `/powerbi/jobs/{id}/status` | Get analysis job status |
 
 **Power BI Tool Configuration (Task-Level):**
 ```json
