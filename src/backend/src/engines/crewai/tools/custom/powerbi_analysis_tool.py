@@ -151,7 +151,7 @@ class PowerBIAnalysisTool(BaseTool):
     _client_id: Optional[str] = PrivateAttr(default=None)
     _workspace_id: Optional[str] = PrivateAttr(default=None)
     _semantic_model_id: Optional[str] = PrivateAttr(default=None)
-    _auth_method: Optional[str] = PrivateAttr(default="username_password")
+    _auth_method: Optional[str] = PrivateAttr(default="service_principal")
 
     def __init__(
         self,
@@ -161,7 +161,7 @@ class PowerBIAnalysisTool(BaseTool):
         client_id: Optional[str] = None,
         workspace_id: Optional[str] = None,
         semantic_model_id: Optional[str] = None,
-        auth_method: Optional[str] = "username_password",
+        auth_method: Optional[str] = "service_principal",
         **kwargs
     ):
         """
@@ -320,31 +320,33 @@ class PowerBIAnalysisTool(BaseTool):
 
             logger.info(f"Prepared job parameters with question: '{question_str[:50]}...' and semantic_model_id: {dashboard_id}")
 
-            # Build PowerBI configuration with precedence: additional_params (task-level) > tool config (defaults)
+            # Build PowerBI configuration with precedence: tool config (from task) > additional_params (from LLM)
             powerbi_config = {}
 
-            # Extract from additional_params first (task-level configuration - highest priority)
+            # PRIORITY 1: Use tool initialization values (from task config) - HIGHEST PRIORITY
+            if self._tenant_id:
+                powerbi_config['tenant_id'] = self._tenant_id
+            if self._client_id:
+                powerbi_config['client_id'] = self._client_id
+            if self._auth_method:
+                powerbi_config['auth_method'] = self._auth_method
+            if self._workspace_id:
+                powerbi_config['workspace_id'] = self._workspace_id
+
+            # PRIORITY 2: Fall back to additional_params only if not already set (from LLM - lower priority)
             if additional_params:
-                if 'tenant_id' in additional_params:
+                if 'tenant_id' not in powerbi_config and 'tenant_id' in additional_params:
                     powerbi_config['tenant_id'] = additional_params['tenant_id']
-                if 'client_id' in additional_params:
+                if 'client_id' not in powerbi_config and 'client_id' in additional_params:
                     powerbi_config['client_id'] = additional_params['client_id']
-                if 'auth_method' in additional_params:
+                if 'auth_method' not in powerbi_config and 'auth_method' in additional_params:
                     powerbi_config['auth_method'] = additional_params['auth_method']
-                if 'workspace_id' in additional_params:
+                if 'workspace_id' not in powerbi_config and 'workspace_id' in additional_params:
                     powerbi_config['workspace_id'] = additional_params['workspace_id']
 
-            # Fall back to tool-level defaults if not provided in additional_params
-            if 'tenant_id' not in powerbi_config and self._tenant_id:
-                powerbi_config['tenant_id'] = self._tenant_id
-            if 'client_id' not in powerbi_config and self._client_id:
-                powerbi_config['client_id'] = self._client_id
-            if 'auth_method' not in powerbi_config and self._auth_method:
-                powerbi_config['auth_method'] = self._auth_method
-
-            # Use workspace_id from kwargs if provided, otherwise from config
-            if not workspace_id and 'workspace_id' not in powerbi_config and self._workspace_id:
-                powerbi_config['workspace_id'] = self._workspace_id
+            # Use workspace_id from kwargs if provided (override everything)
+            if workspace_id:
+                powerbi_config['workspace_id'] = workspace_id
 
             # Use semantic_model_id from kwargs (dashboard_id) if provided, otherwise use default from config
             # Note: dashboard_id in kwargs takes precedence over semantic_model_id from config

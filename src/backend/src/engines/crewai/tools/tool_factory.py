@@ -1129,7 +1129,7 @@ class ToolFactory:
                 client_id = None
                 workspace_id = None
                 semantic_model_id = None
-                auth_method = "username_password"
+                auth_method = "service_principal"
 
                 try:
                     if isinstance(self.config, dict):
@@ -1142,7 +1142,7 @@ class ToolFactory:
                         client_id = tool_config.get("client_id")
                         workspace_id = tool_config.get("workspace_id")
                         semantic_model_id = tool_config.get("semantic_model_id")
-                        auth_method = tool_config.get("auth_method", "username_password")
+                        auth_method = tool_config.get("auth_method", "service_principal")
 
                     # Allow tool_config_override to override specific fields
                     if isinstance(tool_config_override, dict):
