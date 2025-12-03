@@ -463,9 +463,6 @@ Alternatively, create a crew manually:
 │   Agent         │
 └────────┬────────┘
          │
-         ├─ PowerBIDAXTool (Direct query)
-         │  └─> Power BI REST API
-         │
          └─ PowerBIAnalysisTool (Complex analysis)
             └─> Databricks Job (pbi_e2e_pipeline)
                 ├─ Step 1: Extract metadata

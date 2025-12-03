@@ -108,7 +108,6 @@ class PowerBIAnalysisTool(BaseTool):
     - Result persistence to Databricks volumes
     - Integration with other data sources
 
-    For simple, interactive queries, use PowerBIDAXTool instead.
 
     Architecture:
     1. Accepts business questions or DAX statements
@@ -859,6 +858,4 @@ class PowerBIAnalysisTool(BaseTool):
         output += f"```json\n{json.dumps(job_params, indent=2)}\n```\n\n"
         output += f"**Notebook Location:**\n"
         output += f"`scripts/dax_analysis_job.py` (from your ask.md guide)\n\n"
-        output += f"**Alternative:**\n"
-        output += f"For simple queries, use `PowerBIDAXTool` instead for direct execution.\n"
         return output
