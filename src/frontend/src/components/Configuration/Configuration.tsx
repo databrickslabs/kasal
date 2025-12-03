@@ -30,7 +30,6 @@ import CloseIcon from '@mui/icons-material/Close';
 import MemoryIcon from '@mui/icons-material/Memory';
 import StorageIcon from '@mui/icons-material/Storage';
 import WorkspacesIcon from '@mui/icons-material/Workspaces';
-import BarChartIcon from '@mui/icons-material/BarChart';
 // import AutoFixHighIcon from '@mui/icons-material/AutoFixHigh';
 import { useTranslation } from 'react-i18next';
 import { LanguageService } from '../../api/LanguageService';
