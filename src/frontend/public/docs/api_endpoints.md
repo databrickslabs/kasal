@@ -4,6 +4,26 @@ Complete reference for all available API endpoints in the Kasal platform.
 
 ---
 
+## Base URL
+
+All API endpoints use the following base URL structure:
+
+```
+https://<your-app>.databricksapps.com/api/v1
+```
+
+**Example:**
+```
+https://kasal-dev-1444828305810485.aws.databricksapps.com/api/v1/executions
+```
+
+**Local Development:**
+```
+http://localhost:8000/api/v1
+```
+
+---
+
 ## Table of Contents
 
 - [Authentication](#authentication)
@@ -340,7 +360,7 @@ ws://localhost:8000/ws/executions/{execution_id}
 
 ```bash
 # 1. Create a crew
-curl -X POST http://localhost:8000/crews \
+curl -X POST http://localhost:8000/api/v1/crews \
   -H "Authorization: Bearer $TOKEN" \
   -H "Content-Type: application/json" \
   -d '{
@@ -352,7 +372,7 @@ curl -X POST http://localhost:8000/crews \
 # Response: {"id": "crew_123", ...}
 
 # 2. Start execution
-curl -X POST http://localhost:8000/crews/crew_123/kickoff \
+curl -X POST http://localhost:8000/api/v1/crews/crew_123/kickoff \
   -H "Authorization: Bearer $TOKEN" \
   -H "Content-Type: application/json" \
   -d '{"inputs": {"query": "Analyze Q4 sales"}}'
@@ -360,7 +380,7 @@ curl -X POST http://localhost:8000/crews/crew_123/kickoff \
 # Response: {"execution_id": "exec_456", ...}
 
 # 3. Monitor execution
-curl -X GET http://localhost:8000/executions/exec_456/status \
+curl -X GET http://localhost:8000/api/v1/executions/exec_456/status \
   -H "Authorization: Bearer $TOKEN"
 ```
 
@@ -368,7 +388,7 @@ curl -X GET http://localhost:8000/executions/exec_456/status \
 
 ```bash
 # Create task with PowerBI configuration
-curl -X POST http://localhost:8000/tasks \
+curl -X POST http://localhost:8000/api/v1/tasks \
   -H "Authorization: Bearer $TOKEN" \
   -H "Content-Type: application/json" \
   -d '{
