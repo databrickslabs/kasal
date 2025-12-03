@@ -327,11 +327,11 @@ Use the following test parameters:
 
 ### 7.1 Import the Reference Crew Template
 
-A pre-configured reference crew is available in `examples/crew_pbi_tool_template.json` that demonstrates PowerBI Analysis Tool usage.
+A pre-configured reference crew is available in `examples/crew_pbi_tool.json` that demonstrates PowerBI Analysis Tool usage.
 
 **Step 1: Customize the Template**
 
-Download and edit `examples/crew_pbi_tool_template.json` to replace placeholders:
+Download and edit `examples/crew_pbi_tool.json` to replace placeholders:
 
 ```json
 {
@@ -353,7 +353,7 @@ Download and edit `examples/crew_pbi_tool_template.json` to replace placeholders
 
 1. Open Kasal UI → **Crews** page
 2. Click **Import Crew**
-3. Upload your customized `crew_pbi_tool_template.json`
+3. Upload your customized `crew_pbi_tool.json`
 4. The crew will appear with:
    - **Agent**: "PowerBI Job Orchestrator"
    - **Task**: "Run PowerBI Analysis"

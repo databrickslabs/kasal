@@ -1146,25 +1146,56 @@ class ToolFactory:
                 )
 
             elif tool_name == "PowerBIAnalysisTool":
-                # Create PowerBIAnalysisTool with group_id and optional databricks_job_id
+                # Create PowerBIAnalysisTool with group_id and PowerBI configuration
                 group_id = None
                 databricks_job_id = None
+                tenant_id = None
+                client_id = None
+                workspace_id = None
+                semantic_model_id = None
+                auth_method = "username_password"
+
                 try:
                     if isinstance(self.config, dict):
                         group_id = self.config.get("group_id")
-                    # Check for databricks_job_id in tool_config or tool_config_override
+
+                    # Extract PowerBI config from tool_config (merged base + override)
                     if tool_config and isinstance(tool_config, dict):
                         databricks_job_id = tool_config.get("databricks_job_id")
-                    if not databricks_job_id and isinstance(tool_config_override, dict):
-                        databricks_job_id = tool_config_override.get("databricks_job_id")
-                except Exception:
+                        tenant_id = tool_config.get("tenant_id")
+                        client_id = tool_config.get("client_id")
+                        workspace_id = tool_config.get("workspace_id")
+                        semantic_model_id = tool_config.get("semantic_model_id")
+                        auth_method = tool_config.get("auth_method", "username_password")
+
+                    # Allow tool_config_override to override specific fields
+                    if isinstance(tool_config_override, dict):
+                        if "databricks_job_id" in tool_config_override:
+                            databricks_job_id = tool_config_override["databricks_job_id"]
+                        if "tenant_id" in tool_config_override:
+                            tenant_id = tool_config_override["tenant_id"]
+                        if "client_id" in tool_config_override:
+                            client_id = tool_config_override["client_id"]
+                        if "workspace_id" in tool_config_override:
+                            workspace_id = tool_config_override["workspace_id"]
+                        if "semantic_model_id" in tool_config_override:
+                            semantic_model_id = tool_config_override["semantic_model_id"]
+                        if "auth_method" in tool_config_override:
+                            auth_method = tool_config_override["auth_method"]
+                except Exception as e:
+                    logger.error(f"Error extracting PowerBI config: {e}")
                     group_id = None
                     databricks_job_id = None
 
-                logger.info(f"Creating PowerBIAnalysisTool with group_id: {group_id}, databricks_job_id: {databricks_job_id}")
+                logger.info(f"Creating PowerBIAnalysisTool with group_id: {group_id}, databricks_job_id: {databricks_job_id}, tenant_id: {'***' if tenant_id else None}, client_id: {'***' if client_id else None}")
                 return tool_class(
                     group_id=group_id or "default",
-                    databricks_job_id=databricks_job_id
+                    databricks_job_id=databricks_job_id,
+                    tenant_id=tenant_id,
+                    client_id=client_id,
+                    workspace_id=workspace_id,
+                    semantic_model_id=semantic_model_id,
+                    auth_method=auth_method
                 )
 
             elif tool_name == "MCPTool":
