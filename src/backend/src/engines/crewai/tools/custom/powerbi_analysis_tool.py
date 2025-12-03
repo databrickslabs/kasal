@@ -408,6 +408,15 @@ class PowerBIAnalysisTool(BaseTool):
             # Merge PowerBI config into job_params
             job_params.update(powerbi_config)
 
+            # Add Databricks configuration to job_params (needed by the notebook)
+            if databricks_host:
+                job_params['databricks_host'] = databricks_host
+                logger.info(f"Added databricks_host to job_params: {databricks_host}")
+
+            if databricks_token:
+                job_params['databricks_token'] = databricks_token
+                logger.info("Added databricks_token to job_params (value hidden for security)")
+
             # Determine which job_id to use: parameter takes precedence over configured value
             effective_job_id = job_id if job_id is not None else self._databricks_job_id
 
