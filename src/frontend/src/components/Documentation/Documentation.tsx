@@ -32,7 +32,7 @@ interface DocSection {
 }
 
 const docSections: DocSection[] = [
- 
+
   {
     label: 'Architecture',
     items: [
@@ -47,7 +47,13 @@ const docSections: DocSection[] = [
       { label: 'API Reference', file: 'API_REFERENCE' },
     ],
   },
-  
+  {
+    label: 'API',
+    items: [
+      { label: 'API Endpoints', file: 'api_endpoints' },
+    ],
+  },
+
 ];
 
 const Documentation: React.FC = () => {
