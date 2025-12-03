@@ -43,7 +43,7 @@ interface PowerBIConfigSelectorProps {
 }
 
 const AUTH_METHODS = [
-  { value: 'username_password', label: 'Username/Password' },
+  { value: 'service_principal', label: 'Service Principal' },
   { value: 'device_code', label: 'Device Code' },
 ];
 
@@ -52,7 +52,7 @@ const DEFAULT_CONFIG: PowerBIConfig = {
   client_id: '',
   workspace_id: '',
   semantic_model_id: '',
-  auth_method: 'username_password',
+  auth_method: 'service_principal',
   databricks_job_id: undefined,
 };
 
@@ -200,7 +200,7 @@ export const PowerBIConfigSelector: React.FC<PowerBIConfigSelectorProps> = ({
               <FormControl fullWidth disabled={disabled}>
                 <InputLabel>Authentication Method</InputLabel>
                 <Select
-                  value={config.auth_method || 'username_password'}
+                  value={config.auth_method || 'service_principal'}
                   onChange={(e) => handleChange('auth_method', e.target.value)}
                   label="Authentication Method"
                 >

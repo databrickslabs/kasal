@@ -169,7 +169,7 @@ class PowerBIAnalysisTool(BaseTool):
             client_id: Azure AD Application/Client ID for Power BI authentication
             workspace_id: Default Power BI Workspace ID (optional, can be overridden per task)
             semantic_model_id: Default Power BI Semantic Model ID (optional, can be overridden per task)
-            auth_method: Authentication method ("username_password" or "device_code")
+            auth_method: Authentication method ("service_principal" or "device_code")
             **kwargs: Additional keyword arguments for BaseTool
         """
         super().__init__(**kwargs)
