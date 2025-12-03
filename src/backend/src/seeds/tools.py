@@ -89,7 +89,12 @@ def get_tool_configs():
         },   # PowerBIDAXTool
         "72": {
             "result_as_answer": False,
-            "databricks_job_id": None  # Required: Databricks job ID for Power BI analysis
+            "databricks_job_id": None,  # Required: Databricks job ID for Power BI analysis
+            "tenant_id": "",  # Azure AD Tenant ID (required)
+            "client_id": "",  # Azure AD Application/Client ID (required)
+            "workspace_id": "",  # Default Power BI Workspace ID (optional, can be overridden per task)
+            "semantic_model_id": "",  # Default Power BI Semantic Model ID (optional, can be overridden per task)
+            "auth_method": "username_password"  # Authentication method: "username_password" or "device_code"
         }   # PowerBIAnalysisTool
     }
 

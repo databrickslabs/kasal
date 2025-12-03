@@ -127,11 +127,21 @@ class PowerBIAnalysisTool(BaseTool):
 
     _group_id: Optional[str] = PrivateAttr(default=None)
     _databricks_job_id: Optional[int] = PrivateAttr(default=None)
+    _tenant_id: Optional[str] = PrivateAttr(default=None)
+    _client_id: Optional[str] = PrivateAttr(default=None)
+    _workspace_id: Optional[str] = PrivateAttr(default=None)
+    _semantic_model_id: Optional[str] = PrivateAttr(default=None)
+    _auth_method: Optional[str] = PrivateAttr(default="username_password")
 
     def __init__(
         self,
         group_id: Optional[str] = None,
         databricks_job_id: Optional[int] = None,
+        tenant_id: Optional[str] = None,
+        client_id: Optional[str] = None,
+        workspace_id: Optional[str] = None,
+        semantic_model_id: Optional[str] = None,
+        auth_method: Optional[str] = "username_password",
         **kwargs
     ):
         """
@@ -140,11 +150,21 @@ class PowerBIAnalysisTool(BaseTool):
         Args:
             group_id: Group ID for multi-tenant support
             databricks_job_id: Databricks job ID for Power BI analysis (if pre-configured)
+            tenant_id: Azure AD Tenant ID for Power BI authentication
+            client_id: Azure AD Application/Client ID for Power BI authentication
+            workspace_id: Default Power BI Workspace ID (optional, can be overridden per task)
+            semantic_model_id: Default Power BI Semantic Model ID (optional, can be overridden per task)
+            auth_method: Authentication method ("username_password" or "device_code")
             **kwargs: Additional keyword arguments for BaseTool
         """
         super().__init__(**kwargs)
         self._group_id = group_id
         self._databricks_job_id = databricks_job_id
+        self._tenant_id = tenant_id
+        self._client_id = client_id
+        self._workspace_id = workspace_id
+        self._semantic_model_id = semantic_model_id
+        self._auth_method = auth_method
 
         # Clear debug log file at initialization
         try:
@@ -247,6 +267,24 @@ class PowerBIAnalysisTool(BaseTool):
 
             logger.info(f"Prepared job parameters with question: '{question_str[:50]}...' and semantic_model_id: {dashboard_id}")
 
+            # Merge PowerBI configuration from tool config
+            powerbi_config = {}
+            if self._tenant_id:
+                powerbi_config['tenant_id'] = self._tenant_id
+            if self._client_id:
+                powerbi_config['client_id'] = self._client_id
+            if self._auth_method:
+                powerbi_config['auth_method'] = self._auth_method
+            # Use workspace_id from kwargs if provided, otherwise use default from config
+            if not workspace_id and self._workspace_id:
+                powerbi_config['workspace_id'] = self._workspace_id
+            # Use semantic_model_id from kwargs (dashboard_id) if provided, otherwise use default from config
+            # Note: dashboard_id in kwargs takes precedence over semantic_model_id from config
+            if not dashboard_id and self._semantic_model_id:
+                job_params['semantic_model_id'] = self._semantic_model_id
+
+            logger.info(f"PowerBI config from tool: {list(powerbi_config.keys())}")
+
             # Merge additional parameters (these will be passed to the Databricks notebook/job)
             if additional_params:
                 # Create a copy to avoid modifying the original
@@ -259,6 +297,9 @@ class PowerBIAnalysisTool(BaseTool):
 
                 job_params.update(job_additional_params)
                 logger.info(f"Added {len(job_additional_params)} additional parameters to job_params")
+
+            # Merge PowerBI config into job_params (after additional_params so tool config takes precedence over task overrides)
+            job_params.update(powerbi_config)
 
             # Determine which job_id to use: parameter takes precedence over configured value
             effective_job_id = job_id if job_id is not None else self._databricks_job_id
