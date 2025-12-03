@@ -51,15 +51,6 @@ except ImportError:
         logging.warning("Could not import DatabricksKnowledgeSearchTool")
 
 try:
-    from .custom.powerbi_dax_tool import PowerBIDAXTool
-except ImportError:
-    try:
-        from .custom.powerbi_dax_tool import PowerBIDAXTool
-    except ImportError:
-        PowerBIDAXTool = None
-        logging.warning("Could not import PowerBIDAXTool")
-
-try:
     from .custom.powerbi_analysis_tool import PowerBIAnalysisTool
 except ImportError:
     try:
@@ -111,7 +102,6 @@ class ToolFactory:
             "GenieTool": GenieTool,
             "DatabricksJobsTool": DatabricksJobsTool,
             "DatabricksKnowledgeSearchTool": DatabricksKnowledgeSearchTool,
-            "PowerBIDAXTool": PowerBIDAXTool,
             "PowerBIAnalysisTool": PowerBIAnalysisTool,
         }
 
@@ -1130,20 +1120,6 @@ class ToolFactory:
 
                 tool = DatabricksKnowledgeSearchTool(**tool_args)
                 return tool
-
-            elif tool_name == "PowerBIDAXTool":
-                # Create PowerBIDAXTool with group_id for multi-tenant support
-                group_id = None
-                try:
-                    if isinstance(self.config, dict):
-                        group_id = self.config.get("group_id")
-                except Exception:
-                    group_id = None
-
-                logger.info(f"Creating PowerBIDAXTool with group_id: {group_id}")
-                return tool_class(
-                    group_id=group_id or "default"
-                )
 
             elif tool_name == "PowerBIAnalysisTool":
                 # Create PowerBIAnalysisTool with group_id and PowerBI configuration

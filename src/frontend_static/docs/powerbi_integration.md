@@ -59,15 +59,25 @@ The Power BI DAX integration enables Kasal to execute DAX queries against Power 
 
 The service supports two authentication methods:
 
-#### 1. Service Principal (Client Credentials)
-Best for production environments:
-- Requires: `tenant_id`, `client_id`, `client_secret`
-- Permissions: Power BI Service API access
+#### 1. Device Code Flow (Interactive) - **Recommended for Testing**
+Best for testing, development, and personal workspaces:
+- **Use Case**: When you don't have a service principal or need to test with your personal Power BI account
+- **Requirements**: `tenant_id`, `client_id` (can use Power BI public client: `1950a258-227b-4e31-a9cf-717495945fc2`)
+- **How it works**:
+  - User is prompted to visit `microsoft.com/devicelogin`
+  - Enter provided code to authenticate via browser
+  - Supports MFA and conditional access policies
+  - Token is cached for subsequent queries
+- **Permissions**: Uses the authenticated user's Power BI permissions
+- **Note**: Not suitable for automated/unattended workflows
 
-#### 2. Username/Password
-For development or specific scenarios:
-- Requires: `tenant_id`, `client_id`, `username`, `password`
-- Uses `UsernamePasswordCredential` from Azure Identity
+#### 2. Username/Password Flow - **For Automated Workflows**
+For production environments with service accounts:
+- **Use Case**: Automated workflows, scheduled jobs, production deployments
+- **Requirements**: `tenant_id`, `client_id`, `username`, `password` (stored in API Keys)
+- **How it works**: Authenticates with username/password programmatically
+- **Permissions**: Requires account without MFA
+- **Note**: Less secure than service principal, consider migrating to OAuth when possible
 
 ### Environment Variables
 
@@ -175,23 +185,13 @@ Check Power BI integration status.
 }
 ```
 
-## Using the CrewAI Tools
+## Using the CrewAI Tool
 
-Kasal provides **two Power BI tools** for different use cases:
+Kasal provides the **PowerBIAnalysisTool** for Power BI integration via Databricks jobs:
 
-### 1. PowerBIDAXTool (Direct Execution)
+### PowerBIAnalysisTool (Databricks-Wrapped)
 
-**Best for**: Interactive queries, low latency, simple analysis
-
-**Tool Name**: `PowerBIDAXTool`
-
-**Actions**:
-- `query`: Execute a DAX query directly
-- `analyze`: Analyze with business questions (future feature)
-
-### 2. PowerBIAnalysisTool (Databricks-Wrapped)
-
-**Best for**: Heavy computation, complex analysis, large datasets
+**Best for**: Heavy computation, complex analysis, large datasets, year-over-year analysis
 
 **Tool Name**: `PowerBIAnalysisTool`
 
@@ -201,23 +201,9 @@ Kasal provides **two Power BI tools** for different use cases:
 - `dax_statement`: Optional pre-generated DAX query
 - `databricks_job_id`: Databricks job ID (configured in tool_configs)
 
-**See**: [Tool Comparison Guide](powerbi_tool_comparison.md) for detailed comparison
+### Agent Configuration Example
 
-### Agent Configuration Examples
-
-**Example 1: Using PowerBIDAXTool (Direct)**
-```json
-{
-  "role": "Sales Analyst",
-  "goal": "Analyze sales data from Power BI",
-  "tools": ["PowerBIDAXTool"],
-  "tool_configs": {
-    "PowerBIDAXTool": {}
-  }
-}
-```
-
-**Example 2: Using PowerBIAnalysisTool (Databricks)**
+**Using PowerBIAnalysisTool (Databricks)**
 ```json
 {
   "role": "Business Intelligence Analyst",
@@ -231,30 +217,7 @@ Kasal provides **two Power BI tools** for different use cases:
 }
 ```
 
-**Example 3: Using Both Tools**
-```json
-{
-  "role": "Data Analyst",
-  "goal": "Analyze sales data with flexible approach",
-  "tools": ["PowerBIDAXTool", "PowerBIAnalysisTool"],
-  "tool_configs": {
-    "PowerBIDAXTool": {},
-    "PowerBIAnalysisTool": {
-      "databricks_job_id": 12345
-    }
-  }
-}
-```
-
 ### Task Examples
-
-**Simple Query (PowerBIDAXTool)**
-```json
-{
-  "description": "Execute this DAX query: EVALUATE SUMMARIZECOLUMNS('Sales'[Region], \"Total Sales\", SUM('Sales'[Amount]))",
-  "expected_output": "Sales totals by region"
-}
-```
 
 **Complex Analysis (PowerBIAnalysisTool)**
 ```json
@@ -544,9 +507,9 @@ ps aux | grep "npm start"
 
 **Navigate to Tools**:
 1. Go to **Tools** section in sidebar
-2. Find **PowerBIDAXTool** and **PowerBIAnalysisTool**
+2. Find **PowerBIAnalysisTool**
 3. Review security disclaimers
-4. Enable both tools for your workspace
+4. Enable the tool for your workspace
 
 **Verify Tool Registration**:
 - Both tools should appear in the available tools list
@@ -628,17 +591,17 @@ SELECT * FROM powerbiconfig;     # Check configuration saved
 
 #### 1.6 Test Agent Workflow (Optional)
 
-**Create Test Agent with PowerBIDAXTool**:
+**Create Test Agent with PowerBIAnalysisTool**:
 1. Navigate to **Agents** section
 2. Create new agent:
    - **Role**: "Sales Analyst"
    - **Goal**: "Analyze sales data from Power BI"
-   - **Tools**: Enable "PowerBIDAXTool"
+   - **Tools**: Enable "PowerBIAnalysisTool"
 3. Create task:
-   - **Description**: "Execute DAX query to get top 10 products by revenue"
+   - **Description**: "Analyze top 10 products by revenue using Power BI data"
    - **Expected Output**: "List of products with revenue amounts"
 4. Run the workflow
-5. Check execution logs for successful DAX query execution
+5. Check execution logs for successful analysis execution
 
 ---
 
@@ -751,35 +714,7 @@ python3 deploy.py --app-name kasal-david --user-name david.schwarzenbacher@datab
 
 #### 2.4 End-to-End Testing
 
-**Test 1: Direct DAX Query (PowerBIDAXTool)**
-
-1. **Enable Tool**:
-   - Navigate to **Tools** → **PowerBIDAXTool**
-   - Enable the tool
-
-2. **Create Agent**:
-   - **Role**: "Power BI Analyst"
-   - **Goal**: "Execute DAX queries to analyze sales data"
-   - **Tools**: PowerBIDAXTool
-   - **Backstory**: "Expert in DAX and Power BI analysis"
-
-3. **Create Task**:
-   - **Description**: "Get the top 5 products by total sales amount"
-   - **Expected Output**: "List of products with sales amounts in descending order"
-   - **Agent**: Select the Power BI Analyst agent
-
-4. **Run Workflow**:
-   - Click **Run**
-   - Monitor execution logs
-   - Verify DAX query is executed
-   - Check results contain expected data
-
-5. **Validate Results**:
-   - Results should match your Power BI data
-   - Execution time should be reasonable (< 5 seconds for small datasets)
-   - No authentication errors
-
-**Test 2: Complex Analysis (PowerBIAnalysisTool)**
+**Test: Complex Analysis (PowerBIAnalysisTool)**
 
 1. **Configure Databricks Job**:
    - Create a Databricks job for Power BI analysis
@@ -821,16 +756,15 @@ python3 deploy.py --app-name kasal-david --user-name david.schwarzenbacher@datab
    - Check job logs for DAX query execution
    - Validate results when job completes
 
-**Test 3: Combined Workflow (Both Tools)**
+**Test 2: Production Workflow**
 
-Create an agent with both tools to handle different scenarios:
+Create an agent with PowerBIAnalysisTool for comprehensive analysis:
 ```json
 {
   "role": "Data Analyst",
-  "goal": "Analyze sales data with flexible approach - use direct queries for simple tasks, Databricks jobs for complex analysis",
-  "tools": ["PowerBIDAXTool", "PowerBIAnalysisTool"],
+  "goal": "Analyze sales data using Databricks-powered Power BI analysis",
+  "tools": ["PowerBIAnalysisTool"],
   "tool_configs": {
-    "PowerBIDAXTool": {},
     "PowerBIAnalysisTool": {
       "databricks_job_id": 12345
     }
@@ -839,9 +773,9 @@ Create an agent with both tools to handle different scenarios:
 ```
 
 Test with multiple tasks:
-- Simple query → Should use PowerBIDAXTool
-- Complex analysis → Should use PowerBIAnalysisTool
-- Agent should choose appropriate tool based on task complexity
+- All Power BI analysis tasks use PowerBIAnalysisTool
+- Tool handles both simple and complex queries via Databricks jobs
+- Agent leverages Databricks compute for optimal performance
 
 #### 2.5 Troubleshooting Checklist
 

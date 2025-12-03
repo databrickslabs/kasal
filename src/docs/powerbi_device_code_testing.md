@@ -79,10 +79,10 @@ curl -X POST http://localhost:8000/powerbi/query \
 
 ### Option 3: Test via Agent Workflow
 
-#### Step 1: Enable PowerBIDAXTool
+#### Step 1: Enable PowerBIAnalysisTool
 
 1. Go to **Tools** section
-2. Find **PowerBIDAXTool**
+2. Find **PowerBIAnalysisTool**
 3. Enable the tool
 
 #### Step 2: Create Test Agent
@@ -91,7 +91,7 @@ curl -X POST http://localhost:8000/powerbi/query \
 {
   "role": "Power BI Analyst",
   "goal": "Execute DAX queries to analyze test data",
-  "tools": ["PowerBIDAXTool"],
+  "tools": ["PowerBIAnalysisTool"],
   "backstory": "Expert in Power BI DAX analysis"
 }
 ```

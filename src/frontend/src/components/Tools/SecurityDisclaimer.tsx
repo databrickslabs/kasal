@@ -609,36 +609,6 @@ export const TOOL_SECURITY_INFO: Record<string, {
     ],
     deploymentContext: 'Single-tenant with API key service'
   },
-  'PowerBIDAXTool': {
-    riskLevel: 'MEDIUM',
-    description: 'Executes DAX queries directly against Power BI semantic models',
-    risks: [
-      'Direct access to Power BI semantic models',
-      'Potential for complex data aggregations',
-      'Query resource consumption',
-      'Access to business intelligence data'
-    ],
-    mitigations: [
-      'Implement query complexity limits',
-      'Monitor query execution patterns',
-      'Validate DAX queries before execution',
-      'Use read-only Power BI credentials'
-    ],
-    singleTenantRiskLevel: 'LOW',
-    singleTenantRisks: [
-      'DAX queries within user\'s Power BI permissions',
-      'Performance impact from complex queries',
-      'Access limited to configured semantic models'
-    ],
-    singleTenantMitigations: [
-      'Power BI authentication ensures user-level permissions',
-      'Queries execute with configured service principal',
-      'Semantic model access controlled by Power BI workspace',
-      'Query execution time limits enforced',
-      'Results limited to prevent data exfiltration'
-    ],
-    deploymentContext: 'Single-tenant with Power BI service principal or user credentials'
-  },
   'PowerBIAnalysisTool': {
     riskLevel: 'MEDIUM',
     description: 'Executes complex Power BI analysis via Databricks jobs',

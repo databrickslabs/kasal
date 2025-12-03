@@ -62,7 +62,6 @@ export const customTools = [
   'DatabricksCustomTool',
   'DatabricksJobsTool',
   'PythonPPTXTool',
-  'PowerBIDAXTool',
   'PowerBIAnalysisTool'
 ];
 
