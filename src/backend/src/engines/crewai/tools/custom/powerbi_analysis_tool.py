@@ -82,9 +82,10 @@ class PowerBIAnalysisToolSchema(BaseModel):
         None, description=(
             "Additional parameters for Power BI authentication and Databricks job execution. "
             "Required fields: 'tenant_id' (Azure AD Tenant ID), 'client_id' (Azure AD Application ID). "
-            "Optional fields: 'auth_method' (default: 'username_password'), 'databricks_host', 'databricks_token', "
+            "Optional fields: 'auth_method' (default: 'service_principal'), 'databricks_host', 'databricks_token', "
             "'sample_size', 'metadata', 'task_key' (default: 'pbi_e2e_pipeline' for multi-task jobs). "
-            "Example: {'tenant_id': 'xxx', 'client_id': 'yyy', 'auth_method': 'username_password'}"
+            "NOTE: 'client_secret' is automatically retrieved from API Keys (POWERBI_CLIENT_SECRET) - do not pass in params. "
+            "Example: {'tenant_id': 'xxx', 'client_id': 'yyy', 'auth_method': 'service_principal'}"
         )
     )
 
@@ -128,7 +129,8 @@ class PowerBIAnalysisTool(BaseTool):
         "- 'additional_params': Dict with Power BI authentication:\n"
         "  - 'tenant_id': Azure AD Tenant ID (required)\n"
         "  - 'client_id': Azure AD Application ID (required)\n"
-        "  - 'auth_method': Authentication method (default: 'username_password')\n"
+        "  - 'auth_method': Authentication method (default: 'service_principal')\n"
+        "  - NOTE: 'client_secret' is retrieved from API Keys (Configuration > API Keys > POWERBI_CLIENT_SECRET)\n"
         "\n\nOPTIONAL PARAMETERS:\n"
         "- 'workspace_id': Power BI workspace ID\n"
         "- 'dax_statement': Pre-generated DAX query\n"
@@ -239,23 +241,56 @@ class PowerBIAnalysisTool(BaseTool):
             # Import here to avoid circular dependency
             from .databricks_jobs_tool import DatabricksJobsTool
 
-            # Extract Databricks configuration from additional_params
+            # Auto-detect Databricks configuration
             databricks_host = None
             databricks_token = None
             tool_config = {}
 
-            if additional_params:
-                # Extract databricks-specific config (used for API calls, not job params)
-                databricks_host = additional_params.get('databricks_host')
-                databricks_token = additional_params.get('databricks_token')
+            # 1. Try to get databricks_host from unified auth (auto-detect from environment)
+            try:
+                from src.utils.databricks_auth import get_auth_context
+                auth_context = await get_auth_context()
+                if auth_context and auth_context.workspace_url:
+                    databricks_host = auth_context.workspace_url
+                    logger.info(f"Auto-detected databricks_host from environment: {databricks_host}")
+            except Exception as e:
+                logger.debug(f"Could not auto-detect databricks_host from auth context: {e}")
 
-                if databricks_token:
-                    tool_config['DATABRICKS_API_KEY'] = databricks_token
-                    logger.info("Extracted databricks_token from additional_params for tool config")
+            # 2. Override with additional_params if explicitly provided
+            if additional_params and 'databricks_host' in additional_params:
+                databricks_host = additional_params['databricks_host']
+                logger.info(f"Using databricks_host from additional_params: {databricks_host}")
 
-                if databricks_host:
-                    tool_config['DATABRICKS_HOST'] = databricks_host
-                    logger.info(f"Extracted databricks_host from additional_params: {databricks_host}")
+            # 3. Try to get databricks_token from API Keys first (secure)
+            try:
+                from src.services.api_keys_service import ApiKeysService
+                from src.db.session import async_session_factory
+                from src.utils.encryption_utils import EncryptionUtils
+
+                async with async_session_factory() as session:
+                    api_keys_service = ApiKeysService(session, group_id=self._group_id)
+                    # Try both DATABRICKS_TOKEN and DATABRICKS_API_KEY
+                    token_obj = await api_keys_service.find_by_name("DATABRICKS_TOKEN")
+                    if not token_obj:
+                        token_obj = await api_keys_service.find_by_name("DATABRICKS_API_KEY")
+
+                    if token_obj and token_obj.encrypted_value:
+                        databricks_token = EncryptionUtils.decrypt_value(token_obj.encrypted_value)
+                        logger.info("Retrieved databricks_token from API Keys")
+            except Exception as e:
+                logger.debug(f"Could not retrieve databricks_token from API Keys: {e}")
+
+            # 4. Fall back to additional_params if not found in API Keys
+            if not databricks_token and additional_params and 'databricks_token' in additional_params:
+                databricks_token = additional_params['databricks_token']
+                logger.info("Using databricks_token from additional_params")
+
+            # 5. Build tool_config for DatabricksJobsTool
+            if databricks_token:
+                tool_config['DATABRICKS_API_KEY'] = databricks_token
+
+            if databricks_host:
+                tool_config['DATABRICKS_HOST'] = databricks_host
 
             # Create DatabricksJobsTool instance with proper configuration
             databricks_tool = DatabricksJobsTool(
@@ -315,14 +350,38 @@ class PowerBIAnalysisTool(BaseTool):
 
             logger.info(f"PowerBI config (task-level overrides applied): {list(powerbi_config.keys())}")
 
+            # Fetch client_secret from API Keys service (encrypted storage)
+            # This is sensitive and should never be stored in task config or passed in plain text
+            try:
+                from src.services.api_keys_service import ApiKeysService
+                from src.db.session import async_session_factory
+                from src.utils.encryption_utils import EncryptionUtils
+
+                async with async_session_factory() as session:
+                    # Use group_id for multi-tenant isolation
+                    api_keys_service = ApiKeysService(session, group_id=self._group_id)
+                    client_secret_obj = await api_keys_service.find_by_name("POWERBI_CLIENT_SECRET")
+
+                    if client_secret_obj and client_secret_obj.encrypted_value:
+                        # Decrypt the client secret
+                        client_secret = EncryptionUtils.decrypt_value(client_secret_obj.encrypted_value)
+                        powerbi_config['client_secret'] = client_secret
+                        logger.info("Successfully retrieved POWERBI_CLIENT_SECRET from API Keys")
+                    else:
+                        logger.warning("POWERBI_CLIENT_SECRET not found in API Keys - authentication may fail")
+                        # Continue without client_secret - it might be provided via additional_params for testing
+            except Exception as e:
+                logger.error(f"Error retrieving POWERBI_CLIENT_SECRET from API Keys: {e}")
+                # Continue without client_secret - it might be provided via additional_params
+
             # Merge additional parameters (these will be passed to the Databricks notebook/job)
             if additional_params:
                 # Create a copy to avoid modifying the original
                 job_additional_params = additional_params.copy()
 
-                # Remove PowerBI auth params that we already extracted (they're in powerbi_config)
+                # Remove auth params that we already extracted (they're in powerbi_config or tool_config)
                 # This avoids duplication in job_params
-                for key in ['tenant_id', 'client_id', 'auth_method']:
+                for key in ['tenant_id', 'client_id', 'auth_method', 'client_secret', 'databricks_host', 'databricks_token']:
                     job_additional_params.pop(key, None)
 
                 job_params.update(job_additional_params)
