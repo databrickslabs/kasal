@@ -82,9 +82,9 @@ class PowerBIAnalysisToolSchema(BaseModel):
         None, description=(
             "Additional parameters for Power BI authentication and Databricks job execution. "
             "Required fields: 'tenant_id' (Azure AD Tenant ID), 'client_id' (Azure AD Application ID). "
-            "Optional fields: 'auth_method' (default: 'service_principal'), 'databricks_host', 'databricks_token', "
-            "'sample_size', 'metadata', 'task_key' (default: 'pbi_e2e_pipeline' for multi-task jobs). "
-            "NOTE: 'client_secret' is automatically retrieved from API Keys (POWERBI_CLIENT_SECRET) - do not pass in params. "
+            "Optional fields: 'auth_method' (default: 'service_principal'), 'sample_size', 'metadata', 'task_key'. "
+            "NOTE: Credentials auto-fetched from API Keys: POWERBI_CLIENT_SECRET, POWERBI_USERNAME, POWERBI_PASSWORD, DATABRICKS_TOKEN. "
+            "Databricks host auto-detected from environment. "
             "Example: {'tenant_id': 'xxx', 'client_id': 'yyy', 'auth_method': 'service_principal'}"
         )
     )
@@ -130,7 +130,11 @@ class PowerBIAnalysisTool(BaseTool):
         "  - 'tenant_id': Azure AD Tenant ID (required)\n"
         "  - 'client_id': Azure AD Application ID (required)\n"
         "  - 'auth_method': Authentication method (default: 'service_principal')\n"
-        "  - NOTE: 'client_secret' is retrieved from API Keys (Configuration > API Keys > POWERBI_CLIENT_SECRET)\n"
+        "  - NOTE: Credentials auto-fetched from API Keys:\n"
+        "    - POWERBI_CLIENT_SECRET (for service_principal auth)\n"
+        "    - POWERBI_USERNAME (optional, for device_code auth)\n"
+        "    - POWERBI_PASSWORD (optional, for device_code auth)\n"
+        "    - DATABRICKS_TOKEN (for Databricks API access)\n"
         "\n\nOPTIONAL PARAMETERS:\n"
         "- 'workspace_id': Power BI workspace ID\n"
         "- 'dax_statement': Pre-generated DAX query\n"
@@ -138,7 +142,7 @@ class PowerBIAnalysisTool(BaseTool):
         "'task_key' (default: 'pbi_e2e_pipeline' for multi-task jobs)\n"
         "\n\nEXAMPLE:\n"
         "job_id=365257288725339, dashboard_id='a17de62e-...', questions=['What is total NSR?'], "
-        "additional_params={'tenant_id': 'xxx-xxx', 'client_id': 'yyy-yyy', 'auth_method': 'username_password'}"
+        "additional_params={'tenant_id': 'xxx-xxx', 'client_id': 'yyy-yyy', 'auth_method': 'service_principal'}"
     )
     args_schema: Type[BaseModel] = PowerBIAnalysisToolSchema
 
@@ -350,8 +354,8 @@ class PowerBIAnalysisTool(BaseTool):
 
             logger.info(f"PowerBI config (task-level overrides applied): {list(powerbi_config.keys())}")
 
-            # Fetch client_secret from API Keys service (encrypted storage)
-            # This is sensitive and should never be stored in task config or passed in plain text
+            # Fetch PowerBI credentials from API Keys service (encrypted storage)
+            # These are sensitive and should never be stored in task config or passed in plain text
             try:
                 from src.services.api_keys_service import ApiKeysService
                 from src.db.session import async_session_factory
@@ -360,19 +364,33 @@ class PowerBIAnalysisTool(BaseTool):
                 async with async_session_factory() as session:
                     # Use group_id for multi-tenant isolation
                     api_keys_service = ApiKeysService(session, group_id=self._group_id)
-                    client_secret_obj = await api_keys_service.find_by_name("POWERBI_CLIENT_SECRET")
 
+                    # Fetch client_secret (required for service_principal auth)
+                    client_secret_obj = await api_keys_service.find_by_name("POWERBI_CLIENT_SECRET")
                     if client_secret_obj and client_secret_obj.encrypted_value:
-                        # Decrypt the client secret
                         client_secret = EncryptionUtils.decrypt_value(client_secret_obj.encrypted_value)
                         powerbi_config['client_secret'] = client_secret
                         logger.info("Successfully retrieved POWERBI_CLIENT_SECRET from API Keys")
                     else:
-                        logger.warning("POWERBI_CLIENT_SECRET not found in API Keys - authentication may fail")
-                        # Continue without client_secret - it might be provided via additional_params for testing
+                        logger.warning("POWERBI_CLIENT_SECRET not found in API Keys")
+
+                    # Fetch username (optional, for device_code or interactive auth)
+                    username_obj = await api_keys_service.find_by_name("POWERBI_USERNAME")
+                    if username_obj and username_obj.encrypted_value:
+                        username = EncryptionUtils.decrypt_value(username_obj.encrypted_value)
+                        powerbi_config['username'] = username
+                        logger.info("Successfully retrieved POWERBI_USERNAME from API Keys")
+
+                    # Fetch password (optional, for device_code or interactive auth)
+                    password_obj = await api_keys_service.find_by_name("POWERBI_PASSWORD")
+                    if password_obj and password_obj.encrypted_value:
+                        password = EncryptionUtils.decrypt_value(password_obj.encrypted_value)
+                        powerbi_config['password'] = password
+                        logger.info("Successfully retrieved POWERBI_PASSWORD from API Keys")
+
             except Exception as e:
-                logger.error(f"Error retrieving POWERBI_CLIENT_SECRET from API Keys: {e}")
-                # Continue without client_secret - it might be provided via additional_params
+                logger.error(f"Error retrieving PowerBI credentials from API Keys: {e}")
+                # Continue without credentials - they might be provided via additional_params
 
             # Merge additional parameters (these will be passed to the Databricks notebook/job)
             if additional_params:
@@ -381,7 +399,7 @@ class PowerBIAnalysisTool(BaseTool):
 
                 # Remove auth params that we already extracted (they're in powerbi_config or tool_config)
                 # This avoids duplication in job_params
-                for key in ['tenant_id', 'client_id', 'auth_method', 'client_secret', 'databricks_host', 'databricks_token']:
+                for key in ['tenant_id', 'client_id', 'auth_method', 'client_secret', 'username', 'password', 'databricks_host', 'databricks_token']:
                     job_additional_params.pop(key, None)
 
                 job_params.update(job_additional_params)
