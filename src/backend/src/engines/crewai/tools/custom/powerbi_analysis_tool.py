@@ -79,7 +79,13 @@ class PowerBIAnalysisToolSchema(BaseModel):
         None, description="Databricks job ID to execute (overrides configured job_id if provided)"
     )
     additional_params: Optional[dict] = Field(
-        None, description="Additional parameters to pass to the Databricks job (e.g., auth_method, tenant_id, client_id, etc.). For multi-task jobs, include 'task_key' to specify which task output to retrieve (default: 'pbi_e2e_pipeline')"
+        None, description=(
+            "Additional parameters for Power BI authentication and Databricks job execution. "
+            "Required fields: 'tenant_id' (Azure AD Tenant ID), 'client_id' (Azure AD Application ID). "
+            "Optional fields: 'auth_method' (default: 'username_password'), 'databricks_host', 'databricks_token', "
+            "'sample_size', 'metadata', 'task_key' (default: 'pbi_e2e_pipeline' for multi-task jobs). "
+            "Example: {'tenant_id': 'xxx', 'client_id': 'yyy', 'auth_method': 'username_password'}"
+        )
     )
 
     @model_validator(mode='after')
@@ -115,13 +121,22 @@ class PowerBIAnalysisTool(BaseTool):
     description: str = (
         "Execute complex Power BI analysis using Databricks jobs. "
         "Suitable for heavy computations, long-running queries, and advanced analytics. "
-        "REQUIRED: 'job_id' (Databricks job ID to execute), 'dashboard_id' (semantic model ID), "
-        "'questions' (list of business questions). "
-        "OPTIONAL: 'workspace_id', 'dax_statement', 'additional_params' (dict with auth_method, "
-        "tenant_id, client_id, client_secret, sample_size, metadata, databricks_host, databricks_token, "
-        "task_key='pbi_e2e_pipeline' for multi-task jobs, etc.). "
-        "Example: job_id=365257288725339, dashboard_id='a17de62e-...', questions=['What is total NSR?'], "
-        "additional_params={'auth_method': 'service_principal', 'tenant_id': '...', 'task_key': 'pbi_e2e_pipeline'}"
+        "\n\nREQUIRED PARAMETERS:\n"
+        "- 'job_id': Databricks job ID to execute (can be set in tool config as default)\n"
+        "- 'dashboard_id': Power BI semantic model ID to query\n"
+        "- 'questions': List of business questions to analyze\n"
+        "- 'additional_params': Dict with Power BI authentication:\n"
+        "  - 'tenant_id': Azure AD Tenant ID (required)\n"
+        "  - 'client_id': Azure AD Application ID (required)\n"
+        "  - 'auth_method': Authentication method (default: 'username_password')\n"
+        "\n\nOPTIONAL PARAMETERS:\n"
+        "- 'workspace_id': Power BI workspace ID\n"
+        "- 'dax_statement': Pre-generated DAX query\n"
+        "- Additional params: 'databricks_host', 'databricks_token', 'sample_size', 'metadata', "
+        "'task_key' (default: 'pbi_e2e_pipeline' for multi-task jobs)\n"
+        "\n\nEXAMPLE:\n"
+        "job_id=365257288725339, dashboard_id='a17de62e-...', questions=['What is total NSR?'], "
+        "additional_params={'tenant_id': 'xxx-xxx', 'client_id': 'yyy-yyy', 'auth_method': 'username_password'}"
     )
     args_schema: Type[BaseModel] = PowerBIAnalysisToolSchema
 
@@ -267,38 +282,53 @@ class PowerBIAnalysisTool(BaseTool):
 
             logger.info(f"Prepared job parameters with question: '{question_str[:50]}...' and semantic_model_id: {dashboard_id}")
 
-            # Merge PowerBI configuration from tool config
+            # Build PowerBI configuration with precedence: additional_params (task-level) > tool config (defaults)
             powerbi_config = {}
-            if self._tenant_id:
+
+            # Extract from additional_params first (task-level configuration - highest priority)
+            if additional_params:
+                if 'tenant_id' in additional_params:
+                    powerbi_config['tenant_id'] = additional_params['tenant_id']
+                if 'client_id' in additional_params:
+                    powerbi_config['client_id'] = additional_params['client_id']
+                if 'auth_method' in additional_params:
+                    powerbi_config['auth_method'] = additional_params['auth_method']
+                if 'workspace_id' in additional_params:
+                    powerbi_config['workspace_id'] = additional_params['workspace_id']
+
+            # Fall back to tool-level defaults if not provided in additional_params
+            if 'tenant_id' not in powerbi_config and self._tenant_id:
                 powerbi_config['tenant_id'] = self._tenant_id
-            if self._client_id:
+            if 'client_id' not in powerbi_config and self._client_id:
                 powerbi_config['client_id'] = self._client_id
-            if self._auth_method:
+            if 'auth_method' not in powerbi_config and self._auth_method:
                 powerbi_config['auth_method'] = self._auth_method
-            # Use workspace_id from kwargs if provided, otherwise use default from config
-            if not workspace_id and self._workspace_id:
+
+            # Use workspace_id from kwargs if provided, otherwise from config
+            if not workspace_id and 'workspace_id' not in powerbi_config and self._workspace_id:
                 powerbi_config['workspace_id'] = self._workspace_id
+
             # Use semantic_model_id from kwargs (dashboard_id) if provided, otherwise use default from config
             # Note: dashboard_id in kwargs takes precedence over semantic_model_id from config
             if not dashboard_id and self._semantic_model_id:
                 job_params['semantic_model_id'] = self._semantic_model_id
 
-            logger.info(f"PowerBI config from tool: {list(powerbi_config.keys())}")
+            logger.info(f"PowerBI config (task-level overrides applied): {list(powerbi_config.keys())}")
 
             # Merge additional parameters (these will be passed to the Databricks notebook/job)
             if additional_params:
                 # Create a copy to avoid modifying the original
                 job_additional_params = additional_params.copy()
 
-                # Remove databricks config from job_params (already used for tool config)
-                # Keep them if the notebook needs them, otherwise remove:
-                # job_additional_params.pop('databricks_host', None)
-                # job_additional_params.pop('databricks_token', None)
+                # Remove PowerBI auth params that we already extracted (they're in powerbi_config)
+                # This avoids duplication in job_params
+                for key in ['tenant_id', 'client_id', 'auth_method']:
+                    job_additional_params.pop(key, None)
 
                 job_params.update(job_additional_params)
                 logger.info(f"Added {len(job_additional_params)} additional parameters to job_params")
 
-            # Merge PowerBI config into job_params (after additional_params so tool config takes precedence over task overrides)
+            # Merge PowerBI config into job_params
             job_params.update(powerbi_config)
 
             # Determine which job_id to use: parameter takes precedence over configured value
