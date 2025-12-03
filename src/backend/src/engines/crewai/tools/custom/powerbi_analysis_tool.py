@@ -311,14 +311,18 @@ class PowerBIAnalysisTool(BaseTool):
             # Convert questions array to single question string (take first question)
             question_str = questions[0] if questions and len(questions) > 0 else ""
 
+            # Determine semantic_model_id with priority: task config > kwargs > fallback
+            # PRIORITY 1: Use semantic_model_id from task config if available
+            effective_semantic_model_id = self._semantic_model_id if self._semantic_model_id else dashboard_id
+
             job_params = {
-                "question": question_str,                    # Singular, not plural
-                "semantic_model_id": dashboard_id,           # Renamed from dashboard_id
+                "question": question_str,                           # Singular, not plural
+                "semantic_model_id": effective_semantic_model_id,   # Use prioritized value
                 "workspace_id": workspace_id,
                 # dax_statement is NOT sent to the job (internal to PowerBI tool)
             }
 
-            logger.info(f"Prepared job parameters with question: '{question_str[:50]}...' and semantic_model_id: {dashboard_id}")
+            logger.info(f"Prepared job parameters with question: '{question_str[:50] if question_str else ''}...' and semantic_model_id: {effective_semantic_model_id}")
 
             # Build PowerBI configuration with precedence: tool config (from task) > additional_params (from LLM)
             powerbi_config = {}
@@ -347,11 +351,6 @@ class PowerBIAnalysisTool(BaseTool):
             # Use workspace_id from kwargs if provided (override everything)
             if workspace_id:
                 powerbi_config['workspace_id'] = workspace_id
-
-            # Use semantic_model_id from kwargs (dashboard_id) if provided, otherwise use default from config
-            # Note: dashboard_id in kwargs takes precedence over semantic_model_id from config
-            if not dashboard_id and self._semantic_model_id:
-                job_params['semantic_model_id'] = self._semantic_model_id
 
             logger.info(f"PowerBI config (task-level overrides applied): {list(powerbi_config.keys())}")
 
