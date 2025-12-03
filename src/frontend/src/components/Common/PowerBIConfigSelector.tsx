@@ -23,6 +23,7 @@ import {
 } from '@mui/material';
 import ExpandMoreIcon from '@mui/icons-material/ExpandMore';
 import InfoIcon from '@mui/icons-material/Info';
+import { useAPIKeysStore } from '../../store/apiKeys';
 
 export interface PowerBIConfig {
   tenant_id?: string;
@@ -66,6 +67,28 @@ export const PowerBIConfigSelector: React.FC<PowerBIConfigSelectorProps> = ({
 }) => {
   const [config, setConfig] = useState<PowerBIConfig>({ ...DEFAULT_CONFIG, ...value });
   const [expanded, setExpanded] = useState<boolean>(false);
+  const { secrets, fetchAPIKeys } = useAPIKeysStore();
+  const [missingApiKeys, setMissingApiKeys] = useState<string[]>([]);
+
+  // Check for required API keys
+  useEffect(() => {
+    fetchAPIKeys();
+  }, [fetchAPIKeys]);
+
+  useEffect(() => {
+    const requiredKeys = [
+      'POWERBI_CLIENT_SECRET',
+      'POWERBI_USERNAME',
+      'POWERBI_PASSWORD',
+      'DATABRICKS_API_KEY'
+    ];
+
+    const missing = requiredKeys.filter(keyName =>
+      !secrets.find(key => key.name === keyName)
+    );
+
+    setMissingApiKeys(missing);
+  }, [secrets]);
 
   useEffect(() => {
     setConfig({ ...DEFAULT_CONFIG, ...value });
@@ -87,6 +110,28 @@ export const PowerBIConfigSelector: React.FC<PowerBIConfigSelectorProps> = ({
       {!isConfigured && (
         <Alert severity="warning" sx={{ mb: 2 }}>
           Power BI configuration is required. Please configure tenant_id, client_id, and semantic_model_id.
+        </Alert>
+      )}
+
+      {missingApiKeys.length > 0 && (
+        <Alert severity="error" sx={{ mb: 2 }}>
+          <Box sx={{ display: 'flex', flexDirection: 'column', gap: 1 }}>
+            <Typography variant="body2" fontWeight="bold">
+              ⚠️ Required API Keys Missing
+            </Typography>
+            <Typography variant="body2">
+              To use PowerBIAnalysisTool, you MUST configure the following API Keys in Settings → API Keys:
+            </Typography>
+            <Box component="ul" sx={{ margin: 0, paddingLeft: 2 }}>
+              {missingApiKeys.map(key => (
+                <li key={key}>
+                  <Typography variant="body2" component="span" fontFamily="monospace">
+                    {key}
+                  </Typography>
+                </li>
+              ))}
+            </Box>
+          </Box>
         </Alert>
       )}
 
