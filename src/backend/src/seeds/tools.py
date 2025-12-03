@@ -94,7 +94,7 @@ def get_tool_configs():
             "client_id": "",  # Azure AD Application/Client ID (required)
             "workspace_id": "",  # Default Power BI Workspace ID (optional, can be overridden per task)
             "semantic_model_id": "",  # Default Power BI Semantic Model ID (optional, can be overridden per task)
-            "auth_method": "username_password"  # Authentication method: "username_password" or "device_code"
+            "auth_method": "service_principal"  # Authentication method: "service_principal" or "device_code"
         }   # PowerBIAnalysisTool
     }
 
