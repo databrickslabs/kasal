@@ -232,18 +232,6 @@ Authorization: Bearer <JWT_TOKEN>
 |--------|----------|-------------|
 | `POST` | `/powerbi/config` | Configure Power BI connection |
 | `GET` | `/powerbi/config` | Get Power BI configuration |
-| `POST` | `/powerbi/validate` | Validate Power BI credentials |
-| `GET` | `/powerbi/workspaces` | List available workspaces |
-| `GET` | `/powerbi/datasets` | List datasets in workspace |
-| `GET` | `/powerbi/datasets/{id}/info` | Get dataset metadata |
-
-### Power BI Analysis
-
-| Method | Endpoint | Description |
-|--------|----------|-------------|
-| `POST` | `/powerbi/query` | Execute DAX query |
-| `POST` | `/powerbi/analyze` | Run complex analysis via Databricks |
-| `GET` | `/powerbi/jobs/{id}/status` | Get analysis job status |
 
 **Power BI Tool Configuration (Task-Level):**
 ```json
@@ -329,6 +317,43 @@ GET /crews?page=1&limit=50&sort=created_at&order=desc
 X-RateLimit-Limit: 1000
 X-RateLimit-Remaining: 999
 X-RateLimit-Reset: 1609459200
+```
+
+---
+
+## Memory Management
+
+### GET /api/v1/memory/{crew_id}
+**Get crew memory (short-term and long-term)**
+
+```json
+Response: 200 OK
+{
+  "short_term": [
+    {
+      "timestamp": "2024-01-15T10:00:00Z",
+      "content": "Customer prefers email communication"
+    }
+  ],
+  "long_term": [
+    {
+      "category": "preferences",
+      "insights": ["Email preferred", "Weekly reports"]
+    }
+  ]
+}
+```
+
+### POST /api/v1/memory/{crew_id}/clear
+**Clear crew memory**
+
+```json
+Request:
+{
+  "type": "short_term"  // Options: "short_term", "long_term", or "all"
+}
+
+Response: 204 No Content
 ```
 
 ---

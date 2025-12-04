@@ -1,462 +1,602 @@
-# Power BI DAX Integration
+# Power BI Integration Guide
+
+Complete guide for integrating Power BI with Kasal AI agents for advanced business intelligence analysis.
+
+---
+
+## Table of Contents
+
+- [Overview](#overview)
+- [Architecture](#architecture)
+- [Prerequisites](#prerequisites)
+- [Setup Guide](#setup-guide)
+  - [Development Environment](#1-development-environment-setup)
+  - [Azure Service Principal](#2-azure-service-principal-setup)
+  - [Databricks Configuration](#3-databricks-configuration)
+  - [Kasal Configuration](#4-kasal-configuration)
+- [Authentication Methods](#authentication-methods)
+- [API Configuration](#api-configuration)
+- [PowerBI Analysis Tool](#powerbi-analysis-tool)
+- [Testing](#testing)
+- [Troubleshooting](#troubleshooting)
+- [Security & Best Practices](#security--best-practices)
+
+---
 
 ## Overview
 
-The Power BI DAX integration enables Kasal to execute DAX queries against Power BI semantic models (datasets) and analyze business intelligence data within AI agent workflows. This integration provides a production-ready, API-driven connector for Power BI analytics.
+The Power BI integration enables Kasal AI agents to execute complex analysis against Power BI semantic models using Databricks compute resources. This provides a production-ready, API-driven connector for Power BI analytics within AI workflows based on a preconfigured template notebook for tracability.
+
+**Key Features:**
+- DAX query execution against Power BI semantic models
+- Complex analysis using Databricks job orchestration
+- Multiple authentication methods (Service Principal, Device Code Flow)
+- Task-level configuration for workspace and semantic model selection
+- Multi-tenant isolation with encrypted credential storage
+
+**Use Cases:**
+- Year-over-year growth analysis
+- Trend detection and forecasting
+- Complex financial reporting
+- Multi-dimensional business analysis
+- Automated business intelligence reporting
+
+---
 
 ## Architecture
 
-### Components
+### System Components
 
-1. **Database Model** (`models/powerbi_config.py`)
-   - Stores Power BI connection configuration
-   - Supports multi-tenant isolation via `group_id`
-   - Encrypts sensitive credentials (client secret, username, password)
-
-2. **Repository** (`repositories/powerbi_config_repository.py`)
-   - Handles data access for Power BI configurations
-   - Manages active configuration per group
-   - Provides async CRUD operations
-
-3. **Service Layer** (`services/powerbi_service.py`)
-   - Orchestrates DAX query execution
-   - Manages authentication with Power BI API
-   - Handles token generation and API communication
-
-4. **API Router** (`api/powerbi_router.py`)
-   - FastAPI endpoints for Power BI operations
-   - Multi-tenant aware with group context
-   - Admin-only configuration endpoints
-
-5. **CrewAI Tool** (`engines/crewai/tools/custom/powerbi_dax_tool.py`)
-   - AI agent tool for DAX query execution
-   - Integrates with CrewAI framework
-   - Supports async execution in agent workflows
-
-## Configuration
-
-### Database Setup
-
-1. **Run Migration**:
-   ```bash
-   cd src/backend
-   DATABASE_TYPE=sqlite alembic upgrade head
-   ```
-
-2. **Configuration Model Fields**:
-   - `tenant_id`: Azure AD Tenant ID
-   - `client_id`: Service Principal Application ID
-   - `encrypted_client_secret`: Encrypted SPN secret
-   - `workspace_id`: Power BI Workspace ID (optional)
-   - `semantic_model_id`: Default semantic model/dataset ID (optional)
-   - `encrypted_username`: Encrypted username for user/password auth
-   - `encrypted_password`: Encrypted password for user/password auth
-   - `is_enabled`: Enable/disable Power BI integration
-   - `group_id`: Group isolation for multi-tenancy
-   - `created_by_email`: Audit trail
-
-### Authentication Methods
-
-The service supports two authentication methods:
-
-#### 1. Device Code Flow (Interactive) - **Recommended for Testing**
-Best for testing, development, and personal workspaces:
-- **Use Case**: When you don't have a service principal or need to test with your personal Power BI account
-- **Requirements**: `tenant_id`, `client_id` (can use Power BI public client: `1950a258-227b-4e31-a9cf-717495945fc2`)
-- **How it works**:
-  - User is prompted to visit `microsoft.com/devicelogin`
-  - Enter provided code to authenticate via browser
-  - Supports MFA and conditional access policies
-  - Token is cached for subsequent queries
-- **Permissions**: Uses the authenticated user's Power BI permissions
-- **Note**: Not suitable for automated/unattended workflows
-
-#### 2. Username/Password Flow - **For Automated Workflows**
-For production environments with service accounts:
-- **Use Case**: Automated workflows, scheduled jobs, production deployments
-- **Requirements**: `tenant_id`, `client_id`, `username`, `password` (stored in API Keys)
-- **How it works**: Authenticates with username/password programmatically
-- **Permissions**: Requires account without MFA
-- **Note**: Less secure than service principal, consider migrating to OAuth when possible
-
-### Environment Variables
-
-Set these in your `.env` file:
-
-```bash
-# Power BI Configuration
-POWERBI_TENANT_ID=your-tenant-id
-POWERBI_CLIENT_ID=your-client-id
-POWERBI_CLIENT_SECRET=your-client-secret
-POWERBI_USERNAME=user@domain.com
-POWERBI_PASSWORD=your-password
+```
+┌─────────────────┐
+│   Kasal AI      │
+│   Agent         │
+└────────┬────────┘
+         │
+         └─ PowerBIAnalysisTool
+            └─> Databricks Job
+                ├─ Step 1: Extract Power BI metadata
+                ├─ Step 2: Generate DAX query from business question
+                └─ Step 3: Execute query
+                    └─> Power BI REST API
+                        └─> Returns: JSON result data
 ```
 
-**Note**: Never commit credentials to source control. Use environment variables or the API Keys Service.
+### Backend Components
 
-## API Endpoints
+1. **API Keys Service** (`services/api_keys_service.py`)
+   - Stores encrypted Power BI credentials
+   - Multi-tenant isolation via `group_id`
+   - Handles: `POWERBI_CLIENT_SECRET`, `POWERBI_USERNAME`, `POWERBI_PASSWORD`
 
-### POST `/powerbi/config`
-**Admin Only** - Set Power BI configuration for the workspace.
+2. **Databricks Auth Context** (`utils/databricks_auth.py`)
+   - Auto-detects `databricks_host` from environment
+   - Retrieves `databricks_token` from API Keys or environment
 
-**Request Body**:
+3. **PowerBIAnalysisTool** (`engines/crewai/tools/custom/powerbi_analysis_tool.py`)
+   - CrewAI tool for Power BI analysis
+   - Wraps Databricks job execution
+   - Handles credential retrieval and job parameter passing
+
+4. **Tool Factory** (`engines/crewai/tools/tool_factory.py`)
+   - Instantiates tools with task-level configuration
+   - Merges base tool config with task-specific overrides
+
+### Frontend Components
+
+1. **PowerBIConfigSelector** (`components/Common/PowerBIConfigSelector.tsx`)
+   - Task-level Power BI configuration UI
+   - Appears when PowerBIAnalysisTool is selected
+   - Validates required API Keys
+
+2. **TaskForm** (`components/Tasks/TaskForm.tsx`)
+   - Integrates PowerBIConfigSelector
+   - Stores configuration in `tool_configs.PowerBIAnalysisTool`
+
+### Authentication Flow
+
+1. Kasal retrieves credentials from API Keys Service
+2. Auto-detects Databricks host from unified auth context
+3. Passes credentials to Databricks job as parameters
+4. Databricks job authenticates with Azure AD
+5. Azure AD issues Power BI access token
+6. Access token used to call Power BI REST API
+
+---
+
+## Prerequisites
+
+### Required Accounts & Access
+
+- **Azure Tenant**: Admin access for Service Principal or Service Account (if PBI with RLS enforcement) setup
+- **Power BI**: Workspace access and semantic model permissions
+- **Databricks Workspace**: Access with token for job creation
+- **Operating System**: Linux/macOS (Ubuntu on VDI for production)
+- **Key vault connect to Databricks**: Connection of centrally managed secrets as KV variables within Databricks
+- **Python**: 3.11+
+- **Node.js**: LTS version
+
+### Power BI Requirements
+
+- Power BI workspace with semantic models
+- Workspace ID and Semantic Model ID
+- Admin permissions to grant Service Principal access
+
+### Azure AD Requirements
+
+- Permission to create App Registrations
+- Admin consent capability for API permissions
+- Ability to create and manage Client Secrets
+
+---
+
+## Setup Guide
+
+### 1. Development Environment Setup
+
+#### 1.1 Install Python 3.11
+
+```bash
+# Add the deadsnakes PPA (Ubuntu)
+sudo add-apt-repository ppa:deadsnakes/ppa -y
+sudo apt update
+
+# Install Python 3.11
+sudo apt install python3.11 python3.11-venv python3.11-dev -y
+
+# Verify installation
+python3.11 --version
+```
+
+#### 1.2 Clone Repository
+
+```bash
+# Clone the Kasal repository
+git clone https://github.com/databrickslabs/kasal.git
+cd kasal
+
+# Checkout the feature branch
+git checkout feature/pbi-tool
+```
+
+#### 1.3 Create Virtual Environment
+
+```bash
+# Create virtual environment with Python 3.11
+python3.11 -m venv venv
+
+# Activate the environment
+source venv/bin/activate
+
+# Upgrade pip
+pip install --upgrade pip
+```
+
+#### 1.4 Install Dependencies
+
+```bash
+# Navigate to src directory
+cd src
+
+# Install Python dependencies
+pip install -r requirements.txt
+
+# Verify installations
+pip freeze | grep -E "crewai|litellm|databricks"
+```
+
+#### 1.5 Install Node.js (if needed)
+
+```bash
+# Install Node Version Manager (nvm)
+curl -o- https://raw.githubusercontent.com/nvm-sh/nvm/v0.39.0/install.sh | bash
+
+# Load nvm
+source ~/.bashrc
+
+# Install Node.js LTS
+nvm install --lts
+nvm use --lts
+
+# Verify installations
+node --version
+npm --version
+```
+
+---
+
+### 2. Azure Service Principal Setup
+
+To enable non-interactive authentication, create an Azure Service Principal with Power BI read permissions.
+
+#### 2.1 Create Service Principal in Azure Portal
+
+1. **Navigate to Azure Portal**: https://portal.azure.com
+2. **Go to Azure Active Directory** → **App registrations**
+3. **Click "New registration"**:
+   - **Name**: `Kasal-PowerBI-Connector` (or your preferred name)
+   - **Supported account types**: Single tenant
+   - **Redirect URI**: Leave blank
+4. **Note the Application (client) ID** and **Directory (tenant) ID**
+
+Please consider that for some PowerBI reports a service principal might not be enough, but a service account might be needed. This will be especially the case for PowerBIs that enfore RLS within the PowerBI. 
+
+#### 2.2 Create Client Secret
+
+1. In your app registration, go to **Certificates & secrets**
+2. Click **New client secret**
+3. **Description**: `Kasal PowerBI Tool`
+4. **Expires**: Choose expiration period (recommended: 90 days)
+5. **Copy the secret value** immediately (you won't be able to see it again)
+
+#### 2.3 Configure API Permissions
+
+**Critical**: The Service Principal needs **Application** permissions, not **Delegated**.
+
+1. Go to **API permissions** in your app registration
+2. **Remove any Delegated permissions** if present
+3. Click **Add a permission**
+4. Select **Power BI Service**
+5. Choose **Application permissions** (NOT Delegated)
+6. Check **Dataset.Read.All**
+7. Click **Add permissions**
+8. **Click "Grant admin consent for [Your Organization]"** (requires admin)
+
+**Important**: This step requires **Azure AD Admin** privileges. If you don't have admin rights, use the email template in the Appendix.
+
+#### 2.4 Enable Service Principal in Power BI Admin Portal
+
+1. Go to **Power BI Admin Portal**: https://app.powerbi.com/admin-portal/tenantSettings
+2. Navigate to **Developer settings** (or **Tenant settings**)
+3. Find **Service principals can use Power BI APIs**
+4. **Enable** this setting
+5. Add your Service Principal to the allowed list:
+   - Option 1: Add specific Service Principal by name
+   - Option 2: Add to a security group that's allowed
+
+#### 2.5 Grant Workspace Access
+
+For each Power BI workspace you want to access:
+
+1. Open the Power BI workspace
+2. Click **Workspace settings**
+3. Go to **Access**
+4. Click **Add people or groups**
+5. Search for your Service Principal name
+6. Assign role: **Member** or **Contributor**
+
+---
+
+### 3. Databricks Configuration
+
+#### 3.1 Set Environment Variables
+
+```bash
+# Set Databricks credentials
+export DATABRICKS_TOKEN="your-databricks-token"
+export DATABRICKS_HOST="https://your-workspace.cloud.databricks.com/"
+```
+
+#### 3.2 Configure Databricks CLI
+
+```bash
+# Configure Databricks CLI
+databricks configure --host https://your-workspace.cloud.databricks.com --token
+```
+
+If the prompt doesn't appear:
+```bash
+# Unset environment variables and retry
+unset DATABRICKS_HOST
+unset DATABRICKS_TOKEN
+databricks configure --host https://your-workspace.cloud.databricks.com --token
+```
+
+#### 3.3 Verify Connection
+
+```bash
+# Test workspace access
+databricks workspace list /
+```
+
+#### 3.4 Create Databricks Job
+
+The PowerBIAnalysisTool requires a Databricks job for executing the analysis pipeline.
+
+1. **Navigate to Databricks Workflows**:
+   - Go to your Databricks workspace
+   - Click **Workflows** in the left sidebar
+
+2. **Create New Job**:
+   - Click **Create Job**
+   - **Job Name**: `pbi_e2e_pipeline`
+
+3. **Add Task**:
+   - Click **Add Task**
+   - **Task Name**: `pbi_e2e_pipeline`
+   - **Type**: Notebook
+   - **Notebook Path**: `/Workspace/Shared/powerbi_full_pipeline`
+   - **Cluster**: Select or create appropriate cluster
+
+4. **Note the Job ID**:
+   - After creating the job, copy the **Job ID** from the URL
+   - Example: `365257288725339`
+   - This will be used in PowerBIAnalysisTool configuration
+
+#### 3.5 Upload Pipeline Notebook
+
+```bash
+# Upload the notebook to Databricks
+# Please note that the security features were implemented
+# But for the notebook to work you need to be precise with
+# pre-requisites (Key-Vault setup) and PBI SVP setting (ask respective admins)
+databricks workspace import \
+    examples/powerbi_full_pipeline.ipynb \
+    /Workspace/Shared/powerbi_full_pipeline \
+    --language PYTHON \
+    --format JUPYTER
+```
+
+Or manually upload via Databricks UI:
+1. Go to **Workspace** → **Shared**
+2. Click **Create** → **Import**
+3. Upload `examples/powerbi_full_pipeline.ipynb`
+
+---
+
+### 4. Kasal Configuration
+
+#### 4.1 Build Frontend
+
+```bash
+# From the project root
+python src/build.py
+```
+
+This creates a `frontend_static` folder with compiled React application.
+
+#### 4.2 Deploy to Databricks Apps
+
+```bash
+# Deploy the application
+cd src
+python deploy.py \
+    --app-name kasal \
+    --user-name your-email@domain.com
+```
+
+**Note**: Replace `--app-name` and `--user-name` with your specific values.
+
+#### 4.3 Configure API Keys
+
+After deploying, configure required API Keys:
+
+1. **Navigate to Configuration** → **API Keys**
+2. **Add the following keys**:
+   - `POWERBI_CLIENT_SECRET`: Service Principal secret (from section 2.2)
+   - `POWERBI_USERNAME`: Power BI service account email (for device code auth)
+   - `POWERBI_PASSWORD`: Service account password (for device code auth)
+   - `DATABRICKS_API_KEY` or `DATABRICKS_TOKEN`: Databricks access token
+
+**Important**: All values are encrypted at rest and never returned in plain text via API.
+
+#### 4.4 Enable PowerBIAnalysisTool
+
+1. Go to **Tools** section
+2. Find **PowerBIAnalysisTool**
+3. Review security disclaimers
+4. Enable the tool for your workspace
+
+---
+
+## Authentication Methods
+
+The PowerBIAnalysisTool supports two authentication methods:
+
+### Service Principal (Recommended for Production)
+
+**Best for**: Automated workflows, production deployments, unattended execution
+
+**Requirements**:
+- `tenant_id`: Azure AD Tenant ID
+- `client_id`: Service Principal Application ID
+- `POWERBI_CLIENT_SECRET`: Stored in API Keys
+
+**Configuration**:
 ```json
 {
-  "tenant_id": "xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx",
-  "client_id": "xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx",
-  "workspace_id": "xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx",
-  "semantic_model_id": "xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx",
-  "enabled": true
+  "tenant_id": "9f37a392-f0ae-4280-9796-f1864a10effc",
+  "client_id": "7b597aac-de00-44c9-8e2a-3d2c345c36a9",
+  "auth_method": "service_principal"
 }
 ```
 
-**Response**:
+**Advantages**:
+- Non-interactive, fully automated
+- No MFA requirements
+- Production-ready
+- Supports scheduled workflows
+
+### Device Code Flow (Recommended for Testing)
+
+**Best for**: Development, testing, personal workspaces
+
+**Requirements**:
+- `tenant_id`: Azure AD Tenant ID
+- `client_id`: Can use Power BI public client `1950a258-227b-4e31-a9cf-717495945fc2`
+- `POWERBI_USERNAME`: User email (stored in API Keys)
+- `POWERBI_PASSWORD`: User password (stored in API Keys)
+
+**Configuration**:
 ```json
 {
-  "message": "Power BI configuration saved successfully",
-  "config": {
-    "tenant_id": "...",
-    "client_id": "...",
-    "workspace_id": "...",
-    "semantic_model_id": "...",
-    "is_enabled": true,
-    "is_active": true
+  "tenant_id": "9f37a392-f0ae-4280-9796-f1864a10effc",
+  "client_id": "1950a258-227b-4e31-a9cf-717495945fc2",
+  "auth_method": "device_code"
+}
+```
+
+**How it works**:
+1. First request prompts: "Visit microsoft.com/devicelogin"
+2. Enter provided code in browser
+3. Sign in with your credentials
+4. Token is cached for subsequent requests (~1 hour)
+
+**Advantages**:
+- No Service Principal setup required
+- Uses your personal Power BI permissions
+- Perfect for development and testing
+- Supports MFA
+
+---
+
+## API Configuration
+
+### Task-Level Configuration
+
+Configure Power BI settings at the **task level** for flexibility across different semantic models:
+
+1. **Create or Edit Task**
+2. **Select PowerBIAnalysisTool** in tools list
+3. **Configure Power BI settings** (fields appear automatically):
+   - **Tenant ID**: Azure AD tenant GUID
+   - **Client ID**: Service Principal or app client ID
+   - **Workspace ID**: Power BI workspace GUID (optional)
+   - **Semantic Model ID**: Power BI semantic model/dataset GUID
+   - **Auth Method**: `service_principal` or `device_code`
+   - **Databricks Job ID**: Databricks job ID for analysis pipeline
+
+**Example Task Configuration**:
+```json
+{
+  "name": "Analyze Sales Data",
+  "description": "Analyze Q4 sales trends using Power BI",
+  "agent_id": "agent_123",
+  "tools": [71],
+  "tool_configs": {
+    "PowerBIAnalysisTool": {
+      "tenant_id": "9f37a392-f0ae-4280-9796-f1864a10effc",
+      "client_id": "7b597aac-de00-44c9-8e2a-3d2c345c36a9",
+      "semantic_model_id": "a17de62e-8dc0-4a8a-acaa-2a9954de8c75",
+      "workspace_id": "bcb084ed-f8c9-422c-b148-29839c0f9227",
+      "auth_method": "service_principal",
+      "databricks_job_id": 365257288725339
+    }
   }
 }
 ```
 
-### GET `/powerbi/config`
-Get current Power BI configuration.
+### Required API Keys Check
 
-**Response**:
-```json
-{
-  "tenant_id": "...",
-  "client_id": "...",
-  "workspace_id": "...",
-  "semantic_model_id": "...",
-  "enabled": true
-}
-```
+The UI automatically checks for required API Keys when PowerBIAnalysisTool is selected:
+- `POWERBI_CLIENT_SECRET`
+- `POWERBI_USERNAME`
+- `POWERBI_PASSWORD`
+- `DATABRICKS_API_KEY` (or `DATABRICKS_TOKEN`)
 
-### POST `/powerbi/query`
-Execute a DAX query against a Power BI semantic model.
+If keys are missing, an error alert is displayed with instructions.
 
-**Request Body**:
-```json
-{
-  "dax_query": "EVALUATE SUMMARIZECOLUMNS('Table'[Column], \"Measure\", SUM('Table'[Value]))",
-  "semantic_model_id": "xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx",
-  "workspace_id": "xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx"
-}
-```
+---
 
-**Response**:
-```json
-{
-  "status": "success",
-  "data": [
-    {
-      "Column": "Value1",
-      "Measure": 12345
-    },
-    {
-      "Column": "Value2",
-      "Measure": 67890
-    }
-  ],
-  "row_count": 2,
-  "columns": ["Column", "Measure"],
-  "execution_time_ms": 245
-}
-```
+## PowerBI Analysis Tool
 
-### GET `/powerbi/status`
-Check Power BI integration status.
+### Tool Overview
 
-**Response**:
-```json
-{
-  "configured": true,
-  "enabled": true,
-  "workspace_id": "...",
-  "semantic_model_id": "...",
-  "message": "Power BI is configured and ready"
-}
-```
+**PowerBIAnalysisTool** (ID: 71) enables complex Power BI analysis via Databricks job orchestration.
 
-## Using the CrewAI Tool
+**Best for**:
+- Heavy computation and large datasets
+- Complex multi-query analysis
+- Year-over-year comparisons
+- Trend detection and forecasting
+- Resource-intensive business intelligence tasks
 
-Kasal provides the **PowerBIAnalysisTool** for Power BI integration via Databricks jobs:
+### Tool Parameters
 
-### PowerBIAnalysisTool (Databricks-Wrapped)
+**Input Parameters**:
+- `question` (str): Business question to analyze
+- `dashboard_id` (str): Semantic model ID (can be provided by LLM or task config)
+- `workspace_id` (str): Power BI workspace ID (optional)
+- `additional_params` (dict): Optional additional parameters
 
-**Best for**: Heavy computation, complex analysis, large datasets, year-over-year analysis
-
-**Tool Name**: `PowerBIAnalysisTool`
-
-**Parameters**:
-- `dashboard_id`: Power BI semantic model ID
-- `questions`: List of business questions to analyze
-- `dax_statement`: Optional pre-generated DAX query
-- `databricks_job_id`: Databricks job ID (configured in tool_configs)
+**Configuration** (from tool_configs):
+- `tenant_id`: Azure AD tenant
+- `client_id`: Application client ID
+- `semantic_model_id`: Default semantic model
+- `workspace_id`: Default workspace
+- `auth_method`: Authentication method
+- `databricks_job_id`: Databricks job ID for pipeline
 
 ### Agent Configuration Example
 
-**Using PowerBIAnalysisTool (Databricks)**
 ```json
 {
   "role": "Business Intelligence Analyst",
-  "goal": "Perform complex year-over-year growth analysis",
+  "goal": "Perform complex Power BI analysis using Databricks",
+  "backstory": "Expert analyst with deep understanding of business metrics",
   "tools": ["PowerBIAnalysisTool"],
+  "llm_config": {
+    "model": "databricks-meta-llama-3-1-70b-instruct",
+    "temperature": 0.1
+  }
+}
+```
+
+### Task Configuration Example
+
+```json
+{
+  "name": "Q4 Revenue Analysis",
+  "description": "Analyze Q4 2024 revenue trends by product category and region, comparing year-over-year growth",
+  "expected_output": "Comprehensive analysis report with insights and recommendations",
+  "agent_id": "agent_123",
+  "tools": [71],
   "tool_configs": {
     "PowerBIAnalysisTool": {
-      "databricks_job_id": 12345
+      "tenant_id": "9f37a392-f0ae-4280-9796-f1864a10effc",
+      "client_id": "7b597aac-de00-44c9-8e2a-3d2c345c36a9",
+      "semantic_model_id": "a17de62e-8dc0-4a8a-acaa-2a9954de8c75",
+      "workspace_id": "bcb084ed-f8c9-422c-b148-29839c0f9227",
+      "auth_method": "service_principal",
+      "databricks_job_id": 365257288725339
     }
   }
 }
 ```
 
-### Task Examples
+### How It Works
 
-**Complex Analysis (PowerBIAnalysisTool)**
-```json
-{
-  "description": "Analyze year-over-year growth trends across all product categories",
-  "expected_output": "Comprehensive growth analysis with insights and recommendations"
-}
-```
+1. **Agent receives task** with business question
+2. **PowerBIAnalysisTool invoked** with question and semantic model ID
+3. **Tool retrieves credentials** from API Keys Service
+4. **Tool auto-detects** databricks_host from environment
+5. **Databricks job triggered** with parameters:
+   - `question`: Business question
+   - `semantic_model_id`: Dataset to query
+   - `workspace_id`: Power BI workspace
+   - `tenant_id`, `client_id`: Authentication
+   - `client_secret`, `username`, `password`: Credentials
+   - `databricks_host`, `databricks_token`: For recursive auth
+6. **Job executes pipeline**:
+   - Extracts Power BI metadata
+   - Generates DAX query from question
+   - Executes query against Power BI
+   - Returns structured results
+7. **Agent receives results** and continues workflow
 
-## DAX Query Examples
+---
 
-### 1. Simple Table Evaluation
-```dax
-EVALUATE 'Sales'
-```
+## Testing
 
-### 2. Summarize Columns
-```dax
-EVALUATE
-SUMMARIZECOLUMNS(
-    'Date'[Year],
-    'Product'[Category],
-    "Total Sales", SUM('Sales'[Amount]),
-    "Total Quantity", SUM('Sales'[Quantity])
-)
-```
+### Local Development Testing
 
-### 3. Top N Analysis
-```dax
-EVALUATE
-TOPN(
-    10,
-    SUMMARIZECOLUMNS(
-        'Product'[Name],
-        "Revenue", SUM('Sales'[Amount])
-    ),
-    [Revenue],
-    DESC
-)
-```
-
-### 4. Filtered Results
-```dax
-EVALUATE
-CALCULATETABLE(
-    SUMMARIZECOLUMNS(
-        'Sales'[Region],
-        "Total", SUM('Sales'[Amount])
-    ),
-    'Date'[Year] = 2024
-)
-```
-
-## Security Considerations
-
-### Credential Storage
-
-1. **Encrypted Storage**:
-   - Client secrets, usernames, and passwords are encrypted in the database
-   - Uses the same encryption mechanism as other API keys in Kasal
-
-2. **API Keys Service**:
-   - Preferred method for credential management
-   - Centralized key storage with encryption
-   - Supports key rotation
-
-3. **Environment Variables**:
-   - Fallback for development environments
-   - Never commit `.env` files to source control
-
-### Multi-Tenant Isolation
-
-- Each group has separate Power BI configuration
-- `group_id` ensures data isolation
-- Only workspace admins can configure Power BI settings
-
-### Permissions
-
-- **Configuration**: Workspace admin only
-- **Query Execution**: All authenticated users in the group
-- **Status Check**: All authenticated users in the group
-
-## Troubleshooting
-
-### Authentication Errors
-
-**Error**: "Failed to authenticate with Power BI"
-
-**Solutions**:
-1. Verify `tenant_id` and `client_id` are correct
-2. Check credentials in environment variables or API Keys Service
-3. Ensure Service Principal has Power BI API permissions
-4. For user/password auth, verify credentials are correct
-
-### Query Execution Errors
-
-**Error**: "Semantic model ID is required"
-
-**Solution**: Provide `semantic_model_id` in request or configure a default in settings.
-
-**Error**: "Power BI API error (status 400)"
-
-**Solution**:
-- Check DAX query syntax
-- Verify semantic model ID is correct
-- Ensure columns and tables exist in the model
-
-### Configuration Not Found
-
-**Error**: "No active Power BI configuration found"
-
-**Solution**:
-1. Configure Power BI via `/powerbi/config` endpoint
-2. Ensure `enabled` is set to `true`
-3. Verify you're in the correct workspace/group
-
-## Development Workflow
-
-### 1. Setup Development Environment
-
-```bash
-# Install dependencies
-cd src/backend
-pip install -r ../requirements.txt
-
-# Set up environment variables
-cp .env.example .env
-# Edit .env with your Power BI credentials
-
-# Run migrations
-DATABASE_TYPE=sqlite alembic upgrade head
-```
-
-### 2. Configure Power BI
-
-Use the API or directly insert configuration:
-
-```python
-from src.core.unit_of_work import UnitOfWork
-from src.repositories.powerbi_config_repository import PowerBIConfigRepository
-
-async def configure_powerbi():
-    async with UnitOfWork() as uow:
-        repo = PowerBIConfigRepository(uow._session)
-        config = await repo.create_config({
-            "tenant_id": "your-tenant-id",
-            "client_id": "your-client-id",
-            "workspace_id": "your-workspace-id",
-            "semantic_model_id": "your-model-id",
-            "group_id": "your-group-id",
-            "is_enabled": True,
-            "is_active": True
-        })
-        return config
-```
-
-### 3. Test DAX Query
-
-```python
-from src.services.powerbi_service import PowerBIService
-from src.schemas.powerbi_config import DAXQueryRequest
-
-async def test_query(session, group_id):
-    service = PowerBIService(session, group_id=group_id)
-
-    request = DAXQueryRequest(
-        dax_query="EVALUATE 'Sales'"
-    )
-
-    response = await service.execute_dax_query(request)
-    print(f"Status: {response.status}")
-    print(f"Rows: {response.row_count}")
-    print(f"Data: {response.data}")
-```
-
-## Production Deployment
-
-### Prerequisites
-
-1. **Azure AD Service Principal**:
-   - Created in Azure Portal
-   - Granted Power BI Service API permissions
-   - Client secret generated and stored securely
-
-2. **Power BI Workspace**:
-   - Service Principal added as member or admin
-   - Semantic models published and accessible
-
-3. **Database**:
-   - PostgreSQL in production (SQLite for dev)
-   - Migrations applied
-   - Connection pooling configured
-
-### Deployment Steps
-
-1. **Set Environment Variables**:
-   ```bash
-   export POWERBI_TENANT_ID="your-tenant-id"
-   export POWERBI_CLIENT_ID="your-client-id"
-   export POWERBI_CLIENT_SECRET="your-secret"
-   ```
-
-2. **Run Migrations**:
-   ```bash
-   alembic upgrade head
-   ```
-
-3. **Configure via API**:
-   - Use admin account to POST to `/powerbi/config`
-   - Store workspace and semantic model IDs
-
-4. **Test Connection**:
-   - Check status: GET `/powerbi/status`
-   - Execute test query: POST `/powerbi/query`
-
-5. **Monitor**:
-   - Check application logs for authentication issues
-   - Monitor API response times
-   - Track failed query attempts
-
-
-
-
-
-
-## Testing Strategy
-
-### Step 1: Local Development Testing
-
-Local testing verifies the integration works correctly in your development environment before deploying to production.
-
-#### 1.1 Start Backend and Frontend
+#### 1. Start Services
 
 **Backend**:
 ```bash
 cd src/backend
 ./run.sh sqlite
 # Backend starts on http://localhost:8000
-# Check logs for: "Application startup complete"
 ```
 
 **Frontend**:
@@ -464,465 +604,349 @@ cd src/backend
 cd src/frontend
 npm start
 # Frontend starts on http://localhost:3000
-# Browser opens automatically
 ```
 
-**Verify Services**:
-```bash
-# Check backend is running
-ps aux | grep uvicorn
+#### 2. Configure via UI
 
-# Check frontend is running
-ps aux | grep "npm start"
-```
-
-#### 1.2 Configure Power BI in the UI
-
-**Navigate to Configuration**:
 1. Open http://localhost:3000
-2. Go to **Configuration** (gear icon in sidebar)
-3. Click **Power BI** tab
-
-**Set API Keys**:
-1. Navigate to **API Keys** tab
-2. Add the following keys:
-   - `POWERBI_USERNAME`: Your Power BI service account email
-   - `POWERBI_PASSWORD`: Service account password
-   - `POWERBI_CLIENT_SECRET`: Azure AD app client secret (optional)
-3. Click **Save**
-
-**Configure Power BI Settings**:
-1. Return to **Power BI** tab
-2. Toggle **Enable Power BI Integration** to ON
-3. Fill in required fields:
-   - **Tenant ID**: Your Azure AD tenant GUID
-   - **Client ID**: Your Azure AD application (client) ID
-4. (Optional) Fill in default settings:
-   - **Workspace ID**: Default Power BI workspace GUID
-   - **Semantic Model ID**: Default semantic model GUID
-5. Click **Save Configuration**
-6. Verify status shows: "Power BI is configured and ready"
-
-#### 1.3 Enable Power BI Tools
-
-**Navigate to Tools**:
-1. Go to **Tools** section in sidebar
-2. Find **PowerBIAnalysisTool**
-3. Review security disclaimers
-4. Enable the tool for your workspace
-
-**Verify Tool Registration**:
-- Both tools should appear in the available tools list
-- Status should show "Enabled"
-- Security profile should display risk levels
-
-#### 1.4 Test Backend API Endpoints
-
-**Check Configuration Status**:
-```bash
-curl -X GET http://localhost:8000/powerbi/status \
-  -H "Authorization: Bearer YOUR_JWT_TOKEN"
-
-# Expected response:
-# {
-#   "configured": true,
-#   "enabled": true,
-#   "workspace_id": "...",
-#   "semantic_model_id": "...",
-#   "message": "Power BI is configured and ready"
-# }
-```
-
-**Get Configuration**:
-```bash
-curl -X GET http://localhost:8000/powerbi/config \
-  -H "Authorization: Bearer YOUR_JWT_TOKEN"
-
-# Expected response:
-# {
-#   "tenant_id": "...",
-#   "client_id": "...",
-#   "workspace_id": "...",
-#   "semantic_model_id": "...",
-#   "enabled": true
-# }
-```
-
-**Execute Test DAX Query**:
-```bash
-curl -X POST http://localhost:8000/powerbi/query \
-  -H "Authorization: Bearer YOUR_JWT_TOKEN" \
-  -H "Content-Type: application/json" \
-  -d '{
-    "dax_query": "EVALUATE TOPN(5, '\''Sales'\'')",
-    "semantic_model_id": "your-model-id",
-    "workspace_id": "your-workspace-id"
-  }'
-
-# Expected response:
-# {
-#   "status": "success",
-#   "data": [...],
-#   "row_count": 5,
-#   "columns": ["Column1", "Column2", ...],
-#   "execution_time_ms": 245
-# }
-```
-
-#### 1.5 Verify Database Configuration
-
-**Check SQLite Database**:
-```bash
-cd src/backend
-sqlite3 kasal.db
-
-# Run queries:
-.tables                          # Verify 'powerbiconfig' table exists
-SELECT * FROM powerbiconfig;     # Check configuration saved
-.exit
-```
-
-**Verify Fields**:
-- `tenant_id` should match your Azure AD tenant
-- `client_id` should match your application ID
-- `is_enabled` should be `1` (true)
-- `is_active` should be `1` (true)
-- `group_id` should match your workspace/group
-
-#### 1.6 Test Agent Workflow (Optional)
-
-**Create Test Agent with PowerBIAnalysisTool**:
-1. Navigate to **Agents** section
-2. Create new agent:
-   - **Role**: "Sales Analyst"
-   - **Goal**: "Analyze sales data from Power BI"
-   - **Tools**: Enable "PowerBIAnalysisTool"
-3. Create task:
-   - **Description**: "Analyze top 10 products by revenue using Power BI data"
-   - **Expected Output**: "List of products with revenue amounts"
-4. Run the workflow
-5. Check execution logs for successful analysis execution
-
----
-
-### Step 2: Real-World Testing with Databricks App
-
-Production testing validates the integration in a real Databricks environment with actual Power BI data.
-
-#### 2.1 Prerequisites
-
-**Azure AD Application Setup**:
-1. Go to Azure Portal → **Azure Active Directory** → **App registrations**
-2. Create or select existing application
-3. Note the following IDs:
-   - **Application (client) ID**
-   - **Directory (tenant) ID**
-4. Under **Certificates & secrets**, create a **Client Secret** (optional)
-5. Under **API permissions**, add:
-   - **Power BI Service** → **Dataset.Read.All**
-   - **Power BI Service** → **Content.Create** (if needed)
-6. Grant admin consent for permissions
-
-**Power BI Workspace Setup**:
-1. Go to Power BI Service (app.powerbi.com)
-2. Create a test workspace or use existing
-3. Note the **Workspace ID** (from URL or workspace settings)
-4. Publish a test semantic model with sample data
-5. Note the **Semantic Model ID** (Dataset ID)
-6. Grant workspace access:
-   - Add service principal as workspace member/admin
-   - OR add service account user
-
-**Test Data Setup**:
-Create a simple Power BI dataset with sample data:
-```dax
-Sales = DATATABLE(
-    "Product", STRING,
-    "Region", STRING,
-    "Amount", CURRENCY,
-    {
-        {"Product A", "North", 1000},
-        {"Product B", "South", 1500},
-        {"Product C", "East", 1200},
-        {"Product D", "West", 800},
-        {"Product E", "North", 2000}
-    }
-)
-```
-
-#### 2.2 Build and Deploy to Databricks Apps
-
-**Build Frontend Static Assets**:
-```bash
-cd src
-python build.py
-
-# Verify output:
-# - Frontend static files copied to src/frontend_static/
-# - Build completed successfully
-```
-
-**Deploy to Databricks**:
-```bash
-cd src
-python3 deploy.py --app-name kasal-david --user-name david.schwarzenbacher@databricks.com
-
-# Deployment steps:
-# 1. Uploads application files to Databricks
-# 2. Creates/updates Databricks App
-# 3. Configures environment variables
-# 4. Starts the application
-
-# Note the App URL from deployment output
-```
-
-**Verify Deployment**:
-1. Open Databricks workspace
-2. Navigate to **Apps** section
-3. Find your deployed Kasal app
-4. Click to open the app URL
-5. Verify app loads correctly
-
-#### 2.3 Configure Power BI in Databricks App
-
-**Set Environment Variables** (if not using API Keys Service):
-1. In Databricks workspace, go to your App settings
-2. Add environment variables:
-   ```
-   POWERBI_USERNAME=your-service-account@domain.com
-   POWERBI_PASSWORD=your-password
-   POWERBI_CLIENT_SECRET=your-client-secret
-   ```
-3. Restart the app
-
-**Configure via UI**:
-1. Open the deployed app
 2. Navigate to **Configuration** → **API Keys**
-3. Add credentials:
+3. Add required keys:
+   - `POWERBI_CLIENT_SECRET`
    - `POWERBI_USERNAME`
    - `POWERBI_PASSWORD`
-   - `POWERBI_CLIENT_SECRET`
-4. Navigate to **Configuration** → **Power BI**
-5. Configure settings:
-   - **Enable Power BI Integration**: ON
-   - **Tenant ID**: Your Azure AD tenant ID
-   - **Client ID**: Your application (client) ID
-   - **Workspace ID**: Your Power BI workspace ID
-   - **Semantic Model ID**: Your test dataset ID
-6. Click **Save Configuration**
-7. Verify status: "Power BI is configured and ready"
+   - `DATABRICKS_API_KEY`
+4. Navigate to **Tools** → Enable **PowerBIAnalysisTool**
 
-#### 2.4 End-to-End Testing
+#### 3. Create Test Agent and Task
 
-**Test: Complex Analysis (PowerBIAnalysisTool)**
-
-1. **Configure Databricks Job**:
-   - Create a Databricks job for Power BI analysis
-   - Configure job to accept parameters: `dax_queries`, `semantic_model_id`
-   - Note the **Job ID**
-
-2. **Enable Tool with Configuration**:
-   - Navigate to **Tools** → **PowerBIAnalysisTool**
-   - Configure tool settings:
-     ```json
-     {
-       "databricks_job_id": 12345
-     }
-     ```
-   - Enable the tool
-
-3. **Create Agent**:
-   - **Role**: "Business Intelligence Analyst"
-   - **Goal**: "Perform complex Power BI analysis using Databricks"
-   - **Tools**: PowerBIAnalysisTool
-   - **Tool Config**:
-     ```json
-     {
-       "PowerBIAnalysisTool": {
-         "databricks_job_id": 12345
-       }
-     }
-     ```
-
-4. **Create Task**:
-   - **Description**: "Analyze year-over-year growth trends by product category and region"
-   - **Expected Output**: "Comprehensive growth analysis with insights"
-   - **Agent**: Select the BI Analyst agent
-
-5. **Run Workflow**:
-   - Click **Run**
-   - Monitor Databricks job execution
-   - Verify job receives correct parameters
-   - Check job logs for DAX query execution
-   - Validate results when job completes
-
-**Test 2: Production Workflow**
-
-Create an agent with PowerBIAnalysisTool for comprehensive analysis:
+**Agent**:
 ```json
 {
-  "role": "Data Analyst",
-  "goal": "Analyze sales data using Databricks-powered Power BI analysis",
-  "tools": ["PowerBIAnalysisTool"],
+  "role": "Sales Analyst",
+  "goal": "Analyze Power BI sales data",
+  "tools": ["PowerBIAnalysisTool"]
+}
+```
+
+**Task**:
+```json
+{
+  "description": "What is the total revenue for Q4 2024?",
+  "expected_output": "Revenue figure with analysis",
   "tool_configs": {
     "PowerBIAnalysisTool": {
-      "databricks_job_id": 12345
+      "tenant_id": "your-tenant-id",
+      "client_id": "your-client-id",
+      "semantic_model_id": "your-model-id",
+      "workspace_id": "your-workspace-id",
+      "auth_method": "service_principal",
+      "databricks_job_id": 365257288725339
     }
   }
 }
 ```
 
-Test with multiple tasks:
-- All Power BI analysis tasks use PowerBIAnalysisTool
-- Tool handles both simple and complex queries via Databricks jobs
-- Agent leverages Databricks compute for optimal performance
+#### 4. Run Workflow
 
-#### 2.5 Troubleshooting Checklist
+1. Click **Run Crew**
+2. Monitor execution in **Runs** tab
+3. Check Databricks **Workflows** for job execution
+4. Verify results in execution logs
 
-**Authentication Issues**:
-- [ ] Verify tenant_id and client_id are correct
-- [ ] Check credentials in API Keys Service
-- [ ] Confirm service principal has Power BI API permissions
-- [ ] Test authentication with Azure AD:
-  ```bash
-  # Test token generation
-  curl -X POST https://login.microsoftonline.com/{tenant_id}/oauth2/v2.0/token \
-    -d "client_id={client_id}" \
-    -d "scope=https://analysis.windows.net/powerbi/api/.default" \
-    -d "username={username}" \
-    -d "password={password}" \
-    -d "grant_type=password"
-  ```
+### Production Testing (Databricks App)
 
-**Query Execution Issues**:
-- [ ] Verify semantic_model_id is correct
-- [ ] Check workspace_id matches configuration
-- [ ] Validate DAX query syntax
-- [ ] Ensure tables/columns exist in semantic model
-- [ ] Test query directly in Power BI Desktop
-
-**Configuration Issues**:
-- [ ] Check database has powerbiconfig table
-- [ ] Verify is_enabled = true
-- [ ] Confirm is_active = true
-- [ ] Check group_id matches your workspace
-
-**Databricks App Issues**:
-- [ ] Verify app is running (check Apps section)
-- [ ] Check app logs for errors
-- [ ] Confirm environment variables are set
-- [ ] Test backend API endpoints directly
-- [ ] Verify database connection is working
-
-**Tool Registration Issues**:
-- [ ] Check tool appears in Tools list
-- [ ] Verify tool is enabled
-- [ ] Confirm tool_configs are saved correctly
-- [ ] Check agent has tool assigned
-- [ ] Review CrewAI logs for tool instantiation errors
-
-#### 2.6 Quick Testing Script
-
-Save this as `/tmp/test_powerbi.sh` for rapid testing:
+#### 1. Deploy to Databricks
 
 ```bash
-#!/bin/bash
-
-# Test Power BI Integration
-BASE_URL="${1:-http://localhost:8000}"
-TOKEN="${2:-your-jwt-token}"
-
-echo "=== Testing Power BI Integration ==="
-echo "Base URL: $BASE_URL"
-echo ""
-
-# Test 1: Status Check
-echo "1. Checking Power BI status..."
-curl -s -X GET "$BASE_URL/powerbi/status" \
-  -H "Authorization: Bearer $TOKEN" | jq .
-echo ""
-
-# Test 2: Get Configuration
-echo "2. Getting Power BI configuration..."
-curl -s -X GET "$BASE_URL/powerbi/config" \
-  -H "Authorization: Bearer $TOKEN" | jq .
-echo ""
-
-# Test 3: Execute Simple DAX Query
-echo "3. Executing test DAX query..."
-curl -s -X POST "$BASE_URL/powerbi/query" \
-  -H "Authorization: Bearer $TOKEN" \
-  -H "Content-Type: application/json" \
-  -d '{
-    "dax_query": "EVALUATE TOPN(5, '\''Sales'\'')",
-    "semantic_model_id": "your-model-id"
-  }' | jq .
-echo ""
-
-echo "=== Testing Complete ==="
+cd src
+python deploy.py --app-name kasal-prod --user-name your-email@domain.com
 ```
 
-**Usage**:
-```bash
-# Local testing
-bash /tmp/test_powerbi.sh http://localhost:8000 your-local-token
+#### 2. Configure in Deployed App
 
-# Databricks App testing
-bash /tmp/test_powerbi.sh https://your-app-url.databricks.com your-databricks-token
+1. Open deployed app URL
+2. Navigate to **Configuration** → **API Keys**
+3. Add production credentials
+4. Enable **PowerBIAnalysisTool**
+
+#### 3. Create Production Workflow
+
+Create agent and task using production semantic model IDs and workspace IDs.
+
+#### 4. End-to-End Test
+
+1. Run crew execution
+2. Monitor Databricks job logs
+3. Verify Power BI API calls in Azure AD audit logs
+4. Validate results accuracy
+
+### Sample Test Queries
+
+**Simple aggregation**:
+```json
+{
+  "question": "What is the total revenue by region?"
+}
+```
+
+**Year-over-year analysis**:
+```json
+{
+  "question": "Compare Q4 2024 revenue to Q4 2023 by product category"
+}
+```
+
+**Trend analysis**:
+```json
+{
+  "question": "Show monthly sales trends for the last 12 months"
+}
 ```
 
 ---
 
-## Future Enhancements
+## Troubleshooting
 
-### Planned Features
+### Authentication Issues
 
-1. **DAX Generation from Natural Language**:
-   - LLM-powered DAX query generation
-   - Business question to DAX translation
-   - Schema-aware query construction
+**Error**: "Provided OAuth token does not have required scopes"
 
-2. **Query Caching**:
-   - Cache frequently executed queries
-   - Configurable TTL
-   - Invalidation strategies
+**Causes**:
+- Missing OAuth scopes in Databricks App configuration
+- Service Principal lacks Power BI API permissions
 
-3. **Result Streaming**:
-   - Stream large result sets
-   - Pagination support
-   - Progressive loading
+**Solutions**:
+1. Verify Service Principal has **Application** (not Delegated) permissions
+2. Ensure admin consent was granted in Azure AD
+3. Check Service Principal is enabled in Power BI Admin Portal
+4. For Databricks Apps, configure OAuth scopes: `sql`, `all-apis`
 
-4. **Advanced Analytics**:
-   - Time series analysis
-   - Trend detection
-   - Anomaly detection
+---
 
-5. **Visualization Integration**:
-   - Generate charts from results
-   - Export to various formats
-   - Embedded Power BI reports
+**Error**: "Authentication failed: 403 Forbidden"
 
-### Contributing
+**Causes**:
+- Service Principal doesn't have workspace access
+- Incorrect workspace ID
 
-To contribute to the Power BI integration:
+**Solutions**:
+1. Add Service Principal to Power BI workspace with Member/Contributor role
+2. Verify workspace_id matches the actual workspace GUID
+3. Check Power BI audit logs for access denied events
 
-1. Follow the clean architecture pattern
-2. Ensure all operations are async
-3. Add comprehensive tests
-4. Update documentation
-5. Submit pull request
+---
 
-## References
+### Configuration Issues
 
-- [Power BI REST API Documentation](https://learn.microsoft.com/en-us/rest/api/power-bi/)
-- [DAX Query Language Reference](https://learn.microsoft.com/en-us/dax/)
-- [Azure Identity Python SDK](https://learn.microsoft.com/en-us/python/api/overview/azure/identity-readme)
-- [CrewAI Tool Development](https://docs.crewai.com/concepts/tools)
+**Error**: "tenant_id showing as 'your_tenant_id'"
 
-## Support
+**Cause**: LLM-provided placeholder values taking precedence over task config
 
-For issues or questions:
-- Check the troubleshooting section above
-- Review application logs
-- Consult Power BI API documentation
-- Create an issue in the project repository
+**Solution**: Verify task configuration priority in tool_factory.py - task config should override LLM values
+
+---
+
+**Error**: "semantic_model_id truncated or incorrect"
+
+**Cause**: dashboard_id from kwargs overriding task config value
+
+**Solution**: Check powerbi_analysis_tool.py lines 314-316 for proper priority handling
+
+---
+
+**Error**: "Missing databricks_host or databricks_token in job parameters"
+
+**Cause**: Credentials not being passed to job parameters
+
+**Solution**: Verify powerbi_analysis_tool.py lines 411-418 add credentials to job_params
+
+---
+
+### Job Execution Issues
+
+**Error**: "Databricks job times out"
+
+**Causes**:
+- Large dataset
+- Complex DAX query
+- Insufficient cluster resources
+
+**Solutions**:
+1. Increase job timeout in tool configuration
+2. Optimize DAX query for performance
+3. Use more powerful cluster for the job
+4. Consider breaking analysis into smaller queries
+
+---
+
+**Error**: "Dataset.Read.All permission not found"
+
+**Cause**: Using Delegated permission instead of Application permission
+
+**Solution**:
+1. Go to Azure AD → App registrations → API permissions
+2. Remove Delegated permissions
+3. Add **Application** permission: Dataset.Read.All
+4. Grant admin consent
+
+---
+
+**Error**: "Client secret expired"
+
+**Cause**: Azure client secrets expire after set period
+
+**Solution**:
+1. Create new client secret in Azure Portal
+2. Update `POWERBI_CLIENT_SECRET` in API Keys
+3. Rotate secrets regularly (recommended: every 90 days)
+
+---
+
+## Security & Best Practices
+
+### Credential Management
+
+1. **Use API Keys Service**:
+   - All credentials stored encrypted at rest
+   - Multi-tenant isolation via group_id
+   - Never commit credentials to source control
+
+2. **Rotate Credentials Regularly**:
+   - Rotate Service Principal secrets every 90 days
+   - Use Azure Key Vault for production deployments
+   - Monitor credential usage in audit logs
+
+3. **Principle of Least Privilege**:
+   - Only grant workspace access where needed
+   - Use Power BI RLS (Row-Level Security) for data filtering
+   - Limit Service Principal to read-only permissions
+
+### Production Secret Management with Key Vaults
+
+For production deployments, **never pass credentials directly as job parameters**. Instead, use key vault references:
+
+#### Architecture Pattern
+
+```
+┌──────────────┐
+│   Kasal App  │
+└──────┬───────┘
+       │ Pass secret names only
+       ▼
+┌──────────────────┐
+│ Databricks Job   │
+│  Parameters:     │
+│  {               │
+│    "client_secret_key": "powerbi-client-secret"  ← Secret name
+│    "username_key": "powerbi-username"            ← Secret name
+│  }               │
+└──────┬───────────┘
+       │ Retrieve actual values
+       ▼
+┌──────────────────────────┐
+│   Key Vault Storage      │
+│  (Azure Key Vault,       │
+│   Databricks Secrets,    │
+│   AWS Secrets Manager)   │
+└──────────────────────────┘
+```
+
+#### Option 1: Azure Key Vault (Recommended for Azure)
+
+**Setup Azure Key Vault:**
+
+1. **Create Key Vault** in Azure Portal
+2. **Add Secrets**:
+   - `powerbi-client-secret`: Service Principal secret
+   - `powerbi-username`: Service account username
+   - `powerbi-password`: Service account password
+   - `databricks-token`: Databricks PAT
+
+3. **Grant Access** to Databricks workspace:
+   - Use Managed Identity or Service Principal
+   - Assign "Key Vault Secrets User" role
+
+**Configure Databricks to Access Azure Key Vault:**
+
+```bash
+# Create secret scope backed by Azure Key Vault
+databricks secrets create-scope --scope azure-key-vault \
+  --scope-backend-type AZURE_KEYVAULT \
+  --resource-id /subscriptions/{subscription-id}/resourceGroups/{resource-group}/providers/Microsoft.KeyVault/vaults/{vault-name} \
+  --dns-name https://{vault-name}.vault.azure.net/
+```
+
+**Notebook Code (Secure Approach):**
+
+```python
+import os
+
+# Retrieve secrets from Databricks secret scope (backed by Azure Key Vault)
+client_secret = dbutils.secrets.get(scope="azure-key-vault", key="powerbi-client-secret")
+username = dbutils.secrets.get(scope="azure-key-vault", key="powerbi-username")
+password = dbutils.secrets.get(scope="azure-key-vault", key="powerbi-password")
+databricks_token = dbutils.secrets.get(scope="azure-key-vault", key="databricks-token")
+
+# Use credentials for authentication
+powerbi_config = {
+    "tenant_id": dbutils.widgets.get("tenant_id"),
+    "client_id": dbutils.widgets.get("client_id"),
+    "client_secret": client_secret,  # Retrieved from Key Vault
+    "username": username,             # Retrieved from Key Vault
+    "password": password              # Retrieved from Key Vault
+}
+```
+
+**Job Parameters (No Sensitive Data):**
+
+```json
+{
+  "question": "Analyze Q4 revenue",
+  "semantic_model_id": "a17de62e-8dc0-4a8a-acaa-2a9954de8c75",
+  "workspace_id": "bcb084ed-f8c9-422c-b148-29839c0f9227",
+  "tenant_id": "9f37a392-f0ae-4280-9796-f1864a10effc",
+  "client_id": "7b597aac-de00-44c9-8e2a-3d2c345c36a9"
+}
+```
+
+**Set environment variables** in Databricks job cluster configuration:
+
+```json
+{
+  "spark_env_vars": {
+    "POWERBI_CLIENT_SECRET": "{{secrets/powerbi-secrets/client-secret}}",
+    "POWERBI_USERNAME": "{{secrets/powerbi-secrets/username}}",
+    "POWERBI_PASSWORD": "{{secrets/powerbi-secrets/password}}"
+  }
+}
+```
+
+**Note**: No secrets in job parameters - just their names! All retrieved from Key Vault.
+
+---
+
+#### Option 2: Environment Variables (Development Only)
+
+**For local development**, use environment variables:
+
+```python
+import os
+
+# Retrieve from environment
+client_secret = os.getenv("POWERBI_CLIENT_SECRET")
+username = os.getenv("POWERBI_USERNAME")
+password = os.getenv("POWERBI_PASSWORD")
+databricks_token = os.getenv("DATABRICKS_TOKEN")
+```
+
+**Set environment variables** in Databricks job cluster configuration:
+
+```json
+{
+  "spark_env_vars": {
+    "POWERBI_CLIENT_SECRET": "{{secrets/powerbi-secrets/client-secret}}",
+    "POWERBI_USERNAME": "{{secrets/powerbi-secrets/username}}",
+    "POWERBI_PASSWORD": "{{secrets/powerbi-secrets/password}}"
+  }
+}
+```
