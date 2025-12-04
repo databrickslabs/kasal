@@ -321,6 +321,43 @@ X-RateLimit-Reset: 1609459200
 
 ---
 
+## Memory Management
+
+### GET /api/v1/memory/{crew_id}
+**Get crew memory (short-term and long-term)**
+
+```json
+Response: 200 OK
+{
+  "short_term": [
+    {
+      "timestamp": "2024-01-15T10:00:00Z",
+      "content": "Customer prefers email communication"
+    }
+  ],
+  "long_term": [
+    {
+      "category": "preferences",
+      "insights": ["Email preferred", "Weekly reports"]
+    }
+  ]
+}
+```
+
+### POST /api/v1/memory/{crew_id}/clear
+**Clear crew memory**
+
+```json
+Request:
+{
+  "type": "short_term"  // Options: "short_term", "long_term", or "all"
+}
+
+Response: 204 No Content
+```
+
+---
+
 ## WebSocket Endpoints
 
 ### Real-Time Execution Updates

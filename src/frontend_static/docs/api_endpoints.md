@@ -4,6 +4,26 @@ Complete reference for all available API endpoints in the Kasal platform.
 
 ---
 
+## Base URL
+
+All API endpoints use the following base URL structure:
+
+```
+https://<your-app>.databricksapps.com/api/v1
+```
+
+**Example:**
+```
+https://kasal-dev-1444828305810485.aws.databricksapps.com/api/v1/executions
+```
+
+**Local Development:**
+```
+http://localhost:8000/api/v1
+```
+
+---
+
 ## Table of Contents
 
 - [Authentication](#authentication)
@@ -212,18 +232,6 @@ Authorization: Bearer <JWT_TOKEN>
 |--------|----------|-------------|
 | `POST` | `/powerbi/config` | Configure Power BI connection |
 | `GET` | `/powerbi/config` | Get Power BI configuration |
-| `POST` | `/powerbi/validate` | Validate Power BI credentials |
-| `GET` | `/powerbi/workspaces` | List available workspaces |
-| `GET` | `/powerbi/datasets` | List datasets in workspace |
-| `GET` | `/powerbi/datasets/{id}/info` | Get dataset metadata |
-
-### Power BI Analysis
-
-| Method | Endpoint | Description |
-|--------|----------|-------------|
-| `POST` | `/powerbi/query` | Execute DAX query |
-| `POST` | `/powerbi/analyze` | Run complex analysis via Databricks |
-| `GET` | `/powerbi/jobs/{id}/status` | Get analysis job status |
 
 **Power BI Tool Configuration (Task-Level):**
 ```json
@@ -313,6 +321,43 @@ X-RateLimit-Reset: 1609459200
 
 ---
 
+## Memory Management
+
+### GET /api/v1/memory/{crew_id}
+**Get crew memory (short-term and long-term)**
+
+```json
+Response: 200 OK
+{
+  "short_term": [
+    {
+      "timestamp": "2024-01-15T10:00:00Z",
+      "content": "Customer prefers email communication"
+    }
+  ],
+  "long_term": [
+    {
+      "category": "preferences",
+      "insights": ["Email preferred", "Weekly reports"]
+    }
+  ]
+}
+```
+
+### POST /api/v1/memory/{crew_id}/clear
+**Clear crew memory**
+
+```json
+Request:
+{
+  "type": "short_term"  // Options: "short_term", "long_term", or "all"
+}
+
+Response: 204 No Content
+```
+
+---
+
 ## WebSocket Endpoints
 
 ### Real-Time Execution Updates
@@ -340,7 +385,7 @@ ws://localhost:8000/ws/executions/{execution_id}
 
 ```bash
 # 1. Create a crew
-curl -X POST http://localhost:8000/crews \
+curl -X POST http://localhost:8000/api/v1/crews \
   -H "Authorization: Bearer $TOKEN" \
   -H "Content-Type: application/json" \
   -d '{
@@ -352,7 +397,7 @@ curl -X POST http://localhost:8000/crews \
 # Response: {"id": "crew_123", ...}
 
 # 2. Start execution
-curl -X POST http://localhost:8000/crews/crew_123/kickoff \
+curl -X POST http://localhost:8000/api/v1/crews/crew_123/kickoff \
   -H "Authorization: Bearer $TOKEN" \
   -H "Content-Type: application/json" \
   -d '{"inputs": {"query": "Analyze Q4 sales"}}'
@@ -360,7 +405,7 @@ curl -X POST http://localhost:8000/crews/crew_123/kickoff \
 # Response: {"execution_id": "exec_456", ...}
 
 # 3. Monitor execution
-curl -X GET http://localhost:8000/executions/exec_456/status \
+curl -X GET http://localhost:8000/api/v1/executions/exec_456/status \
   -H "Authorization: Bearer $TOKEN"
 ```
 
@@ -368,7 +413,7 @@ curl -X GET http://localhost:8000/executions/exec_456/status \
 
 ```bash
 # Create task with PowerBI configuration
-curl -X POST http://localhost:8000/tasks \
+curl -X POST http://localhost:8000/api/v1/tasks \
   -H "Authorization: Bearer $TOKEN" \
   -H "Content-Type: application/json" \
   -d '{

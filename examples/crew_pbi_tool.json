@@ -1,15 +1,15 @@
 {
-  "id": "42a83f99-c519-4377-b924-881d1ef78a67",
+  "id": "1a6b7844-c651-4e88-b95d-84fcef04231a",
   "name": "pbi_tool",
   "agent_ids": [
-    "6f6081da-c3a6-448c-ab54-8ebeed3ea212"
+    "b6e6638e-fbae-465d-b64e-031a7491f6a3"
   ],
   "task_ids": [
-    "2868464e-4f67-4776-be43-354303d51231"
+    "82defb03-9686-408b-a81f-e32be0d4ec4d"
   ],
   "nodes": [
     {
-      "id": "task-2868464e-4f67-4776-be43-354303d51231",
+      "id": "task-82defb03-9686-408b-a81f-e32be0d4ec4d",
       "type": "taskNode",
       "position": {
         "x": 368,
@@ -21,11 +21,20 @@
         "goal": null,
         "backstory": null,
         "tools": [
-          "72"
+          "71"
         ],
-        "tool_configs": null,
+        "tool_configs": {
+          "PowerBIAnalysisTool": {
+            "tenant_id": "9f37a392-f0ae-4280-9796-f1864a10effc",
+            "client_id": "7b597aac-de00-44c9-8e2a-3d2c345c36a9",
+            "workspace_id": "bcb084ed-f8c9-422c-b148-29839c0f9227",
+            "semantic_model_id": "a17de62e-8dc0-4a8a-acaa-2a9954de8c75",
+            "auth_method": "service_principal",
+            "databricks_job_id": 365257288725339
+          }
+        },
         "agentId": null,
-        "taskId": "2868464e-4f67-4776-be43-354303d51231",
+        "taskId": "82defb03-9686-408b-a81f-e32be0d4ec4d",
         "llm": null,
         "function_calling_llm": null,
         "max_iter": null,
@@ -45,7 +54,7 @@
         "use_system_prompt": null,
         "respect_context_window": null,
         "type": "task",
-        "description": "Execute job ID 365257288725339 ONE TIME. \n\nExecute the job with those parameters:\n- question: {question}\n- workspace_id: 'bcb084ed-aaa-bbb-ccc-ddd'\n- semantic_model_id: 'a17de62e-8dc0-4a8a-acaa-2a9954de8c75'\n- auth_method: 'service_principal'\n- tenant_id: '9f37a392-aaa-bbb-ccc-ddd'\n- client_id: '7b597aac-aaa-bbb-ccc-ddd'\n- client_secret: 'doM8Q~ddd~dd.3xcbiK'\n- sample_size: 100\n- metadata: 'json'\n- databricks_host: 'https://e2-<dbx-host>.databricks.com/'\n- databricks_token: 'dapia-xxxx'\n\nI don't want you to list or get the job; I want you to run it once; you are not allowed to run more than once. Use PowerBITool to execute this query.\n\nIMPORTANT: You will make sure that the action run will only trigger 1 time and not more.",
+        "description": "Execute job ID 365257288725339 ONE TIME. \n\nExecute the job with those parameters:\n- question: {question}\n- sample_size: 100\n- metadata: 'json'\n- databricks_host: 'https://e2-demo-field-eng.cloud.databricks.com/'\n\nI don't want you to list or get the job; I want you to run it once; you are not allowed to run more than once. Use PowerBITool to execute this query.\n\nIMPORTANT: You will make sure that the action run will only trigger 1 time and not more.",
         "expected_output": "A job execution result containing the result data from running job ID 365257288725339 with the custom parameters. The output will include any result_data and various other parameters.",
         "icon": null,
         "advanced_config": null,
@@ -78,7 +87,7 @@
       "style": null
     },
     {
-      "id": "agent-6f6081da-c3a6-448c-ab54-8ebeed3ea212",
+      "id": "agent-b6e6638e-fbae-465d-b64e-031a7491f6a3",
       "type": "agentNode",
       "position": {
         "x": 68,
@@ -93,7 +102,7 @@
           "72"
         ],
         "tool_configs": null,
-        "agentId": "6f6081da-c3a6-448c-ab54-8ebeed3ea212",
+        "agentId": "b6e6638e-fbae-465d-b64e-031a7491f6a3",
         "taskId": null,
         "llm": "databricks-llama-4-maverick",
         "function_calling_llm": null,
@@ -139,13 +148,13 @@
   ],
   "edges": [
     {
-      "source": "agent-6f6081da-c3a6-448c-ab54-8ebeed3ea212",
-      "target": "task-2868464e-4f67-4776-be43-354303d51231",
+      "source": "agent-b6e6638e-fbae-465d-b64e-031a7491f6a3",
+      "target": "task-82defb03-9686-408b-a81f-e32be0d4ec4d",
       "id": "reactflow__edge-agent-2d21de66-438d-4a70-8be0-f16dd0a8d4aa-task-c2c71f3e-89e8-4786-84dd-fd0e2f063ad1-right-left",
       "sourceHandle": null,
       "targetHandle": null
     }
   ],
-  "created_at": "2025-11-26T08:21:41.264255",
-  "updated_at": "2025-11-26T08:21:41.264257"
+  "created_at": "2025-12-03T16:09:08.320279",
+  "updated_at": "2025-12-03T16:09:08.320281"
 }
