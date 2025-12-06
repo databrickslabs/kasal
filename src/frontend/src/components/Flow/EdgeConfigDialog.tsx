@@ -17,14 +17,25 @@ import {
   Divider,
   Checkbox,
   FormGroup,
+  Select,
+  MenuItem,
   IconButton
 } from '@mui/material';
+import {
+  Delete as DeleteIcon,
+  Add as AddIcon
+} from '@mui/icons-material';
 import { Edge, Node } from 'reactflow';
-import DeleteIcon from '@mui/icons-material/Delete';
-import AddIcon from '@mui/icons-material/Add';
 import ConditionBuilder, { Condition, conditionsToPython, pythonToConditions } from './ConditionBuilder';
 
 export type FlowLogicType = 'AND' | 'OR' | 'ROUTER' | 'NONE';
+
+// State mapping: extract task output field and save to state variable
+export interface StateMapping {
+  sourceTaskId: string;   // Which task's output to read from
+  outputField: string;    // Field to extract from task output (e.g., "confidence", "result.status")
+  stateVariable: string;  // State variable name to save to (e.g., "confidence", "last_status")
+}
 
 interface Task {
   id: string;
@@ -43,28 +54,18 @@ interface EdgeConfigDialogProps {
   nodes: Node[];  // Pass nodes as prop instead of using useReactFlow
   onSave: (edgeId: string, config: EdgeConfig) => void;
   aggregatedSourceTasks?: AggregatedSourceTasks[];  // Tasks from all source crews
-}
-
-export interface StateWrite {
-  variable: string;
-  value?: unknown;
-  expression?: string;  // Python expression to compute value
-}
-
-export interface StateOperations {
-  reads?: string[];  // State variables to read
-  writes?: StateWrite[];  // State variables to write
-  condition?: string;  // State-based condition for routing
+  flowStateVariables?: string[];  // State variables from other edges in the flow
 }
 
 export interface EdgeConfig {
   logicType: FlowLogicType;
-  routerCondition?: string;
+  routerCondition?: string;       // Evaluated against state variables (e.g., "state.confidence > 0.8")
   description?: string;
-  listenToTaskIds?: string[];  // Tasks from source crew
-  targetTaskIds?: string[];     // Tasks from target crew
-  stateOperations?: StateOperations;  // State operations during transition
-  persistAfterExecution?: boolean;  // Method-level persistence
+  listenToTaskIds?: string[];     // Tasks from source crew to wait for
+  targetTaskIds?: string[];       // Tasks from target crew to execute
+  // State management (aligned with CrewAI Flow state)
+  stateMappings?: StateMapping[]; // Extract task outputs → state variables (with sourceTaskId)
+  checkpoint?: boolean;           // Enable @persist - checkpoint after this step for resume capability
 }
 
 const EdgeConfigDialog: React.FC<EdgeConfigDialogProps> = ({
@@ -73,7 +74,8 @@ const EdgeConfigDialog: React.FC<EdgeConfigDialogProps> = ({
   edge,
   nodes,
   onSave,
-  aggregatedSourceTasks = []
+  aggregatedSourceTasks = [],
+  flowStateVariables = []
 }) => {
   const [logicType, setLogicType] = useState<FlowLogicType>('NONE');
   const [routerConditions, setRouterConditions] = useState<Condition[]>([]);
@@ -81,11 +83,9 @@ const EdgeConfigDialog: React.FC<EdgeConfigDialogProps> = ({
   const [listenToTaskIds, setListenToTaskIds] = useState<string[]>([]);
   const [targetTaskIds, setTargetTaskIds] = useState<string[]>([]);
 
-  // State management fields
-  const [stateReads, setStateReads] = useState<string[]>([]);
-  const [stateWrites, setStateWrites] = useState<Array<{ key: string; value: string }>>([]);
-  const [stateConditions, setStateConditions] = useState<Condition[]>([]);
-  const [persistAfterExecution, setPersistAfterExecution] = useState(false);
+  // State management
+  const [stateMappings, setStateMappings] = useState<StateMapping[]>([]);
+  const [checkpoint, setCheckpoint] = useState(false);
 
   // Get target node from passed nodes prop
   const targetNode = edge ? nodes.find(n => n.id === edge.target) : null;
@@ -97,9 +97,27 @@ const EdgeConfigDialog: React.FC<EdgeConfigDialogProps> = ({
   const sourceNode = edge ? nodes.find(n => n.id === edge.source) : null;
   const fallbackSourceTasks: Task[] = sourceNode?.data?.allTasks || [];
 
+  // Debug logging for source tasks
+  console.log('EdgeConfigDialog: source tasks check', {
+    aggregatedSourceTasksLength: aggregatedSourceTasks.length,
+    aggregatedSourceTasks: aggregatedSourceTasks,
+    fallbackSourceTasksLength: fallbackSourceTasks.length,
+    fallbackSourceTasks: fallbackSourceTasks,
+    sourceNodeId: sourceNode?.id,
+    sourceNodeDataKeys: sourceNode?.data ? Object.keys(sourceNode.data) : []
+  });
+
   // Load existing configuration when edge changes
   useEffect(() => {
     if (edge && edge.data) {
+      console.log('EdgeConfigDialog: Loading edge data', {
+        edgeId: edge.id,
+        logicType: edge.data.logicType,
+        listenToTaskIds: edge.data.listenToTaskIds,
+        stateMappings: edge.data.stateMappings,
+        allDataKeys: Object.keys(edge.data)
+      });
+
       setLogicType(edge.data.logicType || 'NONE');
 
       // Parse router condition from string to conditions array
@@ -110,21 +128,9 @@ const EdgeConfigDialog: React.FC<EdgeConfigDialogProps> = ({
       setListenToTaskIds(edge.data.listenToTaskIds || []);
       setTargetTaskIds(edge.data.targetTaskIds || []);
 
-      // Load state operations
-      setStateReads(edge.data.stateOperations?.reads || []);
-
-      // Convert StateWrite[] to simple key-value pairs
-      const writes = edge.data.stateOperations?.writes || [];
-      setStateWrites(writes.map((w: StateWrite) => ({
-        key: w.variable,
-        value: w.expression || String(w.value || '')
-      })));
-
-      // Parse state condition from string to conditions array
-      const stateCondStr = edge.data.stateOperations?.condition || '';
-      setStateConditions(stateCondStr ? pythonToConditions(stateCondStr) : []);
-
-      setPersistAfterExecution(edge.data.persistAfterExecution || false);
+      // Load state management settings
+      setStateMappings(edge.data.stateMappings || []);
+      setCheckpoint(edge.data.checkpoint || false);
     } else {
       // Reset to defaults
       setLogicType('NONE');
@@ -132,10 +138,8 @@ const EdgeConfigDialog: React.FC<EdgeConfigDialogProps> = ({
       setDescription('');
       setListenToTaskIds([]);
       setTargetTaskIds([]);
-      setStateReads([]);
-      setStateWrites([]);
-      setStateConditions([]);
-      setPersistAfterExecution(false);
+      setStateMappings([]);
+      setCheckpoint(false);
     }
   }, [edge]);
 
@@ -153,35 +157,38 @@ const EdgeConfigDialog: React.FC<EdgeConfigDialogProps> = ({
   const handleSave = () => {
     if (!edge) return;
 
-    // Convert conditions to Python expressions
+    // Convert conditions to Python expressions (conditions now reference state variables)
     const routerConditionStr = conditionsToPython(routerConditions);
-    const stateConditionStr = conditionsToPython(stateConditions);
 
-    // Convert key-value writes to StateWrite format
-    const stateWritesFormatted: StateWrite[] = stateWrites
-      .filter(w => w.key.trim())
-      .map(w => ({
-        variable: w.key.trim(),
-        expression: w.value.trim() || undefined
-      }));
+    // Filter out incomplete state mappings (need sourceTaskId, outputField, and stateVariable)
+    const validStateMappings = stateMappings.filter(
+      m => m.sourceTaskId && m.outputField.trim() && m.stateVariable.trim()
+    );
 
     const config: EdgeConfig = {
       logicType,
       description,
       listenToTaskIds,
       targetTaskIds,
-      stateOperations: {
-        reads: stateReads.length > 0 ? stateReads : undefined,
-        writes: stateWritesFormatted.length > 0 ? stateWritesFormatted : undefined,
-        condition: stateConditionStr || undefined,
-      },
-      persistAfterExecution,
+      // Include state management if configured
+      ...(validStateMappings.length > 0 && { stateMappings: validStateMappings }),
+      ...(checkpoint && { checkpoint: true }),
     };
 
     // Only include router condition if logic type is ROUTER
-    if (logicType === 'ROUTER') {
+    // Router conditions are evaluated against state variables (populated by stateMappings)
+    if (logicType === 'ROUTER' && routerConditionStr) {
       config.routerCondition = routerConditionStr;
     }
+
+    console.log('EdgeConfigDialog: Saving config', {
+      edgeId: edge.id,
+      logicType: config.logicType,
+      routerCondition: config.routerCondition,
+      stateMappings: config.stateMappings,
+      listenToTaskIds: config.listenToTaskIds,
+      allConfigKeys: Object.keys(config)
+    });
 
     onSave(edge.id, config);
     onClose();
@@ -202,6 +209,40 @@ const EdgeConfigDialog: React.FC<EdgeConfigDialogProps> = ({
         : [...prev, taskId]
     );
   };
+
+  // State mapping helpers
+  const handleAddStateMapping = () => {
+    // Default to first selected task if available
+    const defaultTaskId = listenToTaskIds.length > 0 ? listenToTaskIds[0] : '';
+    setStateMappings([...stateMappings, { sourceTaskId: defaultTaskId, outputField: '', stateVariable: '' }]);
+  };
+
+  const handleRemoveStateMapping = (index: number) => {
+    setStateMappings(stateMappings.filter((_, i) => i !== index));
+  };
+
+  const handleStateMappingChange = (index: number, field: 'sourceTaskId' | 'outputField' | 'stateVariable', value: string) => {
+    const updated = [...stateMappings];
+    updated[index] = { ...updated[index], [field]: value };
+    setStateMappings(updated);
+  };
+
+  // Get all source tasks as flat list for state mapping dropdown
+  const allSourceTasks: Task[] = aggregatedSourceTasks.length > 0
+    ? aggregatedSourceTasks.flatMap(g => g.tasks)
+    : fallbackSourceTasks;
+
+  // Get state variable names for displaying in condition builder hint
+  // Combine current edge's state mappings with flow-wide state variables
+  const currentEdgeStateVars = stateMappings
+    .filter(m => m.stateVariable.trim())
+    .map(m => m.stateVariable.trim());
+
+  // Combine and deduplicate: current edge vars + flow-wide vars
+  const allStateVariableNames = [...new Set([...currentEdgeStateVars, ...flowStateVariables])];
+
+  // Separate into "this edge" vs "from flow" for better display
+  const flowOnlyStateVars = flowStateVariables.filter(v => !currentEdgeStateVars.includes(v));
 
   const handleCancel = () => {
     onClose();
@@ -503,164 +544,157 @@ const EdgeConfigDialog: React.FC<EdgeConfigDialogProps> = ({
             </RadioGroup>
           </FormControl>
 
-          {/* Router Condition (only shown when ROUTER is selected) */}
+          {/* Router Configuration (only shown when ROUTER is selected) */}
           {logicType === 'ROUTER' && (
-            <Box sx={{ mt: 1 }}>
-              <ConditionBuilder
-                conditions={routerConditions}
-                onChange={setRouterConditions}
-                label="Router Conditions"
-                helperText="Define conditions to evaluate during routing"
-              />
-            </Box>
-          )}
-
-          {/* Info: How Data Flows */}
-          <Alert severity="info" sx={{ fontSize: '0.75rem', py: 0.5, mb: 2 }}>
-            <Typography variant="caption" sx={{ fontWeight: 600, display: 'block', mb: 0.5, fontSize: '0.75rem' }}>
-              How Output Flows Between Crews
-            </Typography>
-            <Typography variant="caption" sx={{ fontSize: '0.7rem', display: 'block' }}>
-              • The output from the source crew is <strong>automatically passed</strong> to the target crew
-            </Typography>
-            <Typography variant="caption" sx={{ fontSize: '0.7rem', display: 'block' }}>
-              • Target crew can access it via <code style={{ fontSize: '0.7rem', background: '#f5f5f5', padding: '1px 4px', borderRadius: '2px' }}>previous_output</code> or <code style={{ fontSize: '0.7rem', background: '#f5f5f5', padding: '1px 4px', borderRadius: '2px' }}>self.state[&apos;previous_output&apos;]</code>
-            </Typography>
-            <Typography variant="caption" sx={{ fontSize: '0.7rem', display: 'block' }}>
-              • Use state variables below to store additional context across the flow
-            </Typography>
-          </Alert>
-
-          {/* State Operations Section */}
-          <Box sx={{ mt: 2 }}>
-            <Typography variant="subtitle2" sx={{ mb: 1, fontWeight: 600 }}>
-              State Management (Optional)
-            </Typography>
-
-            {/* State Reads */}
-            <TextField
-              fullWidth
-              size="small"
-              label="State Variables to Read"
-              placeholder="e.g., score, count, status (comma-separated)"
-              value={stateReads.join(', ')}
-              onChange={(e) => setStateReads(
-                e.target.value.split(',').map(v => v.trim()).filter(v => v)
-              )}
-              helperText="Variables to read from flow state"
-              sx={{ mb: 1.5 }}
-            />
-
-            {/* State Writes - Simplified Key-Value Interface */}
-            <Box sx={{ mb: 1.5 }}>
-              <Typography variant="subtitle2" sx={{ mb: 1, fontWeight: 600, fontSize: '0.875rem' }}>
-                State Variables to Write
+            <Box sx={{ mt: 1, p: 2, bgcolor: 'action.hover', borderRadius: 1 }}>
+              <Typography variant="subtitle2" sx={{ mb: 1.5, fontWeight: 600, color: 'primary.main' }}>
+                Router Configuration
               </Typography>
-              {stateWrites.length === 0 ? (
-                <Box
-                  sx={{
-                    border: '1px dashed',
-                    borderColor: 'divider',
-                    borderRadius: 1,
-                    p: 2,
-                    textAlign: 'center',
-                    cursor: 'pointer',
-                    '&:hover': { borderColor: 'primary.main', bgcolor: 'action.hover' }
-                  }}
-                  onClick={() => setStateWrites([{ key: '', value: '' }])}
-                >
-                  <Typography variant="body2" color="text.secondary" sx={{ fontSize: '0.8rem' }}>
-                    Click to add state variables
-                  </Typography>
-                </Box>
-              ) : (
-                <Box sx={{ display: 'flex', flexDirection: 'column', gap: 1 }}>
-                  {stateWrites.map((write, index) => (
-                    <Box key={index} sx={{ display: 'flex', gap: 1, alignItems: 'center' }}>
-                      <TextField
-                        size="small"
-                        placeholder="Variable name"
-                        value={write.key}
-                        onChange={(e) => {
-                          const updated = [...stateWrites];
-                          updated[index] = { ...updated[index], key: e.target.value };
-                          setStateWrites(updated);
-                        }}
-                        sx={{ flex: 1, '& input': { fontSize: '0.85rem' } }}
-                      />
-                      <Typography variant="body2" sx={{ mx: 0.5 }}>=</Typography>
-                      <TextField
-                        size="small"
-                        placeholder="Value or expression"
-                        value={write.value}
-                        onChange={(e) => {
-                          const updated = [...stateWrites];
-                          updated[index] = { ...updated[index], value: e.target.value };
-                          setStateWrites(updated);
-                        }}
-                        sx={{ flex: 2, '& input': { fontSize: '0.85rem' } }}
-                      />
-                      <IconButton
-                        size="small"
-                        onClick={() => setStateWrites(stateWrites.filter((_, i) => i !== index))}
-                        sx={{ color: 'error.main' }}
-                      >
-                        <DeleteIcon fontSize="small" />
-                      </IconButton>
-                    </Box>
-                  ))}
+
+              {/* Step 1: State Mappings - extract task outputs to state variables */}
+              <Box sx={{ mb: 2 }}>
+                <Typography variant="subtitle2" sx={{ fontWeight: 600, fontSize: '0.8rem', mb: 0.5, display: 'flex', alignItems: 'center', gap: 1 }}>
+                  <Box component="span" sx={{ bgcolor: 'primary.main', color: 'white', borderRadius: '50%', width: 20, height: 20, display: 'inline-flex', alignItems: 'center', justifyContent: 'center', fontSize: '0.7rem' }}>1</Box>
+                  Save Task Output to State
+                </Typography>
+                <Typography variant="caption" color="text.secondary" sx={{ fontSize: '0.7rem', display: 'block', mb: 1.5, ml: 3.5 }}>
+                  Extract values from task outputs to use in the route condition
+                </Typography>
+
+                {listenToTaskIds.length === 0 ? (
+                  <Alert severity="warning" sx={{ fontSize: '0.75rem', py: 0.5, ml: 3.5 }}>
+                    <Typography variant="caption" sx={{ fontSize: '0.7rem' }}>
+                      Select source tasks above first to enable state mappings
+                    </Typography>
+                  </Alert>
+                ) : stateMappings.length === 0 ? (
                   <Box
                     sx={{
                       border: '1px dashed',
                       borderColor: 'divider',
                       borderRadius: 1,
-                      p: 1,
+                      p: 1.5,
                       textAlign: 'center',
                       cursor: 'pointer',
-                      display: 'flex',
-                      alignItems: 'center',
-                      justifyContent: 'center',
-                      gap: 0.5,
-                      '&:hover': { borderColor: 'primary.main', bgcolor: 'action.hover' }
+                      ml: 3.5,
+                      '&:hover': { borderColor: 'primary.main', bgcolor: 'background.paper' }
                     }}
-                    onClick={() => setStateWrites([...stateWrites, { key: '', value: '' }])}
+                    onClick={handleAddStateMapping}
                   >
-                    <AddIcon fontSize="small" />
-                    <Typography variant="body2" sx={{ fontSize: '0.8rem' }}>
-                      Add variable
+                    <AddIcon fontSize="small" sx={{ color: 'text.secondary', mb: 0.5 }} />
+                    <Typography variant="body2" color="text.secondary" sx={{ fontSize: '0.8rem' }}>
+                      Add state mapping
                     </Typography>
                   </Box>
-                </Box>
-              )}
-              <Typography variant="caption" color="text.secondary" sx={{ mt: 0.5, display: 'block', fontSize: '0.75rem' }}>
-                Variables to write to flow state
-              </Typography>
-            </Box>
+                ) : (
+                  <Box sx={{ display: 'flex', flexDirection: 'column', gap: 1, ml: 3.5 }}>
+                    {stateMappings.map((mapping, index) => (
+                      <Box key={index} sx={{ display: 'flex', gap: 1, alignItems: 'center', flexWrap: 'wrap' }}>
+                        <FormControl size="small" sx={{ minWidth: 120 }}>
+                          <Select
+                            value={mapping.sourceTaskId || ''}
+                            onChange={(e) => handleStateMappingChange(index, 'sourceTaskId', e.target.value)}
+                            displayEmpty
+                            sx={{ fontSize: '0.75rem' }}
+                          >
+                            <MenuItem value="" disabled><em>Task</em></MenuItem>
+                            {allSourceTasks.map((task) => (
+                              <MenuItem key={task.id} value={task.id} sx={{ fontSize: '0.75rem' }}>{task.name}</MenuItem>
+                            ))}
+                          </Select>
+                        </FormControl>
+                        <Typography variant="body2" sx={{ color: 'text.secondary', fontSize: '0.7rem' }}>.</Typography>
+                        <TextField
+                          size="small"
+                          placeholder="field"
+                          value={mapping.outputField}
+                          onChange={(e) => handleStateMappingChange(index, 'outputField', e.target.value)}
+                          sx={{ width: 80, '& input': { fontSize: '0.75rem' } }}
+                        />
+                        <Typography variant="body2" sx={{ color: 'primary.main', fontWeight: 600 }}>→</Typography>
+                        <TextField
+                          size="small"
+                          placeholder="state var"
+                          value={mapping.stateVariable}
+                          onChange={(e) => handleStateMappingChange(index, 'stateVariable', e.target.value)}
+                          sx={{ width: 90, '& input': { fontSize: '0.75rem' } }}
+                        />
+                        <IconButton size="small" onClick={() => handleRemoveStateMapping(index)} sx={{ color: 'error.main', p: 0.5 }}>
+                          <DeleteIcon fontSize="small" />
+                        </IconButton>
+                      </Box>
+                    ))}
+                    <Button size="small" startIcon={<AddIcon />} onClick={handleAddStateMapping} sx={{ alignSelf: 'flex-start', fontSize: '0.7rem' }}>
+                      Add mapping
+                    </Button>
+                  </Box>
+                )}
+              </Box>
 
-            {/* State Condition - Using ConditionBuilder */}
-            <ConditionBuilder
-              conditions={stateConditions}
-              onChange={setStateConditions}
-              label="State-Based Conditions (Optional)"
-              helperText="Conditions for state-based routing decisions"
-            />
+              <Divider sx={{ my: 2 }} />
 
-            {/* Persist After Execution */}
-            <FormControlLabel
-              control={
-                <Checkbox
-                  size="small"
-                  checked={persistAfterExecution}
-                  onChange={(e) => setPersistAfterExecution(e.target.checked)}
-                />
-              }
-              label={
-                <Typography variant="body2" sx={{ fontSize: '0.85rem' }}>
-                  Persist state after execution (method-level persistence)
+              {/* Step 2: Route Condition - evaluates state variables */}
+              <Box sx={{ mb: 1 }}>
+                <Typography variant="subtitle2" sx={{ fontWeight: 600, fontSize: '0.8rem', mb: 0.5, display: 'flex', alignItems: 'center', gap: 1 }}>
+                  <Box component="span" sx={{ bgcolor: 'primary.main', color: 'white', borderRadius: '50%', width: 20, height: 20, display: 'inline-flex', alignItems: 'center', justifyContent: 'center', fontSize: '0.7rem' }}>2</Box>
+                  Route Condition
                 </Typography>
-              }
-            />
-          </Box>
+
+                {/* Show available state variables */}
+                <Box sx={{ ml: 3.5, mb: 1.5 }}>
+                  {allStateVariableNames.length > 0 ? (
+                    <Box sx={{ display: 'flex', flexDirection: 'column', gap: 0.5 }}>
+                      {currentEdgeStateVars.length > 0 && (
+                        <Typography variant="caption" color="text.secondary" sx={{ fontSize: '0.7rem' }}>
+                          <strong>This edge:</strong> {currentEdgeStateVars.join(', ')}
+                        </Typography>
+                      )}
+                      {flowOnlyStateVars.length > 0 && (
+                        <Typography variant="caption" color="text.secondary" sx={{ fontSize: '0.7rem' }}>
+                          <strong>From flow:</strong> {flowOnlyStateVars.join(', ')}
+                        </Typography>
+                      )}
+                      {currentEdgeStateVars.length === 0 && flowOnlyStateVars.length > 0 && (
+                        <Typography variant="caption" color="warning.main" sx={{ fontSize: '0.65rem', fontStyle: 'italic' }}>
+                          Tip: Add state mappings above to extract values from this edge&apos;s tasks
+                        </Typography>
+                      )}
+                    </Box>
+                  ) : (
+                    <Typography variant="caption" color="text.secondary" sx={{ fontSize: '0.7rem' }}>
+                      Add state mappings above first, then use state variables here
+                    </Typography>
+                  )}
+                </Box>
+
+                <Box sx={{ ml: 3.5 }}>
+                  <ConditionBuilder
+                    conditions={routerConditions}
+                    onChange={setRouterConditions}
+                    label=""
+                    helperText="If TRUE → this route activates. If FALSE → route is skipped."
+                  />
+                </Box>
+              </Box>
+            </Box>
+          )}
+
+          {/* Checkpoint - Simple inline checkbox */}
+          <FormControlLabel
+            control={
+              <Checkbox
+                size="small"
+                checked={checkpoint}
+                onChange={(e) => setCheckpoint(e.target.checked)}
+              />
+            }
+            label={
+              <Typography variant="body2" sx={{ fontSize: '0.85rem' }}>
+                Enable Checkpoint <Typography component="span" variant="caption" color="text.secondary">— Resume flow from here if interrupted</Typography>
+              </Typography>
+            }
+            sx={{ mt: 1, ml: 0 }}
+          />
 
           {/* Description */}
           <TextField

@@ -128,9 +128,18 @@ const FlowCanvas: React.FC<FlowCanvasProps> = ({
   const [isEdgeDialogOpen, setIsEdgeDialogOpen] = useState(false);
   const [selectedEdge, setSelectedEdge] = useState<Edge | null>(null);
   const [aggregatedSourceTasks, setAggregatedSourceTasks] = useState<Array<{ crewName: string; tasks: any[] }>>([]);
+  const [flowStateVariables, setFlowStateVariables] = useState<string[]>([]);
 
   // Handle edge click for configuration
   const handleEdgeClick = useCallback((event: React.MouseEvent, edge: Edge) => {
+    console.log('FlowCanvas: handleEdgeClick', {
+      edgeId: edge.id,
+      edgeDataKeys: Object.keys(edge.data || {}),
+      stateMappings: edge.data?.stateMappings,
+      routeName: edge.data?.routeName,
+      logicType: edge.data?.logicType
+    });
+
     // Check if this edge is part of a merge group
     const mergeGroupId = edge.data?.mergeGroupId;
 
@@ -158,6 +167,14 @@ const FlowCanvas: React.FC<FlowCanvasProps> = ({
     } else {
       // For non-merged edges, just use the single source
       const sourceNode = nodes.find(n => n.id === edge.source);
+      console.log('FlowCanvas: handleEdgeClick source node lookup', {
+        edgeSource: edge.source,
+        sourceNodeFound: !!sourceNode,
+        sourceNodeType: sourceNode?.type,
+        sourceNodeDataKeys: sourceNode?.data ? Object.keys(sourceNode.data) : [],
+        allTasksLength: sourceNode?.data?.allTasks?.length,
+        allTasks: sourceNode?.data?.allTasks
+      });
       if (sourceNode && sourceNode.data?.allTasks?.length > 0) {
         aggregated.push({
           crewName: sourceNode.data?.label || sourceNode.data?.crewName || 'Unknown Crew',
@@ -166,8 +183,32 @@ const FlowCanvas: React.FC<FlowCanvasProps> = ({
       }
     }
 
+    console.log('FlowCanvas: aggregatedSourceTasks', {
+      aggregatedLength: aggregated.length,
+      aggregated: aggregated
+    });
+
+    // Collect all state variables from ALL edges in the flow (excluding current edge)
+    // This allows router conditions to reference state set by previous edges
+    const allStateVars = new Set<string>();
+    edges.forEach(e => {
+      if (e.id !== edge.id && e.data?.stateMappings) {
+        e.data.stateMappings.forEach((mapping: { stateVariable?: string }) => {
+          if (mapping.stateVariable?.trim()) {
+            allStateVars.add(mapping.stateVariable.trim());
+          }
+        });
+      }
+    });
+
+    console.log('FlowCanvas: flowStateVariables', {
+      count: allStateVars.size,
+      variables: Array.from(allStateVars)
+    });
+
     setSelectedEdge(edge);
     setAggregatedSourceTasks(aggregated);
+    setFlowStateVariables(Array.from(allStateVars));
     setIsEdgeDialogOpen(true);
   }, [edges, nodes]);
 
@@ -203,6 +244,13 @@ const FlowCanvas: React.FC<FlowCanvasProps> = ({
 
   // Handle edge configuration save
   const handleEdgeSave = useCallback((edgeId: string, config: EdgeConfig) => {
+    console.log('FlowCanvas: handleEdgeSave called', {
+      edgeId,
+      configLogicType: config.logicType,
+      configStateMappings: config.stateMappings,
+      configKeys: Object.keys(config)
+    });
+
     // Find the edge to update
     const edgeIndex = edges.findIndex(e => e.id === edgeId);
     if (edgeIndex !== -1) {
@@ -239,6 +287,13 @@ const FlowCanvas: React.FC<FlowCanvasProps> = ({
           data: { ...currentEdge.data, ...config },
           type: 'crewEdge' // Ensure it uses our custom edge type
         };
+
+        console.log('FlowCanvas: Updated edge data', {
+          edgeId: updatedEdge.id,
+          updatedDataKeys: Object.keys(updatedEdge.data || {}),
+          stateMappings: updatedEdge.data?.stateMappings,
+          routeName: updatedEdge.data?.routeName
+        });
 
         // Update edge by removing old and adding updated version
         const changes: EdgeChange[] = [
@@ -827,6 +882,7 @@ const FlowCanvas: React.FC<FlowCanvasProps> = ({
           nodes={nodes}
           onSave={handleEdgeSave}
           aggregatedSourceTasks={aggregatedSourceTasks}
+          flowStateVariables={flowStateVariables}
         />
       </Box>
     </Box>

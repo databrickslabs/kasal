@@ -5,6 +5,7 @@ import axios from 'axios';
 import { SaveCrewProps } from '../../types/crews';
 import { Edge } from 'reactflow';
 import { useTabManagerStore } from '../../store/tabManager';
+import { useCrewExecutionStore } from '../../store/crewExecution';
 
 interface SaveCrewComponentProps extends SaveCrewProps {
   disabled?: boolean;
@@ -16,8 +17,18 @@ const SaveCrew: React.FC<SaveCrewComponentProps> = ({ nodes, edges, trigger, dis
   const [error, setError] = useState<string | null>(null);
   const nameInputRef = useRef<HTMLInputElement>(null);
   const [isSaving, setIsSaving] = useState(false);
-  
+
   const { activeTabId, updateTabCrewInfo } = useTabManagerStore();
+
+  // Get execution configuration from the store
+  const {
+    processType,
+    planningEnabled,
+    planningLLM,
+    reasoningEnabled,
+    reasoningLLM,
+    managerLLM
+  } = useCrewExecutionStore();
 
   // Listen for the custom event to open the save crew dialog
   useEffect(() => {
@@ -74,13 +85,25 @@ const SaveCrew: React.FC<SaveCrewComponentProps> = ({ nodes, edges, trigger, dis
           nodeIds.has(edge.source) && nodeIds.has(edge.target)
         );
 
+        // Get execution configuration from the store
+        const executionStore = useCrewExecutionStore.getState();
+        const executionConfig = {
+          process: executionStore.processType,
+          planning: executionStore.planningEnabled,
+          planning_llm: executionStore.planningEnabled && executionStore.planningLLM ? executionStore.planningLLM : undefined,
+          reasoning: executionStore.reasoningEnabled,
+          reasoning_llm: executionStore.reasoningEnabled && executionStore.reasoningLLM ? executionStore.reasoningLLM : undefined,
+          manager_llm: executionStore.processType === 'hierarchical' && executionStore.managerLLM ? executionStore.managerLLM : undefined
+        };
+
         console.log('SaveCrew: About to update crew with data:', {
           crewId,
           name: tab.savedCrewName || tab.name,
           nodes: uniqueNodes.length,
           totalEdges: uniqueEdges.length,
           validEdges: validEdges.length,
-          removedEdges: uniqueEdges.length - validEdges.length
+          removedEdges: uniqueEdges.length - validEdges.length,
+          executionConfig
         });
 
         // Use the current tab's nodes and edges for update
@@ -89,7 +112,8 @@ const SaveCrew: React.FC<SaveCrewComponentProps> = ({ nodes, edges, trigger, dis
           agent_ids: [], // Will be calculated in the service
           task_ids: [], // Will be calculated in the service
           nodes: uniqueNodes,
-          edges: validEdges
+          edges: validEdges,
+          ...executionConfig
         });
         
         console.log('SaveCrew: Update successful', updatedCrew);
@@ -168,13 +192,27 @@ const SaveCrew: React.FC<SaveCrewComponentProps> = ({ nodes, edges, trigger, dis
           return acc;
         }, []);
 
+        // Get execution configuration from the store
+        const executionStore = useCrewExecutionStore.getState();
+        const executionConfig = {
+          process: executionStore.processType,
+          planning: executionStore.planningEnabled,
+          planning_llm: executionStore.planningEnabled && executionStore.planningLLM ? executionStore.planningLLM : undefined,
+          reasoning: executionStore.reasoningEnabled,
+          reasoning_llm: executionStore.reasoningEnabled && executionStore.reasoningLLM ? executionStore.reasoningLLM : undefined,
+          manager_llm: executionStore.processType === 'hierarchical' && executionStore.managerLLM ? executionStore.managerLLM : undefined
+        };
+
+        console.log('SaveCrew: Updating crew by name with execution config:', executionConfig);
+
         // Use the found crew ID to update
         const updatedCrew = await CrewService.updateCrew(matchingCrew.id.toString(), {
           name: crewName,
           agent_ids: [], // Will be calculated in the service
           task_ids: [], // Will be calculated in the service
           nodes: uniqueNodes,
-          edges: uniqueEdges
+          edges: uniqueEdges,
+          ...executionConfig
         });
         
         console.log('SaveCrew: Update by name successful', updatedCrew);
@@ -414,21 +452,51 @@ const SaveCrew: React.FC<SaveCrewComponentProps> = ({ nodes, edges, trigger, dis
         return node;
       });
 
+      // Build execution configuration
+      const executionConfig = {
+        process: processType,
+        planning: planningEnabled,
+        planning_llm: planningEnabled && planningLLM ? planningLLM : undefined,
+        reasoning: reasoningEnabled,
+        reasoning_llm: reasoningEnabled && reasoningLLM ? reasoningLLM : undefined,
+        manager_llm: processType === 'hierarchical' && managerLLM ? managerLLM : undefined
+      };
+
+      console.log('SaveCrew: Saving with execution config:', executionConfig);
+
       const savedCrew = await CrewService.saveCrew({
         name,
         agent_ids: uniqueAgentIds,
         task_ids: uniqueTaskIds,
         nodes: processedNodes,
-        edges: validEdges
+        edges: validEdges,
+        ...executionConfig
       });
       
       console.log('SaveCrew: Save successful, closing dialog', savedCrew);
-      
+
       // Update the tab's crew info
+      console.log('SaveCrew: Updating tab crew info:', {
+        activeTabId,
+        savedCrewId: savedCrew.id,
+        savedCrewIdType: typeof savedCrew.id,
+        crewName: name,
+        willUpdate: !!(activeTabId && savedCrew.id)
+      });
+
       if (activeTabId && savedCrew.id) {
         updateTabCrewInfo(activeTabId, savedCrew.id, name);
+        // Verify the update was successful
+        const updatedTab = useTabManagerStore.getState().getTab(activeTabId);
+        console.log('SaveCrew: updateTabCrewInfo called, verification:', {
+          updatedTabSavedCrewId: updatedTab?.savedCrewId,
+          updatedTabSavedCrewName: updatedTab?.savedCrewName,
+          expectedId: savedCrew.id
+        });
+      } else {
+        console.warn('SaveCrew: Could not update tab crew info - missing activeTabId or savedCrew.id');
       }
-      
+
       // Close dialog and reset state
       handleClose();
       
