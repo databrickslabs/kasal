@@ -18,7 +18,7 @@ export const useManagerNode = ({ nodes, edges, setNodes, setEdges }: UseManagerN
   console.log('[useManagerNode] 🚀 Hook called!');
 
   const { layoutOrientation } = useUILayoutStore();
-  const { managerLLM, processType, managerNodeId, setManagerNodeId } = useCrewExecutionStore();
+  const { managerLLM, processType, managerNodeId, setManagerNodeId, isLoadingCrew } = useCrewExecutionStore();
 
   // Track previous layout orientation to detect changes
   // Initialize with undefined so first change is detected
@@ -31,7 +31,8 @@ export const useManagerNode = ({ nodes, edges, setNodes, setEdges }: UseManagerN
     prevLayoutOrientation: prevLayoutOrientationRef.current,
     managerLLM,
     nodesCount: nodes.length,
-    edgesCount: edges.length
+    edgesCount: edges.length,
+    isLoadingCrew
   });
 
   /**
@@ -84,7 +85,7 @@ export const useManagerNode = ({ nodes, edges, setNodes, setEdges }: UseManagerN
         sourceHandle,
         targetHandle,
         type: 'default',
-        style: { stroke: '#ff9800', strokeWidth: 2 },
+        style: { stroke: '#2196f3', strokeWidth: 2 },
         animated: false,
         label: '', // No label for manager-to-agent edges
       };
@@ -165,7 +166,7 @@ export const useManagerNode = ({ nodes, edges, setNodes, setEdges }: UseManagerN
         sourceHandle,
         targetHandle,
         type: 'default',
-        style: { stroke: '#ff9800', strokeWidth: 2 },
+        style: { stroke: '#2196f3', strokeWidth: 2 },
         animated: false,
         label: '', // No label for manager-to-agent edges
       };
@@ -190,9 +191,17 @@ export const useManagerNode = ({ nodes, edges, setNodes, setEdges }: UseManagerN
       processType,
       managerNodeId,
       managerExists,
-      shouldCreate: processType === 'hierarchical' && !managerExists,
-      shouldRemove: processType !== 'hierarchical' && managerExists
+      isLoadingCrew,
+      shouldCreate: processType === 'hierarchical' && !managerExists && !isLoadingCrew,
+      shouldRemove: processType !== 'hierarchical' && managerExists && !isLoadingCrew
     });
+
+    // Skip manager creation/removal while loading a crew
+    // This prevents race conditions where the manager is removed before processType is updated
+    if (isLoadingCrew) {
+      console.log('[useManagerNode] Skipping manager node changes - crew is loading');
+      return;
+    }
 
     if (processType === 'hierarchical') {
       // Only create if manager doesn't actually exist in nodes
@@ -219,7 +228,7 @@ export const useManagerNode = ({ nodes, edges, setNodes, setEdges }: UseManagerN
         console.log('[useManagerNode] No manager to remove');
       }
     }
-  }, [processType, nodes, createManagerNode, removeManagerNode]);
+  }, [processType, nodes, createManagerNode, removeManagerNode, isLoadingCrew]);
 
   /**
    * Listen for layout orientation changes to update manager position and edge handles
@@ -307,7 +316,7 @@ export const useManagerNode = ({ nodes, edges, setNodes, setEdges }: UseManagerN
           sourceHandle,
           targetHandle,
           type: 'default',
-          style: { stroke: '#ff9800', strokeWidth: 2 },
+          style: { stroke: '#2196f3', strokeWidth: 2 },
           animated: false,
           label: '', // No label for manager-to-agent edges
         };

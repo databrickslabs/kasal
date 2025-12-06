@@ -27,6 +27,10 @@ interface CrewConfig {
   edges?: { id: string; source: string; target: string; sourceHandle?: string; targetHandle?: string; data?: Record<string, unknown> }[];
   flow_id?: string;
   flow_config?: Record<string, unknown>;
+  // Checkpoint resume parameters
+  resume_from_flow_uuid?: string;
+  resume_from_execution_id?: number;
+  resume_from_crew_sequence?: number;  // For granular crew-level resume: skip crews up to this sequence
 }
 
 export interface JobResponse {
@@ -42,14 +46,18 @@ export class JobExecutionService {
   private readonly modelService = ModelService.getInstance();
 
   async executeJob(
-    nodes: Node[], 
-    edges: Edge[], 
-    planning = false, 
-    model?: string, 
+    nodes: Node[],
+    edges: Edge[],
+    planning = false,
+    model?: string,
     executionType: 'crew' | 'flow' = 'crew',
     additionalInputs: Record<string, unknown> = {},
     schemaDetectionEnabled = true,
-    reasoning = false
+    reasoning = false,
+    resumeFromFlowUuid?: string,
+    resumeFromExecutionId?: number,
+    savedFlowId?: string,
+    resumeFromCrewSequence?: number
   ): Promise<JobResponse> {
     try {
       // Generate a temporary ID to use for file path generation
@@ -123,7 +131,27 @@ export class JobExecutionService {
           config.execution_type = 'flow';
           config.model = model;
           config.schema_detection_enabled = schemaDetectionEnabled;
-          
+
+          // Add flow_id for saved flows - this enables checkpoint tracking
+          if (savedFlowId) {
+            config.flow_id = savedFlowId;
+            console.log(`[JobExecutionService] Using saved flow ID: ${savedFlowId}`);
+          }
+
+          // Add checkpoint resume parameters for flow execution
+          if (resumeFromFlowUuid) {
+            config.resume_from_flow_uuid = resumeFromFlowUuid;
+            console.log(`[JobExecutionService] Resuming flow from checkpoint: ${resumeFromFlowUuid}`);
+          }
+          if (resumeFromExecutionId) {
+            config.resume_from_execution_id = resumeFromExecutionId;
+            console.log(`[JobExecutionService] Resuming from execution ID: ${resumeFromExecutionId}`);
+          }
+          if (resumeFromCrewSequence !== undefined && resumeFromCrewSequence !== null) {
+            config.resume_from_crew_sequence = resumeFromCrewSequence;
+            console.log(`[JobExecutionService] Resuming from crew sequence: ${resumeFromCrewSequence} (will skip crews up to this sequence)`);
+          }
+
           // Add any additional inputs that might be needed
           if (Object.keys(additionalInputs).length > 0) {
             config.inputs = additionalInputs;

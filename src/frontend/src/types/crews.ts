@@ -1,7 +1,20 @@
 import { Node, Edge } from 'reactflow';
 import { TaskNode, AgentNode } from './crew';
 
-export interface CrewResponse {
+export interface CrewExecutionConfig {
+  process?: 'sequential' | 'hierarchical';
+  planning?: boolean;
+  planning_llm?: string;
+  reasoning?: boolean;
+  reasoning_llm?: string;
+  manager_llm?: string;
+  tool_configs?: Record<string, any>;
+  memory?: boolean;
+  verbose?: boolean;
+  max_rpm?: number;
+}
+
+export interface CrewResponse extends CrewExecutionConfig {
   id: string;
   name: string;
   agent_ids: string[];
@@ -26,7 +39,7 @@ export interface SaveCrewProps {
   trigger: React.ReactElement;
 }
 
-export interface CrewCreate {
+export interface CrewCreate extends CrewExecutionConfig {
   name: string;
   agent_ids: string[];
   task_ids: string[];
@@ -34,7 +47,7 @@ export interface CrewCreate {
   edges: Edge[];
 }
 
-export interface Crew {
+export interface Crew extends CrewExecutionConfig {
   id: string;
   name: string;
   agent_ids: string[];
@@ -45,7 +58,7 @@ export interface Crew {
   updated_at: string;
 }
 
-export interface CrewSaveData {
+export interface CrewSaveData extends CrewExecutionConfig {
   name: string;
   nodes: Node[];
   edges: Edge[];

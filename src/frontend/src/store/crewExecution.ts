@@ -2,14 +2,9 @@ import { create } from 'zustand';
 import { Node, Edge } from 'reactflow';
 import { jobExecutionService } from '../api/JobExecutionService';
 import { useWorkflowStore } from './workflow';
+import { useTabManagerStore } from './tabManager';
 import { Tool } from '../types/tool';
-
-interface Crew {
-  id: string;
-  name: string;
-  description: string;
-  // Add other crew properties as needed
-}
+import { FlowService, FlowCheckpoint } from '../api/FlowService';
 
 interface RunHistoryItem {
   id: string;
@@ -32,6 +27,7 @@ interface CrewExecutionState {
   processType: 'sequential' | 'hierarchical';
   managerLLM: string;
   managerNodeId: string | null;  // ID of the manager node (if exists)
+  isLoadingCrew: boolean;  // Flag to prevent manager removal during crew loading
   isCrewPlanningOpen: boolean;
   isScheduleDialogOpen: boolean;
   inputMode: 'dialog' | 'chat';
@@ -53,6 +49,18 @@ interface CrewExecutionState {
   successMessage: string;
   showSuccess: boolean;
 
+  // Checkpoint dialog state
+  showCheckpointDialog: boolean;
+  checkpoints: FlowCheckpoint[];
+  checkpointsLoading: boolean;
+  checkpointsError: string | null;
+  pendingFlowExecution: {
+    nodes: Node[];
+    edges: Edge[];
+    savedFlowId: string;
+    savedFlowName?: string;
+  } | null;
+
   // Setters
   setSelectedModel: (model: string) => void;
   setPlanningEnabled: (enabled: boolean) => void;
@@ -63,6 +71,7 @@ interface CrewExecutionState {
   setProcessType: (type: 'sequential' | 'hierarchical') => void;
   setManagerLLM: (model: string) => void;
   setManagerNodeId: (id: string | null) => void;
+  setIsLoadingCrew: (loading: boolean) => void;
   setCrewPlanningOpen: (open: boolean) => void;
   setScheduleDialogOpen: (open: boolean) => void;
   setSelectedTools: (tools: Tool[]) => void;
@@ -84,14 +93,24 @@ interface CrewExecutionState {
   setUserActive: (active: boolean) => void;
   cleanup: () => void;
 
+  // Checkpoint dialog methods
+  setShowCheckpointDialog: (show: boolean) => void;
+  setCheckpoints: (checkpoints: FlowCheckpoint[]) => void;
+  setCheckpointsLoading: (loading: boolean) => void;
+  setCheckpointsError: (error: string | null) => void;
+  setPendingFlowExecution: (pending: { nodes: Node[]; edges: Edge[]; savedFlowId: string; savedFlowName?: string } | null) => void;
+  handleCheckpointStartFresh: () => Promise<void>;
+  handleCheckpointResume: (checkpoint: FlowCheckpoint, selectedCrewSequence?: number) => Promise<void>;
+  handleCheckpointDelete: (executionId: number) => Promise<void>;
+  refreshCheckpoints: () => Promise<void>;
+
   // Execution methods
   executeCrew: (nodes: Node[], edges: Edge[]) => Promise<{ job_id: string } | null>;
-  executeFlow: (nodes: Node[], edges: Edge[]) => Promise<{ job_id: string } | null>;
+  executeFlow: (nodes: Node[], edges: Edge[], resumeFromFlowUuid?: string, resumeFromExecutionId?: number, savedFlowId?: string, resumeFromCrewSequence?: number) => Promise<{ job_id: string } | null>;
   executeTab: (tabId: string, nodes: Node[], edges: Edge[], tabName?: string) => Promise<{ job_id: string } | null>;
   handleModelChange: (event: React.ChangeEvent<{ value: unknown }>) => void;
   handleRunClick: (type: 'crew' | 'flow') => Promise<void>;
   handleGenerateCrew: () => Promise<void>;
-  handleCrewSelect: (crew: Crew) => void;
   executeWithVariables: (variables: Record<string, string>) => Promise<void>;
 }
 
@@ -107,6 +126,7 @@ export const useCrewExecutionStore = create<CrewExecutionState>((set, get) => ({
   processType: (localStorage.getItem('crewai-process-type') as 'sequential' | 'hierarchical') || 'sequential',
   managerLLM: localStorage.getItem('crewai-manager-llm') || '',
   managerNodeId: null,
+  isLoadingCrew: false,
   isCrewPlanningOpen: false,
   isScheduleDialogOpen: false,
   inputMode: (localStorage.getItem('crewai-input-mode') as 'dialog' | 'chat') || 'dialog',
@@ -126,6 +146,13 @@ export const useCrewExecutionStore = create<CrewExecutionState>((set, get) => ({
   successMessage: '',
   showSuccess: false,
 
+  // Checkpoint dialog state
+  showCheckpointDialog: false,
+  checkpoints: [],
+  checkpointsLoading: false,
+  checkpointsError: null,
+  pendingFlowExecution: null,
+
   // State setters
   setSelectedModel: (model) => set({ selectedModel: model as string }),
   setPlanningEnabled: (enabled) => set({ planningEnabled: enabled }),
@@ -144,6 +171,7 @@ export const useCrewExecutionStore = create<CrewExecutionState>((set, get) => ({
     set({ managerLLM: model });
   },
   setManagerNodeId: (id) => set({ managerNodeId: id }),
+  setIsLoadingCrew: (loading) => set({ isLoadingCrew: loading }),
   setCrewPlanningOpen: (open) => set({ isCrewPlanningOpen: open }),
   setScheduleDialogOpen: (open) => set({ isScheduleDialogOpen: open }),
   setSelectedTools: (tools) => set({ selectedTools: tools }),
@@ -182,6 +210,80 @@ export const useCrewExecutionStore = create<CrewExecutionState>((set, get) => ({
     successMessage: '',
     showSuccess: false
   }),
+
+  // Checkpoint dialog setters
+  setShowCheckpointDialog: (show) => set({ showCheckpointDialog: show }),
+  setCheckpoints: (checkpoints) => set({ checkpoints }),
+  setCheckpointsLoading: (loading) => set({ checkpointsLoading: loading }),
+  setCheckpointsError: (error) => set({ checkpointsError: error }),
+  setPendingFlowExecution: (pending) => set({ pendingFlowExecution: pending }),
+
+  // Checkpoint dialog handlers
+  handleCheckpointStartFresh: async () => {
+    const { pendingFlowExecution, executeFlow } = get();
+    if (pendingFlowExecution) {
+      const { nodes, edges, savedFlowId } = pendingFlowExecution;
+      set({
+        showCheckpointDialog: false,
+        pendingFlowExecution: null,
+        checkpoints: [],
+        checkpointsError: null
+      });
+      console.log('[CrewExecution] Starting fresh flow execution with savedFlowId:', savedFlowId);
+      await executeFlow(nodes, edges, undefined, undefined, savedFlowId);
+    }
+  },
+
+  handleCheckpointResume: async (checkpoint: FlowCheckpoint, selectedCrewSequence?: number) => {
+    const { pendingFlowExecution, executeFlow } = get();
+    if (pendingFlowExecution) {
+      const { nodes, edges, savedFlowId } = pendingFlowExecution;
+      set({
+        showCheckpointDialog: false,
+        pendingFlowExecution: null,
+        checkpoints: [],
+        checkpointsError: null
+      });
+      console.log('[CrewExecution] Resuming from checkpoint:', checkpoint.flow_uuid, 'with savedFlowId:', savedFlowId);
+      if (selectedCrewSequence !== undefined && selectedCrewSequence !== null) {
+        console.log('[CrewExecution] Resuming from crew sequence:', selectedCrewSequence);
+      }
+      await executeFlow(nodes, edges, checkpoint.flow_uuid, checkpoint.execution_id, savedFlowId, selectedCrewSequence);
+    }
+  },
+
+  handleCheckpointDelete: async (executionId: number) => {
+    const { pendingFlowExecution, checkpoints } = get();
+    if (pendingFlowExecution) {
+      const success = await FlowService.deleteFlowCheckpoint(pendingFlowExecution.savedFlowId, executionId);
+      if (success) {
+        // Remove the deleted checkpoint from the list
+        const updatedCheckpoints = checkpoints.filter(cp => cp.execution_id !== executionId);
+        set({ checkpoints: updatedCheckpoints });
+        // If no checkpoints left, close dialog and start fresh
+        if (updatedCheckpoints.length === 0) {
+          const { handleCheckpointStartFresh } = get();
+          await handleCheckpointStartFresh();
+        }
+      }
+    }
+  },
+
+  refreshCheckpoints: async () => {
+    const { pendingFlowExecution } = get();
+    if (pendingFlowExecution) {
+      set({ checkpointsLoading: true, checkpointsError: null });
+      try {
+        const response = await FlowService.getFlowCheckpoints(pendingFlowExecution.savedFlowId);
+        set({ checkpoints: response.checkpoints, checkpointsLoading: false });
+      } catch (error) {
+        set({
+          checkpointsError: error instanceof Error ? error.message : 'Failed to fetch checkpoints',
+          checkpointsLoading: false
+        });
+      }
+    }
+  },
 
   // Execution methods
   executeCrew: async (nodes, edges) => {
@@ -345,10 +447,14 @@ export const useCrewExecutionStore = create<CrewExecutionState>((set, get) => ({
     }
   },
 
-  executeFlow: async (nodes, edges) => {
+  executeFlow: async (nodes, edges, resumeFromFlowUuid, resumeFromExecutionId, savedFlowId, resumeFromCrewSequence) => {
     console.log('[CrewExecution] ========== executeFlow CALLED ==========');
     console.log('[CrewExecution] executeFlow - nodes:', nodes);
     console.log('[CrewExecution] executeFlow - edges:', edges);
+    console.log('[CrewExecution] executeFlow - resumeFromFlowUuid:', resumeFromFlowUuid);
+    console.log('[CrewExecution] executeFlow - resumeFromExecutionId:', resumeFromExecutionId);
+    console.log('[CrewExecution] executeFlow - savedFlowId:', savedFlowId);
+    console.log('[CrewExecution] executeFlow - resumeFromCrewSequence:', resumeFromCrewSequence);
 
     const { selectedModel, planningEnabled, planningLLM, reasoningEnabled, reasoningLLM, schemaDetectionEnabled } = get();
     set({ isExecuting: true });
@@ -405,7 +511,11 @@ export const useCrewExecutionStore = create<CrewExecutionState>((set, get) => ({
         'flow',
         additionalInputs,
         schemaDetectionEnabled,
-        reasoningEnabled
+        reasoningEnabled,
+        resumeFromFlowUuid,
+        resumeFromExecutionId,
+        savedFlowId,
+        resumeFromCrewSequence
       );
 
       console.log('[FlowExecution] Job execution response:', response);
@@ -597,6 +707,57 @@ export const useCrewExecutionStore = create<CrewExecutionState>((set, get) => ({
     console.log('[CrewExecution] handleRunClick called with type:', type);
     console.log('[CrewExecution] Current nodes:', state.nodes);
 
+    // Helper function to check for checkpoints and handle flow execution
+    const checkForCheckpointsAndExecuteFlow = async (nodes: Node[], edges: Edge[]) => {
+      console.log('[CrewExecution] Checking for checkpoints before flow execution');
+
+      // Get the current tab's saved flow ID
+      const tabManagerState = useTabManagerStore.getState();
+      const activeTab = tabManagerState.tabs.find(tab => tab.id === tabManagerState.activeTabId);
+      const savedFlowId = activeTab?.savedFlowId || null;
+      const savedFlowName = activeTab?.savedFlowName || undefined;
+
+      console.log('[CrewExecution] Checkpoint check - savedFlowId:', savedFlowId);
+
+      // Check if any edge has checkpoint enabled
+      const hasPersistenceEnabled = edges.some(edge => edge.data?.checkpoint === true);
+      console.log('[CrewExecution] Checkpoint check - hasPersistenceEnabled:', hasPersistenceEnabled);
+
+      if (savedFlowId && hasPersistenceEnabled) {
+        console.log('[CrewExecution] Checking for available checkpoints...');
+        set({ checkpointsLoading: true });
+
+        try {
+          const response = await FlowService.getFlowCheckpoints(savedFlowId);
+          console.log('[CrewExecution] Available checkpoints:', response.checkpoints);
+
+          if (response.checkpoints.length > 0) {
+            console.log('[CrewExecution] Found checkpoints, showing resume dialog');
+            // Store the pending execution and show the dialog
+            set({
+              checkpoints: response.checkpoints,
+              checkpointsLoading: false,
+              pendingFlowExecution: { nodes, edges, savedFlowId, savedFlowName },
+              showCheckpointDialog: true
+            });
+            return; // Don't execute yet, wait for user choice
+          }
+          console.log('[CrewExecution] No checkpoints found, starting fresh');
+          set({ checkpointsLoading: false });
+        } catch (error) {
+          console.error('[CrewExecution] Error checking checkpoints:', error);
+          set({ checkpointsLoading: false });
+          // Continue with fresh execution on error
+        }
+      } else {
+        console.log('[CrewExecution] Skipping checkpoint check - flow not saved or persistence not enabled');
+      }
+
+      // No checkpoints or persistence not enabled, execute immediately
+      window.dispatchEvent(new CustomEvent('openExecutionHistory'));
+      await state.executeFlow(nodes, edges, undefined, undefined, savedFlowId || undefined);
+    };
+
     // Check if we need to show input variables dialog
     // Only check for variables in the nodes relevant to the execution type
     const variablePattern = /\{([^}]+)\}/g;
@@ -639,7 +800,7 @@ export const useCrewExecutionStore = create<CrewExecutionState>((set, get) => ({
       }
       return false;
     });
-    
+
     console.log('[CrewExecution] Has variables:', hasVariables);
     console.log('[CrewExecution] Input mode:', state.inputMode);
 
@@ -658,9 +819,8 @@ export const useCrewExecutionStore = create<CrewExecutionState>((set, get) => ({
           if (type === 'crew') {
             await state.executeCrew(state.nodes, state.edges);
           } else {
-            // Auto-open execution history for flow runs
-            window.dispatchEvent(new CustomEvent('openExecutionHistory'));
-            await state.executeFlow(state.nodes, state.edges);
+            // Check for checkpoints before executing flow
+            await checkForCheckpointsAndExecuteFlow(state.nodes, state.edges);
           }
         } catch (error) {
           set({
@@ -682,9 +842,8 @@ export const useCrewExecutionStore = create<CrewExecutionState>((set, get) => ({
           await state.executeCrew(state.nodes, state.edges);
         } else {
           console.log('[CrewExecution] Executing FLOW path');
-          // Auto-open execution history for flow runs
-          window.dispatchEvent(new CustomEvent('openExecutionHistory'));
-          await state.executeFlow(state.nodes, state.edges);
+          // Check for checkpoints before executing flow
+          await checkForCheckpointsAndExecuteFlow(state.nodes, state.edges);
         }
       } catch (error) {
         set({
@@ -751,17 +910,12 @@ export const useCrewExecutionStore = create<CrewExecutionState>((set, get) => ({
     }
   },
 
-  handleCrewSelect: (crew) => {
-    console.log('CrewExecutionStore - Handling crew select:', crew);
-    // Add any additional crew selection logic here
-  },
-
   executeWithVariables: async (variables: Record<string, string>) => {
     const state = get();
-    set({ 
+    set({
       inputVariables: variables,
       showInputVariablesDialog: false,
-      isExecuting: true 
+      isExecuting: true
     });
 
     try {
@@ -773,12 +927,16 @@ export const useCrewExecutionStore = create<CrewExecutionState>((set, get) => ({
       if (executionType === 'crew') {
         await state.executeCrew(state.nodes, state.edges);
       } else {
-        await state.executeFlow(state.nodes, state.edges);
+        // Get savedFlowId from tab manager for flow executions
+        const tabManagerState = useTabManagerStore.getState();
+        const activeTab = tabManagerState.tabs.find(tab => tab.id === tabManagerState.activeTabId);
+        const savedFlowId = activeTab?.savedFlowId || undefined;
+        await state.executeFlow(state.nodes, state.edges, undefined, undefined, savedFlowId);
       }
     } catch (error) {
-      set({ 
+      set({
         errorMessage: error instanceof Error ? error.message : 'Failed to execute',
-        showError: true 
+        showError: true
       });
     } finally {
       set({ isExecuting: false });

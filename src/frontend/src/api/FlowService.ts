@@ -535,12 +535,90 @@ export class FlowService {
     }
   }
 
-  static async deleteAllFlows(): Promise<void> {
+  /**
+   * Get available checkpoints for a flow that can be resumed.
+   * @param flowId - The flow ID to get checkpoints for
+   * @param statusFilter - Filter by checkpoint status (default: 'active')
+   * @returns List of available checkpoints
+   */
+  static async getFlowCheckpoints(flowId: string, statusFilter = 'active'): Promise<FlowCheckpointListResponse> {
     try {
-      await apiClient.delete('/flows');
+      // Format ID as UUID if needed
+      let formattedId = flowId;
+      if (flowId && !flowId.includes('-') && flowId.length >= 32) {
+        formattedId = [
+          flowId.substring(0, 8),
+          flowId.substring(8, 12),
+          flowId.substring(12, 16),
+          flowId.substring(16, 20),
+          flowId.substring(20)
+        ].join('-');
+      }
+
+      const response = await apiClient.get(`/flows/${formattedId}/checkpoints`, {
+        params: { status_filter: statusFilter }
+      });
+
+      flowLogger.debug('Checkpoints fetched:', response.data);
+      return response.data;
     } catch (error) {
-      console.error('Error deleting all flows:', error);
-      throw error;
+      flowLogger.error('Error fetching flow checkpoints:', error);
+      return { flow_id: flowId, checkpoints: [], total: 0 };
     }
   }
+
+  /**
+   * Delete/expire a checkpoint so it won't appear in the resume list.
+   * @param flowId - The flow ID
+   * @param executionId - The execution ID of the checkpoint to delete
+   * @returns Success status
+   */
+  static async deleteFlowCheckpoint(flowId: string, executionId: number): Promise<boolean> {
+    try {
+      // Format ID as UUID if needed
+      let formattedId = flowId;
+      if (flowId && !flowId.includes('-') && flowId.length >= 32) {
+        formattedId = [
+          flowId.substring(0, 8),
+          flowId.substring(8, 12),
+          flowId.substring(12, 16),
+          flowId.substring(16, 20),
+          flowId.substring(20)
+        ].join('-');
+      }
+
+      await apiClient.delete(`/flows/${formattedId}/checkpoints/${executionId}`);
+      flowLogger.info('Checkpoint deleted successfully');
+      return true;
+    } catch (error) {
+      flowLogger.error('Error deleting checkpoint:', error);
+      return false;
+    }
+  }
+}
+
+// Types for checkpoint operations
+export interface CrewCheckpoint {
+  crew_name: string;
+  sequence: number;
+  status: string;
+  output_preview: string | null;
+  completed_at: string;
+}
+
+export interface FlowCheckpoint {
+  execution_id: number;
+  job_id: string;
+  flow_uuid: string;
+  checkpoint_method: string | null;
+  checkpoint_status: string;
+  created_at: string;
+  run_name: string | null;
+  crew_checkpoints?: CrewCheckpoint[];
+}
+
+export interface FlowCheckpointListResponse {
+  flow_id: string | null;
+  checkpoints: FlowCheckpoint[];
+  total: number;
 }
