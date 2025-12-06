@@ -53,7 +53,10 @@ class CrewAIFlowService:
                       run_name: Optional[str] = None,
                       config: Optional[Dict[str, Any]] = None,
                       group_context = None,
-                      user_token: Optional[str] = None) -> Dict[str, Any]:
+                      user_token: Optional[str] = None,
+                      resume_from_flow_uuid: Optional[str] = None,
+                      resume_from_execution_id: Optional[int] = None,
+                      resume_from_crew_sequence: Optional[int] = None) -> Dict[str, Any]:
         """
         Execute a flow based on the provided parameters using process isolation.
 
@@ -64,6 +67,9 @@ class CrewAIFlowService:
             config: Configuration parameters
             group_context: Group context for multi-tenant isolation
             user_token: User access token for OAuth authentication
+            resume_from_flow_uuid: CrewAI state.id to resume flow from checkpoint
+            resume_from_execution_id: Execution ID of checkpoint to resume from
+            resume_from_crew_sequence: Crew sequence to resume from (skip crews up to this sequence)
 
         Returns:
             Dictionary with execution result
@@ -75,6 +81,9 @@ class CrewAIFlowService:
         logger.info(f"  run_name: {run_name}")
         logger.info(f"  group_context: {group_context}")
         logger.info(f"  user_token: {'<present>' if user_token else '<not provided>'}")
+        logger.info(f"  resume_from_flow_uuid: {resume_from_flow_uuid}")
+        logger.info(f"  resume_from_execution_id: {resume_from_execution_id}")
+        logger.info(f"  resume_from_crew_sequence: {resume_from_crew_sequence}")
         if config:
             logger.info(f"  config keys: {list(config.keys())}")
             logger.info(f"  config.nodes: {len(config.get('nodes', []))} nodes")
@@ -84,6 +93,54 @@ class CrewAIFlowService:
                 logger.info(f"  flow_config.startingPoints: {len(flow_config.get('startingPoints', []))}")
                 logger.info(f"  flow_config.listeners: {len(flow_config.get('listeners', []))}")
         logger.info("="*100)
+
+        # Generate run_name if not provided
+        if not run_name and config:
+            try:
+                from src.services.execution_name_service import ExecutionNameService
+                from src.schemas.execution import ExecutionNameGenerationRequest
+
+                # Extract agents/tasks from nodes for name generation
+                agents_yaml = {}
+                tasks_yaml = {}
+                nodes = config.get('nodes', [])
+
+                for node in nodes:
+                    node_type = node.get('type', '').lower()
+                    node_data = node.get('data', {})
+
+                    if node_type == 'crewnode':
+                        all_agents = node_data.get('allAgents', node_data.get('agents', []))
+                        all_tasks = node_data.get('allTasks', node_data.get('tasks', []))
+
+                        for agent in all_agents:
+                            agent_id = agent.get('id', f"agent_{len(agents_yaml)}")
+                            agents_yaml[agent_id] = {
+                                'role': agent.get('role', agent.get('name', 'Agent')),
+                                'goal': agent.get('goal', ''),
+                                'backstory': agent.get('backstory', '')
+                            }
+
+                        for task in all_tasks:
+                            task_id = task.get('id', f"task_{len(tasks_yaml)}")
+                            tasks_yaml[task_id] = {
+                                'name': task.get('name', task.get('description', 'Task')[:50] if task.get('description') else 'Task'),
+                                'description': task.get('description', ''),
+                                'expected_output': task.get('expected_output', task.get('expectedOutput', ''))
+                            }
+
+                if agents_yaml or tasks_yaml:
+                    name_service = ExecutionNameService.create(self.session)
+                    request = ExecutionNameGenerationRequest(
+                        agents_yaml=agents_yaml,
+                        tasks_yaml=tasks_yaml,
+                        model=config.get('model')
+                    )
+                    response = await name_service.generate_execution_name(request)
+                    run_name = response.name
+                    logger.info(f"Generated run_name for flow: {run_name}")
+            except Exception as e:
+                logger.warning(f"Failed to generate execution name for flow: {e}")
 
         try:
             # Create a UUID for job_id if not provided
@@ -111,7 +168,11 @@ class CrewAIFlowService:
                 'flow_config': config.get('flow_config', {}) if config else {},
                 'inputs': config.get('inputs', {}) if config else {},
                 'model': config.get('model') if config else None,
-                'planning': config.get('planning') if config else None
+                'planning': config.get('planning') if config else None,
+                # Checkpoint resume parameters
+                'resume_from_flow_uuid': resume_from_flow_uuid,
+                'resume_from_execution_id': resume_from_execution_id,
+                'resume_from_crew_sequence': resume_from_crew_sequence
             }
 
             # Add group_context to config if provided
@@ -132,11 +193,18 @@ class CrewAIFlowService:
 
             logger.info(f"[CrewAIFlowService] Engine.run_flow() returned execution_id: {execution_id}")
 
+            # Build response message
+            if resume_from_flow_uuid:
+                message = f"Flow execution resumed from checkpoint in isolated process"
+            else:
+                message = "Flow execution started in isolated process"
+
             return {
                 "success": True,
                 "execution_id": execution_id,
                 "job_id": job_id,
-                "message": "Flow execution started in isolated process"
+                "message": message,
+                "resumed_from": resume_from_execution_id if resume_from_flow_uuid else None
             }
 
         except Exception as e:

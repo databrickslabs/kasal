@@ -41,6 +41,12 @@ def create_execution_callbacks(job_id: str, config: Dict[str, Any] = None, group
     # Store crew reference for use in callbacks
     crew_ref = crew
     
+    # Get crew name for trace metadata
+    crew_name = None
+    if crew_ref and hasattr(crew_ref, 'name'):
+        crew_name = crew_ref.name
+        logger.info(f"{log_prefix} Crew name for traces: {crew_name}")
+
     # Enhanced context tracking
     execution_context = {
         "current_agent": None,
@@ -52,7 +58,8 @@ def create_execution_callbacks(job_id: str, config: Dict[str, Any] = None, group
         "agent_tools": {},  # agent role -> list of tool names
         "tool_to_agent": {},  # tool name -> agent role
         "last_task_id": None,  # Track the last task to detect changes
-        "task_started_logged": set()  # Track which tasks have had their start logged
+        "task_started_logged": set(),  # Track which tasks have had their start logged
+        "crew_name": crew_name  # Crew name for flow execution tracking
     }
     
     # Build agent lookup from crew if available
@@ -359,9 +366,13 @@ def create_execution_callbacks(job_id: str, config: Dict[str, Any] = None, group
                         "agent_role": agent_name,
                         "task_description": task_description
                     }
-                    
+
                     if task_id:
                         task_started_data["task_id"] = task_id
+
+                    # Add crew_name for flow execution tracking
+                    if execution_context.get("crew_name"):
+                        task_started_data["crew_name"] = execution_context["crew_name"]
                     
                     trace_data = {
                         "job_id": job_id,
@@ -629,10 +640,14 @@ def create_execution_callbacks(job_id: str, config: Dict[str, Any] = None, group
                 "agent_role": agent_name,
                 "task_description": task_description
             }
-            
+
             # Add task_id if we found one
             if task_id:
                 extra_data["task_id"] = task_id
+
+            # Add crew_name for flow execution tracking
+            if execution_context.get("crew_name"):
+                extra_data["crew_name"] = execution_context["crew_name"]
             
             trace_data = {
                 "job_id": job_id,

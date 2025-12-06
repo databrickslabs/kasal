@@ -27,6 +27,8 @@ from src.repositories.task_repository import TaskRepository
 from src.repositories.agent_repository import AgentRepository
 from src.repositories.tool_repository import ToolRepository
 from src.repositories.crew_repository import CrewRepository
+from src.repositories.execution_history_repository import ExecutionHistoryRepository
+from src.repositories.execution_trace_repository import ExecutionTraceRepository
 from src.core.logger import LoggerManager
 from src.db.session import async_session_factory
 from src.services.api_keys_service import ApiKeysService
@@ -232,19 +234,39 @@ class FlowRunnerService:
             # Start the appropriate execution method based on flow_id
             # IMPORTANT: Use await instead of create_task to ensure subprocess waits for completion
             # This allows stdout capture in the finally block to get the actual CrewAI output
+            flow_result = None
             if flow_id is not None:
                 logger.info(f"Starting execution for existing flow {flow_id}")
-                await self._run_flow_execution(execution.id, flow_id, job_id, config)
+                flow_result = await self._run_flow_execution(execution.id, flow_id, job_id, config)
             else:
                 logger.info(f"Starting execution for dynamic flow")
-                await self._run_dynamic_flow(execution.id, job_id, config)
+                flow_result = await self._run_dynamic_flow(execution.id, job_id, config)
 
-            return {
-                "job_id": job_id,
-                "execution_id": execution.id,
-                "status": FlowExecutionStatus.COMPLETED,
-                "message": "Flow execution completed"
-            }
+            # Return the actual flow result instead of just a status message
+            if flow_result and flow_result.get("success"):
+                return_dict = {
+                    "job_id": job_id,
+                    "execution_id": execution.id,
+                    "status": FlowExecutionStatus.COMPLETED,
+                    "result": flow_result.get("result"),
+                    "message": "Flow execution completed"
+                }
+                # Include flow_uuid for checkpoint/resume functionality
+                if flow_result.get("flow_uuid"):
+                    return_dict["flow_uuid"] = flow_result.get("flow_uuid")
+                return return_dict
+            else:
+                error_msg = flow_result.get("error", "Unknown error") if flow_result else "No result returned"
+                return {
+                    "job_id": job_id,
+                    "execution_id": execution.id,
+                    "status": FlowExecutionStatus.FAILED,
+                    "error": error_msg,
+                    "message": f"Flow execution failed: {error_msg}"
+                }
+        except HTTPException:
+            # Re-raise HTTPException as-is to preserve status codes (404, 400, etc.)
+            raise
         except Exception as e:
             logger.error(f"Error running flow execution: {e}", exc_info=True)
             raise HTTPException(
@@ -252,7 +274,7 @@ class FlowRunnerService:
                 detail=f"Error running flow execution: {str(e)}"
             )
     
-    async def _run_dynamic_flow(self, execution_id: int, job_id: str, config: Dict[str, Any]) -> None:
+    async def _run_dynamic_flow(self, execution_id: int, job_id: str, config: Dict[str, Any]) -> Dict[str, Any]:
         """
         Run a dynamic flow execution created from the configuration.
 
@@ -260,6 +282,9 @@ class FlowRunnerService:
             execution_id: ID of the flow execution record
             job_id: Job ID for tracking
             config: Configuration containing nodes, edges, and flow configuration
+
+        Returns:
+            Dict containing the flow execution result with 'success', 'result' or 'error' keys
         """
         # Create a fresh database session for this background task
         async with async_session_factory() as session:
@@ -314,6 +339,8 @@ class FlowRunnerService:
                 agent_repo = AgentRepository(session)
                 tool_repo = ToolRepository(session)
                 crew_repo = CrewRepository(session)
+                execution_history_repo = ExecutionHistoryRepository(session)
+                execution_trace_repo = ExecutionTraceRepository(session)
 
                 # Initialize BackendFlow with the job_id (no flow_id for dynamic flows)
                 backend_flow = BackendFlow(job_id=job_id, flow_id=None)
@@ -322,7 +349,9 @@ class FlowRunnerService:
                     'task': task_repo,
                     'agent': agent_repo,
                     'tool': tool_repo,
-                    'crew': crew_repo
+                    'crew': crew_repo,
+                    'execution_history': execution_history_repo,
+                    'execution_trace': execution_trace_repo
                 }
 
                 # CRITICAL: For dynamic flows, we need to populate _flow_data from config
@@ -396,7 +425,28 @@ class FlowRunnerService:
                             status=FlowExecutionStatus.COMPLETED,
                             result=result_data
                         )
+
+                        # Save checkpoint info if flow_uuid is available (from @persist)
+                        flow_uuid = result.get("flow_uuid")
+                        if flow_uuid:
+                            try:
+                                from src.services.execution_history_service import ExecutionHistoryService
+                                history_service = ExecutionHistoryService(session)
+                                await history_service.set_checkpoint_active(
+                                    execution_id=execution_id,
+                                    flow_uuid=flow_uuid,
+                                    checkpoint_method="flow_complete"
+                                )
+                                logger.info(f"Saved checkpoint info for execution {execution_id} with flow_uuid {flow_uuid}")
+                            except Exception as checkpoint_err:
+                                logger.warning(f"Could not save checkpoint info: {checkpoint_err}")
+
                         logger.info(f"Successfully completed dynamic flow execution {execution_id}")
+                        return_dict = {"success": True, "result": result_data, "execution_id": execution_id}
+                        # Include flow_uuid for checkpoint/resume functionality
+                        if flow_uuid:
+                            return_dict["flow_uuid"] = flow_uuid
+                        return return_dict
                     else:
                         # Flow returned with success=False
                         error_msg = result.get("error", "Flow execution failed")
@@ -406,6 +456,7 @@ class FlowRunnerService:
                             error=error_msg
                         )
                         logger.error(f"Dynamic flow execution {execution_id} failed: {error_msg}")
+                        return {"success": False, "error": error_msg, "execution_id": execution_id}
 
                 except Exception as kickoff_error:
                     logger.error(f"Error during backend_flow.kickoff() for dynamic flow {execution_id}: {kickoff_error}", exc_info=True)
@@ -414,6 +465,7 @@ class FlowRunnerService:
                         status=FlowExecutionStatus.FAILED,
                         error=str(kickoff_error)
                     )
+                    return {"success": False, "error": str(kickoff_error), "execution_id": execution_id}
 
             except Exception as e:
                 logger.error(f"Error running dynamic flow execution {execution_id}: {e}", exc_info=True)
@@ -426,6 +478,7 @@ class FlowRunnerService:
                     )
                 except Exception as update_error:
                     logger.error(f"Error updating flow execution {execution_id} status: {update_error}", exc_info=True)
+                return {"success": False, "error": str(e), "execution_id": execution_id}
     
     async def _get_required_providers(self, session: AsyncSession, config: Dict[str, Any], group_id: Optional[str] = None) -> List[str]:
         """
@@ -495,7 +548,7 @@ class FlowRunnerService:
 
         return provider_list
 
-    async def _run_flow_execution(self, execution_id: int, flow_id: Union[uuid.UUID, str], job_id: str, config: Dict[str, Any]) -> None:
+    async def _run_flow_execution(self, execution_id: int, flow_id: Union[uuid.UUID, str], job_id: str, config: Dict[str, Any]) -> Dict[str, Any]:
         """
         Run a flow execution for an existing flow.
 
@@ -504,6 +557,9 @@ class FlowRunnerService:
             flow_id: ID of the flow to execute
             job_id: Job ID for tracking
             config: Additional configuration
+
+        Returns:
+            Dict containing the flow execution result with 'success', 'result' or 'error' keys
         """
         # Create a fresh database session for this background task
         async with async_session_factory() as session:
@@ -514,6 +570,8 @@ class FlowRunnerService:
             agent_repo = AgentRepository(session)
             tool_repo = ToolRepository(session)
             crew_repo = CrewRepository(session)
+            execution_history_repo = ExecutionHistoryRepository(session)
+            execution_trace_repo = ExecutionTraceRepository(session)
 
             # Convert string to UUID if needed
             if isinstance(flow_id, str):
@@ -527,7 +585,7 @@ class FlowRunnerService:
                         status=FlowExecutionStatus.FAILED,
                         error=f"Invalid UUID format: {str(e)}"
                     )
-                    return
+                    return {"success": False, "error": f"Invalid UUID format: {str(e)}"}
 
             try:
                 logger.info(f"Starting flow execution {execution_id} for flow {flow_id}, job {job_id}")
@@ -577,7 +635,9 @@ class FlowRunnerService:
                     'task': task_repo,
                     'agent': agent_repo,
                     'tool': tool_repo,
-                    'crew': crew_repo
+                    'crew': crew_repo,
+                    'execution_history': execution_history_repo,
+                    'execution_trace': execution_trace_repo
                 }
 
                 # Log what we have in the config BEFORE loading from database
@@ -732,14 +792,37 @@ class FlowRunnerService:
                             status=FlowExecutionStatus.COMPLETED,
                             result=result_data
                         )
+
+                        # Save checkpoint info if flow_uuid is available (from @persist)
+                        flow_uuid = result.get("flow_uuid")
+                        if flow_uuid:
+                            try:
+                                from src.services.execution_history_service import ExecutionHistoryService
+                                history_service = ExecutionHistoryService(session)
+                                await history_service.set_checkpoint_active(
+                                    execution_id=execution_id,
+                                    flow_uuid=flow_uuid,
+                                    checkpoint_method="flow_complete"
+                                )
+                                logger.info(f"Saved checkpoint info for execution {execution_id} with flow_uuid {flow_uuid}")
+                            except Exception as checkpoint_err:
+                                logger.warning(f"Could not save checkpoint info: {checkpoint_err}")
+
+                        logger.info(f"Updated flow execution {execution_id} with final status: COMPLETED")
+                        return_dict = {"success": True, "result": result_data, "execution_id": execution_id}
+                        # Include flow_uuid for checkpoint/resume functionality
+                        if flow_uuid:
+                            return_dict["flow_uuid"] = flow_uuid
+                        return return_dict
                     else:
+                        error_msg = result.get("error", "Unknown error")
                         await flow_execution_service.update_execution_status(
                             execution_id=execution_id,
                             status=FlowExecutionStatus.FAILED,
-                            error=result.get("error", "Unknown error")
+                            error=error_msg
                         )
-
-                    logger.info(f"Updated flow execution {execution_id} with final status")
+                        logger.info(f"Updated flow execution {execution_id} with final status: FAILED")
+                        return {"success": False, "error": error_msg, "execution_id": execution_id}
                 except Exception as kickoff_error:
                     logger.error(f"Error executing flow {flow_id}: {kickoff_error}", exc_info=True)
                     await flow_execution_service.update_execution_status(
@@ -747,6 +830,7 @@ class FlowRunnerService:
                         status=FlowExecutionStatus.FAILED,
                         error=str(kickoff_error)
                     )
+                    return {"success": False, "error": str(kickoff_error), "execution_id": execution_id}
             except Exception as e:
                 logger.error(f"Error in flow execution {execution_id}: {e}", exc_info=True)
                 try:
@@ -758,6 +842,7 @@ class FlowRunnerService:
                     )
                 except Exception as update_error:
                     logger.error(f"Error updating flow execution {execution_id} status: {update_error}", exc_info=True)
+                return {"success": False, "error": str(e), "execution_id": execution_id}
     
     async def get_flow_execution(self, execution_id: int) -> Dict[str, Any]:
         """
@@ -851,345 +936,4 @@ class FlowRunnerService:
                 "success": False,
                 "error": str(e),
                 "flow_id": flow_id
-            }
-
-    def _create_flow_from_config(self, flow_id, job_id, config):
-        """
-        Create a CrewAI Flow class dynamically from the flow configuration.
-        
-        Args:
-            flow_id: The ID of the flow
-            job_id: Job ID for tracking
-            config: The flow configuration including nodes, edges, and flow_config
-            
-        Returns:
-            An instance of a dynamically created Flow class
-        """
-        from crewai.flow.flow import Flow, start, listen, router
-        from crewai.agent import Agent
-        from crewai.task import Task
-        from crewai.crew import Crew
-        
-        logger.info(f"Creating flow from config: {flow_id}")
-        
-        # Extract flow configuration
-        flow_config = config.get('flow_config', {})
-        nodes = config.get('nodes', [])
-        edges = config.get('edges', [])
-        
-        if not flow_config:
-            logger.warning("No flow_config found in configuration")
-            flow_config = {}
-            
-        # Extract starting points and listeners
-        starting_points = flow_config.get('startingPoints', [])
-        listeners = flow_config.get('listeners', [])
-        
-        # Find all crew nodes from the nodes list
-        crew_nodes = {}
-        for node in nodes:
-            if node.get('type', '').lower() == 'crewnode':
-                crew_nodes[node.get('id')] = node
-        
-        if not starting_points and len(crew_nodes) > 0:
-            logger.warning("No starting points found in flow_config, creating default")
-            # Create a default starting point
-            first_crew = list(crew_nodes.values())[0]
-            starting_points = [{
-                'crewId': first_crew.get('id'),
-                'crewName': first_crew.get('data', {}).get('label', 'Default Crew'),
-                'taskId': 'default-task',
-                'taskName': 'Default Task'
-            }]
-            
-        logger.info(f"Found {len(starting_points)} starting points in flow config")
-        logger.info(f"Found {len(listeners)} listeners in flow config")
-
-        # Log complete flow configuration before execution
-        logger.info("="*80)
-        logger.info("FLOW CONFIGURATION BEFORE EXECUTION:")
-        logger.info(f"  Flow ID: {flow_id}")
-        logger.info(f"  Job ID: {job_id}")
-        logger.info(f"  Total Crew Nodes: {len(crew_nodes)}")
-        logger.info(f"  Starting Points ({len(starting_points)}):")
-        for i, sp in enumerate(starting_points):
-            logger.info(f"    [{i}] Crew: {sp.get('crewName')} (ID: {sp.get('crewId')})")
-        logger.info(f"  Listeners ({len(listeners)}):")
-        for i, listener in enumerate(listeners):
-            listen_to = "start_flow" if i == 0 else f"listener_{i-1}"
-            logger.info(f"    [{i}] Crew: {listener.get('crewName')} (ID: {listener.get('crewId')}) → Listens to: '{listen_to}'")
-        logger.info("="*80)
-
-        # Define a dynamic Flow class
-        dynamic_flow_class = type('DynamicFlow', (Flow,), {})
-        
-        # Define the __init__ method
-        def __init__(self, flow_id=None, job_id=None, config=None):
-            super(dynamic_flow_class, self).__init__()
-            self._flow_id = flow_id
-            self._job_id = job_id
-            self._config = config or {}
-            self.crews = {}
-            self._initialize_crews()
-        
-        # Define the _initialize_crews method with improved agent and task configuration
-        def _initialize_crews(self):
-            try:
-                # Import agent/task services
-                from src.services.agent_service import AgentService
-                from src.services.task_service import TaskService
-                from src.services.crew_service import CrewService
-                from src.engines.crewai.tools.tool_factory import ToolFactory
-
-                # Create a tool factory instance for tool creation
-                # Pass an empty config dict as required by ToolFactory
-                tool_factory = ToolFactory(config={})
-                
-                # TODO: Convert to async - temporarily disabled SessionLocal usage
-                # Need to refactor this to use async patterns properly
-                if False:  # Temporarily disabled
-                    agent_service = AgentService(db)
-                    task_service = TaskService(db)
-                    crew_service = CrewService(db)
-                    
-                    # Initialize crews from the configuration
-                    for node_id, node in crew_nodes.items():
-                        crew_name = node.get('data', {}).get('label', f"Crew-{node_id}")
-                        
-                        # Try to get crew from database
-                        try:
-                            crew_id = node.get('data', {}).get('crewId') or node.get('id')
-                            if isinstance(crew_id, str) and crew_id.isdigit():
-                                crew_id = int(crew_id)
-                            
-                            crew_data = crew_service.get_crew(crew_id)
-                            if crew_data:
-                                # Get agents for this crew with proper tool configuration
-                                agents = []
-                                for agent_data in crew_data.agents:
-                                    agent_obj = agent_service.get_agent(agent_data.id)
-                                    if agent_obj:
-                                        # Create tools for the agent
-                                        tools = []
-                                        if hasattr(agent_obj, 'tools') and agent_obj.tools:
-                                            for tool_id in agent_obj.tools:
-                                                try:
-                                                    # Get tool configuration
-                                                    from src.services.tool_service import ToolService
-                                                    tool_service = ToolService(db)
-                                                    tool_obj = tool_service.get_tool(tool_id)
-                                                    
-                                                    if tool_obj:
-                                                        # Create the tool instance
-                                                        tool_name = tool_obj.title
-                                                        result_as_answer = False
-                                                        if hasattr(tool_obj, 'config') and tool_obj.config:
-                                                            if isinstance(tool_obj.config, dict):
-                                                                result_as_answer = tool_obj.config.get('result_as_answer', False)
-                                                            
-                                                        tool = tool_factory.create_tool(
-                                                            tool_name,
-                                                            result_as_answer=result_as_answer
-                                                        )
-                                                        
-                                                        if tool:
-                                                            tools.append(tool)
-                                                            logger.info(f"Added tool: {tool_name} to agent: {agent_obj.name}")
-                                                except Exception as tool_error:
-                                                    logger.error(f"Error configuring tool for agent {agent_obj.name}: {tool_error}")
-                                        
-                                        # Configure the agent with its tools
-                                        agent_kwargs = {
-                                            "role": agent_obj.role,
-                                            "goal": agent_obj.goal,
-                                            "backstory": agent_obj.backstory,
-                                            "verbose": True,
-                                            "allow_delegation": agent_obj.allow_delegation,
-                                            "use_system_prompt": True,
-                                            # CRITICAL: Enable respect_context_window to auto-summarize when context exceeds limits
-                                            # Without this, some LLM providers (Qwen, DeepSeek, Mistral) return empty responses
-                                            # instead of throwing errors when context is too large
-                                            "respect_context_window": True,
-                                            "tools": tools
-                                        }
-                                        
-                                        # Add LLM if specified
-                                        if hasattr(agent_obj, 'llm') and agent_obj.llm:
-                                            agent_kwargs["llm"] = agent_obj.llm
-                                        
-                                        # Create the agent
-                                        agent = Agent(**agent_kwargs)
-                                        agents.append(agent)
-                                        logger.info(f"Created agent {agent_obj.name} with {len(tools)} tools")
-                                
-                                # Get tasks for this crew with proper configuration
-                                tasks = []
-                                for task_data in crew_data.tasks:
-                                    task_obj = task_service.get_task(task_data.id)
-                                    if task_obj and task_obj.agent_id:
-                                        # Find the corresponding agent
-                                        agent = None
-                                        for i, a in enumerate(crew_data.agents):
-                                            if str(a.id) == str(task_obj.agent_id) and i < len(agents):
-                                                agent = agents[i]
-                                                break
-                                                
-                                        if agent:
-                                            # Configure task with context if needed
-                                            task_kwargs = {
-                                                "description": task_obj.description,
-                                                "expected_output": task_obj.expected_output,
-                                                "agent": agent,
-                                                "verbose": True
-                                            }
-                                            
-                                            # Handle task context (dependencies on other tasks)
-                                            if hasattr(task_obj, 'context_task_ids') and task_obj.context_task_ids:
-                                                context_tasks = []
-                                                for ctx_task_id in task_obj.context_task_ids:
-                                                    # Find the context task in our task list
-                                                    for t in tasks:
-                                                        if hasattr(t, 'id') and str(t.id) == str(ctx_task_id):
-                                                            context_tasks.append(t)
-                                                            break
-                                                    
-                                                if context_tasks:
-                                                    task_kwargs["context"] = context_tasks
-                                            
-                                            # Add async_execution if specified
-                                            if hasattr(task_obj, 'async_execution'):
-                                                task_kwargs["async_execution"] = task_obj.async_execution
-                                            
-                                            # Create the task
-                                            task = Task(**task_kwargs)
-                                            tasks.append(task)
-                                            logger.info(f"Created task {task_obj.name} with agent {agent.role}")
-                                
-                                # Create the crew if we have agents and tasks
-                                if agents and tasks:
-                                    # Determine process type from crew configuration
-                                    process_type = Process.sequential
-                                    if hasattr(crew_data, 'process') and crew_data.process:
-                                        process_str = str(crew_data.process).lower()
-                                        if process_str == 'hierarchical':
-                                            process_type = Process.hierarchical
-                                        # Note: CrewAI does not have Process.parallel
-                                        # Use hierarchical for delegation or async_execution for task-level parallelism
-                                    
-                                    crew = Crew(
-                                        agents=agents,
-                                        tasks=tasks,
-                                        verbose=True,
-                                        process=process_type
-                                    )
-                                    
-                                    # Configure LLM if specified at crew level
-                                    if hasattr(crew_data, 'llm') and crew_data.llm:
-                                        crew.llm = crew_data.llm
-                                    
-                                    self.crews[node_id] = crew
-                                    logger.info(f"Created crew {crew_name} with {len(agents)} agents and {len(tasks)} tasks using {process_type} process")
-                        except Exception as e:
-                            logger.error(f"Error creating crew {crew_name}: {str(e)}")
-            except Exception as e:
-                logger.error(f"Error initializing crews: {str(e)}")
-        
-        # Define the start_flow method with improved error handling
-        @start()
-        def start_flow(self):
-            logger.info(f"Starting flow execution for job {self._job_id}")
-            
-            # Initialize state with flow_id and job_id for tracking
-            self.state["flow_id"] = str(self._flow_id) if self._flow_id else "dynamic-flow"
-            self.state["job_id"] = self._job_id
-            self.state["start_time"] = datetime.now(UTC).isoformat()
-            
-            # Execute the starting point crew if available
-            if starting_points and len(starting_points) > 0:
-                start_point = starting_points[0]
-                crew_id = start_point.get('crewId')
-                crew_name = start_point.get('crewName')
-                task_id = start_point.get('taskId')
-                task_name = start_point.get('taskName')
-                
-                logger.info(f"Starting flow with crew {crew_name} and task {task_name}")
-                
-                # Find the crew by ID
-                crew = self.crews.get(str(crew_id))
-                if crew:
-                    # Execute the crew
-                    try:
-                        logger.info(f"Executing crew {crew_name}")
-                        result = crew.kickoff()
-                        logger.info(f"Crew execution completed successfully")
-                        # Store result in state for downstream listeners
-                        self.state["result"] = result.raw if hasattr(result, 'raw') else str(result)
-                        self.state["end_time"] = datetime.now(UTC).isoformat()
-                        return result
-                    except Exception as e:
-                        logger.error(f"Error executing crew: {str(e)}")
-                        self.state["error"] = str(e)
-                        self.state["end_time"] = datetime.now(UTC).isoformat()
-                        return {"error": str(e)}
-                else:
-                    error_msg = f"Crew {crew_id} not found"
-                    logger.error(error_msg)
-                    self.state["error"] = error_msg
-                    self.state["end_time"] = datetime.now(UTC).isoformat()
-                    return {"error": error_msg}
-            else:
-                error_msg = "No starting points defined"
-                logger.warning(error_msg)
-                self.state["error"] = error_msg 
-                self.state["end_time"] = datetime.now(UTC).isoformat()
-                return {"error": error_msg}
-        
-        # Add methods to the class
-        setattr(dynamic_flow_class, '__init__', __init__)
-        setattr(dynamic_flow_class, '_initialize_crews', _initialize_crews)
-        setattr(dynamic_flow_class, 'start_flow', start_flow)
-        
-        # Add listener methods - chain them sequentially
-        logger.info(f"Setting up {len(listeners)} listeners for sequential flow execution")
-        for i, listener in enumerate(listeners):
-            crew_id = listener.get('crewId')
-            crew_name = listener.get('crewName')
-
-            # Determine what this listener should listen to:
-            # - First listener (i=0) listens to "start_flow"
-            # - Subsequent listeners listen to the previous listener
-            listen_to = "start_flow" if i == 0 else f"listener_{i-1}"
-
-            logger.info(f"Listener {i} for crew '{crew_name}' will listen to event: '{listen_to}'")
-
-            # Define the listener method
-            def make_listener_method(crew_id, crew_name, listen_to_event, method_name):
-                @listen(listen_to_event)
-                def listener_method(self, result):
-                    logger.info(f"✓ Listener triggered for crew '{crew_name}' (listening to '{listen_to_event}')")
-                    crew = self.crews.get(str(crew_id))
-                    if crew:
-                        try:
-                            logger.info(f"▶ Executing listener crew '{crew_name}'")
-                            self.state["previous_result"] = result
-                            listener_result = crew.kickoff()
-                            logger.info(f"✓ Listener crew '{crew_name}' execution completed")
-                            return listener_result
-                        except Exception as e:
-                            logger.error(f"✗ Error executing listener crew '{crew_name}': {str(e)}")
-                            return {"error": str(e)}
-                    else:
-                        logger.error(f"✗ Listener crew {crew_id} not found")
-                        return {"error": f"Crew {crew_id} not found"}
-
-                # CRITICAL: Set __name__ to match method_name so CrewAI Flow emits the correct event
-                listener_method.__name__ = method_name
-                return listener_method
-
-            method_name = f"listener_{i}"
-            setattr(dynamic_flow_class, method_name, make_listener_method(crew_id, crew_name, listen_to, method_name))
-        
-        # Create and return an instance
-        flow_instance = dynamic_flow_class(flow_id=flow_id, job_id=job_id, config=config)
-        logger.info(f"Created dynamic flow instance for job {job_id}")
-        return flow_instance 
+            } 

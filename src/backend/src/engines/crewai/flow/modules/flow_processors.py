@@ -142,13 +142,25 @@ class FlowProcessorManager:
                     if agent_repo:
                         agent_data = await agent_repo.get(agent_id)
                         if agent_data:
+                            # Merge tool_configs: task-level takes priority over crew-level
+                            # MCP servers are typically configured at the task level
+                            effective_tool_configs = {}
+                            if crew_data and hasattr(crew_data, 'tool_configs') and crew_data.tool_configs:
+                                if isinstance(crew_data.tool_configs, dict):
+                                    effective_tool_configs.update(crew_data.tool_configs)
+                            if hasattr(task_data, 'tool_configs') and task_data.tool_configs:
+                                if isinstance(task_data.tool_configs, dict):
+                                    effective_tool_configs.update(task_data.tool_configs)
+
+                            logger.info(f"Task {task_id} effective tool_configs: {effective_tool_configs}")
+
                             # Build CrewAI Agent object using configure_agent_and_tools
                             agent_obj = await AgentConfig.configure_agent_and_tools(
                                 agent_data=agent_data,
                                 flow_data=flow_config,
                                 repositories=repositories,
                                 group_context=group_context,
-                                crew_tool_configs=crew_data.tool_configs if crew_data and hasattr(crew_data, 'tool_configs') else None
+                                crew_tool_configs=effective_tool_configs if effective_tool_configs else None
                             )
 
                             # Build CrewAI Task object with the agent using configure_task
@@ -157,7 +169,8 @@ class FlowProcessorManager:
                                 agent=agent_obj,
                                 task_output_callback=callbacks.get('task_callback') if callbacks else None,
                                 flow_data=flow_config,
-                                repositories=repositories
+                                repositories=repositories,
+                                group_context=group_context
                             )
 
                             # Set up task.context for sequential dependencies
@@ -218,9 +231,9 @@ class FlowProcessorManager:
                 # If we successfully built tasks for this crew, add it as a starting point
                 if crew_task_objects:
                     # Store metadata about this starting point crew
-                    # Format: (method_name, task_ids_list, task_objects_list, crew_name)
-                    # Include both IDs (for listener matching) and objects (for crew creation)
-                    starting_point_info = (method_name, task_ids, crew_task_objects, crew_data.name if hasattr(crew_data, 'name') else f"Crew {crew_idx}")
+                    # Format: (method_name, task_ids_list, task_objects_list, crew_name, crew_data)
+                    # Include both IDs (for listener matching), objects (for crew creation), and crew_data (for configuration)
+                    starting_point_info = (method_name, task_ids, crew_task_objects, crew_data.name if hasattr(crew_data, 'name') else f"Crew {crew_idx}", crew_data)
                     starting_point_methods.append(starting_point_info)
                     logger.info(f"Added starting point {method_name} for crew {crew_id} with {len(crew_task_objects)} tasks (including {len(async_tasks)} parallel)")
 
@@ -242,6 +255,10 @@ class FlowProcessorManager:
         """
         Process listeners from flow configuration.
 
+        IMPORTANT: Groups listener tasks by crew_id. If multiple listener entries have the same crew_id,
+        they are merged into a single crew that executes all tasks sequentially using task.context.
+        This enables crew-level listener orchestration instead of task-level.
+
         Args:
             flow_config: Flow configuration with listeners
             all_tasks: Dictionary to populate with task objects
@@ -250,9 +267,10 @@ class FlowProcessorManager:
             callbacks: Callbacks for execution monitoring
 
         Returns:
-            List of listener method names
+            List of tuples: (method_name, crew_id, task_ids, task_objects, crew_name, listen_to_task_ids, condition_type)
+            This rich structure allows flow_builder to create proper crew-level listeners.
         """
-        logger.info("Processing listeners")
+        logger.info("Processing listeners with crew grouping")
         listener_methods = []
 
         task_repo = repositories.get('task') if repositories else None
@@ -262,33 +280,86 @@ class FlowProcessorManager:
             logger.warning("No task repository provided for listeners")
             return listener_methods
 
-        for idx, listener in enumerate(flow_config.get('listeners', [])):
-            method_name = f"listener_{idx}"
-            crew_id = listener.get('crewId')
+        # STEP 1: Group listeners by crew_id
+        # Multiple listener configs with the same crew_id should be merged into one crew
+        crews_map = {}  # crew_id -> {task_ids: [], listen_to_task_ids: set(), condition_type: str, listener_config: dict}
 
-            # Note: We don't need listenTo here - that's handled in flow_builder.py
-            # We just need to load the listener tasks into all_tasks so flow_builder can find them
+        for idx, listener in enumerate(flow_config.get('listeners', [])):
+            crew_id = listener.get('crewId')
+            listen_to_task_ids = listener.get('listenToTaskIds', [])
+            condition_type = listener.get('conditionType', 'NONE')
+
+            logger.info(f"Listener {idx}: crew_id={crew_id}, listenToTaskIds={listen_to_task_ids}, conditionType={condition_type}")
+
             if not crew_id:
-                logger.warning(f"Listener {idx} missing crew_id")
+                logger.warning(f"Listener {idx} missing crew_id, skipping")
+                continue
+
+            # Skip ROUTER listeners - handled separately
+            if condition_type == 'ROUTER':
+                logger.info(f"Listener {idx} is ROUTER type, skipping (handled by routers)")
+                continue
+
+            # Initialize crew entry if not exists
+            if crew_id not in crews_map:
+                crews_map[crew_id] = {
+                    'task_ids': [],
+                    'listen_to_task_ids': set(),
+                    'condition_type': condition_type,
+                    'listener_configs': []
+                }
+
+            # Add tasks from this listener to the crew
+            for task_config in listener.get('tasks', []):
+                task_id = task_config.get('id')
+                if task_id and task_id not in crews_map[crew_id]['task_ids']:
+                    crews_map[crew_id]['task_ids'].append(task_id)
+
+            # Add listen_to targets
+            for listen_id in listen_to_task_ids:
+                crews_map[crew_id]['listen_to_task_ids'].add(listen_id)
+
+            # Store original listener config for reference
+            crews_map[crew_id]['listener_configs'].append(listener)
+
+            # Use AND if multiple listen targets, otherwise keep existing type
+            if len(crews_map[crew_id]['listen_to_task_ids']) > 1 and condition_type == 'NONE':
+                crews_map[crew_id]['condition_type'] = 'AND'
+
+        logger.info(f"Grouped listeners into {len(crews_map)} crews")
+
+        # STEP 2: Process each crew (building task objects with task.context for sequential execution)
+        for crew_idx, (crew_id, crew_info) in enumerate(crews_map.items()):
+            method_name = f"listener_{crew_idx}"
+            task_ids = crew_info['task_ids']
+            listen_to_task_ids = list(crew_info['listen_to_task_ids'])
+            condition_type = crew_info['condition_type']
+
+            logger.info(f"Processing listener crew {crew_id} with {len(task_ids)} tasks")
+            logger.info(f"  Tasks to execute: {task_ids}")
+            logger.info(f"  Listening to: {listen_to_task_ids}")
+            logger.info(f"  Condition type: {condition_type}")
+
+            if not task_ids:
+                logger.warning(f"No tasks for listener crew {crew_id}, skipping")
                 continue
 
             try:
                 # Load crew data
                 crew_data = await crew_repo.get(crew_id) if crew_repo else None
                 if not crew_data:
-                    logger.warning(f"Crew {crew_id} not found for listener {idx}")
+                    logger.warning(f"Crew {crew_id} not found for listener")
                     continue
 
-                # Process tasks for this listener
-                listener_tasks = []
-                for task_config in listener.get('tasks', []):
-                    task_id = task_config.get('id')
-                    if not task_id:
-                        continue
+                crew_name = crew_data.name if hasattr(crew_data, 'name') else f"Listener Crew {crew_idx}"
 
+                # Build Task objects for all tasks in this crew
+                crew_task_objects = []
+
+                for task_idx, task_id in enumerate(task_ids):
                     task_data = await task_repo.get(task_id)
                     if not task_data:
-                        logger.warning(f"Task {task_id} not found for listener {idx}")
+                        logger.warning(f"Task {task_id} not found, skipping")
                         continue
 
                     # Get agent_id from crew structure
@@ -330,43 +401,81 @@ class FlowProcessorManager:
                     if agent_repo:
                         agent_data = await agent_repo.get(agent_id)
                         if agent_data:
-                            # Build CrewAI Agent object using configure_agent_and_tools
+                            # Merge tool_configs: task-level takes priority over crew-level
+                            # MCP servers are typically configured at the task level
+                            effective_tool_configs = {}
+                            if crew_data and hasattr(crew_data, 'tool_configs') and crew_data.tool_configs:
+                                if isinstance(crew_data.tool_configs, dict):
+                                    effective_tool_configs.update(crew_data.tool_configs)
+                            if hasattr(task_data, 'tool_configs') and task_data.tool_configs:
+                                if isinstance(task_data.tool_configs, dict):
+                                    effective_tool_configs.update(task_data.tool_configs)
+
+                            logger.info(f"Listener task {task_id} effective tool_configs: {effective_tool_configs}")
+
+                            # Build CrewAI Agent object
                             agent_obj = await AgentConfig.configure_agent_and_tools(
                                 agent_data=agent_data,
                                 flow_data=flow_config,
                                 repositories=repositories,
                                 group_context=group_context,
-                                crew_tool_configs=crew_data.tool_configs if crew_data and hasattr(crew_data, 'tool_configs') else None
+                                crew_tool_configs=effective_tool_configs if effective_tool_configs else None
                             )
 
-                            # Build CrewAI Task object with the agent using configure_task
+                            # Build CrewAI Task object with the agent
                             task_obj = await TaskConfig.configure_task(
                                 task_data=task_data,
                                 agent=agent_obj,
                                 task_output_callback=callbacks.get('task_callback') if callbacks else None,
                                 flow_data=flow_config,
-                                repositories=repositories
+                                repositories=repositories,
+                                group_context=group_context
                             )
 
-                            # Store the actual task object by task_id
+                            # Set up task.context for sequential dependencies within crew
+                            # Only set context if task is NOT marked for async execution
+                            is_async = getattr(task_data, 'async_execution', False)
+
+                            if is_async:
+                                logger.info(f"  Task {task_id} marked for async execution (parallel)")
+                            elif task_idx > 0 and len(crew_task_objects) > 0:
+                                # Sequential execution - set context to wait for previous task
+                                task_obj.context = [crew_task_objects[-1]]
+                                logger.info(f"  Task {task_id} will wait for previous task (sequential via task.context)")
+
+                            # Store the task object
                             all_tasks[str(task_id)] = task_obj
-                            listener_tasks.append(task_obj)
+                            crew_task_objects.append(task_obj)
+                            logger.info(f"  Added task {task_id} (index {task_idx}) to listener crew")
                         else:
                             logger.warning(f"Agent {agent_id} not found for listener task {task_id}")
                     else:
                         logger.warning(f"No agent repository for listener task {task_id}")
 
-                if listener_tasks:
-                    listener_methods.append(method_name)
-                    logger.info(f"Added listener {method_name} with {len(listener_tasks)} tasks")
+                # If we successfully built tasks for this listener crew, add it
+                if crew_task_objects:
+                    # Return rich structure for flow_builder to create proper crew-level listeners
+                    # Format: (method_name, crew_id, task_ids, task_objects, crew_name, listen_to_task_ids, condition_type, crew_data)
+                    listener_info = (
+                        method_name,
+                        crew_id,
+                        task_ids,
+                        crew_task_objects,
+                        crew_name,
+                        listen_to_task_ids,
+                        condition_type,
+                        crew_data
+                    )
+                    listener_methods.append(listener_info)
+                    logger.info(f"Added listener crew {method_name} for crew {crew_id} with {len(crew_task_objects)} sequential tasks")
                 else:
-                    logger.warning(f"No valid tasks found for listener {idx}")
+                    logger.warning(f"No valid tasks found for listener crew {crew_id}")
 
             except Exception as e:
-                logger.error(f"Error processing listener {idx}: {e}", exc_info=True)
+                logger.error(f"Error processing listener crew {crew_id}: {e}", exc_info=True)
                 continue
 
-        logger.info(f"Processed {len(listener_methods)} listeners")
+        logger.info(f"Processed {len(listener_methods)} listener crews")
         return listener_methods
 
     @staticmethod
@@ -403,33 +512,37 @@ class FlowProcessorManager:
         for idx, router_config in enumerate(flow_config.get('routers', [])):
             router_method_name = f"router_{idx}"
             listen_to = router_config.get('listenTo')
-            routes = router_config.get('routes', [])
+            routes = router_config.get('routes', {})  # Dict format: {route_name: [task_configs]}
+            route_conditions = router_config.get('routeConditions', {})  # Dict format: {route_name: condition_expr}
 
             if not listen_to:
                 logger.warning(f"Router {idx} missing listenTo")
                 continue
 
-            # Debug: Log the routes structure
+            # Debug: Log the routes and conditions structure
             logger.info(f"Router {idx} routes type: {type(routes)}, value: {routes}")
+            logger.info(f"Router {idx} route_conditions: {route_conditions}")
 
             try:
-                # Process each route
+                # Process each route - routes is a dict: {route_name: [task_configs]}
                 processed_routes = []
-                for route in routes:
+                for route_name, route_task_configs in routes.items():
                     # Debug: Log each route structure
-                    logger.info(f"  Route type: {type(route)}, value: {route}")
+                    logger.info(f"  Route '{route_name}' task_configs: {route_task_configs}")
 
-                    # Handle case where route might be a string instead of dict
-                    if isinstance(route, str):
-                        logger.warning(f"Router {idx} has route as string instead of dict: {route}")
+                    # Get condition for this route from routeConditions dict
+                    condition = route_conditions.get(route_name, '')
+
+                    # Get crew_id from the first task config (all tasks in a route are from the same crew)
+                    if not route_task_configs:
+                        logger.warning(f"Route '{route_name}' has no task configs")
                         continue
 
-                    route_name = route.get('name')
-                    condition = route.get('condition')
-                    crew_id = route.get('crewId')
+                    first_task_config = route_task_configs[0] if isinstance(route_task_configs, list) else route_task_configs
+                    crew_id = first_task_config.get('crewId')
 
-                    if not route_name or not crew_id:
-                        logger.warning(f"Route missing name or crew_id in router {idx}")
+                    if not crew_id:
+                        logger.warning(f"Route '{route_name}' missing crew_id in router {idx}")
                         continue
 
                     # Load crew data
@@ -438,9 +551,9 @@ class FlowProcessorManager:
                         logger.warning(f"Crew {crew_id} not found for route {route_name}")
                         continue
 
-                    # Process tasks for this route
+                    # Process tasks for this route - route_task_configs is already the list of task configs
                     route_tasks = []
-                    for task_config in route.get('tasks', []):
+                    for task_config in route_task_configs:
                         task_id = task_config.get('id')
                         if not task_id:
                             continue
@@ -489,13 +602,25 @@ class FlowProcessorManager:
                         if agent_repo:
                             agent_data = await agent_repo.get(agent_id)
                             if agent_data:
+                                # Merge tool_configs: task-level takes priority over crew-level
+                                # MCP servers are typically configured at the task level
+                                effective_tool_configs = {}
+                                if crew_data and hasattr(crew_data, 'tool_configs') and crew_data.tool_configs:
+                                    if isinstance(crew_data.tool_configs, dict):
+                                        effective_tool_configs.update(crew_data.tool_configs)
+                                if hasattr(task_data, 'tool_configs') and task_data.tool_configs:
+                                    if isinstance(task_data.tool_configs, dict):
+                                        effective_tool_configs.update(task_data.tool_configs)
+
+                                logger.info(f"Router task {task_id} effective tool_configs: {effective_tool_configs}")
+
                                 # Build CrewAI Agent object using configure_agent_and_tools
                                 agent_obj = await AgentConfig.configure_agent_and_tools(
                                     agent_data=agent_data,
                                     flow_data=flow_config,
                                     repositories=repositories,
                                     group_context=group_context,
-                                    crew_tool_configs=crew_data.tool_configs if crew_data and hasattr(crew_data, 'tool_configs') else None
+                                    crew_tool_configs=effective_tool_configs if effective_tool_configs else None
                                 )
 
                                 # Build CrewAI Task object with the agent using configure_task
@@ -504,7 +629,8 @@ class FlowProcessorManager:
                                     agent=agent_obj,
                                     task_output_callback=callbacks.get('task_callback') if callbacks else None,
                                     flow_data=flow_config,
-                                    repositories=repositories
+                                    repositories=repositories,
+                                    group_context=group_context
                                 )
 
                                 # Store the actual task object by task_id

@@ -16,12 +16,10 @@ from pydantic import BaseModel, Field
 
 from src.core.logger import LoggerManager
 from src.repositories.flow_repository import FlowRepository
-from crewai import Agent, Task, Crew
+from crewai import Agent, Task, Crew, LLM
 from crewai import Process
 from crewai.flow.flow import Flow as CrewAIFlow
-from crewai import LLM
 from src.core.llm_manager import LLMManager
-from crewai.tools import BaseTool
 
 # Import the refactored modules
 from src.engines.crewai.flow.modules.agent_config import AgentConfig
@@ -179,9 +177,25 @@ class BackendFlow:
                 logger.warning(f"Could not set group context: {e}")
 
         if not self._flow_data:
-            # Use flow repository if available
-            flow_repo = self._repositories.get('flow')
-            await self.load_flow(repository=flow_repo)
+            # Check if this is an unsaved flow with data in config
+            config_has_nodes = 'nodes' in self._config and self._config['nodes'] and len(self._config['nodes']) > 0
+
+            if config_has_nodes:
+                # Unsaved flow - populate _flow_data from config
+                logger.info(f"[flow] Unsaved flow detected - populating _flow_data from config with {len(self._config['nodes'])} nodes")
+                self._flow_data = {
+                    'id': self._flow_id,
+                    'name': self._config.get('name', 'Unsaved Flow'),
+                    'crew_id': self._config.get('crew_id'),
+                    'nodes': self._config['nodes'],
+                    'edges': self._config.get('edges', []),
+                    'flow_config': self._config.get('flow_config', {})
+                }
+                logger.info(f"[flow] Successfully populated _flow_data from config for unsaved flow")
+            else:
+                # Saved flow - load from database
+                flow_repo = self._repositories.get('flow')
+                await self.load_flow(repository=flow_repo)
 
         if not self._flow_data:
             logger.error("Flow data could not be loaded")
@@ -190,15 +204,29 @@ class BackendFlow:
         try:
             # Initialize callbacks for this flow execution
             self._init_callbacks()
-            
+
+            # Extract checkpoint resume parameters from config
+            resume_from_flow_uuid = self._config.get('resume_from_flow_uuid')
+            resume_from_crew_sequence = self._config.get('resume_from_crew_sequence')
+            resume_from_execution_id = self._config.get('resume_from_execution_id')
+            if resume_from_flow_uuid:
+                logger.info(f"Resuming flow from checkpoint: {resume_from_flow_uuid}")
+                if resume_from_crew_sequence is not None:
+                    logger.info(f"Resuming from crew sequence: {resume_from_crew_sequence} (will skip crews up to this sequence)")
+                if resume_from_execution_id is not None:
+                    logger.info(f"Resume from execution ID: {resume_from_execution_id} (will query traces for checkpoint data)")
+
             # Build the flow using the FlowBuilder module
             dynamic_flow = await FlowBuilder.build_flow(
                 flow_data=self._flow_data,
                 repositories=self._repositories,
                 callbacks=self._config.get('callbacks', {}),
-                group_context=self._config.get('group_context')
+                group_context=self._config.get('group_context'),
+                restore_uuid=resume_from_flow_uuid,
+                resume_from_crew_sequence=resume_from_crew_sequence,
+                resume_from_execution_id=resume_from_execution_id
             )
-            
+
             logger.info("Flow created successfully")
             return dynamic_flow
             
@@ -268,17 +296,45 @@ class BackendFlow:
 
             # Load flow data if needed
             if not self._flow_data:
-                try:
-                    flow_repo = self._repositories.get('flow')
-                    await self.load_flow(repository=flow_repo)
-                    logger.info("Successfully loaded flow data during kickoff_async")
-                except Exception as e:
-                    logger.error(f"Error loading flow data during kickoff_async: {e}", exc_info=True)
-                    return {
-                        "success": False,
-                        "error": f"Failed to load flow data: {str(e)}",
-                        "flow_id": self._flow_id
+                # Check if this is an unsaved flow with data in config
+                config_has_nodes = 'nodes' in self._config and self._config['nodes'] and len(self._config['nodes']) > 0
+
+                if config_has_nodes:
+                    # Unsaved flow - populate _flow_data from config
+                    logger.info(f"[kickoff_async] Unsaved flow detected - populating _flow_data from config with {len(self._config['nodes'])} nodes")
+                    self._flow_data = {
+                        'id': self._flow_id,
+                        'name': self._config.get('name', 'Unsaved Flow'),
+                        'crew_id': self._config.get('crew_id'),
+                        'nodes': self._config['nodes'],
+                        'edges': self._config.get('edges', []),
+                        'flow_config': self._config.get('flow_config', {})
                     }
+                    logger.info(f"[kickoff_async] Successfully populated _flow_data from config for unsaved flow")
+                else:
+                    # Saved flow - load from database
+                    try:
+                        flow_repo = self._repositories.get('flow')
+                        await self.load_flow(repository=flow_repo)
+                        logger.info("Successfully loaded flow data during kickoff_async")
+                    except Exception as e:
+                        logger.error(f"Error loading flow data during kickoff_async: {e}", exc_info=True)
+                        return {
+                            "success": False,
+                            "error": f"Failed to load flow data: {str(e)}",
+                            "flow_id": self._flow_id
+                        }
+
+            # Merge config data into flow_data (frontend config takes precedence)
+            # This ensures frontend-provided flow_config, nodes, and edges are used
+            if 'flow_config' in self._config:
+                logger.info("[kickoff_async] Using flow_config from self._config (has latest updates)")
+                self._flow_data['flow_config'] = self._config['flow_config']
+            if 'nodes' in self._config:
+                self._flow_data['nodes'] = self._config['nodes']
+            if 'edges' in self._config:
+                self._flow_data['edges'] = self._config['edges']
+                logger.info(f"[kickoff_async] Merged {len(self._config['edges'])} edges from config")
 
             # Create the CrewAI flow instance
             try:
@@ -301,40 +357,86 @@ class BackendFlow:
                 if hasattr(crewai_flow, 'kickoff_async'):
                     logger.info("Using CrewAI's native kickoff_async method")
                     logger.info(f"About to call kickoff_async() on flow instance")
-                    result = await crewai_flow.kickoff_async()
+
+                    # CRITICAL: Pass restore_uuid as 'id' in inputs for checkpoint resume
+                    # CrewAI's @persist decorator loads state from persistence when 'id' is in inputs
+                    resume_from_flow_uuid = self._config.get('resume_from_flow_uuid')
+                    if resume_from_flow_uuid:
+                        logger.info(f"Passing id={resume_from_flow_uuid} to kickoff_async for checkpoint resume")
+                        result = await crewai_flow.kickoff_async(inputs={"id": resume_from_flow_uuid})
+                    else:
+                        result = await crewai_flow.kickoff_async()
                     logger.info(f"kickoff_async() returned: {type(result)}")
+
+                    # DIAGNOSTIC: Log method_outputs from CrewAI Flow
+                    if hasattr(crewai_flow, '_method_outputs'):
+                        logger.info(f"🔍 DIAGNOSTIC - Flow._method_outputs count: {len(crewai_flow._method_outputs)}")
+                        for idx, output in enumerate(crewai_flow._method_outputs):
+                            if hasattr(output, 'raw') and output.raw:
+                                logger.info(f"🔍 DIAGNOSTIC - _method_outputs[{idx}].raw length: {len(str(output.raw))}")
+                                raw_str = str(output.raw)
+                                if len(raw_str) > 400:
+                                    logger.info(f"🔍 DIAGNOSTIC - _method_outputs[{idx}] END: ...{raw_str[-200:]}")
+                            else:
+                                logger.info(f"🔍 DIAGNOSTIC - _method_outputs[{idx}] type: {type(output)}, str length: {len(str(output))}")
                 else:
                     logger.info("kickoff_async not available, using synchronous kickoff")
                     logger.info(f"About to call kickoff() on flow instance")
-                    result = crewai_flow.kickoff()
+                    # CRITICAL: Pass restore_uuid as 'id' in inputs for checkpoint resume
+                    resume_from_flow_uuid = self._config.get('resume_from_flow_uuid')
+                    if resume_from_flow_uuid:
+                        logger.info(f"Passing id={resume_from_flow_uuid} to kickoff for checkpoint resume")
+                        result = crewai_flow.kickoff(inputs={"id": resume_from_flow_uuid})
+                    else:
+                        result = crewai_flow.kickoff()
                     logger.info(f"kickoff() returned: {type(result)}")
 
                 logger.info("Flow executed successfully via kickoff_async")
 
-                # Process result
-                result_dict = {}
+                # Process result the same way as crew results
+                # Extract raw content directly without wrapping
+                logger.info(f"Processing flow result, type: {type(result)}")
                 if result is None:
-                    result_value = {}
+                    result_value = None
+                elif hasattr(result, 'raw') and result.raw:
+                    # CrewOutput object with raw attribute - extract raw content directly
+                    # This matches how crew execution captures results
+                    result_value = result.raw
+                    logger.info(f"Extracted raw output from flow result, length: {len(str(result_value))}")
                 elif isinstance(result, dict):
                     result_value = result
+                    logger.info(f"Flow result is already a dictionary")
+                elif isinstance(result, str):
+                    result_value = result
+                    logger.info(f"Flow result is a string, length: {len(result_value)}")
+                elif hasattr(result, 'to_dict'):
+                    result_value = result.to_dict()
+                    logger.info(f"Used to_dict() for flow result conversion")
+                elif hasattr(result, '__dict__'):
+                    result_value = result.__dict__
+                    logger.info(f"Used __dict__ for flow result conversion")
                 else:
-                    # Handle CrewOutput object
-                    if hasattr(result, 'to_dict'):
-                        result_value = result.to_dict()
-                    elif hasattr(result, '__dict__'):
-                        result_value = result.__dict__
-                    elif hasattr(result, 'raw'):
-                        result_value = {
-                            "content": result.raw,
-                            "token_usage": str(result.token_usage) if hasattr(result, 'token_usage') else None
-                        }
-                    else:
-                        result_value = {"content": str(result)}
+                    result_value = str(result)
+                    logger.info(f"Used string fallback for flow result conversion")
+
+                logger.info(f"Flow result processed, type: {type(result_value)}")
+
+                # Extract flow_uuid (state.id) for checkpoint/resume functionality
+                # This is CrewAI's internal state identifier when using @persist
+                flow_uuid = None
+                try:
+                    if hasattr(crewai_flow, 'state') and crewai_flow.state is not None:
+                        if hasattr(crewai_flow.state, 'id'):
+                            flow_uuid = str(crewai_flow.state.id)
+                            logger.info(f"Extracted flow_uuid (state.id) for checkpoint: {flow_uuid}")
+                except Exception as state_err:
+                    logger.warning(f"Could not extract flow state.id: {state_err}")
 
                 return {
                     "success": True,
                     "result": result_value,
-                    "flow_id": self._flow_id
+                    "flow_id": self._flow_id,
+                    "flow_uuid": flow_uuid  # CrewAI state.id for checkpoint resume
                 }
             except Exception as exec_error:
                 logger.error(f"Error during async flow execution: {exec_error}", exc_info=True)
@@ -385,18 +487,35 @@ class BackendFlow:
             
             # Make sure we have flow data loaded
             if not self._flow_data:
-                try:
-                    # Use the repository from the service if provided
-                    flow_repo = self._repositories.get('flow')
-                    await self.load_flow(repository=flow_repo)
-                    logger.info("Successfully loaded flow data during kickoff")
-                except Exception as e:
-                    logger.error(f"Error loading flow data during kickoff: {e}", exc_info=True)
-                    return {
-                        "success": False,
-                        "error": f"Failed to load flow data: {str(e)}",
-                        "flow_id": self._flow_id
+                # Check if this is an unsaved flow with data in config
+                config_has_nodes = 'nodes' in self._config and self._config['nodes'] and len(self._config['nodes']) > 0
+
+                if config_has_nodes:
+                    # Unsaved flow - populate _flow_data from config
+                    logger.info(f"Unsaved flow detected - populating _flow_data from config with {len(self._config['nodes'])} nodes")
+                    self._flow_data = {
+                        'id': self._flow_id,  # Use the generated flow_id
+                        'name': self._config.get('name', 'Unsaved Flow'),
+                        'crew_id': self._config.get('crew_id'),
+                        'nodes': self._config['nodes'],
+                        'edges': self._config.get('edges', []),
+                        'flow_config': self._config.get('flow_config', {})
                     }
+                    logger.info(f"Successfully populated _flow_data from config for unsaved flow")
+                else:
+                    # Saved flow - load from database
+                    try:
+                        # Use the repository from the service if provided
+                        flow_repo = self._repositories.get('flow')
+                        await self.load_flow(repository=flow_repo)
+                        logger.info("Successfully loaded flow data during kickoff")
+                    except Exception as e:
+                        logger.error(f"Error loading flow data during kickoff: {e}", exc_info=True)
+                        return {
+                            "success": False,
+                            "error": f"Failed to load flow data: {str(e)}",
+                            "flow_id": self._flow_id
+                        }
 
             # CRITICAL: If config has an updated flow_config (with startingPoints), use it
             # This ensures frontend-provided flow_config takes precedence over database version
@@ -460,61 +579,99 @@ class BackendFlow:
             # Do NOT call start methods directly - this bypasses the event system!
             logger.info("Calling flow.kickoff_async() to execute the flow with proper event handling")
 
-            combined_results = {}
             try:
-                # Let CrewAI Flow handle the execution (start methods + listeners)
-                flow_result = await crewai_flow.kickoff_async()
+                # CRITICAL: Pass resume_from_flow_uuid as 'id' in inputs for checkpoint resume
+                # CrewAI's @persist decorator loads state from persistence when 'id' is in inputs
+                resume_from_flow_uuid = self._config.get('resume_from_flow_uuid')
+                if resume_from_flow_uuid:
+                    logger.info(f"Passing id={resume_from_flow_uuid} to kickoff_async for checkpoint resume")
+                    flow_result = await crewai_flow.kickoff_async(inputs={"id": resume_from_flow_uuid})
+                else:
+                    # Let CrewAI Flow handle the execution (start methods + listeners)
+                    flow_result = await crewai_flow.kickoff_async()
                 logger.info(f"Flow kickoff_async completed, result type: {type(flow_result)}")
 
-                # Store the result
-                if flow_result:
-                    combined_results['flow_output'] = flow_result
-                else:
-                    logger.warning("Flow kickoff_async returned None")
+                # DIAGNOSTIC: Log method_outputs from CrewAI Flow
+                if hasattr(crewai_flow, '_method_outputs'):
+                    logger.info(f"🔍 DIAGNOSTIC - Flow._method_outputs count: {len(crewai_flow._method_outputs)}")
+                    for idx, output in enumerate(crewai_flow._method_outputs):
+                        if hasattr(output, 'raw') and output.raw:
+                            logger.info(f"🔍 DIAGNOSTIC - _method_outputs[{idx}].raw length: {len(str(output.raw))}")
+                            raw_str = str(output.raw)
+                            if len(raw_str) > 400:
+                                logger.info(f"🔍 DIAGNOSTIC - _method_outputs[{idx}] END: ...{raw_str[-200:]}")
+                        else:
+                            logger.info(f"🔍 DIAGNOSTIC - _method_outputs[{idx}] type: {type(output)}, str length: {len(str(output))}")
             except Exception as flow_error:
                 logger.error(f"Error during flow kickoff_async: {flow_error}", exc_info=True)
                 raise
 
-            logger.info(f"Flow executed successfully with {len(combined_results)} results")
-            
-            # Convert all results to dictionary format
-            result_dict = {}
-            for key, value in combined_results.items():
-                try:
-                    # Process result based on its type
-                    if value is None:
-                        result_value = {}
-                    elif isinstance(value, dict):
-                        result_value = value
-                    else:
-                        # Handle CrewOutput object
-                        if hasattr(value, 'to_dict'):
-                            # Use to_dict method if available
-                            result_value = value.to_dict()
-                        elif hasattr(value, '__dict__'):
-                            # Use __dict__ if to_dict not available
-                            result_value = value.__dict__
-                        elif hasattr(value, 'raw'):
-                            # Extract raw content and token usage if available
-                            result_value = {
-                                "content": value.raw,
-                                "token_usage": str(value.token_usage) if hasattr(value, 'token_usage') else None
-                            }
+            # Process flow result the same way as crew results
+            # Extract raw content directly without wrapping in flow_output
+            processed_result = None
+            try:
+                if flow_result is None:
+                    logger.warning("Flow kickoff_async returned None")
+                    processed_result = None
+                elif hasattr(flow_result, 'raw') and flow_result.raw:
+                    # CrewOutput object with raw attribute - extract raw content directly
+                    # This matches how crew execution captures results
+                    processed_result = flow_result.raw
+                    logger.info(f"Extracted raw output from flow result, length: {len(str(processed_result))}")
+                elif isinstance(flow_result, dict):
+                    # Already a dictionary - use as is
+                    processed_result = flow_result
+                    logger.info(f"Flow result is already a dictionary")
+                elif isinstance(flow_result, str):
+                    # String result - use directly
+                    processed_result = flow_result
+                    logger.info(f"Flow result is a string, length: {len(processed_result)}")
+                elif hasattr(flow_result, 'to_dict'):
+                    # Use to_dict method if available
+                    processed_result = flow_result.to_dict()
+                    logger.info(f"Used to_dict() for flow result conversion")
+                elif hasattr(flow_result, '__dict__'):
+                    # Use __dict__ as fallback
+                    processed_result = flow_result.__dict__
+                    logger.info(f"Used __dict__ for flow result conversion")
+                else:
+                    # Fallback to string representation
+                    processed_result = str(flow_result)
+                    logger.info(f"Used string fallback for flow result conversion")
+            except Exception as conv_error:
+                logger.error(f"Error processing flow result: {conv_error}", exc_info=True)
+                # Use string representation as fallback
+                processed_result = str(flow_result) if flow_result else None
+
+            logger.info(f"Flow executed successfully, result processed")
+
+            # Extract flow_uuid (state.id) for checkpoint/resume functionality
+            # This is CrewAI's internal state identifier when using @persist
+            flow_uuid = None
+            try:
+                logger.info(f"DEBUG: Checking crewai_flow.state - hasattr(state): {hasattr(crewai_flow, 'state')}")
+                if hasattr(crewai_flow, 'state'):
+                    state = crewai_flow.state
+                    logger.info(f"DEBUG: state type: {type(state)}, state value: {state}")
+                    logger.info(f"DEBUG: state attributes: {dir(state) if state else 'None'}")
+                    if state is not None:
+                        if hasattr(state, 'id'):
+                            flow_uuid = str(state.id)
+                            logger.info(f"Extracted flow_uuid (state.id) for checkpoint: {flow_uuid}")
                         else:
-                            # Fallback to string representation
-                            result_value = {"content": str(value)}
-                        
-                    # Add to result dictionary
-                    result_dict[key] = result_value
-                except Exception as conv_error:
-                    logger.error(f"Error converting result to dictionary for {key}: {conv_error}", exc_info=True)
-                    # Use a simple string representation as fallback
-                    result_dict[key] = {"content": str(value)}
-            
+                            logger.info(f"DEBUG: state has no 'id' attribute")
+                            # Try to get id from dict-like state
+                            if isinstance(state, dict) and 'id' in state:
+                                flow_uuid = str(state['id'])
+                                logger.info(f"Extracted flow_uuid from dict state['id']: {flow_uuid}")
+            except Exception as state_err:
+                logger.warning(f"Could not extract flow state.id: {state_err}", exc_info=True)
+
             return {
                 "success": True,
-                "result": result_dict,
-                "flow_id": self._flow_id
+                "result": processed_result,
+                "flow_id": self._flow_id,
+                "flow_uuid": flow_uuid  # CrewAI state.id for checkpoint resume
             }
         except Exception as e:
             logger.error(f"Error during flow kickoff: {e}", exc_info=True)
@@ -582,7 +739,8 @@ class BackendFlow:
         return await AgentConfig.configure_agent_and_tools(
             agent_data=agent_data,
             flow_data=self._flow_data,
-            repositories=self._repositories
+            repositories=self._repositories,
+            group_context=self._config.get('group_context')
         )
 
     async def _configure_task(self, task_data, agent=None, task_output_callback=None):
@@ -603,5 +761,6 @@ class BackendFlow:
             agent=agent,
             task_output_callback=task_output_callback,
             flow_data=self._flow_data,
-            repositories=self._repositories
+            repositories=self._repositories,
+            group_context=self._config.get('group_context')
         ) 
