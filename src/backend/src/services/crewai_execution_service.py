@@ -10,7 +10,6 @@ from datetime import datetime, UTC
 from typing import Dict, Any, Optional, List
 from concurrent.futures import ThreadPoolExecutor
 from sqlalchemy.ext.asyncio import AsyncSession
-import logging
 from enum import Enum
 import uuid
 
@@ -30,10 +29,7 @@ from src.services.task_service import TaskService
 
 
 # Initialize logger
-logger = LoggerManager.get_instance().crew
-
-# Configure logging
-crew_logger = logging.getLogger("crewai.service")
+crew_logger = LoggerManager.get_instance().crew
 
 # Set to store active tasks to prevent garbage collection
 _active_tasks = set()
@@ -679,13 +675,25 @@ class CrewAIExecutionService:
                     flow_logger = LoggerManager.get_instance().flow
 
                     # Call the flow service to run the flow with process isolation
-                    flow_logger.info(f"Starting flow execution for job_id: {job_id}")
+                    # Extract checkpoint resume parameters from config
+                    resume_from_flow_uuid = execution_config.get('resume_from_flow_uuid')
+                    resume_from_execution_id = execution_config.get('resume_from_execution_id')
+                    resume_from_crew_sequence = execution_config.get('resume_from_crew_sequence')
+                    if resume_from_flow_uuid:
+                        flow_logger.info(f"Starting flow execution for job_id: {job_id} (RESUMING from checkpoint {resume_from_flow_uuid})")
+                        if resume_from_crew_sequence is not None:
+                            flow_logger.info(f"Resume from crew sequence: {resume_from_crew_sequence} (will skip crews up to this sequence)")
+                    else:
+                        flow_logger.info(f"Starting flow execution for job_id: {job_id}")
                     result = await flow_service.run_flow(
                         flow_id=flow_id,
                         job_id=job_id,
                         config=execution_config,
                         group_context=group_context,
-                        user_token=user_token
+                        user_token=user_token,
+                        resume_from_flow_uuid=resume_from_flow_uuid,
+                        resume_from_execution_id=resume_from_execution_id,
+                        resume_from_crew_sequence=resume_from_crew_sequence
                     )
 
                     flow_logger.info(f"Flow execution started successfully (process isolated): {result}")

@@ -81,7 +81,7 @@ async def create_execution(
         # Process flow_id if present
         if hasattr(config, 'flow_id') and config.flow_id:
             exec_logger.info(f"Executing flow with ID: {config.flow_id}")
-            
+
             # Convert string to UUID if necessary
             if isinstance(config.flow_id, str):
                 try:
@@ -92,16 +92,23 @@ async def create_execution(
                     exec_logger.error(f"Invalid flow_id format: {config.flow_id}")
                     raise ValueError(f"Invalid flow_id format: {config.flow_id}. Must be a valid UUID.")
 
-            # Verify the flow exists in database
-            flow_service = FlowService(service.session)
-            try:
-                flow = await flow_service.get_flow(config.flow_id)
-                exec_logger.info(f"Found flow in database: {flow.name} ({flow.id})")
-            except HTTPException as he:
-                if he.status_code == 404:
-                    exec_logger.error(f"Flow with ID {config.flow_id} not found")
-                    raise ValueError(f"Flow with ID {config.flow_id} not found")
-                raise
+            # Only verify flow exists in database if nodes are NOT already provided in config
+            # If nodes are provided, it's an unsaved flow being executed from the canvas
+            has_nodes_in_config = hasattr(config, 'nodes') and config.nodes and len(config.nodes) > 0
+
+            if not has_nodes_in_config:
+                # This is a saved flow being re-executed - verify it exists
+                flow_service = FlowService(service.session)
+                try:
+                    flow = await flow_service.get_flow(config.flow_id)
+                    exec_logger.info(f"Found flow in database: {flow.name} ({flow.id})")
+                except HTTPException as he:
+                    if he.status_code == 404:
+                        exec_logger.error(f"Flow with ID {config.flow_id} not found")
+                        raise ValueError(f"Flow with ID {config.flow_id} not found")
+                    raise
+            else:
+                exec_logger.info(f"Executing unsaved flow with {len(config.nodes)} nodes from canvas (flow_id={config.flow_id})")
 
         # Log the incoming config to debug knowledge_sources
         exec_logger.info(f"[create_execution] Received config with agents_yaml: {hasattr(config, 'agents_yaml')}")
@@ -338,8 +345,9 @@ async def stop_execution(
                 detail=f"Execution {execution_id} not found"
             )
         
-        # Check if execution is in a stoppable state
-        if execution.status not in ["RUNNING", "PREPARING"]:
+        # Check if execution is in a stoppable state (case-insensitive)
+        status_upper = execution.status.upper() if execution.status else ""
+        if status_upper not in ["RUNNING", "PREPARING"]:
             return StopExecutionResponse(
                 execution_id=execution_id,
                 status=execution.status,

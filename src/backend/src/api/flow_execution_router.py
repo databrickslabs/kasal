@@ -27,6 +27,9 @@ class FlowExecutionRequest(BaseModel):
     job_id: str
     run_name: Optional[str] = None
     config: Optional[Dict[str, Any]] = None
+    # Checkpoint resume fields
+    resume_from_flow_uuid: Optional[str] = None  # CrewAI state.id to resume from
+    resume_from_execution_id: Optional[int] = None  # Execution ID of checkpoint to resume
 
 
 @router.post("", status_code=status.HTTP_202_ACCEPTED)
@@ -52,7 +55,9 @@ async def execute_flow(
             flow_id=request.flow_id,
             job_id=request.job_id,
             run_name=request.run_name,
-            config=request.config
+            config=request.config,
+            resume_from_flow_uuid=request.resume_from_flow_uuid,
+            resume_from_execution_id=request.resume_from_execution_id
         )
         
         if not result.get("success", True) is False:  # Assume success unless explicitly False
