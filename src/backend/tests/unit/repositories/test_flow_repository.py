@@ -42,13 +42,14 @@ class MockScalars:
 
 
 class MockResult:
-    def __init__(self, results):
+    def __init__(self, results, rowcount=0):
         self._scalars = MockScalars(results)
         self._rows = results if results and isinstance(results[0], tuple) else []
-    
+        self.rowcount = rowcount
+
     def scalars(self):
         return self._scalars
-    
+
     def fetchall(self):
         return self._rows
 
@@ -222,140 +223,135 @@ class TestFlowRepositoryFindAll:
 
 class TestFlowRepositoryDeleteWithExecutions:
     """Test cases for delete_with_executions method."""
-    
+
     @pytest.mark.asyncio
     async def test_delete_with_executions_success(self, flow_repository, mock_async_session):
         """Test successful cascading delete of flow with executions."""
         flow_id = uuid.uuid4()
         flow = MockFlow(id=flow_id)
-        
+
         # Mock get method to return flow
         with patch.object(flow_repository, 'get', return_value=flow):
-            # Mock execution ID query result
-            execution_ids_result = MockResult([(1,), (2,), (3,)])
+            # New implementation: delete executions + delete flow (2 queries)
+            mock_result_with_rowcount = MagicMock()
+            mock_result_with_rowcount.rowcount = 3
             mock_async_session.execute.side_effect = [
-                execution_ids_result,  # Find executions query
-                MagicMock(),  # Delete node executions query
-                MagicMock(),  # Delete flow executions query
-                MagicMock()   # Delete flow query
+                mock_result_with_rowcount,  # Delete executions from executionhistory
+                MagicMock()                  # Delete flow
             ]
-            
+
             result = await flow_repository.delete_with_executions(flow_id)
-            
+
             assert result is True
-            # Verify all delete operations were called
-            assert mock_async_session.execute.call_count == 4
+            # New implementation only executes 2 queries
+            assert mock_async_session.execute.call_count == 2
             mock_async_session.commit.assert_called_once()
-    
+
     @pytest.mark.asyncio
     async def test_delete_with_executions_flow_not_found(self, flow_repository, mock_async_session):
         """Test delete when flow not found."""
         flow_id = uuid.uuid4()
-        
+
         with patch.object(flow_repository, 'get', return_value=None):
             result = await flow_repository.delete_with_executions(flow_id)
-            
+
             assert result is False
             mock_async_session.execute.assert_not_called()
             mock_async_session.commit.assert_not_called()
-    
+
     @pytest.mark.asyncio
     async def test_delete_with_executions_no_executions(self, flow_repository, mock_async_session):
         """Test delete when flow has no executions."""
         flow_id = uuid.uuid4()
         flow = MockFlow(id=flow_id)
-        
+
         with patch.object(flow_repository, 'get', return_value=flow):
-            # Mock empty execution result
-            empty_execution_result = MockResult([])
+            # Mock result with rowcount=0 (no executions deleted)
+            mock_result_with_rowcount = MagicMock()
+            mock_result_with_rowcount.rowcount = 0
             mock_async_session.execute.side_effect = [
-                empty_execution_result,  # Find executions query (empty)
-                MagicMock()              # Delete flow query
+                mock_result_with_rowcount,  # Delete executions (none found)
+                MagicMock()                  # Delete flow
             ]
-            
+
             result = await flow_repository.delete_with_executions(flow_id)
-            
+
             assert result is True
-            # Should only execute 2 queries (find executions + delete flow)
+            # Still executes 2 queries (delete executions + delete flow)
             assert mock_async_session.execute.call_count == 2
             mock_async_session.commit.assert_called_once()
-    
+
     @pytest.mark.asyncio
     async def test_delete_with_executions_large_execution_list(self, flow_repository, mock_async_session):
-        """Test delete with many executions (chunking logic)."""
+        """Test delete with many executions."""
         flow_id = uuid.uuid4()
         flow = MockFlow(id=flow_id)
-        
-        # Create 75 execution IDs to test chunking (chunk_size=50)
-        execution_ids = [(i,) for i in range(1, 76)]
-        
+
         with patch.object(flow_repository, 'get', return_value=flow):
-            execution_ids_result = MockResult(execution_ids)
+            # Mock result with rowcount=75 (75 executions deleted)
+            mock_result_with_rowcount = MagicMock()
+            mock_result_with_rowcount.rowcount = 75
             mock_async_session.execute.side_effect = [
-                execution_ids_result,  # Find executions query
-                MagicMock(),  # Delete node executions chunk 1 
-                MagicMock(),  # Delete node executions chunk 2
-                MagicMock(),  # Delete flow executions query
-                MagicMock()   # Delete flow query
+                mock_result_with_rowcount,  # Delete executions
+                MagicMock()                  # Delete flow
             ]
-            
+
             result = await flow_repository.delete_with_executions(flow_id)
-            
+
             assert result is True
-            # Should execute 5 queries (find + 2 chunks + delete executions + delete flow)
-            assert mock_async_session.execute.call_count == 5
+            # New implementation doesn't chunk - just 2 queries
+            assert mock_async_session.execute.call_count == 2
             mock_async_session.commit.assert_called_once()
-    
+
     @pytest.mark.asyncio
     async def test_delete_with_executions_database_error(self, flow_repository, mock_async_session):
         """Test delete with database error during execution."""
         flow_id = uuid.uuid4()
         flow = MockFlow(id=flow_id)
-        
+
         with patch.object(flow_repository, 'get', return_value=flow):
             mock_async_session.execute.side_effect = Exception("Database error")
-            
+
             with pytest.raises(Exception, match="Database error"):
                 await flow_repository.delete_with_executions(flow_id)
-            
+
             mock_async_session.rollback.assert_called_once()
 
 
 class TestFlowRepositoryDeleteAll:
     """Test cases for delete_all method."""
-    
+
     @pytest.mark.asyncio
     async def test_delete_all_success(self, flow_repository, mock_async_session):
         """Test successful delete all flows operation."""
         mock_async_session.execute.side_effect = [
-            MagicMock(),  # Delete node executions
-            MagicMock(),  # Delete flow executions  
+            MagicMock(),  # Delete flow executions from executionhistory
             MagicMock()   # Delete flows
         ]
-        
+
         await flow_repository.delete_all()
-        
-        # Verify all 3 delete operations were called
-        assert mock_async_session.execute.call_count == 3
+
+        # New implementation: 2 delete operations (executions + flows)
+        assert mock_async_session.execute.call_count == 2
         mock_async_session.commit.assert_called_once()
-        
+
         # Verify the order of deletions
         call_args_list = mock_async_session.execute.call_args_list
-        assert len(call_args_list) == 3
-        
+        assert len(call_args_list) == 2
+
         # Each call should have a text() query
         for call_args in call_args_list:
             query = call_args[0][0]
             assert hasattr(query, 'text')  # Should be a text() query
-    
+
     @pytest.mark.asyncio
     async def test_delete_all_database_error(self, flow_repository, mock_async_session):
         """Test delete all with database error."""
         mock_async_session.execute.side_effect = Exception("Delete error")
-        
+
         with pytest.raises(Exception, match="Delete error"):
             await flow_repository.delete_all()
-        
+
         mock_async_session.rollback.assert_called_once()
 
 
@@ -515,28 +511,29 @@ class TestFlowRepositoryIntegration:
         """Test finding flows by crew ID then deleting them."""
         crew_id = uuid.uuid4()
         flows = [MockFlow(crew_id=crew_id), MockFlow(crew_id=crew_id)]
-        
+
         # Mock find_by_crew_id
         mock_result = MockResult(flows)
         mock_async_session.execute.return_value = mock_result
-        
+
         found_flows = await flow_repository.find_by_crew_id(crew_id)
-        
+
         assert len(found_flows) == 2
         assert all(flow.crew_id == crew_id for flow in found_flows)
-        
+
         # Now test deleting one of the flows
         flow_to_delete = found_flows[0]
         with patch.object(flow_repository, 'get', return_value=flow_to_delete):
-            # Mock delete operations
-            execution_ids_result = MockResult([])  # No executions
+            # Mock delete operations - new implementation uses 2 queries
+            mock_result_with_rowcount = MagicMock()
+            mock_result_with_rowcount.rowcount = 0
             mock_async_session.execute.side_effect = [
-                execution_ids_result,  # Find executions
-                MagicMock()           # Delete flow
+                mock_result_with_rowcount,  # Delete executions
+                MagicMock()                  # Delete flow
             ]
-            
+
             delete_result = await flow_repository.delete_with_executions(flow_to_delete.id)
-            
+
             assert delete_result is True
             mock_async_session.commit.assert_called_once()
 
@@ -582,19 +579,20 @@ class TestFlowRepositoryErrorHandling:
         """Test delete with executions when commit fails."""
         flow_id = uuid.uuid4()
         flow = MockFlow(id=flow_id)
-        
+
         with patch.object(flow_repository, 'get', return_value=flow):
             # Mock successful queries but failed commit
-            execution_ids_result = MockResult([])
+            mock_result_with_rowcount = MagicMock()
+            mock_result_with_rowcount.rowcount = 0
             mock_async_session.execute.side_effect = [
-                execution_ids_result,  # Find executions
-                MagicMock()           # Delete flow
+                mock_result_with_rowcount,  # Delete executions
+                MagicMock()                  # Delete flow
             ]
             mock_async_session.commit.side_effect = Exception("Commit failed")
-            
+
             with pytest.raises(Exception, match="Commit failed"):
                 await flow_repository.delete_with_executions(flow_id)
-            
+
             mock_async_session.rollback.assert_called_once()
 
 
@@ -636,63 +634,57 @@ class TestFlowRepositoryUUIDHandling:
 
 class TestFlowRepositoryQueryConstruction:
     """Test cases for query construction and SQL generation."""
-    
+
     @pytest.mark.asyncio
     async def test_cascading_delete_sql_construction(self, flow_repository, mock_async_session):
         """Test that cascading delete constructs correct SQL queries."""
         flow_id = uuid.uuid4()
         flow = MockFlow(id=flow_id)
-        
+
         with patch.object(flow_repository, 'get', return_value=flow):
-            # Mock multiple execution IDs to test chunking
-            execution_ids = [(i,) for i in range(1, 51)]  # Exactly 50 IDs
-            execution_ids_result = MockResult(execution_ids)
-            
+            mock_result_with_rowcount = MagicMock()
+            mock_result_with_rowcount.rowcount = 5
+
             mock_async_session.execute.side_effect = [
-                execution_ids_result,  # Find executions
-                MagicMock(),          # Delete node executions
-                MagicMock(),          # Delete flow executions
-                MagicMock()           # Delete flow
+                mock_result_with_rowcount,  # Delete executions from executionhistory
+                MagicMock()                  # Delete flow
             ]
-            
+
             result = await flow_repository.delete_with_executions(flow_id)
-            
+
             assert result is True
-            
-            # Verify all SQL queries were executed
-            assert mock_async_session.execute.call_count == 4
-            
-            # Check that the first query is for finding executions
+
+            # Verify 2 SQL queries were executed (new implementation)
+            assert mock_async_session.execute.call_count == 2
+
+            # Check that the first query is for deleting executions from executionhistory
             first_call = mock_async_session.execute.call_args_list[0]
             first_query = first_call[0][0]
             assert hasattr(first_query, 'text')
-            assert "SELECT id FROM flow_executions" in str(first_query.text)
-    
+            assert "executionhistory" in str(first_query.text)
+
     @pytest.mark.asyncio
     async def test_delete_all_sql_order(self, flow_repository, mock_async_session):
         """Test that delete_all executes SQL in correct order."""
         mock_async_session.execute.side_effect = [
-            MagicMock(),  # Delete node executions
-            MagicMock(),  # Delete flow executions
+            MagicMock(),  # Delete flow executions from executionhistory
             MagicMock()   # Delete flows
         ]
-        
+
         await flow_repository.delete_all()
-        
-        # Verify the correct order of SQL operations
+
+        # Verify the correct order of SQL operations (2 queries now)
         call_args_list = mock_async_session.execute.call_args_list
-        assert len(call_args_list) == 3
-        
+        assert len(call_args_list) == 2
+
         # Each should be a text() query
         for call_args in call_args_list:
             query = call_args[0][0]
             assert hasattr(query, 'text')
-            
+
         # Check the order by examining the SQL content
-        node_delete_query = call_args_list[0][0][0]
-        exec_delete_query = call_args_list[1][0][0]
-        flow_delete_query = call_args_list[2][0][0]
-        
-        assert "flow_node_executions" in str(node_delete_query.text)
-        assert "flow_executions" in str(exec_delete_query.text)
+        exec_delete_query = call_args_list[0][0][0]
+        flow_delete_query = call_args_list[1][0][0]
+
+        assert "executionhistory" in str(exec_delete_query.text)
         assert "flows" in str(flow_delete_query.text)
