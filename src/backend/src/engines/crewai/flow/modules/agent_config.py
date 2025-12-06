@@ -9,6 +9,7 @@ from typing import Dict, List, Optional, Any, Union
 from crewai import Agent
 
 from src.core.logger import LoggerManager
+from src.utils.user_context import GroupContext
 from src.engines.crewai.tools.tool_factory import ToolFactory
 
 # Initialize logger
@@ -43,13 +44,36 @@ class AgentConfig:
             
             # Initialize tools list
             tools = []
-            
-            # Initialize the ToolFactory
-            tool_factory = ToolFactory({})
+
+            # Initialize the ToolFactory with proper context for API key access
+            # Build config with group_id for multi-tenant isolation
+            factory_config = {}
+            if group_context and hasattr(group_context, 'primary_group_id') and group_context.primary_group_id:
+                factory_config['group_id'] = group_context.primary_group_id
+                logger.info(f"Creating ToolFactory with group_id: {group_context.primary_group_id}")
+
+            # Create api_keys_service for tool factory to access API keys from database
+            tool_factory = None
             try:
-                await tool_factory.initialize()
+                from src.db.session import async_session_factory
+                from src.services.api_keys_service import ApiKeysService
+
+                async with async_session_factory() as session:
+                    group_id = factory_config.get('group_id')
+                    api_keys_service = ApiKeysService(session, group_id=group_id)
+                    # Create tool factory with proper context
+                    tool_factory = await ToolFactory.create(
+                        config=factory_config,
+                        api_keys_service=api_keys_service
+                    )
+                    logger.info(f"Created ToolFactory with api_keys_service for agent {agent_data.name}")
             except Exception as e:
-                logger.warning(f"Error initializing ToolFactory: {e}")
+                logger.warning(f"Error creating ToolFactory with api_keys_service: {e}, falling back to basic factory")
+                tool_factory = ToolFactory(factory_config)
+                try:
+                    await tool_factory.initialize()
+                except Exception as init_error:
+                    logger.warning(f"Error initializing ToolFactory: {init_error}")
             
             # First check for tools directly on the agent_data object
             if hasattr(agent_data, 'tools') and agent_data.tools:
@@ -289,10 +313,29 @@ class AgentConfig:
             agent_kwargs["llm"] = llm
             
         # Add additional properties if they exist
-        for prop in ['memory', 'max_iter', 'max_rpm']:
+        # Match the parameters from agent_helpers.py to ensure consistent behavior with crew execution
+        additional_params = [
+            'memory', 'max_iter', 'max_rpm', 'code_execution_mode',
+            'max_context_window_size', 'max_tokens',
+            'reasoning', 'max_reasoning_attempts'
+        ]
+        for prop in additional_params:
             if hasattr(agent_data, prop) and getattr(agent_data, prop) is not None:
                 agent_kwargs[prop] = getattr(agent_data, prop)
-        
+                logger.info(f"Setting agent parameter '{prop}' to {getattr(agent_data, prop)} for agent {agent_data.name}")
+
+        # Handle prompt templates (matching crew execution in agent_helpers.py)
+        # These templates can hint at expected output format and length
+        if hasattr(agent_data, 'system_template') and agent_data.system_template:
+            agent_kwargs['system_prompt'] = agent_data.system_template
+            logger.info(f"Setting system_prompt from system_template for agent {agent_data.name}")
+        if hasattr(agent_data, 'prompt_template') and agent_data.prompt_template:
+            agent_kwargs['task_prompt'] = agent_data.prompt_template
+            logger.info(f"Setting task_prompt from prompt_template for agent {agent_data.name}")
+        if hasattr(agent_data, 'response_template') and agent_data.response_template:
+            agent_kwargs['format_prompt'] = agent_data.response_template
+            logger.info(f"Setting format_prompt from response_template for agent {agent_data.name}")
+
         # Handle config as the last step to avoid validation issues
         if hasattr(agent_data, 'config') and agent_data.config is not None:
             try:

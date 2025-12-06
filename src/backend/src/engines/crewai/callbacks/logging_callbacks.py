@@ -349,6 +349,8 @@ class AgentTraceEventListener(BaseEventListener):
     _active_context: Dict[str, Dict[str, str]] = {}
     # Track task start times for duration calculation
     _task_start_times: Dict[str, Dict[str, datetime]] = {}
+    # Track active crew name for including in task traces (needed for checkpoint resume)
+    _active_crew_name: Dict[str, str] = {}
     
     # Event types that are considered verbose/debug-only and can be suppressed
     DEBUG_ONLY_EVENT_TYPES = {
@@ -630,6 +632,11 @@ class AgentTraceEventListener(BaseEventListener):
                     "task_description": task_description,
                     "timestamp": event.timestamp.isoformat() if hasattr(event, 'timestamp') and event.timestamp else None
                 }
+
+                # Include crew_name from active context (needed for checkpoint resume)
+                active_crew = AgentTraceEventListener._active_crew_name.get(self.job_id)
+                if active_crew:
+                    full_extra_data["crew_name"] = active_crew
                 
                 # Add tool information if detected
                 if tool_info:
@@ -669,6 +676,10 @@ class AgentTraceEventListener(BaseEventListener):
                 # Reset registries for this job
                 AgentTraceEventListener._task_registry[self.job_id] = {}
                 AgentTraceEventListener._task_start_times[self.job_id] = {}
+
+                # Store active crew name for including in task traces (checkpoint resume support)
+                AgentTraceEventListener._active_crew_name[self.job_id] = crew_name
+                logger.debug(f"{log_prefix} Stored active crew name: {crew_name}")
 
                 # Only create crew-level trace if NOT in flow mode
                 # In flow mode, flow_started event provides the top-level context

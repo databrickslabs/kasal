@@ -132,9 +132,19 @@ async def run_flow_in_process(
             final_message = "Flow execution completed successfully"
             logger.info(f"Flow execution COMPLETED for {execution_id}")
         else:
-            final_status = ExecutionStatus.FAILED.value
-            final_message = result.get('error', 'Process execution failed')
-            logger.error(f"Flow execution failed for {execution_id}: {final_message}")
+            # Before setting FAILED, check if the execution was stopped
+            # This prevents overwriting STOPPED status with FAILED
+            from src.services.execution_status_service import ExecutionStatusService
+            execution_record = await ExecutionStatusService.get_status(execution_id)
+            current_status = execution_record.status if execution_record and hasattr(execution_record, 'status') else None
+            if current_status and current_status.upper() in ['STOPPED', 'STOPPING']:
+                logger.info(f"Flow execution {execution_id} was stopped - preserving STOPPED status (current: {current_status})")
+                final_status = None  # Don't update status, it's already STOPPED
+                final_message = None
+            else:
+                final_status = ExecutionStatus.FAILED.value
+                final_message = result.get('error', 'Process execution failed')
+                logger.error(f"Flow execution failed for {execution_id}: {final_message}")
 
     except asyncio.CancelledError:
         # Execution was cancelled
@@ -170,6 +180,9 @@ async def run_flow_in_process(
                 logger.info(f"[run_flow_in_process] Successfully updated status to {final_status}")
             except Exception as status_error:
                 logger.error(f"[run_flow_in_process] Failed to update status: {status_error}")
+        else:
+            # final_status is None - execution was stopped, don't update status
+            logger.info(f"[run_flow_in_process] Skipping status update for {execution_id} - execution was stopped (preserving current status)")
 
         # Remove from running jobs
         if execution_id in running_jobs:

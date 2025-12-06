@@ -8,6 +8,7 @@ import json
 from typing import Dict, List, Optional, Any, Union
 
 from src.core.logger import LoggerManager
+from src.utils.user_context import GroupContext
 from crewai import Task
 
 from src.engines.crewai.tools.tool_factory import ToolFactory
@@ -21,17 +22,18 @@ class TaskConfig:
     """
     
     @staticmethod
-    async def configure_task(task_data, agent=None, task_output_callback=None, flow_data=None, repositories=None):
+    async def configure_task(task_data, agent=None, task_output_callback=None, flow_data=None, repositories=None, group_context: Optional[GroupContext] = None):
         """
         Configure a task with its associated agent and callbacks.
-        
+
         Args:
             task_data: Task data from the database
             agent: Pre-configured agent instance (optional)
             task_output_callback: Callback for task output (optional)
             flow_data: Flow data for context (optional)
             repositories: Dictionary of repositories (optional)
-            
+            group_context: Group context for multi-tenant tool access (optional)
+
         Returns:
             Task: A properly configured CrewAI Task instance
         """
@@ -47,14 +49,14 @@ class TaskConfig:
             
             # First resolve the agent if not provided
             if agent is None:
-                agent = await TaskConfig._resolve_agent_for_task(task_data, flow_data, repositories)
-                
+                agent = await TaskConfig._resolve_agent_for_task(task_data, flow_data, repositories, group_context)
+
                 if not agent:
                     logger.error(f"No agent provided or configured for task: {task_data.name}")
                     return None
             
             # Check if task has specific tools and add them to the agent
-            await TaskConfig._configure_task_tools(task_data, agent, flow_data)
+            await TaskConfig._configure_task_tools(task_data, agent, flow_data, group_context)
             
             # Create basic required parameters - this avoids all the complex validation issues
             description = str(task_data.description)
@@ -106,15 +108,16 @@ class TaskConfig:
             return None
 
     @staticmethod
-    async def _resolve_agent_for_task(task_data, flow_data, repositories):
+    async def _resolve_agent_for_task(task_data, flow_data, repositories, group_context: Optional[GroupContext] = None):
         """
         Resolve the agent for a task from either the task data or flow connections.
-        
+
         Args:
             task_data: Task data from the database
             flow_data: Optional flow data for looking up connections
             repositories: Optional dictionary of repositories
-            
+            group_context: Group context for multi-tenant tool access (optional)
+
         Returns:
             Agent: The resolved agent for the task
         """
@@ -145,13 +148,13 @@ class TaskConfig:
             
             if agent_data:
                 # Configure the agent
-                agent = await AgentConfig.configure_agent_and_tools(agent_data, flow_data, repositories)
+                agent = await AgentConfig.configure_agent_and_tools(agent_data, flow_data, repositories, group_context)
                 if agent:
                     return agent
-                    
+
                 logger.error(f"Failed to configure agent for task: {task_data.name}")
                 return None
-            
+
             logger.error(f"Agent with ID {task_data.agent_id} not found for task: {task_data.name}")
         
         # If no agent_id or agent not found, try to infer from flow edges
@@ -195,7 +198,7 @@ class TaskConfig:
                         
                         if agent_data:
                             # Configure the agent
-                            agent = await AgentConfig.configure_agent_and_tools(agent_data, flow_data, repositories)
+                            agent = await AgentConfig.configure_agent_and_tools(agent_data, flow_data, repositories, group_context)
                             if agent:
                                 return agent
                         break
@@ -205,23 +208,47 @@ class TaskConfig:
         return None
     
     @staticmethod
-    async def _configure_task_tools(task_data, agent, flow_data):
+    async def _configure_task_tools(task_data, agent, flow_data, group_context: Optional[GroupContext] = None):
         """
         Configure tools for a task and add them to the agent.
         Only assign tools if explicitly defined in the task configuration.
-        
+
         Args:
             task_data: Task data from the database
             agent: The agent to add tools to
             flow_data: Optional flow data for looking up tools
+            group_context: Group context for multi-tenant tool access (optional)
         """
-        # Initialize the ToolFactory
+        # Initialize the ToolFactory with proper context for API key access
         from src.engines.crewai.tools.tool_factory import ToolFactory
-        tool_factory = ToolFactory({})
+
+        # Build config with group_id for multi-tenant isolation
+        factory_config = {}
+        if group_context and hasattr(group_context, 'primary_group_id') and group_context.primary_group_id:
+            factory_config['group_id'] = group_context.primary_group_id
+            logger.info(f"Creating ToolFactory with group_id: {group_context.primary_group_id}")
+
+        # Create api_keys_service for tool factory to access API keys from database
+        api_keys_service = None
         try:
-            await tool_factory.initialize()
+            from src.db.session import async_session_factory
+            from src.services.api_keys_service import ApiKeysService
+
+            async with async_session_factory() as session:
+                group_id = factory_config.get('group_id')
+                api_keys_service = ApiKeysService(session, group_id=group_id)
+                # Create tool factory with proper context
+                tool_factory = await ToolFactory.create(
+                    config=factory_config,
+                    api_keys_service=api_keys_service
+                )
         except Exception as e:
-            logger.warning(f"Error initializing ToolFactory: {e}")
+            logger.warning(f"Error creating ToolFactory with api_keys_service: {e}, falling back to basic factory")
+            tool_factory = ToolFactory(factory_config)
+            try:
+                await tool_factory.initialize()
+            except Exception as init_error:
+                logger.warning(f"Error initializing ToolFactory: {init_error}")
             
         # Check if task has specific tools
         if hasattr(task_data, 'tools') and task_data.tools:
