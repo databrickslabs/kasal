@@ -124,7 +124,8 @@ export interface Router {
   listenTo: string;  // Method name to listen to
   conditionField: string;  // Field to evaluate for routing
   routes: Record<string, RouterTaskConfig[]>;  // Route name -> array of task configs
-  condition?: string;  // Python condition expression for routing
+  condition?: string;  // Python condition expression for routing (deprecated, use routeConditions)
+  routeConditions?: Record<string, string>;  // Route name -> Python condition expression
 }
 
 export interface FlowConfiguration {

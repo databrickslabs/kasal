@@ -3,6 +3,16 @@ import { persist } from 'zustand/middleware';
 import { Node, Edge } from 'reactflow';
 import { v4 as uuidv4 } from 'uuid';
 
+// Execution configuration per tab
+export interface TabExecutionConfig {
+  processType?: 'sequential' | 'hierarchical';
+  planningEnabled?: boolean;
+  planningLLM?: string;
+  reasoningEnabled?: boolean;
+  reasoningLLM?: string;
+  managerLLM?: string;
+}
+
 export interface TabData {
   id: string;
   name: string;
@@ -25,6 +35,8 @@ export interface TabData {
   // Execution status
   executionStatus?: 'running' | 'completed' | 'failed';
   lastExecutionTime?: Date;
+  // Execution configuration (per-tab runtime settings)
+  executionConfig?: TabExecutionConfig;
 }
 
 interface TabManagerState {
@@ -57,6 +69,9 @@ interface TabManagerState {
   // New methods for execution status
   updateTabExecutionStatus: (tabId: string, status: 'running' | 'completed' | 'failed') => void;
   clearTabExecutionStatus: (tabId: string) => void;
+  // New methods for execution configuration (per-tab runtime settings)
+  updateTabExecutionConfig: (tabId: string, config: Partial<TabExecutionConfig>) => void;
+  getTabExecutionConfig: (tabId: string) => TabExecutionConfig | undefined;
 }
 
 // Helper function to compare nodes for actual content changes
@@ -466,6 +481,28 @@ export const useTabManagerStore = create<TabManagerState>()(
               : tab
           )
         }));
+      },
+
+      // Execution configuration methods (per-tab runtime settings)
+      updateTabExecutionConfig: (tabId: string, config: Partial<TabExecutionConfig>) => {
+        set(state => ({
+          tabs: state.tabs.map(tab =>
+            tab.id === tabId
+              ? {
+                  ...tab,
+                  executionConfig: {
+                    ...tab.executionConfig,
+                    ...config
+                  }
+                }
+              : tab
+          )
+        }));
+      },
+
+      getTabExecutionConfig: (tabId: string) => {
+        const tab = get().tabs.find(t => t.id === tabId);
+        return tab?.executionConfig;
       },
 
       // Group/workspace filtering methods
