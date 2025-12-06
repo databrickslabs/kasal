@@ -72,6 +72,11 @@ class CrewConfig(BaseModel):
     llm_provider: Optional[str] = Field(None, description="LLM provider to use (openai, anthropic, etc)")
     execution_type: Optional[str] = Field("crew", description="Type of execution (crew or flow)")
     schema_detection_enabled: Optional[bool] = Field(True, description="Whether schema detection is enabled")
+    flow_id: Optional[str] = Field(None, description="ID of the saved flow (for checkpoint tracking)")
+    # Checkpoint resume parameters
+    resume_from_flow_uuid: Optional[str] = Field(None, description="CrewAI state.id to resume flow from checkpoint")
+    resume_from_execution_id: Optional[int] = Field(None, description="Execution ID of checkpoint to resume from")
+    resume_from_crew_sequence: Optional[int] = Field(None, description="Crew sequence to resume from (skip crews up to this sequence)")
 
     @property
     def tasks(self) -> Dict:

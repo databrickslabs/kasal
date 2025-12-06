@@ -11,9 +11,9 @@ from pydantic import BaseModel, Field, ConfigDict
 
 class ExecutionHistoryItem(BaseModel):
     """Schema for an execution history item."""
-    
+
     model_config = ConfigDict(from_attributes=True)
-    
+
     id: int
     job_id: str = Field(description="Unique string identifier for the execution")
     name: Optional[str] = Field(None, alias="run_name")
@@ -32,6 +32,11 @@ class ExecutionHistoryItem(BaseModel):
     mlflow_trace_id: Optional[str] = Field(None, description="MLflow trace ID for evaluation linking")
     mlflow_experiment_name: Optional[str] = Field(None, description="MLflow experiment name for reference")
     mlflow_evaluation_run_id: Optional[str] = Field(None, description="MLflow evaluation run ID")
+
+    # Checkpoint/Persistence fields
+    flow_uuid: Optional[str] = Field(None, description="CrewAI state.id for checkpoint persistence")
+    checkpoint_status: Optional[str] = Field(None, description="Checkpoint status: active, resumed, expired")
+    checkpoint_method: Optional[str] = Field(None, description="Last checkpointed method name")
     
 class ExecutionHistoryList(BaseModel):
     """Schema for a paginated list of execution history items."""
@@ -81,9 +86,51 @@ class ExecutionOutputDebugList(BaseModel):
     
 class DeleteResponse(BaseModel):
     """Schema for a response to a delete operation."""
-    
+
+    success: bool = Field(default=True, description="Whether the delete operation was successful")
     message: str = Field(description="Success message")
     deleted_run_id: Optional[int] = Field(None, description="ID of the deleted execution (if deleting by ID)")
     deleted_job_id: Optional[str] = Field(None, description="Job ID of the deleted execution (if deleting by job_id)")
     deleted_runs: Optional[int] = Field(None, description="Number of deleted executions (if deleting all)")
-    deleted_outputs: Optional[int] = Field(None, description="Number of deleted outputs") 
+    deleted_outputs: Optional[int] = Field(None, description="Number of deleted outputs")
+
+
+class CrewCheckpointInfo(BaseModel):
+    """Schema for crew-level checkpoint information within a flow execution."""
+
+    crew_name: str = Field(description="Name of the crew that completed")
+    sequence: int = Field(description="Order in which the crew executed (1, 2, 3...)")
+    status: str = Field(description="Status: completed or failed")
+    output_preview: Optional[str] = Field(None, description="First 200 chars of crew output")
+    completed_at: datetime = Field(description="When the crew completed")
+
+
+class CheckpointInfo(BaseModel):
+    """Schema for checkpoint information."""
+
+    model_config = ConfigDict(from_attributes=True)
+
+    execution_id: int = Field(description="ID of the execution with the checkpoint")
+    job_id: str = Field(description="Job ID of the execution")
+    flow_uuid: str = Field(description="CrewAI state.id for resuming")
+    checkpoint_method: Optional[str] = Field(None, description="Last checkpointed method name")
+    checkpoint_status: str = Field(description="Status: active, resumed, expired")
+    created_at: datetime = Field(description="When the checkpoint was created")
+    run_name: Optional[str] = Field(None, description="Name of the execution run")
+    # Crew-level checkpoints for granular resume
+    crew_checkpoints: List[CrewCheckpointInfo] = Field(default_factory=list, description="List of completed crews")
+
+
+class CheckpointListResponse(BaseModel):
+    """Schema for a list of available checkpoints."""
+
+    flow_id: Optional[str] = Field(None, description="Flow ID the checkpoints belong to")
+    checkpoints: List[CheckpointInfo] = Field(description="List of available checkpoints")
+    total: int = Field(description="Total number of checkpoints")
+
+
+class ResumeFromCheckpointRequest(BaseModel):
+    """Schema for requesting execution resume from checkpoint."""
+
+    flow_uuid: Optional[str] = Field(None, description="CrewAI state.id to resume from")
+    execution_id: Optional[int] = Field(None, description="Execution ID to resume from (alternative to flow_uuid)") 
