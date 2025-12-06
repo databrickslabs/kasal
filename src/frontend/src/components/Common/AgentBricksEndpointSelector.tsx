@@ -54,7 +54,6 @@ export const AgentBricksEndpointSelector: React.FC<AgentBricksEndpointSelectorPr
   const [selectedOptions, setSelectedOptions] = useState<AgentBricksEndpoint | AgentBricksEndpoint[] | null>(null);
   const [inputValue, setInputValue] = useState('');
   const [loading, setLoading] = useState(false);
-  const [searchQuery, setSearchQuery] = useState('');
   const [pinnedEndpoints, setPinnedEndpoints] = useState<string[]>([]);
   const searchTimeoutRef = useRef<NodeJS.Timeout | null>(null);
 
@@ -168,7 +167,6 @@ export const AgentBricksEndpointSelector: React.FC<AgentBricksEndpointSelectorPr
 
       // Set new timeout
       searchTimeoutRef.current = setTimeout(() => {
-        setSearchQuery(newInputValue);
         loadEndpoints(newInputValue);
       }, 300);
     }

@@ -47,6 +47,8 @@ import ListItemButton from '@mui/material/ListItemButton';
 import ListItemIcon from '@mui/material/ListItemIcon';
 import ListItemText from '@mui/material/ListItemText';
 import { useFlowConfigStore } from '../../../store/flowConfig';
+import { useCrewExecutionStore } from '../../../store/crewExecution';
+import { useTabManagerStore, TabExecutionConfig } from '../../../store/tabManager';
 
 interface TabPanelProps {
   children?: React.ReactNode;
@@ -231,7 +233,11 @@ const CrewFlowSelectionDialog: React.FC<CrewFlowSelectionDialogProps> = ({
 
   const handleCrewSelect = async (crewId: string) => {
     setLoading(true);
-    
+
+    // Set isLoadingCrew flag to prevent useManagerNode from removing manager node
+    const executionStore = useCrewExecutionStore.getState();
+    executionStore.setIsLoadingCrew(true);
+
     // Dispatch event to signal crew loading is starting
     window.dispatchEvent(new CustomEvent('crewLoadStarted'));
     
@@ -349,21 +355,27 @@ const CrewFlowSelectionDialog: React.FC<CrewFlowSelectionDialogProps> = ({
 
       // Update node IDs and references
       const updatedNodes = (selectedCrew.nodes || []).map(node => {
-        const newId = node.type === 'agentNode' 
-          ? `agent-${idMapping[node.id] || node.id}`
-          : `task-${idMapping[node.id] || node.id}`;
-        
+        let newId: string;
+        if (node.type === 'agentNode') {
+          newId = `agent-${idMapping[node.id] || node.id}`;
+        } else if (node.type === 'managerNode') {
+          // Manager node keeps its original ID
+          newId = node.id;
+        } else {
+          newId = `task-${idMapping[node.id] || node.id}`;
+        }
+
         const updatedNode = {
           ...node,
           id: newId,
           type: node.type, // Ensure type is preserved
           data: {
             ...node.data,
-            id: idMapping[node.id] || node.data.id,
+            id: node.type === 'managerNode' ? node.data.id : (idMapping[node.id] || node.data.id),
             agent_id: node.data.agent_id ? idMapping[node.data.agent_id] || node.data.agent_id : node.data.agent_id,
             agentId: node.type === 'agentNode' ? idMapping[node.id] || node.data.agentId : node.data.agentId,
             taskId: node.type === 'taskNode' ? idMapping[node.id] || node.data.taskId : node.data.taskId,
-            type: node.type === 'agentNode' ? 'agent' : 'task' // Set the internal type field
+            type: node.type === 'agentNode' ? 'agent' : (node.type === 'managerNode' ? 'manager' : 'task') // Set the internal type field
           }
         };
         console.log('Updated node:', updatedNode);
@@ -374,24 +386,105 @@ const CrewFlowSelectionDialog: React.FC<CrewFlowSelectionDialogProps> = ({
       const updatedEdges = (selectedCrew.edges || []).map(edge => {
         const sourceNode = selectedCrew?.nodes?.find(n => n.id === edge.source);
         const targetNode = selectedCrew?.nodes?.find(n => n.id === edge.target);
-        
+
+        // Determine new source ID based on node type
+        let newSource: string;
+        if (sourceNode?.type === 'agentNode') {
+          newSource = `agent-${idMapping[edge.source] || edge.source}`;
+        } else if (sourceNode?.type === 'managerNode') {
+          newSource = edge.source; // Manager keeps original ID
+        } else {
+          newSource = `task-${idMapping[edge.source] || edge.source}`;
+        }
+
+        // Determine new target ID based on node type
+        let newTarget: string;
+        if (targetNode?.type === 'agentNode') {
+          newTarget = `agent-${idMapping[edge.target] || edge.target}`;
+        } else if (targetNode?.type === 'managerNode') {
+          newTarget = edge.target; // Manager keeps original ID
+        } else {
+          newTarget = `task-${idMapping[edge.target] || edge.target}`;
+        }
+
         return {
           ...edge,
-          source: sourceNode?.type === 'agentNode' 
-            ? `agent-${idMapping[edge.source] || edge.source}`
-            : `task-${idMapping[edge.source] || edge.source}`,
-          target: targetNode?.type === 'agentNode'
-            ? `agent-${idMapping[edge.target] || edge.target}`
-            : `task-${idMapping[edge.target] || edge.target}`
+          source: newSource,
+          target: newTarget
         };
       });
       
       // Pass the crew data to the callback - the tab creation will be handled there
       onCrewSelect(updatedNodes, updatedEdges, selectedCrew.name, selectedCrew.id.toString());
       onClose();
-      
-      // Dispatch event to fit view after nodes are rendered
+
+      // Check if there's a manager node in the loaded crew
+      const hasManagerNode = updatedNodes.some(n => n.type === 'managerNode');
+      const managerNode = updatedNodes.find(n => n.type === 'managerNode');
+
+      // Restore execution config after nodes are added
       setTimeout(() => {
+        const store = useCrewExecutionStore.getState();
+        const tabStore = useTabManagerStore.getState();
+
+        // Determine the final process type
+        let finalProcessType: 'sequential' | 'hierarchical' = 'sequential';
+        if (hasManagerNode) {
+          console.log('[CrewFlowDialog] Manager node found, forcing hierarchical process type');
+          finalProcessType = 'hierarchical';
+        } else if (selectedCrew.process) {
+          console.log('[CrewFlowDialog] Setting process type from crew data:', selectedCrew.process);
+          finalProcessType = selectedCrew.process as 'sequential' | 'hierarchical';
+        }
+        store.setProcessType(finalProcessType);
+
+        if (selectedCrew.planning !== undefined) {
+          store.setPlanningEnabled(selectedCrew.planning);
+        }
+        if (selectedCrew.planning_llm) {
+          store.setPlanningLLM(selectedCrew.planning_llm);
+        }
+        if (selectedCrew.reasoning !== undefined) {
+          store.setReasoningEnabled(selectedCrew.reasoning);
+        }
+        if (selectedCrew.reasoning_llm) {
+          store.setReasoningLLM(selectedCrew.reasoning_llm);
+        }
+
+        // Determine final manager LLM
+        let finalManagerLLM: string | undefined;
+        if (selectedCrew.manager_llm) {
+          finalManagerLLM = selectedCrew.manager_llm;
+          store.setManagerLLM(selectedCrew.manager_llm);
+        } else if (managerNode?.data?.llm) {
+          finalManagerLLM = managerNode.data.llm;
+          store.setManagerLLM(managerNode.data.llm);
+        }
+
+        // Set manager node ID if manager exists
+        if (hasManagerNode && managerNode) {
+          store.setManagerNodeId(managerNode.id);
+        }
+
+        // Save execution config to the active tab for per-tab persistence
+        const activeTabId = tabStore.activeTabId;
+        if (activeTabId) {
+          const tabConfig: TabExecutionConfig = {
+            processType: finalProcessType,
+            planningEnabled: selectedCrew.planning,
+            planningLLM: selectedCrew.planning_llm,
+            reasoningEnabled: selectedCrew.reasoning,
+            reasoningLLM: selectedCrew.reasoning_llm,
+            managerLLM: finalManagerLLM
+          };
+          console.log('[CrewFlowDialog] Saving execution config to tab:', activeTabId, tabConfig);
+          tabStore.updateTabExecutionConfig(activeTabId, tabConfig);
+        }
+
+        // Clear the loading flag after all config is set
+        store.setIsLoadingCrew(false);
+
+        // Dispatch event to fit view after nodes are rendered
         if (typeof window !== 'undefined') {
           const event = new CustomEvent('fitViewToNodes', { bubbles: true });
           window.dispatchEvent(event);
@@ -401,6 +494,9 @@ const CrewFlowSelectionDialog: React.FC<CrewFlowSelectionDialogProps> = ({
       const error = err as Error;
       console.error('Error loading crew:', error);
       setError(error.message || 'Failed to load crew');
+
+      // Clear loading flag on error too
+      useCrewExecutionStore.getState().setIsLoadingCrew(false);
     } finally {
       setLoading(false);
     }

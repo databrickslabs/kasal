@@ -1,9 +1,13 @@
 import React, { useState } from 'react';
 import { Handle, Position, NodeProps, useReactFlow } from 'reactflow';
-import { Box, Typography, IconButton, Tooltip, useTheme } from '@mui/material';
+import { Box, Typography, IconButton, Tooltip, useTheme, CircularProgress } from '@mui/material';
 import DeleteIcon from '@mui/icons-material/Delete';
+import CheckCircleIcon from '@mui/icons-material/CheckCircle';
+import ErrorIcon from '@mui/icons-material/Error';
+import PlayArrowIcon from '@mui/icons-material/PlayArrow';
 import { FlowConfiguration } from '../../types/flow';
 import { useUILayoutStore } from '../../store/uiLayout';
+import { useFlowExecutionStore } from '../../store/flowExecutionStore';
 
 interface Task {
   id: string;
@@ -28,7 +32,70 @@ const CrewNode: React.FC<NodeProps<CrewNodeData>> = ({ data, selected, id, isCon
   const theme = useTheme();
   const layoutOrientation = useUILayoutStore(state => state.layoutOrientation);
 
+  // Get execution state for this crew node
+  const crewNodeStates = useFlowExecutionStore(state => state.crewNodeStates);
+  const isExecuting = useFlowExecutionStore(state => state.isExecuting);
+
+  // Find the execution state for this crew node by matching crew name
+  const nodeLabel = data.label || crewName || '';
+  const executionState = crewNodeStates.get(nodeLabel) || crewNodeStates.get(crewName);
+
   const { deleteElements } = useReactFlow();
+
+  // Get status-based styling
+  const getStatusStyles = () => {
+    if (!executionState && !isExecuting) {
+      return {}; // No execution in progress
+    }
+
+    const status = executionState?.status;
+
+    switch (status) {
+      case 'running':
+        return {
+          borderColor: theme.palette.primary.main,
+          boxShadow: `0 0 0 2px ${theme.palette.primary.main}, 0 0 12px ${theme.palette.primary.main}40`,
+          animation: 'pulse 2s infinite',
+        };
+      case 'completed':
+        return {
+          borderColor: theme.palette.success.main,
+          boxShadow: `0 0 0 2px ${theme.palette.success.main}`,
+        };
+      case 'failed':
+        return {
+          borderColor: theme.palette.error.main,
+          boxShadow: `0 0 0 2px ${theme.palette.error.main}`,
+        };
+      case 'pending':
+        return {
+          opacity: 0.7,
+        };
+      default:
+        return {};
+    }
+  };
+
+  // Get status icon
+  const getStatusIcon = () => {
+    if (!executionState) return null;
+
+    const status = executionState.status;
+    const iconStyle = { fontSize: 16 };
+
+    switch (status) {
+      case 'running':
+        return <CircularProgress size={14} sx={{ color: theme.palette.primary.main }} />;
+      case 'completed':
+        return <CheckCircleIcon sx={{ ...iconStyle, color: theme.palette.success.main }} />;
+      case 'failed':
+        return <ErrorIcon sx={{ ...iconStyle, color: theme.palette.error.main }} />;
+      case 'pending':
+        return <PlayArrowIcon sx={{ ...iconStyle, color: theme.palette.text.secondary, opacity: 0.5 }} />;
+      default:
+        return null;
+    }
+  };
 
   // Generate tooltip content showing selected tasks
   const taskTooltip = selectedTasks.length > 0
@@ -39,6 +106,9 @@ const CrewNode: React.FC<NodeProps<CrewNodeData>> = ({ data, selected, id, isCon
     event.stopPropagation(); // Prevent node selection
     deleteElements({ nodes: [{ id }] });
   };
+
+  const statusStyles = getStatusStyles();
+  const statusIcon = getStatusIcon();
 
   return (
     <Tooltip title={taskTooltip} placement="top" arrow>
@@ -51,19 +121,26 @@ const CrewNode: React.FC<NodeProps<CrewNodeData>> = ({ data, selected, id, isCon
           justifyContent: 'center',
           alignItems: 'center',
           borderRadius: '12px',
-          border: `1px solid ${theme.palette.divider}`,
+          border: `1px solid ${statusStyles.borderColor || theme.palette.divider}`,
           background: selected
             ? `${theme.palette.primary.light}20`
             : theme.palette.background.paper,
-          boxShadow: selected
+          boxShadow: statusStyles.boxShadow || (selected
             ? `0 0 0 2px ${theme.palette.primary.main}`
-            : 1,
+            : 1),
           position: 'relative',
           transition: 'all 0.2s ease',
           overflow: 'visible',
           cursor: 'pointer',
+          opacity: statusStyles.opacity || 1,
+          animation: statusStyles.animation || 'none',
+          '@keyframes pulse': {
+            '0%': { opacity: 1 },
+            '50%': { opacity: 0.7 },
+            '100%': { opacity: 1 },
+          },
           '&:hover': {
-            boxShadow: 4,
+            boxShadow: statusStyles.boxShadow || 4,
           }
         }}
         onMouseEnter={() => setIsHovered(true)}
@@ -130,12 +207,40 @@ const CrewNode: React.FC<NodeProps<CrewNodeData>> = ({ data, selected, id, isCon
             pointerEvents: layoutOrientation === 'horizontal' ? 'all' : 'none'
           }}
         />
+        {/* Status icon badge */}
+        {statusIcon && (
+          <Box
+            sx={{
+              position: 'absolute',
+              top: -8,
+              left: -8,
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              width: 24,
+              height: 24,
+              borderRadius: '50%',
+              backgroundColor: theme.palette.background.paper,
+              boxShadow: '0 0 4px rgba(0,0,0,0.2)',
+              zIndex: 10,
+            }}
+          >
+            {statusIcon}
+          </Box>
+        )}
+
           <Typography
             variant="subtitle1"
             textAlign="center"
             fontWeight="bold"
             sx={{
-              color: theme.palette.primary.main,
+              color: executionState?.status === 'running'
+                ? theme.palette.primary.main
+                : executionState?.status === 'completed'
+                  ? theme.palette.success.main
+                  : executionState?.status === 'failed'
+                    ? theme.palette.error.main
+                    : theme.palette.primary.main,
               wordBreak: 'break-word',
               padding: '0 5px',
             }}

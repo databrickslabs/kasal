@@ -102,6 +102,12 @@ const ShowTraceTimeline: React.FC<ShowTraceProps> = ({
   const [isRefreshing, setIsRefreshing] = useState(false);
   const [evaluationEnabled, setEvaluationEnabled] = useState<boolean>(false);
   const [isEvaluationRunning, setIsEvaluationRunning] = useState(false);
+  const [selectedTaskDescription, setSelectedTaskDescription] = useState<{
+    taskName: string;
+    taskId?: string;
+    fullDescription?: string;
+    isLoading: boolean;
+  } | null>(null);
 
   // Handle opening logs dialog
   const handleOpenLogs = async () => {
@@ -920,6 +926,48 @@ const ShowTraceTimeline: React.FC<ShowTraceProps> = ({
     setExpandedTasks(newExpanded);
   };
 
+  // Truncate task name for display
+  const truncateTaskName = (name: string, maxLength = 80): string => {
+    if (name.length <= maxLength) return name;
+    return name.substring(0, maxLength) + '...';
+  };
+
+  // Handle clicking on a task name to show full description
+  const handleTaskDescriptionClick = async (taskName: string, taskId?: string, e?: React.MouseEvent) => {
+    // Stop propagation to prevent toggling the task expansion
+    if (e) {
+      e.stopPropagation();
+    }
+
+    // Set initial state with task name
+    setSelectedTaskDescription({
+      taskName,
+      taskId,
+      fullDescription: undefined,
+      isLoading: !!taskId
+    });
+
+    // If we have a taskId, fetch the full task details
+    if (taskId) {
+      try {
+        const taskDetails = await TraceService.getTaskDetails(taskId);
+        setSelectedTaskDescription(prev => prev ? {
+          ...prev,
+          fullDescription: taskDetails.description || taskName,
+          isLoading: false
+        } : null);
+      } catch (error) {
+        console.error('Failed to fetch task details:', error);
+        // Use the task name as fallback
+        setSelectedTaskDescription(prev => prev ? {
+          ...prev,
+          fullDescription: taskName,
+          isLoading: false
+        } : null);
+      }
+    }
+  };
+
   const getEventIcon = (type: string): JSX.Element => {
     const iconProps = { fontSize: 'small' as const, sx: { fontSize: 16 } };
 
@@ -1207,9 +1255,30 @@ const ShowTraceTimeline: React.FC<ShowTraceProps> = ({
                             <IconButton size="small">
                               {expandedTasks.has(taskKey) ? <ExpandLessIcon /> : <ExpandMoreIcon />}
                             </IconButton>
-                            <Typography variant="body2" fontWeight="medium">
-                              {task.taskName}
-                            </Typography>
+                            <Tooltip
+                              title={task.taskName.length > 80 ? "Click to view full description" : ""}
+                              arrow
+                              placement="top"
+                            >
+                              <Typography
+                                variant="body2"
+                                fontWeight="medium"
+                                onClick={(e) => handleTaskDescriptionClick(task.taskName, task.taskId, e)}
+                                sx={{
+                                  maxWidth: '500px',
+                                  overflow: 'hidden',
+                                  textOverflow: 'ellipsis',
+                                  whiteSpace: 'nowrap',
+                                  cursor: 'pointer',
+                                  '&:hover': {
+                                    color: 'primary.main',
+                                    textDecoration: 'underline'
+                                  }
+                                }}
+                              >
+                                {truncateTaskName(task.taskName)}
+                              </Typography>
+                            </Tooltip>
                             <Chip
                               size="small"
                               label={formatDuration(task.duration)}
@@ -1382,6 +1451,81 @@ const ShowTraceTimeline: React.FC<ShowTraceProps> = ({
           </Box>
         )}
       </DialogContent>
+
+      {/* Task Description Dialog */}
+      <Dialog
+        open={!!selectedTaskDescription}
+        onClose={() => setSelectedTaskDescription(null)}
+        maxWidth="md"
+        fullWidth
+      >
+        {selectedTaskDescription && (
+          <>
+            <DialogTitle sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+              <Box>
+                <Typography variant="h6">Task Description</Typography>
+                {selectedTaskDescription.taskId && (
+                  <Typography variant="caption" color="text.secondary">
+                    Task ID: {selectedTaskDescription.taskId}
+                  </Typography>
+                )}
+              </Box>
+              <IconButton
+                onClick={() => setSelectedTaskDescription(null)}
+                size="small"
+              >
+                <CloseIcon />
+              </IconButton>
+            </DialogTitle>
+            <DialogContent dividers>
+              {selectedTaskDescription.isLoading ? (
+                <Box display="flex" justifyContent="center" alignItems="center" minHeight="100px">
+                  <CircularProgress size={24} />
+                  <Typography sx={{ ml: 2 }} color="text.secondary">
+                    Loading task details...
+                  </Typography>
+                </Box>
+              ) : (
+                <Paper
+                  sx={{
+                    p: 2,
+                    backgroundColor: (theme) => theme.palette.mode === 'dark' ? 'grey.900' : 'grey.50',
+                    maxHeight: '60vh',
+                    overflow: 'auto',
+                  }}
+                >
+                  <Typography
+                    variant="body1"
+                    sx={{
+                      whiteSpace: 'pre-wrap',
+                      wordBreak: 'break-word',
+                      lineHeight: 1.6
+                    }}
+                  >
+                    {selectedTaskDescription.fullDescription || selectedTaskDescription.taskName}
+                  </Typography>
+                </Paper>
+              )}
+            </DialogContent>
+            <DialogActions>
+              <Button
+                onClick={() => {
+                  navigator.clipboard.writeText(
+                    selectedTaskDescription.fullDescription || selectedTaskDescription.taskName
+                  );
+                }}
+                startIcon={<ContentCopyIcon />}
+                size="small"
+              >
+                Copy Description
+              </Button>
+              <Button onClick={() => setSelectedTaskDescription(null)} size="small">
+                Close
+              </Button>
+            </DialogActions>
+          </>
+        )}
+      </Dialog>
 
       {/* Output Details Dialog */}
       <Dialog

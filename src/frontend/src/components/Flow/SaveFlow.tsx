@@ -80,9 +80,20 @@ const SaveFlow: React.FC<SaveFlowProps> = ({ nodes, edges, trigger, disabled = f
         // Build flowConfig from nodes and edges
         const flowConfig = buildFlowConfiguration(uniqueNodes, validEdges, tab.savedFlowName || tab.name);
 
+        // Get crew_id - first try tab's savedCrewId, then try CrewNodes
+        let crew_id = tab.savedCrewId || '';
+        if (!crew_id) {
+          const crewNode = uniqueNodes.find(node => node.type === 'crewNode');
+          if (crewNode?.data?.crewId) {
+            crew_id = String(crewNode.data.crewId);
+            console.log('SaveFlow: Update using crew_id from CrewNode:', crew_id);
+          }
+        }
+
         console.log('SaveFlow: About to update flow with data:', {
           flowId,
           name: tab.savedFlowName || tab.name,
+          crew_id,
           nodes: uniqueNodes.length,
           totalEdges: uniqueEdges.length,
           validEdges: validEdges.length,
@@ -94,7 +105,7 @@ const SaveFlow: React.FC<SaveFlowProps> = ({ nodes, edges, trigger, disabled = f
         // Use the current tab's nodes and edges for update
         const updatedFlow = await FlowService.updateFlow(flowId, {
           name: tab.savedFlowName || tab.name,
-          crew_id: tab.savedCrewId || '', // Use the saved crew ID from the tab
+          crew_id,
           nodes: uniqueNodes,
           edges: validEdges,
           flowConfig  // Include flowConfig with listeners, actions, and tasks
@@ -224,9 +235,27 @@ const SaveFlow: React.FC<SaveFlowProps> = ({ nodes, edges, trigger, disabled = f
         removedEdges: uniqueEdges.length - validEdges.length
       });
 
-      // Get active tab to get crew_id
-      const activeTab = useTabManagerStore.getState().getTab(activeTabId || '');
-      const crew_id = activeTab?.savedCrewId || '';
+      // Get active tab to get crew_id - use getActiveTab() for latest state
+      // This ensures we read the current activeTabId from store state, not the potentially stale hook value
+      const activeTab = useTabManagerStore.getState().getActiveTab();
+      let crew_id = activeTab?.savedCrewId || '';
+
+      // If no savedCrewId on tab, try to get crew_id from CrewNodes in the flow
+      if (!crew_id) {
+        const crewNode = uniqueNodes.find(node => node.type === 'crewNode');
+        if (crewNode?.data?.crewId) {
+          crew_id = String(crewNode.data.crewId);
+          console.log('SaveFlow: Using crew_id from CrewNode:', crew_id);
+        }
+      }
+
+      // Log debug info to help diagnose issues
+      console.log('SaveFlow: crew_id resolution:', {
+        savedCrewId: activeTab?.savedCrewId,
+        activeTabId: activeTab?.id,
+        crew_id,
+        crewNodeCount: uniqueNodes.filter(n => n.type === 'crewNode').length
+      });
 
       if (!crew_id) {
         setError('Please save the crew first before saving the flow');

@@ -130,6 +130,8 @@ const LeftSidebar: React.FC<LeftSidebarProps> = ({
     setManagerLLM,
     processType: storeProcessType,
     managerLLM: storeManagerLLM,
+    planningLLM: storePlanningLLM,
+    reasoningLLM: storeReasoningLLM,
   } = useCrewExecutionStore();
 
   // Get user permissions
@@ -180,6 +182,28 @@ const LeftSidebar: React.FC<LeftSidebarProps> = ({
 
     fetchModels();
   }, [planningModel, setPlanningLLM, reasoningModel, setReasoningLLM, managerModel, setManagerLLM, storeManagerLLM]);
+
+  // Sync local state with store values when they change (e.g., when loading a crew)
+  useEffect(() => {
+    if (storeManagerLLM && storeManagerLLM !== managerModel) {
+      console.log('LeftSidebar: Syncing manager model from store:', storeManagerLLM);
+      setManagerModel(storeManagerLLM);
+    }
+  }, [storeManagerLLM, managerModel]);
+
+  useEffect(() => {
+    if (storePlanningLLM && storePlanningLLM !== planningModel) {
+      console.log('LeftSidebar: Syncing planning model from store:', storePlanningLLM);
+      setPlanningModel(storePlanningLLM);
+    }
+  }, [storePlanningLLM, planningModel]);
+
+  useEffect(() => {
+    if (storeReasoningLLM && storeReasoningLLM !== reasoningModel) {
+      console.log('LeftSidebar: Syncing reasoning model from store:', storeReasoningLLM);
+      setReasoningModel(storeReasoningLLM);
+    }
+  }, [storeReasoningLLM, reasoningModel]);
 
   const handlePlanningModelChange = useCallback((event: SelectChangeEvent) => {
     const value = event.target.value;

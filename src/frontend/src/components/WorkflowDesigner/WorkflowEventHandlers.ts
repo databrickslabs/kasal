@@ -562,6 +562,23 @@ export const useEventBindings = (
         };
       }
 
+      // Manager-to-agent edges: change based on layout orientation
+      if (sourceNode?.type === 'managerNode' && targetNode?.type === 'agentNode') {
+        const managerSourceHandle = currentLayout === 'vertical' ? 'bottom' : 'right';
+        const agentTargetHandle = currentLayout === 'vertical' ? 'top' : 'left';
+        return {
+          ...e,
+          sourceHandle: managerSourceHandle,
+          targetHandle: agentTargetHandle,
+          style: {
+            ...e.style,
+            stroke: '#2196f3',
+            strokeWidth: 2,
+          },
+          animated: false
+        };
+      }
+
       return e;
     });
 
@@ -569,6 +586,7 @@ export const useEventBindings = (
       layoutOrientation: currentLayout,
       agentToTaskHandles: currentLayout === 'vertical' ? 'bottom→top' : 'right→left',
       taskToTaskHandles: 'right→left (always)',
+      managerToAgentHandles: currentLayout === 'vertical' ? 'bottom→top' : 'right→left',
       edgeCount: updatedEdges.length
     });
 

@@ -20,6 +20,7 @@ import { useFlowManager } from '../../hooks/workflow/useFlowManager';
 import { useCrewExecutionStore } from '../../store/crewExecution';
 import { useTabManagerStore } from '../../store/tabManager';
 import { useTabSync } from '../../hooks/workflow/useTabSync';
+import { useTabExecutionSync } from '../../hooks/workflow/useTabExecutionSync';
 import { useRunStatusStore } from '../../store/runStatus';
 import { useChatPanelResize } from '../../hooks/workflow/useChatPanelResize';
 import { useExecutionHistoryResize } from '../../hooks/workflow/useExecutionHistoryResize';
@@ -49,7 +50,6 @@ import { useTaskExecutionStore } from '../../store/taskExecutionStore';
 import AgentDialog from '../Agents/AgentDialog';
 import TaskDialog from '../Tasks/TaskDialog';
 import CrewPlanningDialog from '../Planning/CrewPlanningDialog';
-import { CrewDialog as _CrewDialog } from '../Crew';
 import ScheduleDialog from '../Schedule/ScheduleDialog';
 import JobsPanel from '../Jobs/JobsPanel';
 import InteractiveTutorial from '../Tutorial/InteractiveTutorial';
@@ -63,6 +63,7 @@ import ToolForm from '../Tools/ToolForm';
 import { CrewFlowSelectionDialog } from '../Crew/CrewFlowDialog';
 import SaveCrew from '../Crew/SaveCrew';
 import SaveFlow from '../Flow/SaveFlow';
+import CheckpointResumeDialog from '../Flow/CheckpointResumeDialog';
 
 // Services & Utilities
 import { useAgentManager } from '../../hooks/workflow/useAgentManager';
@@ -230,6 +231,9 @@ const WorkflowDesigner: React.FC<WorkflowDesignerProps> = (): JSX.Element => {
 
   // Use tab sync to keep tabs and flow manager in sync
   const { activeTabId: _activeTabId } = useTabSync({ nodes, edges, setNodes, setEdges });
+
+  // Use tab execution sync to keep execution config (process type, planning, etc.) in sync per tab
+  useTabExecutionSync();
 
   // Use agent and task managers with original flow manager
   const {
@@ -455,7 +459,18 @@ const WorkflowDesigner: React.FC<WorkflowDesignerProps> = (): JSX.Element => {
     setEdges: setCrewExecutionEdges,
     showInputVariablesDialog,
     setShowInputVariablesDialog,
-    executeWithVariables
+    executeWithVariables,
+    // Checkpoint dialog state
+    showCheckpointDialog,
+    setShowCheckpointDialog,
+    checkpoints,
+    checkpointsLoading,
+    checkpointsError,
+    pendingFlowExecution,
+    handleCheckpointStartFresh,
+    handleCheckpointResume,
+    handleCheckpointDelete,
+    refreshCheckpoints
   } = useCrewExecutionStore();
 
   // Debug logging for running tab
@@ -1654,6 +1669,20 @@ const WorkflowDesigner: React.FC<WorkflowDesignerProps> = (): JSX.Element => {
           jobId={selectedExecutionJobId || ''}
           isConnecting={isConnectingLogs}
           connectionError={connectionError}
+        />
+
+        {/* Checkpoint Resume Dialog */}
+        <CheckpointResumeDialog
+          open={showCheckpointDialog}
+          onClose={() => setShowCheckpointDialog(false)}
+          checkpoints={checkpoints}
+          loading={checkpointsLoading}
+          error={checkpointsError}
+          flowName={pendingFlowExecution?.savedFlowName}
+          onStartFresh={handleCheckpointStartFresh}
+          onResumeFromCheckpoint={handleCheckpointResume}
+          onDeleteCheckpoint={handleCheckpointDelete}
+          onRefresh={refreshCheckpoints}
         />
 
         {/* Right Sidebar */}
