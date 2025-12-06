@@ -17,12 +17,13 @@ from src.engines.crewai.flow.backend_flow import BackendFlow
 
 # Mock classes
 class MockCrewAIFlow:
-    """Mock CrewAI Flow instance."""
+    """Mock CrewAI Flow instance that properly supports dir() inspection."""
     def __init__(self, has_kickoff_async=True, has_plot=True):
         self.state = {}
         self._has_kickoff_async = has_kickoff_async
         self._has_plot = has_plot
-        # Add starting_point method for flow detection
+        self._kickoff_async_result = {"raw": "async result", "token_usage": "100 tokens"}
+        # Add starting_point method for flow detection - this will appear in dir()
         self.starting_point_test = Mock()
 
     def kickoff(self):
@@ -31,7 +32,7 @@ class MockCrewAIFlow:
     async def kickoff_async(self):
         if not self._has_kickoff_async:
             raise AttributeError("kickoff_async not available")
-        return {"raw": "async result", "token_usage": "100 tokens"}
+        return self._kickoff_async_result
 
     def plot(self, filename="flow_diagram"):
         if not self._has_plot:
@@ -102,9 +103,9 @@ class TestKickoffAsync:
         flow._flow_data = mock_flow_data
         flow._config = {'callbacks': {}}
 
-        mock_crewai_flow = Mock()
-        mock_crewai_flow.kickoff_async = AsyncMock(return_value={"key": "value"})
-        mock_crewai_flow.starting_point_test = Mock()
+        # Use MockCrewAIFlow which properly supports dir() inspection
+        mock_crewai_flow = MockCrewAIFlow(has_kickoff_async=True)
+        mock_crewai_flow._kickoff_async_result = {"key": "value"}
 
         with patch.object(flow, 'flow', new_callable=AsyncMock) as mock_flow_method:
             mock_flow_method.return_value = mock_crewai_flow

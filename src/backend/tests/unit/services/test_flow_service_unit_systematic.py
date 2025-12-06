@@ -40,6 +40,7 @@ class FakeSession:
         class R:
             def __init__(self, count):
                 self.count = count
+                self.rowcount = count  # Add rowcount for SQLAlchemy result compatibility
             def scalar_one(self):
                 return self.count
             def first(self):
