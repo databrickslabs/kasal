@@ -81,9 +81,8 @@ class FlowRepository(BaseRepository[Flow]):
             True if flow was deleted, False if not found
         """
         import logging
-        from sqlalchemy import text
         logger = logging.getLogger(__name__)
-        
+
         # Check if the flow exists
         flow = await self.get(flow_id)
         if not flow:
@@ -91,39 +90,17 @@ class FlowRepository(BaseRepository[Flow]):
             return False
         
         try:
-            # Step 1: Identify all flow_executions for this flow
-            find_executions_query = text("""
-            SELECT id FROM flow_executions WHERE flow_id = :flow_id
+            # Delete all flow executions from executionhistory table
+            exec_delete_query = text("""
+            DELETE FROM executionhistory
+            WHERE flow_id = :flow_id AND execution_type = 'flow'
             """)
-            result = await self.session.execute(find_executions_query, {"flow_id": flow_id})
-            execution_ids = [row[0] for row in result.fetchall()]
+            result = await self.session.execute(exec_delete_query, {"flow_id": flow_id})
+            deleted_count = result.rowcount
+            if deleted_count > 0:
+                logger.info(f"Deleted {deleted_count} flow executions for flow {flow_id}")
             
-            if execution_ids:
-                logger.info(f"Found {len(execution_ids)} flow executions to delete for flow {flow_id}")
-                
-                # Step 2: Delete related flow_node_executions (process in chunks to avoid very large queries)
-                chunk_size = 50  # Adjust based on your database performance
-                for i in range(0, len(execution_ids), chunk_size):
-                    chunk = execution_ids[i:i+chunk_size]
-                    placeholders = ", ".join([f":id{j}" for j in range(len(chunk))])
-                    params = {f"id{j}": execution_id for j, execution_id in enumerate(chunk)}
-                    
-                    node_delete_query = text(f"""
-                    DELETE FROM flow_node_executions 
-                    WHERE flow_execution_id IN ({placeholders})
-                    """)
-                    await self.session.execute(node_delete_query, params)
-                
-                logger.info(f"Deleted flow_node_executions for {len(execution_ids)} executions of flow {flow_id}")
-                
-                # Step 3: Delete all flow_executions
-                exec_delete_query = text("""
-                DELETE FROM flow_executions WHERE flow_id = :flow_id
-                """)
-                await self.session.execute(exec_delete_query, {"flow_id": flow_id})
-                logger.info(f"Deleted flow_executions for flow {flow_id}")
-            
-            # Step 4: Now delete the flow
+            # Now delete the flow
             flow_delete_query = text("""
             DELETE FROM flows WHERE id = :flow_id
             """)
@@ -149,32 +126,23 @@ class FlowRepository(BaseRepository[Flow]):
             None
         """
         import logging
-        from sqlalchemy import text
         logger = logging.getLogger(__name__)
-        
+
         try:
-            # First delete all flow_node_executions
-            node_delete_query = text("""
-            DELETE FROM flow_node_executions 
-            WHERE flow_execution_id IN (SELECT id FROM flow_executions)
-            """)
-            await self.session.execute(node_delete_query)
-            logger.info("Deleted all flow node executions")
-            
-            # Then delete all flow_executions
+            # Delete all flow executions from executionhistory table
             exec_delete_query = text("""
-            DELETE FROM flow_executions
+            DELETE FROM executionhistory WHERE execution_type = 'flow'
             """)
             await self.session.execute(exec_delete_query)
-            logger.info("Deleted all flow executions")
-            
-            # Finally delete all flows
+            logger.info("Deleted all flow executions from executionhistory")
+
+            # Delete all flows
             flow_delete_query = text("""
             DELETE FROM flows
             """)
             await self.session.execute(flow_delete_query)
             logger.info("Deleted all flows")
-            
+
             # Commit the changes
             await self.session.commit()
             
