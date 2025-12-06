@@ -6,7 +6,7 @@ This module provides functions for CRUD operations on execution traces.
 
 import logging
 from typing import List, Optional, Dict, Any, Tuple
-from sqlalchemy import select, delete, update, func
+from sqlalchemy import delete, update, func
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.future import select
 from sqlalchemy.exc import SQLAlchemyError
@@ -469,8 +469,173 @@ class ExecutionTraceRepository(BaseRepository[ExecutionTrace]):
     async def delete_all(self) -> int:
         """
         Delete all execution traces.
-        
+
         Returns:
             Number of deleted records
         """
-        return await self._delete_all() 
+        return await self._delete_all()
+
+    async def get_crew_checkpoints_by_job_id(self, job_id: str) -> List[Dict[str, Any]]:
+        """
+        Get crew checkpoint information from traces for a specific job.
+
+        This extracts crew completion events from traces to support
+        granular checkpoint resume functionality.
+
+        Args:
+            job_id: Job ID to get crew checkpoints for
+
+        Returns:
+            List of crew checkpoint dicts with:
+                - crew_name: Name of the crew
+                - sequence: Order of execution (1-based)
+                - status: 'completed' or 'failed'
+                - output_preview: First 200 chars of output
+                - completed_at: ISO timestamp
+        """
+        try:
+            # Query for task_completed events (crews complete when their tasks complete)
+            stmt = select(ExecutionTrace).where(
+                ExecutionTrace.job_id == job_id,
+                ExecutionTrace.event_type == "task_completed"
+            ).order_by(ExecutionTrace.created_at)
+
+            result = await self.session.execute(stmt)
+            traces = result.scalars().all()
+
+            # Extract unique crew completions from traces
+            crew_checkpoints = []
+            seen_crews = set()
+            sequence = 0
+
+            for trace in traces:
+                # Get crew_name from trace_metadata (extra_data is saved directly as trace_metadata)
+                # or from trace_metadata.extra_data (legacy format) or output.extra_data
+                # Fallback to agent_role if crew_name not available (backward compatibility)
+                crew_name = None
+
+                if trace.trace_metadata and isinstance(trace.trace_metadata, dict):
+                    # First check if crew_name is directly in trace_metadata (new format)
+                    crew_name = trace.trace_metadata.get("crew_name")
+                    # Fallback to extra_data.crew_name (legacy format)
+                    if not crew_name:
+                        extra_data = trace.trace_metadata.get("extra_data", {})
+                        if isinstance(extra_data, dict):
+                            crew_name = extra_data.get("crew_name")
+                    # Fallback to agent_role (backward compatibility with traces before crew_name was added)
+                    if not crew_name:
+                        crew_name = trace.trace_metadata.get("agent_role")
+
+                # Also check output if not found in trace_metadata
+                if not crew_name and trace.output and isinstance(trace.output, dict):
+                    crew_name = trace.output.get("crew_name")
+                    if not crew_name:
+                        extra_data = trace.output.get("extra_data", {})
+                        if isinstance(extra_data, dict):
+                            crew_name = extra_data.get("crew_name")
+
+                if not crew_name:
+                    continue
+
+                # Only add each crew once (first completion = checkpoint)
+                if crew_name in seen_crews:
+                    continue
+
+                seen_crews.add(crew_name)
+                sequence += 1
+
+                # Get output preview
+                output_preview = ""
+                if trace.output:
+                    if isinstance(trace.output, dict):
+                        output_preview = str(trace.output.get("output_content", ""))[:200]
+                    else:
+                        output_preview = str(trace.output)[:200]
+
+                crew_checkpoints.append({
+                    "crew_name": crew_name,
+                    "sequence": sequence,
+                    "status": "completed",
+                    "output_preview": output_preview,
+                    "completed_at": trace.created_at.isoformat() if trace.created_at else None
+                })
+
+            logger.info(f"Found {len(crew_checkpoints)} crew checkpoints for job {job_id}")
+            if crew_checkpoints:
+                for cp in crew_checkpoints:
+                    logger.info(f"  Crew checkpoint: {cp['crew_name']} (sequence {cp['sequence']})")
+            else:
+                # Log trace info for debugging
+                logger.info(f"No crew checkpoints found. Total task_completed traces: {len(traces)}")
+                if traces:
+                    sample_trace = traces[0]
+                    logger.info(f"  Sample trace_metadata keys: {list(sample_trace.trace_metadata.keys()) if sample_trace.trace_metadata else 'None'}")
+                    logger.info(f"  Sample trace_metadata: {sample_trace.trace_metadata}")
+            return crew_checkpoints
+
+        except SQLAlchemyError as e:
+            logger.error(f"Database error getting crew checkpoints for job {job_id}: {str(e)}")
+            return [] 
+
+    async def get_crew_outputs_for_resume(self, job_id: str) -> Dict[str, Any]:
+        """
+        Get full crew outputs from traces for checkpoint resume.
+
+        This returns a dictionary mapping crew names to their full outputs,
+        which can be used to populate flow state when resuming from a checkpoint.
+
+        Args:
+            job_id: Job ID to get crew outputs for
+
+        Returns:
+            Dict mapping crew_name -> full output content
+        """
+        try:
+            # Query for task_completed events (crews complete when their tasks complete)
+            stmt = select(ExecutionTrace).where(
+                ExecutionTrace.job_id == job_id,
+                ExecutionTrace.event_type == "task_completed"
+            ).order_by(ExecutionTrace.created_at)
+
+            result = await self.session.execute(stmt)
+            traces = result.scalars().all()
+
+            # Extract crew outputs from traces
+            crew_outputs = {}
+            
+            for trace in traces:
+                # Get crew_name from trace_metadata
+                crew_name = None
+
+                if trace.trace_metadata and isinstance(trace.trace_metadata, dict):
+                    crew_name = trace.trace_metadata.get("crew_name")
+                    if not crew_name:
+                        extra_data = trace.trace_metadata.get("extra_data", {})
+                        if isinstance(extra_data, dict):
+                            crew_name = extra_data.get("crew_name")
+                    if not crew_name:
+                        crew_name = trace.trace_metadata.get("agent_role")
+
+                if not crew_name:
+                    continue
+
+                # Get the full output
+                full_output = None
+                if trace.output:
+                    if isinstance(trace.output, dict):
+                        # Try to get the actual output content
+                        full_output = trace.output.get("output_content") or trace.output.get("raw") or trace.output
+                    else:
+                        full_output = trace.output
+
+                # Store the output (last task's output for each crew)
+                if crew_name and full_output:
+                    crew_outputs[crew_name] = full_output
+                    logger.debug(f"Stored output for crew '{crew_name}': {str(full_output)[:100]}...")
+
+            logger.info(f"Retrieved outputs for {len(crew_outputs)} crews for resume: {list(crew_outputs.keys())}")
+            return crew_outputs
+
+        except SQLAlchemyError as e:
+            logger.error(f"Database error getting crew outputs for job {job_id}: {str(e)}")
+            return {}
