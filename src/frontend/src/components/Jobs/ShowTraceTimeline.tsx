@@ -37,8 +37,7 @@ import { useTranslation } from 'react-i18next';
 import ShowLogs from './ShowLogs';
 import { executionLogService, LogEntry } from '../../api/ExecutionLogs';
 import { useRunResult } from '../../hooks/global/useExecutionResult';
-import ReactMarkdown from 'react-markdown';
-import remarkGfm from 'remark-gfm';
+import { PaginatedOutput } from '../Common';
 
 interface GroupedTrace {
   agent: string;
@@ -78,8 +77,7 @@ const ShowTraceTimeline: React.FC<ShowTraceProps> = ({
   runId,
   run,
   onViewResult,
-  onShowLogs,
-
+  onShowLogs: _onShowLogs,
 }) => {
   const { t } = useTranslation();
   const { useNewExecutionUI } = useUserPreferencesStore();
@@ -1008,28 +1006,6 @@ const ShowTraceTimeline: React.FC<ShowTraceProps> = ({
     }
   };
 
-  const formatOutput = (output: string | Record<string, unknown> | undefined): string => {
-    if (!output) return 'No output available';
-
-    if (typeof output === 'string') {
-      // Clean up tool results and other formatted strings
-      if (output.includes('ToolResult')) {
-        const match = output.match(/result="([^"]+)"/);
-        if (match) {
-          try {
-            const parsed = JSON.parse(match[1].replace(/'/g, '"'));
-            return JSON.stringify(parsed, null, 2);
-          } catch {
-            return output;
-          }
-        }
-      }
-      return output;
-    }
-
-    return JSON.stringify(output, null, 2);
-  };
-
   const handleEventClick = (event: { type: string; description: string; output?: string | Record<string, unknown> }) => {
     setSelectedEvent(event);
   };
@@ -1602,110 +1578,17 @@ const ShowTraceTimeline: React.FC<ShowTraceProps> = ({
                   </Box>
                 ) : null}
 
-                <Paper
-                  sx={{
-                    p: 2,
-                    mt: 1,
-                    backgroundColor: (theme) => theme.palette.mode === 'dark' ? 'grey.900' : 'grey.50',
-                    maxHeight: '60vh',
-                    overflow: 'auto',
-                    '& pre': {
-                      overflowX: 'auto',
-                      padding: 1,
-                      borderRadius: 1,
-                      backgroundColor: (theme) => theme.palette.mode === 'dark' ? 'grey.800' : 'grey.100',
-                      fontFamily: 'monospace',
-                      fontSize: '0.875rem',
-                    },
-                    '& code': {
-                      fontFamily: 'monospace',
-                      fontSize: '0.875rem',
-                      backgroundColor: (theme) => theme.palette.mode === 'dark' ? 'grey.800' : 'grey.200',
-                      padding: '2px 4px',
-                      borderRadius: '3px',
-                    },
-                    '& p': {
-                      marginTop: 1,
-                      marginBottom: 1,
-                    },
-                    '& ul, & ol': {
-                      paddingLeft: 3,
-                      marginTop: 1,
-                      marginBottom: 1,
-                    },
-                    '& li': {
-                      marginTop: 0.5,
-                      marginBottom: 0.5,
-                    },
-                    '& blockquote': {
-                      borderLeft: '4px solid',
-                      borderColor: 'primary.main',
-                      paddingLeft: 2,
-                      marginLeft: 0,
-                      marginTop: 1,
-                      marginBottom: 1,
-                      fontStyle: 'italic',
-                      color: 'text.secondary',
-                    },
-                    '& h1, & h2, & h3, & h4, & h5, & h6': {
-                      marginTop: 2,
-                      marginBottom: 1,
-                      fontWeight: 'bold',
-                    },
-                    '& h1': { fontSize: '1.5rem' },
-                    '& h2': { fontSize: '1.3rem' },
-                    '& h3': { fontSize: '1.1rem' },
-                    '& h4': { fontSize: '1rem' },
-                    '& h5': { fontSize: '0.9rem' },
-                    '& h6': { fontSize: '0.85rem' },
-                    '& table': {
-                      width: '100%',
-                      borderCollapse: 'collapse',
-                      marginTop: 1,
-                      marginBottom: 1,
-                    },
-                    '& th, & td': {
-                      border: '1px solid',
-                      borderColor: 'divider',
-                      padding: 1,
-                      textAlign: 'left',
-                    },
-                    '& th': {
-                      backgroundColor: (theme) => theme.palette.mode === 'dark' ? 'grey.800' : 'grey.200',
-                      fontWeight: 'bold',
-                    },
-                    '& hr': {
-                      marginTop: 2,
-                      marginBottom: 2,
-                      border: 'none',
-                      borderTop: '1px solid',
-                      borderColor: 'divider',
-                    },
-                    '& a': {
-                      color: 'primary.main',
-                      textDecoration: 'none',
-                      '&:hover': {
-                        textDecoration: 'underline',
-                      },
-                    },
-                  }}
-                >
-                  <ReactMarkdown remarkPlugins={[remarkGfm]}>
-                    {formatOutput(selectedEvent.output)}
-                  </ReactMarkdown>
-                </Paper>
+                {/* Paginated output display - prevents browser crash on large content */}
+                <PaginatedOutput
+                  content={selectedEvent.output}
+                  pageSize={10000}
+                  enableMarkdown={true}
+                  showCopyButton={true}
+                  maxHeight="55vh"
+                />
               </Box>
             </DialogContent>
             <DialogActions>
-              <Button
-                onClick={() => {
-                  navigator.clipboard.writeText(formatOutput(selectedEvent.output));
-                }}
-                startIcon={<ContentCopyIcon />}
-                size="small"
-              >
-                Copy Output
-              </Button>
               <Button onClick={() => setSelectedEvent(null)} size="small">
                 Close
               </Button>
