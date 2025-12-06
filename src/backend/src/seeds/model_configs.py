@@ -118,7 +118,7 @@ DEFAULT_MODELS = {
         "temperature": 0.7,
         "provider": "databricks",
         "context_window": 128000,
-        "max_output_tokens": 4096
+        "max_output_tokens": 8000
     },
     "databricks-claude-sonnet-4": {
         "name": "databricks-claude-sonnet-4",
@@ -310,6 +310,9 @@ DEFAULT_MODELS = {
         "max_output_tokens": 16384
     }
 }
+
+# Alias for backwards compatibility - some modules import MODEL_CONFIGS
+MODEL_CONFIGS = DEFAULT_MODELS
 
 async def seed_async():
     """Seed model configurations into the database using async session."""

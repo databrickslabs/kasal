@@ -1,5 +1,6 @@
 from datetime import datetime, timezone
 from sqlalchemy import Column, Integer, String, JSON, Text, DateTime, ForeignKey, Boolean
+from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import relationship
 from uuid import uuid4
 
@@ -96,7 +97,19 @@ class ExecutionHistory(Base):
     # Multi-group fields
     group_id = Column(String(100), index=True, nullable=True)  # Group isolation
     group_email = Column(String(255), index=True, nullable=True)  # User email for audit
-    
+
+    # Execution type and flow fields (consolidated from flow_executions table)
+    execution_type = Column(String(20), default="crew", index=True)  # 'crew' or 'flow'
+    flow_id = Column(UUID(as_uuid=True), nullable=True, index=True)  # Optional reference to saved flow
+
+    # Checkpoint/Persistence fields for CrewAI Flow state management
+    flow_uuid = Column(String(255), nullable=True, index=True)  # CrewAI's state.id for @persist
+    checkpoint_status = Column(String(50), nullable=True, default=None)  # 'active', 'resumed', 'expired', None
+    checkpoint_method = Column(String(255), nullable=True)  # Last checkpointed method name
+    # Crew-level checkpoint data for granular resume functionality
+    # Structure: {"crew_checkpoints": [{"crew_node_id": "...", "crew_name": "...", "sequence": 1, "status": "completed", "output_preview": "...", "completed_at": "..."}]}
+    checkpoint_data = Column(JSON, nullable=True, default=None)
+
     # Relationships
     task_statuses = relationship("TaskStatus", back_populates="execution_history", 
                                 foreign_keys="TaskStatus.job_id", 
@@ -106,13 +119,13 @@ class ExecutionHistory(Base):
                                primaryjoin="ExecutionHistory.id == ErrorTrace.run_id")
     
     # New relationship with ExecutionTrace
-    execution_traces = relationship("ExecutionTrace", back_populates="run", 
+    execution_traces = relationship("ExecutionTrace", back_populates="run",
                                    foreign_keys="ExecutionTrace.run_id",
                                    primaryjoin="ExecutionHistory.id == ExecutionTrace.run_id")
-    execution_traces_by_job_id = relationship("ExecutionTrace", 
+    execution_traces_by_job_id = relationship("ExecutionTrace",
                                              foreign_keys="ExecutionTrace.job_id",
                                              primaryjoin="ExecutionHistory.job_id == ExecutionTrace.job_id")
-    
+
     def __init__(self, **kwargs):
         super(ExecutionHistory, self).__init__(**kwargs)
         if self.job_id is None:
@@ -125,6 +138,8 @@ class ExecutionHistory(Base):
             self.planning = False
         if self.trigger_type is None:
             self.trigger_type = "api"
+        if self.execution_type is None:
+            self.execution_type = "crew"
         if self.created_at is None:
             self.created_at = datetime.utcnow()
 
@@ -221,10 +236,13 @@ class ErrorTrace(Base):
     
     # Relationship to the run
     execution_history = relationship("ExecutionHistory", back_populates="error_traces")
-    
+
     def __init__(self, **kwargs):
         super(ErrorTrace, self).__init__(**kwargs)
         if self.error_metadata is None:
             self.error_metadata = {}
         if self.timestamp is None:
-            self.timestamp = datetime.now(timezone.utc) 
+            self.timestamp = datetime.now(timezone.utc)
+
+
+ 

@@ -112,6 +112,18 @@ class CrewBase(BaseModel):
     nodes: List[Node] = Field(default_factory=list)
     edges: List[Edge] = Field(default_factory=list)
 
+    # Crew execution configuration
+    process: Optional[str] = Field("sequential", description="Execution process type: sequential or hierarchical")
+    planning: Optional[bool] = Field(False, description="Enable planning mode for strategic task orchestration")
+    planning_llm: Optional[str] = Field(None, description="LLM model for planning operations")
+    reasoning: Optional[bool] = Field(False, description="Enable reasoning mode for enhanced decision-making")
+    reasoning_llm: Optional[str] = Field(None, description="LLM model for reasoning operations")
+    manager_llm: Optional[str] = Field(None, description="LLM model for hierarchical process manager")
+    tool_configs: Optional[Dict[str, Any]] = Field(None, description="Crew-level tool configurations (MCP servers, etc.)")
+    memory: Optional[bool] = Field(True, description="Enable crew memory")
+    verbose: Optional[bool] = Field(True, description="Enable verbose output")
+    max_rpm: Optional[int] = Field(None, description="Maximum requests per minute")
+
 
 # Properties to receive on crew creation
 class CrewCreate(CrewBase):
@@ -127,6 +139,17 @@ class CrewUpdate(BaseModel):
     task_ids: Optional[List[str]] = None
     nodes: Optional[List[Node]] = None
     edges: Optional[List[Edge]] = None
+    # Crew execution configuration
+    process: Optional[str] = None
+    planning: Optional[bool] = None
+    planning_llm: Optional[str] = None
+    reasoning: Optional[bool] = None
+    reasoning_llm: Optional[str] = None
+    manager_llm: Optional[str] = None
+    tool_configs: Optional[Dict[str, Any]] = None
+    memory: Optional[bool] = None
+    verbose: Optional[bool] = None
+    max_rpm: Optional[int] = None
 
 
 # Properties shared by models stored in DB
@@ -156,6 +179,17 @@ class CrewResponse(BaseModel):
     edges: List[Edge]
     created_at: str
     updated_at: str
+    # Crew execution configuration
+    process: Optional[str] = "sequential"
+    planning: Optional[bool] = False
+    planning_llm: Optional[str] = None
+    reasoning: Optional[bool] = False
+    reasoning_llm: Optional[str] = None
+    manager_llm: Optional[str] = None
+    tool_configs: Optional[Dict[str, Any]] = None
+    memory: Optional[bool] = True
+    verbose: Optional[bool] = True
+    max_rpm: Optional[int] = None
 
     model_config = ConfigDict(from_attributes=True)
 
