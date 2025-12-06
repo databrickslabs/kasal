@@ -160,6 +160,106 @@ async def get_traces_by_job_id(
             detail=f"Failed to retrieve traces: {str(e)}"
         )
 
+@router.get("/job/{job_id}/crew-node-states")
+async def get_current_crew_node_states(
+    job_id: str,
+    service: ExecutionTraceServiceDep,
+    group_context: GroupContextDep
+):
+    """
+    Get current crew node execution states from traces for flow execution.
+    Returns which crew nodes are running, completed, or failed.
+
+    Args:
+        job_id: String ID of the execution (job_id)
+        service: Execution trace service dependency
+        group_context: Group context from headers for authorization
+
+    Returns:
+        Dictionary mapping crew names to their current states
+    """
+    try:
+        # Get all traces for the job with authorization check
+        result = await service.get_traces_by_job_id(
+            group_context=group_context,
+            job_id=job_id,
+            limit=500,
+            offset=0
+        )
+        if not result:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail=f"Execution with job_id {job_id} not found or access denied"
+            )
+
+        crew_states = {}
+
+        # Process traces to determine current crew node states
+        # Track crew execution based on task events grouped by crew
+        current_crew = None
+        crew_task_counts = {}  # Track total tasks per crew
+        crew_completed_tasks = {}  # Track completed tasks per crew
+        crew_failed = set()  # Track failed crews
+
+        for trace in result.traces:
+            event_type_upper = trace.event_type.upper() if trace.event_type else ""
+
+            # Check for crew-related events from flow execution
+            if event_type_upper in ["TASK_STARTED", "TASK_COMPLETED", "TASK_FAILED"]:
+                # Extract crew name from metadata if available
+                crew_name = None
+                if trace.trace_metadata and isinstance(trace.trace_metadata, dict):
+                    crew_name = trace.trace_metadata.get("crew_name")
+                    if not crew_name:
+                        # Try to get from agent role (crew name is often the first agent's role)
+                        agent_role = trace.trace_metadata.get("agent_role")
+                        if agent_role:
+                            crew_name = agent_role
+
+                if crew_name:
+                    # Initialize crew state if not exists
+                    if crew_name not in crew_states:
+                        crew_states[crew_name] = {
+                            "status": "pending",
+                            "started_at": None,
+                            "completed_at": None,
+                            "task_count": 0,
+                            "completed_count": 0
+                        }
+                        crew_task_counts[crew_name] = 0
+                        crew_completed_tasks[crew_name] = 0
+
+                    if event_type_upper == "TASK_STARTED":
+                        crew_task_counts[crew_name] = crew_task_counts.get(crew_name, 0) + 1
+                        if crew_states[crew_name]["status"] == "pending":
+                            crew_states[crew_name]["status"] = "running"
+                            crew_states[crew_name]["started_at"] = trace.created_at.isoformat() if trace.created_at else None
+                        crew_states[crew_name]["task_count"] = crew_task_counts[crew_name]
+
+                    elif event_type_upper == "TASK_COMPLETED":
+                        crew_completed_tasks[crew_name] = crew_completed_tasks.get(crew_name, 0) + 1
+                        crew_states[crew_name]["completed_count"] = crew_completed_tasks[crew_name]
+                        # Check if all tasks are completed
+                        if crew_completed_tasks[crew_name] >= crew_task_counts.get(crew_name, 0) and crew_name not in crew_failed:
+                            crew_states[crew_name]["status"] = "completed"
+                            crew_states[crew_name]["completed_at"] = trace.created_at.isoformat() if trace.created_at else None
+
+                    elif event_type_upper == "TASK_FAILED":
+                        crew_failed.add(crew_name)
+                        crew_states[crew_name]["status"] = "failed"
+                        crew_states[crew_name]["failed_at"] = trace.created_at.isoformat() if trace.created_at else None
+
+        return crew_states
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error getting crew node states for job_id {job_id}: {str(e)}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to retrieve crew node states: {str(e)}"
+        )
+
+
 @router.get("/job/{job_id}/task-states")
 async def get_current_task_states(
     job_id: str,

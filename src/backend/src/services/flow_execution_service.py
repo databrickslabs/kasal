@@ -3,26 +3,21 @@ Flow Execution Service.
 
 This service handles all business logic for flow execution state management,
 following the service architecture pattern: API -> Service -> Repository -> Model.
+
+NOTE: This service now uses the consolidated ExecutionHistory model instead of
+the deprecated FlowExecution model. All flow executions are tracked in the
+executionhistory table with execution_type='flow'.
 """
 
 import uuid
 from typing import Any, Dict, List, Optional, Union
 from datetime import datetime
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy import select
 
 from src.core.logger import LoggerManager
-from src.repositories.flow_execution_repository import (
-    FlowExecutionRepository,
-    FlowNodeExecutionRepository
-)
-from src.schemas.flow_execution import (
-    FlowExecutionCreate,
-    FlowExecutionUpdate,
-    FlowNodeExecutionCreate,
-    FlowNodeExecutionUpdate,
-    FlowExecutionStatus
-)
-from src.models.flow_execution import FlowExecution, FlowNodeExecution
+from src.models.execution_history import ExecutionHistory
+from src.repositories.execution_history_repository import ExecutionHistoryRepository
 
 logger = LoggerManager.get_instance().flow
 
@@ -32,12 +27,11 @@ class FlowExecutionService:
     Service for managing flow execution state.
 
     This service provides business logic for:
-    - Creating and managing flow executions
+    - Creating and managing flow executions (stored in executionhistory with execution_type='flow')
     - Tracking flow execution state
-    - Managing node executions within flows
     - Persisting and retrieving flow state
 
-    All database operations go through the repository layer.
+    All database operations go through the repository layer or direct session access.
     """
 
     def __init__(self, session: AsyncSession):
@@ -48,8 +42,7 @@ class FlowExecutionService:
             session: Database session for repository operations
         """
         self.session = session
-        self.flow_execution_repo = FlowExecutionRepository(session)
-        self.node_execution_repo = FlowNodeExecutionRepository(session)
+        self.execution_repo = ExecutionHistoryRepository(session)
 
     async def create_execution(
         self,
@@ -58,12 +51,12 @@ class FlowExecutionService:
         run_name: Optional[str] = None,
         config: Optional[Dict[str, Any]] = None,
         group_id: Optional[str] = None
-    ) -> FlowExecution:
+    ) -> ExecutionHistory:
         """
         Create a new flow execution with multi-tenant isolation.
 
         Args:
-            flow_id: ID of the flow to execute
+            flow_id: ID of the flow to execute (can be None for ad-hoc flows)
             job_id: Job ID for tracking
             run_name: Optional descriptive name for the execution
             config: Optional configuration for the execution
@@ -71,7 +64,7 @@ class FlowExecutionService:
                      If not provided, will be inherited from the parent flow.
 
         Returns:
-            Created FlowExecution instance
+            Created ExecutionHistory instance
 
         Raises:
             ValueError: If flow_id is invalid
@@ -79,7 +72,7 @@ class FlowExecutionService:
         logger.info(f"Creating flow execution for flow {flow_id}, job {job_id}, run_name={run_name}, group {group_id}")
 
         # Convert string to UUID if needed
-        if isinstance(flow_id, str):
+        if flow_id is not None and isinstance(flow_id, str):
             try:
                 flow_id = uuid.UUID(flow_id)
             except ValueError as e:
@@ -87,7 +80,7 @@ class FlowExecutionService:
                 raise ValueError(f"Invalid UUID format: {str(e)}")
 
         # If group_id not provided, inherit from the parent flow
-        if group_id is None:
+        if group_id is None and flow_id is not None:
             from src.repositories.flow_repository import FlowRepository
             flow_repo = FlowRepository(self.session)
             flow = await flow_repo.get(flow_id)
@@ -99,26 +92,49 @@ class FlowExecutionService:
         if not run_name:
             # Use a default format with flow_id and timestamp
             timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-            flow_id_str = str(flow_id)[:8]  # Use first 8 chars of flow_id
+            flow_id_str = str(flow_id)[:8] if flow_id else "adhoc"
             run_name = f"Flow Execution {flow_id_str} - {timestamp}"
             logger.info(f"Generated default run_name: {run_name}")
 
-        # Create execution via repository
-        execution_data = FlowExecutionCreate(
-            flow_id=flow_id,
-            job_id=job_id,
-            status=FlowExecutionStatus.PENDING,
-            config=config or {},
-            run_name=run_name,
-            group_id=group_id
+        # Check if an execution record already exists (created by execution_service.py)
+        existing_execution = await self.session.execute(
+            select(ExecutionHistory).where(ExecutionHistory.job_id == job_id)
         )
+        execution = existing_execution.scalar_one_or_none()
 
-        execution = await self.flow_execution_repo.create(execution_data)
-        logger.info(f"Created flow execution {execution.id} for group {group_id}")
+        if execution:
+            # Update existing record with flow-specific fields
+            logger.info(f"Found existing execution record for job_id={job_id}, updating with flow fields")
+            execution.execution_type = "flow"
+            execution.flow_id = flow_id
+            if run_name:
+                execution.run_name = run_name
+            if config:
+                execution.inputs = config
+            if group_id:
+                execution.group_id = group_id
+        else:
+            # Create new execution record in executionhistory table
+            execution = ExecutionHistory(
+                job_id=job_id,
+                status="pending",
+                inputs=config or {},
+                run_name=run_name,
+                execution_type="flow",
+                flow_id=flow_id,
+                group_id=group_id,
+                created_at=datetime.utcnow()
+            )
+            self.session.add(execution)
+
+        await self.session.commit()
+        await self.session.refresh(execution)
+
+        logger.info(f"Flow execution {execution.id} (job_id={job_id}) ready for group {group_id}")
 
         return execution
 
-    async def get_execution(self, execution_id: int) -> Optional[FlowExecution]:
+    async def get_execution(self, execution_id: int) -> Optional[ExecutionHistory]:
         """
         Get a flow execution by ID.
 
@@ -126,14 +142,38 @@ class FlowExecutionService:
             execution_id: ID of the execution
 
         Returns:
-            FlowExecution instance or None if not found
+            ExecutionHistory instance or None if not found
         """
-        return await self.flow_execution_repo.get_by_id(execution_id)
+        result = await self.session.execute(
+            select(ExecutionHistory).where(
+                ExecutionHistory.id == execution_id,
+                ExecutionHistory.execution_type == "flow"
+            )
+        )
+        return result.scalar_one_or_none()
+
+    async def get_execution_by_job_id(self, job_id: str) -> Optional[ExecutionHistory]:
+        """
+        Get a flow execution by job_id.
+
+        Args:
+            job_id: Job ID of the execution
+
+        Returns:
+            ExecutionHistory instance or None if not found
+        """
+        result = await self.session.execute(
+            select(ExecutionHistory).where(
+                ExecutionHistory.job_id == job_id,
+                ExecutionHistory.execution_type == "flow"
+            )
+        )
+        return result.scalar_one_or_none()
 
     async def get_executions_by_flow(
         self,
         flow_id: Union[uuid.UUID, str]
-    ) -> List[FlowExecution]:
+    ) -> List[ExecutionHistory]:
         """
         Get all executions for a specific flow.
 
@@ -141,43 +181,101 @@ class FlowExecutionService:
             flow_id: ID of the flow
 
         Returns:
-            List of FlowExecution instances
+            List of ExecutionHistory instances
         """
         if isinstance(flow_id, str):
             flow_id = uuid.UUID(flow_id)
 
-        return await self.flow_execution_repo.get_by_flow_id(flow_id)
+        result = await self.session.execute(
+            select(ExecutionHistory).where(
+                ExecutionHistory.flow_id == flow_id,
+                ExecutionHistory.execution_type == "flow"
+            ).order_by(ExecutionHistory.created_at.desc())
+        )
+        return list(result.scalars().all())
 
     async def update_execution_status(
         self,
         execution_id: int,
-        status: FlowExecutionStatus,
+        status: str,
         error: Optional[str] = None,
         result: Optional[Dict[str, Any]] = None
-    ) -> FlowExecution:
+    ) -> ExecutionHistory:
         """
         Update the status of a flow execution.
 
         Args:
             execution_id: ID of the execution
-            status: New status
+            status: New status (pending, running, completed, failed)
             error: Optional error message
             result: Optional result data
 
         Returns:
-            Updated FlowExecution instance
+            Updated ExecutionHistory instance
         """
         logger.info(f"Updating execution {execution_id} status to {status}")
 
-        update_data = FlowExecutionUpdate(
-            status=status,
-            error=error,
-            result=result
-        )
+        execution = await self.get_execution(execution_id)
+        if not execution:
+            raise ValueError(f"Execution {execution_id} not found")
 
-        # The repository will automatically set completed_at for terminal statuses
-        execution = await self.flow_execution_repo.update(execution_id, update_data)
+        execution.status = status
+        if error:
+            execution.error = error
+        if result:
+            execution.result = result
+
+        # Set completed_at for terminal statuses
+        if status in ["completed", "failed"]:
+            execution.completed_at = datetime.utcnow()
+
+        await self.session.commit()
+        await self.session.refresh(execution)
+
         logger.info(f"Updated execution {execution_id} to status {status}")
+
+        return execution
+
+    async def update_execution_status_by_job_id(
+        self,
+        job_id: str,
+        status: str,
+        error: Optional[str] = None,
+        result: Optional[Dict[str, Any]] = None
+    ) -> Optional[ExecutionHistory]:
+        """
+        Update the status of a flow execution by job_id.
+
+        Args:
+            job_id: Job ID of the execution
+            status: New status (pending, running, completed, failed)
+            error: Optional error message
+            result: Optional result data
+
+        Returns:
+            Updated ExecutionHistory instance or None if not found
+        """
+        logger.info(f"Updating execution with job_id {job_id} status to {status}")
+
+        execution = await self.get_execution_by_job_id(job_id)
+        if not execution:
+            logger.warning(f"Execution with job_id {job_id} not found")
+            return None
+
+        execution.status = status
+        if error:
+            execution.error = error
+        if result:
+            execution.result = result
+
+        # Set completed_at for terminal statuses
+        if status in ["completed", "failed"]:
+            execution.completed_at = datetime.utcnow()
+
+        await self.session.commit()
+        await self.session.refresh(execution)
+
+        logger.info(f"Updated execution {execution.id} (job_id={job_id}) to status {status}")
 
         return execution
 
@@ -185,7 +283,7 @@ class FlowExecutionService:
         self,
         execution_id: int,
         config: Dict[str, Any]
-    ) -> FlowExecution:
+    ) -> ExecutionHistory:
         """
         Update the configuration/state of a flow execution.
 
@@ -196,111 +294,23 @@ class FlowExecutionService:
             config: Updated configuration/state data
 
         Returns:
-            Updated FlowExecution instance
+            Updated ExecutionHistory instance
         """
         logger.debug(f"Updating execution {execution_id} config")
 
-        update_data = FlowExecutionUpdate(config=config)
-        execution = await self.flow_execution_repo.update(execution_id, update_data)
+        execution = await self.get_execution(execution_id)
+        if not execution:
+            raise ValueError(f"Execution {execution_id} not found")
+
+        execution.inputs = config
+        await self.session.commit()
+        await self.session.refresh(execution)
 
         return execution
 
-    async def create_node_execution(
-        self,
-        flow_execution_id: int,
-        node_id: str,
-        agent_id: Optional[Union[uuid.UUID, str]] = None,
-        task_id: Optional[Union[uuid.UUID, str]] = None,
-        group_id: Optional[str] = None
-    ) -> FlowNodeExecution:
-        """
-        Create a new node execution within a flow with multi-tenant isolation.
-
-        Args:
-            flow_execution_id: ID of the parent flow execution
-            node_id: ID of the node being executed
-            agent_id: Optional ID of the agent executing the node
-            task_id: Optional ID of the task being executed
-            group_id: Optional group ID for multi-tenant isolation.
-                     If not provided, will be inherited from the parent flow execution.
-
-        Returns:
-            Created FlowNodeExecution instance
-        """
-        logger.info(f"Creating node execution for node {node_id} in flow execution {flow_execution_id}")
-
-        # If group_id not provided, inherit from parent flow execution
-        if group_id is None:
-            flow_execution = await self.get_execution(flow_execution_id)
-            if flow_execution and flow_execution.group_id:
-                group_id = flow_execution.group_id
-                logger.info(f"Inherited group_id {group_id} from parent flow execution {flow_execution_id}")
-
-        node_data = FlowNodeExecutionCreate(
-            flow_execution_id=flow_execution_id,
-            node_id=node_id,
-            agent_id=agent_id,
-            task_id=task_id,
-            status=FlowExecutionStatus.RUNNING,
-            group_id=group_id
-        )
-
-        node_execution = await self.node_execution_repo.create(node_data)
-        logger.info(f"Created node execution {node_execution.id} for group {group_id}")
-
-        return node_execution
-
-    async def update_node_execution(
-        self,
-        node_execution_id: int,
-        status: FlowExecutionStatus,
-        result: Optional[Dict[str, Any]] = None,
-        error: Optional[str] = None
-    ) -> FlowNodeExecution:
-        """
-        Update a node execution.
-
-        Args:
-            node_execution_id: ID of the node execution
-            status: New status
-            result: Optional result data
-            error: Optional error message
-
-        Returns:
-            Updated FlowNodeExecution instance
-        """
-        logger.info(f"Updating node execution {node_execution_id} to status {status}")
-
-        update_data = FlowNodeExecutionUpdate(
-            status=status,
-            result=result,
-            error=error
-        )
-
-        # Note: completed_at is set automatically by the repository for terminal statuses
-        node_execution = await self.node_execution_repo.update(node_execution_id, update_data)
-        logger.info(f"Updated node execution {node_execution_id} to status {status}")
-
-        return node_execution
-
-    async def get_node_executions(
-        self,
-        flow_execution_id: int
-    ) -> List[FlowNodeExecution]:
-        """
-        Get all node executions for a flow execution.
-
-        Args:
-            flow_execution_id: ID of the flow execution
-
-        Returns:
-            List of FlowNodeExecution instances
-        """
-        return await self.node_execution_repo.get_by_flow_execution_id(flow_execution_id)
-
     async def delete_execution(self, execution_id: int) -> bool:
         """
-        Delete a flow execution and its node executions.
+        Delete a flow execution.
 
         Args:
             execution_id: ID of the execution to delete
@@ -310,13 +320,52 @@ class FlowExecutionService:
         """
         logger.info(f"Deleting flow execution {execution_id}")
 
-        # Delete node executions first
-        node_executions = await self.get_node_executions(execution_id)
-        for node_execution in node_executions:
-            await self.node_execution_repo.delete(node_execution.id)
+        execution = await self.get_execution(execution_id)
+        if not execution:
+            logger.warning(f"Execution {execution_id} not found")
+            return False
 
-        # Delete the flow execution
-        await self.flow_execution_repo.delete(execution_id)
+        await self.session.delete(execution)
+        await self.session.commit()
+
         logger.info(f"Deleted flow execution {execution_id}")
 
         return True
+
+    async def delete_executions_by_flow(self, flow_id: Union[uuid.UUID, str]) -> int:
+        """
+        Delete all executions for a specific flow.
+
+        Args:
+            flow_id: ID of the flow
+
+        Returns:
+            Number of executions deleted
+        """
+        if isinstance(flow_id, str):
+            flow_id = uuid.UUID(flow_id)
+
+        logger.info(f"Deleting all executions for flow {flow_id}")
+
+        executions = await self.get_executions_by_flow(flow_id)
+        deleted_count = 0
+
+        for execution in executions:
+            if await self.delete_execution(execution.id):
+                deleted_count += 1
+
+        logger.info(f"Deleted {deleted_count} executions for flow {flow_id}")
+
+        return deleted_count
+
+    # Backward compatibility methods for FlowRunnerService
+    async def get_node_executions(self, execution_id: int) -> List:
+        """
+        Get node executions for a flow execution.
+
+        NOTE: Node-level tracking was never implemented. This returns an empty list
+        for backward compatibility with FlowRunnerService.get_flow_execution().
+
+        Individual task statuses are tracked in the 'taskstatus' table instead.
+        """
+        return []

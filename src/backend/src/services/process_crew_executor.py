@@ -135,6 +135,9 @@ def run_crew_in_process(
 
     # Mark that we're in subprocess mode for logging purposes
     os.environ['CREW_SUBPROCESS_MODE'] = 'true'
+    # CRITICAL: Store execution_id in environment for orphaned process detection
+    # This allows us to find and terminate this process even after server reloads
+    os.environ['KASAL_EXECUTION_ID'] = execution_id
 
     # Ensure DATABASE_TYPE is set correctly in subprocess
     # The subprocess needs to know which database to use
@@ -1694,19 +1697,32 @@ class ProcessCrewExecutor:
         else:
             logger.error("[ProcessCrewExecutor] SECURITY: No group_context provided - multi-tenant isolation will fail")
 
-        # Create a direct Process instead of using ProcessPoolExecutor
-        # This gives us full control over the process lifecycle
-        process = self._ctx.Process(
-            target=self._run_crew_wrapper,
-            args=(execution_id, crew_config, inputs, group_context, result_queue, log_queue)
-        )
+        # CRITICAL: Set KASAL_EXECUTION_ID in parent BEFORE spawning
+        # This ensures the child process inherits it and psutil can see it
+        old_kasal_exec_id = os.environ.get('KASAL_EXECUTION_ID')
+        os.environ['KASAL_EXECUTION_ID'] = execution_id
+        logger.info(f"[ProcessCrewExecutor] Set KASAL_EXECUTION_ID={execution_id} for subprocess inheritance")
 
-        # Store the process for tracking and termination
-        self._running_processes[execution_id] = process
+        try:
+            # Create a direct Process instead of using ProcessPoolExecutor
+            # This gives us full control over the process lifecycle
+            process = self._ctx.Process(
+                target=self._run_crew_wrapper,
+                args=(execution_id, crew_config, inputs, group_context, result_queue, log_queue)
+            )
 
-        # Start the process
-        process.start()
-        logger.info(f"Started process {process.pid} for execution {execution_id}")
+            # Store the process for tracking and termination
+            self._running_processes[execution_id] = process
+
+            # Start the process
+            process.start()
+            logger.info(f"Started process {process.pid} for execution {execution_id}")
+        finally:
+            # Restore parent's environment
+            if old_kasal_exec_id is not None:
+                os.environ['KASAL_EXECUTION_ID'] = old_kasal_exec_id
+            else:
+                os.environ.pop('KASAL_EXECUTION_ID', None)
 
         try:
             # Wait for the process to complete with optional timeout
@@ -2070,11 +2086,110 @@ class ProcessCrewExecutor:
             # Remove from tracking
             del self._running_processes[execution_id]
 
+        # If not found in tracking (e.g., server reloaded), search ALL processes
+        if not terminated:
+            logger.info(f"[ProcessCrewExecutor] Process not in tracking, searching all processes for {execution_id}...")
+            terminated = self._terminate_orphaned_process(execution_id)
+
         if terminated:
             self._metrics['terminated_executions'] += 1
 
         return terminated
 
+    def _terminate_orphaned_process(self, execution_id: str) -> bool:
+        """
+        Find and terminate orphaned crew processes by searching all running processes.
+
+        This handles the case where the server was reloaded and we lost the process reference.
+        It searches for processes that have the KASAL_EXECUTION_ID environment variable.
+
+        Args:
+            execution_id: The execution ID to search for
+
+        Returns:
+            True if a matching process was found and terminated
+        """
+        try:
+            import psutil
+
+            # Use short execution_id for matching (first 8 chars is common in logs)
+            exec_id_short = execution_id[:8]
+            killed_count = 0
+
+            logger.info(f"[ProcessCrewExecutor] Searching for orphaned processes with execution_id {exec_id_short}...")
+
+            # Search ALL processes, not just children of current process
+            for proc in psutil.process_iter(['pid', 'name', 'cmdline']):
+                try:
+                    # Skip non-Python processes for efficiency
+                    proc_name = proc.info.get('name', '').lower()
+                    if 'python' not in proc_name:
+                        continue
+
+                    # Check command line for execution_id
+                    cmdline = proc.info.get('cmdline', [])
+                    cmdline_str = ' '.join(cmdline) if cmdline else ''
+
+                    # Check for KASAL_EXECUTION_ID environment variable (most reliable)
+                    kasal_exec_id = None
+                    try:
+                        env = proc.environ()
+                        kasal_exec_id = env.get('KASAL_EXECUTION_ID', '')
+                    except (psutil.AccessDenied, psutil.NoSuchProcess):
+                        pass
+
+                    # Check if this process matches our execution
+                    is_match = False
+                    if kasal_exec_id:
+                        is_match = (kasal_exec_id == execution_id or kasal_exec_id.startswith(exec_id_short))
+                    elif execution_id in cmdline_str or exec_id_short in cmdline_str:
+                        is_match = True
+
+                    if is_match:
+                        pid = proc.info['pid']
+                        logger.info(f"[ProcessCrewExecutor] Found matching process {pid}, terminating...")
+
+                        # Kill the process and all its children
+                        try:
+                            parent = psutil.Process(pid)
+                            children = parent.children(recursive=True)
+
+                            # Terminate children first
+                            for child in children:
+                                try:
+                                    child.kill()
+                                    logger.info(f"[ProcessCrewExecutor] Terminated child process {child.pid}")
+                                except (psutil.NoSuchProcess, psutil.AccessDenied):
+                                    pass
+
+                            # Give children time to terminate
+                            if children:
+                                psutil.wait_procs(children, timeout=2)
+
+                            # Now kill the parent
+                            parent.kill()
+                            logger.info(f"[ProcessCrewExecutor] Successfully terminated orphaned process {pid}")
+                            killed_count += 1
+
+                        except (psutil.NoSuchProcess, psutil.AccessDenied) as e:
+                            logger.warning(f"[ProcessCrewExecutor] Could not terminate process {pid}: {e}")
+
+                except (psutil.NoSuchProcess, psutil.AccessDenied):
+                    continue
+
+            if killed_count > 0:
+                logger.info(f"[ProcessCrewExecutor] Terminated {killed_count} orphaned processes for {execution_id}")
+                return True
+            else:
+                logger.warning(f"[ProcessCrewExecutor] No orphaned processes found for {execution_id}")
+                return False
+
+        except ImportError:
+            logger.error("[ProcessCrewExecutor] psutil not available for orphaned process cleanup")
+            return False
+        except Exception as e:
+            logger.error(f"[ProcessCrewExecutor] Error searching for orphaned processes: {e}")
+            return False
 
     def get_metrics(self) -> Dict[str, Any]:
         """

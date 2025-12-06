@@ -6,7 +6,10 @@ from fastapi import APIRouter, Depends, HTTPException, Path, Query, status
 
 from src.core.dependencies import SessionDep, GroupContextDep
 from src.schemas.flow import FlowCreate, FlowUpdate, FlowResponse
+from src.schemas.execution_history import CheckpointListResponse, CheckpointInfo, CrewCheckpointInfo
+from src.repositories.execution_trace_repository import ExecutionTraceRepository
 from src.services.flow_service import FlowService
+from src.services.execution_history_service import ExecutionHistoryService
 
 router = APIRouter(
     prefix="/flows",
@@ -19,6 +22,16 @@ logger = logging.getLogger(__name__)
 # Dependency to get FlowService
 def get_flow_service(session: SessionDep) -> FlowService:
     return FlowService(session)
+
+
+# Dependency to get ExecutionHistoryService
+def get_execution_history_service(session: SessionDep) -> ExecutionHistoryService:
+    return ExecutionHistoryService(session)
+
+
+# Dependency to get ExecutionTraceRepository
+def get_execution_trace_repository(session: SessionDep) -> ExecutionTraceRepository:
+    return ExecutionTraceRepository(session)
 
 
 def clean_null_values(obj: Any) -> Any:
@@ -253,11 +266,11 @@ async def delete_all_flows(
 ):
     """
     Delete all flows for the current group.
-    
+
     Args:
         service: Flow service injected by dependency
         group_context: Group context from headers
-        
+
     Returns:
         Success message
     """
@@ -266,4 +279,132 @@ async def delete_all_flows(
         return {"status": "success", "message": "All flows deleted successfully"}
     except Exception as e:
         logger.error(f"Error deleting all flows: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.get("/{flow_id}/checkpoints", response_model=CheckpointListResponse)
+async def get_flow_checkpoints(
+    flow_id: Annotated[uuid.UUID, Path(title="The ID of the flow to get checkpoints for")],
+    flow_service: Annotated[FlowService, Depends(get_flow_service)],
+    execution_service: Annotated[ExecutionHistoryService, Depends(get_execution_history_service)],
+    trace_repository: Annotated[ExecutionTraceRepository, Depends(get_execution_trace_repository)],
+    group_context: GroupContextDep,
+    status_filter: Annotated[Optional[str], Query(title="Filter by checkpoint status")] = "active",
+):
+    """
+    Get available checkpoints for a flow.
+
+    Returns checkpoints from previous executions that can be resumed.
+    Only returns checkpoints with 'active' status by default.
+    Each checkpoint includes a list of completed crews for granular resume.
+
+    Args:
+        flow_id: UUID of the flow
+        flow_service: Flow service for group check
+        execution_service: Execution history service
+        trace_repository: Execution trace repository for crew checkpoints
+        group_context: Group context from headers
+        status_filter: Filter checkpoints by status (default: 'active')
+
+    Returns:
+        List of available checkpoints for the flow with crew-level details
+    """
+    try:
+        # First verify the flow exists and user has access
+        await flow_service.get_flow_with_group_check(flow_id, group_context)
+
+        # Get checkpoints for this flow
+        checkpoints = await execution_service.get_checkpoints_for_flow(
+            flow_id=flow_id,
+            group_id=group_context.primary_group_id,
+            status_filter=status_filter
+        )
+
+        # Build checkpoint info with crew checkpoints
+        checkpoint_infos = []
+        for cp in checkpoints:
+            # Get crew checkpoints from traces for this execution
+            crew_checkpoints_data = await trace_repository.get_crew_checkpoints_by_job_id(cp.job_id)
+
+            # Convert to CrewCheckpointInfo objects
+            crew_checkpoints = []
+            for crew_cp in crew_checkpoints_data:
+                try:
+                    from datetime import datetime
+                    completed_at = crew_cp.get("completed_at")
+                    if isinstance(completed_at, str):
+                        completed_at = datetime.fromisoformat(completed_at.replace("Z", "+00:00"))
+
+                    crew_checkpoints.append(CrewCheckpointInfo(
+                        crew_name=crew_cp.get("crew_name", "Unknown Crew"),
+                        sequence=crew_cp.get("sequence", 0),
+                        status=crew_cp.get("status", "completed"),
+                        output_preview=crew_cp.get("output_preview"),
+                        completed_at=completed_at
+                    ))
+                except Exception as e:
+                    logger.warning(f"Error parsing crew checkpoint: {e}")
+                    continue
+
+            checkpoint_infos.append(CheckpointInfo(
+                execution_id=cp.id,
+                job_id=cp.job_id,
+                flow_uuid=cp.flow_uuid,
+                checkpoint_method=cp.checkpoint_method,
+                checkpoint_status=cp.checkpoint_status,
+                created_at=cp.created_at,
+                run_name=cp.run_name,
+                crew_checkpoints=crew_checkpoints
+            ))
+
+        return CheckpointListResponse(
+            flow_id=str(flow_id),
+            checkpoints=checkpoint_infos,
+            total=len(checkpoint_infos)
+        )
+    except HTTPException as he:
+        raise he
+    except Exception as e:
+        logger.error(f"Error getting checkpoints for flow {flow_id}: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.delete("/{flow_id}/checkpoints/{execution_id}", status_code=status.HTTP_200_OK)
+async def delete_checkpoint(
+    flow_id: Annotated[uuid.UUID, Path(title="The ID of the flow")],
+    execution_id: Annotated[int, Path(title="The execution ID of the checkpoint to delete")],
+    flow_service: Annotated[FlowService, Depends(get_flow_service)],
+    execution_service: Annotated[ExecutionHistoryService, Depends(get_execution_history_service)],
+    group_context: GroupContextDep,
+):
+    """
+    Delete/expire a specific checkpoint.
+
+    Marks the checkpoint as 'expired' so it won't appear in the resume list.
+
+    Args:
+        flow_id: UUID of the flow
+        execution_id: ID of the execution with the checkpoint
+        flow_service: Flow service for group check
+        execution_service: Execution history service
+        group_context: Group context from headers
+
+    Returns:
+        Success message
+    """
+    try:
+        # Verify flow access
+        await flow_service.get_flow_with_group_check(flow_id, group_context)
+
+        # Expire the checkpoint
+        await execution_service.expire_checkpoint(
+            execution_id=execution_id,
+            group_id=group_context.primary_group_id
+        )
+
+        return {"status": "success", "message": "Checkpoint expired successfully"}
+    except HTTPException as he:
+        raise he
+    except Exception as e:
+        logger.error(f"Error expiring checkpoint: {e}")
         raise HTTPException(status_code=500, detail=str(e)) 
