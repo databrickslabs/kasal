@@ -1,17 +1,44 @@
 from typing import Dict, List, Optional, Any
 from datetime import datetime
-from pydantic import BaseModel, Field, ConfigDict
+from uuid import UUID
+from pydantic import BaseModel, Field, ConfigDict, model_validator
+
 
 class ScheduleBase(BaseModel):
-    """Base schema for schedule configuration"""
+    """Base schema for schedule configuration supporting both crew and flow executions"""
     name: str = Field(..., description="Name of the scheduled job")
     cron_expression: str = Field(..., description="Cron expression for schedule timing")
-    agents_yaml: Dict[str, Any] = Field(..., description="Agent configuration in YAML format")
-    tasks_yaml: Dict[str, Any] = Field(..., description="Tasks configuration in YAML format")
+
+    # Execution type (crew or flow)
+    execution_type: str = Field(default="crew", description="Type of execution: 'crew' or 'flow'")
+
+    # Crew execution fields (required for crew, optional for flow)
+    agents_yaml: Optional[Dict[str, Any]] = Field(None, description="Agent configuration in YAML format (for crew executions)")
+    tasks_yaml: Optional[Dict[str, Any]] = Field(None, description="Tasks configuration in YAML format (for crew executions)")
+
+    # Flow execution fields (required for flow, optional for crew)
+    flow_id: Optional[UUID] = Field(None, description="ID of the saved flow (for flow executions)")
+    nodes: Optional[List[Dict[str, Any]]] = Field(None, description="Flow nodes configuration (for ad-hoc flow executions)")
+    edges: Optional[List[Dict[str, Any]]] = Field(None, description="Flow edges configuration (for ad-hoc flow executions)")
+    flow_config: Optional[Dict[str, Any]] = Field(None, description="Flow-specific configuration")
+
+    # Common fields
     inputs: Dict[str, Any] = Field(default_factory=dict, description="Input values for the job")
     is_active: bool = Field(default=True, description="Whether the schedule is active")
     planning: bool = Field(default=False, description="Whether to use planning mode")
     model: str = Field(default="gpt-4o-mini", description="Model to use for the job")
+
+    @model_validator(mode='after')
+    def validate_execution_type_requirements(self):
+        """Validate that required fields are present based on execution type"""
+        if self.execution_type == "crew":
+            if not self.agents_yaml or not self.tasks_yaml:
+                raise ValueError("agents_yaml and tasks_yaml are required for crew executions")
+        elif self.execution_type == "flow":
+            # Flow execution requires either flow_id or nodes/edges
+            if not self.flow_id and not (self.nodes and self.edges):
+                raise ValueError("flow_id or nodes/edges are required for flow executions")
+        return self
 
 
 class ScheduleCreate(ScheduleBase):
@@ -32,9 +59,32 @@ class ScheduleUpdate(ScheduleBase):
     pass
 
 
-class ScheduleResponse(ScheduleBase):
-    """Schema for schedule responses"""
+class ScheduleResponse(BaseModel):
+    """Schema for schedule responses - does not validate execution type requirements since data comes from DB"""
     id: int = Field(..., description="Unique identifier for the schedule")
+    name: str = Field(..., description="Name of the scheduled job")
+    cron_expression: str = Field(..., description="Cron expression for schedule timing")
+
+    # Execution type
+    execution_type: str = Field(default="crew", description="Type of execution: 'crew' or 'flow'")
+
+    # Crew execution fields
+    agents_yaml: Optional[Dict[str, Any]] = Field(None, description="Agent configuration (for crew executions)")
+    tasks_yaml: Optional[Dict[str, Any]] = Field(None, description="Tasks configuration (for crew executions)")
+
+    # Flow execution fields
+    flow_id: Optional[UUID] = Field(None, description="ID of the saved flow (for flow executions)")
+    nodes: Optional[List[Dict[str, Any]]] = Field(None, description="Flow nodes configuration")
+    edges: Optional[List[Dict[str, Any]]] = Field(None, description="Flow edges configuration")
+    flow_config: Optional[Dict[str, Any]] = Field(None, description="Flow-specific configuration")
+
+    # Common fields
+    inputs: Dict[str, Any] = Field(default_factory=dict, description="Input values for the job")
+    is_active: bool = Field(default=True, description="Whether the schedule is active")
+    planning: bool = Field(default=False, description="Whether to use planning mode")
+    model: str = Field(default="gpt-4o-mini", description="Model to use for the job")
+
+    # Timestamps
     last_run_at: Optional[datetime] = Field(None, description="Timestamp of the last execution")
     next_run_at: Optional[datetime] = Field(None, description="Timestamp of the next scheduled execution")
     created_at: datetime = Field(..., description="Timestamp when the schedule was created")
@@ -55,9 +105,21 @@ class ToggleResponse(ScheduleResponse):
 
 
 class CrewConfig(BaseModel):
-    """Configuration for a crew job"""
-    agents_yaml: Dict[str, Any] = Field(..., description="Agent configuration in YAML format")
-    tasks_yaml: Dict[str, Any] = Field(..., description="Tasks configuration in YAML format")
+    """Configuration for a scheduled job (supports both crew and flow executions)"""
+    # Execution type
+    execution_type: str = Field(default="crew", description="Type of execution: 'crew' or 'flow'")
+
+    # Crew execution fields (optional for flows)
+    agents_yaml: Optional[Dict[str, Any]] = Field(default_factory=dict, description="Agent configuration in YAML format")
+    tasks_yaml: Optional[Dict[str, Any]] = Field(default_factory=dict, description="Tasks configuration in YAML format")
+
+    # Flow execution fields (optional for crews)
+    flow_id: Optional[UUID] = Field(None, description="ID of the saved flow (for flow executions)")
+    nodes: Optional[List[Dict[str, Any]]] = Field(None, description="Flow nodes configuration")
+    edges: Optional[List[Dict[str, Any]]] = Field(None, description="Flow edges configuration")
+    flow_config: Optional[Dict[str, Any]] = Field(None, description="Flow-specific configuration")
+
+    # Common fields
     inputs: Dict[str, Any] = Field(default_factory=dict, description="Input values for the job")
     planning: bool = Field(default=False, description="Whether to use planning mode")
     model: str = Field(default="gpt-4o-mini", description="Model to use for the job") 

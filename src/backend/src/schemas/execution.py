@@ -63,9 +63,9 @@ class CrewConfig(BaseModel):
         The schema automatically converts JSON strings to dictionaries
         in the tasks and agents properties for flexibility.
     """
-    agents_yaml: Dict[str, Dict[str, Any]] = Field(..., description="Agent configuration in YAML format")
-    tasks_yaml: Dict[str, Dict[str, Any]] = Field(..., description="Task configuration in YAML format")
-    inputs: Dict[str, Any] = Field(..., description="Input values for the execution")
+    agents_yaml: Dict[str, Dict[str, Any]] = Field(default_factory=dict, description="Agent configuration in YAML format (optional for flows)")
+    tasks_yaml: Dict[str, Dict[str, Any]] = Field(default_factory=dict, description="Task configuration in YAML format (optional for flows)")
+    inputs: Dict[str, Any] = Field(default_factory=dict, description="Input values for the execution")
     planning: bool = Field(False, description="Whether to enable planning")
     reasoning: bool = Field(False, description="Whether to enable reasoning")
     model: Optional[str] = Field(None, description="LLM model to use")
@@ -73,6 +73,10 @@ class CrewConfig(BaseModel):
     execution_type: Optional[str] = Field("crew", description="Type of execution (crew or flow)")
     schema_detection_enabled: Optional[bool] = Field(True, description="Whether schema detection is enabled")
     flow_id: Optional[str] = Field(None, description="ID of the saved flow (for checkpoint tracking)")
+    # Flow configuration fields (for flow scheduling)
+    nodes: Optional[List[Dict[str, Any]]] = Field(None, description="Flow nodes configuration")
+    edges: Optional[List[Dict[str, Any]]] = Field(None, description="Flow edges configuration")
+    flow_config: Optional[Dict[str, Any]] = Field(None, description="Flow-specific configuration")
     # Checkpoint resume parameters
     resume_from_flow_uuid: Optional[str] = Field(None, description="CrewAI state.id to resume flow from checkpoint")
     resume_from_execution_id: Optional[int] = Field(None, description="Execution ID of checkpoint to resume from")
@@ -135,8 +139,9 @@ class ExecutionResponse(BaseModel):
     run_name: Optional[str] = Field(None, description="Descriptive name for the execution")
     # Additional fields
     id: Optional[int] = Field(None, description="Database ID of the execution")
-    flow_id: Optional[int] = Field(None, description="ID of the flow used (if execution_type is flow)")
+    flow_id: Optional[str] = Field(None, description="UUID of the flow used (if execution_type is flow)")
     crew_id: Optional[int] = Field(None, description="ID of the crew used (if execution_type is crew)")
+    execution_type: Optional[str] = Field(None, description="Type of execution (crew or flow)")
     execution_key: Optional[str] = Field(None, description="Optional external key for the execution")
     started_at: Optional[datetime] = Field(None, description="When the execution started")
     completed_at: Optional[datetime] = Field(None, description="When the execution completed")
