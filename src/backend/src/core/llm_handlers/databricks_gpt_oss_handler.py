@@ -385,5 +385,214 @@ class DatabricksGPTOSSLLM(LLM):
             raise
 
 
+class DatabricksRetryLLM(LLM):
+    """
+    Custom LLM wrapper for Databricks models that adds retry logic for empty responses.
+
+    Databricks models (including Llama 4 Maverick) can intermittently return empty responses,
+    especially after many tool iterations. This wrapper retries the call with exponential
+    backoff when an empty response is detected.
+    """
+
+    MAX_RETRIES = 3
+    INITIAL_BACKOFF = 1.0  # seconds
+
+    def __init__(self, **kwargs):
+        """Initialize the Databricks Retry LLM wrapper."""
+        super().__init__(**kwargs)
+        self._original_model_name = kwargs.get('model', '')
+        logger.info(f"Initialized DatabricksRetryLLM wrapper for model: {self._original_model_name}")
+
+    def _get_crew_logger(self):
+        """Get the crew logger for subprocess-compatible logging."""
+        try:
+            from src.core.logger import LoggerManager
+            return LoggerManager.get_instance().crew
+        except Exception:
+            return logger  # Fallback to module logger
+
+    def _fix_message_format_for_llama(self, messages, crew_log):
+        """
+        Fix message format for Llama models only.
+
+        Llama 4 (like Mistral) requires:
+        1. Messages to alternate between user and assistant
+        2. Last message should be 'user' role (not 'assistant')
+
+        This fix is NOT applied to other models (Claude, Qwen, DBRX, etc.)
+        which have their own message format requirements.
+
+        Returns fixed messages list.
+        """
+        if not messages or not isinstance(messages, list):
+            return messages
+
+        # Only apply fix for Llama models - other models (Claude, Qwen, etc.) don't need it
+        model_lower = self._original_model_name.lower()
+        if 'llama' not in model_lower:
+            return messages
+
+        # Check if last message is 'assistant' - Llama doesn't like this
+        if messages[-1].get("role") == "assistant":
+            crew_log.info("[DatabricksRetryLLM] Fixing message format for Llama: adding user continuation prompt")
+            return [*messages, {"role": "user", "content": "Please continue with your response."}]
+
+        return messages
+
+    def call(
+        self,
+        messages,
+        tools=None,
+        callbacks=None,
+        available_functions=None,
+        from_task=None,
+        from_agent=None,
+    ):
+        """
+        Override the call method to add retry logic for empty responses.
+
+        When Databricks returns an empty response (which happens intermittently,
+        especially after many tool iterations), we retry with exponential backoff.
+        Also fixes message format for Llama 4 compatibility.
+        """
+        import time
+
+        crew_log = self._get_crew_logger()
+        last_error = None
+
+        # Fix message format for Llama 4 before making calls
+        fixed_messages = self._fix_message_format_for_llama(messages, crew_log)
+        msg_count = len(fixed_messages) if isinstance(fixed_messages, list) else 1
+
+        for attempt in range(self.MAX_RETRIES):
+            try:
+                crew_log.info(f"[DatabricksRetryLLM] call() attempt {attempt + 1}/{self.MAX_RETRIES} with {msg_count} messages")
+
+                # Call the parent class method with all arguments
+                result = super().call(
+                    fixed_messages,
+                    tools=tools,
+                    callbacks=callbacks,
+                    available_functions=available_functions,
+                    from_task=from_task,
+                    from_agent=from_agent,
+                )
+
+                # Check if response is empty
+                if result is None or result == "":
+                    if attempt < self.MAX_RETRIES - 1:
+                        backoff = self.INITIAL_BACKOFF * (2 ** attempt)
+                        crew_log.warning(
+                            f"[DatabricksRetryLLM] Empty response (attempt {attempt + 1}/{self.MAX_RETRIES}). "
+                            f"Retrying in {backoff}s..."
+                        )
+                        time.sleep(backoff)
+                        continue
+                    else:
+                        crew_log.error(f"[DatabricksRetryLLM] Empty response after {self.MAX_RETRIES} attempts - failing")
+                        return ""
+
+                # Success
+                crew_log.info(f"[DatabricksRetryLLM] Success, response length: {len(str(result))}")
+                return result
+
+            except Exception as e:
+                last_error = e
+                error_str = str(e).lower()
+
+                # Check if this is a retryable error
+                is_retryable = any(term in error_str for term in [
+                    'timeout', 'connection', 'rate limit', 'too many requests',
+                    'service unavailable', '503', '429', '502', '504', 'gateway'
+                ])
+
+                if is_retryable and attempt < self.MAX_RETRIES - 1:
+                    backoff = self.INITIAL_BACKOFF * (2 ** attempt)
+                    crew_log.warning(
+                        f"[DatabricksRetryLLM] Retryable error (attempt {attempt + 1}/{self.MAX_RETRIES}): {e}. "
+                        f"Retrying in {backoff}s..."
+                    )
+                    time.sleep(backoff)
+                    continue
+                else:
+                    crew_log.error(f"[DatabricksRetryLLM] Non-retryable error: {e}")
+                    raise
+
+        # If we get here, we've exhausted retries
+        if last_error:
+            raise last_error
+        return ""
+
+    def _handle_non_streaming_response(self, params, callbacks=None, available_functions=None, from_task=None, from_agent=None):
+        """
+        Override to add retry logic for empty responses in non-streaming mode.
+        Uses simple exponential backoff (1s, 2s, 4s).
+        """
+        import time
+
+        crew_log = self._get_crew_logger()
+        last_error = None
+
+        for attempt in range(self.MAX_RETRIES):
+            try:
+                # Try calling with appropriate arguments
+                try:
+                    response = super()._handle_non_streaming_response(
+                        params,
+                        callbacks,
+                        available_functions
+                    )
+                except TypeError:
+                    # Try with all 5 arguments
+                    response = super()._handle_non_streaming_response(
+                        params,
+                        callbacks,
+                        available_functions,
+                        from_task,
+                        from_agent
+                    )
+
+                # Check if response is empty
+                if response is None or response == "":
+                    if attempt < self.MAX_RETRIES - 1:
+                        backoff = self.INITIAL_BACKOFF * (2 ** attempt)
+                        crew_log.warning(
+                            f"[DatabricksRetryLLM] Empty in _handle_non_streaming (attempt {attempt + 1}/{self.MAX_RETRIES}). "
+                            f"Retrying in {backoff}s..."
+                        )
+                        time.sleep(backoff)
+                        continue
+                    else:
+                        crew_log.error(f"[DatabricksRetryLLM] Empty after {self.MAX_RETRIES} attempts in _handle_non_streaming")
+                        return ""
+
+                return response
+
+            except Exception as e:
+                last_error = e
+                error_str = str(e).lower()
+
+                is_retryable = any(term in error_str for term in [
+                    'timeout', 'connection', 'rate limit', 'too many requests',
+                    'service unavailable', '503', '429', '502', '504', 'gateway'
+                ])
+
+                if is_retryable and attempt < self.MAX_RETRIES - 1:
+                    backoff = self.INITIAL_BACKOFF * (2 ** attempt)
+                    crew_log.warning(
+                        f"[DatabricksRetryLLM] Retryable error in _handle_non_streaming (attempt {attempt + 1}/{self.MAX_RETRIES}): {e}. "
+                        f"Retrying in {backoff}s..."
+                    )
+                    time.sleep(backoff)
+                    continue
+                else:
+                    crew_log.error(f"[DatabricksRetryLLM] Non-retryable error in _handle_non_streaming: {e}")
+                    raise
+
+        if last_error:
+            raise last_error
+        return ""
+
+
 # Apply the monkey patch when this module is imported
 DatabricksGPTOSSHandler.apply_monkey_patch()
