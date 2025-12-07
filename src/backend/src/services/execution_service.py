@@ -489,16 +489,19 @@ class ExecutionService:
                         "error": e.error,
                         "group_email": e.group_email,
                         "group_id": e.group_id,  # CRITICAL: Include group_id for frontend security filtering
-                        "inputs": e.inputs  # Include the inputs field
+                        "inputs": e.inputs,  # Include the inputs field
+                        # Flow scheduling support - include execution_type and flow_id
+                        "execution_type": getattr(e, 'execution_type', None) or (e.inputs.get('execution_type') if e.inputs else None) or 'crew',
+                        "flow_id": str(e.flow_id) if getattr(e, 'flow_id', None) else (e.inputs.get('flow_id') if e.inputs else None)
                     }
-                    
+
                     # Also extract agents_yaml and tasks_yaml from inputs for direct access
                     if e.inputs and isinstance(e.inputs, dict):
                         if 'agents_yaml' in e.inputs:
                             exec_dict['agents_yaml'] = json.dumps(e.inputs['agents_yaml']) if isinstance(e.inputs['agents_yaml'], dict) else e.inputs.get('agents_yaml', '')
                         if 'tasks_yaml' in e.inputs:
                             exec_dict['tasks_yaml'] = json.dumps(e.inputs['tasks_yaml']) if isinstance(e.inputs['tasks_yaml'], dict) else e.inputs.get('tasks_yaml', '')
-                    
+
                     db_executions.append(exec_dict)
             else:
                 logger.error(f"[list_executions] No database session available")

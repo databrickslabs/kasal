@@ -314,12 +314,34 @@ export class RunService {
     const tasks_yaml = stringifyYamlData(tasksYamlData);
     
     // Prepare object versions for inputs (preserve original structure if it's an object)
-    const agents_yaml_object = (typeof agentsYamlData === 'object' && agentsYamlData !== null) 
-      ? agentsYamlData as Record<string, unknown>
-      : {};
-    const tasks_yaml_object = (typeof tasksYamlData === 'object' && tasksYamlData !== null) 
-      ? tasksYamlData as Record<string, unknown>
-      : {};
+    // Also handle the case where the data comes as a JSON string from the backend
+    let agents_yaml_object: Record<string, unknown> = {};
+    if (typeof agentsYamlData === 'object' && agentsYamlData !== null) {
+      agents_yaml_object = agentsYamlData as Record<string, unknown>;
+    } else if (typeof agentsYamlData === 'string' && agentsYamlData.trim()) {
+      try {
+        const parsed = JSON.parse(agentsYamlData);
+        if (typeof parsed === 'object' && parsed !== null) {
+          agents_yaml_object = parsed;
+        }
+      } catch (e) {
+        // If parsing fails, leave it as empty object
+      }
+    }
+
+    let tasks_yaml_object: Record<string, unknown> = {};
+    if (typeof tasksYamlData === 'object' && tasksYamlData !== null) {
+      tasks_yaml_object = tasksYamlData as Record<string, unknown>;
+    } else if (typeof tasksYamlData === 'string' && tasksYamlData.trim()) {
+      try {
+        const parsed = JSON.parse(tasksYamlData);
+        if (typeof parsed === 'object' && parsed !== null) {
+          tasks_yaml_object = parsed;
+        }
+      } catch (e) {
+        // If parsing fails, leave it as empty object
+      }
+    }
     
     // Build inputs object if we have input data
     let inputs: {
@@ -355,6 +377,19 @@ export class RunService {
       };
     }
     
+    // Extract execution_type and flow_id for flow scheduling support
+    // Try to get from direct fields first, then from inputs
+    let execution_type: string | undefined = executionItem.execution_type as string | undefined;
+    let flow_id: string | undefined = executionItem.flow_id as string | undefined;
+
+    // If not found directly, try to get from inputs
+    if (!execution_type && inputs?.execution_type) {
+      execution_type = inputs.execution_type as string;
+    }
+    if (!flow_id && inputs?.flow_id) {
+      flow_id = inputs.flow_id as string;
+    }
+
     // Return the run object with all extracted data
     return {
       id: (executionItem.id as number | undefined)?.toString() || jobId,
@@ -368,6 +403,9 @@ export class RunService {
       tasks_yaml,
       group_id: executionItem.group_id as string | undefined,  // CRITICAL: Extract group_id for security filtering
       group_email: executionItem.group_email as string | undefined,
+      // Execution type and flow_id for flow scheduling
+      execution_type: execution_type,
+      flow_id: flow_id,
       inputs,
       result: executionItem.result as Record<string, OutputDataType> | undefined,
       error: executionItem.error as string | undefined,
