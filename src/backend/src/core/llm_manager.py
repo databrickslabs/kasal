@@ -21,7 +21,7 @@ import pathlib
 
 # CRITICAL: Import and apply model handlers BEFORE importing litellm
 # This ensures the monkey patches are applied to handle model-specific responses
-from src.core.llm_handlers.databricks_gpt_oss_handler import DatabricksGPTOSSHandler, DatabricksGPTOSSLLM
+from src.core.llm_handlers.databricks_gpt_oss_handler import DatabricksGPTOSSHandler, DatabricksGPTOSSLLM, DatabricksRetryLLM
 
 # Now import litellm after the monkey patch has been applied
 import litellm
@@ -823,12 +823,15 @@ class LLMManager:
                 
             logger.info(f"Creating CrewAI LLM with model: {prefixed_model}, has_api_key: {bool(api_key)}, api_base: {api_base}")
             
-            # Use custom wrapper for GPT-OSS models
+            # Use custom wrapper for GPT-OSS models (special response format handling)
             if DatabricksGPTOSSHandler.is_gpt_oss_model(model_name_value):
                 logger.info(f"Using DatabricksGPTOSSLLM wrapper for GPT-OSS model: {model_name_value}")
                 return DatabricksGPTOSSLLM(**llm_params)
             else:
-                return LLM(**llm_params)
+                # Use DatabricksRetryLLM for all other Databricks models (Llama 4, etc.)
+                # This provides retry logic for intermittent empty responses
+                logger.info(f"Using DatabricksRetryLLM wrapper for Databricks model: {model_name_value}")
+                return DatabricksRetryLLM(**llm_params)
         elif provider == ModelProvider.GEMINI:
             # SECURITY: Use group_id parameter for multi-tenant isolation
             api_key = await ApiKeysService.get_provider_api_key(provider, group_id=group_id)
