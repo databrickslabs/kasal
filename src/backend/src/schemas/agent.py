@@ -21,7 +21,7 @@ class AgentBase(BaseModel):
     
     # Execution settings
     max_iter: int = Field(default=25)
-    max_rpm: int = Field(default=10, description="Maximum requests per minute to avoid rate limits")
+    max_rpm: Optional[int] = Field(default=10, description="Maximum requests per minute to avoid rate limits")
     max_execution_time: Optional[int] = None
     verbose: bool = Field(default=False)
     allow_delegation: bool = Field(default=False)
@@ -49,6 +49,14 @@ class AgentBase(BaseModel):
     # Knowledge sources
     knowledge_sources: List[Any] = Field(default_factory=list)
     
+    @field_validator('max_rpm', mode='before')
+    @classmethod
+    def coerce_max_rpm_none_to_default(cls, v):
+        """Convert None to default value for max_rpm."""
+        if v is None:
+            return 10
+        return v
+
     @field_validator('allow_code_execution', mode='before')
     @classmethod
     def force_code_execution_false(cls, v):

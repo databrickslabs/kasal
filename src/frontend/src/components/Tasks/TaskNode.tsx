@@ -420,6 +420,12 @@ const TaskNode: React.FC<TaskNodeProps> = ({ data, id }) => {
   };
 
   const handlePrepareTaskData = () => {
+    // Get llm_guardrail from top-level data first, then fallback to config
+    // The dispatcher stores it at top-level, but user edits may store it in config
+    const llmGuardrail = (data as unknown as { llm_guardrail?: LLMGuardrailConfig }).llm_guardrail
+      || data.config?.llm_guardrail
+      || null;
+
     // Convert the node data to the format expected by TaskForm
     const taskData = {
       id: data.taskId,
@@ -432,6 +438,8 @@ const TaskNode: React.FC<TaskNodeProps> = ({ data, id }) => {
       async_execution: data.async_execution || false,
       context: data.context || [],
       markdown: data.config?.markdown || false,
+      // Include llm_guardrail at top level for TaskForm's suggestedGuardrail state
+      llm_guardrail: llmGuardrail,
       config: {
         cache_response: data.config?.cache_response || false,
         cache_ttl: data.config?.cache_ttl || 3600,
@@ -450,8 +458,9 @@ const TaskNode: React.FC<TaskNodeProps> = ({ data, id }) => {
         condition: data.config?.condition,
         // Use undefined instead of null for guardrail if it's not present
         guardrail: data.config?.guardrail || undefined,
-        // Include llm_guardrail for LLM-based validation
-        llm_guardrail: data.config?.llm_guardrail || null,
+        // Only include llm_guardrail in config if user explicitly enabled it (saved in config)
+        // Top-level llm_guardrail is for the suggestion - config.llm_guardrail is user's choice
+        llm_guardrail: data.config?.llm_guardrail ?? null,
         markdown: data.config?.markdown || false
       }
     };

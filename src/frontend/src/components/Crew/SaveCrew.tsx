@@ -418,35 +418,49 @@ const SaveCrew: React.FC<SaveCrewComponentProps> = ({ nodes, edges, trigger, dis
         removedEdges: uniqueEdges.length - validEdges.length
       });
 
-      // Ensure task nodes have complete config with markdown field
+      // Ensure task nodes have complete config with markdown and llm_guardrail fields
       const processedNodes = uniqueNodes.map(node => {
         if (node.type === 'taskNode') {
           // Ensure we have a config object, create one if it doesn't exist
           const existingConfig = node.data?.config || {};
-          
+
+          // Get llm_guardrail: config takes priority (user edits go there), top-level is fallback
+          // Use explicit undefined check because null means "user disabled it"
+          const llmGuardrail = existingConfig.llm_guardrail !== undefined
+            ? existingConfig.llm_guardrail  // User explicitly set or cleared in config
+            : (node.data?.llm_guardrail ?? null);  // Original from dispatcher or null
+
           // Debug logging
           console.log(`SaveCrew: Processing task node ${node.id}`, {
             topLevelMarkdown: node.data?.markdown,
             configMarkdown: existingConfig.markdown,
+            topLevelLlmGuardrail: node.data?.llm_guardrail,
+            configLlmGuardrail: existingConfig.llm_guardrail,
+            resolvedLlmGuardrail: llmGuardrail,
             hasConfig: !!node.data?.config
           });
-          
+
           const processedNode = {
             ...node,
             data: {
               ...node.data,
+              // Preserve llm_guardrail at top level for compatibility
+              llm_guardrail: llmGuardrail,
               config: {
                 ...existingConfig,
                 // Ensure markdown is included in config, prioritize top-level markdown
-                markdown: node.data?.markdown !== undefined ? node.data.markdown : (existingConfig.markdown || false)
+                markdown: node.data?.markdown !== undefined ? node.data.markdown : (existingConfig.markdown || false),
+                // Ensure llm_guardrail is also in config for loading
+                llm_guardrail: llmGuardrail
               }
             }
           };
-          
+
           console.log(`SaveCrew: Processed task node ${node.id}`, {
-            resultMarkdown: processedNode.data.config.markdown
+            resultMarkdown: processedNode.data.config.markdown,
+            resultLlmGuardrail: processedNode.data.config.llm_guardrail
           });
-          
+
           return processedNode;
         }
         return node;

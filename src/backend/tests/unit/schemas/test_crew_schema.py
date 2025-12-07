@@ -11,7 +11,7 @@ from pydantic import ValidationError
 from typing import List, Dict, Any
 
 from src.schemas.crew import (
-    Position, Style, TaskConfig, NodeData, Node, Edge, CrewBase, CrewCreate,
+    Position, Style, LLMGuardrailConfig, TaskConfig, NodeData, Node, Edge, CrewBase, CrewCreate,
     CrewUpdate, CrewInDBBase, Crew, CrewResponse, CrewGenerationRequest,
     AgentConfig, Agent, Task, CrewGenerationResponse, CrewCreationResponse
 )
@@ -109,6 +109,58 @@ class TestStyle:
         assert style.boxShadow is None
 
 
+class TestLLMGuardrailConfig:
+    """Test cases for LLMGuardrailConfig schema."""
+
+    def test_valid_llm_guardrail_config(self):
+        """Test valid LLMGuardrailConfig creation."""
+        config_data = {
+            "description": "Validate output format and accuracy"
+        }
+        config = LLMGuardrailConfig(**config_data)
+        assert config.description == "Validate output format and accuracy"
+        assert config.llm_model == "databricks-claude-sonnet-4-5"  # Default
+
+    def test_llm_guardrail_config_with_custom_model(self):
+        """Test LLMGuardrailConfig with custom LLM model."""
+        config_data = {
+            "description": "Check for factual accuracy",
+            "llm_model": "gpt-4"
+        }
+        config = LLMGuardrailConfig(**config_data)
+        assert config.description == "Check for factual accuracy"
+        assert config.llm_model == "gpt-4"
+
+    def test_llm_guardrail_config_missing_description(self):
+        """Test LLMGuardrailConfig validation with missing description."""
+        with pytest.raises(ValidationError) as exc_info:
+            LLMGuardrailConfig()
+
+        errors = exc_info.value.errors()
+        missing_fields = [error["loc"][0] for error in errors if error["type"] == "missing"]
+        assert "description" in missing_fields
+
+    def test_llm_guardrail_config_null_model(self):
+        """Test LLMGuardrailConfig with null model uses default."""
+        config_data = {
+            "description": "Validate task output",
+            "llm_model": None
+        }
+        config = LLMGuardrailConfig(**config_data)
+        assert config.description == "Validate task output"
+        # When None is explicitly passed, it should remain None (not default)
+        assert config.llm_model is None
+
+    def test_llm_guardrail_config_serialization(self):
+        """Test LLMGuardrailConfig serialization."""
+        config = LLMGuardrailConfig(
+            description="Ensure output meets quality standards"
+        )
+        config_dict = config.model_dump()
+        assert config_dict["description"] == "Ensure output meets quality standards"
+        assert config_dict["llm_model"] == "databricks-claude-sonnet-4-5"
+
+
 class TestTaskConfig:
     """Test cases for TaskConfig schema."""
     
@@ -129,6 +181,7 @@ class TestTaskConfig:
         assert config.callback_function is None
         assert config.human_input is False
         assert config.markdown is False
+        assert config.llm_guardrail is None  # Default is None
     
     def test_valid_task_config_full(self):
         """Test TaskConfig with all fields specified."""
@@ -164,6 +217,25 @@ class TestTaskConfig:
         assert config.human_input is True
         assert config.markdown is True
 
+    def test_task_config_with_llm_guardrail(self):
+        """Test TaskConfig with llm_guardrail field."""
+        guardrail = LLMGuardrailConfig(
+            description="Validate task output for accuracy",
+            llm_model="databricks-claude-sonnet-4-5"
+        )
+        config = TaskConfig(
+            cache_response=True,
+            llm_guardrail=guardrail
+        )
+        assert config.llm_guardrail is not None
+        assert config.llm_guardrail.description == "Validate task output for accuracy"
+        assert config.llm_guardrail.llm_model == "databricks-claude-sonnet-4-5"
+
+    def test_task_config_llm_guardrail_null_explicit(self):
+        """Test TaskConfig with explicitly null llm_guardrail (disabled)."""
+        config = TaskConfig(llm_guardrail=None)
+        assert config.llm_guardrail is None
+
 
 class TestNodeData:
     """Test cases for NodeData schema."""
@@ -183,6 +255,7 @@ class TestNodeData:
         assert data.context == []
         assert data.async_execution is False
         assert data.markdown is False
+        assert data.llm_guardrail is None  # Default is None
     
     def test_valid_node_data_agent(self):
         """Test NodeData for an agent node."""
@@ -239,7 +312,26 @@ class TestNodeData:
         assert data.context == ["task-123"]
         assert data.async_execution is True
         assert data.markdown is True
-    
+
+    def test_node_data_with_llm_guardrail(self):
+        """Test NodeData for a task node with llm_guardrail."""
+        guardrail = LLMGuardrailConfig(
+            description="Validate task output accuracy"
+        )
+        task_config = TaskConfig(llm_guardrail=guardrail)
+        node_data = {
+            "label": "Validated Task",
+            "type": "task",
+            "description": "Task with validation",
+            "taskId": "task-789",
+            "config": task_config,
+            "llm_guardrail": guardrail
+        }
+        data = NodeData(**node_data)
+        assert data.llm_guardrail is not None
+        assert data.llm_guardrail.description == "Validate task output accuracy"
+        assert data.config.llm_guardrail is not None
+
     def test_node_data_missing_label(self):
         """Test NodeData validation with missing label."""
         with pytest.raises(ValidationError) as exc_info:

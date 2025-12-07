@@ -21,6 +21,12 @@ class Style(BaseModel):
     boxShadow: Optional[str] = None
 
 
+class LLMGuardrailConfig(BaseModel):
+    """Configuration for LLM-based output validation guardrail."""
+    description: str = Field(..., description="Validation criteria for the task output")
+    llm_model: Optional[str] = Field("databricks-claude-sonnet-4-5", description="LLM model to use for validation")
+
+
 class TaskConfig(BaseModel):
     """Configuration specific to tasks."""
     cache_response: Optional[bool] = False
@@ -37,6 +43,7 @@ class TaskConfig(BaseModel):
     callback_function: Optional[str] = None
     human_input: Optional[bool] = False
     markdown: Optional[bool] = False
+    llm_guardrail: Optional[LLMGuardrailConfig] = Field(None, description="LLM-based output validation configuration")
 
 
 class NodeData(BaseModel):
@@ -78,6 +85,7 @@ class NodeData(BaseModel):
     async_execution: Optional[bool] = False
     knowledge_sources: Optional[List[Dict[str, Any]]] = None
     markdown: Optional[bool] = Field(False, description="Whether to use markdown formatting")
+    llm_guardrail: Optional[LLMGuardrailConfig] = Field(None, description="LLM-based output validation at node level")
 
 
 class Node(BaseModel):

@@ -627,6 +627,19 @@ async def create_task(
                 description = getattr(llm_guardrail_config, 'description', 'Validate the task output')
                 llm_model = getattr(llm_guardrail_config, 'llm_model', 'databricks-claude-sonnet-4-5')
 
+            # PROACTIVE GUARDRAIL AUGMENTATION: Inject validation criteria into task description
+            # This ensures the agent knows the requirements BEFORE execution, reducing unnecessary retries
+            # CrewAI's native guardrail is reactive (agent only learns after failing validation)
+            # By augmenting the description, the agent can align with requirements on the first attempt
+            if description and description != 'Validate the task output':
+                validation_augmentation = (
+                    f"\n\n=== VALIDATION REQUIREMENTS ===\n"
+                    f"Your output will be validated against these criteria: {description}\n"
+                    f"Ensure your response meets these requirements to pass validation."
+                )
+                task_args['description'] = task_args['description'] + validation_augmentation
+                guardrail_logger.info(f"Augmented task {task_key} description with guardrail criteria for proactive alignment")
+
             # Ensure model has provider prefix for LiteLLM
             # Databricks models need 'databricks/' prefix
             if llm_model and not llm_model.startswith('databricks/'):

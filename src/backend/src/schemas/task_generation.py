@@ -9,6 +9,12 @@ from typing import Dict, Any, Optional, List
 from pydantic import BaseModel, Field
 
 
+class LLMGuardrailConfig(BaseModel):
+    """Configuration for LLM-based output validation guardrail."""
+    description: str = Field(..., description="Validation criteria for the task output")
+    llm_model: Optional[str] = Field("databricks-claude-sonnet-4-5", description="LLM model to use for validation")
+
+
 class Agent(BaseModel):
     """Schema for agent information."""
     name: str = Field(..., description="Name of the agent")
@@ -52,4 +58,5 @@ class TaskGenerationResponse(BaseModel):
     description: str = Field(..., description="Description of the task")
     expected_output: str = Field(..., description="Expected output of the task")
     tools: List[Dict[str, Any]] = Field(default_factory=list, description="Tools to use for the task")
-    advanced_config: AdvancedConfig = Field(default_factory=AdvancedConfig, description="Advanced configuration") 
+    advanced_config: AdvancedConfig = Field(default_factory=AdvancedConfig, description="Advanced configuration")
+    llm_guardrail: Optional[LLMGuardrailConfig] = Field(None, description="LLM-based output validation configuration") 
