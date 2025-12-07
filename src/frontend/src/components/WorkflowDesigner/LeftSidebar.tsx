@@ -579,7 +579,7 @@ const LeftSidebar: React.FC<LeftSidebarProps> = ({
         top: '48px', // Account for TabBar height
         left: 0,
         height: showRunHistory ? `calc(100% - 48px - ${executionHistoryHeight}px)` : 'calc(100% - 48px)',
-        zIndex: 20, // Temporarily higher to ensure visibility
+        zIndex: 5, // Lower than execution history to prevent overlap at high zoom
         display: 'flex',
         flexDirection: 'row'
       }}
