@@ -1342,17 +1342,26 @@ const WorkflowChat: React.FC<WorkflowChatProps> = ({
                 paddingRight: '120px',
                 borderRadius: 1,
               },
+              '& .MuiInputBase-inputMultiline': {
+                paddingRight: '0 !important',
+                overflow: 'hidden',
+                textOverflow: 'ellipsis',
+              },
             }}
             InputProps={{
               endAdornment: (
                 <Box
                   sx={{
                     position: 'absolute',
-                    right: 35,
+                    right: 8,
                     bottom: 8,
                     display: 'flex',
                     alignItems: 'center',
                     gap: 0.25,
+                    zIndex: 1,
+                    backgroundColor: 'background.paper',
+                    borderRadius: 1,
+                    padding: '2px 4px',
                   }}
                 >
                   {/* Knowledge File Upload */}
