@@ -21,7 +21,7 @@ class AgentBase(BaseModel):
     
     # Execution settings
     max_iter: int = Field(default=25)
-    max_rpm: Optional[int] = None
+    max_rpm: int = Field(default=10, description="Maximum requests per minute to avoid rate limits")
     max_execution_time: Optional[int] = None
     verbose: bool = Field(default=False)
     allow_delegation: bool = Field(default=False)
