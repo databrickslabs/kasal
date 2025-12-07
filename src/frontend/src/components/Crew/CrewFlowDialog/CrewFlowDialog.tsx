@@ -334,7 +334,11 @@ const CrewFlowSelectionDialog: React.FC<CrewFlowSelectionDialogProps> = ({
                 human_input: Boolean(taskData.config?.human_input),
                 condition: taskData.config?.condition === 'is_data_missing' ? 'is_data_missing' : undefined,
                 guardrail: taskData.config?.guardrail || null,
-                llm_guardrail: taskData.config?.llm_guardrail || null,
+                // Config is source of truth for user's choice (null = disabled)
+                // Only fall back to top-level if config is undefined (never set)
+                llm_guardrail: taskData.config?.llm_guardrail !== undefined
+                  ? taskData.config.llm_guardrail
+                  : (taskData.task?.config?.llm_guardrail ?? null),
                 markdown: taskData.config?.markdown === true || taskData.config?.markdown === 'true' || taskData.markdown === true || taskData.markdown === 'true'
               }
             };

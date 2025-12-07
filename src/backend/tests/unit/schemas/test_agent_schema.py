@@ -34,7 +34,7 @@ class TestAgentBase:
         assert agent.tools == []  # Default empty list
         assert agent.function_calling_llm is None
         assert agent.max_iter == 25  # Default
-        assert agent.max_rpm is None
+        assert agent.max_rpm == 10  # Default to avoid rate limits
         assert agent.max_execution_time is None
         assert agent.verbose is False  # Default
         assert agent.allow_delegation is False  # Default

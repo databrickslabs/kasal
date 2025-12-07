@@ -34,7 +34,7 @@ Format your response as a JSON object with the following structure:
         "llm": "databricks-llama-4-maverick",
         "function_calling_llm": null,
         "max_iter": 25,
-        "max_rpm": 1,
+        "max_rpm": 10,
         "verbose": false,
         "allow_delegation": false,
         "cache": true,
@@ -133,7 +133,8 @@ json
     "cache_response": true,
     "cache_ttl": 3600,
     "markdown": false
-  }
+  },
+  "llm_guardrail": {"description": "Validation criteria based on expected_output", "llm_model": "databricks-claude-sonnet-4-5"}
 }
 Please follow these strict guidelines when generating your output:
 1. Ensure all fields are present and populated correctly.
@@ -145,6 +146,25 @@ Please follow these strict guidelines when generating your output:
 7. All boolean and null values must use correct JSON syntax.
 8. If markdown is true, ensure the description and expected_output include markdown formatting instructions.
 9. Do not include any explanation or commentary—only return the JSON object.
+
+LLM GUARDRAIL GUIDELINES:
+The llm_guardrail field enables AI-powered output validation.
+IMPORTANT: ALWAYS generate a task-specific guardrail. The description MUST align with the task's expected_output.
+
+Structure: {"description": "task-specific validation criteria", "llm_model": "databricks-claude-sonnet-4-5"}
+
+How to write the guardrail description:
+1. Analyze the task's expected_output field
+2. Create validation criteria that verify the output meets those expectations
+3. Be specific about format, content requirements, and quality standards
+
+The guardrail description should answer: "What makes this task's output valid and complete?"
+
+Examples based on task type:
+- Research: {"description": "Output must include at least 3 credible sources, distinguish facts from opinions, and provide specific data points.", "llm_model": "databricks-claude-sonnet-4-5"}
+- Writing: {"description": "Must be professional tone, well-structured, free of jargon, and suitable for the intended audience.", "llm_model": "databricks-claude-sonnet-4-5"}
+- Analysis: {"description": "Must contain clear methodology, data-backed findings, and actionable recommendations.", "llm_model": "databricks-claude-sonnet-4-5"}
+- Email: {"description": "Must have proper email structure, clear message body, and professional tone.", "llm_model": "databricks-claude-sonnet-4-5"}
 
 If the user's goal involves creating a presentation, follow these precise guidelines:
 - Generate a single self-contained HTML file with reveal.js fully embedded inline including all CSS and JavaScript directly without external dependencies.
@@ -223,7 +243,7 @@ For agents include:
             "llm": "databricks-llama-4-maverick",
             "function_calling_llm": null,
             "max_iter": 25,
-            "max_rpm": 1,
+            "max_rpm": 10,
             "max_execution_time": null,
             "verbose": false,
             "allow_delegation": false,
@@ -254,7 +274,8 @@ For agents include:
             "output": null,
             "callback": null,
             "human_input": false,
-            "converter_cls": null
+            "converter_cls": null,
+            "llm_guardrail": {"description": "Validation criteria that aligns with expected_output", "llm_model": "databricks-claude-sonnet-4-5"}
         }
     ]
 }
@@ -276,6 +297,26 @@ Ensure:
 7. Return the name of the tool exactly as it is in the tools array
 8. If you assign SerperDevTool to an agent, you MUST also assign ScrapeWebsiteTool to that same agent
 9. The total number of tasks MUST NOT exceed 6 tasks
+
+LLM GUARDRAIL CONFIGURATION:
+The llm_guardrail field enables AI-powered output validation for tasks.
+IMPORTANT: Generate a task-specific guardrail for EVERY task. The description MUST align with what the task is supposed to produce.
+
+Structure: {"description": "task-specific validation criteria", "llm_model": "databricks-claude-sonnet-4-5"}
+
+How to write the guardrail description for each task:
+1. Read the task's expected_output field
+2. Create validation criteria that verify the output meets those expectations
+3. Be specific about format, content requirements, and quality standards
+
+Examples based on task type:
+- Email task: {"description": "Must contain proper email structure with subject context, clear message body, and professional closing. Verify recipient information is referenced correctly.", "llm_model": "databricks-claude-sonnet-4-5"}
+- Research task: {"description": "Output must include at least 3 credible sources, distinguish facts from opinions, provide specific data points, and avoid unverified claims.", "llm_model": "databricks-claude-sonnet-4-5"}
+- Analysis task: {"description": "Must contain clear methodology, data-backed findings, actionable recommendations, and logical conclusions aligned with the analysis objective.", "llm_model": "databricks-claude-sonnet-4-5"}
+- Content/Writing task: {"description": "Must be professional tone, well-structured with clear sections, free of jargon, and suitable for the intended audience.", "llm_model": "databricks-claude-sonnet-4-5"}
+- Data processing task: {"description": "Output must be in the specified format, contain all required fields, and have no missing or malformed data.", "llm_model": "databricks-claude-sonnet-4-5"}
+
+The guardrail description should answer: "What makes this task's output valid and complete?"
 
 If the user's goal involves creating a presentation, follow these precise guidelines:
 - Generate a single self-contained HTML file with reveal.js fully embedded inline including all CSS and JavaScript directly without external dependencies.

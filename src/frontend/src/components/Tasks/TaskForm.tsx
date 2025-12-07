@@ -24,6 +24,9 @@ import {
   IconButton,
   InputAdornment,
   Tooltip,
+  Switch,
+  FormControlLabel,
+  CircularProgress,
 } from '@mui/material';
 import { type Task } from '../../api/TaskService';
 import { type Agent } from '../../types/agent';
@@ -43,6 +46,9 @@ import { PerplexityConfigSelector } from '../Common/PerplexityConfigSelector';
 import { SerperConfigSelector } from '../Common/SerperConfigSelector';
 import { MCPServerSelector } from '../Common/MCPServerSelector';
 import { PerplexityConfig, SerperConfig } from '../../types/config';
+import { type LLMGuardrailConfig } from '../../types/task';
+import { ModelService } from '../../api/ModelService';
+import { type ModelConfig } from '../../types/models';
 import TaskBestPractices from '../BestPractices/TaskBestPractices';
 
 interface TaskFormProps {
@@ -113,7 +119,7 @@ const TaskForm: React.FC<TaskFormProps> = ({ initialData, onCancel, onTaskSaved,
       human_input: initialData.config.human_input ?? false,
       condition: initialData.config.condition,
       guardrail: initialData.config.guardrail ?? null,
-      llm_guardrail: initialData.config.llm_guardrail ?? null,
+      llm_guardrail: initialData.config?.llm_guardrail ?? null,
       markdown: initialData.config.markdown ?? false
     }
   });
@@ -127,6 +133,19 @@ const TaskForm: React.FC<TaskFormProps> = ({ initialData, onCancel, onTaskSaved,
   const [toolConfigs, setToolConfigs] = useState<Record<string, unknown>>(initialData?.tool_configs || {});
   const [showBestPractices, setShowBestPractices] = useState(false);
   const [workspaceUrlFromBackend, setWorkspaceUrlFromBackend] = useState<string>('');
+
+  // LLM Guardrail state
+  const [llmModels, setLlmModels] = useState<Array<{ name: string; config: ModelConfig }>>([]);
+  const [llmModelsLoading, setLlmModelsLoading] = useState(false);
+
+  // Store the LLM-suggested guardrail (from dispatcher) to use when enabling the toggle
+  const [suggestedGuardrail] = useState<LLMGuardrailConfig | null>(() => {
+    // Check multiple possible locations for the LLM-generated guardrail
+    const guardrail = (initialData as unknown as { llm_guardrail?: LLMGuardrailConfig })?.llm_guardrail
+      || initialData?.config?.llm_guardrail
+      || null;
+    return guardrail;
+  });
 
   useEffect(() => {
     if (initialData?.tools) {
@@ -217,6 +236,72 @@ const TaskForm: React.FC<TaskFormProps> = ({ initialData, onCancel, onTaskSaved,
     void fetchWorkspaceUrl();
   }, []);
 
+  // Fetch LLM models for guardrail validation
+  useEffect(() => {
+    const fetchLlmModels = async () => {
+      setLlmModelsLoading(true);
+      try {
+        const modelService = ModelService.getInstance();
+        const modelsDict = await modelService.getModels();
+        const modelsArray = Object.entries(modelsDict).map(([name, config]) => ({
+          name,
+          config
+        }));
+        setLlmModels(modelsArray);
+      } catch (error) {
+        console.error('Error fetching LLM models:', error);
+      } finally {
+        setLlmModelsLoading(false);
+      }
+    };
+
+    void fetchLlmModels();
+  }, []);
+
+  // Handle LLM guardrail toggle
+  const handleLlmGuardrailToggle = (enabled: boolean) => {
+    if (enabled) {
+      // Use the LLM-suggested guardrail if available, otherwise use default
+      const guardrailConfig: LLMGuardrailConfig = suggestedGuardrail || {
+        description: 'Validate the task output for accuracy and completeness',
+        llm_model: 'databricks-claude-sonnet-4-5'
+      };
+      setFormData(prev => ({
+        ...prev,
+        config: {
+          ...prev.config,
+          llm_guardrail: guardrailConfig
+        }
+      }));
+    } else {
+      setFormData(prev => ({
+        ...prev,
+        config: {
+          ...prev.config,
+          llm_guardrail: null
+        }
+      }));
+    }
+  };
+
+  // Handle LLM guardrail field changes
+  const handleLlmGuardrailChange = (field: keyof LLMGuardrailConfig, value: string) => {
+    const currentConfig = formData.config?.llm_guardrail || suggestedGuardrail || {
+      description: 'Validate the task output for accuracy and completeness',
+      llm_model: 'databricks-claude-sonnet-4-5'
+    };
+    const updatedConfig = {
+      ...currentConfig,
+      [field]: value
+    };
+    setFormData(prev => ({
+      ...prev,
+      config: {
+        ...prev.config,
+        llm_guardrail: updatedConfig
+      }
+    }));
+  };
 
   const handleInputChange = (field: keyof Task, value: string) => {
     setFormData((prev: Task) => ({
@@ -689,6 +774,69 @@ const TaskForm: React.FC<TaskFormProps> = ({ initialData, onCancel, onTaskSaved,
                 )
               }}
             />
+
+            {/* LLM Guardrail - Prominent placement for visibility */}
+            <Box sx={{
+              mt: 2,
+              p: 2,
+              backgroundColor: 'rgba(156, 39, 176, 0.04)',
+              borderRadius: 1,
+              border: '1px solid rgba(156, 39, 176, 0.2)'
+            }}>
+              <Box sx={{ display: 'flex', alignItems: 'center', mb: 1 }}>
+                <Typography variant="subtitle2" sx={{ fontWeight: 600, color: 'secondary.main' }}>
+                  LLM Guardrail
+                </Typography>
+                <Tooltip title="Uses an LLM agent to validate task output against criteria you define. This provides flexible, AI-powered validation.">
+                  <IconButton size="small" sx={{ ml: 0.5 }}>
+                    <HelpOutlineIcon fontSize="small" />
+                  </IconButton>
+                </Tooltip>
+              </Box>
+
+              <FormControlLabel
+                control={
+                  <Switch
+                    checked={Boolean(formData.config?.llm_guardrail)}
+                    onChange={(e) => handleLlmGuardrailToggle(e.target.checked)}
+                    color="secondary"
+                  />
+                }
+                label="Enable LLM Guardrail"
+              />
+
+              {formData.config?.llm_guardrail && (
+                <Box sx={{ display: 'flex', flexDirection: 'column', gap: 2, mt: 2 }}>
+                  <TextField
+                    label="Validation Criteria"
+                    value={formData.config.llm_guardrail.description || ''}
+                    onChange={(e) => handleLlmGuardrailChange('description', e.target.value)}
+                    fullWidth
+                    multiline
+                    rows={2}
+                    placeholder="Describe how the LLM should validate the task output..."
+                    helperText="Describe the criteria the LLM will use to validate the task output"
+                  />
+                  <FormControl fullWidth>
+                    <InputLabel>Validation LLM Model</InputLabel>
+                    <Select
+                      value={formData.config.llm_guardrail.llm_model || 'databricks-claude-sonnet-4-5'}
+                      onChange={(e) => handleLlmGuardrailChange('llm_model', e.target.value)}
+                      label="Validation LLM Model"
+                      disabled={llmModelsLoading}
+                      startAdornment={llmModelsLoading ? <CircularProgress size={20} sx={{ mr: 1 }} /> : null}
+                    >
+                      {llmModels.map((model) => (
+                        <MenuItem key={model.name} value={model.name}>
+                          {model.name}
+                        </MenuItem>
+                      ))}
+                    </Select>
+                  </FormControl>
+                </Box>
+              )}
+            </Box>
+
             <FormControl fullWidth>
               <InputLabel id="tools-label">Tools</InputLabel>
               <Select

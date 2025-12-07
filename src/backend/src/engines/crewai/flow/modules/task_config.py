@@ -96,12 +96,57 @@ class TaskConfig:
                 task.human_input = bool(task_data.human_input)
                 
             # Note: We're deliberately NOT setting context here because that's causing problems
-                
+
+            # Handle LLM guardrail if present in task configuration
+            # Access llm_guardrail directly from task_data (it's a dedicated column in the Task model)
+            try:
+                llm_guardrail_config = getattr(task_data, 'llm_guardrail', None)
+
+                if llm_guardrail_config:
+                    logger.info(f"Task {task_data.name} has LLM guardrail configuration: {llm_guardrail_config}")
+
+                    from crewai.tasks.llm_guardrail import LLMGuardrail
+                    from crewai import LLM
+
+                    # Extract configuration
+                    if isinstance(llm_guardrail_config, dict):
+                        guardrail_description = llm_guardrail_config.get('description', 'Validate the task output')
+                        llm_model = llm_guardrail_config.get('llm_model', 'databricks-claude-sonnet-4-5')
+                    else:
+                        guardrail_description = getattr(llm_guardrail_config, 'description', 'Validate the task output')
+                        llm_model = getattr(llm_guardrail_config, 'llm_model', 'databricks-claude-sonnet-4-5')
+
+                    # PROACTIVE GUARDRAIL AUGMENTATION: Inject validation criteria into task description
+                    if guardrail_description and guardrail_description != 'Validate the task output':
+                        validation_augmentation = (
+                            f"\n\n=== VALIDATION REQUIREMENTS ===\n"
+                            f"Your output will be validated against these criteria: {guardrail_description}\n"
+                            f"Ensure your response meets these requirements to pass validation."
+                        )
+                        task.description = task.description + validation_augmentation
+                        logger.info(f"Augmented task {task_data.name} description with guardrail criteria")
+
+                    # Ensure model has provider prefix for LiteLLM
+                    if llm_model and not llm_model.startswith('databricks/'):
+                        if llm_model.startswith('databricks-'):
+                            llm_model = f"databricks/{llm_model}"
+
+                    # Create and apply LLM guardrail
+                    guardrail_llm = LLM(model=llm_model)
+                    llm_guardrail = LLMGuardrail(description=guardrail_description, llm=guardrail_llm)
+                    task.guardrail = llm_guardrail
+                    task.retry_on_fail = True
+                    logger.info(f"Applied LLM guardrail to task {task_data.name} using model {llm_model}")
+
+            except Exception as guardrail_error:
+                logger.warning(f"Error setting up guardrail for task {task_data.name}: {guardrail_error}")
+                # Continue without guardrail - task is still valid
+
             logger.info(f"Successfully configured task: {task_data.name} with agent role: {agent.role}")
-            
+
             # No longer adding default tools - we respect the task configuration
             # If a task has no tools assigned, we don't add any by default
-                
+
             return task
         except Exception as e:
             logger.error(f"Error configuring task {getattr(task_data, 'name', 'unknown')}: {e}", exc_info=True)

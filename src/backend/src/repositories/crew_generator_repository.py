@@ -214,6 +214,7 @@ class CrewGeneratorRepository:
                 'context': task.context,
                 'output': task.output,
                 'human_input': task.human_input,
+                'llm_guardrail': task.llm_guardrail,
                 'created_at': task.created_at.isoformat() if task.created_at else None,
                 'updated_at': task.updated_at.isoformat() if task.updated_at else None
             }
@@ -397,6 +398,8 @@ class CrewGeneratorRepository:
                 output=self._safe_get_attr(task_data, 'output'),
                 human_input=self._safe_get_attr(task_data, 'human_input', False),
                 markdown=self._safe_get_attr(task_data, 'markdown', False),
+                # LLM guardrail configuration (AI-powered output validation)
+                llm_guardrail=self._safe_get_attr(task_data, 'llm_guardrail'),
                 # Add group context fields
                 group_id=group_context.primary_group_id if group_context else None,
                 created_by_email=group_context.group_email if group_context else None

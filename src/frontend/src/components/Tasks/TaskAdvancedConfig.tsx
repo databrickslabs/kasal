@@ -13,14 +13,11 @@ import {
   Divider,
   Tooltip,
   IconButton,
-  CircularProgress,
 } from '@mui/material';
-import { type TaskAdvancedConfigProps, type LLMGuardrailConfig } from '../../types/task';
+import { type TaskAdvancedConfigProps } from '../../types/task';
 import { TASK_CALLBACKS, type TaskCallbackOption } from '../../types/taskCallbacks';
 import HelpOutlineIcon from '@mui/icons-material/HelpOutline';
 import { SchemaService } from '../../api/SchemaService';
-import { ModelService } from '../../api/ModelService';
-import { type ModelConfig } from '../../types/models';
 import { DatabricksVolumeConfigComponent, type DatabricksVolumeConfig } from './DatabricksVolumeConfig';
 
 export type ConditionType = 'is_data_missing';
@@ -40,10 +37,6 @@ const TaskAdvancedConfigComponent: React.FC<TaskAdvancedConfigProps> = ({
   const [pydanticModels, setPydanticModels] = useState<Array<{ value: string, label: string }>>([]);
   const [databricksConfig, setDatabricksConfig] = useState<DatabricksVolumeConfig | null>(null);
 
-  // LLM Guardrail state
-  const [llmModels, setLlmModels] = useState<Array<{ name: string; config: ModelConfig }>>([]);
-  const [llmModelsLoading, setLlmModelsLoading] = useState(false);
-  
   // Fetch Pydantic models from SchemaService
   useEffect(() => {
     const fetchPydanticModels = async () => {
@@ -64,29 +57,6 @@ const TaskAdvancedConfigComponent: React.FC<TaskAdvancedConfigProps> = ({
     };
     
     void fetchPydanticModels();
-  }, []);
-
-  // Fetch LLM models for guardrail validation
-  useEffect(() => {
-    const fetchLlmModels = async () => {
-      setLlmModelsLoading(true);
-      try {
-        const modelService = ModelService.getInstance();
-        const modelsDict = await modelService.getModels();
-        // Convert Models dictionary to array format for dropdown
-        const modelsArray = Object.entries(modelsDict).map(([name, config]) => ({
-          name,
-          config
-        }));
-        setLlmModels(modelsArray);
-      } catch (error) {
-        console.error('Error fetching LLM models:', error);
-      } finally {
-        setLlmModelsLoading(false);
-      }
-    };
-
-    void fetchLlmModels();
   }, []);
 
   const handleConditionChange = useCallback((field: string, value: string | number | boolean | null) => {
@@ -270,32 +240,6 @@ const TaskAdvancedConfigComponent: React.FC<TaskAdvancedConfigProps> = ({
       return null;
     }
   }, [advancedConfig.guardrail]);
-
-  // Handle LLM guardrail toggle
-  const handleLlmGuardrailToggle = useCallback((enabled: boolean) => {
-    if (enabled) {
-      const defaultConfig: LLMGuardrailConfig = {
-        description: 'Validate the task output for accuracy and completeness',
-        llm_model: 'databricks-claude-sonnet-4-5'
-      };
-      onConfigChange('llm_guardrail', defaultConfig as unknown as Record<string, unknown>);
-    } else {
-      onConfigChange('llm_guardrail', null);
-    }
-  }, [onConfigChange]);
-
-  // Handle LLM guardrail field changes
-  const handleLlmGuardrailChange = useCallback((field: keyof LLMGuardrailConfig, value: string) => {
-    const currentConfig = advancedConfig.llm_guardrail || {
-      description: 'Validate the task output for accuracy and completeness',
-      llm_model: 'databricks-claude-sonnet-4-5'
-    };
-    const updatedConfig = {
-      ...currentConfig,
-      [field]: value
-    };
-    onConfigChange('llm_guardrail', updatedConfig as unknown as Record<string, unknown>);
-  }, [advancedConfig.llm_guardrail, onConfigChange]);
 
   // Automatically enable retry on failure when data_processing guardrail is selected
   useEffect(() => {
@@ -630,60 +574,6 @@ const TaskAdvancedConfigComponent: React.FC<TaskAdvancedConfigProps> = ({
         </Box>
       )}
 
-      <Divider sx={{ my: 2 }} />
-      <Typography variant="subtitle2" color="text.secondary">
-        LLM Guardrail Settings
-        <Tooltip title="Uses an LLM agent to validate task output against criteria you define. This provides flexible, AI-powered validation.">
-          <IconButton size="small" sx={{ ml: 0.5 }}>
-            <HelpOutlineIcon fontSize="small" />
-          </IconButton>
-        </Tooltip>
-      </Typography>
-
-      <FormControlLabel
-        control={
-          <Switch
-            checked={Boolean(advancedConfig.llm_guardrail)}
-            onChange={(e) => handleLlmGuardrailToggle(e.target.checked)}
-          />
-        }
-        label="Enable LLM Guardrail"
-      />
-
-      {advancedConfig.llm_guardrail && (
-        <Box sx={{ display: 'flex', flexDirection: 'column', gap: 2, mt: 1 }}>
-          <TextField
-            label="Validation Criteria"
-            value={advancedConfig.llm_guardrail.description || ''}
-            onChange={(e) => handleLlmGuardrailChange('description', e.target.value)}
-            fullWidth
-            multiline
-            rows={3}
-            placeholder="Describe how the LLM should validate the task output..."
-            helperText="Describe the criteria the LLM will use to validate the task output"
-          />
-          <FormControl fullWidth>
-            <InputLabel>Validation LLM Model</InputLabel>
-            <Select
-              value={advancedConfig.llm_guardrail.llm_model || 'databricks-claude-sonnet-4-5'}
-              onChange={(e) => handleLlmGuardrailChange('llm_model', e.target.value)}
-              label="Validation LLM Model"
-              disabled={llmModelsLoading}
-              startAdornment={llmModelsLoading ? <CircularProgress size={20} sx={{ mr: 1 }} /> : null}
-            >
-              {llmModels.map((model) => (
-                <MenuItem key={model.name} value={model.name}>
-                  {model.name}
-                </MenuItem>
-              ))}
-            </Select>
-          </FormControl>
-          <Typography variant="body2" color="text.secondary">
-            The LLM guardrail uses an AI model to validate task outputs against your criteria.
-            If validation fails, the task can be retried (enable &quot;Retry on Failure&quot; above).
-          </Typography>
-        </Box>
-      )}
     </Box>
   );
 };
