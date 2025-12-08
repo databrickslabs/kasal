@@ -204,7 +204,7 @@ export const useFlowManager = ({ showErrorMessage }: UseFlowManagerProps) => {
             target: targetNodeId,
             sourceHandle,
             targetHandle: targetHandleId,
-            type: 'crewEdge',
+            type: 'default', // Use default (AnimatedEdge) for CrewCanvas edges - crewEdge is only for FlowCanvas
             data: {
               ...sharedData,
               mergeGroupId, // Mark this edge as part of a merged group
