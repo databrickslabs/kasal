@@ -1344,8 +1344,13 @@ const WorkflowChat: React.FC<WorkflowChatProps> = ({
               },
               '& .MuiInputBase-inputMultiline': {
                 paddingRight: '0 !important',
-                overflow: 'hidden',
-                textOverflow: 'ellipsis',
+                overflowY: 'auto',
+                // Hide scrollbar but keep scroll functionality
+                scrollbarWidth: 'none', // Firefox
+                msOverflowStyle: 'none', // IE/Edge
+                '&::-webkit-scrollbar': {
+                  display: 'none', // Chrome, Safari, Opera
+                },
               },
             }}
             InputProps={{
@@ -1679,40 +1684,39 @@ const WorkflowChat: React.FC<WorkflowChatProps> = ({
                       ))
                     )}
                   </Menu>
+                  {/* Send button - on same level as model selector */}
+                  <IconButton
+                    color="primary"
+                    onClick={handleSendMessage}
+                    disabled={isActionDisabled}
+                    size="small"
+                    sx={{
+                      padding: '4px',
+                      backgroundColor: 'primary.main',
+                      color: 'primary.contrastText',
+                      borderRadius: '50%',
+                      width: 24,
+                      height: 24,
+                      minWidth: 24,
+                      '&:hover': {
+                        backgroundColor: 'primary.dark',
+                      },
+                      '&.Mui-disabled': {
+                        backgroundColor: 'action.disabledBackground',
+                        color: 'action.disabled',
+                      },
+                    }}
+                  >
+                    {isLoading || executingJobId ? (
+                      <CircularProgress size={14} sx={{ color: 'inherit' }} />
+                    ) : (
+                      <ArrowUpwardIcon sx={{ fontSize: 14 }} />
+                    )}
+                  </IconButton>
                 </Box>
               ),
             }}
           />
-          {/* Send button */}
-              <IconButton
-                color="primary"
-                onClick={handleSendMessage}
-                disabled={isActionDisabled}
-                sx={{
-                  position: 'absolute',
-                  right: 8,
-                  bottom: 8,
-                  padding: '6px',
-                  backgroundColor: 'primary.main',
-                  color: 'primary.contrastText',
-                  borderRadius: '50%',
-                  width: 28,
-                  height: 28,
-                  '&:hover': {
-                    backgroundColor: 'primary.dark',
-                  },
-                  '&.Mui-disabled': {
-                    backgroundColor: 'action.disabledBackground',
-                    color: 'action.disabled',
-                  },
-                }}
-              >
-                {isLoading || executingJobId ? (
-                  <CircularProgress size={16} sx={{ color: 'inherit' }} />
-                ) : (
-                  <ArrowUpwardIcon sx={{ fontSize: 16 }} />
-                )}
-              </IconButton>
         </Box>
       </Paper>
     </Box>
