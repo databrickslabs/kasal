@@ -158,7 +158,7 @@ function APIKeys(): JSX.Element {
 
 
   // Filter out model API keys from local keys (for placeholder generation)
-  const localApiKeys = apiKeys.filter(key => !modelApiKeys.includes(key.name));
+  const _localApiKeys = apiKeys.filter(key => !modelApiKeys.includes(key.name));
 
   if (loading) {
     return (
