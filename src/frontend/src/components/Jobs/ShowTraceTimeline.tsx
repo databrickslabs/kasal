@@ -349,6 +349,49 @@ const ShowTraceTimeline: React.FC<ShowTraceProps> = ({
       }
     });
 
+    // Helper function to extract task_id from trace (could be direct field or in metadata)
+    const getTaskId = (trace: Trace): string | null => {
+      // First check direct field
+      if (trace.task_id) return trace.task_id;
+      // Then check trace_metadata
+      if (trace.trace_metadata && typeof trace.trace_metadata === 'object') {
+        const metadata = trace.trace_metadata as Record<string, unknown>;
+        if (metadata.task_id) return metadata.task_id as string;
+      }
+      // Finally check extra_data
+      if (trace.extra_data && typeof trace.extra_data === 'object') {
+        const extraData = trace.extra_data as Record<string, unknown>;
+        if (extraData.task_id) return extraData.task_id as string;
+      }
+      return null;
+    };
+
+    // Build task_id -> task_name mapping for parallel task support
+    const taskIdToName = new Map<string, string>();
+    sorted.forEach(trace => {
+      const taskId = getTaskId(trace);
+      if (trace.event_type === 'task_started' && taskId) {
+        let taskName: string | null = null;
+        // Extract task name from trace_metadata first
+        if (trace.trace_metadata && typeof trace.trace_metadata === 'object') {
+          const metadata = trace.trace_metadata as Record<string, unknown>;
+          if (metadata.task_name) {
+            taskName = metadata.task_name as string;
+          }
+        }
+        // Fallback to extra_data
+        if (!taskName && trace.extra_data && typeof trace.extra_data === 'object') {
+          const extraData = trace.extra_data as Record<string, unknown>;
+          if (extraData.task_name) {
+            taskName = extraData.task_name as string;
+          }
+        }
+        if (taskName) {
+          taskIdToName.set(taskId, taskName);
+        }
+      }
+    });
+
     // Second pass: group traces by agent
     sorted.forEach(trace => {
       // Skip global events (crew/flow), task orchestration events, and task events for agent grouping
@@ -397,18 +440,36 @@ const ShowTraceTimeline: React.FC<ShowTraceProps> = ({
       const agentStart = new Date(agentTraces[0].created_at);
       const agentEnd = new Date(agentTraces[agentTraces.length - 1].created_at);
 
-      // Group agent traces by task - using task_started events to determine task boundaries
+      // Group agent traces by task - using task_id for parallel task support
       const taskMap = new Map<string, Trace[]>();
-      let currentTask: string | null = null;
+      const taskIdToUniqueKey = new Map<string, string>(); // Map task_id to unique task key
       let taskCounter = 0;
 
       agentTraces.forEach(trace => {
-        // Check if this is a task_started event - if so, start a new task section
-        if (trace.event_type === 'task_started') {
-          // Extract task name from the task_started event
+        let taskKey = 'Processing Task'; // Default fallback
+        const traceTaskId = getTaskId(trace);
+
+        // Primary method: Use task_id to determine which task this trace belongs to
+        if (traceTaskId && taskIdToName.has(traceTaskId)) {
+          // Check if we already have a unique key for this task_id
+          if (taskIdToUniqueKey.has(traceTaskId)) {
+            taskKey = taskIdToUniqueKey.get(traceTaskId)!;
+          } else {
+            // Create a unique key for this task
+            const baseName = taskIdToName.get(traceTaskId)!;
+            // Check if this base name already exists (same task name running in parallel)
+            if (taskMap.has(baseName)) {
+              taskCounter++;
+              taskKey = `${baseName} (${taskCounter})`;
+            } else {
+              taskKey = baseName;
+            }
+            taskIdToUniqueKey.set(traceTaskId, taskKey);
+          }
+        } else if (trace.event_type === 'task_started') {
+          // For task_started events without task_id in the map, extract name and create entry
           let newTaskName: string | null = null;
 
-          // First try trace_metadata (where task_name is typically stored)
           if (trace.trace_metadata) {
             const metadata = trace.trace_metadata as Record<string, unknown>;
             const taskName = metadata.task_name as string;
@@ -417,7 +478,6 @@ const ShowTraceTimeline: React.FC<ShowTraceProps> = ({
             }
           }
 
-          // Fallback to extra_data if trace_metadata doesn't have task_name
           if (!newTaskName && trace.extra_data) {
             const extraData = trace.extra_data as Record<string, unknown>;
             const taskName = extraData.task_name as string;
@@ -426,26 +486,25 @@ const ShowTraceTimeline: React.FC<ShowTraceProps> = ({
             }
           }
 
-          // If we found a task name, use it as the new current task
           if (newTaskName) {
-            // Make task name unique if it already exists
-            let uniqueTaskName = newTaskName;
             if (taskMap.has(newTaskName)) {
               taskCounter++;
-              uniqueTaskName = `${newTaskName} (${taskCounter})`;
+              taskKey = `${newTaskName} (${taskCounter})`;
+            } else {
+              taskKey = newTaskName;
             }
-            currentTask = uniqueTaskName;
+            if (traceTaskId) {
+              taskIdToUniqueKey.set(traceTaskId, taskKey);
+            }
+          } else {
+            taskKey = 'Processing Task';
           }
-        }
-
-        // If we still don't have a current task, try to find it from task descriptions
-        if (!currentTask) {
+        } else {
+          // Fallback: try to find task from descriptions using temporal matching
           const traceTime = new Date(trace.created_at).getTime();
 
-          // Find matching task by checking task completions
           const taskEntries = Array.from(taskDescriptions.entries());
           for (const [taskContext, taskDesc] of taskEntries) {
-            // Find task completion trace
             const taskCompletion = sorted.find(t =>
               t.event_source === 'task' &&
               t.event_type === 'task_completed' &&
@@ -454,27 +513,22 @@ const ShowTraceTimeline: React.FC<ShowTraceProps> = ({
 
             if (taskCompletion) {
               const taskEndTime = new Date(taskCompletion.created_at).getTime();
-              // If trace is before task completion and agent matches, it belongs to this task
-              if (traceTime <= taskEndTime + 1000) { // Within 1 second after task completion
+              if (traceTime <= taskEndTime + 1000) {
                 const taskAgent = agentTaskMap.get(taskContext);
                 if (!taskAgent || taskAgent === agentName) {
-                  currentTask = taskDesc;
+                  taskKey = taskDesc;
                   break;
                 }
               }
             }
           }
+          // If no match found, taskKey remains 'Processing Task' (default)
         }
 
-        // Fallback to a generic task name if no match found
-        if (!currentTask) {
-          currentTask = 'Processing Task';
+        if (!taskMap.has(taskKey)) {
+          taskMap.set(taskKey, []);
         }
-
-        if (!taskMap.has(currentTask)) {
-          taskMap.set(currentTask, []);
-        }
-        const taskTraces = taskMap.get(currentTask);
+        const taskTraces = taskMap.get(taskKey);
         if (taskTraces) {
           taskTraces.push(trace);
         }
@@ -682,7 +736,7 @@ const ShowTraceTimeline: React.FC<ShowTraceProps> = ({
 
         return {
           taskName,
-          taskId: taskTraces[0].task_id,
+          taskId: getTaskId(taskTraces[0]) || undefined,
           startTime: taskStart,
           endTime: taskEnd,
           duration: taskEnd.getTime() - taskStart.getTime(),
