@@ -61,7 +61,7 @@ class TaskBase(BaseModel):
     output_json: Optional[str] = None
     output_pydantic: Optional[str] = None
     output_file: Optional[str] = None
-    output: Optional[Dict[str, Any]] = None
+    output: Optional[Any] = None  # Accept any type of output (dict or string)
     markdown: bool = False
     callback: Optional[str] = None
     callback_config: Optional[Dict[str, Any]] = None
@@ -92,7 +92,7 @@ class TaskUpdate(BaseModel):
     output_json: Optional[str] = None
     output_pydantic: Optional[str] = None
     output_file: Optional[str] = None
-    output: Optional[Dict[str, Any]] = None
+    output: Optional[Any] = None  # Accept any type of output (dict or string)
     markdown: Optional[bool] = None
     callback: Optional[str] = None
     callback_config: Optional[Dict[str, Any]] = None
