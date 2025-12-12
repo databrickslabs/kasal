@@ -368,6 +368,9 @@ const ShowTraceTimeline: React.FC<ShowTraceProps> = ({
 
     // Build task_id -> task_name mapping for parallel task support
     const taskIdToName = new Map<string, string>();
+    // Also build task time ranges for temporal matching (task_id -> {start, end})
+    const taskTimeRanges = new Map<string, { start: number; end: number; name: string }>();
+
     sorted.forEach(trace => {
       const taskId = getTaskId(trace);
       if (trace.event_type === 'task_started' && taskId) {
@@ -388,6 +391,18 @@ const ShowTraceTimeline: React.FC<ShowTraceProps> = ({
         }
         if (taskName) {
           taskIdToName.set(taskId, taskName);
+          // Initialize time range with start time
+          taskTimeRanges.set(taskId, {
+            start: new Date(trace.created_at).getTime(),
+            end: Infinity, // Will be set when task_completed is found
+            name: taskName
+          });
+        }
+      } else if (trace.event_type === 'task_completed' && taskId) {
+        // Update end time for task time range
+        const range = taskTimeRanges.get(taskId);
+        if (range) {
+          range.end = new Date(trace.created_at).getTime();
         }
       }
     });
@@ -500,29 +515,80 @@ const ShowTraceTimeline: React.FC<ShowTraceProps> = ({
             taskKey = 'Processing Task';
           }
         } else {
-          // Fallback: try to find task from descriptions using temporal matching
+          // Fallback: try to find task using temporal matching with task time ranges
           const traceTime = new Date(trace.created_at).getTime();
 
-          const taskEntries = Array.from(taskDescriptions.entries());
-          for (const [taskContext, taskDesc] of taskEntries) {
-            const taskCompletion = sorted.find(t =>
-              t.event_source === 'task' &&
-              t.event_type === 'task_completed' &&
-              t.event_context === taskContext
-            );
+          // First, try matching using taskTimeRanges (most accurate)
+          let foundMatch = false;
+          for (const [taskId, range] of taskTimeRanges.entries()) {
+            // Check if trace time falls within this task's time range (with 1s buffer)
+            if (traceTime >= range.start - 1000 && traceTime <= range.end + 1000) {
+              // Check if we already have a unique key for this task_id
+              if (taskIdToUniqueKey.has(taskId)) {
+                taskKey = taskIdToUniqueKey.get(taskId)!;
+              } else {
+                // Create a unique key for this task
+                const baseName = range.name;
+                if (taskMap.has(baseName)) {
+                  taskCounter++;
+                  taskKey = `${baseName} (${taskCounter})`;
+                } else {
+                  taskKey = baseName;
+                }
+                taskIdToUniqueKey.set(taskId, taskKey);
+              }
+              foundMatch = true;
+              break;
+            }
+          }
 
-            if (taskCompletion) {
-              const taskEndTime = new Date(taskCompletion.created_at).getTime();
-              if (traceTime <= taskEndTime + 1000) {
-                const taskAgent = agentTaskMap.get(taskContext);
-                if (!taskAgent || taskAgent === agentName) {
-                  taskKey = taskDesc;
-                  break;
+          // If no match from time ranges, try using taskDescriptions as fallback
+          if (!foundMatch) {
+            const taskEntries = Array.from(taskDescriptions.entries());
+            for (const [taskContext, taskDesc] of taskEntries) {
+              const taskCompletion = sorted.find(t =>
+                t.event_source === 'task' &&
+                t.event_type === 'task_completed' &&
+                t.event_context === taskContext
+              );
+
+              if (taskCompletion) {
+                const taskEndTime = new Date(taskCompletion.created_at).getTime();
+                if (traceTime <= taskEndTime + 1000) {
+                  const taskAgent = agentTaskMap.get(taskContext);
+                  if (!taskAgent || taskAgent === agentName) {
+                    taskKey = taskDesc;
+                    foundMatch = true;
+                    break;
+                  }
                 }
               }
             }
           }
-          // If no match found, taskKey remains 'Processing Task' (default)
+
+          // If still no match but we have a most recent task, use it as fallback
+          // This handles events that occur just after a task starts
+          if (!foundMatch && taskTimeRanges.size > 0) {
+            // Find the most recent task that started before this trace
+            let mostRecentTask: { taskId: string; range: { start: number; end: number; name: string } } | null = null;
+            for (const [taskId, range] of taskTimeRanges.entries()) {
+              if (range.start <= traceTime) {
+                if (!mostRecentTask || range.start > mostRecentTask.range.start) {
+                  mostRecentTask = { taskId, range };
+                }
+              }
+            }
+            if (mostRecentTask) {
+              // Use the most recent task
+              if (taskIdToUniqueKey.has(mostRecentTask.taskId)) {
+                taskKey = taskIdToUniqueKey.get(mostRecentTask.taskId)!;
+              } else {
+                taskKey = mostRecentTask.range.name;
+                taskIdToUniqueKey.set(mostRecentTask.taskId, taskKey);
+              }
+            }
+          }
+          // If no match found after all attempts, taskKey remains 'Processing Task' (default)
         }
 
         if (!taskMap.has(taskKey)) {
