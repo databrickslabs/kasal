@@ -15,6 +15,7 @@ from src.repositories.template_repository import TemplateRepository
 from src.repositories.task_tracking_repository import TaskTrackingRepository
 from src.repositories.schema_repository import SchemaRepository
 from src.repositories.databricks_config_repository import DatabricksConfigRepository
+from src.repositories.powerbi_config_repository import PowerBIConfigRepository
 from src.repositories.mcp_repository import MCPServerRepository, MCPSettingsRepository
 from src.repositories.engine_config_repository import EngineConfigRepository
 from src.repositories.memory_backend_repository import MemoryBackendRepository
@@ -40,6 +41,7 @@ class UnitOfWork:
         self.task_tracking_repository: Optional[TaskTrackingRepository] = None
         self.schema_repository: Optional[SchemaRepository] = None
         self.databricks_config_repository: Optional[DatabricksConfigRepository] = None
+        self.powerbi_config_repository: Optional[PowerBIConfigRepository] = None
         self.mcp_server_repository: Optional[MCPServerRepository] = None
         self.mcp_settings_repository: Optional[MCPSettingsRepository] = None
         self.engine_config_repository: Optional[EngineConfigRepository] = None
@@ -65,6 +67,7 @@ class UnitOfWork:
         self.task_tracking_repository = TaskTrackingRepository(session)
         self.schema_repository = SchemaRepository(session)
         self.databricks_config_repository = DatabricksConfigRepository(session)
+        self.powerbi_config_repository = PowerBIConfigRepository(session)
         self.mcp_server_repository = MCPServerRepository(session)
         self.mcp_settings_repository = MCPSettingsRepository(session)
         self.engine_config_repository = EngineConfigRepository(session)
@@ -110,6 +113,7 @@ class UnitOfWork:
             self.task_tracking_repository = None
             self.schema_repository = None
             self.databricks_config_repository = None
+            self.powerbi_config_repository = None
             self.mcp_server_repository = None
             self.mcp_settings_repository = None
             self.engine_config_repository = None
@@ -159,6 +163,7 @@ class SyncUnitOfWork:
         self.task_tracking_repository = None
         self.schema_repository = None
         self.databricks_config_repository = None
+        self.powerbi_config_repository = None
         self.mcp_server_repository = None
         self.mcp_settings_repository = None
         self.engine_config_repository = None
@@ -180,6 +185,7 @@ class SyncUnitOfWork:
             self.task_tracking_repository = TaskTrackingRepository(None)
             self.schema_repository = SchemaRepository(self._session)
             self.databricks_config_repository = DatabricksConfigRepository(self._session)
+            self.powerbi_config_repository = PowerBIConfigRepository(self._session)
             self.mcp_server_repository = MCPServerRepository(self._session)
             self.mcp_settings_repository = MCPSettingsRepository(self._session)
             self.engine_config_repository = EngineConfigRepository(self._session)
