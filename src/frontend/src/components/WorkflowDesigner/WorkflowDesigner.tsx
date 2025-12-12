@@ -499,13 +499,34 @@ const WorkflowDesigner: React.FC<WorkflowDesignerProps> = (): JSX.Element => {
   }, []); // Empty dependency array - only run once
 
   // Sync nodes and edges with crew execution store
+  // For crew canvas (agentNode/taskNode)
   useEffect(() => {
-    setCrewExecutionNodes(nodes);
-  }, [nodes, setCrewExecutionNodes]);
+    if (!areFlowsVisible) {
+      setCrewExecutionNodes(nodes);
+    }
+  }, [nodes, setCrewExecutionNodes, areFlowsVisible]);
 
   useEffect(() => {
-    setCrewExecutionEdges(edges);
-  }, [edges, setCrewExecutionEdges]);
+    if (!areFlowsVisible) {
+      setCrewExecutionEdges(edges);
+    }
+  }, [edges, setCrewExecutionEdges, areFlowsVisible]);
+
+  // CRITICAL: Sync flow canvas nodes/edges with crew execution store
+  // For flow canvas (crewNode) - this enables flow execution to work
+  useEffect(() => {
+    if (areFlowsVisible) {
+      console.log('[WorkflowDesigner] Syncing flowNodes to execution store:', flowNodes.length);
+      setCrewExecutionNodes(flowNodes);
+    }
+  }, [flowNodes, setCrewExecutionNodes, areFlowsVisible]);
+
+  useEffect(() => {
+    if (areFlowsVisible) {
+      console.log('[WorkflowDesigner] Syncing flowEdges to execution store:', flowEdges.length);
+      setCrewExecutionEdges(flowEdges);
+    }
+  }, [flowEdges, setCrewExecutionEdges, areFlowsVisible]);
 
   // JobsPanel handles refresh internally based on job changes
   // The ExecutionHistory component inside JobsPanel will automatically refresh
@@ -1245,13 +1266,12 @@ const WorkflowDesigner: React.FC<WorkflowDesignerProps> = (): JSX.Element => {
               }}
               onPlayFlow={() => {
                 console.log('[WorkflowDesigner] onPlayFlow called from WorkflowPanels');
-                // CRITICAL: Sync flow state to execution store before running
+                console.log('[WorkflowDesigner] flowNodes count:', flowNodes.length, 'flowEdges count:', flowEdges.length);
+                // Nodes/edges are auto-synced via useEffect, but ensure sync is current
                 setCrewExecutionNodes(flowNodes);
                 setCrewExecutionEdges(flowEdges);
-                setTimeout(() => {
-                  console.log('[WorkflowDesigner] Calling handleRunClick("flow") with flowNodes/flowEdges');
-                  handleRunClick('flow');
-                }, 100);
+                // Execute immediately - auto-sync should have already updated the store
+                handleRunClick('flow');
               }}
               onPanelDragStart={e => {
                 e.preventDefault();
@@ -1729,16 +1749,12 @@ const WorkflowDesigner: React.FC<WorkflowDesignerProps> = (): JSX.Element => {
           }}
           onPlayFlow={() => {
             console.log('[WorkflowDesigner] RightSidebar onPlayFlow called');
-            console.log('[WorkflowDesigner] flowNodes:', flowNodes);
-            console.log('[WorkflowDesigner] flowEdges:', flowEdges);
-            // CRITICAL: Sync flow state to execution store before running
+            console.log('[WorkflowDesigner] flowNodes count:', flowNodes.length, 'flowEdges count:', flowEdges.length);
+            // Nodes/edges are auto-synced via useEffect, but ensure sync is current
             setCrewExecutionNodes(flowNodes);
             setCrewExecutionEdges(flowEdges);
-            // Small delay to ensure state is updated
-            setTimeout(() => {
-              console.log('[WorkflowDesigner] Calling handleRunClick("flow") with flowNodes count:', flowNodes.length);
-              handleRunClick('flow');
-            }, 100);
+            // Execute immediately - auto-sync should have already updated the store
+            handleRunClick('flow');
           }}
         />
 
