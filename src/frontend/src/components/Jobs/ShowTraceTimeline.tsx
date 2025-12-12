@@ -28,6 +28,8 @@ import TimelineIcon from '@mui/icons-material/Timeline';
 import TerminalIcon from '@mui/icons-material/Terminal';
 import RefreshIcon from '@mui/icons-material/Refresh';
 import PlayArrowIcon from '@mui/icons-material/PlayArrow';
+import WarningAmberIcon from '@mui/icons-material/WarningAmber';
+import ErrorOutlineIcon from '@mui/icons-material/ErrorOutline';
 import { ShowTraceProps, Trace } from '../../types/trace';
 
 import apiClient from '../../config/api/ApiConfig';
@@ -772,6 +774,42 @@ const ShowTraceTimeline: React.FC<ShowTraceProps> = ({
                 description = 'Guardrail Failed';
               }
             }
+          } else if (trace.event_type === 'rate_limit') {
+            eventType = 'rate_limit';
+            // Extract rate limit details from trace_metadata or extra_data
+            let model = '';
+            let attempt = '';
+            if (trace.trace_metadata && typeof trace.trace_metadata === 'object') {
+              const metadata = trace.trace_metadata as Record<string, unknown>;
+              model = (metadata.model as string) || '';
+              attempt = metadata.attempt ? `(attempt ${metadata.attempt})` : '';
+            }
+            description = model
+              ? `Rate Limit: ${model} ${attempt}`.trim()
+              : `Rate Limit ${attempt}`.trim();
+          } else if (trace.event_type === 'task_failed') {
+            eventType = 'task_failed';
+            // Extract error details from extra_data or output - show full message, no truncation
+            let errorMsg = 'Task Failed';
+            if (trace.extra_data && typeof trace.extra_data === 'object') {
+              const extraData = trace.extra_data as Record<string, unknown>;
+              const error = extraData.error as string;
+              if (error) {
+                errorMsg = error;
+              }
+            } else if (trace.output) {
+              // Try to extract from output content
+              const outputStr = typeof trace.output === 'string'
+                ? trace.output
+                : (trace.output as Record<string, unknown>).content as string || '';
+              if (outputStr && outputStr.includes('failed:')) {
+                const failedPart = outputStr.split('failed:')[1]?.trim();
+                if (failedPart) {
+                  errorMsg = failedPart;
+                }
+              }
+            }
+            description = `❌ ${errorMsg}`;
           } else {
             eventType = trace.event_type;
             // Make the description more readable
@@ -1121,6 +1159,11 @@ const ShowTraceTimeline: React.FC<ShowTraceProps> = ({
         return <PlayCircleIcon {...iconProps} color="primary" />;
       case 'flow_completed':
         return <CheckCircleIcon {...iconProps} color="success" />;
+      case 'rate_limit':
+        return <WarningAmberIcon {...iconProps} color="warning" />;
+      case 'task_failed':
+      case 'error':
+        return <ErrorOutlineIcon {...iconProps} color="error" />;
       default:
         return <span style={{ fontSize: 16 }}>•</span>;
     }
