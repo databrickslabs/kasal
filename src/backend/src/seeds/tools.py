@@ -25,7 +25,7 @@ tools_data = [
     (36, "DatabricksKnowledgeSearchTool", "A powerful knowledge search tool that enables semantic search across documents uploaded to Databricks Vector Search. It provides RAG (Retrieval-Augmented Generation) capabilities by searching through indexed documents based on vector similarity. This tool allows agents to access and retrieve relevant information from uploaded knowledge files including PDFs, Word documents, text files, and other document formats. Essential for building context-aware AI applications with access to custom knowledge bases.", "search"),
     (69, "MCPTool", "An advanced adapter for Model Context Protocol (MCP) servers that enables access to thousands of specialized tools from the MCP ecosystem. This tool establishes and manages connections with MCP servers through SSE (Server-Sent Events), providing seamless integration with community-built tool collections. Perfect for extending agent capabilities with domain-specific tools without requiring custom development or direct integration work.", "integration"),
     (70, "DatabricksJobsTool", "A comprehensive Databricks Jobs management tool using direct REST API calls for optimal performance. IMPORTANT WORKFLOW: Always use 'get_notebook' action FIRST to analyze job notebooks and understand required parameters before running any job with custom parameters. This ensures proper parameter construction and prevents job failures. Available actions: (1) 'list' - List all jobs in workspace with optional name/ID filtering, (2) 'list_my_jobs' - List only jobs created by current user, (3) 'get' - Get detailed job configuration and recent run history, (4) 'get_notebook' - Analyze notebook content to understand parameters, widgets, and logic (REQUIRED before running jobs with parameters), (5) 'run' - Trigger job execution with custom parameters (use dict for notebook/SQL tasks, list for Python tasks), (6) 'monitor' - Track real-time execution status and task progress, (7) 'create' - Create new jobs with custom configurations. The tool provides intelligent parameter analysis, suggesting proper parameter structures based on notebook patterns (search jobs, ETL jobs, etc.). Supports OAuth/OBO authentication, PAT tokens, and Databricks CLI profiles. All operations use direct REST API calls avoiding SDK overhead for faster execution. Essential for automating data pipelines, orchestrating workflows, and integrating Databricks jobs into AI agent systems.", "database"),
-    (71, "PowerBIAnalysisTool", "Execute complex Power BI analysis via Databricks jobs for heavy computational workloads. This tool wraps DAX queries in Databricks job execution, enabling large-scale data processing, multi-query analysis, and resource-intensive computations. Perfect for year-over-year analysis, trend detection, comprehensive reporting, and complex business intelligence tasks that require significant compute resources. Integrates with DatabricksJobsTool for job orchestration and monitoring. IMPORTANT: To enable this tool, you MUST configure the following API Keys in Settings → API Keys: POWERBI_CLIENT_SECRET, POWERBI_USERNAME, POWERBI_PASSWORD, and DATABRICKS_API_KEY (or DATABRICKS_TOKEN).", "database"),
+    (72, "PowerBIAnalysisTool", "Execute complex Power BI analysis via Databricks jobs for heavy computational workloads. This tool wraps DAX queries in Databricks job execution, enabling large-scale data processing, multi-query analysis, and resource-intensive computations. Perfect for year-over-year analysis, trend detection, comprehensive reporting, and complex business intelligence tasks that require significant compute resources. Integrates with DatabricksJobsTool for job orchestration and monitoring. IMPORTANT: To enable this tool, you MUST configure the following API Keys in Settings → API Keys: POWERBI_CLIENT_SECRET, POWERBI_USERNAME, POWERBI_PASSWORD, and DATABRICKS_API_KEY (or DATABRICKS_TOKEN).", "database"),
 ]
 
 def get_tool_configs():
@@ -88,7 +88,7 @@ def get_tool_configs():
             "result_as_answer": False,
             "DATABRICKS_HOST": "",  # Databricks workspace URL (e.g., "e2-demo-field-eng.cloud.databricks.com")
         },   # DatabricksJobsTool
-        "71": {
+        "72": {
             "result_as_answer": False,
             "databricks_job_id": None,  # Required: Databricks job ID for Power BI analysis
             "tenant_id": "",  # Azure AD Tenant ID (required)
@@ -114,7 +114,7 @@ async def seed_async():
     tools_error = 0
 
     # List of tool IDs that should be enabled
-    enabled_tool_ids = [6, 16, 26, 31, 35, 36, 67, 69, 70, 71]
+    enabled_tool_ids = [6, 16, 26, 31, 35, 36, 67, 69, 70, 71, 72]
 
     for tool_id, title, description, icon in tools_data:
         try:
@@ -177,7 +177,7 @@ def seed_sync():
     tools_error = 0
 
     # List of tool IDs that should be enabled
-    enabled_tool_ids = [6, 16, 26, 31, 35, 36, 67, 69, 70, 71]
+    enabled_tool_ids = [6, 16, 26, 31, 35, 36, 67, 69, 70, 71, 72]
 
     for tool_id, title, description, icon in tools_data:
         try:
