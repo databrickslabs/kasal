@@ -392,10 +392,19 @@ class DatabricksRetryLLM(LLM):
     Databricks models (including Llama 4 Maverick) can intermittently return empty responses,
     especially after many tool iterations. This wrapper retries the call with exponential
     backoff when an empty response is detected.
+
+    Rate limit errors use longer backoffs (30s base) since Databricks rate limits
+    typically reset after 60 seconds.
     """
 
+    # Standard retry settings (for timeouts, connection errors, empty responses)
     MAX_RETRIES = 3
     INITIAL_BACKOFF = 1.0  # seconds
+
+    # Rate limit specific settings - longer backoffs to allow quota reset
+    RATE_LIMIT_MAX_RETRIES = 5
+    RATE_LIMIT_INITIAL_BACKOFF = 30.0  # seconds (Databricks rate limits reset ~60s)
+    RATE_LIMIT_MAX_BACKOFF = 120.0  # cap at 2 minutes
 
     def __init__(self, **kwargs):
         """Initialize the Databricks Retry LLM wrapper."""
@@ -410,6 +419,69 @@ class DatabricksRetryLLM(LLM):
             return LoggerManager.get_instance().crew
         except Exception:
             return logger  # Fallback to module logger
+
+    def _is_rate_limit_error(self, error_str: str) -> bool:
+        """Check if an error string indicates a rate limit error.
+
+        Args:
+            error_str: Lowercase error string to check
+
+        Returns:
+            True if this is a rate limit error
+        """
+        return any(term in error_str for term in [
+            'rate limit', 'ratelimit', 'too many requests', '429',
+            'request_limit_exceeded', 'rate_limit_exceeded'
+        ])
+
+    def _is_retryable_error(self, error_str: str) -> bool:
+        """Check if an error is retryable (including rate limits).
+
+        Args:
+            error_str: Lowercase error string to check
+
+        Returns:
+            True if this error should be retried
+        """
+        return any(term in error_str for term in [
+            'timeout', 'connection', 'rate limit', 'ratelimit', 'too many requests',
+            'service unavailable', '503', '429', '502', '504', 'gateway',
+            'request_limit_exceeded'
+        ])
+
+    def _get_backoff_time(self, attempt: int, is_rate_limit: bool) -> float:
+        """Calculate backoff time based on error type and attempt number.
+
+        Rate limit errors use longer backoffs (30s, 60s, 120s) to allow
+        Databricks quota to reset (~60 seconds).
+
+        Other errors use standard short backoffs (1s, 2s, 4s).
+
+        Args:
+            attempt: Current attempt number (0-indexed)
+            is_rate_limit: Whether this is a rate limit error
+
+        Returns:
+            Backoff time in seconds
+        """
+        if is_rate_limit:
+            backoff = self.RATE_LIMIT_INITIAL_BACKOFF * (2 ** attempt)
+            return min(backoff, self.RATE_LIMIT_MAX_BACKOFF)
+        else:
+            return self.INITIAL_BACKOFF * (2 ** attempt)
+
+    def _get_max_retries(self, is_rate_limit: bool) -> int:
+        """Get max retries based on error type.
+
+        Rate limit errors get more retries since they just need time to reset.
+
+        Args:
+            is_rate_limit: Whether this is a rate limit error
+
+        Returns:
+            Maximum number of retry attempts
+        """
+        return self.RATE_LIMIT_MAX_RETRIES if is_rate_limit else self.MAX_RETRIES
 
     def _fix_message_format_for_llama(self, messages, crew_log):
         """
@@ -454,19 +526,29 @@ class DatabricksRetryLLM(LLM):
         When Databricks returns an empty response (which happens intermittently,
         especially after many tool iterations), we retry with exponential backoff.
         Also fixes message format for Llama 4 compatibility.
+
+        Rate limit errors get special treatment with longer backoffs (30s, 60s, 120s)
+        and more retries (5 vs 3) since they just need time for quota to reset.
         """
         import time
 
         crew_log = self._get_crew_logger()
         last_error = None
+        is_rate_limit = False
+        attempt = 0
 
         # Fix message format for Llama 4 before making calls
         fixed_messages = self._fix_message_format_for_llama(messages, crew_log)
         msg_count = len(fixed_messages) if isinstance(fixed_messages, list) else 1
 
-        for attempt in range(self.MAX_RETRIES):
+        while True:
+            max_retries = self._get_max_retries(is_rate_limit)
+
+            if attempt >= max_retries:
+                break
+
             try:
-                crew_log.info(f"[DatabricksRetryLLM] call() attempt {attempt + 1}/{self.MAX_RETRIES} with {msg_count} messages")
+                crew_log.info(f"[DatabricksRetryLLM] call() attempt {attempt + 1}/{max_retries} with {msg_count} messages")
 
                 # Call the parent class method with all arguments
                 result = super().call(
@@ -480,16 +562,17 @@ class DatabricksRetryLLM(LLM):
 
                 # Check if response is empty
                 if result is None or result == "":
-                    if attempt < self.MAX_RETRIES - 1:
-                        backoff = self.INITIAL_BACKOFF * (2 ** attempt)
+                    if attempt < max_retries - 1:
+                        backoff = self._get_backoff_time(attempt, is_rate_limit=False)
                         crew_log.warning(
-                            f"[DatabricksRetryLLM] Empty response (attempt {attempt + 1}/{self.MAX_RETRIES}). "
+                            f"[DatabricksRetryLLM] Empty response (attempt {attempt + 1}/{max_retries}). "
                             f"Retrying in {backoff}s..."
                         )
                         time.sleep(backoff)
+                        attempt += 1
                         continue
                     else:
-                        crew_log.error(f"[DatabricksRetryLLM] Empty response after {self.MAX_RETRIES} attempts - failing")
+                        crew_log.error(f"[DatabricksRetryLLM] Empty response after {max_retries} attempts - failing")
                         return ""
 
                 # Success
@@ -500,19 +583,22 @@ class DatabricksRetryLLM(LLM):
                 last_error = e
                 error_str = str(e).lower()
 
-                # Check if this is a retryable error
-                is_retryable = any(term in error_str for term in [
-                    'timeout', 'connection', 'rate limit', 'too many requests',
-                    'service unavailable', '503', '429', '502', '504', 'gateway'
-                ])
+                # Check error type
+                is_retryable = self._is_retryable_error(error_str)
+                is_rate_limit = self._is_rate_limit_error(error_str)
 
-                if is_retryable and attempt < self.MAX_RETRIES - 1:
-                    backoff = self.INITIAL_BACKOFF * (2 ** attempt)
+                # Update max_retries based on error type (rate limits get more retries)
+                max_retries = self._get_max_retries(is_rate_limit)
+
+                if is_retryable and attempt < max_retries - 1:
+                    backoff = self._get_backoff_time(attempt, is_rate_limit)
+                    error_type = "Rate limit" if is_rate_limit else "Retryable error"
                     crew_log.warning(
-                        f"[DatabricksRetryLLM] Retryable error (attempt {attempt + 1}/{self.MAX_RETRIES}): {e}. "
+                        f"[DatabricksRetryLLM] {error_type} (attempt {attempt + 1}/{max_retries}): {e}. "
                         f"Retrying in {backoff}s..."
                     )
                     time.sleep(backoff)
+                    attempt += 1
                     continue
                 else:
                     crew_log.error(f"[DatabricksRetryLLM] Non-retryable error: {e}")
@@ -526,14 +612,23 @@ class DatabricksRetryLLM(LLM):
     def _handle_non_streaming_response(self, params, callbacks=None, available_functions=None, from_task=None, from_agent=None):
         """
         Override to add retry logic for empty responses in non-streaming mode.
-        Uses simple exponential backoff (1s, 2s, 4s).
+
+        Rate limit errors get special treatment with longer backoffs (30s, 60s, 120s)
+        and more retries (5 vs 3) since they just need time for quota to reset.
         """
         import time
 
         crew_log = self._get_crew_logger()
         last_error = None
+        is_rate_limit = False
+        attempt = 0
 
-        for attempt in range(self.MAX_RETRIES):
+        while True:
+            max_retries = self._get_max_retries(is_rate_limit)
+
+            if attempt >= max_retries:
+                break
+
             try:
                 # Try calling with appropriate arguments
                 try:
@@ -554,16 +649,17 @@ class DatabricksRetryLLM(LLM):
 
                 # Check if response is empty
                 if response is None or response == "":
-                    if attempt < self.MAX_RETRIES - 1:
-                        backoff = self.INITIAL_BACKOFF * (2 ** attempt)
+                    if attempt < max_retries - 1:
+                        backoff = self._get_backoff_time(attempt, is_rate_limit=False)
                         crew_log.warning(
-                            f"[DatabricksRetryLLM] Empty in _handle_non_streaming (attempt {attempt + 1}/{self.MAX_RETRIES}). "
+                            f"[DatabricksRetryLLM] Empty in _handle_non_streaming (attempt {attempt + 1}/{max_retries}). "
                             f"Retrying in {backoff}s..."
                         )
                         time.sleep(backoff)
+                        attempt += 1
                         continue
                     else:
-                        crew_log.error(f"[DatabricksRetryLLM] Empty after {self.MAX_RETRIES} attempts in _handle_non_streaming")
+                        crew_log.error(f"[DatabricksRetryLLM] Empty after {max_retries} attempts in _handle_non_streaming")
                         return ""
 
                 return response
@@ -572,18 +668,22 @@ class DatabricksRetryLLM(LLM):
                 last_error = e
                 error_str = str(e).lower()
 
-                is_retryable = any(term in error_str for term in [
-                    'timeout', 'connection', 'rate limit', 'too many requests',
-                    'service unavailable', '503', '429', '502', '504', 'gateway'
-                ])
+                # Check error type
+                is_retryable = self._is_retryable_error(error_str)
+                is_rate_limit = self._is_rate_limit_error(error_str)
 
-                if is_retryable and attempt < self.MAX_RETRIES - 1:
-                    backoff = self.INITIAL_BACKOFF * (2 ** attempt)
+                # Update max_retries based on error type (rate limits get more retries)
+                max_retries = self._get_max_retries(is_rate_limit)
+
+                if is_retryable and attempt < max_retries - 1:
+                    backoff = self._get_backoff_time(attempt, is_rate_limit)
+                    error_type = "Rate limit" if is_rate_limit else "Retryable error"
                     crew_log.warning(
-                        f"[DatabricksRetryLLM] Retryable error in _handle_non_streaming (attempt {attempt + 1}/{self.MAX_RETRIES}): {e}. "
+                        f"[DatabricksRetryLLM] {error_type} in _handle_non_streaming (attempt {attempt + 1}/{max_retries}): {e}. "
                         f"Retrying in {backoff}s..."
                     )
                     time.sleep(backoff)
+                    attempt += 1
                     continue
                 else:
                     crew_log.error(f"[DatabricksRetryLLM] Non-retryable error in _handle_non_streaming: {e}")
