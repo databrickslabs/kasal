@@ -45,6 +45,7 @@ import { AgentBricksEndpointSelector } from '../Common/AgentBricksEndpointSelect
 import { PerplexityConfigSelector } from '../Common/PerplexityConfigSelector';
 import { SerperConfigSelector } from '../Common/SerperConfigSelector';
 import { MCPServerSelector } from '../Common/MCPServerSelector';
+import { PowerBIConfigSelector, PowerBIConfig } from '../Common/PowerBIConfigSelector';
 import { PerplexityConfig, SerperConfig } from '../../types/config';
 import { type LLMGuardrailConfig } from '../../types/task';
 import { ModelService } from '../../api/ModelService';
@@ -129,6 +130,7 @@ const TaskForm: React.FC<TaskFormProps> = ({ initialData, onCancel, onTaskSaved,
   const [selectedAgentBricksEndpoint, setSelectedAgentBricksEndpoint] = useState<{ id: string; name: string } | null>(null);
   const [perplexityConfig, setPerplexityConfig] = useState<PerplexityConfig>({});
   const [serperConfig, setSerperConfig] = useState<SerperConfig>({});
+  const [powerBIConfig, setPowerBIConfig] = useState<PowerBIConfig>({});
   const [selectedMcpServers, setSelectedMcpServers] = useState<string[]>([]);
   const [toolConfigs, setToolConfigs] = useState<Record<string, unknown>>(initialData?.tool_configs || {});
   const [showBestPractices, setShowBestPractices] = useState(false);
@@ -189,6 +191,11 @@ const TaskForm: React.FC<TaskFormProps> = ({ initialData, onCancel, onTaskSaved,
 
       if (initialData.tool_configs.SerperDevTool) {
         setSerperConfig(initialData.tool_configs.SerperDevTool as SerperConfig);
+      }
+
+      // Check for PowerBIAnalysisTool config
+      if (initialData.tool_configs.PowerBIAnalysisTool) {
+        setPowerBIConfig(initialData.tool_configs.PowerBIAnalysisTool as PowerBIConfig);
       }
 
       // Check for MCP_SERVERS config
@@ -1116,6 +1123,33 @@ const TaskForm: React.FC<TaskFormProps> = ({ initialData, onCancel, onTaskSaved,
                   }}
                   label="Serper Configuration"
                   helperText="Configure Serper.dev search parameters for this task"
+                  fullWidth
+                />
+              </Box>
+            )}
+
+            {/* Power BI Configuration - Show only when PowerBIAnalysisTool is selected */}
+            {formData.tools.some(toolId => {
+              const tool = tools.find(t =>
+                String(t.id) === String(toolId) ||
+                t.id === Number(toolId) ||
+                t.title === toolId
+              );
+              return tool?.title === 'PowerBIAnalysisTool';
+            }) && (
+              <Box sx={{ mt: 2 }}>
+                <PowerBIConfigSelector
+                  value={powerBIConfig}
+                  onChange={(config) => {
+                    setPowerBIConfig(config);
+                    // Update tool configs when configuration changes
+                    setToolConfigs(prev => ({
+                      ...prev,
+                      PowerBIAnalysisTool: config
+                    }));
+                  }}
+                  label="Power BI Configuration"
+                  helperText="Configure Power BI authentication and semantic model for this task"
                   fullWidth
                 />
               </Box>
