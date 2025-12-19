@@ -30,6 +30,13 @@ apiClient.interceptors.request.use(
       config.headers['group_id'] = selectedGroupId;  // Use 'group_id' to match database column name
     }
 
+    // For local development: simulate Databricks Apps auth header
+    // In production, this header is set by the Databricks Apps gateway
+    if (process.env.NODE_ENV === 'development') {
+      const devEmail = process.env.REACT_APP_DEV_USER_EMAIL || 'dev@localhost';
+      config.headers['X-Forwarded-Email'] = devEmail;
+    }
+
     return config;
   },
   (error) => {
