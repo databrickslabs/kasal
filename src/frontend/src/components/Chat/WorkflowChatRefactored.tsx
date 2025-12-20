@@ -1343,7 +1343,7 @@ const WorkflowChat: React.FC<WorkflowChatProps> = ({
                 borderRadius: 1,
               },
               '& .MuiInputBase-inputMultiline': {
-                paddingRight: '0 !important',
+                paddingRight: '20px',
                 overflowY: 'auto',
                 // Hide scrollbar but keep scroll functionality
                 scrollbarWidth: 'none', // Firefox
