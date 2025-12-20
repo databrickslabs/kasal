@@ -35,6 +35,7 @@ dependencies = [
     "bcrypt==4.0.1",
     "cryptography",
     "python-multipart>=0.0.9",
+    "azure-identity>=1.15.0",
 
     # Databricks
     "databricks",
@@ -64,6 +65,7 @@ dependencies = [
     "psutil",
     "rich>=13.7.0,<14.0.0",
     "redis>=5.0.0",
+    "aiofiles>=23.0.0",
 
     # Protobuf (version pinned for compatibility)
     "protobuf>=5.29.0,<6.0.0",
