@@ -5,9 +5,19 @@ This module handles processing of starting points, listeners, and routers in flo
 """
 import logging
 from typing import Dict, List, Any, Optional, Callable
+from uuid import UUID
 from crewai.flow.flow import listen, router
 
 from src.core.logger import LoggerManager
+
+
+def _to_uuid(value) -> UUID:
+    """Convert a string or UUID to UUID object."""
+    if isinstance(value, UUID):
+        return value
+    if isinstance(value, str):
+        return UUID(value)
+    raise ValueError(f"Cannot convert {type(value)} to UUID")
 
 # Initialize logger - use flow logger for flow execution
 logger = LoggerManager.get_instance().flow
@@ -82,7 +92,9 @@ class FlowProcessorManager:
 
             try:
                 # Load crew data (shared by all tasks)
-                crew_data = await crew_repo.get(crew_id) if crew_repo else None
+                # Convert crew_id to UUID since the Crew model uses UUID(as_uuid=True)
+                crew_uuid = _to_uuid(crew_id)
+                crew_data = await crew_repo.get(crew_uuid) if crew_repo else None
                 if not crew_data:
                     logger.warning(f"Crew {crew_id} not found")
                     continue
@@ -417,7 +429,9 @@ class FlowProcessorManager:
 
             try:
                 # Load crew data
-                crew_data = await crew_repo.get(crew_id) if crew_repo else None
+                # Convert crew_id to UUID since the Crew model uses UUID(as_uuid=True)
+                crew_uuid = _to_uuid(crew_id)
+                crew_data = await crew_repo.get(crew_uuid) if crew_repo else None
                 if not crew_data:
                     logger.warning(f"Crew {crew_id} not found for listener")
                     continue
@@ -695,7 +709,9 @@ class FlowProcessorManager:
                         continue
 
                     # Load crew data
-                    crew_data = await crew_repo.get(crew_id) if crew_repo else None
+                    # Convert crew_id to UUID since the Crew model uses UUID(as_uuid=True)
+                    crew_uuid = _to_uuid(crew_id)
+                    crew_data = await crew_repo.get(crew_uuid) if crew_repo else None
                     if not crew_data:
                         logger.warning(f"Crew {crew_id} not found for route {route_name}")
                         continue
