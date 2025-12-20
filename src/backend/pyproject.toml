@@ -1,42 +1,102 @@
-[tool.poetry]
-name = "modern-backend"
+[project]
+name = "kasal-backend"
 version = "0.1.0"
-description = "Modern Python Backend with FastAPI and SQLAlchemy"
-authors = ["Your Name <your.email@example.com>"]
-readme = "README.md"
+description = "Kasal Backend - AI Agent Workflow Orchestration Platform"
+requires-python = ">=3.10"
+dependencies = [
+    # Web framework
+    "fastapi>=0.110.0",
+    "uvicorn[standard]>=0.27.0",
+    "starlette==0.40.0",
 
-[tool.poetry.dependencies]
-python = "^3.9"
-fastapi = "^0.110.0"
-uvicorn = {extras = ["standard"], version = "^0.27.0"}
-sqlalchemy = "^2.0.27"
-pydantic = "^2.6.1"
-pydantic-settings = "^2.1.0"
-alembic = "^1.13.1"
-asyncpg = "^0.29.0"
-httpx = "^0.26.0"
-aiohttp = "^3.9.0"
-python-jose = {extras = ["cryptography"], version = "^3.3.0"}
-passlib = {extras = ["bcrypt"], version = "^1.7.4"}
-python-multipart = "^0.0.9"
-tenacity = "^8.2.3"
-greenlet = "^3.0.3"
+    # Database
+    "sqlalchemy>=2.0.27",
+    "alembic>=1.13.1",
+    "asyncpg>=0.29.0",
+    "pg8000",
+    "aiosqlite",
+    "greenlet>=3.0.3",
 
-[tool.poetry.group.dev.dependencies]
-pytest = "^8.0.0"
-pytest-cov = "^4.1.0"
-pytest-asyncio = "^0.23.5"
-pytest-xdist = "^3.5.0"
-pytest-mock = "^3.12.0"
-black = "^24.1.1"
-isort = "^5.13.2"
-mypy = "^1.8.0"
-ruff = "^0.2.1"
-httpx = "^0.26.0"
+    # Pydantic
+    "pydantic>=2.6.1",
+    "pydantic-settings>=2.1.0",
+    "pydantic[email]",
+    "email-validator",
+
+    # HTTP clients
+    "httpx>=0.26.0",
+    "aiohttp>=3.9.0",
+    "httpx-sse==0.4.0",
+    "urllib3>=1.26.6",
+
+    # Auth
+    "python-jose[cryptography]>=3.3.0",
+    "passlib[bcrypt]>=1.7.4",
+    "bcrypt==4.0.1",
+    "cryptography",
+    "python-multipart>=0.0.9",
+
+    # Databricks
+    "databricks",
+    "databricks-sdk>=0.65.0",
+    "databricks-vectorsearch",
+    "databricks-agents>=1.4.0",
+
+    # AI/ML
+    "litellm==1.74.9",
+    "crewai[tools]>=0.193.2",
+    "crewai_tools>=0.73.1",
+    "langchain",
+    "mcp==1.9.0",
+    "mcpadapt",
+
+    # DSPy
+    "dspy-ai>=2.5.0",
+    "optuna>=3.5.0",
+    "numpy>=1.24.0",
+
+    # Observability
+    "mlflow==3.4.0",
+
+    # Utils
+    "tenacity>=8.2.3",
+    "croniter",
+    "psutil",
+    "rich>=13.7.0,<14.0.0",
+    "redis>=5.0.0",
+
+    # Protobuf (version pinned for compatibility)
+    "protobuf>=5.29.0,<6.0.0",
+    "grpcio-status>=1.62.0,<1.71.0",
+
+    # Tools
+    "google-api-python-client",
+    "pysendpulse",
+    "nixtla",
+    "selenium",
+    "python-pptx",
+    "wheel",
+]
+
+[dependency-groups]
+dev = [
+    "pytest>=8.0.0",
+    "pytest-cov>=4.1.0",
+    "pytest-asyncio>=0.23.5",
+    "pytest-xdist>=3.5.0",
+    "pytest-mock>=3.12.0",
+    "black>=24.1.1",
+    "isort>=5.13.2",
+    "mypy>=1.8.0",
+    "ruff>=0.2.1",
+]
 
 [build-system]
-requires = ["poetry-core"]
-build-backend = "poetry.core.masonry.api"
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src"]
 
 [tool.black]
 line-length = 88
