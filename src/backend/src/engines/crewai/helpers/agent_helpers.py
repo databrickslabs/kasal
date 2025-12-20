@@ -153,8 +153,13 @@ async def create_agent(
                         logger.info(f"Applied GPT-5 parameter transformations for model: {model_name}")
                         # Use GPT5CompatibleLLM for GPT-5 models
                         llm = GPT5CompatibleLLM(**llm_kwargs)
+                    elif model_name.startswith('databricks/') or 'databricks' in model_name.lower():
+                        # Use DatabricksRetryLLM for Databricks models to ensure timeout handling
+                        from src.core.llm_handlers.databricks_gpt_oss_handler import DatabricksRetryLLM
+                        llm = DatabricksRetryLLM(**llm_kwargs)
+                        logger.info(f"Using DatabricksRetryLLM for Databricks model: {model_name} (timeout: {DatabricksRetryLLM.REQUEST_TIMEOUT}s)")
                     else:
-                        # Create the standard LLM for non-GPT-5 models
+                        # Create the standard LLM for non-Databricks models
                         llm = LLM(**llm_kwargs)
                     logger.info(f"Created LLM instance for agent {agent_key} with model {llm_kwargs.get('model')}")
                 else:
@@ -192,8 +197,13 @@ async def create_agent(
                         logger.info(f"Applied GPT-5 parameter transformations for model: {model_name}")
                         # Use GPT5CompatibleLLM for GPT-5 models
                         llm = GPT5CompatibleLLM(**llm_kwargs)
+                    elif model_name.startswith('databricks/') or 'databricks' in model_name.lower():
+                        # Use DatabricksRetryLLM for Databricks models to ensure timeout handling
+                        from src.core.llm_handlers.databricks_gpt_oss_handler import DatabricksRetryLLM
+                        llm = DatabricksRetryLLM(**llm_kwargs)
+                        logger.info(f"Using DatabricksRetryLLM for Databricks model: {model_name} (timeout: {DatabricksRetryLLM.REQUEST_TIMEOUT}s)")
                     else:
-                        # Create the standard LLM for non-GPT-5 models
+                        # Create the standard LLM for non-Databricks models
                         llm = LLM(**llm_kwargs)
         else:
             # Use default model
