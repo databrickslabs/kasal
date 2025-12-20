@@ -125,14 +125,8 @@ class CrewGenerationService:
             if any(tool.get('name') == 'NL2SQLTool' for tool in tools):
                 tools_context += "\n\nFor NL2SQLTool, use the following format for input: {'sql_query': <your_query>}"
 
-        # Add a conditional instruction for presentation generation (safe to include globally)
-        presentation_guidelines = (
-            "\n\nPresentation generation guidelines:\n"
-            "When asked to create a presentation, generate a single self-contained HTML file with reveal.js fully embedded inline including all CSS and JavaScript directly without external dependencies, configure viewport constraints with width: 960, height: 700, margin: 0.04 in Reveal.initialize() for proper screen boundaries, use clean professional themes like white, black, or league without decorative icons or technical symbols, structure content with section tags for slides using data-background-color or data-background-gradient for visual interest, include minified reveal.js and reveal.css code inline from CDN or embedded directly, set readable typography with .reveal .slides { font-size: 36px; } and system fonts with clear h1/h2/h3 hierarchy, organize slides as title, overview, key points (one per slide), and conclusion, enable smooth transitions with data-auto-animate between related slides, and limit expanded content to maximum double the original word count while maintaining professional design focused on clarity and readability within the viewport boundaries."
-        )
-
-        # Add tools context to the system message along with presentation guidelines
-        return system_message + presentation_guidelines + tools_context
+        # Add tools context to the system message
+        return system_message + tools_context
 
     def _process_crew_setup(self, setup: Dict[str, Any], allowed_tools: List[Dict[str, Any]], tool_name_to_id_map: Dict[str, str]) -> Dict[str, Any]:
         """
@@ -524,19 +518,16 @@ class CrewGenerationService:
             # Generate completion with litellm
             try:
                 logger.info("CREATE CREW: Calling LLM API...")
-                # Adjust max_tokens dynamically: Anthropic/Claude tends to produce longer JSON
+                # Use consistent max_tokens for all models to ensure detailed task descriptions
                 _model_id = model_params.get("model", "")
-                _model_id_l = _model_id.lower() if isinstance(_model_id, str) else ""
-                _max_tokens = 1500 if fast_planning else 4000
-                # Claude/Anthropic models tend to produce longer JSON; don't truncate them in fast mode
-                if isinstance(_model_id, str) and ("claude" in _model_id_l or _model_id_l.startswith("anthropic/")):
-                    _max_tokens = 4000  # even in fast_planning, allow more room for valid JSON
-                logger.info(f"CREATE CREW: Using max_tokens={_max_tokens} for model={_model_id} fast_planning={fast_planning}")
+                _max_tokens = 4000
+                logger.info(f"CREATE CREW: Using max_tokens={_max_tokens} for model={_model_id}")
 
-                response = await litellm.acompletion(
+                # Use LLMManager wrapper (handles GPT-5/deep research models)
+                response = await LLMManager.acompletion(
                     **model_params,
                     messages=messages,
-                    temperature=0.2 if fast_planning else 0.7,
+                    temperature=0.7,
                     max_tokens=_max_tokens
                 )
 
