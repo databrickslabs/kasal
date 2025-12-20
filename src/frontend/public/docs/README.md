@@ -72,14 +72,11 @@ One command sequence to run both backend and frontend locally.
 # Clone the repository
 git clone https://github.com/databrickslabs/kasal
 
-# Install dependencies
-cd kasal && pip install -r src/requirements.txt
-
-# Start the backend
-cd src/backend && ./run.sh
+# Start the backend (uv syncs dependencies automatically)
+cd kasal/src/backend && ./run.sh
 
 # In another terminal, start the frontend
-cd src/frontend && npm install && npm start
+cd kasal/src/frontend && npm install && npm start
 ```
 
 Access the application at `http://localhost:3000`
@@ -152,8 +149,8 @@ This project is licensed under the Apache License 2.0 - see the [LICENSE](https:
 Project and documentation version details.
 
 - **Current Version**: 2.0.0
-- **Documentation Updated**: October 2025
-- **Minimum Python Version**: 3.9
+- **Documentation Updated**: December 2025
+- **Minimum Python Version**: 3.10
 - **Minimum Node Version**: 16.0
 
 ---

@@ -327,6 +327,9 @@ The PowerBIAnalysisTool requires a Databricks job for executing the analysis pip
 
 ```bash
 # Upload the notebook to Databricks
+# Please note that the security features were implemented
+# But for the notebook to work you need to be precise with
+# pre-requisites (Key-Vault setup) and PBI SVP setting (ask respective admins)
 databricks workspace import \
     examples/powerbi_full_pipeline.ipynb \
     /Workspace/Shared/powerbi_full_pipeline \
@@ -906,40 +909,23 @@ powerbi_config = {
 }
 ```
 
-**Note**: No secrets in job parameters! All retrieved from Key Vault.
+**Set environment variables** in Databricks job cluster configuration:
+
+```json
+{
+  "spark_env_vars": {
+    "POWERBI_CLIENT_SECRET": "{{secrets/powerbi-secrets/client-secret}}",
+    "POWERBI_USERNAME": "{{secrets/powerbi-secrets/username}}",
+    "POWERBI_PASSWORD": "{{secrets/powerbi-secrets/password}}"
+  }
+}
+```
+
+**Note**: No secrets in job parameters - just their names! All retrieved from Key Vault.
 
 ---
 
-#### Option 2: Databricks Secrets (Recommended for Multi-Cloud)
-
-**Setup Databricks Secrets:**
-
-```bash
-# Create secret scope
-databricks secrets create-scope --scope powerbi-secrets
-
-# Add secrets
-databricks secrets put --scope powerbi-secrets --key client-secret
-databricks secrets put --scope powerbi-secrets --key username
-databricks secrets put --scope powerbi-secrets --key password
-databricks secrets put --scope powerbi-secrets --key databricks-token
-```
-
-**Notebook Code:**
-
-```python
-# Retrieve secrets from Databricks secret scope
-client_secret = dbutils.secrets.get(scope="powerbi-secrets", key="client-secret")
-username = dbutils.secrets.get(scope="powerbi-secrets", key="username")
-password = dbutils.secrets.get(scope="powerbi-secrets", key="password")
-databricks_token = dbutils.secrets.get(scope="powerbi-secrets", key="databricks-token")
-
-# No secrets in widgets or parameters
-```
-
----
-
-#### Option 3: Environment Variables (Development Only)
+#### Option 2: Environment Variables (Development Only)
 
 **For local development**, use environment variables:
 
@@ -964,232 +950,3 @@ databricks_token = os.getenv("DATABRICKS_TOKEN")
   }
 }
 ```
-
----
-
-#### Security Benefits
-
-**Why This Approach is More Secure:**
-
-1. **No Credentials in Logs**:
-   - Job parameters logged in Databricks job history
-   - Secret values never appear in logs
-   - Only secret names/references visible
-
-2. **Centralized Secret Management**:
-   - Single source of truth for all secrets
-   - Consistent access control policies
-   - Easier audit and compliance
-
-3. **Secret Rotation Without Code Changes**:
-   - Update secret in Key Vault
-   - No need to update job parameters
-   - No application redeployment required
-
-4. **Audit Trail**:
-   - Key Vault logs all secret access
-   - Track who/what accessed secrets and when
-   - Compliance reporting built-in
-
-5. **Principle of Least Privilege**:
-   - Grant secret access only to specific jobs/clusters
-   - Scope-based access control
-   - Temporary access tokens
-
----
-
-#### Migration from Direct Credentials
-
-**Current Approach** (Less Secure):
-
-```python
-# Job parameters include secrets
-{
-  "client_secret": "xxxx-YOUR-SECRET-HERE-xxxx",  # ❌ INSECURE - Never do this!
-  "password": "YourPassword123"                    # ❌ INSECURE - Never do this!
-}
-```
-
-**Secure Approach** (Recommended):
-
-```python
-# Job parameters reference secret names only
-{
-  "secret_scope": "azure-key-vault",           # ✅ SECURE
-  "client_secret_key": "powerbi-client-secret" # ✅ SECURE
-}
-
-# In notebook
-client_secret = dbutils.secrets.get(
-    scope=dbutils.widgets.get("secret_scope"),
-    key=dbutils.widgets.get("client_secret_key")
-)
-```
-
----
-
-#### Implementation Checklist
-
-**For Production Deployment:**
-
-- [ ] Create Azure Key Vault or Databricks secret scope
-- [ ] Migrate all credentials to Key Vault
-- [ ] Update notebook to retrieve secrets via `dbutils.secrets.get()`
-- [ ] Remove credentials from job parameters
-- [ ] Grant Key Vault access to Databricks workspace
-- [ ] Test secret retrieval in notebook
-- [ ] Verify credentials not visible in job logs
-- [ ] Set up Key Vault access audit logging
-- [ ] Document secret rotation procedures
-- [ ] Configure alerts for unauthorized access attempts
-
----
-
-#### Example: Secure Notebook Implementation
-
-```python
-# Power BI Analysis Notebook - Secure Implementation
-
-import os
-from azure.identity import ClientSecretCredential
-
-# Widget parameters (non-sensitive)
-question = dbutils.widgets.get("question")
-semantic_model_id = dbutils.widgets.get("semantic_model_id")
-workspace_id = dbutils.widgets.get("workspace_id")
-tenant_id = dbutils.widgets.get("tenant_id")
-client_id = dbutils.widgets.get("client_id")
-auth_method = dbutils.widgets.get("auth_method")
-
-# Retrieve secrets from Key Vault (secure)
-secret_scope = "azure-key-vault"  # or from widget parameter
-client_secret = dbutils.secrets.get(scope=secret_scope, key="powerbi-client-secret")
-username = dbutils.secrets.get(scope=secret_scope, key="powerbi-username")
-password = dbutils.secrets.get(scope=secret_scope, key="powerbi-password")
-databricks_token = dbutils.secrets.get(scope=secret_scope, key="databricks-token")
-
-# Authenticate based on method
-if auth_method == "service_principal":
-    credential = ClientSecretCredential(
-        tenant_id=tenant_id,
-        client_id=client_id,
-        client_secret=client_secret  # From Key Vault
-    )
-elif auth_method == "device_code":
-    # Use username/password from Key Vault
-    credential = authenticate_device_code(username, password)
-
-# Execute Power BI analysis
-result = execute_powerbi_query(
-    question=question,
-    semantic_model_id=semantic_model_id,
-    workspace_id=workspace_id,
-    credential=credential
-)
-
-print(result)
-```
-
-**Job Parameters** (All Non-Sensitive):
-
-```json
-{
-  "question": "What is the total revenue for Q4 2024?",
-  "semantic_model_id": "a17de62e-8dc0-4a8a-acaa-2a9954de8c75",
-  "workspace_id": "bcb084ed-f8c9-422c-b148-29839c0f9227",
-  "tenant_id": "9f37a392-f0ae-4280-9796-f1864a10effc",
-  "client_id": "7b597aac-de00-44c9-8e2a-3d2c345c36a9",
-  "auth_method": "service_principal"
-}
-```
-
-**Note**: Zero credentials in job parameters or logs!
-
----
-
-### Monitoring
-
-1. **Power BI Audit Logs**:
-   - Review regularly for unusual API activity
-   - Set up alerts for failed authentication attempts
-   - Track query patterns and data access
-
-2. **Databricks Job Monitoring**:
-   - Monitor job execution times
-   - Track failure rates and error patterns
-   - Set up alerts for job failures
-
-3. **Application Logging**:
-   - Log all Power BI API calls
-   - Track authentication events
-   - Monitor tool usage patterns
-
-### Production Deployment Checklist
-
-- [ ] Service Principal created with Application permissions
-- [ ] Admin consent granted in Azure AD
-- [ ] Service Principal enabled in Power BI Admin Portal
-- [ ] Workspace access granted to Service Principal
-- [ ] API Keys configured in Kasal
-- [ ] Databricks job created and tested
-- [ ] Tool enabled and configured
-- [ ] End-to-end testing completed
-- [ ] Monitoring and alerts configured
-- [ ] Credential rotation policy established
-
----
-
-## Appendix
-
-### Email Template for Azure Admin
-
-Use this template when requesting Azure admin assistance:
-
-```
-Subject: Azure AD Admin Consent Required for Power BI Service Principal
-
-Hi [Admin Name],
-
-I need admin consent for a Service Principal to enable automated Power BI data access for our Kasal AI platform.
-
-**Service Principal Details:**
-- Name: Kasal-PowerBI-Connector
-- App ID: [Your Application ID]
-- Requested Permission: Power BI Service → Dataset.Read.All (Application)
-
-**Steps Required:**
-1. Go to Azure Portal → Azure AD → App registrations → Kasal-PowerBI-Connector
-2. Go to "API permissions"
-3. Remove any Delegated Dataset.Read.All permission
-4. Add Application permission: Power BI Service → Dataset.Read.All (Application, not Delegated)
-5. Click "Grant admin consent for [Organization]"
-
-**Additionally:**
-- Enable Service Principal in Power BI Admin Portal under "Developer settings"
-- Allow service principals to use Power BI APIs
-
-**Test Plan:**
-After setup, I will test by running the Kasal app: [Your App URL]
-
-Let me know if you have any questions!
-
-Best regards,
-[Your Name]
-```
-
----
-
-## References
-
-- **Power BI REST API**: https://learn.microsoft.com/en-us/rest/api/power-bi/
-- **DAX Query Language**: https://learn.microsoft.com/en-us/dax/
-- **Azure Identity SDK**: https://learn.microsoft.com/en-us/python/api/overview/azure/identity-readme
-- **Databricks Jobs API**: https://docs.databricks.com/dev-tools/api/latest/jobs.html
-- **CrewAI Documentation**: https://docs.crewai.com/
-- **Kasal API Documentation**: [api_endpoints.md](api_endpoints.md)
-
----
-
-**Document Version**: 2.0
-**Last Updated**: 2025-12-04
-**Maintained By**: Kasal Development Team
