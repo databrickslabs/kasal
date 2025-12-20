@@ -555,15 +555,15 @@ Please analyze this message and provide your intent classification, considering 
                                 "messages": messages,
                                 "temperature": 0.3
                             })
-                        response = await litellm.acompletion(**completion_params)
+                        response = await LLMManager.acompletion(**completion_params)
                         if hasattr(intent_span, 'set_outputs'):
                             intent_span.set_outputs({
                                 "response": response["choices"][0]["message"]["content"][:500]  # Truncate for brevity
                             })
                 else:
-                    response = await litellm.acompletion(**completion_params)
+                    response = await LLMManager.acompletion(**completion_params)
             except ImportError:
-                response = await litellm.acompletion(**completion_params)
+                response = await LLMManager.acompletion(**completion_params)
 
             # Extract content - handle both dict and ModelResponse objects
             # litellm 1.75.8 returns ModelResponse (Pydantic) objects
