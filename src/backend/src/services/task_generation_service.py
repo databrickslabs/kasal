@@ -196,8 +196,8 @@ class TaskGenerationService:
             # Configure litellm using the LLMManager
             model_params = await LLMManager.configure_litellm(model)
             
-            # Generate completion with litellm directly
-            response = await litellm.acompletion(
+            # Generate completion with LLMManager wrapper (handles GPT-5/deep research models)
+            response = await LLMManager.acompletion(
                 **model_params,
                 messages=messages,
                 temperature=0.2 if fast_planning else 0.7,

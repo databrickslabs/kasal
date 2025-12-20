@@ -117,8 +117,8 @@ Tasks:
             # We set max_tokens=100 to safely accommodate both reasoning and completion tokens,
             # ensuring we can generate a full 2-4 word name without hitting token limits.
             # For models without reasoning tokens, we'll truncate to ensure concise names.
-            import litellm
-            response = await litellm.acompletion(
+            # Use LLMManager wrapper (handles GPT-5/deep research models)
+            response = await LLMManager.acompletion(
                 **model_params,
                 messages=messages,
                 temperature=0.7,
