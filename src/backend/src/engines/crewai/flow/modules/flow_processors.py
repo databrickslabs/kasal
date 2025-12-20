@@ -91,22 +91,24 @@ class FlowProcessorManager:
                 crew_task_objects = []
 
                 for task_idx, task_id in enumerate(task_ids):
-                    task_data = await task_repo.get(task_id)
-                    if not task_data:
-                        logger.warning(f"Task {task_id} not found, skipping")
-                        continue
+                    task_data = await task_repo.get(task_id) if task_repo else None
 
-                    # Get agent_id - prioritize crew structure as source of truth
+                    # Variables for embedded node data fallback
+                    task_node_data = None
+                    agent_node_data = None
                     agent_id = None
 
-                    # Try to get agent from crew structure (nodes/edges)
+                    # Always scan crew structure for task/agent data (needed for both DB and embedded cases)
                     if crew_data.nodes:
                         for node in crew_data.nodes:
                             node_id = node.get('id', '')
                             node_uuid = node_id.split('-', 1)[1] if '-' in node_id else node_id
 
                             if node.get('type') == 'taskNode' and node_uuid == str(task_id):
-                                # Found the task node, now find the agent connected to it
+                                # Found the task node - save its data for fallback
+                                task_node_data = node.get('data', {})
+
+                                # Find the agent connected to this task
                                 if crew_data.edges:
                                     for edge in crew_data.edges:
                                         if edge.get('target') == node.get('id'):
@@ -118,15 +120,46 @@ class FlowProcessorManager:
                                                     agent_id = agent_full_id.split('-', 1)[1] if '-' in agent_full_id else agent_full_id
                                                     if not agent_id:
                                                         agent_id = agent_node.get('data', {}).get('id') or agent_node.get('data', {}).get('agentId')
+                                                    # Save agent node data for fallback
+                                                    agent_node_data = agent_node.get('data', {})
                                                     logger.info(f"  Resolved agent {agent_id} from crew structure for task {task_id}")
                                                     break
                                             if agent_id:
                                                 break
                                 break
 
+                    # If task not in DB, try to create from embedded node data
+                    if not task_data:
+                        if task_node_data:
+                            logger.info(f"Task {task_id} not in database, using embedded node data from crew")
+                            # Create a mock task data object from node data
+                            from types import SimpleNamespace
+                            task_data = SimpleNamespace(
+                                id=task_id,
+                                name=task_node_data.get('label', f'Task {task_id}'),
+                                description=task_node_data.get('description', ''),
+                                expected_output=task_node_data.get('expected_output', ''),
+                                agent_id=agent_id,
+                                tools=task_node_data.get('tools', []),
+                                tool_configs=task_node_data.get('tool_configs', {}),
+                                async_execution=task_node_data.get('async_execution', False),
+                                context=task_node_data.get('context', []),
+                                config=task_node_data.get('config', {}),
+                                memory=task_node_data.get('memory', False),
+                                markdown=task_node_data.get('markdown', False),
+                                output_file=task_node_data.get('config', {}).get('output_file'),
+                                output_json=task_node_data.get('config', {}).get('output_json'),
+                                output_pydantic=task_node_data.get('config', {}).get('output_pydantic'),
+                                human_input=task_node_data.get('config', {}).get('human_input', False),
+                                converter_cls=None
+                            )
+                        else:
+                            logger.warning(f"Task {task_id} not found in database or crew nodes, skipping")
+                            continue
+
                     # Fallback to task.agent_id if crew structure lookup failed
                     if not agent_id:
-                        agent_id = task_data.agent_id
+                        agent_id = getattr(task_data, 'agent_id', None)
                         if agent_id:
                             logger.info(f"  Using agent {agent_id} from task.agent_id for task {task_id}")
                         else:
@@ -139,60 +172,98 @@ class FlowProcessorManager:
 
                     # Build the CrewAI Task object with agent
                     agent_repo = repositories.get('agent') if repositories else None
-                    if agent_repo:
-                        agent_data = await agent_repo.get(agent_id)
-                        if agent_data:
-                            # Merge tool_configs: task-level takes priority over crew-level
-                            # MCP servers are typically configured at the task level
-                            effective_tool_configs = {}
-                            if crew_data and hasattr(crew_data, 'tool_configs') and crew_data.tool_configs:
-                                if isinstance(crew_data.tool_configs, dict):
-                                    effective_tool_configs.update(crew_data.tool_configs)
-                            if hasattr(task_data, 'tool_configs') and task_data.tool_configs:
-                                if isinstance(task_data.tool_configs, dict):
-                                    effective_tool_configs.update(task_data.tool_configs)
+                    agent_data = await agent_repo.get(agent_id) if agent_repo else None
 
-                            logger.info(f"Task {task_id} effective tool_configs: {effective_tool_configs}")
+                    # If agent not in DB, try to create from embedded node data
+                    if not agent_data and agent_node_data:
+                        logger.info(f"Agent {agent_id} not in database, using embedded node data from crew")
+                        from types import SimpleNamespace
+                        # Helper to handle None values with defaults
+                        def _get_val(d, key, default):
+                            val = d.get(key)
+                            return default if val is None else val
 
-                            # Build CrewAI Agent object using configure_agent_and_tools
-                            agent_obj = await AgentConfig.configure_agent_and_tools(
-                                agent_data=agent_data,
-                                flow_data=flow_config,
-                                repositories=repositories,
-                                group_context=group_context,
-                                crew_tool_configs=effective_tool_configs if effective_tool_configs else None
-                            )
+                        agent_data = SimpleNamespace(
+                            id=agent_id,
+                            name=agent_node_data.get('label', f'Agent {agent_id}'),
+                            role=agent_node_data.get('role', ''),
+                            goal=agent_node_data.get('goal', ''),
+                            backstory=agent_node_data.get('backstory', ''),
+                            llm=agent_node_data.get('llm'),
+                            function_calling_llm=agent_node_data.get('function_calling_llm'),
+                            tools=agent_node_data.get('tools') or [],
+                            tool_configs=agent_node_data.get('tool_configs') or {},
+                            max_iter=agent_node_data.get('max_iter'),
+                            max_rpm=agent_node_data.get('max_rpm'),
+                            max_execution_time=agent_node_data.get('max_execution_time'),
+                            verbose=_get_val(agent_node_data, 'verbose', True),
+                            allow_delegation=_get_val(agent_node_data, 'allow_delegation', False),
+                            cache=_get_val(agent_node_data, 'cache', True),
+                            memory=_get_val(agent_node_data, 'memory', False),
+                            embedder_config=agent_node_data.get('embedder_config'),
+                            system_template=agent_node_data.get('system_template'),
+                            prompt_template=agent_node_data.get('prompt_template'),
+                            response_template=agent_node_data.get('response_template'),
+                            allow_code_execution=_get_val(agent_node_data, 'allow_code_execution', False),
+                            code_execution_mode=agent_node_data.get('code_execution_mode'),
+                            max_retry_limit=_get_val(agent_node_data, 'max_retry_limit', 2),
+                            use_system_prompt=_get_val(agent_node_data, 'use_system_prompt', True),
+                            respect_context_window=_get_val(agent_node_data, 'respect_context_window', True),
+                            knowledge_sources=agent_node_data.get('knowledge_sources'),
+                            reasoning_mode=agent_node_data.get('reasoning_mode'),
+                            reasoning_config=agent_node_data.get('reasoning_config')
+                        )
 
-                            # Build CrewAI Task object with the agent using configure_task
-                            task_obj = await TaskConfig.configure_task(
-                                task_data=task_data,
-                                agent=agent_obj,
-                                task_output_callback=callbacks.get('task_callback') if callbacks else None,
-                                flow_data=flow_config,
-                                repositories=repositories,
-                                group_context=group_context
-                            )
+                    if agent_data:
+                        # Merge tool_configs: task-level takes priority over crew-level
+                        # MCP servers are typically configured at the task level
+                        effective_tool_configs = {}
+                        if crew_data and hasattr(crew_data, 'tool_configs') and crew_data.tool_configs:
+                            if isinstance(crew_data.tool_configs, dict):
+                                effective_tool_configs.update(crew_data.tool_configs)
+                        if hasattr(task_data, 'tool_configs') and task_data.tool_configs:
+                            if isinstance(task_data.tool_configs, dict):
+                                effective_tool_configs.update(task_data.tool_configs)
 
-                            # Set up task.context for sequential dependencies
-                            # Only set context if task is NOT marked for async execution
-                            is_async = getattr(task_data, 'async_execution', False)
+                        logger.info(f"Task {task_id} effective tool_configs: {effective_tool_configs}")
 
-                            if is_async:
-                                # Parallel execution - don't set context
-                                logger.info(f"Task {task_id} marked for async execution (will run in parallel)")
-                            elif task_idx > 0 and len(crew_task_objects) > 0:
-                                # Sequential execution - set context to wait for previous task
-                                task_obj.context = [crew_task_objects[-1]]  # Wait for previous task
-                                logger.info(f"Task {task_id} will wait for previous task {task_ids[task_idx-1]} (sequential)")
+                        # Build CrewAI Agent object using configure_agent_and_tools
+                        agent_obj = await AgentConfig.configure_agent_and_tools(
+                            agent_data=agent_data,
+                            flow_data=flow_config,
+                            repositories=repositories,
+                            group_context=group_context,
+                            crew_tool_configs=effective_tool_configs if effective_tool_configs else None
+                        )
 
-                            # Store the actual task object by task_id
-                            all_tasks[str(task_id)] = task_obj
-                            crew_task_objects.append(task_obj)
-                            logger.info(f"Added task {task_id} (index {task_idx}) to crew {crew_id}, agent {agent_id}")
-                        else:
-                            logger.warning(f"Agent {agent_id} not found for task {task_id}")
+                        # Build CrewAI Task object with the agent using configure_task
+                        task_obj = await TaskConfig.configure_task(
+                            task_data=task_data,
+                            agent=agent_obj,
+                            task_output_callback=callbacks.get('task_callback') if callbacks else None,
+                            flow_data=flow_config,
+                            repositories=repositories,
+                            group_context=group_context
+                        )
+
+                        # Set up task.context for sequential dependencies
+                        # Only set context if task is NOT marked for async execution
+                        is_async = getattr(task_data, 'async_execution', False)
+
+                        if is_async:
+                            # Parallel execution - don't set context
+                            logger.info(f"Task {task_id} marked for async execution (will run in parallel)")
+                        elif task_idx > 0 and len(crew_task_objects) > 0:
+                            # Sequential execution - set context to wait for previous task
+                            task_obj.context = [crew_task_objects[-1]]  # Wait for previous task
+                            logger.info(f"Task {task_id} will wait for previous task {task_ids[task_idx-1]} (sequential)")
+
+                        # Store the actual task object by task_id
+                        all_tasks[str(task_id)] = task_obj
+                        crew_task_objects.append(task_obj)
+                        logger.info(f"Added task {task_id} (index {task_idx}) to crew {crew_id}, agent {agent_id}")
                     else:
-                        logger.warning(f"No agent repository provided for task {task_id}")
+                        logger.warning(f"Agent {agent_id} not found in database or crew nodes for task {task_id}")
 
                 # CrewAI validation: A crew cannot end with more than one async task
                 # If we have multiple async tasks, auto-create a completion task to enable parallel execution
@@ -358,39 +429,79 @@ class FlowProcessorManager:
 
                 for task_idx, task_id in enumerate(task_ids):
                     task_data = await task_repo.get(task_id)
-                    if not task_data:
-                        logger.warning(f"Task {task_id} not found, skipping")
-                        continue
 
-                    # Get agent_id from crew structure
+                    # Variables for embedded node data fallback
+                    task_node_data = None
+                    agent_node_data = None
                     agent_id = None
+
+                    # Always scan crew structure for task/agent data (needed for both DB and embedded cases)
                     if crew_data.nodes:
                         for node in crew_data.nodes:
                             node_id = node.get('id', '')
                             node_uuid = node_id.split('-', 1)[1] if '-' in node_id else node_id
 
                             if node.get('type') == 'taskNode' and node_uuid == str(task_id):
+                                # Found the task node - save its data for fallback
+                                task_node_data = node.get('data', {})
+
+                                # Find the agent connected to this task
                                 if crew_data.edges:
                                     for edge in crew_data.edges:
                                         if edge.get('target') == node.get('id'):
                                             agent_node_id = edge.get('source')
+                                            # Find the agent node
                                             for agent_node in crew_data.nodes:
                                                 if agent_node.get('id') == agent_node_id and agent_node.get('type') == 'agentNode':
                                                     agent_full_id = agent_node.get('id', '')
                                                     agent_id = agent_full_id.split('-', 1)[1] if '-' in agent_full_id else agent_full_id
                                                     if not agent_id:
                                                         agent_id = agent_node.get('data', {}).get('id') or agent_node.get('data', {}).get('agentId')
+                                                    # Save agent node data for fallback
+                                                    agent_node_data = agent_node.get('data', {})
+                                                    logger.info(f"  Resolved agent {agent_id} from crew structure for listener task {task_id}")
                                                     break
                                             if agent_id:
                                                 break
                                 break
 
-                    # Fallback to task.agent_id
+                    # If task not in DB, try to create from embedded node data
+                    if not task_data:
+                        if task_node_data:
+                            logger.info(f"Listener task {task_id} not in database, using embedded node data from crew")
+                            # Create a mock task data object from node data
+                            from types import SimpleNamespace
+                            task_data = SimpleNamespace(
+                                id=task_id,
+                                name=task_node_data.get('label', f'Task {task_id}'),
+                                description=task_node_data.get('description', ''),
+                                expected_output=task_node_data.get('expected_output', ''),
+                                agent_id=agent_id,
+                                tools=task_node_data.get('tools', []),
+                                tool_configs=task_node_data.get('tool_configs', {}),
+                                async_execution=task_node_data.get('async_execution', False),
+                                context=task_node_data.get('context', []),
+                                config=task_node_data.get('config', {}),
+                                memory=task_node_data.get('memory', False),
+                                markdown=task_node_data.get('markdown', False),
+                                output_file=task_node_data.get('config', {}).get('output_file'),
+                                output_json=task_node_data.get('config', {}).get('output_json'),
+                                output_pydantic=task_node_data.get('config', {}).get('output_pydantic'),
+                                human_input=task_node_data.get('config', {}).get('human_input', False),
+                                converter_cls=None
+                            )
+                        else:
+                            logger.warning(f"Listener task {task_id} not found in database or crew nodes, skipping")
+                            continue
+
+                    # Fallback to task.agent_id if crew structure lookup failed
                     if not agent_id:
-                        agent_id = task_data.agent_id
+                        agent_id = getattr(task_data, 'agent_id', None)
+                        if agent_id:
+                            logger.info(f"  Using agent {agent_id} from task.agent_id for listener task {task_id}")
 
                     if not agent_id:
-                        logger.warning(f"Could not resolve agent for task {task_id}")
+                        logger.warning(f"Could not resolve agent for listener task {task_id}")
                         continue
 
                     # Build CrewAI Task and Agent objects
@@ -398,59 +509,97 @@ class FlowProcessorManager:
                     from src.engines.crewai.flow.modules.agent_config import AgentConfig
 
                     agent_repo = repositories.get('agent') if repositories else None
-                    if agent_repo:
-                        agent_data = await agent_repo.get(agent_id)
-                        if agent_data:
-                            # Merge tool_configs: task-level takes priority over crew-level
-                            # MCP servers are typically configured at the task level
-                            effective_tool_configs = {}
-                            if crew_data and hasattr(crew_data, 'tool_configs') and crew_data.tool_configs:
-                                if isinstance(crew_data.tool_configs, dict):
-                                    effective_tool_configs.update(crew_data.tool_configs)
-                            if hasattr(task_data, 'tool_configs') and task_data.tool_configs:
-                                if isinstance(task_data.tool_configs, dict):
-                                    effective_tool_configs.update(task_data.tool_configs)
+                    agent_data = await agent_repo.get(agent_id) if agent_repo else None
 
-                            logger.info(f"Listener task {task_id} effective tool_configs: {effective_tool_configs}")
+                    # If agent not in DB, try to create from embedded node data
+                    if not agent_data and agent_node_data:
+                        logger.info(f"Listener agent {agent_id} not in database, using embedded node data from crew")
+                        from types import SimpleNamespace
+                        # Helper to handle None values with defaults
+                        def _get_val(d, key, default):
+                            val = d.get(key)
+                            return default if val is None else val
 
-                            # Build CrewAI Agent object
-                            agent_obj = await AgentConfig.configure_agent_and_tools(
-                                agent_data=agent_data,
-                                flow_data=flow_config,
-                                repositories=repositories,
-                                group_context=group_context,
-                                crew_tool_configs=effective_tool_configs if effective_tool_configs else None
-                            )
+                        agent_data = SimpleNamespace(
+                            id=agent_id,
+                            name=agent_node_data.get('label', f'Agent {agent_id}'),
+                            role=agent_node_data.get('role', ''),
+                            goal=agent_node_data.get('goal', ''),
+                            backstory=agent_node_data.get('backstory', ''),
+                            llm=agent_node_data.get('llm'),
+                            function_calling_llm=agent_node_data.get('function_calling_llm'),
+                            tools=agent_node_data.get('tools') or [],
+                            tool_configs=agent_node_data.get('tool_configs') or {},
+                            max_iter=agent_node_data.get('max_iter'),
+                            max_rpm=agent_node_data.get('max_rpm'),
+                            max_execution_time=agent_node_data.get('max_execution_time'),
+                            verbose=_get_val(agent_node_data, 'verbose', True),
+                            allow_delegation=_get_val(agent_node_data, 'allow_delegation', False),
+                            cache=_get_val(agent_node_data, 'cache', True),
+                            memory=_get_val(agent_node_data, 'memory', False),
+                            embedder_config=agent_node_data.get('embedder_config'),
+                            system_template=agent_node_data.get('system_template'),
+                            prompt_template=agent_node_data.get('prompt_template'),
+                            response_template=agent_node_data.get('response_template'),
+                            allow_code_execution=_get_val(agent_node_data, 'allow_code_execution', False),
+                            code_execution_mode=agent_node_data.get('code_execution_mode'),
+                            max_retry_limit=_get_val(agent_node_data, 'max_retry_limit', 2),
+                            use_system_prompt=_get_val(agent_node_data, 'use_system_prompt', True),
+                            respect_context_window=_get_val(agent_node_data, 'respect_context_window', True),
+                            knowledge_sources=agent_node_data.get('knowledge_sources'),
+                            reasoning_mode=agent_node_data.get('reasoning_mode'),
+                            reasoning_config=agent_node_data.get('reasoning_config')
+                        )
 
-                            # Build CrewAI Task object with the agent
-                            task_obj = await TaskConfig.configure_task(
-                                task_data=task_data,
-                                agent=agent_obj,
-                                task_output_callback=callbacks.get('task_callback') if callbacks else None,
-                                flow_data=flow_config,
-                                repositories=repositories,
-                                group_context=group_context
-                            )
+                    if agent_data:
+                        # Merge tool_configs: task-level takes priority over crew-level
+                        # MCP servers are typically configured at the task level
+                        effective_tool_configs = {}
+                        if crew_data and hasattr(crew_data, 'tool_configs') and crew_data.tool_configs:
+                            if isinstance(crew_data.tool_configs, dict):
+                                effective_tool_configs.update(crew_data.tool_configs)
+                        if hasattr(task_data, 'tool_configs') and task_data.tool_configs:
+                            if isinstance(task_data.tool_configs, dict):
+                                effective_tool_configs.update(task_data.tool_configs)
 
-                            # Set up task.context for sequential dependencies within crew
-                            # Only set context if task is NOT marked for async execution
-                            is_async = getattr(task_data, 'async_execution', False)
+                        logger.info(f"Listener task {task_id} effective tool_configs: {effective_tool_configs}")
 
-                            if is_async:
-                                logger.info(f"  Task {task_id} marked for async execution (parallel)")
-                            elif task_idx > 0 and len(crew_task_objects) > 0:
-                                # Sequential execution - set context to wait for previous task
-                                task_obj.context = [crew_task_objects[-1]]
-                                logger.info(f"  Task {task_id} will wait for previous task (sequential via task.context)")
+                        # Build CrewAI Agent object
+                        agent_obj = await AgentConfig.configure_agent_and_tools(
+                            agent_data=agent_data,
+                            flow_data=flow_config,
+                            repositories=repositories,
+                            group_context=group_context,
+                            crew_tool_configs=effective_tool_configs if effective_tool_configs else None
+                        )
 
-                            # Store the task object
-                            all_tasks[str(task_id)] = task_obj
-                            crew_task_objects.append(task_obj)
-                            logger.info(f"  Added task {task_id} (index {task_idx}) to listener crew")
-                        else:
-                            logger.warning(f"Agent {agent_id} not found for listener task {task_id}")
+                        # Build CrewAI Task object with the agent
+                        task_obj = await TaskConfig.configure_task(
+                            task_data=task_data,
+                            agent=agent_obj,
+                            task_output_callback=callbacks.get('task_callback') if callbacks else None,
+                            flow_data=flow_config,
+                            repositories=repositories,
+                            group_context=group_context
+                        )
+
+                        # Set up task.context for sequential dependencies within crew
+                        # Only set context if task is NOT marked for async execution
+                        is_async = getattr(task_data, 'async_execution', False)
+
+                        if is_async:
+                            logger.info(f"  Task {task_id} marked for async execution (parallel)")
+                        elif task_idx > 0 and len(crew_task_objects) > 0:
+                            # Sequential execution - set context to wait for previous task
+                            task_obj.context = [crew_task_objects[-1]]
+                            logger.info(f"  Task {task_id} will wait for previous task (sequential via task.context)")
+
+                        # Store the task object
+                        all_tasks[str(task_id)] = task_obj
+                        crew_task_objects.append(task_obj)
+                        logger.info(f"  Added task {task_id} (index {task_idx}) to listener crew")
                     else:
-                        logger.warning(f"No agent repository for listener task {task_id}")
+                        logger.warning(f"Agent {agent_id} not found in database or crew nodes for listener task {task_id}")
 
                 # If we successfully built tasks for this listener crew, add it
                 if crew_task_objects:
@@ -559,39 +708,79 @@ class FlowProcessorManager:
                             continue
 
                         task_data = await task_repo.get(task_id)
-                        if not task_data:
-                            logger.warning(f"Task {task_id} not found for route {route_name}")
-                            continue
 
-                        # Get agent_id from crew structure
+                        # Variables for embedded node data fallback
+                        task_node_data = None
+                        agent_node_data = None
                         agent_id = None
+
+                        # Always scan crew structure for task/agent data (needed for both DB and embedded cases)
                         if crew_data.nodes:
                             for node in crew_data.nodes:
                                 node_id = node.get('id', '')
                                 node_uuid = node_id.split('-', 1)[1] if '-' in node_id else node_id
 
                                 if node.get('type') == 'taskNode' and node_uuid == str(task_id):
+                                    # Found the task node - save its data for fallback
+                                    task_node_data = node.get('data', {})
+
+                                    # Find the agent connected to this task
                                     if crew_data.edges:
                                         for edge in crew_data.edges:
                                             if edge.get('target') == node.get('id'):
                                                 agent_node_id = edge.get('source')
+                                                # Find the agent node
                                                 for agent_node in crew_data.nodes:
                                                     if agent_node.get('id') == agent_node_id and agent_node.get('type') == 'agentNode':
                                                         agent_full_id = agent_node.get('id', '')
                                                         agent_id = agent_full_id.split('-', 1)[1] if '-' in agent_full_id else agent_full_id
                                                         if not agent_id:
                                                             agent_id = agent_node.get('data', {}).get('id') or agent_node.get('data', {}).get('agentId')
+                                                        # Save agent node data for fallback
+                                                        agent_node_data = agent_node.get('data', {})
+                                                        logger.info(f"  Resolved agent {agent_id} from crew structure for router task {task_id}")
                                                         break
                                                 if agent_id:
                                                     break
                                     break
 
-                        # Fallback to task.agent_id
+                        # If task not in DB, try to create from embedded node data
+                        if not task_data:
+                            if task_node_data:
+                                logger.info(f"Router task {task_id} not in database, using embedded node data from crew")
+                                # Create a mock task data object from node data
+                                from types import SimpleNamespace
+                                task_data = SimpleNamespace(
+                                    id=task_id,
+                                    name=task_node_data.get('label', f'Task {task_id}'),
+                                    description=task_node_data.get('description', ''),
+                                    expected_output=task_node_data.get('expected_output', ''),
+                                    agent_id=agent_id,
+                                    tools=task_node_data.get('tools', []),
+                                    tool_configs=task_node_data.get('tool_configs', {}),
+                                    async_execution=task_node_data.get('async_execution', False),
+                                    context=task_node_data.get('context', []),
+                                    config=task_node_data.get('config', {}),
+                                    memory=task_node_data.get('memory', False),
+                                    markdown=task_node_data.get('markdown', False),
+                                    output_file=task_node_data.get('config', {}).get('output_file'),
+                                    output_json=task_node_data.get('config', {}).get('output_json'),
+                                    output_pydantic=task_node_data.get('config', {}).get('output_pydantic'),
+                                    human_input=task_node_data.get('config', {}).get('human_input', False),
+                                    converter_cls=None
+                                )
+                            else:
+                                logger.warning(f"Router task {task_id} not found in database or crew nodes for route {route_name}")
+                                continue
+
+                        # Fallback to task.agent_id if crew structure lookup failed
                         if not agent_id:
-                            agent_id = task_data.agent_id
+                            agent_id = getattr(task_data, 'agent_id', None)
+                            if agent_id:
+                                logger.info(f"  Using agent {agent_id} from task.agent_id for router task {task_id}")
 
                         if not agent_id:
-                            logger.warning(f"Could not resolve agent for task {task_id}")
+                            logger.warning(f"Could not resolve agent for router task {task_id}")
                             continue
 
                         # Build CrewAI Task and Agent objects
@@ -599,47 +788,86 @@ class FlowProcessorManager:
                         from src.engines.crewai.flow.modules.agent_config import AgentConfig
 
                         agent_repo = repositories.get('agent') if repositories else None
-                        if agent_repo:
-                            agent_data = await agent_repo.get(agent_id)
-                            if agent_data:
-                                # Merge tool_configs: task-level takes priority over crew-level
-                                # MCP servers are typically configured at the task level
-                                effective_tool_configs = {}
-                                if crew_data and hasattr(crew_data, 'tool_configs') and crew_data.tool_configs:
-                                    if isinstance(crew_data.tool_configs, dict):
-                                        effective_tool_configs.update(crew_data.tool_configs)
-                                if hasattr(task_data, 'tool_configs') and task_data.tool_configs:
-                                    if isinstance(task_data.tool_configs, dict):
-                                        effective_tool_configs.update(task_data.tool_configs)
+                        agent_data = await agent_repo.get(agent_id) if agent_repo else None
 
-                                logger.info(f"Router task {task_id} effective tool_configs: {effective_tool_configs}")
+                        # If agent not in DB, try to create from embedded node data
+                        if not agent_data and agent_node_data:
+                            logger.info(f"Router agent {agent_id} not in database, using embedded node data from crew")
+                            from types import SimpleNamespace
 
-                                # Build CrewAI Agent object using configure_agent_and_tools
-                                agent_obj = await AgentConfig.configure_agent_and_tools(
-                                    agent_data=agent_data,
-                                    flow_data=flow_config,
-                                    repositories=repositories,
-                                    group_context=group_context,
-                                    crew_tool_configs=effective_tool_configs if effective_tool_configs else None
-                                )
+                            # Helper to handle None values with defaults
+                            def _get_val(d, key, default):
+                                val = d.get(key)
+                                return default if val is None else val
 
-                                # Build CrewAI Task object with the agent using configure_task
-                                task_obj = await TaskConfig.configure_task(
-                                    task_data=task_data,
-                                    agent=agent_obj,
-                                    task_output_callback=callbacks.get('task_callback') if callbacks else None,
-                                    flow_data=flow_config,
-                                    repositories=repositories,
-                                    group_context=group_context
-                                )
+                            agent_data = SimpleNamespace(
+                                id=agent_id,
+                                name=agent_node_data.get('label', f'Agent {agent_id}'),
+                                role=agent_node_data.get('role', ''),
+                                goal=agent_node_data.get('goal', ''),
+                                backstory=agent_node_data.get('backstory', ''),
+                                llm=agent_node_data.get('llm'),
+                                function_calling_llm=agent_node_data.get('function_calling_llm'),
+                                tools=agent_node_data.get('tools') or [],
+                                tool_configs=agent_node_data.get('tool_configs') or {},
+                                max_iter=agent_node_data.get('max_iter'),
+                                max_rpm=agent_node_data.get('max_rpm'),
+                                max_execution_time=agent_node_data.get('max_execution_time'),
+                                verbose=_get_val(agent_node_data, 'verbose', True),
+                                allow_delegation=_get_val(agent_node_data, 'allow_delegation', False),
+                                cache=_get_val(agent_node_data, 'cache', True),
+                                memory=_get_val(agent_node_data, 'memory', False),
+                                embedder_config=agent_node_data.get('embedder_config'),
+                                system_template=agent_node_data.get('system_template'),
+                                prompt_template=agent_node_data.get('prompt_template'),
+                                response_template=agent_node_data.get('response_template'),
+                                allow_code_execution=_get_val(agent_node_data, 'allow_code_execution', False),
+                                code_execution_mode=agent_node_data.get('code_execution_mode'),
+                                max_retry_limit=_get_val(agent_node_data, 'max_retry_limit', 2),
+                                use_system_prompt=_get_val(agent_node_data, 'use_system_prompt', True),
+                                respect_context_window=_get_val(agent_node_data, 'respect_context_window', True),
+                                knowledge_sources=agent_node_data.get('knowledge_sources'),
+                                reasoning_mode=agent_node_data.get('reasoning_mode'),
+                                reasoning_config=agent_node_data.get('reasoning_config')
+                            )
 
-                                # Store the actual task object by task_id
-                                all_tasks[str(task_id)] = task_obj
-                                route_tasks.append(task_obj)
-                            else:
-                                logger.warning(f"Agent {agent_id} not found for route task {task_id}")
+                        if agent_data:
+                            # Merge tool_configs: task-level takes priority over crew-level
+                            # MCP servers are typically configured at the task level
+                            effective_tool_configs = {}
+                            if crew_data and hasattr(crew_data, 'tool_configs') and crew_data.tool_configs:
+                                if isinstance(crew_data.tool_configs, dict):
+                                    effective_tool_configs.update(crew_data.tool_configs)
+                            if hasattr(task_data, 'tool_configs') and task_data.tool_configs:
+                                if isinstance(task_data.tool_configs, dict):
+                                    effective_tool_configs.update(task_data.tool_configs)
+
+                            logger.info(f"Router task {task_id} effective tool_configs: {effective_tool_configs}")
+
+                            # Build CrewAI Agent object using configure_agent_and_tools
+                            agent_obj = await AgentConfig.configure_agent_and_tools(
+                                agent_data=agent_data,
+                                flow_data=flow_config,
+                                repositories=repositories,
+                                group_context=group_context,
+                                crew_tool_configs=effective_tool_configs if effective_tool_configs else None
+                            )
+
+                            # Build CrewAI Task object with the agent using configure_task
+                            task_obj = await TaskConfig.configure_task(
+                                task_data=task_data,
+                                agent=agent_obj,
+                                task_output_callback=callbacks.get('task_callback') if callbacks else None,
+                                flow_data=flow_config,
+                                repositories=repositories,
+                                group_context=group_context
+                            )
+
+                            # Store the actual task object by task_id
+                            all_tasks[str(task_id)] = task_obj
+                            route_tasks.append(task_obj)
                         else:
-                            logger.warning(f"No agent repository for route task {task_id}")
+                            logger.warning(f"Agent {agent_id} not found in database or crew nodes for router task {task_id}")
 
                     if route_tasks:
                         processed_routes.append({

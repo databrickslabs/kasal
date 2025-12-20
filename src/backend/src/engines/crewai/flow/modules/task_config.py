@@ -175,7 +175,7 @@ class TaskConfig:
             agent_repo = None if repositories is None else repositories.get('agent')
             
             if agent_repo:
-                agent_data = agent_repo.find_by_id(task_data.agent_id)
+                agent_data = await agent_repo.get(task_data.agent_id)
             
             # Fallback to direct database query if repository not available or agent not found
             if not agent_data:
@@ -225,7 +225,7 @@ class TaskConfig:
                         agent_repo = None if repositories is None else repositories.get('agent')
                         
                         if agent_repo:
-                            agent_data = agent_repo.find_by_id(inferred_agent_id)
+                            agent_data = await agent_repo.get(inferred_agent_id)
                         
                         # Fallback to direct database query
                         if not agent_data:
