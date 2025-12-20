@@ -292,68 +292,57 @@ def run_flow_in_process(
             except Exception as e:
                 async_logger.error(f"[FLOW_SUBPROCESS] Failed to initialize UserContext: {e}")
 
-        # Initialize TraceManager and event listeners in subprocess (CRITICAL for execution_logs and execution_trace)
-        try:
-            async_logger.info(f"[FLOW_SUBPROCESS] Initializing TraceManager and event listeners for {execution_id}")
-
-            # Create new event loop for async initialization
-            init_loop = asyncio.new_event_loop()
-            asyncio.set_event_loop(init_loop)
-
-            async def initialize_tracing():
-                try:
-                    from src.engines.crewai.trace_management import TraceManager
-                    from src.engines.crewai.callbacks.logging_callbacks import (
-                        AgentTraceEventListener,
-                        TaskCompletionEventListener
-                    )
-                    from crewai.events import crewai_event_bus
-
-                    # Start trace and logs writers
-                    await TraceManager.ensure_writer_started()
-                    async_logger.info(f"[FLOW_SUBPROCESS] TraceManager writer started for {execution_id}")
-
-                    # Create and register event listeners
-                    # Read debug tracing flag from environment variable
-                    debug_tracing_enabled = os.environ.get('CREWAI_DEBUG_TRACING', 'true').lower() == 'true'
-                    async_logger.info(f"[FLOW_SUBPROCESS] Debug tracing flag from environment: {debug_tracing_enabled}")
-
-                    trace_listener = AgentTraceEventListener(
-                        job_id=execution_id,
-                        group_context=group_context,
-                        debug_tracing=debug_tracing_enabled
-                    )
-                    trace_listener.setup_listeners(crewai_event_bus)
-                    async_logger.info(f"[FLOW_SUBPROCESS] AgentTraceEventListener registered for {execution_id} (debug_tracing={debug_tracing_enabled})")
-
-                    # Log that subprocess mode is enabled for direct DB writes
-                    async_logger.info(f"[FLOW_SUBPROCESS] CREW_SUBPROCESS_MODE={os.environ.get('CREW_SUBPROCESS_MODE')} - Direct DB writes enabled")
-
-                    # Create task completion listener
-                    task_listener = TaskCompletionEventListener(
-                        job_id=execution_id,
-                        group_context=group_context
-                    )
-                    task_listener.setup_listeners(crewai_event_bus)
-                    async_logger.info(f"[FLOW_SUBPROCESS] TaskCompletionEventListener registered for {execution_id}")
-
-                except Exception as listener_error:
-                    async_logger.error(f"[FLOW_SUBPROCESS] Failed to initialize event listeners: {listener_error}", exc_info=True)
-                    raise
-
-            # Run initialization in the init loop
-            init_loop.run_until_complete(initialize_tracing())
-            init_loop.close()
-
-            async_logger.info(f"[FLOW_SUBPROCESS] Successfully initialized tracing and event listeners")
-
-        except Exception as trace_init_error:
-            async_logger.error(f"[FLOW_SUBPROCESS] Failed to initialize TraceManager: {trace_init_error}", exc_info=True)
-            # Continue execution even if trace initialization fails
-
-        # Run the flow execution asynchronously
+        # Run the flow execution asynchronously (with initialization in same loop)
         async def run_async_flow():
-            """Execute the flow in an async context"""
+            """Execute the flow in an async context with TraceManager in same event loop"""
+
+            # Initialize TraceManager and event listeners FIRST (in same loop as execution)
+            # This is CRITICAL - TraceManager must be started in the same loop that will call stop_writer()
+            try:
+                async_logger.info(f"[FLOW_SUBPROCESS] Initializing TraceManager and event listeners for {execution_id}")
+
+                from src.engines.crewai.trace_management import TraceManager
+                from src.engines.crewai.callbacks.logging_callbacks import (
+                    AgentTraceEventListener,
+                    TaskCompletionEventListener
+                )
+                from crewai.events import crewai_event_bus
+
+                # Start trace and logs writers
+                await TraceManager.ensure_writer_started()
+                async_logger.info(f"[FLOW_SUBPROCESS] TraceManager writer started for {execution_id}")
+
+                # Create and register event listeners
+                # Read debug tracing flag from environment variable
+                debug_tracing_enabled = os.environ.get('CREWAI_DEBUG_TRACING', 'true').lower() == 'true'
+                async_logger.info(f"[FLOW_SUBPROCESS] Debug tracing flag from environment: {debug_tracing_enabled}")
+
+                trace_listener = AgentTraceEventListener(
+                    job_id=execution_id,
+                    group_context=group_context,
+                    debug_tracing=debug_tracing_enabled
+                )
+                trace_listener.setup_listeners(crewai_event_bus)
+                async_logger.info(f"[FLOW_SUBPROCESS] AgentTraceEventListener registered for {execution_id} (debug_tracing={debug_tracing_enabled})")
+
+                # Log that subprocess mode is enabled for direct DB writes
+                async_logger.info(f"[FLOW_SUBPROCESS] CREW_SUBPROCESS_MODE={os.environ.get('CREW_SUBPROCESS_MODE')} - Direct DB writes enabled")
+
+                # Create task completion listener
+                task_listener = TaskCompletionEventListener(
+                    job_id=execution_id,
+                    group_context=group_context
+                )
+                task_listener.setup_listeners(crewai_event_bus)
+                async_logger.info(f"[FLOW_SUBPROCESS] TaskCompletionEventListener registered for {execution_id}")
+
+                async_logger.info(f"[FLOW_SUBPROCESS] Successfully initialized tracing and event listeners")
+
+            except Exception as trace_init_error:
+                async_logger.error(f"[FLOW_SUBPROCESS] Failed to initialize TraceManager: {trace_init_error}", exc_info=True)
+                # Continue execution even if trace initialization fails
+
+            # Now run the actual flow execution
             try:
                 from src.db.session import async_session_factory
                 from src.engines.crewai.flow.flow_runner_service import FlowRunnerService
