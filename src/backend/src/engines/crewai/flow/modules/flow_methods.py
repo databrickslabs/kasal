@@ -223,33 +223,52 @@ class FlowMethodFactory:
             # This follows the same pattern as CrewPreparation in regular crew execution
             logger.info(f"Creating Crew instance: {crew_name}")
 
-            # Determine crew memory setting - crew_data takes priority, then agent settings
+            # Determine crew memory setting - check both crew config AND agent settings
             crew_memory = True  # Default
-            if crew_data and hasattr(crew_data, 'memory') and crew_data.memory is not None:
-                crew_memory = crew_data.memory
-                logger.info(f"Using crew memory setting from configuration: {crew_memory}")
-            else:
-                # Check agent memory settings to determine crew memory
-                agents_with_memory_enabled = []
-                agents_with_memory_disabled = []
-                for agent in agents:
-                    agent_role = agent.role if hasattr(agent, 'role') else 'Unknown'
-                    # Check if agent has memory attribute set
-                    if hasattr(agent, 'memory'):
-                        if agent.memory is False:
-                            agents_with_memory_disabled.append(agent_role)
-                        else:
-                            agents_with_memory_enabled.append(agent_role)
-                    else:
-                        # Default to memory enabled if not specified
-                        agents_with_memory_enabled.append(agent_role)
 
-                # Determine crew memory setting
-                if agents_with_memory_disabled and not agents_with_memory_enabled:
-                    crew_memory = False
-                    logger.info(f"All agents have memory disabled - setting crew memory to False")
+            # First, get crew-level memory setting if available
+            crew_memory_from_config = None
+            if crew_data and hasattr(crew_data, 'memory') and crew_data.memory is not None:
+                crew_memory_from_config = crew_data.memory
+                logger.info(f"Crew memory setting from configuration: {crew_memory_from_config}")
+
+            # Then check agent memory settings - this is ALWAYS checked, not just as fallback
+            # We check our custom _kasal_memory_disabled attribute since CrewAI Agent doesn't store memory as an attribute
+            agents_with_memory_enabled = []
+            agents_with_memory_disabled = []
+            logger.info(f"Checking memory settings for {len(agents)} agents in crew {crew_name}")
+            for agent in agents:
+                agent_role = agent.role if hasattr(agent, 'role') else 'Unknown'
+                # Check our custom attribute that was set during agent configuration
+                has_kasal_attr = hasattr(agent, '_kasal_memory_disabled')
+                kasal_memory_disabled = getattr(agent, '_kasal_memory_disabled', False)
+                logger.info(f"  Agent '{agent_role}': has_kasal_attr={has_kasal_attr}, _kasal_memory_disabled={kasal_memory_disabled}")
+                if has_kasal_attr and kasal_memory_disabled:
+                    agents_with_memory_disabled.append(agent_role)
+                    logger.info(f"  → Agent '{agent_role}' has memory DISABLED (via _kasal_memory_disabled)")
                 else:
-                    logger.info(f"At least one agent has memory enabled - setting crew memory to True")
+                    agents_with_memory_enabled.append(agent_role)
+                    logger.info(f"  → Agent '{agent_role}' has memory ENABLED")
+
+            # Determine final crew memory setting:
+            # 1. If ALL agents have memory disabled, crew memory should be False (regardless of crew config)
+            # 2. If crew config explicitly sets memory=False, use that
+            # 3. Otherwise use crew config or default to True
+            all_agents_memory_disabled = agents_with_memory_disabled and not agents_with_memory_enabled
+
+            if all_agents_memory_disabled:
+                crew_memory = False
+                logger.info(f"All agents have memory disabled ({agents_with_memory_disabled}) - setting crew memory to False")
+            elif crew_memory_from_config is False:
+                crew_memory = False
+                logger.info(f"Crew memory explicitly disabled in configuration")
+            elif crew_memory_from_config is True:
+                crew_memory = True
+                logger.info(f"Using crew memory setting from configuration: True")
+            else:
+                # Default: at least one agent has memory enabled
+                crew_memory = True
+                logger.info(f"At least one agent has memory enabled ({agents_with_memory_enabled}) - setting crew memory to True")
 
             # Determine process type from crew_data
             process_type = Process.sequential  # Default
@@ -506,34 +525,52 @@ class FlowMethodFactory:
             listener_crew_name = crew_name if crew_name else (agents[0].role if agents and hasattr(agents[0], 'role') and agents[0].role else "Listener Crew")
             logger.info(f"Creating listener crew with name: {listener_crew_name}")
 
-            # Determine crew memory setting - crew_data takes priority, then agent settings
+            # Determine crew memory setting - check both crew config AND agent settings
             crew_memory = True  # Default
-            if crew_data and hasattr(crew_data, 'memory') and crew_data.memory is not None:
-                crew_memory = crew_data.memory
-                logger.info(f"Using listener crew memory setting from configuration: {crew_memory}")
-            else:
-                # Determine memory setting based on agent configuration
-                # This follows the same pattern as CrewPreparation in regular crew execution
-                agents_with_memory_enabled = []
-                agents_with_memory_disabled = []
-                for agent in agents:
-                    agent_role = agent.role if hasattr(agent, 'role') else 'Unknown'
-                    # Check if agent has memory attribute set
-                    if hasattr(agent, 'memory'):
-                        if agent.memory is False:
-                            agents_with_memory_disabled.append(agent_role)
-                        else:
-                            agents_with_memory_enabled.append(agent_role)
-                    else:
-                        # Default to memory enabled if not specified
-                        agents_with_memory_enabled.append(agent_role)
 
-                # Determine crew memory setting
-                if agents_with_memory_disabled and not agents_with_memory_enabled:
-                    crew_memory = False
-                    logger.info(f"All agents have memory disabled - setting listener crew memory to False")
+            # First, get crew-level memory setting if available
+            crew_memory_from_config = None
+            if crew_data and hasattr(crew_data, 'memory') and crew_data.memory is not None:
+                crew_memory_from_config = crew_data.memory
+                logger.info(f"Listener crew memory setting from configuration: {crew_memory_from_config}")
+
+            # Then check agent memory settings - this is ALWAYS checked, not just as fallback
+            # We check our custom _kasal_memory_disabled attribute since CrewAI Agent doesn't store memory as an attribute
+            agents_with_memory_enabled = []
+            agents_with_memory_disabled = []
+            logger.info(f"Checking memory settings for {len(agents)} agents in listener crew {listener_crew_name}")
+            for agent in agents:
+                agent_role = agent.role if hasattr(agent, 'role') else 'Unknown'
+                # Check our custom attribute that was set during agent configuration
+                has_kasal_attr = hasattr(agent, '_kasal_memory_disabled')
+                kasal_memory_disabled = getattr(agent, '_kasal_memory_disabled', False)
+                logger.info(f"  Agent '{agent_role}': has_kasal_attr={has_kasal_attr}, _kasal_memory_disabled={kasal_memory_disabled}")
+                if has_kasal_attr and kasal_memory_disabled:
+                    agents_with_memory_disabled.append(agent_role)
+                    logger.info(f"  → Agent '{agent_role}' has memory DISABLED (via _kasal_memory_disabled)")
                 else:
-                    logger.info(f"At least one agent has memory enabled - setting listener crew memory to True")
+                    agents_with_memory_enabled.append(agent_role)
+                    logger.info(f"  → Agent '{agent_role}' has memory ENABLED")
+
+            # Determine final crew memory setting:
+            # 1. If ALL agents have memory disabled, crew memory should be False (regardless of crew config)
+            # 2. If crew config explicitly sets memory=False, use that
+            # 3. Otherwise use crew config or default to True
+            all_agents_memory_disabled = agents_with_memory_disabled and not agents_with_memory_enabled
+
+            if all_agents_memory_disabled:
+                crew_memory = False
+                logger.info(f"All agents have memory disabled ({agents_with_memory_disabled}) - setting listener crew memory to False")
+            elif crew_memory_from_config is False:
+                crew_memory = False
+                logger.info(f"Listener crew memory explicitly disabled in configuration")
+            elif crew_memory_from_config is True:
+                crew_memory = True
+                logger.info(f"Using listener crew memory setting from configuration: True")
+            else:
+                # Default: at least one agent has memory enabled
+                crew_memory = True
+                logger.info(f"At least one agent has memory enabled ({agents_with_memory_enabled}) - setting listener crew memory to True")
 
             # Determine process type from crew_data
             process_type = Process.sequential  # Default
