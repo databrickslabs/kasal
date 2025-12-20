@@ -623,6 +623,54 @@ class FlowBuilder:
                         import json
                         eval_context = {}
 
+                        # Helper function to convert string values to appropriate types
+                        def auto_convert_value(val):
+                            """Convert string numeric values to int/float."""
+                            if isinstance(val, str):
+                                # Try int first
+                                try:
+                                    return int(val)
+                                except ValueError:
+                                    pass
+                                # Try float
+                                try:
+                                    return float(val)
+                                except ValueError:
+                                    pass
+                            return val
+
+                        # Helper function to convert all string numerics in a dict
+                        def auto_convert_dict(d):
+                            """Recursively convert string numerics in a dict."""
+                            if not isinstance(d, dict):
+                                return d
+                            return {k: auto_convert_value(v) if not isinstance(v, dict) else auto_convert_dict(v) for k, v in d.items()}
+
+                        # Safe helper functions for condition evaluation
+                        def safe_int(val, default=0):
+                            """Safely convert value to int."""
+                            try:
+                                return int(val)
+                            except (ValueError, TypeError):
+                                return default
+
+                        def safe_float(val, default=0.0):
+                            """Safely convert value to float."""
+                            try:
+                                return float(val)
+                            except (ValueError, TypeError):
+                                return default
+
+                        # Add helper functions to context for use in conditions
+                        eval_context['int'] = safe_int
+                        eval_context['float'] = safe_float
+                        eval_context['str'] = str
+                        eval_context['len'] = len
+                        eval_context['bool'] = bool
+                        eval_context['abs'] = abs
+                        eval_context['min'] = min
+                        eval_context['max'] = max
+
                         # Add state to context if available
                         if hasattr(self, 'state'):
                             eval_context['state'] = self.state
@@ -642,6 +690,8 @@ class FlowBuilder:
                                     raw_str = str(result_obj.raw).strip()
                                     if raw_str.startswith('{') and raw_str.endswith('}'):
                                         parsed_data = json.loads(raw_str)
+                                        # Auto-convert numeric strings to actual numbers
+                                        parsed_data = auto_convert_dict(parsed_data)
                                         eval_context['state'].update(parsed_data)
                                         eval_context.update(parsed_data)  # Also add to top-level for easy access
                                         logger.info(f"Parsed crew output JSON and merged into state: {parsed_data}")
@@ -654,6 +704,8 @@ class FlowBuilder:
                                     raw_str = result_obj.strip()
                                     if raw_str.startswith('{') and raw_str.endswith('}'):
                                         parsed_data = json.loads(raw_str)
+                                        # Auto-convert numeric strings to actual numbers
+                                        parsed_data = auto_convert_dict(parsed_data)
                                         eval_context['state'].update(parsed_data)
                                         eval_context.update(parsed_data)  # Also add to top-level for easy access
                                         logger.info(f"Parsed string result as JSON and merged into state: {parsed_data}")
@@ -687,6 +739,8 @@ class FlowBuilder:
                                         try:
                                             parsed_value = json.loads(json_value)
                                             if isinstance(parsed_value, dict):
+                                                # Auto-convert numeric strings to actual numbers
+                                                parsed_value = auto_convert_dict(parsed_value)
                                                 # Add parsed values to both state and top-level for easy access
                                                 eval_context['state'].update(parsed_value)
                                                 eval_context.update(parsed_value)
