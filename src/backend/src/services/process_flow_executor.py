@@ -1034,6 +1034,9 @@ class ProcessFlowExecutor:
         This method reads the flow.log file, extracts logs for the specific execution,
         and writes them to the database for persistent storage and later retrieval.
 
+        NOTE: This is a non-critical operation. If it fails, the flow execution is still
+        considered successful. Traces are captured separately by TraceManager.
+
         Args:
             log_queue: Not used anymore, kept for compatibility
             execution_id: The execution ID for logging
@@ -1043,10 +1046,7 @@ class ProcessFlowExecutor:
 
         try:
             import os
-            import json
-            from datetime import datetime, timezone
-            from sqlalchemy.ext.asyncio import create_async_engine
-            from sqlalchemy import text
+            from datetime import datetime
             from src.config.settings import settings
 
             # Get the flow.log path
@@ -1094,35 +1094,80 @@ class ProcessFlowExecutor:
             else:
                 logger.info(f"Found {len(logs_to_write)-1} logs for execution {exec_id_short} in flow.log")
 
-            # Build database URL
+            # Try to write logs using synchronous SQLite (more reliable in post-subprocess context)
+            # Async database operations can have greenlet/event loop issues after subprocess completion
             if settings.DATABASE_TYPE == 'sqlite':
-                db_url = f'sqlite+aiosqlite:///{settings.SQLITE_DB_PATH}'
-                logger.info(f"[ProcessFlowExecutor] Using SQLite database: {settings.SQLITE_DB_PATH}")
+                await self._write_logs_sqlite_sync(logs_to_write, settings.SQLITE_DB_PATH)
             else:
-                postgres_user = settings.POSTGRES_USER or 'postgres'
-                postgres_password = settings.POSTGRES_PASSWORD or 'postgres'
-                postgres_server = settings.POSTGRES_SERVER or 'localhost'
-                postgres_port = settings.POSTGRES_PORT or '5432'
-                postgres_db = settings.POSTGRES_DB or 'kasal'
-                db_url = f'postgresql+asyncpg://{postgres_user}:{postgres_password}@{postgres_server}:{postgres_port}/{postgres_db}'
-                logger.info(f"[ProcessFlowExecutor] Using PostgreSQL database: {postgres_server}:{postgres_port}/{postgres_db}")
+                # For PostgreSQL, use async with NullPool
+                await self._write_logs_postgres_async(logs_to_write, settings)
 
-            # Write logs to database
-            engine = create_async_engine(db_url)
+        except Exception as e:
+            # Log the error but don't fail the execution - this is a non-critical operation
+            logger.warning(f"[ProcessFlowExecutor] Failed to write logs to database (non-critical): {e}")
+            logger.info(f"[ProcessFlowExecutor] Logs are still available in flow.log file")
+
+    async def _write_logs_sqlite_sync(self, logs_to_write: list, db_path: str):
+        """Write logs to SQLite using synchronous operations to avoid event loop issues."""
+        import sqlite3
+        from concurrent.futures import ThreadPoolExecutor
+
+        def sync_write():
+            try:
+                conn = sqlite3.connect(db_path)
+                cursor = conn.cursor()
+                for log_data in logs_to_write:
+                    cursor.execute("""
+                        INSERT INTO execution_logs (execution_id, content, timestamp, group_id, group_email)
+                        VALUES (?, ?, ?, ?, ?)
+                    """, (
+                        log_data['execution_id'],
+                        log_data['content'],
+                        log_data['timestamp'].isoformat() if log_data['timestamp'] else None,
+                        log_data['group_id'],
+                        log_data['group_email']
+                    ))
+                conn.commit()
+                conn.close()
+                return len(logs_to_write)
+            except Exception as e:
+                logger.warning(f"[ProcessFlowExecutor] SQLite sync write failed: {e}")
+                return 0
+
+        # Run in thread pool to avoid blocking
+        loop = asyncio.get_event_loop()
+        with ThreadPoolExecutor(max_workers=1) as executor:
+            count = await loop.run_in_executor(executor, sync_write)
+            if count > 0:
+                logger.info(f"[ProcessFlowExecutor] Successfully wrote {count} logs to SQLite execution_logs table")
+
+    async def _write_logs_postgres_async(self, logs_to_write: list, settings):
+        """Write logs to PostgreSQL using async with NullPool."""
+        from sqlalchemy.ext.asyncio import create_async_engine
+        from sqlalchemy import text
+        from sqlalchemy.pool import NullPool
+
+        postgres_user = settings.POSTGRES_USER or 'postgres'
+        postgres_password = settings.POSTGRES_PASSWORD or 'postgres'
+        postgres_server = settings.POSTGRES_SERVER or 'localhost'
+        postgres_port = settings.POSTGRES_PORT or '5432'
+        postgres_db = settings.POSTGRES_DB or 'kasal'
+        db_url = f'postgresql+asyncpg://{postgres_user}:{postgres_password}@{postgres_server}:{postgres_port}/{postgres_db}'
+        logger.info(f"[ProcessFlowExecutor] Using PostgreSQL database: {postgres_server}:{postgres_port}/{postgres_db}")
+
+        # Use NullPool to avoid connection pooling issues in post-subprocess context
+        engine = create_async_engine(db_url, poolclass=NullPool)
+
+        try:
             async with engine.begin() as conn:
                 for log_data in logs_to_write:
                     await conn.execute(text("""
                         INSERT INTO execution_logs (execution_id, content, timestamp, group_id, group_email)
                         VALUES (:execution_id, :content, :timestamp, :group_id, :group_email)
                     """), log_data)
-
+            logger.info(f"[ProcessFlowExecutor] Successfully wrote {len(logs_to_write)} logs to PostgreSQL execution_logs table")
+        finally:
             await engine.dispose()
-            logger.info(f"[ProcessFlowExecutor] Successfully wrote {len(logs_to_write)} logs to execution_logs table")
-
-        except Exception as e:
-            import traceback
-            logger.error(f"[ProcessFlowExecutor] Error processing logs from flow.log: {e}")
-            logger.error(f"[ProcessFlowExecutor] Full traceback:\n{traceback.format_exc()}")
 
     def get_execution_info(self, execution_id: str) -> Optional[Dict[str, Any]]:
         """Get information about a running execution."""
