@@ -63,12 +63,33 @@ DEFAULT_MODELS = {
         "context_window": 400000,
         "max_output_tokens": 128000
     },
+    "gpt-5.2": {
+        "name": "openai/gpt-5.2",
+        "temperature": 0.7,
+        "provider": "openai",
+        "context_window": 400000,
+        "max_output_tokens": 128000
+    },
     "gemini-2.0-flash": {
         "name": "gemini-2.0-flash",
         "temperature": 0.7,
         "provider": "gemini",
         "context_window": 1000000,
         "max_output_tokens": 4096
+    },
+    "gemini-3-pro": {
+        "name": "gemini-3-pro-preview",
+        "temperature": 1,
+        "provider": "gemini",
+        "context_window": 1000000,
+        "max_output_tokens": 64000
+    },
+    "gemini-3-flash": {
+        "name": "gemini-3-flash-preview",
+        "temperature": 1,
+        "provider": "gemini",
+        "context_window": 1000000,
+        "max_output_tokens": 64000
     },
     "claude-3-5-sonnet-20241022": {
         "name": "claude-3-5-sonnet-20241022",
@@ -176,6 +197,13 @@ DEFAULT_MODELS = {
         "context_window": 200000,
         "max_output_tokens": 64000
     },
+    "databricks-claude-opus-4-5": {
+        "name": "databricks-claude-opus-4-5",
+        "temperature": 0.7,
+        "provider": "databricks",
+        "context_window": 200000,
+        "max_output_tokens": 64000
+    },
     "databricks-gemini-2-5-flash": {
         "name": "databricks-gemini-2-5-flash",
         "temperature": 0.7,
@@ -210,6 +238,13 @@ DEFAULT_MODELS = {
         "provider": "databricks",
         "context_window": 128000,
         "max_output_tokens": 8192
+    },
+    "databricks-gpt-5-2": {
+        "name": "databricks-gpt-5-2",
+        "temperature": 0.7,
+        "provider": "databricks",
+        "context_window": 400000,
+        "max_output_tokens": 128000
     },
     "claude-opus-4-20250514": {
         "name": "claude-opus-4-20250514",
@@ -308,6 +343,20 @@ DEFAULT_MODELS = {
         "provider": "databricks",
         "context_window": 128000,
         "max_output_tokens": 16384
+    },
+    "o3-deep-research": {
+        "name": "o3-deep-research-2025-06-26",
+        "temperature": 1,
+        "provider": "openai",
+        "context_window": 200000,
+        "max_output_tokens": 100000
+    },
+    "o4-mini-deep-research": {
+        "name": "o4-mini-deep-research-2025-06-26",
+        "temperature": 1,
+        "provider": "openai",
+        "context_window": 200000,
+        "max_output_tokens": 100000
     }
 }
 
