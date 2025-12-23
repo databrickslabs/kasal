@@ -8,6 +8,8 @@ from datetime import datetime
 from typing import Dict, List, Optional, Any, TYPE_CHECKING
 from concurrent.futures import ThreadPoolExecutor
 
+from databricks.sdk.useragent import with_product
+
 from src.core.logger import LoggerManager
 from src.utils.databricks_auth import (
     get_workspace_client,
@@ -15,6 +17,13 @@ from src.utils.databricks_auth import (
     is_scope_error,
     get_databricks_auth_headers
 )
+from src.utils.telemetry import KASAL_BASE, get_user_agent_header
+from src.config.settings import settings
+
+VERSION = settings.VERSION
+
+# Register User-Agent for Databricks SDK calls (module-level)
+with_product(KASAL_BASE, VERSION)  # Kasal/0.1.0 User-Agent
 
 if TYPE_CHECKING:
     from databricks.sdk import WorkspaceClient
@@ -281,7 +290,8 @@ class DatabricksVolumeRepository:
 
             headers = {
                 "Authorization": f"Bearer {token}",
-                "Content-Type": "application/octet-stream"
+                "Content-Type": "application/octet-stream",
+                **get_user_agent_header()  # Kasal User-Agent for REST fallback
             }
 
             logger.info(f"[REST API] PUT {upload_url}")
@@ -360,7 +370,8 @@ class DatabricksVolumeRepository:
             download_url = f"{workspace_url}/api/2.0/fs/files{file_path}"
 
             headers = {
-                "Authorization": f"Bearer {token}"
+                "Authorization": f"Bearer {token}",
+                **get_user_agent_header()  # Kasal User-Agent for REST fallback
             }
 
             logger.info(f"[REST API] GET {download_url}")

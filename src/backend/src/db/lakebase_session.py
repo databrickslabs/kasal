@@ -13,6 +13,7 @@ from databricks.sdk import WorkspaceClient
 
 from src.core.logger import LoggerManager
 from src.utils.databricks_auth import get_current_databricks_user, get_workspace_client
+from src.utils.telemetry import get_application_name
 
 logger_manager = LoggerManager.get_instance()
 logger = logging.getLogger(__name__)
@@ -152,7 +153,8 @@ class LakebaseSessionFactory:
                     "ssl": "require",  # Enable SSL for asyncpg
                     "server_settings": {
                         "jit": "off",  # Disable JIT for compatibility
-                        "search_path": "kasal"  # Set schema search path to kasal only
+                        "search_path": "kasal",  # Set schema search path to kasal only
+                        "application_name": get_application_name()  # Kasal/0.1.0 User-Agent
                     }
                 }
             )
