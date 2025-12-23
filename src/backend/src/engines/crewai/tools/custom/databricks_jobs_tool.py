@@ -12,6 +12,8 @@ import aiohttp
 from crewai.tools import BaseTool
 from pydantic import BaseModel, Field, PrivateAttr, model_validator
 
+from src.utils.telemetry import get_user_agent_header, KasalProduct
+
 logger = logging.getLogger(__name__)
 
 # Global execution tracking dictionaries (outside of class to avoid Pydantic field interpretation)
@@ -451,7 +453,8 @@ class DatabricksJobsTool(BaseTool):
         
         return {
             "Authorization": f"Bearer {auth_token}",
-            "Content-Type": "application/json"
+            "Content-Type": "application/json",
+            **get_user_agent_header(KasalProduct.JOBS)  # Kasal_jobs User-Agent
         }
 
     async def _make_api_call(

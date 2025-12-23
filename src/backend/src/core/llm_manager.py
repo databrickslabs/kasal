@@ -17,6 +17,7 @@ from src.utils.databricks_url_utils import DatabricksURLUtils
 from src.services.model_config_service import ModelConfigService
 from src.services.api_keys_service import ApiKeysService
 from src.core.unit_of_work import UnitOfWork
+from src.utils.telemetry import get_litellm_user_agent
 import pathlib
 
 # CRITICAL: Import and apply model handlers BEFORE importing litellm
@@ -790,6 +791,10 @@ class LLMManager:
             if api_base:
                 llm_params["api_base"] = api_base
             
+            # Add User-Agent for Databricks API attribution
+            # LiteLLM will format this as: Kasal_litellm/<litellm_version>
+            llm_params["user_agent"] = get_litellm_user_agent()
+            
             # Add max_output_tokens if defined in model config
             if "max_output_tokens" in model_config_dict and model_config_dict["max_output_tokens"]:
                 # GPT-5 and newer OpenAI models use max_completion_tokens instead of max_tokens
@@ -797,7 +802,7 @@ class LLMManager:
                 llm_params["max_tokens"] = model_config_dict["max_output_tokens"]
                 logger.info(f"Setting max_tokens to {model_config_dict['max_output_tokens']} for model {prefixed_model}")
                 
-            logger.info(f"Creating CrewAI LLM with model: {prefixed_model}, has_api_key: {bool(api_key)}, api_base: {api_base}")
+            logger.info(f"Creating CrewAI LLM with model: {prefixed_model}, has_api_key: {bool(api_key)}, api_base: {api_base}, user_agent: {get_litellm_user_agent()}")
             
             # Use custom wrapper for GPT-OSS models
             if DatabricksGPTOSSHandler.is_gpt_oss_model(model_name_value):
