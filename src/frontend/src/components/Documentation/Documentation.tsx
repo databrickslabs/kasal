@@ -268,9 +268,9 @@ const Documentation: React.FC = () => {
                     {children}
                   </Typography>
                 ),
-                img: (props) => (
+                img: (props: React.ImgHTMLAttributes<HTMLImageElement>) => (
                   <img
-                    {...(props as any)}
+                    {...props}
                     style={{
                       maxWidth: '100%',
                       height: 'auto',
@@ -280,8 +280,8 @@ const Documentation: React.FC = () => {
                     }}
                   />
                 ),
-                a: ({ href, children, ...props }: { href?: string; children?: React.ReactNode }) => {
-                  if (!href) return <a {...(props as any)}>{children}</a>;
+                a: ({ href, children, ...props }: React.AnchorHTMLAttributes<HTMLAnchorElement>) => {
+                  if (!href) return <a {...props}>{children}</a>;
 
                   // Intra-page anchors (e.g., #section)
                   if (href.startsWith('#')) {
@@ -294,7 +294,7 @@ const Documentation: React.FC = () => {
                           textDecoration: 'underline',
                           '&:hover': { color: theme.palette.primary.dark },
                         }}
-                        {...(props as any)}
+                        {...props}
                       >
                         {children}
                       </Box>
@@ -343,7 +343,7 @@ const Documentation: React.FC = () => {
                         textDecoration: 'underline',
                         '&:hover': { color: theme.palette.primary.dark },
                       }}
-                      {...(props as any)}
+                      {...props}
                     >
                       {children}
                     </Box>

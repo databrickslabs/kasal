@@ -95,8 +95,9 @@ const ExecutionStopButton: React.FC<ExecutionStopButtonProps> = ({
       }
     } catch (error: unknown) {
       console.error('Error stopping execution:', error);
+      const axiosError = error as { response?: { data?: { detail?: string } } };
       toast.error(
-        (error as any)?.response?.data?.detail || 'Failed to stop execution'
+        axiosError?.response?.data?.detail || 'Failed to stop execution'
       );
     } finally {
       setIsStopping(false);

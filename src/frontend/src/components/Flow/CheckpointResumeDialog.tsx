@@ -224,9 +224,9 @@ const CheckpointResumeDialog: React.FC<CheckpointResumeDialogProps> = ({
                                   variant="outlined"
                                 />
                               )}
-                              {hasCrewCheckpoints && (
+                              {hasCrewCheckpoints && checkpoint.crew_checkpoints && (
                                 <Chip
-                                  label={`${checkpoint.crew_checkpoints!.length} crew${checkpoint.crew_checkpoints!.length !== 1 ? 's' : ''}`}
+                                  label={`${checkpoint.crew_checkpoints.length} crew${checkpoint.crew_checkpoints.length !== 1 ? 's' : ''}`}
                                   size="small"
                                   color="success"
                                   variant="outlined"

@@ -158,7 +158,7 @@ const AgentNode: React.FC<{ data: AgentNodeData; id: string }> = ({ data, id }) 
     } catch (error) {
       console.error('Failed to fetch agent data:', error);
     }
-  }, [data.agentId, data.id, data.agent_id]);
+  }, [data, getAgent]);
 
   useEffect(() => {
     // Cleanup when dialog opens/closes if needed

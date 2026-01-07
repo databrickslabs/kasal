@@ -57,7 +57,7 @@ export const TraceService = {
       // If we're in development mode and we have a hardcoded list of known IDs
       // only apply this for numeric IDs, not UUIDs
       if (!isUuid && 
-          process.env.NODE_ENV === 'development' && 
+          import.meta.env.DEV && 
           numericRunId !== null &&
           KNOWN_RUN_IDS.includes(numericRunId)) {
         return true;
@@ -78,7 +78,7 @@ export const TraceService = {
       if (apiError.response && apiError.response.status === 404) {
         // For development, suggest using a known ID, but only for numeric IDs
         const isUuid = typeof runId === 'string' && runId.includes('-');
-        if (!isUuid && process.env.NODE_ENV === 'development' && KNOWN_RUN_IDS.length > 0) {
+        if (!isUuid && import.meta.env.DEV && KNOWN_RUN_IDS.length > 0) {
           // Suggestion logic remains but without console.log
         }
         return false;
@@ -108,7 +108,7 @@ export const TraceService = {
       // For development purposes, only use fallback if it's a numeric ID (not UUID)
       // and it's not in the known IDs list
       if (!isUuid &&
-          process.env.NODE_ENV === 'development' && 
+          import.meta.env.DEV && 
           numericRunId !== null &&
           !KNOWN_RUN_IDS.includes(numericRunId) && 
           KNOWN_RUN_IDS.length > 0) {
@@ -140,7 +140,7 @@ export const TraceService = {
         const isUuid = typeof runId === 'string' && runId.includes('-');
         
         if (!isUuid && 
-            process.env.NODE_ENV === 'development' && 
+            import.meta.env.DEV && 
             KNOWN_RUN_IDS.length > 0 &&
             !isNaN(parseInt(runId))) {
           // Prevent infinite recursion
@@ -191,7 +191,7 @@ export const TraceService = {
       // For development purposes, only use fallback if it's a numeric ID (not UUID)
       // and it's not in the known IDs list
       if (!isUuid && 
-          process.env.NODE_ENV === 'development' && 
+          import.meta.env.DEV && 
           numericRunId !== null &&
           !KNOWN_RUN_IDS.includes(numericRunId) && 
           KNOWN_RUN_IDS.length > 0) {
@@ -257,7 +257,7 @@ export const TraceService = {
       // For development, if we get a 404, try to use a known ID only for numeric IDs
       if (apiError.response && apiError.response.status === 404) {
         const isUuid = typeof runId === 'string' && runId.includes('-');
-        if (!isUuid && process.env.NODE_ENV === 'development' && KNOWN_RUN_IDS.length > 0 && !isNaN(parseInt(runId))) {
+        if (!isUuid && import.meta.env.DEV && KNOWN_RUN_IDS.length > 0 && !isNaN(parseInt(runId))) {
           return this.getTraces(KNOWN_RUN_IDS[0].toString());
         }
       }

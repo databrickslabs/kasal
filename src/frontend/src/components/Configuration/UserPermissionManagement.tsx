@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import {
   Box,
   Typography,
@@ -56,11 +56,11 @@ function UserPermissionManagement(): JSX.Element {
 
   const userService = UserService.getInstance();
 
-  useEffect(() => {
-    loadUsers();
+  const showNotification = useCallback((message: string, severity: NotificationState['severity']) => {
+    setNotification({ open: true, message, severity });
   }, []);
 
-  const loadUsers = async () => {
+  const loadUsers = useCallback(async () => {
     try {
       setLoading(true);
       const usersData = await userService.getUsers();
@@ -71,11 +71,11 @@ function UserPermissionManagement(): JSX.Element {
     } finally {
       setLoading(false);
     }
-  };
+  }, [userService, showNotification]);
 
-  const showNotification = (message: string, severity: NotificationState['severity']) => {
-    setNotification({ open: true, message, severity });
-  };
+  useEffect(() => {
+    loadUsers();
+  }, [loadUsers]);
 
   const handlePermissionChange = async (
     userId: string,

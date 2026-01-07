@@ -451,7 +451,7 @@ function ObjectManagement(): JSX.Element {
         </DialogContent>
         <DialogActions>
           <Button onClick={() => setViewDialog(false)} size="small">Close</Button>
-          <Button onClick={() => { setViewDialog(false); handleEdit(currentSchema!); }} variant="contained" size="small" startIcon={<EditIcon />}>Edit</Button>
+          <Button onClick={() => { setViewDialog(false); if (currentSchema) handleEdit(currentSchema); }} variant="contained" size="small" startIcon={<EditIcon />}>Edit</Button>
         </DialogActions>
       </Dialog>
 

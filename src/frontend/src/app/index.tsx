@@ -11,13 +11,13 @@ import { store } from '../store';
 /*
 (() => {
   const noop = (..._args: unknown[]): void => { return; };
-  if (process.env.NODE_ENV !== 'test') {
+  if (import.meta.env.MODE !== 'test') {
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     console.log = noop as any;
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     console.debug = noop as any;
     // Keep warnings in development; silence in production
-    if (process.env.NODE_ENV === 'production') {
+    if (import.meta.env.PROD) {
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       console.warn = noop as any;
     }
@@ -37,7 +37,7 @@ const app = (
   </Provider>
 );
 
-if (process.env.NODE_ENV === 'development') {
+if (import.meta.env.DEV) {
   root.render(app);
 } else {
   root.render(

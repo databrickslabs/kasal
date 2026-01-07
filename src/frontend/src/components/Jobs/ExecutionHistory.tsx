@@ -142,13 +142,13 @@ interface ScheduleCreateData {
   tasks_yaml?: Record<string, TaskYaml>;
   // Flow fields
   flow_id?: string;
-  nodes?: any[];
-  edges?: any[];
+  nodes?: Array<{ id: string; type: string; position: { x: number; y: number }; data: Record<string, unknown> }>;
+  edges?: Array<{ id: string; source: string; target: string; sourceHandle?: string; targetHandle?: string }>;
   flow_config?: Record<string, unknown>;
   // Common fields
-  inputs: Record<string, unknown>;
-  is_active: boolean;
-  planning: boolean;
+  inputs?: Record<string, unknown>;
+  is_active?: boolean;
+  planning?: boolean;
   model?: string;
 }
 

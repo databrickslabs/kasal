@@ -159,5 +159,5 @@ export const useUILayoutState = (): UILayoutState => {
 
 // Expose store on window for debugging
 if (typeof window !== 'undefined') {
-  (window as any).useUILayoutStore = useUILayoutStore;
+  (window as unknown as Record<string, unknown>).useUILayoutStore = useUILayoutStore;
 }
