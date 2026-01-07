@@ -58,7 +58,8 @@ class ExecutionLogService {
         type: 'historical'
       }));
     } catch (error: unknown) {
-      if (error instanceof Error && 'response' in error && (error as any).response?.status === 404) {
+      const axiosError = error as { response?: { status?: number } };
+      if (axiosError.response?.status === 404) {
         console.warn(`No logs found for job ${jobId}`);
         return [];
       }
@@ -114,15 +115,16 @@ class ExecutionLogService {
               const { setTaskState } = useTaskExecutionStore.getState();
 
               if (parsedContent) {
-                const taskId = (parsedContent as any).task_id || `task_${(parsedContent as any).task_name}`;
-                const status = (parsedContent as any).event_type === 'TASK_STARTED' ? 'running' :
-                              (parsedContent as any).event_type === 'TASK_COMPLETED' ? 'completed' :
+                const taskStatusUpdate = parsedContent as { task_id?: string; task_name?: string; event_type?: string; timestamp?: string };
+                const taskId = taskStatusUpdate.task_id || `task_${taskStatusUpdate.task_name}`;
+                const status = taskStatusUpdate.event_type === 'TASK_STARTED' ? 'running' :
+                              taskStatusUpdate.event_type === 'TASK_COMPLETED' ? 'completed' :
                               'failed';
 
                 setTaskState(taskId, {
                   status,
-                  task_name: (parsedContent as any).task_name,
-                  [`${status === 'running' ? 'started' : status}_at`]: (parsedContent as any).timestamp
+                  task_name: taskStatusUpdate.task_name || '',
+                  [`${status === 'running' ? 'started' : status}_at`]: taskStatusUpdate.timestamp
                 });
 
                 console.log(`Task status update: ${taskId} is now ${status}`);

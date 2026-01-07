@@ -142,7 +142,7 @@ const GroupSelector: React.FC = () => {
         }}
       />
     );
-  }, [currentGroup?.id, currentGroup?.name, currentUser?.email, currentGroup]);
+  }, [currentGroup]);
 
   if (loading || isSwitching || isLoadingUser) {
     return (

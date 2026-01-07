@@ -228,7 +228,7 @@ export const useManagerNode = ({ nodes, edges, setNodes, setEdges }: UseManagerN
         console.log('[useManagerNode] No manager to remove');
       }
     }
-  }, [processType, nodes, createManagerNode, removeManagerNode, isLoadingCrew]);
+  }, [processType, nodes, createManagerNode, removeManagerNode, isLoadingCrew, managerNodeId, setManagerNodeId]);
 
   /**
    * Listen for layout orientation changes to update manager position and edge handles

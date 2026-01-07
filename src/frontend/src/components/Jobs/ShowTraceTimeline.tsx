@@ -470,10 +470,10 @@ const ShowTraceTimeline: React.FC<ShowTraceProps> = ({
         if (traceTaskId && taskIdToName.has(traceTaskId)) {
           // Check if we already have a unique key for this task_id
           if (taskIdToUniqueKey.has(traceTaskId)) {
-            taskKey = taskIdToUniqueKey.get(traceTaskId)!;
+            taskKey = taskIdToUniqueKey.get(traceTaskId) ?? taskKey;
           } else {
             // Create a unique key for this task
-            const baseName = taskIdToName.get(traceTaskId)!;
+            const baseName = taskIdToName.get(traceTaskId) ?? 'Processing Task';
             // Check if this base name already exists (same task name running in parallel)
             if (taskMap.has(baseName)) {
               taskCounter++;
@@ -527,7 +527,7 @@ const ShowTraceTimeline: React.FC<ShowTraceProps> = ({
             if (traceTime >= range.start - 1000 && traceTime <= range.end + 1000) {
               // Check if we already have a unique key for this task_id
               if (taskIdToUniqueKey.has(taskId)) {
-                taskKey = taskIdToUniqueKey.get(taskId)!;
+                taskKey = taskIdToUniqueKey.get(taskId) ?? taskKey;
               } else {
                 // Create a unique key for this task
                 const baseName = range.name;
@@ -583,7 +583,7 @@ const ShowTraceTimeline: React.FC<ShowTraceProps> = ({
             if (mostRecentTask) {
               // Use the most recent task
               if (taskIdToUniqueKey.has(mostRecentTask.taskId)) {
-                taskKey = taskIdToUniqueKey.get(mostRecentTask.taskId)!;
+                taskKey = taskIdToUniqueKey.get(mostRecentTask.taskId) ?? taskKey;
               } else {
                 taskKey = mostRecentTask.range.name;
                 taskIdToUniqueKey.set(mostRecentTask.taskId, taskKey);

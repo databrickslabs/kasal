@@ -277,5 +277,5 @@ export const useWorkflowStore = create<WorkflowState>()(
 
 // Expose store on window for debugging
 if (typeof window !== 'undefined') {
-  (window as any).useWorkflowStore = useWorkflowStore;
+  (window as unknown as Record<string, unknown>).useWorkflowStore = useWorkflowStore;
 }

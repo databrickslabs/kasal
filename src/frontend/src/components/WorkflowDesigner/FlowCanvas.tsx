@@ -127,7 +127,7 @@ const FlowCanvas: React.FC<FlowCanvasProps> = ({
   // Edge configuration dialog state
   const [isEdgeDialogOpen, setIsEdgeDialogOpen] = useState(false);
   const [selectedEdge, setSelectedEdge] = useState<Edge | null>(null);
-  const [aggregatedSourceTasks, setAggregatedSourceTasks] = useState<Array<{ crewName: string; tasks: any[] }>>([]);
+  const [aggregatedSourceTasks, setAggregatedSourceTasks] = useState<Array<{ crewName: string; tasks: Array<{ id: string; name: string; description?: string }> }>>([]);
   const [flowStateVariables, setFlowStateVariables] = useState<string[]>([]);
 
   // Handle edge click for configuration
@@ -144,7 +144,7 @@ const FlowCanvas: React.FC<FlowCanvasProps> = ({
     const mergeGroupId = edge.data?.mergeGroupId;
 
     // Aggregate tasks from all source nodes
-    const aggregated: Array<{ crewName: string; tasks: any[] }> = [];
+    const aggregated: Array<{ crewName: string; tasks: Array<{ id: string; name: string; description?: string }> }> = [];
     const processedSources = new Set<string>(); // Track processed sources to avoid duplicates
 
     if (mergeGroupId) {
@@ -368,24 +368,33 @@ const FlowCanvas: React.FC<FlowCanvasProps> = ({
       const allTasks: Array<{id: string, name: string, description?: string}> = [];
 
       if (fullCrew.nodes && Array.isArray(fullCrew.nodes)) {
-        const taskNodes = fullCrew.nodes.filter((node: any) =>
+        interface CrewNodeData {
+          type?: string;
+          id?: string;
+          data?: { taskId?: string; label?: string; name?: string; description?: string };
+        }
+        const taskNodes = fullCrew.nodes.filter((node: CrewNodeData) =>
           node.type === 'taskNode' && node.data
         );
 
-        taskNodes.forEach((taskNode: any) => {
-          const taskId = taskNode.data.taskId || taskNode.id;
-          const taskName = taskNode.data.label || taskNode.data.name || 'Unnamed Task';
+        taskNodes.forEach((taskNode: CrewNodeData) => {
+          const taskId = taskNode.data?.taskId || taskNode.id;
+          const taskName = taskNode.data?.label || taskNode.data?.name || 'Unnamed Task';
           allTasks.push({
             id: String(taskId),
             name: String(taskName),
-            description: taskNode.data.description || taskNode.data.label
+            description: taskNode.data?.description || taskNode.data?.label
           });
         });
       }
 
       // Also check tasks array if present
       if (fullCrew.tasks && Array.isArray(fullCrew.tasks)) {
-        fullCrew.tasks.forEach((taskNode: any) => {
+        interface TaskNodeData {
+          id?: string;
+          data?: { taskId?: string; label?: string; name?: string; description?: string };
+        }
+        fullCrew.tasks.forEach((taskNode: TaskNodeData) => {
           const taskId = taskNode.data?.taskId || taskNode.id;
           const taskName = taskNode.data?.label || taskNode.data?.name || 'Unnamed Task';
           // Avoid duplicates
@@ -628,7 +637,7 @@ const FlowCanvas: React.FC<FlowCanvasProps> = ({
 
     // Expose to window for debugging
     if (typeof window !== 'undefined') {
-      (window as any).rfInstance = instance;
+      (window as unknown as Record<string, unknown>).rfInstance = instance;
     }
 
     setTimeout(() => {

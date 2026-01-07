@@ -952,5 +952,5 @@ export const useCrewExecutionStore = create<CrewExecutionState>((set, get) => ({
 
 // Expose store on window for debugging
 if (typeof window !== 'undefined') {
-  (window as any).useCrewExecutionStore = useCrewExecutionStore;
+  (window as unknown as Record<string, unknown>).useCrewExecutionStore = useCrewExecutionStore;
 }

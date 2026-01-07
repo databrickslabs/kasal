@@ -222,12 +222,12 @@ const TaskNode: React.FC<TaskNodeProps> = ({ data, id }) => {
     ));
   }, [id, setNodes, setEdges]);
 
-  const handleEditClick = () => {
+  const handleEditClick = useCallback(() => {
     setEditTooltipOpen(false);
     setDeleteTooltipOpen(false);
     document.activeElement && (document.activeElement as HTMLElement).blur();
     setIsEditing(true);
-  };
+  }, []);
 
   const handleRightHandleDoubleClick = useCallback(() => {
     const nodes = getNodes();
