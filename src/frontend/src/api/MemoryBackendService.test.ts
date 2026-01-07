@@ -1,18 +1,30 @@
+import { vi, Mock, beforeEach, afterEach, describe, it, expect } from 'vitest';
 import { MemoryBackendService, TestConnectionResult, AvailableIndexesResponse } from './MemoryBackendService';
 import { apiClient } from '../config/api/ApiConfig';
 import { MemoryBackendConfig, DatabricksMemoryConfig, MemoryBackendType } from '../types/memoryBackend';
 import { AxiosError } from 'axios';
 
-jest.mock('../config/api/ApiConfig');
+vi.mock('../config/api/ApiConfig', () => ({
+  apiClient: {
+    get: vi.fn(),
+    post: vi.fn(),
+    put: vi.fn(),
+    delete: vi.fn(),
+    patch: vi.fn(),
+  },
+  config: {
+    apiUrl: 'http://localhost:8000/api/v1',
+  },
+}));
 
 describe('MemoryBackendService', () => {
   beforeEach(() => {
-    jest.clearAllMocks();
-    jest.spyOn(console, 'error').mockImplementation(jest.fn());
+    vi.clearAllMocks();
+    vi.spyOn(console, 'error').mockImplementation(vi.fn());
   });
 
   afterEach(() => {
-    (console.error as jest.Mock).mockRestore();
+    (console.error as Mock).mockRestore();
   });
 
   describe('validateConfig', () => {
@@ -32,7 +44,7 @@ describe('MemoryBackendService', () => {
       };
 
       const mockResponse = { valid: true };
-      (apiClient.post as jest.Mock).mockResolvedValue({ data: mockResponse });
+      (apiClient.post as Mock).mockResolvedValue({ data: mockResponse });
 
       const result = await MemoryBackendService.validateConfig(mockConfig);
 
@@ -59,7 +71,7 @@ describe('MemoryBackendService', () => {
         headers: {},
         config: { headers: {} } as any,
       };
-      (apiClient.post as jest.Mock).mockRejectedValue(mockError);
+      (apiClient.post as Mock).mockRejectedValue(mockError);
 
       const result = await MemoryBackendService.validateConfig(mockConfig);
 
@@ -88,7 +100,7 @@ describe('MemoryBackendService', () => {
           indexes_found: ['short_term_index', 'long_term_index'],
         },
       };
-      (apiClient.post as jest.Mock).mockResolvedValue({ data: mockResponse });
+      (apiClient.post as Mock).mockResolvedValue({ data: mockResponse });
 
       const result = await MemoryBackendService.testDatabricksConnection(mockConfig);
 
@@ -105,7 +117,7 @@ describe('MemoryBackendService', () => {
         headers: {},
         config: { headers: {} } as any,
       };
-      (apiClient.post as jest.Mock).mockRejectedValue(mockError);
+      (apiClient.post as Mock).mockRejectedValue(mockError);
 
       const result = await MemoryBackendService.testDatabricksConnection(mockConfig);
 
@@ -134,7 +146,7 @@ describe('MemoryBackendService', () => {
           },
         ],
       };
-      (apiClient.post as jest.Mock).mockResolvedValue({ data: mockResponse });
+      (apiClient.post as Mock).mockResolvedValue({ data: mockResponse });
 
       const result = await MemoryBackendService.getAvailableDatabricksIndexes('test-endpoint');
 
@@ -152,13 +164,13 @@ describe('MemoryBackendService', () => {
         endpoint_name: 'test-endpoint',
         indexes: [],
       };
-      (apiClient.post as jest.Mock).mockResolvedValue({ data: mockResponse });
+      (apiClient.post as Mock).mockResolvedValue({ data: mockResponse });
 
       await MemoryBackendService.getAvailableDatabricksIndexes('test-endpoint', authConfig);
 
       expect(apiClient.post).toHaveBeenCalledWith('/memory-backend/databricks/indexes', {
         endpoint_name: 'test-endpoint',
-        databricks_token: 'test-token',
+        personal_access_token: 'test-token',
       });
     });
 
@@ -171,7 +183,7 @@ describe('MemoryBackendService', () => {
         headers: {},
         config: { headers: {} } as any,
       };
-      (apiClient.post as jest.Mock).mockRejectedValue(mockError);
+      (apiClient.post as Mock).mockRejectedValue(mockError);
 
       await expect(MemoryBackendService.getAvailableDatabricksIndexes('test-endpoint')).rejects.toThrow(
         'Endpoint not found'
@@ -191,7 +203,7 @@ describe('MemoryBackendService', () => {
         },
       };
       const mockResponse = { success: true, message: 'Configuration saved' };
-      (apiClient.post as jest.Mock).mockResolvedValue({ data: mockResponse });
+      (apiClient.post as Mock).mockResolvedValue({ data: mockResponse });
 
       const result = await MemoryBackendService.saveConfig(mockConfig);
 
@@ -212,7 +224,7 @@ describe('MemoryBackendService', () => {
         headers: {},
         config: { headers: {} } as any,
       };
-      (apiClient.post as jest.Mock).mockRejectedValue(mockError);
+      (apiClient.post as Mock).mockRejectedValue(mockError);
 
       const result = await MemoryBackendService.saveConfig(mockConfig);
 
@@ -237,7 +249,7 @@ describe('MemoryBackendService', () => {
         },
       };
       // Mock response as array since we're calling /configs endpoint
-      (apiClient.get as jest.Mock).mockResolvedValue({ data: [mockConfig] });
+      (apiClient.get as Mock).mockResolvedValue({ data: [mockConfig] });
 
       const result = await MemoryBackendService.getConfig();
 
@@ -246,7 +258,7 @@ describe('MemoryBackendService', () => {
     });
 
     it('should return null on error', async () => {
-      (apiClient.get as jest.Mock).mockRejectedValue(new Error('Network error'));
+      (apiClient.get as Mock).mockRejectedValue(new Error('Network error'));
 
       const result = await MemoryBackendService.getConfig();
 
@@ -262,7 +274,7 @@ describe('MemoryBackendService', () => {
         entity_count: 5,
         total_size_mb: 1.5,
       };
-      (apiClient.get as jest.Mock).mockResolvedValue({ data: mockStats });
+      (apiClient.get as Mock).mockResolvedValue({ data: mockStats });
 
       const result = await MemoryBackendService.getMemoryStats('crew-123');
 
@@ -271,7 +283,7 @@ describe('MemoryBackendService', () => {
     });
 
     it('should return empty object on error', async () => {
-      (apiClient.get as jest.Mock).mockRejectedValue(new Error('Not found'));
+      (apiClient.get as Mock).mockRejectedValue(new Error('Not found'));
 
       const result = await MemoryBackendService.getMemoryStats('crew-123');
 
@@ -282,7 +294,7 @@ describe('MemoryBackendService', () => {
   describe('clearMemory', () => {
     it('should clear memory successfully', async () => {
       const mockResponse = { success: true, message: 'Memory cleared' };
-      (apiClient.post as jest.Mock).mockResolvedValue({ data: mockResponse });
+      (apiClient.post as Mock).mockResolvedValue({ data: mockResponse });
 
       const result = await MemoryBackendService.clearMemory('crew-123', ['short_term', 'long_term']);
 
@@ -301,7 +313,7 @@ describe('MemoryBackendService', () => {
         headers: {},
         config: { headers: {} } as any,
       };
-      (apiClient.post as jest.Mock).mockRejectedValue(mockError);
+      (apiClient.post as Mock).mockRejectedValue(mockError);
 
       const result = await MemoryBackendService.clearMemory('crew-123', ['entity']);
 
@@ -330,7 +342,7 @@ describe('MemoryBackendService', () => {
           embedding_dimension: 1536,
         },
       };
-      (apiClient.post as jest.Mock).mockResolvedValue({ data: mockResponse });
+      (apiClient.post as Mock).mockResolvedValue({ data: mockResponse });
 
       const result = await MemoryBackendService.createDatabricksIndex(
         mockConfig,
@@ -360,7 +372,7 @@ describe('MemoryBackendService', () => {
         headers: {},
         config: { headers: {} } as any,
       };
-      (apiClient.post as jest.Mock).mockRejectedValue(mockError);
+      (apiClient.post as Mock).mockRejectedValue(mockError);
 
       const result = await MemoryBackendService.createDatabricksIndex(
         mockConfig,
@@ -415,7 +427,7 @@ describe('MemoryBackendService', () => {
         },
         backend_id: 'backend-123',
       };
-      (apiClient.post as jest.Mock).mockResolvedValue({ data: mockResponse });
+      (apiClient.post as Mock).mockResolvedValue({ data: mockResponse });
 
       const result = await MemoryBackendService.oneClickDatabricksSetup('https://example.databricks.com');
 
@@ -436,7 +448,7 @@ describe('MemoryBackendService', () => {
         headers: {},
         config: { headers: {} } as any,
       };
-      (apiClient.post as jest.Mock).mockRejectedValue(mockError);
+      (apiClient.post as Mock).mockRejectedValue(mockError);
 
       const result = await MemoryBackendService.oneClickDatabricksSetup(
         'https://example.databricks.com',
