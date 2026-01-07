@@ -1,3 +1,4 @@
+import { vi, Mock, beforeEach, afterEach, describe, it, test, expect } from 'vitest';
 import React from 'react';
 import { render, screen, fireEvent } from '@testing-library/react';
 import { ThemeProvider } from '@mui/material/styles';
@@ -8,8 +9,8 @@ import type { Tool } from '../../types/tool';
 const theme = createTheme();
 
 describe('SecurityDisclaimer', () => {
-  const mockOnClose = jest.fn();
-  const mockOnConfirm = jest.fn();
+  const mockOnClose = vi.fn();
+  const mockOnConfirm = vi.fn();
 
   const renderComponent = (tool: Tool | null = null) => {
     return render(
@@ -25,7 +26,7 @@ describe('SecurityDisclaimer', () => {
   };
 
   beforeEach(() => {
-    jest.clearAllMocks();
+    vi.clearAllMocks();
   });
 
   it('should render DatabricksJobsTool security information', () => {
@@ -40,10 +41,11 @@ describe('SecurityDisclaimer', () => {
 
     renderComponent(databricksJobsTool);
 
-    // Check that the security information is displayed
+    // Check that the tool name and warning are displayed
     expect(screen.getByText(/DatabricksJobsTool/)).toBeInTheDocument();
-    expect(screen.getByText(/Manages Databricks Jobs/)).toBeInTheDocument();
-    expect(screen.getByText(/HIGH/)).toBeInTheDocument(); // Risk level
+    expect(screen.getByText(/Security Warning/)).toBeInTheDocument();
+    // Check risk level chips are displayed
+    expect(screen.getByText(/Multi-Tenant: HIGH/)).toBeInTheDocument();
   });
 
   it('should display correct risks for DatabricksJobsTool', () => {
@@ -57,6 +59,10 @@ describe('SecurityDisclaimer', () => {
     };
 
     renderComponent(databricksJobsTool);
+
+    // Click to show details
+    const showDetailsButton = screen.getByText(/Show Security Details/);
+    fireEvent.click(showDetailsButton);
 
     // Check specific risks are displayed
     expect(screen.getByText(/Creation of arbitrary compute jobs/)).toBeInTheDocument();
@@ -76,9 +82,9 @@ describe('SecurityDisclaimer', () => {
 
     renderComponent(databricksJobsTool);
 
-    // Toggle to show mitigations
-    const showMitigationsButton = screen.getByText(/Show Recommended Mitigations/);
-    fireEvent.click(showMitigationsButton);
+    // Click to show details first
+    const showDetailsButton = screen.getByText(/Show Security Details/);
+    fireEvent.click(showDetailsButton);
 
     // Check specific mitigations are displayed
     expect(screen.getByText(/Validate job configurations before creation/)).toBeInTheDocument();
@@ -97,9 +103,15 @@ describe('SecurityDisclaimer', () => {
 
     renderComponent(databricksJobsTool);
 
+    // Check single-tenant chip is displayed
+    expect(screen.getByText(/Single-Tenant: MEDIUM/)).toBeInTheDocument();
+
+    // Click to show details to see deployment context
+    const showDetailsButton = screen.getByText(/Show Security Details/);
+    fireEvent.click(showDetailsButton);
+
     // Check single-tenant specific information
     expect(screen.getByText(/Single-tenant with Databricks OBO security model/)).toBeInTheDocument();
-    expect(screen.getByText(/MEDIUM/)).toBeInTheDocument(); // Single-tenant risk level
   });
 
   it('should include DatabricksJobsTool in TOOL_SECURITY_INFO', () => {

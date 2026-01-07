@@ -1,3 +1,4 @@
+import { vi, Mock, beforeEach, afterEach, describe, it, test, expect } from 'vitest';
 /**
  * Simplified unit tests for AgentForm template functionality.
  *
@@ -31,9 +32,9 @@ import CloseIcon from '@mui/icons-material/Close';
 import ExpandMoreIcon from '@mui/icons-material/ExpandMore';
 
 // Mock the GenerateService
-jest.mock('../../../api/GenerateService', () => ({
+vi.mock('../../../api/GenerateService', () => ({
   GenerateService: {
-    generateTemplates: jest.fn(),
+    generateTemplates: vi.fn(),
   },
 }));
 
@@ -277,11 +278,11 @@ const TemplateSection = ({
 };
 
 describe('AgentForm Template Features', () => {
-  const mockTemplateChange = jest.fn();
-  const mockGenerateTemplates = jest.fn();
+  const mockTemplateChange = vi.fn();
+  const mockGenerateTemplates = vi.fn();
 
   beforeEach(() => {
-    jest.clearAllMocks();
+    vi.clearAllMocks();
   });
 
   describe('Template Fields Rendering', () => {

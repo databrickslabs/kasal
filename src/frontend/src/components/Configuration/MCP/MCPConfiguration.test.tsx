@@ -1,31 +1,32 @@
+import { vi, Mock, beforeEach, afterEach, describe, it, test, expect } from 'vitest';
 import React from 'react';
 import { render, screen, fireEvent, waitFor, act } from '@testing-library/react';
 import '@testing-library/jest-dom';
 import MCPConfiguration from './MCPConfiguration';
 
 // Mock react-i18next
-jest.mock('react-i18next', () => ({
+vi.mock('react-i18next', () => ({
   useTranslation: () => ({
     t: (key: string, options?: any) => options?.defaultValue || key,
     i18n: {
-      changeLanguage: jest.fn().mockResolvedValue(undefined),
+      changeLanguage: vi.fn().mockResolvedValue(undefined),
     },
   }),
 }));
 
 // Mock the MCP service
 const mockMCPService = {
-  getGlobalSettings: jest.fn(),
-  updateGlobalSettings: jest.fn(),
-  getMcpServers: jest.fn(),
-  createMcpServer: jest.fn(),
-  updateMcpServer: jest.fn(),
-  deleteMcpServer: jest.fn(),
-  toggleMcpServerEnabled: jest.fn(),
-  testConnection: jest.fn(),
+  getGlobalSettings: vi.fn(),
+  updateGlobalSettings: vi.fn(),
+  getMcpServers: vi.fn(),
+  createMcpServer: vi.fn(),
+  updateMcpServer: vi.fn(),
+  deleteMcpServer: vi.fn(),
+  toggleMcpServerEnabled: vi.fn(),
+  testConnection: vi.fn(),
 };
 
-jest.mock('../../../api/MCPService', () => ({
+vi.mock('../../../api/MCPService', () => ({
   MCPService: {
     getInstance: () => mockMCPService,
   },
@@ -63,7 +64,7 @@ describe('MCPConfiguration', () => {
   ];
 
   beforeEach(() => {
-    jest.clearAllMocks();
+    vi.clearAllMocks();
     mockMCPService.getGlobalSettings.mockResolvedValue(mockSettings);
     mockMCPService.getMcpServers.mockResolvedValue({ servers: mockServers });
   });

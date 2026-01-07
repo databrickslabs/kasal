@@ -1,12 +1,12 @@
+import { vi, beforeEach, describe, it, expect } from 'vitest';
 import React from 'react';
-import { render, screen } from '@testing-library/react';
+import { render, screen, waitFor } from '@testing-library/react';
 import { ThemeProvider } from '@mui/material/styles';
 import { createTheme } from '@mui/material/styles';
 import ToolForm, { customTools } from './ToolForm';
-import { ToolService } from '../../api/ToolService';
 
 // Mock the translation hook
-jest.mock('react-i18next', () => ({
+vi.mock('react-i18next', () => ({
   useTranslation: () => ({
     t: (key: string) => key,
     i18n: {
@@ -15,10 +15,21 @@ jest.mock('react-i18next', () => ({
   }),
 }));
 
+// Mock permission store
+vi.mock('../../store/permissions', () => ({
+  usePermissionStore: vi.fn((selector) => {
+    const state = {
+      userRole: 'admin',
+      isLoading: false,
+    };
+    return selector ? selector(state) : state;
+  }),
+}));
+
 // Mock the ToolService
-jest.mock('../../api/ToolService', () => ({
+vi.mock('../../api/ToolService', () => ({
   ToolService: {
-    listTools: jest.fn().mockResolvedValue([
+    listTools: vi.fn().mockResolvedValue([
       {
         id: 70,
         title: 'DatabricksJobsTool',
@@ -36,7 +47,7 @@ jest.mock('../../api/ToolService', () => ({
         enabled: true,
       },
     ]),
-    updateTool: jest.fn().mockResolvedValue({}),
+    updateTool: vi.fn().mockResolvedValue({}),
   },
 }));
 
@@ -52,20 +63,15 @@ describe('ToolForm', () => {
   };
 
   beforeEach(() => {
-    jest.clearAllMocks();
+    vi.clearAllMocks();
   });
 
-  it('should render without crashing', () => {
-    renderComponent();
-    expect(screen.getByText('tools.title')).toBeInTheDocument();
-  });
-
-  it('should categorize DatabricksJobsTool as a custom tool', async () => {
+  it('should render without crashing', async () => {
     renderComponent();
 
-    // Wait for tools to load
-    const customTab = await screen.findByText('tools.tabs.custom');
-    expect(customTab).toBeInTheDocument();
+    await waitFor(() => {
+      expect(screen.getByText('tools.regular.title')).toBeInTheDocument();
+    });
   });
 
   it('should include all custom tools in the customTools array', () => {
@@ -74,13 +80,11 @@ describe('ToolForm', () => {
     expect(customTools).toContain('DatabricksJobsTool');
   });
 
-  it('should correctly categorize tools based on customTools array', async () => {
+  it('should show prebuilt tab by default', async () => {
     renderComponent();
 
-    // Wait for the fetch to complete
-    await screen.findByText('tools.title');
-
-    // Verify ToolService was called
-    expect(ToolService.listTools).toHaveBeenCalled();
+    await waitFor(() => {
+      expect(screen.getByText('tools.regular.tabs.prebuilt')).toBeInTheDocument();
+    });
   });
 });
