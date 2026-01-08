@@ -12,6 +12,7 @@ import AttachFileIcon from '@mui/icons-material/AttachFile';
 import { Task } from '../../api/TaskService';
 import { ToolService, Tool } from '../../api/ToolService';
 import TaskForm from './TaskForm';
+import QuickToolSelectionDialog from './QuickToolSelectionDialog';
 import { Theme } from '@mui/material/styles';
 import { useTabDirtyState } from '../../hooks/workflow/useTabDirtyState';
 import { useTaskExecutionStore } from '../../store/taskExecutionStore';
@@ -87,6 +88,7 @@ interface TaskNodeProps {
 const TaskNode: React.FC<TaskNodeProps> = ({ data, id }) => {
   const { setNodes, setEdges, getNodes, getEdges } = useReactFlow();
   const [isEditing, setIsEditing] = useState(false);
+  const [isToolDialogOpen, setIsToolDialogOpen] = useState(false);
   const [availableTools, setAvailableTools] = useState<Tool[]>([]);
   const [editTooltipOpen, setEditTooltipOpen] = useState(false);
   const [deleteTooltipOpen, setDeleteTooltipOpen] = useState(false);
@@ -321,6 +323,35 @@ const TaskNode: React.FC<TaskNodeProps> = ({ data, id }) => {
     event.preventDefault();
     event.stopPropagation();
   }, []);
+
+  // Handle click on tools section to open quick tool selector
+  const handleToolsClick = useCallback((event: React.MouseEvent) => {
+    event.preventDefault();
+    event.stopPropagation();
+    setIsToolDialogOpen(true);
+  }, []);
+
+  // Handle tool selection from the quick tool dialog
+  const handleToolsSelect = useCallback((selectedTools: string[]) => {
+    // Update the node data with the new tools
+    setNodes(nodes => nodes.map(node => {
+      if (node.id === id) {
+        return {
+          ...node,
+          data: {
+            ...node.data,
+            tools: selectedTools,
+          }
+        };
+      }
+      return node;
+    }));
+
+    // Mark tab as dirty since task was modified
+    markCurrentTabDirty();
+
+    setIsToolDialogOpen(false);
+  }, [id, setNodes, markCurrentTabDirty]);
 
   const iconStyles = {
     mr: 1.5,
@@ -606,24 +637,39 @@ const TaskNode: React.FC<TaskNodeProps> = ({ data, id }) => {
           {data.description}
         </Typography>
 
-        <Typography
-          variant="caption"
-          color="textSecondary"
+        <Box
           sx={{
             mt: 'auto',
             pt: 1,
-            fontSize: '0.7rem',
             display: 'flex',
             alignItems: 'center',
             justifyContent: 'space-between',
             width: '100%'
           }}
         >
-          <span>Tools: {Array.isArray(data.tools) ? data.tools.length : 0}</span>
+          <Box
+            onClick={handleToolsClick}
+            sx={{
+              fontSize: '0.7rem',
+              color: 'text.secondary',
+              cursor: 'pointer',
+              padding: '2px 6px',
+              borderRadius: '4px',
+              transition: 'all 0.2s ease',
+              '&:hover': {
+                backgroundColor: (theme: Theme) => `${theme.palette.primary.main}15`,
+                color: (theme: Theme) => theme.palette.primary.main,
+              }
+            }}
+          >
+            Tools: {Array.isArray(data.tools) ? data.tools.length : 0}
+          </Box>
           {data.config?.human_input && (
-            <span style={{ color: 'orange' }}>Human Input</span>
+            <Typography variant="caption" sx={{ color: 'orange', fontSize: '0.7rem' }}>
+              Human Input
+            </Typography>
           )}
-        </Typography>
+        </Box>
 
         {Boolean((data as Record<string, unknown>)?.loading) && (
           <Box
@@ -745,6 +791,14 @@ const TaskNode: React.FC<TaskNodeProps> = ({ data, id }) => {
           </Box>
         </DialogContent>
       </Dialog>
+
+      {/* Quick Tool Selection Dialog */}
+      <QuickToolSelectionDialog
+        open={isToolDialogOpen}
+        onClose={() => setIsToolDialogOpen(false)}
+        onSelectTools={handleToolsSelect}
+        currentTools={data.tools || []}
+      />
     </>
   );
 };
