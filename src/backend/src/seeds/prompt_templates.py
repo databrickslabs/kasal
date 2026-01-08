@@ -120,7 +120,6 @@ json
     "context": [],
     "output_json": null,
     "output_pydantic": null,
-    "output_file": null,
     "human_input": false,
     "retry_on_fail": true,
     "max_retries": 3,
@@ -146,6 +145,7 @@ Please follow these strict guidelines when generating your output:
 7. All boolean and null values must use correct JSON syntax.
 8. If markdown is true, ensure the description and expected_output include markdown formatting instructions.
 9. Do not include any explanation or commentary—only return the JSON object.
+10. CRITICAL: Do NOT include an "output_file" field in your response. Task outputs should be returned directly as the task result, NOT written to files. The output_file feature is reserved for explicit user requests only.
 
 LLM GUARDRAIL GUIDELINES:
 The llm_guardrail field enables AI-powered output validation.
@@ -302,7 +302,6 @@ For agents include:
             "config": {},
             "output_json": null,
             "output_pydantic": null,
-            "output_file": null,
             "output": null,
             "callback": null,
             "human_input": false,
@@ -329,6 +328,7 @@ Ensure:
 7. Return the name of the tool exactly as it is in the tools array
 8. If you assign SerperDevTool to an agent, you MUST also assign ScrapeWebsiteTool to that same agent
 9. The total number of tasks MUST NOT exceed 6 tasks
+10. CRITICAL: Do NOT include an "output_file" field in any task. Task outputs should be returned directly as the task result, NOT written to files. The output_file feature is reserved for explicit user requests only.
 
 LLM GUARDRAIL CONFIGURATION:
 The llm_guardrail field enables AI-powered output validation for tasks.
