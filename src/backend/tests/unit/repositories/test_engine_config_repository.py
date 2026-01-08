@@ -380,12 +380,12 @@ class TestEngineConfigRepositoryCrewAIFlowMethods:
             assert result is False
     
     @pytest.mark.asyncio
-    async def test_get_crewai_flow_enabled_not_found_defaults_false(self, engine_config_repository, mock_async_session):
-        """Test get CrewAI flow enabled when config not found (defaults to False)."""
+    async def test_get_crewai_flow_enabled_not_found_defaults_true(self, engine_config_repository, mock_async_session):
+        """Test get CrewAI flow enabled when config not found (defaults to True)."""
         with patch.object(engine_config_repository, 'find_by_engine_and_key', return_value=None):
             result = await engine_config_repository.get_crewai_flow_enabled()
-            
-            assert result is False
+
+            assert result is True
     
     @pytest.mark.asyncio
     async def test_set_crewai_flow_enabled_update_existing(self, engine_config_repository, mock_async_session):

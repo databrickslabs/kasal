@@ -48,14 +48,14 @@ class TestEngineConfigServiceCrewAIFlowMethods:
         mock_repository.get_crewai_flow_enabled.assert_called_once()
 
     @pytest.mark.asyncio
-    async def test_get_crewai_flow_enabled_error_defaults_false(self, engine_config_service, mock_repository):
-        """Test get CrewAI flow enabled defaults to False on error."""
+    async def test_get_crewai_flow_enabled_error_defaults_true(self, engine_config_service, mock_repository):
+        """Test get CrewAI flow enabled defaults to True on error."""
         mock_repository.get_crewai_flow_enabled.side_effect = Exception("Database error")
 
         with patch('src.services.engine_config_service.logger') as mock_logger:
             result = await engine_config_service.get_crewai_flow_enabled()
 
-            assert result is False
+            assert result is True
             mock_repository.get_crewai_flow_enabled.assert_called_once()
             mock_logger.error.assert_called_once()
 
