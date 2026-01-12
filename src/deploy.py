@@ -355,7 +355,8 @@ starlette==0.40.0
                 shutil.copytree(backend_src, backend_dst, ignore=shutil.ignore_patterns(
                     '__pycache__', '*.pyc', '*.pyo', 'logs', '*.log',
                     '.mypy_cache', '.pytest_cache', 'htmlcov', 'tests',
-                    '*.db', '*.db-shm', '*.db-wal', '.coverage'
+                    '*.db', '*.db-shm', '*.db-wal', '.coverage',
+                    '.venv', 'venv', '.env', '.claude'  # Exclude virtual env, secrets, and IDE configs
                 ))
                 logger.info(f"Copied backend folder")
             else:

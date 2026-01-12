@@ -2,11 +2,19 @@ import logging
 from typing import Optional, Dict, Any
 
 from sqlalchemy.ext.asyncio import AsyncSession
+from databricks.sdk.useragent import with_product
 
 from src.repositories.mlflow_repository import MLflowRepository
 from src.repositories.execution_history_repository import ExecutionHistoryRepository
 from src.services.model_config_service import ModelConfigService
 from src.core.logger import LoggerManager
+from src.utils.telemetry import KASAL_BASE
+from src.config.settings import settings
+
+VERSION = settings.VERSION
+
+# Register User-Agent for Databricks SDK / MLflow calls (module-level)
+with_product(KASAL_BASE, VERSION)  # Kasal/0.1.0 User-Agent
 
 # Route MLflowService logs to system.log for user visibility
 logger = LoggerManager.get_instance().system

@@ -168,7 +168,7 @@ class EmbedderConfigBuilder:
                             }
                             logger.debug("Using OBO token for embeddings")
                         elif self.auth_headers:
-                            headers = self.auth_headers
+                            headers = self.auth_headers.copy()
                         elif self.api_key:
                             headers = {
                                 "Authorization": f"Bearer {self.api_key}",
@@ -177,12 +177,29 @@ class EmbedderConfigBuilder:
                         else:
                             logger.error("No authentication method available for Databricks embeddings")
                             raise Exception("No authentication method available")
+                        
+                        # Add User-Agent header for Databricks API attribution
+                        from src.utils.telemetry import get_user_agent_header, KasalProduct, send_logfood_telemetry_sync
+                        headers.update(get_user_agent_header(KasalProduct.EMBEDDING))
 
                         response = requests.post(endpoint_url, headers=headers, json=payload, timeout=30)
                         if response.status_code == 200:
                             result = response.json()
                             if 'data' in result and len(result['data']) > 0:
                                 embeddings = [item.get('embedding', item) for item in result['data']]
+                                
+                                # Send token usage to Databricks logfood
+                                usage = result.get('usage', {})
+                                if usage:
+                                    auth_token = self.user_token or self.api_key
+                                    send_logfood_telemetry_sync(
+                                        usage=usage,
+                                        model=self.model,
+                                        product_context=KasalProduct.LLM,
+                                        workspace_url=workspace_url,
+                                        token=auth_token
+                                    )
+
                                 return cast(Embeddings, embeddings)
                             else:
                                 raise Exception(f"Unexpected response format: {result}")

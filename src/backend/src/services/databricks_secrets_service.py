@@ -13,6 +13,7 @@ from typing import List, Optional, Dict, Tuple, Any
 
 from src.core.base_service import BaseService
 from src.repositories.databricks_config_repository import DatabricksConfigRepository
+from src.utils.telemetry import get_user_agent_header
 
 # Initialize logger
 logger = logging.getLogger(__name__)
@@ -129,7 +130,8 @@ class DatabricksSecretsService(BaseService):
             url = f"{config.workspace_url}/api/2.0/secrets/list"
             headers = {
                 "Authorization": f"Bearer {token}",
-                "Content-Type": "application/json"
+                "Content-Type": "application/json",
+                **get_user_agent_header()
             }
             data = {"scope": scope}
             
@@ -198,7 +200,8 @@ class DatabricksSecretsService(BaseService):
             url = f"{config.workspace_url}/api/2.0/secrets/get"
             headers = {
                 "Authorization": f"Bearer {token}",
-                "Content-Type": "application/json"
+                "Content-Type": "application/json",
+                **get_user_agent_header()
             }
             data = {"scope": scope, "key": key}
             
@@ -261,7 +264,8 @@ class DatabricksSecretsService(BaseService):
             url = f"{config.workspace_url}/api/2.0/secrets/put"
             headers = {
                 "Authorization": f"Bearer {token}",
-                "Content-Type": "application/json"
+                "Content-Type": "application/json",
+                **get_user_agent_header()
             }
             data = {
                 "scope": scope,
@@ -317,7 +321,8 @@ class DatabricksSecretsService(BaseService):
             url = f"{config.workspace_url}/api/2.0/secrets/delete"
             headers = {
                 "Authorization": f"Bearer {token}",
-                "Content-Type": "application/json"
+                "Content-Type": "application/json",
+                **get_user_agent_header()
             }
             data = {"scope": scope, "key": key}
             
@@ -350,7 +355,8 @@ class DatabricksSecretsService(BaseService):
             url = f"{workspace_url}/api/2.0/secrets/scopes/create"
             headers = {
                 "Authorization": f"Bearer {token}",
-                "Content-Type": "application/json"
+                "Content-Type": "application/json",
+                **get_user_agent_header()
             }
             data = {"scope": scope, "initial_manage_principal": "users"}
             

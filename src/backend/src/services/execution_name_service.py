@@ -118,11 +118,13 @@ Tasks:
             # ensuring we can generate a full 2-4 word name without hitting token limits.
             # For models without reasoning tokens, we'll truncate to ensure concise names.
             # Use LLMManager wrapper (handles GPT-5/deep research models)
+            from src.utils.telemetry import get_user_agent_header, KasalProduct
             response = await LLMManager.acompletion(
                 **model_params,
                 messages=messages,
                 temperature=0.7,
-                max_tokens=100  # Increased to prevent truncation of 2-4 word names
+                max_tokens=100,  # Increased to prevent truncation of 2-4 word names
+                extra_headers=get_user_agent_header(KasalProduct.NAME_GENERATION)
             )
 
             # Extract and clean the name
