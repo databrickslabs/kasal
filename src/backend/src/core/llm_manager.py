@@ -48,6 +48,14 @@ embedding_logger = LoggerManager.get_instance().documentation_embedding
 # Set drop_params to True to automatically drop unsupported parameters
 # This is especially useful for GPT-5 and other new models that may have different parameter support
 # Note: With litellm 1.75.8+, GPT-5 is natively supported
+
+# Module-level token for subprocess callback fallback (contextvars don't propagate to callback threads)
+_subprocess_user_token: Optional[str] = None
+
+def set_subprocess_user_token(token: str) -> None:
+    """Set token for LiteLLM callback fallback in subprocess mode."""
+    global _subprocess_user_token
+    _subprocess_user_token = token
 litellm.drop_params = True
 logger.info("Set litellm.drop_params=True to handle unsupported parameters gracefully")
 
@@ -339,11 +347,17 @@ class LiteLLMTokenTelemetryLogger(CustomLogger):
         try:
             import asyncio
             from src.utils.telemetry import send_logfood_telemetry
+            from src.utils.user_context import UserContext
+            
+            # Get user token from context (set during request via contextvars)
+            # Falls back to module-level token for subprocess callback threads
+            user_token = UserContext.get_user_token() or _subprocess_user_token
             
             # Use skip_db_auth=True to avoid opening database sessions during callbacks,
             # which can cause SQLAlchemy session conflicts with ongoing transactions
             coro = send_logfood_telemetry(
-                usage=usage, model=model, product_context=product_context, skip_db_auth=True
+                usage=usage, model=model, product_context=product_context, 
+                user_token=user_token, skip_db_auth=True
             )
             
             try:
@@ -369,10 +383,17 @@ class LiteLLMTokenTelemetryLogger(CustomLogger):
         
         try:
             from src.utils.telemetry import send_logfood_telemetry
+            from src.utils.user_context import UserContext
+            
+            # Get user token from context (set during request via contextvars)
+            # Falls back to module-level token for subprocess callback threads
+            user_token = UserContext.get_user_token() or _subprocess_user_token
+            
             # Use skip_db_auth=True to avoid opening database sessions during callbacks,
             # which can cause SQLAlchemy session conflicts with ongoing transactions
             await send_logfood_telemetry(
-                usage=usage, model=model, product_context=product_context, skip_db_auth=True
+                usage=usage, model=model, product_context=product_context,
+                user_token=user_token, skip_db_auth=True
             )
         except Exception as e:
             self.logger.debug(f"Token telemetry failed: {e}")

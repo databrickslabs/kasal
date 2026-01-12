@@ -371,6 +371,9 @@ def run_crew_in_process(
                 user_token = crew_config.get('user_token')
                 if user_token:
                     UserContext.set_user_token(user_token)
+                    # Also set for LiteLLM callback fallback (contextvars don't propagate to callback threads)
+                    from src.core.llm_manager import set_subprocess_user_token
+                    set_subprocess_user_token(user_token)
                     subprocess_logger.info(f"[SUBPROCESS] ✓ UserContext initialized with group_id={group_id} and OBO token")
                 else:
                     subprocess_logger.info(f"[SUBPROCESS] ✓ UserContext initialized with group_id={group_id} (no OBO token)")
@@ -779,91 +782,6 @@ def run_crew_in_process(
                 except Exception as mlflow_error:
                     async_logger.error(f"[SUBPROCESS] MLflow configuration failed: {mlflow_error}")
                     # Continue execution even if MLflow setup fails
-
-            # Set up LiteLLM telemetry wrapper (runs regardless of MLflow)
-            # This wraps litellm.completion to capture token usage for logfood
-            try:
-                import litellm
-                from functools import wraps
-                
-                # Wrap litellm.completion to capture token usage for logfood telemetry
-                if not hasattr(litellm.completion, '_kasal_telemetry_wrapped'):
-                    _original_litellm_completion = litellm.completion
-                    
-                    @wraps(_original_litellm_completion)
-                    def _telemetry_tracked_completion(*args, **kwargs):
-                        model = kwargs.get('model', 'unknown')
-                        result = _original_litellm_completion(*args, **kwargs)
-                        
-                        # Send telemetry using async function
-                        try:
-                            from src.utils.telemetry import send_logfood_telemetry, KasalProduct
-                            import asyncio as _asyncio
-                            
-                            usage = getattr(result, 'usage', None)
-                            if usage:
-                                usage_dict = {
-                                    'prompt_tokens': getattr(usage, 'prompt_tokens', 0),
-                                    'completion_tokens': getattr(usage, 'completion_tokens', 0),
-                                    'total_tokens': getattr(usage, 'total_tokens', 0),
-                                }
-                                try:
-                                    loop = _asyncio.get_running_loop()
-                                    # Use skip_db_auth=True to avoid session conflicts
-                                    loop.create_task(send_logfood_telemetry(
-                                        usage=usage_dict,
-                                        model=model,
-                                        product_context=KasalProduct.AGENT,
-                                        skip_db_auth=True
-                                    ))
-                                except RuntimeError:
-                                    pass  # No running event loop
-                        except Exception:
-                            pass  # Telemetry should not affect main flow
-                        
-                        return result
-                    
-                    _telemetry_tracked_completion._kasal_telemetry_wrapped = True
-                    litellm.completion = _telemetry_tracked_completion
-                
-                # Wrap litellm.acompletion for async calls
-                if not hasattr(litellm.acompletion, '_kasal_telemetry_wrapped'):
-                    _original_litellm_acompletion = litellm.acompletion
-                    
-                    @wraps(_original_litellm_acompletion)
-                    async def _telemetry_tracked_acompletion(*args, **kwargs):
-                        model = kwargs.get('model', 'unknown')
-                        result = await _original_litellm_acompletion(*args, **kwargs)
-                        
-                        # Send telemetry
-                        try:
-                            from src.utils.telemetry import send_logfood_telemetry, KasalProduct
-                            
-                            usage = getattr(result, 'usage', None)
-                            if usage:
-                                usage_dict = {
-                                    'prompt_tokens': getattr(usage, 'prompt_tokens', 0),
-                                    'completion_tokens': getattr(usage, 'completion_tokens', 0),
-                                    'total_tokens': getattr(usage, 'total_tokens', 0),
-                                }
-                                # Use skip_db_auth=True to avoid session conflicts
-                                await send_logfood_telemetry(
-                                    usage=usage_dict,
-                                    model=model,
-                                    product_context=KasalProduct.LLM,
-                                    skip_db_auth=True
-                                )
-                        except Exception:
-                            pass  # Telemetry should not affect main flow
-                        
-                        return result
-                    
-                    _telemetry_tracked_acompletion._kasal_telemetry_wrapped = True
-                    litellm.acompletion = _telemetry_tracked_acompletion
-                    
-                    async_logger.debug("[SUBPROCESS] LiteLLM telemetry wrappers installed")
-            except Exception as wrap_err:
-                async_logger.warning(f"[SUBPROCESS] Failed to install telemetry wrapper: {wrap_err}")
 
             # Create services using session factory
             from src.db.session import async_session_factory

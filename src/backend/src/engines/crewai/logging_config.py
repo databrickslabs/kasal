@@ -509,6 +509,19 @@ def configure_subprocess_logging(execution_id: str, process_type: str = "crew"):
         ))
         exec_logger.addHandler(file_handler)
 
+    # In Databricks Apps, also output to stderr so logs are captured by the platform
+    # DATABRICKS_APP_NAME is set when running in Databricks Apps
+    # Use sys.__stderr__ to bypass suppress_stdout_stderr() which redirects sys.stderr
+    console_handler = None
+    if os.environ.get('DATABRICKS_APP_NAME'):
+        console_handler = logging.StreamHandler(sys.__stderr__)
+        console_handler.setFormatter(ExecutionContextFormatter(
+            fmt=f'{log_prefix} %(asctime)s - %(levelname)s - %(message)s',
+            datefmt='%Y-%m-%d %H:%M:%S'
+        ))
+        console_handler.setLevel(logging.INFO)
+        exec_logger.addHandler(console_handler)
+
     # Check if debug logging is enabled via environment variables
     import os
 
@@ -564,7 +577,7 @@ def configure_subprocess_logging(execution_id: str, process_type: str = "crew"):
     if log_level == logging.DEBUG:
         exec_logger.info(f"[TRACE_DEBUG] Debug logging enabled for {process_type} execution")
 
-    # Apply file handler to all relevant loggers
+    # Apply file handler (and console handler in Databricks Apps) to all relevant loggers
     for logger_name in [
         'crewai',  # CrewAI framework logs (crew kickoff, task execution, etc.)
         'src.engines.crewai.callbacks.logging_callbacks',
@@ -575,11 +588,14 @@ def configure_subprocess_logging(execution_id: str, process_type: str = "crew"):
         'src.services.databricks_knowledge_service',  # Add knowledge service logger for search debugging
         'src.engines.crewai.tools.custom.powerbi_analysis_tool',  # Add PowerBI tool logger
         'src.engines.crewai.tools.custom.databricks_jobs_tool',  # Add Databricks jobs tool logger
+        'src.utils.telemetry',  # Add telemetry logger for LogfoodTelemetry logging
         '__main__'  # For any direct logging in subprocess
     ]:
         module_logger = get_logger(logger_name)
         module_logger.handlers = []  # Clear existing handlers
         module_logger.addHandler(file_handler)
+        if console_handler:  # Also add console handler in Databricks Apps
+            module_logger.addHandler(console_handler)
         module_logger.setLevel(log_level)
         module_logger.propagate = False
 
