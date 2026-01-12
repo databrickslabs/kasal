@@ -905,7 +905,8 @@ def extract_user_token_from_request(request) -> Optional[str]:
 
 
 async def get_auth_context(
-    user_token: Optional[str] = None
+    user_token: Optional[str] = None,
+    skip_db_auth: bool = False
 ) -> Optional[AuthContext]:
     """
     Get authentication context with token, headers, and environment.
@@ -913,12 +914,15 @@ async def get_auth_context(
 
     Authentication Priority Chain (applies to ALL services):
     1. OBO (On-Behalf-Of) - User token from request headers (if provided)
-    2. PAT (Personal Access Token) - From API Keys Service with group_id
+    2. PAT (Personal Access Token) - From API Keys Service with group_id (skipped if skip_db_auth=True)
     3. SPN (Service Principal) - OAuth with client credentials
 
     Args:
         user_token: Optional user access token for OBO authentication.
                    If None, skips OBO and uses PAT/SPN (service-level auth).
+        skip_db_auth: If True, skip authentication methods that require database access
+                      (PAT lookup). Use this when called from callbacks during active
+                      database transactions to avoid session conflicts.
 
     Returns:
         AuthContext with all authentication artifacts, or None if auth failed
@@ -940,6 +944,9 @@ async def get_auth_context(
             messages=[...],
             **params
         )
+        
+        # From callback during database transaction (skip PAT lookup)
+        auth = await get_auth_context(user_token=None, skip_db_auth=True)
     """
     try:
         logger.debug(f"get_auth_context called with user_token={'SET' if user_token else 'None'}")
@@ -984,53 +991,57 @@ async def get_auth_context(
 
         # Priority 2: Try PAT from ApiKeysService (per-request lookup with group_id)
         # SECURITY: PAT tokens must be loaded with group_id for multi-tenant isolation
-        logger.info("[AUTH] Priority 2: Attempting PAT authentication from API Keys Service")
+        # Skip this step if skip_db_auth=True (avoids session conflicts during transactions)
         pat_token = None
-        try:
-            from src.services.api_keys_service import ApiKeysService
-            from src.db.session import async_session_factory
-            from src.utils.user_context import UserContext
-
-            # Get group_id from UserContext for multi-tenant isolation
-            group_id = None
+        if skip_db_auth:
+            logger.info("[AUTH] Priority 2: Skipping PAT lookup (skip_db_auth=True)")
+        else:
+            logger.info("[AUTH] Priority 2: Attempting PAT authentication from API Keys Service")
             try:
-                group_context = UserContext.get_group_context()
-                logger.info(f"[AUTH PAT] Retrieved group_context: {group_context}")
-                if group_context and hasattr(group_context, 'primary_group_id'):
-                    group_id = group_context.primary_group_id
-                    logger.info(f"[AUTH PAT] ✓ Using group_id from UserContext: {group_id}")
+                from src.services.api_keys_service import ApiKeysService
+                from src.db.session import async_session_factory
+                from src.utils.user_context import UserContext
+
+                # Get group_id from UserContext for multi-tenant isolation
+                group_id = None
+                try:
+                    group_context = UserContext.get_group_context()
+                    logger.info(f"[AUTH PAT] Retrieved group_context: {group_context}")
+                    if group_context and hasattr(group_context, 'primary_group_id'):
+                        group_id = group_context.primary_group_id
+                        logger.info(f"[AUTH PAT] ✓ Using group_id from UserContext: {group_id}")
+                    else:
+                        logger.warning(f"[AUTH PAT] ✗ No group_context or primary_group_id. group_context={group_context}")
+                except Exception as e:
+                    logger.warning(f"[AUTH PAT] ✗ Could not get group_id from UserContext: {e}")
+
+                if group_id:
+                    logger.info(f"[AUTH PAT] Attempting to load PAT from database with group_id={group_id}")
+                    logger.info("[AUTH PAT] ABOUT TO CREATE async_session_factory() - if hang occurs, it's here")
+                    async with async_session_factory() as session:
+                        logger.info("[AUTH PAT] async_session_factory() created successfully")
+                        api_service = ApiKeysService(session, group_id=group_id)
+
+                        for key_name in ["DATABRICKS_TOKEN", "DATABRICKS_API_KEY"]:
+                            try:
+                                logger.info(f"[AUTH PAT] Looking for key: {key_name}")
+                                api_key = await api_service.find_by_name(key_name)
+                                logger.info(f"[AUTH PAT] Key {key_name} found: {api_key is not None}")
+                                if api_key and api_key.encrypted_value:
+                                    from src.utils.encryption_utils import EncryptionUtils
+                                    pat_token = EncryptionUtils.decrypt_value(api_key.encrypted_value)
+                                    logger.info(f"[AUTH] Priority 2: ✓ PAT loaded from database ({key_name}) with group_id={group_id}")
+                                    break
+                            except Exception as e:
+                                logger.warning(f"[AUTH PAT] Error loading {key_name}: {e}")
+
+                    if not pat_token:
+                        logger.warning(f"[AUTH] Priority 2: ✗ No PAT found in database with group_id={group_id}")
                 else:
-                    logger.warning(f"[AUTH PAT] ✗ No group_context or primary_group_id. group_context={group_context}")
+                    logger.warning("[AUTH] Priority 2: ✗ No group_id available for PAT lookup")
+
             except Exception as e:
-                logger.warning(f"[AUTH PAT] ✗ Could not get group_id from UserContext: {e}")
-
-            if group_id:
-                logger.info(f"[AUTH PAT] Attempting to load PAT from database with group_id={group_id}")
-                logger.info("[AUTH PAT] ABOUT TO CREATE async_session_factory() - if hang occurs, it's here")
-                async with async_session_factory() as session:
-                    logger.info("[AUTH PAT] async_session_factory() created successfully")
-                    api_service = ApiKeysService(session, group_id=group_id)
-
-                    for key_name in ["DATABRICKS_TOKEN", "DATABRICKS_API_KEY"]:
-                        try:
-                            logger.info(f"[AUTH PAT] Looking for key: {key_name}")
-                            api_key = await api_service.find_by_name(key_name)
-                            logger.info(f"[AUTH PAT] Key {key_name} found: {api_key is not None}")
-                            if api_key and api_key.encrypted_value:
-                                from src.utils.encryption_utils import EncryptionUtils
-                                pat_token = EncryptionUtils.decrypt_value(api_key.encrypted_value)
-                                logger.info(f"[AUTH] Priority 2: ✓ PAT loaded from database ({key_name}) with group_id={group_id}")
-                                break
-                        except Exception as e:
-                            logger.warning(f"[AUTH PAT] Error loading {key_name}: {e}")
-
-                if not pat_token:
-                    logger.warning(f"[AUTH] Priority 2: ✗ No PAT found in database with group_id={group_id}")
-            else:
-                logger.warning("[AUTH] Priority 2: ✗ No group_id available for PAT lookup")
-
-        except Exception as e:
-            logger.error(f"[AUTH PAT] Error during PAT lookup: {e}")
+                logger.error(f"[AUTH PAT] Error during PAT lookup: {e}")
 
         if pat_token:
             return AuthContext(
@@ -1039,7 +1050,7 @@ async def get_auth_context(
                 auth_method="pat",
                 user_identity=None
             )
-        else:
+        elif not skip_db_auth:
             logger.warning("[AUTH] Priority 2: ✗ No PAT token available")
 
         # Priority 3: Try Service Principal OAuth as last resort
