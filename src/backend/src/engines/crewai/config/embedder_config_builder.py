@@ -195,7 +195,7 @@ class EmbedderConfigBuilder:
                                     send_logfood_telemetry_sync(
                                         usage=usage,
                                         model=self.model,
-                                        product_context=KasalProduct.LLM,
+                                        product_context=KasalProduct.EMBEDDING,
                                         workspace_url=workspace_url,
                                         token=auth_token
                                     )

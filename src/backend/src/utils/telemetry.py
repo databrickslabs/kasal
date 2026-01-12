@@ -114,6 +114,7 @@ async def send_logfood_telemetry(
     group_context: Optional[Any] = None,
     execution_id: Optional[str] = None,
     skip_db_auth: bool = False,
+    user_token: Optional[str] = None,
 ) -> None:
     """
     Send token usage telemetry to Databricks logfood (Two-Request Pattern).
@@ -125,17 +126,18 @@ async def send_logfood_telemetry(
         usage: Token usage dict with prompt_tokens, completion_tokens, total_tokens
         model: Model name used for the LLM call
         product_context: Product context (e.g., 'crew_gen', 'agent', 'guardrail')
-        group_context: Optional GroupContext for authentication
+        group_context: Optional GroupContext for authentication (deprecated, use user_token)
         execution_id: Optional unique execution identifier
         skip_db_auth: If True, skip authentication methods that require database access
                       (use this when called from callbacks during database transactions)
+        user_token: Optional user access token for OBO authentication (preferred over group_context)
     
     Example:
         >>> await send_logfood_telemetry(
         ...     usage={"prompt_tokens": 100, "completion_tokens": 50, "total_tokens": 150},
         ...     model="databricks-llama-4-maverick",
         ...     product_context=KasalProduct.CREW_GENERATION,
-        ...     group_context=group_context
+        ...     user_token=user_token
         ... )
     """
     
@@ -143,15 +145,18 @@ async def send_logfood_telemetry(
         # Import here to avoid circular imports
         from src.utils.databricks_auth import get_auth_context
         
-        # Get user token from group_context if available
-        user_token = getattr(group_context, 'user_token', None) if group_context else None
+        # Get user token: prefer explicit user_token param, then group_context, then None
+        effective_user_token = user_token or (getattr(group_context, 'user_token', None) if group_context else None)
         
         # Get authentication using the unified auth chain
         # When skip_db_auth=True, we only use OBO or SPN auth (no database PAT lookup)
-        auth = await get_auth_context(user_token=user_token, skip_db_auth=skip_db_auth)
+        auth = await get_auth_context(user_token=effective_user_token, skip_db_auth=skip_db_auth)
         
         if not auth:
-            logger.warning("Logfood telemetry: No authentication available")
+            logger.warning(
+                f"[Telemetry] ✗ No auth available: context={product_context}, model={model}, "
+                f"tokens={usage.get('total_tokens', 0)} - skipped"
+            )
             return
         
         # Generate execution ID if not provided
@@ -166,10 +171,10 @@ async def send_logfood_telemetry(
         # Make a lightweight GET request (logged in Databricks logfood)
         telemetry_url = f"{auth.workspace_url}/api/2.0/serving-endpoints"
         
-        logger.info(
-            f"Sending logfood telemetry: {product_context}, "
-            f"tokens={usage.get('total_tokens', 0)}, model={model}"
-        )
+        # Format token details
+        prompt_tokens = usage.get('prompt_tokens', 0)
+        completion_tokens = usage.get('completion_tokens', 0)
+        total_tokens = usage.get('total_tokens', 0)
         
         async with aiohttp.ClientSession(trust_env=True) as session:
             async with session.get(
@@ -179,13 +184,13 @@ async def send_logfood_telemetry(
             ) as response:
                 if response.status == 200:
                     logger.info(
-                        f"Logfood telemetry sent - execution_id={exec_id}, "
-                        f"tokens={usage.get('total_tokens', 0)}, context={product_context}"
+                        f"[LogfoodTelemetry] ✓ Sent successfully: context={product_context}, model={model}, "
+                        f"tokens={{prompt={prompt_tokens}, completion={completion_tokens}, total={total_tokens}}}"
                     )
                 else:
                     text = await response.text()
                     logger.warning(
-                        f"Logfood telemetry returned status {response.status}: {text[:200]}"
+                        f"[LogfoodTelemetry] ✗ Failed (HTTP {response.status}): context={product_context}, model={model} - {text[:200]}"
                     )
                     
     except asyncio.TimeoutError:
@@ -258,24 +263,24 @@ def send_logfood_telemetry_sync(
         # Make a lightweight GET request (logged in Databricks logfood)
         telemetry_url = f"{workspace_url}/api/2.0/serving-endpoints"
         
-        logger.info(
-            f"Sending logfood telemetry (sync): {product_context}, "
-            f"tokens={usage.get('total_tokens', 0)}, model={model}"
-        )
+        # Format token details
+        prompt_tokens = usage.get('prompt_tokens', 0)
+        completion_tokens = usage.get('completion_tokens', 0)
+        total_tokens = usage.get('total_tokens', 0)
         
         response = requests.get(telemetry_url, headers=telemetry_headers, timeout=5)
         
         if response.status_code == 200:
             logger.info(
-                f"Logfood telemetry sent - execution_id={exec_id}, "
-                f"tokens={usage.get('total_tokens', 0)}, context={product_context}"
+                f"[LogfoodTelemetry] ✓ Sent successfully (sync): context={product_context}, model={model}, "
+                f"tokens={{prompt={prompt_tokens}, completion={completion_tokens}, total={total_tokens}}}"
             )
         else:
             logger.warning(
-                f"Logfood telemetry returned status {response.status_code}: {response.text[:200]}"
+                f"[LogfoodTelemetry] ✗ Failed (HTTP {response.status_code}): context={product_context}, model={model} - {response.text[:200]}"
             )
             
     except Exception as e:
         # Telemetry failures should not affect main flow
-        logger.warning(f"Failed to send logfood telemetry (sync): {str(e)}")
+        logger.warning(f"[LogfoodTelemetry] ✗ Failed (sync): context={product_context}, model={model} - {str(e)}")
 
