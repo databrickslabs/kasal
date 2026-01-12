@@ -809,10 +809,12 @@ def run_crew_in_process(
                                 }
                                 try:
                                     loop = _asyncio.get_running_loop()
+                                    # Use skip_db_auth=True to avoid session conflicts
                                     loop.create_task(send_logfood_telemetry(
                                         usage=usage_dict,
                                         model=model,
-                                        product_context=KasalProduct.AGENT
+                                        product_context=KasalProduct.AGENT,
+                                        skip_db_auth=True
                                     ))
                                 except RuntimeError:
                                     pass  # No running event loop
@@ -844,10 +846,12 @@ def run_crew_in_process(
                                     'completion_tokens': getattr(usage, 'completion_tokens', 0),
                                     'total_tokens': getattr(usage, 'total_tokens', 0),
                                 }
+                                # Use skip_db_auth=True to avoid session conflicts
                                 await send_logfood_telemetry(
                                     usage=usage_dict,
                                     model=model,
-                                    product_context=KasalProduct.LLM
+                                    product_context=KasalProduct.LLM,
+                                    skip_db_auth=True
                                 )
                         except Exception:
                             pass  # Telemetry should not affect main flow
