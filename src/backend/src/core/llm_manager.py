@@ -340,7 +340,11 @@ class LiteLLMTokenTelemetryLogger(CustomLogger):
             import asyncio
             from src.utils.telemetry import send_logfood_telemetry
             
-            coro = send_logfood_telemetry(usage=usage, model=model, product_context=product_context)
+            # Use skip_db_auth=True to avoid opening database sessions during callbacks,
+            # which can cause SQLAlchemy session conflicts with ongoing transactions
+            coro = send_logfood_telemetry(
+                usage=usage, model=model, product_context=product_context, skip_db_auth=True
+            )
             
             try:
                 loop = asyncio.get_running_loop()
@@ -365,7 +369,11 @@ class LiteLLMTokenTelemetryLogger(CustomLogger):
         
         try:
             from src.utils.telemetry import send_logfood_telemetry
-            await send_logfood_telemetry(usage=usage, model=model, product_context=product_context)
+            # Use skip_db_auth=True to avoid opening database sessions during callbacks,
+            # which can cause SQLAlchemy session conflicts with ongoing transactions
+            await send_logfood_telemetry(
+                usage=usage, model=model, product_context=product_context, skip_db_auth=True
+            )
         except Exception as e:
             self.logger.debug(f"Token telemetry failed: {e}")
 

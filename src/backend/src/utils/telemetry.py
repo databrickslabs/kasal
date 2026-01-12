@@ -113,6 +113,7 @@ async def send_logfood_telemetry(
     product_context: str,
     group_context: Optional[Any] = None,
     execution_id: Optional[str] = None,
+    skip_db_auth: bool = False,
 ) -> None:
     """
     Send token usage telemetry to Databricks logfood (Two-Request Pattern).
@@ -126,6 +127,8 @@ async def send_logfood_telemetry(
         product_context: Product context (e.g., 'crew_gen', 'agent', 'guardrail')
         group_context: Optional GroupContext for authentication
         execution_id: Optional unique execution identifier
+        skip_db_auth: If True, skip authentication methods that require database access
+                      (use this when called from callbacks during database transactions)
     
     Example:
         >>> await send_logfood_telemetry(
@@ -144,7 +147,8 @@ async def send_logfood_telemetry(
         user_token = getattr(group_context, 'user_token', None) if group_context else None
         
         # Get authentication using the unified auth chain
-        auth = await get_auth_context(user_token=user_token)
+        # When skip_db_auth=True, we only use OBO or SPN auth (no database PAT lookup)
+        auth = await get_auth_context(user_token=user_token, skip_db_auth=skip_db_auth)
         
         if not auth:
             logger.warning("Logfood telemetry: No authentication available")
