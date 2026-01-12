@@ -50,8 +50,8 @@ class Builder:
             logger.info("Building React application...")
             subprocess.run(["npm", "run", "build"], check=True)
             
-            # Source is the built frontend
-            frontend_build = self.frontend_dir / "build"
+            # Source is the built frontend (Vite outputs to 'dist')
+            frontend_build = self.frontend_dir / "dist"
             logger.info(f"Frontend build completed at {frontend_build}")
             
             # Ensure the build directory exists
