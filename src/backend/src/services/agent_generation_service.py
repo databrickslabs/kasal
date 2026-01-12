@@ -174,7 +174,8 @@ class AgentGenerationService:
 
             # Generate agent configuration without external documentation context
             agent_config = await self._generate_agent_config(
-                prompt_text, system_message, model, documentation_context, fast_planning=fast_planning
+                prompt_text, system_message, model, documentation_context, 
+                fast_planning=fast_planning, group_context=group_context
             )
 
             # Log the interaction
@@ -220,7 +221,8 @@ class AgentGenerationService:
         return system_message
     
     async def _generate_agent_config(self, prompt_text: str, system_message: str, model: str,
-                                     documentation_context: str = None, fast_planning: bool = False) -> Dict[str, Any]:
+                                     documentation_context: str = None, fast_planning: bool = False,
+                                     group_context: Optional[GroupContext] = None) -> Dict[str, Any]:
         """
         Generate and process agent configuration.
 
@@ -229,6 +231,7 @@ class AgentGenerationService:
             system_message: System message with template and tools context
             model: Model to use for generation
             documentation_context: Optional relevant documentation for enhanced generation
+            group_context: Optional group context for authentication
 
         Returns:
             Dict[str, Any]: Processed agent configuration
@@ -253,11 +256,13 @@ class AgentGenerationService:
         # Generate completion with litellm directly
         try:
             # Use LLMManager wrapper (handles GPT-5/deep research models)
+            from src.utils.telemetry import get_user_agent_header, KasalProduct
             response = await LLMManager.acompletion(
                 **model_params,
                 messages=messages,
                 temperature=0.2 if fast_planning else 0.7,
-                max_tokens=1200 if fast_planning else 4000
+                max_tokens=1200 if fast_planning else 4000,
+                extra_headers=get_user_agent_header(KasalProduct.AGENT_GENERATION)
             )
             
             # Extract and parse content

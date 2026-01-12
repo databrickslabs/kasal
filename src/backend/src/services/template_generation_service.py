@@ -131,11 +131,13 @@ class TemplateGenerationService:
             
             try:
                 # Generate completion with LLMManager wrapper (handles GPT-5/deep research models)
+                from src.utils.telemetry import get_user_agent_header, KasalProduct
                 response = await LLMManager.acompletion(
                     **model_params,
                     messages=messages,
                     temperature=0.7,
-                    max_tokens=4000
+                    max_tokens=4000,
+                    extra_headers=get_user_agent_header(KasalProduct.TEMPLATE_GENERATION)
                 )
                 
                 content = response["choices"][0]["message"]["content"]

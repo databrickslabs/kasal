@@ -197,11 +197,13 @@ class TaskGenerationService:
             model_params = await LLMManager.configure_litellm(model)
             
             # Generate completion with LLMManager wrapper (handles GPT-5/deep research models)
+            from src.utils.telemetry import get_user_agent_header, KasalProduct
             response = await LLMManager.acompletion(
                 **model_params,
                 messages=messages,
                 temperature=0.2 if fast_planning else 0.7,
-                max_tokens=1200 if fast_planning else 4000
+                max_tokens=1200 if fast_planning else 4000,
+                extra_headers=get_user_agent_header(KasalProduct.TASK_GENERATION)
             )
             
             # Extract content from response

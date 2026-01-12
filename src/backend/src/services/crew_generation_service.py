@@ -13,7 +13,6 @@ import traceback
 import uuid
 from typing import Dict, Any, List, Tuple, Optional
 
-
 import litellm
 
 from src.utils.prompt_utils import robust_json_parser
@@ -524,11 +523,13 @@ class CrewGenerationService:
                 logger.info(f"CREATE CREW: Using max_tokens={_max_tokens} for model={_model_id}")
 
                 # Use LLMManager wrapper (handles GPT-5/deep research models)
+                from src.utils.telemetry import get_user_agent_header, KasalProduct
                 response = await LLMManager.acompletion(
                     **model_params,
                     messages=messages,
                     temperature=0.7,
-                    max_tokens=_max_tokens
+                    max_tokens=_max_tokens,
+                    extra_headers=get_user_agent_header(KasalProduct.CREW_GENERATION)
                 )
 
                 # Extract and parse the content

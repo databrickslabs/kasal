@@ -233,7 +233,7 @@ const DatabaseManagement: React.FC = () => {
   const [hasDatabricksApiKey, setHasDatabricksApiKey] = useState(false);
 
   // Feature flag - set to true to enable Lakebase feature
-  const showLakebase = false;
+  const showLakebase = true;
 
   // Load database info on mount
   useEffect(() => {

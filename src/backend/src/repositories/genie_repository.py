@@ -37,6 +37,7 @@ from src.schemas.genie import (
     GenieAuthConfig
 )
 from src.utils.databricks_auth import get_auth_context
+from src.utils.telemetry import get_user_agent_header, KasalProduct
 
 logger = logging.getLogger(__name__)
 
@@ -170,8 +171,10 @@ class GenieRepository:
             if not auth:
                 return None, "No authentication method available"
 
-            # Return headers from auth context
-            return auth.get_headers(), None
+            # Return headers from auth context with telemetry
+            headers = auth.get_headers()
+            headers.update(get_user_agent_header(KasalProduct.GENIE))  # Kasal_genie User-Agent
+            return headers, None
 
         except Exception as e:
             logger.error(f"Error getting auth headers: {e}")
