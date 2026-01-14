@@ -467,6 +467,8 @@ class ExecutionHistoryRepository:
             if status_filter:
                 filters.append(ExecutionHistory.checkpoint_status == status_filter)
 
+            logger.info(f"🔍 Checkpoint query for flow_id={flow_id}, group_id={group_id}, status_filter={status_filter}")
+
             # Query for checkpoints ordered by most recent
             stmt = (
                 select(ExecutionHistory)
@@ -476,7 +478,16 @@ class ExecutionHistoryRepository:
             result = await self.session.execute(stmt)
             checkpoints = result.scalars().all()
 
-            logger.debug(f"Found {len(checkpoints)} checkpoints for flow {flow_id}")
+            logger.info(f"📊 Found {len(checkpoints)} checkpoints for flow {flow_id}")
+            if len(checkpoints) == 0:
+                # Debug: Check if any executions exist for this flow
+                debug_stmt = select(ExecutionHistory).where(ExecutionHistory.flow_id == flow_id)
+                debug_result = await self.session.execute(debug_stmt)
+                all_executions = debug_result.scalars().all()
+                logger.info(f"   Total executions for flow: {len(all_executions)}")
+                for ex in all_executions[:5]:  # Log first 5
+                    logger.info(f"   - Execution {ex.id}: flow_uuid={ex.flow_uuid}, checkpoint_status={ex.checkpoint_status}, status={ex.status}")
+
             return list(checkpoints)
 
         except Exception as e:
@@ -561,14 +572,18 @@ class ExecutionHistoryRepository:
         logger = logging.getLogger(__name__)
 
         try:
+            logger.info(f"✏️ set_checkpoint_info called: execution_id={execution_id}, flow_uuid={flow_uuid}, status={checkpoint_status}")
+
             # Find the execution
             stmt = select(ExecutionHistory).where(ExecutionHistory.id == execution_id)
             result = await self.session.execute(stmt)
             execution = result.scalar_one_or_none()
 
             if not execution:
-                logger.warning(f"No execution found with id: {execution_id}")
+                logger.warning(f"❌ No execution found with id: {execution_id}")
                 return False
+
+            logger.info(f"   Found execution {execution_id}: flow_id={execution.flow_id}, current flow_uuid={execution.flow_uuid}, current checkpoint_status={execution.checkpoint_status}")
 
             # Set checkpoint information
             execution.flow_uuid = flow_uuid
@@ -577,7 +592,7 @@ class ExecutionHistoryRepository:
 
             # Flush changes to database
             await self.session.flush()
-            logger.info(f"Set checkpoint info for execution {execution_id}: flow_uuid={flow_uuid}, status={checkpoint_status}")
+            logger.info(f"✅ Set checkpoint info for execution {execution_id}: flow_uuid={flow_uuid}, status={checkpoint_status}, method={checkpoint_method}")
             return True
 
         except Exception as e:
