@@ -352,13 +352,18 @@ def run_flow_in_process(
                     flow_runner = FlowRunnerService(session)
 
                     # Extract flow parameters from config
-                    flow_id = flow_config.get('flow_id')
+                    # flow_id may be at top level or nested in inputs (from execution_service)
+                    flow_id = flow_config.get('flow_id') or flow_config.get('inputs', {}).get('flow_id')
                     run_name = flow_config.get('run_name')
 
                     async_logger.info(f"[FLOW_SUBPROCESS] Starting flow execution")
                     async_logger.info(f"  flow_id: {flow_id}")
                     async_logger.info(f"  execution_id: {execution_id}")
                     async_logger.info(f"  run_name: {run_name}")
+                    async_logger.info(f"  flow_config keys: {list(flow_config.keys())}")
+                    if 'inputs' in flow_config:
+                        async_logger.info(f"  flow_config['inputs'] keys: {list(flow_config.get('inputs', {}).keys())}")
+                        async_logger.info(f"  flow_config['inputs']['flow_id']: {flow_config.get('inputs', {}).get('flow_id')}")
 
                     # Call run_flow() which now uses await (not create_task) to ensure subprocess
                     # waits for completion before capturing stdout in finally block
@@ -421,6 +426,31 @@ def run_flow_in_process(
                 processed_result = "Flow execution completed (no result returned)"
 
             async_logger.info(f"[FLOW_SUBPROCESS] Final processed result type: {type(processed_result)}")
+
+            # Debug: Log result keys and hitl_paused value for HITL troubleshooting
+            if isinstance(result, dict):
+                async_logger.info(f"[FLOW_SUBPROCESS] Result keys: {list(result.keys())}")
+                async_logger.info(f"[FLOW_SUBPROCESS] hitl_paused value: {result.get('hitl_paused')}")
+                async_logger.info(f"[FLOW_SUBPROCESS] paused_for_approval value: {result.get('paused_for_approval')}")
+
+            # Check if flow was paused for HITL approval
+            # IMPORTANT: Check both hitl_paused AND paused_for_approval - the subprocess uses paused_for_approval
+            if isinstance(result, dict) and (result.get("hitl_paused") or result.get("paused_for_approval")):
+                async_logger.info(f"[FLOW_SUBPROCESS] 🚦 Flow paused for HITL approval")
+                return_dict = {
+                    "status": "WAITING_FOR_APPROVAL",
+                    "execution_id": execution_id,
+                    "result": result,  # Pass through the full HITL result
+                    "hitl_paused": True,
+                    "paused_for_approval": True,  # Pass through for flow_execution_runner
+                    "approval_id": result.get("approval_id"),
+                    "gate_node_id": result.get("gate_node_id"),
+                    "message": result.get("message"),
+                    "crew_sequence": result.get("crew_sequence"),
+                    "flow_uuid": result.get("flow_uuid"),
+                    "process_id": os.getpid()
+                }
+                return return_dict
 
             # Build return dict with flow_uuid for checkpoint/resume functionality
             return_dict = {
@@ -509,9 +539,11 @@ def run_flow_in_process(
             if output:
                 # Log the captured output to flow.log with execution ID
                 # The database handler will automatically write to execution_logs
+                # FILTER: Skip CrewAI Flow's built-in visualization to reduce log spam
                 for line in output.split('\n'):
-                    if line.strip():
-                        async_logger.info(f"[STDOUT] {line.strip()}")
+                    line_stripped = line.strip()
+                    if line_stripped and not _is_crewai_flow_visualization(line_stripped):
+                        async_logger.info(f"[STDOUT] {line_stripped}")
         except Exception as capture_error:
             # Log any errors in stdout capture (shouldn't happen normally)
             try:
@@ -660,6 +692,33 @@ class ProcessFlowExecutor:
                 "execution_id": execution_id,
                 "error": str(e)
             })
+        finally:
+            # CRITICAL: Explicitly exit the subprocess after putting result in queue
+            # Without this, the process stays alive waiting for background threads/tasks
+            # This prevents zombie subprocess accumulation
+
+            # Flush and close all logging handlers to prevent blocking on I/O
+            import logging
+            logging.shutdown()
+
+            # Force exit the subprocess
+            import sys
+            import os
+
+            # Log that we're exiting (might not be written if handlers already closed)
+            try:
+                logger = logging.getLogger('flow')
+                logger.info(f"[SUBPROCESS EXIT] Process {os.getpid()} exiting for execution {execution_id}")
+            except:
+                pass
+
+            # CRITICAL: Use os._exit(0) instead of sys.exit(0)
+            # os._exit(0) forcefully terminates without waiting for non-daemon threads
+            # This is necessary because HITL flows leave background tasks running
+            # (TraceManager writers, event listeners) that prevent sys.exit(0) from completing
+            # Normal sys.exit(0) waits for all threads → process hangs as zombie
+            # os._exit(0) terminates immediately → process exits cleanly
+            os._exit(0)
 
     async def run_flow_isolated(
         self,

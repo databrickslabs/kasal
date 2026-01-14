@@ -33,6 +33,7 @@ from src.engines.crewai.flow.modules.flow_config import FlowConfigManager
 from src.engines.crewai.flow.modules.flow_processors import FlowProcessorManager
 from src.engines.crewai.flow.modules.flow_state import FlowStateManager
 from src.engines.crewai.flow.modules.flow_methods import FlowMethodFactory, extract_final_answer, get_model_context_limits
+from src.engines.crewai.flow.exceptions import FlowPausedForApprovalException
 
 # Initialize logger - use flow logger for flow execution
 logger = LoggerManager.get_instance().flow
@@ -215,17 +216,18 @@ class FlowBuilder:
             checkpoint_outputs = {}
             if resume_from_execution_id and repositories:
                 try:
-                    # First, get the job_id (UUID) from the execution_id (integer database ID)
+                    # resume_from_execution_id is the job_id (UUID string), not the integer database ID
                     execution_history_repo = repositories.get('execution_history')
                     execution_trace_repo = repositories.get('execution_trace')
 
                     if execution_history_repo and execution_trace_repo:
-                        logger.info(f"Looking up job_id for execution ID: {resume_from_execution_id}")
-                        execution = await execution_history_repo.get_execution_by_id(int(resume_from_execution_id))
+                        logger.info(f"Looking up execution for job_id: {resume_from_execution_id}")
+                        # Use get_execution_by_job_id since we're passing the job_id (UUID)
+                        execution = await execution_history_repo.get_execution_by_job_id(resume_from_execution_id)
 
                         if execution and execution.job_id:
                             job_id = execution.job_id
-                            logger.info(f"Found job_id: {job_id} for execution ID: {resume_from_execution_id}")
+                            logger.info(f"Found execution with job_id: {job_id}")
 
                             # Now query traces using the job_id
                             checkpoint_outputs = await execution_trace_repo.get_crew_outputs_for_resume(job_id)
@@ -391,11 +393,12 @@ class FlowBuilder:
                 logger.info(f"Flow will resume from checkpoint: {restore_uuid}")
 
         # Track crew sequence for checkpoint resume support
-        # When resume_from_crew_sequence is provided, crews with sequence <= that value will be skipped
+        # When resume_from_crew_sequence is provided, crews with sequence < that value will be skipped
+        # (The resume_from value is the sequence of the crew TO RUN, not the last completed)
         crew_sequence_counter = 0  # Will be incremented to 1 for first crew
         if resume_from_crew_sequence is not None:
             logger.info("="*100)
-            logger.info(f"CHECKPOINT RESUME MODE - Will skip crews with sequence <= {resume_from_crew_sequence}")
+            logger.info(f"CHECKPOINT RESUME MODE - Will skip crews with sequence < {resume_from_crew_sequence} (will run sequence {resume_from_crew_sequence} and beyond)")
             logger.info("="*100)
 
         # Add start methods for each starting point (now receiving tuples with crew info)
@@ -435,13 +438,14 @@ class FlowBuilder:
             logger.info(f"  Number of tasks: {len(crew_tasks)}")
 
             # Check if this crew should be skipped for checkpoint resume
+            # Use < (not <=) because resume_from is the sequence of the crew TO RUN, not the last completed
             should_skip_crew = (
                 resume_from_crew_sequence is not None and
-                current_crew_sequence <= resume_from_crew_sequence
+                current_crew_sequence < resume_from_crew_sequence
             )
 
             if should_skip_crew:
-                logger.info(f"  ⏭️  SKIPPING crew '{crew_name}' (sequence {current_crew_sequence} <= resume_from {resume_from_crew_sequence})")
+                logger.info(f"  ⏭️  SKIPPING crew '{crew_name}' (sequence {current_crew_sequence} < resume_from {resume_from_crew_sequence})")
                 # Get checkpoint output for this crew if available
                 crew_checkpoint_output = None
                 if checkpoint_outputs:
@@ -484,6 +488,17 @@ class FlowBuilder:
 
         # Get frontend listeners config for crew name lookup
         listeners = flow_config.get('listeners', []) if flow_config else []
+
+        # Build a mapping from method name to crew sequence for HITL gates
+        # This allows us to pass the SOURCE crew sequence (not the target crew sequence)
+        method_to_sequence = {}
+        for starting_point_info in starting_points:
+            sp_method_name, sp_task_ids, sp_task_objects, sp_crew_name, sp_crew_data = starting_point_info
+            # Find the sequence number for this starting point from the counter used above
+            # Starting points are numbered 1, 2, 3, ... in order
+            sp_sequence = starting_points.index(starting_point_info) + 1
+            method_to_sequence[sp_method_name] = sp_sequence
+            logger.info(f"  Mapped method '{sp_method_name}' to sequence {sp_sequence}")
 
         # listener_crews is a list of tuples:
         # (method_name, crew_id, task_ids, task_objects, crew_name, listen_to_task_ids, condition_type, crew_data)
@@ -543,8 +558,100 @@ class FlowBuilder:
             # Default to first starting point if no matches found
             default_start_method = starting_points[0][0] if starting_points else "starting_point_0"
 
+            # Check if incoming edge has HITL enabled
+            # The edge data contains hitl config when HITL is configured on the connection
+            edges_for_hitl = flow_config.get('edges', []) if flow_config else []
+            nodes_for_hitl = flow_config.get('nodes', []) if flow_config else []
+
+            # Build a mapping from node ID to crew ID (node.data.crewId)
+            node_to_crew_map = {}
+            for node in nodes_for_hitl:
+                node_id = node.get('id', '')
+                node_crew_id = node.get('data', {}).get('crewId', '')
+                if node_id and node_crew_id:
+                    node_to_crew_map[node_id] = node_crew_id
+
+            hitl_edge = None
+            for edge in edges_for_hitl:
+                edge_data = edge.get('data', {})
+                hitl_config = edge_data.get('hitl', {})
+                # Check if this edge targets our listener crew
+                # Edge target can be:
+                # - A node ID like "crew-{crewId}-{timestamp}"
+                # - A UUID node ID that maps to a crewId in node.data.crewId
+                # - A direct crew_id or task_id
+                target_node_id = edge.get('target', '')
+
+                # Resolve the crew ID from the target node
+                target_crew_id = node_to_crew_map.get(target_node_id, '')
+
+                # Match by:
+                # 1. Direct crew_id match (edge target == crew_id)
+                # 2. Node ID contains crew_id (e.g., "crew-abc123-timestamp" contains "abc123")
+                # 3. Resolved crew ID from node mapping matches our crew_id
+                # 4. Task ID match (edge targets a specific task)
+                is_match = (
+                    target_node_id == crew_id or
+                    crew_id in target_node_id or
+                    target_crew_id == crew_id or
+                    target_node_id in [str(tid) for tid in task_ids]
+                )
+
+                if is_match and hitl_config.get('enabled', False):
+                    hitl_edge = edge
+                    logger.info(f"  🚦 Found HITL-enabled edge to this listener: {edge.get('id', 'unknown')}")
+                    logger.info(f"     Edge target: {target_node_id}, Resolved crew: {target_crew_id}, Listener crew_id: {crew_id}")
+                    logger.info(f"     HITL config: {hitl_config}")
+                    break
+
+            # If HITL is enabled on the incoming edge, create an HITL gate method
+            hitl_gate_method_name = None
+            if hitl_edge:
+                edge_id = hitl_edge.get('id', f'edge_{crew_id}')
+                hitl_config = hitl_edge.get('data', {}).get('hitl', {})
+
+                # Build gate config from edge HITL data
+                gate_config = {
+                    'message': hitl_config.get('message', 'Please review and approve to continue'),
+                    'timeout_seconds': hitl_config.get('timeout_seconds', 86400),
+                    'timeout_action': hitl_config.get('timeout_action', 'auto_reject'),
+                    'require_comment': hitl_config.get('require_comment', False),
+                    'allowed_approvers': hitl_config.get('allowed_approvers', [])
+                }
+
+                # The gate should listen to the source crew's method
+                source_method = method_names[0] if method_names else default_start_method
+
+                # Get the SOURCE crew's sequence (the crew that completed BEFORE the gate)
+                # NOT the current (target) crew's sequence
+                source_crew_sequence = method_to_sequence.get(source_method, 1)
+
+                # Create HITL gate method name
+                hitl_gate_method_name = f"hitl_gate_edge_{edge_id}"
+                logger.info(f"  🚦 Creating HITL gate method: {hitl_gate_method_name}")
+                logger.info(f"     Gate listens to: {source_method} (sequence: {source_crew_sequence})")
+                logger.info(f"     Gate config: {gate_config}")
+                logger.info(f"     ⚠️  IMPORTANT: Using SOURCE crew sequence ({source_crew_sequence}), NOT target crew sequence ({current_crew_sequence})")
+
+                # Create the HITL gate method using the factory
+                class_methods[hitl_gate_method_name] = FlowMethodFactory.create_hitl_gate_method(
+                    method_name=hitl_gate_method_name,
+                    gate_node_id=edge_id,
+                    gate_config=gate_config,
+                    previous_method_name=source_method,
+                    crew_sequence=source_crew_sequence,  # FIXED: Use SOURCE crew sequence, not target
+                    callbacks=callbacks,
+                    group_context=group_context
+                )
+                logger.info(f"  ✅ Created HITL gate method '{hitl_gate_method_name}' for edge")
+
             # Build the method condition based on condition_type
-            if condition_type == "AND" and len(method_names) > 1:
+            # If HITL gate was created, listener should listen to the gate instead
+            if hitl_gate_method_name:
+                # Listener now listens to the HITL gate, not the source crew
+                method_condition = hitl_gate_method_name
+                logger.info(f"  Using HITL gate condition: {method_condition}")
+            elif condition_type == "AND" and len(method_names) > 1:
                 method_condition = and_(*method_names)
                 logger.info(f"  Using AND condition for {len(method_names)} methods")
             elif condition_type == "OR" and len(method_names) > 1:
@@ -556,13 +663,14 @@ class FlowBuilder:
                 logger.info(f"  Using simple condition: {method_condition}")
 
             # Check if this crew should be skipped for checkpoint resume
+            # Use < (not <=) because resume_from is the sequence of the crew TO RUN, not the last completed
             should_skip_crew = (
                 resume_from_crew_sequence is not None and
-                current_crew_sequence <= resume_from_crew_sequence
+                current_crew_sequence < resume_from_crew_sequence
             )
 
             if should_skip_crew:
-                logger.info(f"  ⏭️  SKIPPING listener crew '{crew_name}' (sequence {current_crew_sequence} <= resume_from {resume_from_crew_sequence})")
+                logger.info(f"  ⏭️  SKIPPING listener crew '{crew_name}' (sequence {current_crew_sequence} < resume_from {resume_from_crew_sequence})")
                 # Get checkpoint output for this crew if available
                 crew_checkpoint_output = None
                 if checkpoint_outputs:
@@ -597,6 +705,90 @@ class FlowBuilder:
                     crew_data=crew_data
                 )
                 logger.info(f"  ✅ Created listener '{method_name}' for crew '{crew_name}' with {len(listener_tasks)} sequential tasks, listening to: {method_condition}")
+
+            # Track this listener method's sequence for potential downstream HITL gates
+            method_to_sequence[method_name] = current_crew_sequence
+
+        # Process HITL gate nodes and create gate methods
+        # HITL gates pause the flow for human approval before continuing
+        hitl_gates = flow_config.get('hitlGates', []) if flow_config else []
+        nodes = flow_config.get('nodes', []) if flow_config else []
+        edges = flow_config.get('edges', []) if flow_config else []
+
+        # Also check for HITL gate nodes in the nodes array by type
+        # This handles cases where HITL gates are defined as regular nodes
+        for node in nodes:
+            node_type = node.get('type', '')
+            if node_type == 'hitlGateNode':
+                node_id = node.get('id', '')
+                node_data = node.get('data', {})
+
+                # Build gate config from node data
+                gate_config = {
+                    'message': node_data.get('message', 'Approval required to proceed'),
+                    'timeout_seconds': node_data.get('timeout_seconds', 86400),  # 24 hours default
+                    'timeout_action': node_data.get('timeout_action', 'auto_reject'),
+                    'require_comment': node_data.get('require_comment', False),
+                    'allowed_approvers': node_data.get('allowed_approvers', [])
+                }
+
+                # Find the previous node this gate is connected to (incoming edge)
+                previous_method_name = None
+                incoming_edges = [e for e in edges if e.get('target') == node_id]
+                if incoming_edges:
+                    source_node_id = incoming_edges[0].get('source', '')
+                    # Map source node to method name
+                    # Check starting points first
+                    for sp_info in starting_points:
+                        sp_method_name, sp_task_ids, sp_tasks, sp_crew_name, sp_crew_data = sp_info
+                        # Check if source matches any task ID in this starting point's crew
+                        if source_node_id in [str(tid) for tid in sp_task_ids]:
+                            previous_method_name = sp_method_name
+                            break
+                        # Also check node_id pattern
+                        if source_node_id == sp_crew_data.get('id') if sp_crew_data else None:
+                            previous_method_name = sp_method_name
+                            break
+
+                    # Check listeners if not found in starting points
+                    if not previous_method_name:
+                        for listener_info in listener_crews:
+                            l_method_name, l_crew_id, l_task_ids, l_tasks, l_crew_name, l_listen_to, l_condition, l_crew_data = listener_info
+                            if source_node_id in [str(tid) for tid in l_task_ids]:
+                                previous_method_name = l_method_name
+                                break
+                            if source_node_id == l_crew_id:
+                                previous_method_name = l_method_name
+                                break
+
+                if not previous_method_name:
+                    logger.warning(f"HITL gate {node_id} has no incoming connection - using default start method")
+                    previous_method_name = starting_points[0][0] if starting_points else "starting_point_0"
+
+                # Create the HITL gate method
+                gate_method_name = f"hitl_gate_{node_id}"
+                logger.info(f"Creating HITL gate method: {gate_method_name} listening to {previous_method_name}")
+
+                class_methods[gate_method_name] = FlowMethodFactory.create_hitl_gate_method(
+                    method_name=gate_method_name,
+                    gate_node_id=node_id,
+                    gate_config=gate_config,
+                    previous_method_name=previous_method_name,
+                    crew_sequence=crew_sequence_counter,
+                    callbacks=callbacks,
+                    group_context=group_context
+                )
+                logger.info(f"  ✅ Created HITL gate method '{gate_method_name}'")
+
+                # Store mapping so listeners can listen to this gate instead of the previous crew
+                # This is stored in gate_config with the node_id as key
+                hitl_gates.append({
+                    'id': node_id,
+                    'method_name': gate_method_name,
+                    'listens_to': previous_method_name
+                })
+
+        logger.info(f"Processed {len(hitl_gates)} HITL gate nodes")
 
         # Add router methods for conditional routing
         for i, router_config in enumerate(routers):

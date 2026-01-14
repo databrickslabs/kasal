@@ -5,6 +5,7 @@ This module handles dynamic creation of flow methods (starting points, listeners
 """
 import logging
 import asyncio
+import uuid
 from typing import Dict, List, Any, Optional, Callable
 from crewai.flow.flow import listen, router, start, and_, or_
 from crewai import Crew, Process, Task
@@ -725,9 +726,10 @@ class FlowMethodFactory:
         """
         Create a stub method for a crew that should be skipped during checkpoint resume.
 
-        When resuming from a checkpoint, crews that have already completed (sequence <= resume_from)
+        When resuming from a checkpoint, crews that have already completed (sequence < resume_from)
         are replaced with stub methods that return the checkpoint output from the database,
         allowing the flow to continue with proper context for downstream crews.
+        Note: resume_from is the sequence of the crew TO RUN, not the last completed.
 
         Args:
             method_name: Name of the flow method
@@ -925,3 +927,213 @@ class FlowMethodFactory:
             skipped_listener_method.__name__ = method_name
             skipped_listener_method.__qualname__ = method_name
             return skipped_listener_method
+
+    @staticmethod
+    def create_hitl_gate_method(
+        method_name: str,
+        gate_node_id: str,
+        gate_config: Dict[str, Any],
+        previous_method_name: str,
+        crew_sequence: int,
+        callbacks: Optional[Dict[str, Any]] = None,
+        group_context: Optional[Any] = None
+    ) -> Callable:
+        """
+        Create an HITL gate method that pauses flow for human approval.
+
+        This method listens to the previous crew's completion, then:
+        1. Creates an HITLApproval record in the database
+        2. Updates execution status to WAITING_FOR_APPROVAL
+        3. Sends webhook notifications
+        4. Raises FlowPausedForApprovalException to pause flow
+
+        Args:
+            method_name: Name of the gate method
+            gate_node_id: ID of the HITL gate node in the flow
+            gate_config: Gate configuration dict with:
+                - message: Display message for approver
+                - timeout_seconds: Seconds before timeout
+                - timeout_action: Action on timeout (auto_reject, fail)
+                - require_comment: Whether comment is required
+                - allowed_approvers: List of allowed approver emails
+            previous_method_name: Name of the method this gate listens to
+            crew_sequence: Sequence number of the previous crew
+            callbacks: Callbacks dict with job_id and other metadata
+            group_context: Group context for multi-tenant isolation
+
+        Returns:
+            Async function decorated with @listen() that pauses for approval
+        """
+        @listen(previous_method_name)
+        async def hitl_gate_method(self, previous_output=None):
+            """HITL gate method - pauses flow for human approval."""
+            from src.engines.crewai.flow.exceptions import FlowPausedForApprovalException
+            from src.db.session import async_session_factory
+            from src.services.hitl_service import HITLService
+            from src.services.hitl_webhook_service import HITLWebhookService
+            from src.repositories.hitl_repository import HITLApprovalRepository
+            from src.models.hitl_approval import HITLApprovalStatus
+
+            logger.info("="*80)
+            logger.info(f"🚦 HITL GATE REACHED: {gate_node_id}")
+            logger.info(f"Method: {method_name}")
+            logger.info(f"Listening to: {previous_method_name}")
+            logger.info(f"Gate config: {gate_config}")
+            logger.info("="*80)
+
+            # Extract execution context
+            job_id = callbacks.get('job_id') if callbacks else None
+            flow_id = callbacks.get('flow_id') if callbacks else None
+
+            logger.info(f"📋 Extracted from callbacks:")
+            logger.info(f"   job_id: {job_id}")
+            logger.info(f"   flow_id: {flow_id}")
+            logger.info(f"   callbacks keys: {list(callbacks.keys()) if callbacks else 'None'}")
+
+            if not job_id:
+                logger.error("No job_id found in callbacks - cannot create HITL approval")
+                raise ValueError("HITL gate requires job_id in callbacks")
+
+            # Get group_id from context
+            group_id = None
+            if group_context:
+                if hasattr(group_context, 'primary_group_id'):
+                    group_id = group_context.primary_group_id
+                elif hasattr(group_context, 'group_ids') and group_context.group_ids:
+                    group_id = group_context.group_ids[0]
+
+            if not group_id:
+                logger.error("No group_id found in group_context - cannot create HITL approval")
+                raise ValueError("HITL gate requires group_id in context")
+
+            # Check if there's already an APPROVED approval for this gate
+            # This happens when resuming after approval
+            async with async_session_factory() as session:
+                hitl_repo = HITLApprovalRepository(session)
+                existing_approvals = await hitl_repo.get_all_for_execution(job_id, group_id)
+
+                # Look for an approved approval for this specific gate
+                approved_for_gate = None
+                for approval in existing_approvals:
+                    if (approval.gate_node_id == gate_node_id and
+                        approval.status == HITLApprovalStatus.APPROVED):
+                        approved_for_gate = approval
+                        break
+
+                if approved_for_gate:
+                    logger.info("="*80)
+                    logger.info(f"✅ HITL GATE ALREADY APPROVED: {gate_node_id}")
+                    logger.info(f"   Approval ID: {approved_for_gate.id}")
+                    logger.info(f"   Approved by: {approved_for_gate.responded_by}")
+                    logger.info(f"   Approved at: {approved_for_gate.responded_at}")
+                    logger.info("   Passing through to next step...")
+                    logger.info("="*80)
+                    # Return the previous output to continue the flow
+                    return previous_output
+
+            # Get previous crew name and output
+            previous_crew_name = previous_method_name
+            previous_crew_output = None
+            if previous_output:
+                if isinstance(previous_output, str):
+                    previous_crew_output = previous_output
+                elif hasattr(previous_output, 'raw'):
+                    previous_crew_output = str(previous_output.raw)
+                else:
+                    previous_crew_output = str(previous_output)
+
+            # Get flow state snapshot
+            flow_state_snapshot = {}
+            if hasattr(self, 'state'):
+                try:
+                    if hasattr(self.state, 'model_dump'):
+                        flow_state_snapshot = self.state.model_dump()
+                    elif isinstance(self.state, dict):
+                        flow_state_snapshot = dict(self.state)
+                except Exception as e:
+                    logger.warning(f"Could not serialize flow state: {e}")
+
+            # Get flow_uuid for checkpoint
+            flow_uuid = None
+            logger.info(f"🔍 HITL gate checkpoint extraction:")
+            logger.info(f"   hasattr(self, 'state'): {hasattr(self, 'state')}")
+            if hasattr(self, 'state'):
+                state = self.state
+                logger.info(f"   self.state type: {type(state)}")
+                logger.info(f"   hasattr(self.state, 'id'): {hasattr(state, 'id')}")
+                if hasattr(state, 'id'):
+                    flow_uuid = getattr(state, 'id', None)
+                    logger.info(f"   ✅ Extracted flow_uuid from state.id: {flow_uuid}")
+                elif isinstance(state, dict) and 'id' in state:
+                    # Try to get id from dict-like state
+                    flow_uuid = state['id']
+                    logger.info(f"   ✅ Extracted flow_uuid from dict state['id']: {flow_uuid}")
+
+            # Fallback: Generate a UUID if none was found
+            # This ensures checkpoint functionality works even if @persist state.id is not available
+            if not flow_uuid:
+                flow_uuid = str(uuid.uuid4())
+                logger.warning(f"   ⚠️ No state.id found - generated fallback flow_uuid: {flow_uuid}")
+                # Store in state for future reference if possible
+                if hasattr(self, 'state'):
+                    try:
+                        if hasattr(self.state, 'id'):
+                            setattr(self.state, 'id', flow_uuid)
+                        elif isinstance(self.state, dict):
+                            self.state['id'] = flow_uuid
+                        logger.info(f"   ✅ Stored generated flow_uuid in state")
+                    except Exception as e:
+                        logger.warning(f"   Could not store flow_uuid in state: {e}")
+
+            # Create HITL approval request
+            async with async_session_factory() as session:
+                hitl_service = HITLService(session)
+                webhook_service = HITLWebhookService(session)
+
+                approval = await hitl_service.create_approval_request(
+                    execution_id=job_id,
+                    flow_id=flow_id or "",
+                    gate_node_id=gate_node_id,
+                    crew_sequence=crew_sequence,
+                    gate_config=gate_config,
+                    group_id=group_id,
+                    previous_crew_name=previous_crew_name,
+                    previous_crew_output=previous_crew_output,
+                    flow_state_snapshot=flow_state_snapshot
+                )
+
+                await session.commit()
+
+                logger.info(f"✅ Created HITL approval {approval.id}")
+                logger.info(f"   Execution: {job_id}")
+                logger.info(f"   Gate: {gate_node_id}")
+                logger.info(f"   Expires at: {approval.expires_at}")
+
+                # Send webhook notification
+                try:
+                    # Build approval URL (this would be configured in settings)
+                    approval_url = f"/flows/approvals/{approval.id}"
+
+                    await webhook_service.send_gate_reached_notification(
+                        approval=approval,
+                        approval_url=approval_url
+                    )
+                except Exception as e:
+                    logger.warning(f"Failed to send webhook notification: {e}")
+
+            # Raise exception to pause flow
+            logger.info("🛑 PAUSING FLOW FOR HUMAN APPROVAL")
+            logger.info("="*80)
+
+            raise FlowPausedForApprovalException(
+                approval_id=approval.id,
+                gate_node_id=gate_node_id,
+                message=gate_config.get('message', 'Approval required to proceed'),
+                execution_id=job_id,
+                crew_sequence=crew_sequence,
+                flow_uuid=flow_uuid
+            )
+
+        hitl_gate_method.__name__ = method_name
+        hitl_gate_method.__qualname__ = method_name
+        return hitl_gate_method
