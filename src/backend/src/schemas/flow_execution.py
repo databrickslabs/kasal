@@ -15,6 +15,7 @@ class FlowExecutionStatus(str, Enum):
     RUNNING = "running"
     COMPLETED = "completed"
     FAILED = "failed"
+    WAITING_FOR_APPROVAL = "waiting_for_approval"  # HITL gate pause
 
 
 class FlowExecutionBase(BaseModel):
