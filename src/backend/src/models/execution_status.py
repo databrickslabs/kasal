@@ -10,15 +10,17 @@ from enum import Enum
 class ExecutionStatus(str, Enum):
     """
     Execution status enum.
-    
+
     This enum defines the possible states of an execution.
     Use this as the single source of truth for all status values.
     """
     PENDING = "PENDING"
     PREPARING = "PREPARING"
     RUNNING = "RUNNING"
+    WAITING_FOR_APPROVAL = "WAITING_FOR_APPROVAL"  # Flow paused at HITL gate awaiting human approval
     STOPPING = "STOPPING"  # Execution is in the process of being stopped
     STOPPED = "STOPPED"    # Execution was successfully stopped by user
     COMPLETED = "COMPLETED"
     FAILED = "FAILED"
+    REJECTED = "REJECTED"  # HITL gate was rejected by approver
     CANCELLED = "CANCELLED"  # Execution was cancelled (not by stop request) 
