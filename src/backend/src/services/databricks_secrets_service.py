@@ -201,7 +201,7 @@ class DatabricksSecretsService(BaseService):
             headers = {
                 "Authorization": f"Bearer {token}",
                 "Content-Type": "application/json",
-                **get_user_agent_header()
+                **get_user_agent_header("secret")
             }
             data = {"scope": scope, "key": key}
             
@@ -265,7 +265,7 @@ class DatabricksSecretsService(BaseService):
             headers = {
                 "Authorization": f"Bearer {token}",
                 "Content-Type": "application/json",
-                **get_user_agent_header()
+                **get_user_agent_header("secret")
             }
             data = {
                 "scope": scope,
@@ -322,7 +322,7 @@ class DatabricksSecretsService(BaseService):
             headers = {
                 "Authorization": f"Bearer {token}",
                 "Content-Type": "application/json",
-                **get_user_agent_header()
+                **get_user_agent_header("secret")
             }
             data = {"scope": scope, "key": key}
             
@@ -356,7 +356,7 @@ class DatabricksSecretsService(BaseService):
             headers = {
                 "Authorization": f"Bearer {token}",
                 "Content-Type": "application/json",
-                **get_user_agent_header()
+                **get_user_agent_header("secret")
             }
             data = {"scope": scope, "initial_manage_principal": "users"}
             

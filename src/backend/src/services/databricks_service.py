@@ -372,7 +372,7 @@ class DatabricksService:
                     }
 
                 headers = auth.get_headers()
-                headers.update(get_user_agent_header())  # Kasal User-Agent
+                headers.update(get_user_agent_header("connection_test"))  # Kasal User-Agent
 
             except Exception as e:
                 logger.error(f"Failed to get authentication context: {e}")
