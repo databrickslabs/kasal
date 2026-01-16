@@ -14,7 +14,7 @@ from src.config.settings import settings
 VERSION = settings.VERSION
 
 # Register User-Agent for Databricks SDK / MLflow calls (module-level)
-with_product(KASAL_BASE, VERSION)  # Kasal/0.1.0 User-Agent
+with_product(KASAL_BASE+"_mlflow", VERSION)  # kasal_mlflow/0.1.0 User-Agent
 
 # Route MLflowService logs to system.log for user visibility
 logger = LoggerManager.get_instance().system
