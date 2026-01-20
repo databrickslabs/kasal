@@ -13,7 +13,7 @@ from typing import List, Optional, Dict, Tuple, Any
 
 from src.core.base_service import BaseService
 from src.repositories.databricks_config_repository import DatabricksConfigRepository
-from src.utils.telemetry import get_user_agent_header
+from src.utils.telemetry import get_user_agent_header, KasalProduct
 
 # Initialize logger
 logger = logging.getLogger(__name__)
@@ -131,7 +131,7 @@ class DatabricksSecretsService(BaseService):
             headers = {
                 "Authorization": f"Bearer {token}",
                 "Content-Type": "application/json",
-                **get_user_agent_header()
+                **get_user_agent_header(KasalProduct.SECRET)
             }
             data = {"scope": scope}
             
@@ -201,7 +201,7 @@ class DatabricksSecretsService(BaseService):
             headers = {
                 "Authorization": f"Bearer {token}",
                 "Content-Type": "application/json",
-                **get_user_agent_header("secret")
+                **get_user_agent_header(KasalProduct.SECRET)
             }
             data = {"scope": scope, "key": key}
             
@@ -265,7 +265,7 @@ class DatabricksSecretsService(BaseService):
             headers = {
                 "Authorization": f"Bearer {token}",
                 "Content-Type": "application/json",
-                **get_user_agent_header("secret")
+                **get_user_agent_header(KasalProduct.SECRET)
             }
             data = {
                 "scope": scope,
@@ -322,7 +322,7 @@ class DatabricksSecretsService(BaseService):
             headers = {
                 "Authorization": f"Bearer {token}",
                 "Content-Type": "application/json",
-                **get_user_agent_header("secret")
+                **get_user_agent_header(KasalProduct.SECRET)
             }
             data = {"scope": scope, "key": key}
             
@@ -356,7 +356,7 @@ class DatabricksSecretsService(BaseService):
             headers = {
                 "Authorization": f"Bearer {token}",
                 "Content-Type": "application/json",
-                **get_user_agent_header("secret")
+                **get_user_agent_header(KasalProduct.SECRET)
             }
             data = {"scope": scope, "initial_manage_principal": "users"}
             

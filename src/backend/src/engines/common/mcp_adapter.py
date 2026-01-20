@@ -8,6 +8,8 @@ MCP client library with Databricks OAuth authentication.
 import logging
 from typing import Dict, Optional, Any, List
 
+from src.utils.telemetry import KasalProduct, get_user_agent
+
 logger = logging.getLogger(__name__)
 
 
@@ -70,10 +72,14 @@ class MCPAdapter:
             from mcp import ClientSession
             
             tools_list = []
-            
-            # Use only the Authorization header (this is what works)
-            clean_headers = {"Authorization": headers["Authorization"]}
-            
+
+            # Use Authorization and User-Agent headers
+            # User-Agent identifies Kasal MCP client for tracking in Databricks telemetry
+            clean_headers = {
+                "Authorization": headers["Authorization"],
+                "User-Agent": get_user_agent(KasalProduct.MCP)
+            }
+
             # Connect using MCP streamable HTTP client (the working approach)
             async with connect(self.server_url, headers=clean_headers) as (read_stream, write_stream, _):
                 logger.info("Connected to MCP streamable endpoint for tool discovery")
@@ -249,8 +255,12 @@ class MCPAdapter:
             from mcp.client.streamable_http import streamablehttp_client as connect
             from mcp import ClientSession
 
-            # Use only the Authorization header
-            clean_headers = {"Authorization": headers["Authorization"]}
+            # Use Authorization and User-Agent headers
+            # User-Agent identifies Kasal MCP client for tracking in Databricks telemetry
+            clean_headers = {
+                "Authorization": headers["Authorization"],
+                "User-Agent": get_user_agent(KasalProduct.MCP)
+            }
 
             # Connect using MCP streamable HTTP client
             async with connect(self.server_url, headers=clean_headers) as (read_stream, write_stream, _):
