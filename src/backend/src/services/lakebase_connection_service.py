@@ -22,7 +22,7 @@ from sqlalchemy.engine import Engine
 
 from src.core.base_service import BaseService
 from src.utils.databricks_auth import get_workspace_client
-from src.utils.telemetry import KASAL_BASE, VERSION
+from src.utils.telemetry import KASAL_BASE, VERSION, KasalProduct
 
 logger = logging.getLogger(__name__)
 
@@ -66,7 +66,7 @@ class LakebaseConnectionService(BaseService):
             # This is lazy initialization - only creates client when actually needed
             logger.info("Creating WorkspaceClient for Lakebase (lazy initialization)")
             # Set custom User-Agent for Lakebase operations
-            with_product(f"{KASAL_BASE}_lakebase", VERSION)
+            with_product(f"{KASAL_BASE}_{KasalProduct.LAKEBASE}", VERSION)
             self._workspace_client = await get_workspace_client(self.user_token)
             if not self._workspace_client:
                 error_msg = (

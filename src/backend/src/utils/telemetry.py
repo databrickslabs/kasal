@@ -33,26 +33,30 @@ class KasalProduct:
     JOBS = "jobs"
     GENIE = "genie"
     VECTORSEARCH = "vectorsearch"
-    
+    MCP = "mcp"
+    LAKEBASE = "lakebase"
+    MLFLOW = "mlflow"
+    SECRET = "secret"
+
     # LLM call types (for distinguishing agent vs guardrail vs generation calls)
     AGENT = "agent"
     GUARDRAIL = "guardrail"
     EMBEDDING = "embedding"
-    
+
     # Generic use for token usage telemetry
     LLM = "llm"
-    
+
     # AI generation services
     NAME_GENERATION = "name_gen"
     TASK_GENERATION = "task_gen"
     AGENT_GENERATION = "agent_gen"
     CREW_GENERATION = "crew_gen"
     TEMPLATE_GENERATION = "template_gen"
-    
+
     # Other services
     INTENT_DETECTION = "intent"
     CONNECTION_TEST = "conn_test"
-    
+
     # Model serving
     AGENTBRICKS = "agentbricks"
 
